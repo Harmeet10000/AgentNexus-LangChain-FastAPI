@@ -2,21 +2,17 @@ services:
   app:
     build:
       context: .
-      dockerfile: docker/development/Dockerfile
+      dockerfile: docker/dev.Dockerfile
     container_name: langchain-fastapi
     ports:
       - "8000:8000"
     volumes:
       - ./src:/app/src
       - ./data:/app/data
-      - ./logs:/app/logs
     environment:
       - ENVIRONMENT=development
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - MONGODB_URL=mongodb://mongodb:27017/langchain_db
     env_file:
-      - .env
+      - .env.development
     depends_on:
       - redis
       - mongodb
@@ -46,36 +42,6 @@ services:
     volumes:
       - mongodb-data:/data/db
       - mongodb-config:/data/configdb
-    networks:
-      - langchain-network
-    restart: unless-stopped
-
-  # Optional: MongoDB Express for database management UI
-  mongo-express:
-    image: mongo-express:latest
-    container_name: langchain-mongo-express
-    ports:
-      - "8081:8081"
-    environment:
-      - ME_CONFIG_MONGODB_SERVER=mongodb
-      - ME_CONFIG_BASICAUTH_USERNAME=admin
-      - ME_CONFIG_BASICAUTH_PASSWORD=changeme
-    depends_on:
-      - mongodb
-    networks:
-      - langchain-network
-    restart: unless-stopped
-
-  # Optional: Redis Commander for Redis management UI
-  redis-commander:
-    image: rediscommander/redis-commander:latest
-    container_name: langchain-redis-commander
-    environment:
-      - REDIS_HOSTS=local:redis:6379
-    ports:
-      - "8082:8081"
-    depends_on:
-      - redis
     networks:
       - langchain-network
     restart: unless-stopped

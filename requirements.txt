@@ -76,6 +76,7 @@ ujson==5.9.0
 numpy==1.26.4
 pandas==2.2.1
 scikit-learn==1.4.1.post1
+nanoid>=2.0.0
 
 # API documentation
 slowapi==0.1.9

@@ -1,18 +1,32 @@
 # LangChain FastAPI Production Template
 
-A production-grade FastAPI application integrating LangChain, LangGraph, and LangSmith with Google's Gemini models, featuring Pinecone for vector storage, Docling for document processing, and Crawl4AI for web scraping.
+A production-grade FastAPI application integrating LangChain, LangGraph, and LangSmith with Google's Gemini models, featuring Pinecone for vector storage, Docling for document processing, Crawl4AI for web scraping, and **MCP (Model Context Protocol)** for dynamic tool integration.
 
 ## 🚀 Features
 
+### Core Framework
 - **LangChain Integration**: Complete integration with Google Gemini models for LLM operations
 - **LangGraph Workflows**: Graph-based reasoning and workflow management
 - **LangSmith Monitoring**: Comprehensive tracing, evaluation, and feedback loops
+
+### Advanced Capabilities
+- **MCP Protocol**: Dynamic tool discovery and multi-server communication
 - **Vector Store**: Pinecone integration for efficient semantic search and RAG
-- **Document Processing**: Multi-format document parsing with Docling
-- **Web Crawling**: Intelligent web scraping with Crawl4AI
+- **Document Processing**: Multi-format document parsing with Docling (PDF, DOCX, PPTX, HTML, Markdown)
+- **Web Crawling**: Intelligent web scraping with Crawl4AI (JavaScript rendering, rate limiting)
+- **Structured Outputs**: Type-safe LLM responses with Pydantic models
+- **Agent Workflows**: ReAct, Plan-and-Execute, and custom agent patterns
+- **Memory Management**: Persistent conversation history and checkpointing
+
+### Production Features
 - **Production Ready**: Docker, monitoring, caching, and security best practices
 - **Async First**: Fully asynchronous architecture for high performance
 - **Type Safe**: Complete type hints and Pydantic validation
+- **Multi-Server Support**: Connect to multiple MCP servers simultaneously
+- **Caching**: Redis-based caching for improved performance
+- **Rate Limiting**: Built-in rate limiting and throttling
+- **Error Handling**: Comprehensive error handling and logging
+- **Observability**: LangSmith integration for tracing and monitoring
 
 ## 📋 Prerequisites
 
@@ -22,6 +36,7 @@ A production-grade FastAPI application integrating LangChain, LangGraph, and Lan
   - Google Gemini API Key
   - Pinecone API Key and Environment
   - LangSmith API Key (optional)
+  - OpenWeather API Key (optional, for weather MCP server)
 
 ## 🛠️ Installation
 
@@ -59,6 +74,9 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
+# Install MCP adapters
+pip install langchain-mcp-adapters
+
 # Install Playwright browsers (for Crawl4AI)
 playwright install chromium
 
@@ -73,6 +91,12 @@ langchain-fastapi-production/
 ├── src/
 │   ├── api/                 # API layer
 │   │   ├── endpoints/        # API endpoints
+│   │   │   ├── chat.py       # Chat endpoints
+│   │   │   ├── rag.py        # RAG endpoints
+│   │   │   ├── documents.py  # Document processing
+│   │   │   ├── crawl.py      # Web crawling
+│   │   │   ├── workflows.py  # LangGraph workflows
+│   │   │   └── mcp_agents.py # MCP agent endpoints (NEW)
 │   │   ├── dependencies/     # FastAPI dependencies
 │   │   └── middleware/       # Custom middleware
 │   ├── core/                 # Core functionality
@@ -87,6 +111,20 @@ langchain-fastapi-production/
 │   │   ├── pinecone/        # Vector store
 │   │   ├── docling/         # Document processing
 │   │   └── crawl4ai/        # Web crawling
+│   ├── mcp/                 # MCP Integration (NEW)
+│   │   ├── client.py        # MCP client manager
+│   │   ├── servers/         # MCP server implementations
+│   │   │   ├── math_server.py      # Math operations
+│   │   │   ├── weather_server.py   # Weather data
+│   │   │   ├── database_server.py  # Database queries
+│   │   │   └── filesystem_server.py # File operations
+│   │   ├── adapters/        # Tool adapters
+│   │   └── config/          # Server configurations
+│   ├── agents/              # LangChain agents (NEW)
+│   │   ├── mcp/             # MCP-enabled agents
+│   │   │   └── mcp_agent.py # Main MCP agent
+│   │   ├── rag/             # RAG agents
+│   │   └── conversational/  # Chat agents
 │   ├── chains/              # LangChain chains
 │   │   ├── rag/            # RAG chains
 │   │   ├── conversation/   # Conversation chains
@@ -101,8 +139,14 @@ langchain-fastapi-production/
 │   ├── utils/               # Utility functions
 │   └── main.py             # Application entry point
 ├── tests/                   # Test suite
+│   ├── test_mcp_integration.py  # MCP tests (NEW)
+│   └── ...
 ├── docker/                  # Docker configurations
+│   ├── mcp/                # MCP server Dockerfiles (NEW)
+│   └── ...
 ├── docs/                    # Documentation
+├── examples/                # Usage examples (NEW)
+│   └── mcp_agent_example.py # MCP agent examples
 ├── scripts/                 # Utility scripts
 └── data/                    # Data storage
 ```
@@ -135,7 +179,64 @@ REDIS_PORT=6379
 
 # MongoDB
 MONGODB_URL=mongodb://localhost:27017/langchain_db
+MONGODB_DATABASE=langchain_db
+
+# MCP Servers (NEW)
+ENABLE_DB_MCP=true
+ENABLE_WEATHER_MCP=true
+ENABLE_EXTERNAL_MCP=false
+
+# MCP Server URLs
+WEATHER_MCP_URL=http://localhost:8001/mcp
+EXTERNAL_MCP_URL=http://api.example.com/mcp
+
+# Weather API (for weather MCP server)
+OPENWEATHER_API_KEY=your-openweather-api-key
 ```
+
+## 🎯 Core Features Detail
+
+### 1. LangChain Integration
+- **Chat Models**: Google Gemini Pro, Flash, and custom models
+- **Chains**: RAG, Conversation, Summarization, Q&A
+- **Tools**: Web search, calculations, database queries, file operations
+- **Memory**: Conversation buffers, summaries, and entity tracking
+- **Callbacks**: Token counting, latency tracking, custom handlers
+
+### 2. LangGraph Workflows
+- **State Management**: TypedDict-based state with checkpointing
+- **Conditional Routing**: Dynamic workflow paths based on state
+- **Human-in-the-Loop**: Approval gates and manual interventions
+- **Multi-Agent**: Orchestrate multiple specialized agents
+- **Streaming**: Real-time updates for long-running workflows
+
+### 3. Vector Store & RAG
+- **Pinecone Integration**: Production-grade vector storage
+- **Embeddings**: Google Vertex AI, OpenAI, and custom embeddings
+- **Chunking Strategies**: Recursive, semantic, and custom splitters
+- **Retrieval**: Similarity search, MMR, and hybrid search
+- **Re-ranking**: Cross-encoder and LLM-based re-ranking
+
+### 4. Document Processing
+- **Supported Formats**: PDF, DOCX, PPTX, XLSX, HTML, Markdown, TXT
+- **OCR Support**: Extract text from scanned documents
+- **Metadata Extraction**: Automatic metadata detection
+- **Batch Processing**: Parallel document processing
+- **Storage**: MongoDB-based document store
+
+### 5. Web Crawling
+- **JavaScript Rendering**: Playwright-based crawling
+- **Smart Extraction**: Automatic content detection
+- **Rate Limiting**: Respectful crawling with delays
+- **Link Following**: Recursive crawling with depth control
+- **Content Cleaning**: Remove ads, navigation, and boilerplate
+
+### 6. MCP (Model Context Protocol)
+- **Multi-Server**: Connect to unlimited MCP servers
+- **Transport Types**: stdio (local) and HTTP (remote)
+- **Built-in Servers**: Math, Weather, Database, Filesystem
+- **Custom Servers**: Easy extension with custom tools
+- **Auto-Discovery**: Automatic tool detection and registration
 
 ## 📚 API Documentation
 
@@ -147,76 +248,75 @@ Once the application is running, you can access:
 
 ## 🔥 Quick Start Examples
 
-### 1. Basic Chat Completion
+For detailed API examples and code snippets, see the [Implementation Guide](./IMPLEMENTATION_GUIDE.md) and [MCP Integration Guide](./MCP_INTEGRATION_GUIDE.md).
+
+### Available Endpoints
+
+1. **Chat** - `/api/v1/chat` - Conversational AI with Gemini
+2. **RAG Query** - `/api/v1/rag/query` - Semantic search and retrieval
+3. **MCP Agents** - `/api/v1/mcp-agents/execute` - Multi-tool agent execution
+4. **Document Upload** - `/api/v1/documents/upload` - Multi-format document processing
+5. **Web Crawling** - `/api/v1/crawl` - Intelligent web scraping
+6. **Workflows** - `/api/v1/workflows/execute` - LangGraph workflow execution
+
+## 🤖 MCP (Model Context Protocol) Integration
+
+### What is MCP?
+
+MCP enables dynamic tool discovery and communication with multiple tool servers, allowing agents to access a wide range of capabilities:
+
+- **Math Operations**: Calculations, equations, and mathematical functions
+- **Weather Data**: Real-time weather information from OpenWeatherMap
+- **Database Queries**: MongoDB operations and data retrieval
+- **File System**: File operations and management
+- **Custom Tools**: Easily add your own MCP servers
+
+### MCP Architecture
+
+```
+┌─────────────────┐
+│   LangChain     │
+│     Agent       │
+└────────┬────────┘
+         │
+    ┌────▼────┐
+    │   MCP   │
+    │  Client │
+    └────┬────┘
+         │
+    ┏━━━━┻━━━━━━━━━━━━━━━━━━━━━━━┓
+    ┃                              ┃
+┌───▼────┐  ┌───────┐  ┌────────┐ ┃
+│  Math  │  │Weather│  │Database│ ┃
+│ Server │  │Server │  │ Server │ ┃
+│(stdio) │  │ (HTTP)│  │(stdio) │ ┃
+└────────┘  └───────┘  └────────┘ ┃
+                                   ┃
+          MCP Servers              ┃
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+```
+
+### Quick Example
 
 ```python
-import httpx
+from src.agents.mcp.mcp_agent import MCPAgent
 
-response = httpx.post(
-    "http://localhost:8000/api/v1/chat/completions",
-    json={
-        "messages": [
-            {"role": "user", "content": "What is LangChain?"}
-        ],
-        "model": "gemini-pro",
-        "temperature": 0.7
-    }
-)
-print(response.json())
+# Initialize and use MCP agent
+agent = MCPAgent(model_name="gemini-pro")
+await agent.initialize()
+result = await agent.run("Calculate 25 * 4 and check weather in NYC")
+await agent.cleanup()
 ```
 
-### 2. RAG Query
+### MCP Benefits
 
-```python
-# First, upload a document
-files = {"file": open("document.pdf", "rb")}
-upload_response = httpx.post(
-    "http://localhost:8000/api/v1/documents/upload",
-    files=files
-)
-document_id = upload_response.json()["document_id"]
+✅ **Dynamic Tool Discovery** - Automatically discover and use tools from multiple servers  
+✅ **Mixed Transports** - Support both local (stdio) and remote (HTTP) servers  
+✅ **Scalability** - Easily add new tool servers without modifying agent code  
+✅ **Isolation** - Each server runs independently with its own dependencies  
+✅ **Reusability** - Share MCP servers across multiple agents and applications  
 
-# Query the document
-query_response = httpx.post(
-    "http://localhost:8000/api/v1/rag/query",
-    json={
-        "query": "What are the key points?",
-        "document_ids": [document_id],
-        "top_k": 5
-    }
-)
-print(query_response.json())
-```
-
-### 3. Web Crawling
-
-```python
-response = httpx.post(
-    "http://localhost:8000/api/v1/crawl",
-    json={
-        "url": "https://example.com",
-        "max_depth": 2,
-        "extract_content": True
-    }
-)
-print(response.json())
-```
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=src --cov-report=html
-
-# Run specific test file
-pytest tests/test_api.py
-
-# Run tests in parallel
-pytest -n auto
-```
+**📘 For detailed examples, server implementations, and integration patterns, see: [MCP_INTEGRATION_GUIDE.md](./MCP_INTEGRATION_GUIDE.md)**
 
 ## 📊 Monitoring
 
@@ -233,12 +333,12 @@ pytest -n auto
 ### Application Metrics
 
 - **Health Check**: http://localhost:8000/health
-- **Prometheus Metrics**: http://localhost:8000/metrics (if enabled)
 
 ### Service UIs
 
 - **MongoDB Express**: http://localhost:8081 (admin/changeme)
 - **Redis Commander**: http://localhost:8082
+- **MCP Weather Server**: http://localhost:8001/docs (if enabled)
 
 ## 🚀 Deployment
 
@@ -252,31 +352,60 @@ docker build -f docker/production/Dockerfile -t langchain-fastapi:prod .
 docker run -p 8000:8000 --env-file .env.prod langchain-fastapi:prod
 ```
 
-### Kubernetes Deployment
-
-```yaml
-# See kubernetes/ directory for manifests
-kubectl apply -f kubernetes/
-```
-
 ### Cloud Deployment
 
 The application is ready for deployment on:
 - AWS ECS/EKS
 - Google Cloud Run/GKE
 - Azure Container Instances/AKS
-- Heroku
 - Railway
+- Render
+
+### MCP Servers in Production
+
+```yaml
+# docker-compose.yml additions for MCP
+services:
+  app:
+    environment:
+      - ENABLE_DB_MCP=true
+      - ENABLE_WEATHER_MCP=true
+  
+  weather-mcp:
+    build:
+      context: .
+      dockerfile: docker/mcp/weather.Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
+    restart: unless-stopped
+```
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=src --cov-report=html
+
+# Run specific test file
+pytest tests/test_mcp_integration.py
+
+# Run MCP agent tests
+pytest tests/test_mcp_integration.py -v
+```
 
 ## 🔒 Security
 
-- JWT-based authentication
-- Rate limiting
+- Rate limiting on all endpoints
 - Input validation with Pydantic
-- SQL injection prevention
-- XSS protection
 - CORS configuration
 - Secrets management via environment variables
+- MCP server isolation and sandboxing
+- API key rotation support
 
 ## 🤝 Contributing
 
@@ -290,12 +419,44 @@ The application is ready for deployment on:
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
+## 📖 Documentation
+
+### Architecture & Design
+- **[Architecture Guide](./ARCHITECTURE.md)** - Feature-Based Layered Architecture
+  - Complete project structure and organization
+  - Layer responsibilities (API, Service, Repository, Model)
+  - Feature communication patterns
+  - Dependency injection examples
+  - Testing strategies per layer
+  - Migration guide and best practices
+
+### Implementation Guides
+- **[Implementation Guide](./IMPLEMENTATION_GUIDE.md)** - LangChain/LangGraph patterns
+  - Chain and agent implementations
+  - Workflow state management
+  - RAG patterns and best practices
+  - Tool creation and integration
+  - Structured outputs with Pydantic
+  - Memory and checkpointing
+
+- **[MCP Integration Guide](./MCP_INTEGRATION_GUIDE.md)** - Model Context Protocol
+  - MCP client setup and configuration
+  - Creating custom MCP servers
+  - Agent integration with MCP tools
+  - FastAPI endpoints and testing
+
+### API Documentation
+- **[Swagger UI](http://localhost:8000/api/v1/docs)** - Interactive API docs (when running)
+- **[ReDoc](http://localhost:8000/api/v1/redoc)** - Alternative API documentation
+
 ## 🙏 Acknowledgments
 
-- LangChain team for the amazing framework
+- LangChain team for the amazing framework and MCP adapters
 - Google for Gemini models
+- Anthropic for the Model Context Protocol specification
 - Pinecone for vector database
 - FastAPI for the web framework
+- The open-source community
 
 ## 📮 Contact
 
@@ -303,9 +464,47 @@ For questions and support, please open an issue on GitHub.
 
 ---
 
+## 🗺️ Roadmap
+
+### MCP Enhancements
+- [ ] GitHub MCP server (repositories, issues, PRs)
+- [ ] Slack MCP server (messages, channels, notifications)
+- [ ] Email MCP server (send, receive, search)
+- [ ] Calendar MCP server (Google Calendar, Outlook)
+
+### Agent & Workflow Features
+- [ ] Agent-to-agent communication patterns
+- [ ] Advanced workflow templates (research, writing, analysis)
+- [ ] Visual workflow builder UI
+- [ ] Workflow versioning and rollback
+
+### Performance & Scalability
+- [ ] Distributed task queue (Celery/RQ)
+- [ ] Response caching strategies
+- [ ] Load balancing and horizontal scaling
+- [ ] Database connection pooling optimization
+
+### Developer Experience
+- [ ] GraphQL API support
+- [ ] WebSocket support for real-time updates
+- [ ] SDK clients (Python, TypeScript, Go)
+- [ ] CLI tool for local development
+
+### Enterprise Features
+- [ ] Multi-tenancy support
+- [ ] Role-based access control (RBAC)
+- [ ] Audit logging
+- [ ] Usage analytics and reporting
+- [ ] SSO/SAML integration
+
+---
+
 **Note**: This is a template project. Remember to:
 1. Add your API keys to `.env`
-2. Configure security settings for production
-3. Set up proper monitoring and alerting
-4. Review and adjust rate limits
-5. Configure CORS for your domains
+2. Install `langchain-mcp-adapters` for MCP support
+3. Configure MCP servers in `src/mcp/config/server_config.py`
+4. Configure security settings for production
+5. Set up proper monitoring and alerting
+6. Review and adjust rate limits
+7. Configure CORS for your domains
+8. Test MCP servers before deploying to production

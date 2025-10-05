@@ -8,16 +8,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
-from src.api.middleware.error_handler import ErrorHandlerMiddleware
-from src.api.middleware.logging_middleware import LoggingMiddleware
-from src.api.middleware.rate_limiter import RateLimiterMiddleware
-from src.api.router import api_router
-from src.core.config.logging_config import LoggerAdapter
-from src.core.config.settings import settings
-from src.core.database.mongodb import close_mongodb_connection, connect_to_mongodb
-from src.core.cache.redis_client import close_redis_connection, connect_to_redis
-from src.services.langsmith.client import initialize_langsmith
-from src.services.pinecone.client import initialize_pinecone
+from api.middleware.error_handler import ErrorHandlerMiddleware
+from api.middleware.logging_middleware import LoggingMiddleware
+from api.middleware.rate_limiter import RateLimiterMiddleware
+from api.middleware.correlation_id import CorrelationIDMiddleware
+from api.router import api_router
+from core.config.logging_config import LoggerAdapter
+from core.config.settings import settings
+from core.database.mongodb import close_mongodb_connection, connect_to_mongodb
+from core.cache.redis_client import close_redis_connection, connect_to_redis
+from services.langsmith.client import initialize_langsmith
+from services.pinecone.client import initialize_pinecone
 
 
 logger = LoggerAdapter(__name__)
@@ -111,9 +112,10 @@ def setup_middleware(app: FastAPI) -> None:
             allowed_hosts=["*"],  # Configure based on your domain
         )
     
-    # Custom middleware
+    # Custom middleware (order matters - first added is outermost)
     app.add_middleware(ErrorHandlerMiddleware)
     app.add_middleware(LoggingMiddleware)
+    app.add_middleware(CorrelationIDMiddleware)  # Add correlation ID middleware
     
     if settings.rate_limit_enabled:
         app.add_middleware(RateLimiterMiddleware)
