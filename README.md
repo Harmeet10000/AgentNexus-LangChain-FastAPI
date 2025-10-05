@@ -36,7 +36,6 @@ A production-grade FastAPI application integrating LangChain, LangGraph, and Lan
   - Google Gemini API Key
   - Pinecone API Key and Environment
   - LangSmith API Key (optional)
-  - OpenWeather API Key (optional, for weather MCP server)
 
 ## 🛠️ Installation
 
@@ -153,47 +152,6 @@ langchain-fastapi-production/
 
 ## 🔧 Configuration
 
-### Environment Variables
-
-Key environment variables (see `.env.example` for full list):
-
-```bash
-# Google Gemini
-GOOGLE_API_KEY=your-google-api-key
-GEMINI_MODEL=gemini-pro
-GEMINI_TEMPERATURE=0.7
-
-# Pinecone
-PINECONE_API_KEY=your-pinecone-api-key
-PINECONE_ENVIRONMENT=your-environment
-PINECONE_INDEX_NAME=langchain-index
-
-# LangSmith (Optional)
-LANGSMITH_API_KEY=your-langsmith-api-key
-LANGSMITH_PROJECT=your-project
-LANGCHAIN_TRACING_V2=true
-
-# Redis Cache
-REDIS_HOST=localhost
-REDIS_PORT=6379
-
-# MongoDB
-MONGODB_URL=mongodb://localhost:27017/langchain_db
-MONGODB_DATABASE=langchain_db
-
-# MCP Servers (NEW)
-ENABLE_DB_MCP=true
-ENABLE_WEATHER_MCP=true
-ENABLE_EXTERNAL_MCP=false
-
-# MCP Server URLs
-WEATHER_MCP_URL=http://localhost:8001/mcp
-EXTERNAL_MCP_URL=http://api.example.com/mcp
-
-# Weather API (for weather MCP server)
-OPENWEATHER_API_KEY=your-openweather-api-key
-```
-
 ## 🎯 Core Features Detail
 
 ### 1. LangChain Integration
@@ -245,10 +203,6 @@ Once the application is running, you can access:
 - **Swagger UI**: http://localhost:8000/api/v1/docs
 - **ReDoc**: http://localhost:8000/api/v1/redoc
 - **OpenAPI JSON**: http://localhost:8000/api/v1/openapi.json
-
-## 🔥 Quick Start Examples
-
-For detailed API examples and code snippets, see the [Implementation Guide](./IMPLEMENTATION_GUIDE.md) and [MCP Integration Guide](./MCP_INTEGRATION_GUIDE.md).
 
 ### Available Endpoints
 
@@ -419,36 +373,6 @@ pytest tests/test_mcp_integration.py -v
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 📖 Documentation
-
-### Architecture & Design
-- **[Architecture Guide](./ARCHITECTURE.md)** - Feature-Based Layered Architecture
-  - Complete project structure and organization
-  - Layer responsibilities (API, Service, Repository, Model)
-  - Feature communication patterns
-  - Dependency injection examples
-  - Testing strategies per layer
-  - Migration guide and best practices
-
-### Implementation Guides
-- **[Implementation Guide](./IMPLEMENTATION_GUIDE.md)** - LangChain/LangGraph patterns
-  - Chain and agent implementations
-  - Workflow state management
-  - RAG patterns and best practices
-  - Tool creation and integration
-  - Structured outputs with Pydantic
-  - Memory and checkpointing
-
-- **[MCP Integration Guide](./MCP_INTEGRATION_GUIDE.md)** - Model Context Protocol
-  - MCP client setup and configuration
-  - Creating custom MCP servers
-  - Agent integration with MCP tools
-  - FastAPI endpoints and testing
-
-### API Documentation
-- **[Swagger UI](http://localhost:8000/api/v1/docs)** - Interactive API docs (when running)
-- **[ReDoc](http://localhost:8000/api/v1/redoc)** - Alternative API documentation
-
 ## 🙏 Acknowledgments
 
 - LangChain team for the amazing framework and MCP adapters
@@ -462,40 +386,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 For questions and support, please open an issue on GitHub.
 
----
-
-## 🗺️ Roadmap
-
-### MCP Enhancements
-- [ ] GitHub MCP server (repositories, issues, PRs)
-- [ ] Slack MCP server (messages, channels, notifications)
-- [ ] Email MCP server (send, receive, search)
-- [ ] Calendar MCP server (Google Calendar, Outlook)
-
-### Agent & Workflow Features
-- [ ] Agent-to-agent communication patterns
-- [ ] Advanced workflow templates (research, writing, analysis)
-- [ ] Visual workflow builder UI
-- [ ] Workflow versioning and rollback
-
-### Performance & Scalability
-- [ ] Distributed task queue (Celery/RQ)
-- [ ] Response caching strategies
-- [ ] Load balancing and horizontal scaling
-- [ ] Database connection pooling optimization
-
-### Developer Experience
-- [ ] GraphQL API support
-- [ ] WebSocket support for real-time updates
-- [ ] SDK clients (Python, TypeScript, Go)
-- [ ] CLI tool for local development
-
-### Enterprise Features
-- [ ] Multi-tenancy support
-- [ ] Role-based access control (RBAC)
-- [ ] Audit logging
-- [ ] Usage analytics and reporting
-- [ ] SSO/SAML integration
 
 ---
 
