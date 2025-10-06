@@ -1,0 +1,95 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Source code
+*.py text eol=lf
+*.pyx text eol=lf
+*.pyi text eol=lf
+*.pyw text eol=lf
+
+# Configuration files
+*.cfg text eol=lf
+*.conf text eol=lf
+*.config text eol=lf
+*.ini text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+
+# Documentation
+*.md text eol=lf
+*.rst text eol=lf
+*.txt text eol=lf
+
+# Templates
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+
+# Shell scripts
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Docker files
+Dockerfile* text eol=lf
+*.dockerfile text eol=lf
+
+# Git files
+.gitignore text eol=lf
+.gitattributes text eol=lf
+.gitmodules text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.whl binary
+*.egg binary
+
+# Python compiled files
+*.pyc binary
+*.pyo binary
+*.pyd binary
+
+# Archives
+*.7z binary
+*.gz binary
+*.tar binary
+*.tgz binary
+*.zip binary
+
+# Fonts
+*.ttf binary
+*.eot binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+
+# Executables
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+
+# Language specific settings
+*.py linguist-language=Python
+*.pyi linguist-language=Python
+*.pyx linguist-language=Python
+
+# Export ignore (files not included in git archive)
+.gitignore export-ignore
+.gitattributes export-ignore
+.github/ export-ignore
+tests/ export-ignore
+docs/ export-ignore
+*.md export-ignore

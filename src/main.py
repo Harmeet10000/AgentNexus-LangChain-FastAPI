@@ -28,32 +28,32 @@ logger = LoggerAdapter(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     logger.info("Starting application", environment=settings.environment)
-    
+
     try:
         # Initialize connections
         await connect_to_mongodb()
         await connect_to_redis()
-        
+
         # Initialize services
         if not settings.is_testing:
             initialize_pinecone()
             initialize_langsmith()
-        
+
         logger.info("Application started successfully")
-        
+
         yield
-        
+
     finally:
         # Cleanup connections
         await close_mongodb_connection()
         await close_redis_connection()
-        
+
         logger.info("Application shutdown complete")
 
 
 def create_application() -> FastAPI:
     """Create and configure FastAPI application."""
-    
+
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
@@ -63,13 +63,13 @@ def create_application() -> FastAPI:
         redoc_url=f"{settings.api_prefix}/redoc" if not settings.is_production else None,
         openapi_url=f"{settings.api_prefix}/openapi.json" if not settings.is_production else None,
     )
-    
+
     # Add middleware
     setup_middleware(app)
-    
+
     # Include routers
     app.include_router(api_router, prefix=settings.api_prefix)
-    
+
     # Add health check endpoint
     @app.get("/health")
     async def health_check() -> Dict[str, Any]:
@@ -79,7 +79,7 @@ def create_application() -> FastAPI:
             "environment": settings.environment,
             "version": settings.app_version,
         }
-    
+
     # Add root endpoint
     @app.get("/")
     async def root() -> Dict[str, str]:
@@ -89,13 +89,13 @@ def create_application() -> FastAPI:
             "docs": f"{settings.api_prefix}/docs",
             "health": "/health",
         }
-    
+
     return app
 
 
 def setup_middleware(app: FastAPI) -> None:
     """Configure application middleware."""
-    
+
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
@@ -104,19 +104,19 @@ def setup_middleware(app: FastAPI) -> None:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    
+
     # Trusted host middleware
     if settings.is_production:
         app.add_middleware(
             TrustedHostMiddleware,
             allowed_hosts=["*"],  # Configure based on your domain
         )
-    
+
     # Custom middleware (order matters - first added is outermost)
     app.add_middleware(ErrorHandlerMiddleware)
     app.add_middleware(LoggingMiddleware)
     app.add_middleware(CorrelationIDMiddleware)  # Add correlation ID middleware
-    
+
     if settings.rate_limit_enabled:
         app.add_middleware(RateLimiterMiddleware)
 
@@ -127,7 +127,7 @@ app = create_application()
 
 # Exception handlers
 @app.exception_handler(404)
-async def not_found_handler(request, exc):
+async def not_found_handler():
     """Handle 404 errors."""
     return JSONResponse(
         status_code=404,
@@ -136,7 +136,7 @@ async def not_found_handler(request, exc):
 
 
 @app.exception_handler(500)
-async def internal_error_handler(request, exc):
+async def internal_error_handler(request: Request, exc: Exception):
     """Handle 500 errors."""
     logger.error("Internal server error", exc_info=exc)
     return JSONResponse(
@@ -147,7 +147,7 @@ async def internal_error_handler(request, exc):
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     uvicorn.run(
         "src.main:app",
         host=settings.host,

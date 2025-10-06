@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # Server Configuration
     host: str = Field(default="0.0.0.0")
-    port: int = Field(default=8000)
+    port: int = Field(default=5000)
     workers: int = Field(default=4)
 
     # Security

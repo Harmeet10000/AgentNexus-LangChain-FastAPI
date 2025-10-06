@@ -5,7 +5,7 @@ services:
       dockerfile: docker/dev.Dockerfile
     container_name: langchain-fastapi
     ports:
-      - "8000:8000"
+      - "5000:5000"
     volumes:
       - ./src:/app/src
       - ./data:/app/data

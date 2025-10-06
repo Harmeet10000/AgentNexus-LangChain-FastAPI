@@ -66,7 +66,7 @@ class MCPClientManager:
                         "transport": "stdio" | "streamable_http",
                         "command": "python",  # For stdio
                         "args": ["/path/to/server.py"],  # For stdio
-                        "url": "http://localhost:8000/mcp"  # For http
+                        "url": "http://localhost:5000/mcp"  # For http
                     }
                 }
         """
@@ -142,7 +142,7 @@ MCP_SERVER_CONFIG = {
     # HTTP-based remote servers
     "weather": {
         "transport": "streamable_http",
-        "url": os.getenv("WEATHER_MCP_URL", "http://localhost:8000/mcp"),
+        "url": os.getenv("WEATHER_MCP_URL", "http://localhost:5000/mcp"),
         "enabled": os.getenv("ENABLE_WEATHER_MCP", "false").lower() == "true",
     },
     
@@ -793,7 +793,7 @@ ENABLE_WEATHER_MCP=true
 ENABLE_EXTERNAL_MCP=false
 
 # MCP server URLs
-WEATHER_MCP_URL=http://localhost:8000/mcp
+WEATHER_MCP_URL=http://localhost:5000/mcp
 EXTERNAL_MCP_URL=http://api.example.com/mcp
 
 # Weather API key (if using weather server)
@@ -873,7 +873,7 @@ async def streaming_example():
 ### Example 3: HTTP Request
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/mcp-agents/execute" \
+curl -X POST "http://localhost:5000/api/v1/mcp-agents/execute" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "What is (15 + 25) * 3?",
@@ -901,7 +901,7 @@ services:
       context: .
       dockerfile: docker/mcp/weather.Dockerfile
     ports:
-      - "8001:8000"
+      - "8001:5000"
     environment:
       - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
 ```

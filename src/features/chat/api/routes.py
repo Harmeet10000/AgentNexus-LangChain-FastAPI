@@ -16,18 +16,16 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 async def chat_completion(
     request: Request,
     chat_request: ChatRequest,
-    service: ChatService = Depends(get_chat_service)
+    service: ChatService = Depends(get_chat_service),
 ):
     """Generate chat completion."""
     try:
         response = await service.generate_completion(chat_request)
-        
+
         return http_success(
-            request,
-            message="Chat completion generated successfully",
-            data=response
+            request, message="Chat completion generated successfully", data=response
         )
-        
+
     except Exception as e:
         logger.error("Failed to generate chat completion", error=str(e))
         return http_error(request, e, 500)
@@ -37,13 +35,13 @@ async def chat_completion(
 async def chat_stream(
     request: Request,
     chat_request: ChatRequest,
-    service: ChatService = Depends(get_chat_service)
+    service: ChatService = Depends(get_chat_service),
 ):
     """Stream chat completion (SSE)."""
     try:
         # Implementation for streaming responses
         return {"message": "Streaming not implemented yet"}
-        
+
     except Exception as e:
         logger.error("Failed to stream chat completion", error=str(e))
         return http_error(request, e, 500)
@@ -51,20 +49,16 @@ async def chat_stream(
 
 @router.delete("/memory/{session_id}", response_model=MemoryClearResponse)
 async def clear_memory(
-    request: Request,
-    session_id: str,
-    service: ChatService = Depends(get_chat_service)
+    request: Request, session_id: str, service: ChatService = Depends(get_chat_service)
 ):
     """Clear conversation memory for a session."""
     try:
         result = await service.clear_memory(session_id)
-        
+
         return http_success(
-            request,
-            message=f"Memory cleared for session {session_id}",
-            data=result
+            request, message=f"Memory cleared for session {session_id}", data=result
         )
-        
+
     except Exception as e:
         logger.error("Failed to clear memory", error=str(e))
         return http_error(request, e, 500)

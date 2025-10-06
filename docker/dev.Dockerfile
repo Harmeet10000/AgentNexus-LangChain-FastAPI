@@ -1,71 +1,79 @@
-# Development Dockerfile
-FROM python:3.11-slim
+# Multi-stage Development Dockerfile (switched from alpine -> slim to allow manylinux wheels)
+FROM python:3.12-slim AS builder
+
+# Set build environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_CACHE_DIR=/tmp/uv-cache
+
+# Install build deps (Debian)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    libffi-dev \
+    libssl-dev \
+    curl \
+    python3-dev \
+    python3-distutils \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    mv /root/.local/bin/uv /usr/local/bin/uv
+
+# Create virtual environment with uv
+RUN uv venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy and install Python dependencies with uv
+COPY pyproject.toml ./
+RUN uv pip install --no-cache -e .
+
+# Stage 2: Development Runtime
+FROM python:3.12-slim AS runtime
+
+# Install only essential runtime dependencies
+# RUN apk add --no-cache \
+#     ca-certificates \
+#     tzdata \
+#     && rm -rf /var/cache/apk/*
+
+# Copy virtual environment from builder stage
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Set runtime environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH="/app/src" \
+    PORT=5000
+
+# Install runtime deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -g 1001 appuser && \
+    useradd -u 1001 -g appuser -m -d /app -s /bin/sh appuser
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    git \
-    vim \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Playwright dependencies
-RUN apt-get update && apt-get install -y \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libdbus-1-3 \
-    libatspi2.0-0 \
-    libx11-6 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libxcb1 \
-    libxkbcommon0 \
-    libpango-1.0-0 \
-    libcairo2 \
-    libasound2 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set Python environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Copy requirements
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
-
-# Install Playwright browsers
-RUN playwright install chromium
-
-# Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
-# Copy application code
-COPY . .
-
-# Change ownership to non-root user
-RUN chown -R appuser:appuser /app
+# Create directories and set ownership
+RUN mkdir -p /app/src /app/logs /app/tmp && \
+    chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
 
+# Copy application code (will be overridden by volume mount in development)
+COPY --chown=appuser:appuser src/ ./src/
+COPY --chown=appuser:appuser pyproject.toml ./
+
 # Expose port
-EXPOSE 8000
+EXPOSE 5000
 
 # Development command with auto-reload
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "5000", "--reload"]
