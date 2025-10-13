@@ -154,7 +154,6 @@ ehthumbs.db
 
 # Project specific
 data/
-logs/
 *.db
 *.sqlite
 tmp/
@@ -189,3 +188,4 @@ docker-compose.override.yml
 .augment/rules/byterover-rules.md
 .kiro/*
 .clinerules/*
+.amazonq/*

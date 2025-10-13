@@ -107,11 +107,8 @@ uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 5000
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Install MCP adapters
-pip install langchain-mcp-adapters
+# Install project dependencies (reads pyproject.toml)
+uv pip install -e .
 
 # Install Playwright browsers (for Crawl4AI)
 playwright install chromium
@@ -187,68 +184,215 @@ docker-compose -f docker-compose.dev.yml logs -f app
 ## 📁 Project Structure
 
 ```
-langchain-fastapi-production/
-├── src/
-│   ├── api/                 # API layer
-│   │   ├── endpoints/        # API endpoints
-│   │   │   ├── chat.py       # Chat endpoints
-│   │   │   ├── rag.py        # RAG endpoints
-│   │   │   ├── documents.py  # Document processing
-│   │   │   ├── crawl.py      # Web crawling
-│   │   │   ├── workflows.py  # LangGraph workflows
-│   │   │   └── mcp_agents.py # MCP agent endpoints (NEW)
-│   │   ├── dependencies/     # FastAPI dependencies
-│   │   └── middleware/       # Custom middleware
-│   ├── core/                 # Core functionality
-│   │   ├── config/          # Configuration management
-│   │   ├── security/        # Security utilities
-│   │   ├── database/        # Database connections
-│   │   └── cache/           # Redis cache
-│   ├── services/            # Business logic services
-│   │   ├── langchain/       # LangChain integration
-│   │   ├── langgraph/       # LangGraph workflows
-│   │   ├── langsmith/       # LangSmith monitoring
-│   │   ├── pinecone/        # Vector store
-│   │   ├── docling/         # Document processing
-│   │   └── crawl4ai/        # Web crawling
-│   ├── mcp/                 # MCP Integration (NEW)
-│   │   ├── client.py        # MCP client manager
-│   │   ├── servers/         # MCP server implementations
-│   │   │   ├── math_server.py      # Math operations
-│   │   │   ├── weather_server.py   # Weather data
-│   │   │   ├── database_server.py  # Database queries
-│   │   │   └── filesystem_server.py # File operations
-│   │   ├── adapters/        # Tool adapters
-│   │   └── config/          # Server configurations
-│   ├── agents/              # LangChain agents (NEW)
-│   │   ├── mcp/             # MCP-enabled agents
-│   │   │   └── mcp_agent.py # Main MCP agent
-│   │   ├── rag/             # RAG agents
-│   │   └── conversational/  # Chat agents
-│   ├── chains/              # LangChain chains
-│   │   ├── rag/            # RAG chains
-│   │   ├── conversation/   # Conversation chains
-│   │   └── structured/      # Structured output chains
-│   ├── graphs/              # LangGraph components
-│   │   ├── workflows/       # Workflow definitions
-│   │   ├── states/         # State management
-│   │   └── components/      # Reusable graph components
-│   ├── models/              # Data models
-│   ├── schemas/             # Pydantic schemas
-│   ├── tools/               # LangChain tools
-│   ├── utils/               # Utility functions
-│   └── main.py             # Application entry point
-├── tests/                   # Test suite
-│   ├── test_mcp_integration.py  # MCP tests (NEW)
-│   └── ...
-├── docker/                  # Docker configurations
-│   ├── mcp/                # MCP server Dockerfiles (NEW)
-│   └── ...
-├── docs/                    # Documentation
-├── examples/                # Usage examples (NEW)
-│   └── mcp_agent_example.py # MCP agent examples
-├── scripts/                 # Utility scripts
-└── data/                    # Data storage
+my_fastapi_project/
+│
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── config.py
+│   ├── dependencies.py
+│   │
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── security.py
+│   │   ├── database.py
+│   │   ├── cache.py
+│   │   ├── logging.py
+│   │   └── exceptions.py
+│   │
+│   ├── models/
+│   │   ├── __init__.py
+│   │   └── base.py
+│   │
+│   ├── shared/                           # Shared AI/ML components
+│   │   ├── __init__.py
+│   │   │
+│   │   ├── langchain/                    # LangChain components
+│   │   │   ├── __init__.py
+│   │   │   ├── chains.py                 # Custom chains
+│   │   │   ├── prompts.py                # Prompt templates
+│   │   │   ├── agents.py                 # Agent configurations
+│   │   │   ├── callbacks.py              # Custom callbacks
+│   │   │   └── models.py                 # LLM model configurations
+│   │   │
+│   │   ├── langgraph/                    # LangGraph workflows
+│   │   │   ├── __init__.py
+│   │   │   ├── graphs.py                 # Graph definitions
+│   │   │   ├── nodes.py                  # Custom nodes
+│   │   │   ├── edges.py                  # Edge conditions
+│   │   │   └── state.py                  # State management
+│   │   │
+│   │   ├── langsmith/                    # LangSmith integration
+│   │   │   ├── __init__.py
+│   │   │   ├── tracing.py                # Tracing configuration
+│   │   │   ├── evaluation.py             # Evaluation sets
+│   │   │   └── monitoring.py             # Performance monitoring
+│   │   ├── agents/                       # Agent system
+|   |   |   |
+│   │   │   ├── __init__.py
+│   │   │   ├── base_agent.py             # Base agent class
+│   │   │   ├── agent_factory.py          # Agent creation factory
+│   │   │   ├── agent_registry.py         # Agent registry
+│   │   │   ├── memory/                   # Agent memory systems
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── conversation.py       # Conversation memory
+│   │   │   │   ├── entity.py             # Entity memory
+│   │   │   │   └── vector.py             # Vector memory
+│   │   │   ├── tools/                    # Agent tools
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── search_tool.py
+│   │   │   │   ├── calculator_tool.py
+│   │   │   │   ├── code_executor_tool.py
+│   │   │   │   └── database_tool.py
+│   │   │   ├── types/                    # Predefined agent types
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── conversational.py     # Conversational agent
+│   │   │   │   ├── research.py           # Research agent
+│   │   │   │   ├── code_assistant.py     # Code assistant agent
+│   │   │   │   └── data_analyst.py       # Data analyst agent
+│   │   │   └── orchestration/            # Multi-agent orchestration
+│   │   │       ├── __init__.py
+│   │   │       ├── coordinator.py        # Agent coordinator
+│   │   │       ├── communication.py      # Inter-agent communication
+│   │   │       └── delegation.py         # Task delegation
+│   │   │
+│   │   ├── rag/                          # RAG components
+│   │   │   ├── __init__.py
+│   │   │   ├── retriever.py              # Retrieval logic
+│   │   │   ├── embeddings.py             # Embedding models
+│   │   │   ├── reranker.py               # Reranking logic
+│   │   │   ├── chunking.py               # Document chunking strategies
+│   │   │   └── pipelines.py              # RAG pipelines
+│   │   │
+│   │   ├── vectorstore/                  # Vector database
+│   │   │   ├── __init__.py
+│   │   │   ├── pinecone_client.py        # Pinecone connection
+│   │   │   ├── operations.py             # CRUD operations
+│   │   │   ├── indexing.py               # Index management
+│   │   │   └── search.py                 # Search strategies
+│   │   │
+│   │   ├── crawler/                      # Web crawling
+│   │   │   ├── __init__.py
+│   │   │   ├── crawl4ai_client.py        # Crawl4AI integration
+│   │   │   ├── extractors.py             # Content extractors
+│   │   │   ├── parsers.py                # HTML/content parsers
+│   │   │   └── schedulers.py             # Crawl scheduling
+│   │   │
+│   │   ├── document_processing/          # Document handling
+│   │   │   ├── __init__.py
+│   │   │   ├── docling_client.py         # Docling integration
+│   │   │   ├── loaders.py                # Document loaders
+│   │   │   ├── converters.py             # Format converters
+│   │   │   └── preprocessors.py          # Text preprocessing
+│   │   │
+│   │   └── utils/                        # Shared AI utilities
+│   │       ├── __init__.py
+│   │       ├── token_counter.py
+│   │       ├── text_splitter.py
+│   │       └── validators.py
+│   │
+│   ├── features/                         # Business features
+│   │   ├── __init__.py
+│   │   │
+│   │   ├── chat/                         # AI Chat feature
+│   │   │   ├── __init__.py
+│   │   │   ├── model.py
+│   │   │   ├── schema.py
+│   │   │   ├── router.py
+│   │   │   ├── service.py                # Uses shared/langchain
+│   │   │   ├── repository.py
+│   │   │   ├── dependencies.py
+│   │   │   └── constants.py
+│   │   │
+│   │   ├── documents/                    # Document management
+│   │   │   ├── __init__.py
+│   │   │   ├── model.py
+│   │   │   ├── schema.py
+│   │   │   ├── router.py
+│   │   │   ├── service.py                # Uses shared/document_processing
+│   │   │   ├── repository.py
+│   │   │   ├── dependencies.py
+│   │   │   └── constants.py
+│   │   │
+│   │   ├── knowledge_base/               # RAG knowledge base
+│   │   │   ├── __init__.py
+│   │   │   ├── model.py
+│   │   │   ├── schema.py
+│   │   │   ├── router.py
+│   │   │   ├── service.py                # Uses shared/rag, shared/vectorstore
+│   │   │   ├── repository.py
+│   │   │   ├── dependencies.py
+│   │   │   └── constants.py
+│   │   │
+│   │   ├── web_scraping/                 # Web scraping feature
+│   │   │   ├── __init__.py
+│   │   │   ├── model.py
+│   │   │   ├── schema.py
+│   │   │   ├── router.py
+│   │   │   ├── service.py                # Uses shared/crawler
+│   │   │   ├── repository.py
+│   │   │   ├── dependencies.py
+│   │   │   └── constants.py
+│   │   │
+│   │   └── agents/                       # AI Agents feature
+│   │       ├── __init__.py
+│   │       ├── model.py
+│   │       ├── schema.py
+│   │       ├── router.py
+│   │       ├── service.py                # Uses shared/langgraph
+│   │       ├── repository.py
+│   │       ├── dependencies.py
+│   │       └── constants.py
+│   │
+│   ├── api/
+│   │   ├── __init__.py
+│   │   └── v1/
+│   │       ├── __init__.py
+│   │       └── router.py
+│   │
+│   ├── middleware/
+│   │   ├── __init__.py
+│   │   ├── error_handler.py
+│   │   ├── request_logging.py
+│   │   └── rate_limit.py
+│   │
+│   └── utils/
+│       ├── __init__.py
+│       ├── validators.py
+│       ├── formatters.py
+│       └── helpers.py
+│
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py
+│   ├── unit/
+│   │   ├── shared/
+│   │   │   ├── test_langchain.py
+│   │   │   ├── test_rag.py
+│   │   │   └── test_vectorstore.py
+│   │   └── features/
+│   │       ├── test_chat.py
+│   │       └── test_knowledge_base.py
+│   ├── integration/
+│   │   └── test_api.py
+│   └── e2e/
+│       └── test_flows.py
+│
+├── alembic/
+├── scripts/
+│   ├── seed_data.py
+│   ├── init_pinecone.py
+│   └── index_documents.py
+│
+├── .env
+├── .env.example
+├── .gitignore
+├── alembic.ini
+├── pyproject.toml
+├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+└── README.md
 ```
 
 ## 🔧 Configuration
@@ -331,31 +475,6 @@ MCP enables dynamic tool discovery and communication with multiple tool servers,
 -   **Database Queries**: MongoDB operations and data retrieval
 -   **File System**: File operations and management
 -   **Custom Tools**: Easily add your own MCP servers
-
-### MCP Architecture
-
-```
-┌─────────────────┐
-│   LangChain     │
-│     Agent       │
-└────────┬────────┘
-         │
-    ┌────▼────┐
-    │   MCP   │
-    │  Client │
-    └────┬────┘
-         │
-    ┏━━━━┻━━━━━━━━━━━━━━━━━━━━━━━┓
-    ┃                              ┃
-┌───▼────┐  ┌───────┐  ┌────────┐ ┃
-│  Math  │  │Weather│  │Database│ ┃
-│ Server │  │Server │  │ Server │ ┃
-│(stdio) │  │ (HTTP)│  │(stdio) │ ┃
-└────────┘  └───────┘  └────────┘ ┃
-                                   ┃
-          MCP Servers              ┃
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-```
 
 ### Quick Example
 

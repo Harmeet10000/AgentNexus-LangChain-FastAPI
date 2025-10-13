@@ -50,7 +50,7 @@ dependencies = [
     "python-pptx==1.0.2",
     "beautifulsoup4==4.12.3",
     "lxml==5.3.0",
-    "markdownify==0.13.0",
+    "markdownify>=0.13.1",
     "markdown==3.9.0",
     "unstructured==0.15.3",
     "crawl4ai==0.7.4",
@@ -69,6 +69,7 @@ dependencies = [
     "ruff==0.7.1",
     "pre-commit==4.1.0",
     "python-dotenv==1.1.0",
+    "loguru==0.7.3",
     "cryptography==46.0.2",
     "pyjwt==2.9.0",
     "tenacity==9.1.2",
@@ -85,7 +86,7 @@ dependencies = [
     "fastapi-cache2==0.2.1",
     "wikipedia==1.4.0",
     "requests==2.32.5",
-
+    "mcp-server-fetch>=2025.1.17",
 ]
 
 [project.optional-dependencies]
@@ -235,4 +236,3 @@ exclude_lines = [
 exclude_dirs = ["tests", "migrations"]
 skips = ["B101", "B601"]
 
-# Flake8 configuration (in setup.cfg format since flake8 doesn't support pyproject.toml yet)

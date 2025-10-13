@@ -1,0 +1,14 @@
+from fastapi import APIRouter, Request
+from .controller import self_info, health_check
+
+router = APIRouter(prefix="/api/v1/health", tags=["health"])
+
+
+@router.get("/self", response_model=None)
+async def get_self(request: Request) -> object:
+    return await self_info(request)
+
+
+@router.get("/", response_model=None)
+async def get_health(request: Request) -> object:
+    return await health_check(request)
