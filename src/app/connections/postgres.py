@@ -2,34 +2,22 @@
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
-from pydantic_settings import BaseSettings
+
+from app.core.settings import get_settings
 
 
-class DatabaseConfig(BaseSettings):
-    """Database configuration."""
+def get_database_url() -> str:
+    """Convert psycopg2 URL to asyncpg URL."""
+    postgres_url = get_settings().POSTGRES_URL
+    return postgres_url.replace("postgresql://", "postgresql+asyncpg://")
 
-    POSTGRES_URL: str  # Neon provides full connection string
-    POSTGRES_POOL_SIZE: int = 20
-    POSTGRES_MAX_OVERFLOW: int = 10
-
-    @property
-    def database_url(self) -> str:
-        """Convert psycopg2 URL to asyncpg URL."""
-        # Neon uses postgresql://, convert to postgresql+asyncpg://
-        return self.POSTGRES_URL.replace("postgresql://", "postgresql+asyncpg://")
-
-    class Config:
-        env_file = ".env"
-
-
-config = DatabaseConfig()
 
 # Create async engine
 engine = create_async_engine(
-    config.database_url,
+    get_database_url(),
     echo=False,
-    pool_size=config.POSTGRES_POOL_SIZE,
-    max_overflow=config.POSTGRES_MAX_OVERFLOW,
+    pool_size=get_settings().POSTGRES_POOL_SIZE,
+    max_overflow=get_settings().POSTGRES_MAX_OVERFLOW,
     pool_pre_ping=True,
 )
 

@@ -4,7 +4,6 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 from app.shared.enums import Environment
-from app.middleware.server_middleware import get_correlation_id
 import os
 
 
@@ -26,7 +25,6 @@ def http_response(
     Returns:
         JSONResponse with standardized format
     """
-    correlation_id = get_correlation_id() if request else None
 
     response = {
         "success": True,
@@ -35,7 +33,9 @@ def http_response(
             "ip": request.client.host if request and request.client else None,
             "method": request.method if request else None,
             "url": str(request.url) if request else None,
-            "correlationId": correlation_id,
+            "correlationId": (
+                getattr(request.state, "correlation_id", None) if request else None
+            ),
         },
         "message": message,
         "data": data,

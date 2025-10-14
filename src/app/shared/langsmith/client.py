@@ -10,10 +10,9 @@ from langsmith.evaluation import evaluate
 from langchain.callbacks.tracers import LangChainTracer
 from langchain.callbacks.manager import CallbackManager
 
-from src2.app.core.settings import settings
-from src.core.config.logging_config import LoggerAdapter
+from src.app.core.settings import Settings, get_settings
+from app.utils.logger import logger
 
-logger = LoggerAdapter(__name__)
 
 # Global LangSmith client
 langsmith_client: Optional[Client] = None
@@ -25,7 +24,7 @@ def initialize_langsmith():
     global langsmith_client, langchain_tracer
 
     try:
-        if not settings.langsmith_api_key:
+        if not get_settings().LANGSMITH_API_KEY:
             logger.warning("LangSmith API key not provided, monitoring disabled")
             return
 
@@ -33,18 +32,18 @@ def initialize_langsmith():
 
         # Set environment variables for LangChain tracing
         os.environ["LANGCHAIN_TRACING_V2"] = "true"
-        os.environ["LANGCHAIN_PROJECT"] = settings.langsmith_project
-        os.environ["LANGCHAIN_ENDPOINT"] = settings.langsmith_endpoint
-        os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
+        os.environ["LANGCHAIN_PROJECT"] = get_settings().LANGSMITH_PROJECT
+        os.environ["LANGCHAIN_ENDPOINT"] = get_settings().LANGSMITH_ENDPOINT
+        os.environ["LANGCHAIN_API_KEY"] = get_settings().LANGSMITH_API_KEY
 
         # Initialize LangSmith client
         langsmith_client = Client(
-            api_url=settings.langsmith_endpoint, api_key=settings.langsmith_api_key
+            api_url=get_settings().LANGSMITH_ENDPOINT, api_key=get_settings().LANGSMITH_API_KEY
         )
 
         # Create tracer for callbacks
         langchain_tracer = LangChainTracer(
-            project_name=settings.langsmith_project, client=langsmith_client
+            project_name=get_settings().LANGSMITH_PROJECT, client=langsmith_client
         )
 
         logger.info("LangSmith initialized successfully")
@@ -61,7 +60,7 @@ class LangSmithService:
         """Initialize LangSmith service."""
         self.client = langsmith_client
         self.tracer = langchain_tracer
-        self.project_name = settings.langsmith_project
+        self.project_name = get_settings().LANGSMITH_PROJECT
 
     def get_callback_manager(self) -> Optional[CallbackManager]:
         """Get callback manager with LangSmith tracer."""
@@ -111,7 +110,7 @@ class LangSmithService:
             return run_id
 
         except Exception as e:
-            logger.error("Failed to log run to LangSmith", error=str(e))
+            logger.error("Failed to log run to LangSmith", {error:str(e)})
             return None
 
     async def log_feedback(
@@ -139,7 +138,7 @@ class LangSmithService:
             return True
 
         except Exception as e:
-            logger.error("Failed to log feedback", error=str(e))
+            logger.error("Failed to log feedback", {error:str(e)})
             return False
 
     async def evaluate_dataset(
@@ -163,7 +162,7 @@ class LangSmithService:
             return results
 
         except Exception as e:
-            logger.error("Failed to evaluate dataset", error=str(e))
+            logger.error("Failed to evaluate dataset", {error:str(e)})
             return None
 
     async def create_dataset(
@@ -191,13 +190,13 @@ class LangSmithService:
             return True
 
         except Exception as e:
-            logger.error("Failed to create dataset", error=str(e))
+            logger.error("Failed to create dataset",{ error:str(e)})
             return False
 
     def get_run_url(self, run_id: str) -> str:
         """Get URL for viewing a run in LangSmith UI."""
         return (
-            f"{settings.langsmith_endpoint}/projects/{self.project_name}/runs/{run_id}"
+            f"{get_settings().LANGSMITH_ENDPOINT}/projects/{self.project_name}/runs/{run_id}"
         )
 
     async def get_run_metrics(
@@ -234,7 +233,7 @@ class LangSmithService:
             return metrics
 
         except Exception as e:
-            logger.error("Failed to get run metrics", error=str(e))
+            logger.error("Failed to get run metrics", {error:str(e)})
             return []
 
 

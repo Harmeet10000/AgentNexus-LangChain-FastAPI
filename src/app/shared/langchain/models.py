@@ -6,10 +6,8 @@ from typing import Optional
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.callbacks import AsyncCallbackHandler
 
-from src2.app.core.settings import settings
-from core.config.logging_config import LoggerAdapter
-
-logger = LoggerAdapter(__name__)
+from src.app.core.s import s, get_s
+from app.utils.logger import logger
 
 
 class LangChainModels:
@@ -26,10 +24,10 @@ class LangChainModels:
         """Get or create chat model."""
         if self._chat_model is None:
             self._chat_model = ChatGoogleGenerativeAI(
-                model=settings.gemini_model,
-                google_api_key=settings.google_api_key,
-                temperature=settings.gemini_temperature,
-                max_output_tokens=settings.gemini_max_tokens,
+                model=get_s().GEMINI_MODEL,
+                google_api_key=get_s().GOOGLE_API_KEY,
+                temperature=get_s().GEMINI_TEMPERATURE,
+                max_output_tokens=get_s().GEMINI_MAX_TOKENS,
                 convert_system_message_to_human=True,
             )
             logger.info("Initialized Gemini chat model")
@@ -41,8 +39,8 @@ class LangChainModels:
         """Get or create embedding model."""
         if self._embedding_model is None:
             self._embedding_model = GoogleGenerativeAIEmbeddings(
-                model=settings.gemini_embedding_model,
-                google_api_key=settings.google_api_key,
+                model=get_s().GEMINI_EMBEDDING_MODEL,
+                google_api_key=get_s().GOOGLE_API_KEY,
             )
             logger.info("Initialized Gemini embedding model")
 
@@ -53,8 +51,8 @@ class LangChainModels:
         """Get or create vision model."""
         if self._vision_model is None:
             self._vision_model = ChatGoogleGenerativeAI(
-                model=settings.gemini_vision_model,
-                google_api_key=settings.google_api_key,
+                model=get_s().GEMINI_VISION_MODEL,
+                google_api_key=get_s().GOOGLE_API_KEY,
             )
             logger.info("Initialized Gemini vision model")
 
@@ -84,8 +82,3 @@ def get_vision_model() -> ChatGoogleGenerativeAI:
 
 
 # Import the existing gemini service for backward compatibility
-def get_gemini_service():
-    """Get gemini service for backward compatibility."""
-    from services.langchain.gemini_service import gemini_service
-
-    return gemini_service

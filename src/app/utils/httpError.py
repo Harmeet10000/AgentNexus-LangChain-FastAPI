@@ -3,7 +3,6 @@ from typing import Optional, Any
 from fastapi import Request, HTTPException
 from loguru import logger
 from app.shared.enums import SOMETHING_WENT_WRONG, Environment
-from app.middleware.server_middleware import get_correlation_id
 import os
 
 
@@ -25,7 +24,6 @@ def http_error(
     Returns:
         HTTPException with standardized error format
     """
-    correlation_id = get_correlation_id() if request else None
 
     error_obj = {
         "name": exc.__class__.__name__ if exc else "Error",
@@ -35,7 +33,7 @@ def http_error(
             "ip": request.client.host if request and request.client else None,
             "method": request.method if request else None,
             "url": str(request.url) if request else None,
-            "correlationId": correlation_id,
+            "correlationId": getattr(request.state, "correlation_id", None) if request else None,
         },
         "message": message,
         "data": None,
@@ -50,7 +48,6 @@ def http_error(
 
     # Remove sensitive data in production
     if os.getenv("ENVIRONMENT") == Environment.PRODUCTION:
-        error_obj["request"]["ip"] = None
         error_obj["trace"] = None
 
     return HTTPException(status_code=status_code, detail=error_obj)

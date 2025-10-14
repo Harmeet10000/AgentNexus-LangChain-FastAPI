@@ -10,7 +10,7 @@ from app.utils.quicker import (
     check_redis,
 )
 from app.core.cache import get_redis_client
-from app.db import mongodb as mongo_db
+from app.connections import mongodb as mongo_db
 
 
 async def self_info(request: Request) -> Any:

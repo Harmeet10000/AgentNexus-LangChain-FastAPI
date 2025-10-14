@@ -1,5 +1,8 @@
 """Main FastAPI application module."""
+from dotenv import load_dotenv
 
+# Load the specific environment file
+load_dotenv(".env.development")
 from contextlib import asynccontextmanager
 from typing import Any, Dict, AsyncIterator
 
@@ -9,24 +12,27 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from app.utils.httpResponse import http_response
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 import inspect
 
 from app.core.cache import connect_to_redis
-from app.core.settings import settings
+from app.core.settings import Settings, get_settings
 from app.core.exceptions import register_exception_handlers
-from app.db.mongodb import connect_to_mongodb
-from app.middleware.server_middleware import CorrelationMiddleware
-from app.middleware.security import SecurityHeadersMiddleware
-from app.middleware.timeout import TimeoutMiddleware
-from app.utils.logging import logger, setup_logging
+from app.connections.mongodb import connect_to_mongodb
+from app.connections.postgres import init_db
+from app.middleware.server_middleware import (
+    CorrelationMiddleware,
+    MetricsMiddleware,
+    SecurityHeadersMiddleware,
+    TimeoutMiddleware,
+    init_rate_limiter,
+    rate_limiter,
+    get_metrics,
+)
+from app.utils.logger import logger, setup_logging
 from app.features.health.router import router as health_router
-
-
-# Rate limiter
-limiter = Limiter(key_func=get_remote_address)
+import uvicorn
+import sys
+from app.middleware.server_middleware import MetricsMiddleware, get_metrics
 
 
 @asynccontextmanager
@@ -36,8 +42,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Application starting")
 
     # Connect to databases
-    await connect_to_mongodb()
-    await connect_to_redis()
+    # await connect_to_mongodb()
+    # await connect_to_redis()
+    # await init_db()
 
     yield
 
@@ -51,52 +58,37 @@ def create_app() -> FastAPI:
         title="LangChain FastAPI Production",
         version="1.0.0",
         lifespan=lifespan,
-        docs_url="/api-docs",
-        openapi_url="/swagger.json",
+        docs_url=None if get_settings().ENVIRONMENT else  "/api-docs",
+        redoc_url=None if get_settings().ENVIRONMENT else "/api-redoc",
+        openapi_url=None if get_settings().ENVIRONMENT else "/swagger.json",
     )
+
+    # Correlation ID
+    app.add_middleware(CorrelationMiddleware)
 
     # Security middleware (first)
     app.add_middleware(SecurityHeadersMiddleware)
+    # Trusted hosts
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 
     # Compression (15KB threshold like Express)
     app.add_middleware(GZipMiddleware, minimum_size=15000, compresslevel=6)
 
+    # Metrics
+    app.add_middleware(MetricsMiddleware, project_name="langchain-fastapi")
     # CORS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["*"],
+        expose_headers=["X-Total-Count"],
+        max_age=3600,
     )
 
     # Timeout (30 seconds)
     app.add_middleware(TimeoutMiddleware, timeout=30)
-
-    # Correlation ID
-    app.add_middleware(CorrelationMiddleware)
-
-    # Rate limiter
-    app.state.limiter = limiter
-
-    # slowapi's handler expects a specific exception type; wrap it in an
-    # async handler that accepts a generic Exception to satisfy FastAPI's
-    # typing expectations while forwarding to slowapi's implementation.
-    async def _rate_limit_handler_wrapper(request: Request, exc: Exception) -> Any:
-        if not isinstance(exc, RateLimitExceeded):
-            # If it's not the expected exception, return a generic 429 response.
-            return JSONResponse(
-                status_code=429, content={"detail": "Too Many Requests"}
-            )
-
-        result = _rate_limit_exceeded_handler(request, exc)
-        # support either sync or async implementations
-        if inspect.isawaitable(result):
-            return await result
-        return result
-
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_handler_wrapper)
 
     # Exception handlers
     register_exception_handlers(app)
@@ -105,6 +97,16 @@ def create_app() -> FastAPI:
     @app.get("/")
     async def root() -> Dict[str, str]:
         return {"message": "Welcome to LangChain FastAPI Production 🚀"}
+
+    @app.get("/metrics")
+    async def metrics(request: Request):
+        data, content_type = get_metrics()
+        return http_response(
+            message="Success",
+            data=data,
+            status_code=200,
+            request=request,
+        )
 
     app.include_router(health_router)
 
@@ -126,7 +128,50 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-if __name__ == "__main__":
-    import uvicorn
+def setup_signal_handlers() -> None:
+    """Setup graceful shutdown handlers."""
+    import signal
+    import sys
+    from types import FrameType
 
-    uvicorn.run("app.main:app", host="0.0.0.0", port=5000, reload=True)
+    def graceful_shutdown(sig_name: str) -> None:
+        """Handle graceful shutdown."""
+        logger.info(f"Received {sig_name}, shutting down gracefully...")
+        sys.exit(0)
+
+    def handle_sigterm(signum: int, frame: FrameType | None) -> None:
+        graceful_shutdown("SIGTERM")
+
+    def handle_sigint(signum: int, frame: FrameType | None) -> None:
+        graceful_shutdown("SIGINT")
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    signal.signal(signal.SIGINT, handle_sigint)
+
+
+if __name__ == "__main__":
+
+
+    # Setup signal handlers
+    setup_signal_handlers()
+
+    # Handle unhandled exceptions
+    def handle_exception(
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        exc_traceback: Any
+    ) -> None:
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        logger.error("UNHANDLED EXCEPTION! 💥", {"error": str(exc_value)})
+
+    sys.excepthook = handle_exception
+
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=5000,
+        reload=True,
+        log_config=None  # Use loguru instead
+    )

@@ -5,10 +5,9 @@ from typing import Any, Dict, List, Optional, Union
 
 import redis.asyncio as redis
 from tenacity import retry, stop_after_attempt, wait_exponential
+from app.core.settings import Settings, get_settings
+from app.utils.logger import logger
 
-
-
-logger = LoggerAdapter(__name__)
 
 # Global Redis client instance
 redis_client: Optional[redis.Redis] = None
@@ -20,11 +19,11 @@ async def connect_to_redis() -> None:
 
     try:
         logger.info(
-            "Connecting to Redis", host=settings.redis_host, port=settings.redis_port
+            "Connecting to Redis", { host: get_settings().REDIS_HOST, port: get_settings().REDIS_PORT }
         )
 
         redis_client = await redis.from_url(
-            settings.redis_url,
+            get_settings().REDIS_URL,
             encoding="utf-8",
             decode_responses=True,
             max_connections=50,
@@ -36,7 +35,7 @@ async def connect_to_redis() -> None:
         logger.info("Successfully connected to Redis")
 
     except Exception as e:
-        logger.error("Failed to connect to Redis", error=str(e))
+        logger.error("Failed to connect to Redis", { error: str(e) })
         raise
 
 
@@ -84,7 +83,7 @@ class CacheManager:
         except json.JSONDecodeError:
             return value
         except Exception as e:
-            logger.error("Cache get error", key=full_key, error=str(e))
+            logger.error("Cache get error", { key: full_key, error: str(e) })
             return None
 
     @retry(
@@ -94,14 +93,14 @@ class CacheManager:
         """Set value in cache."""
         client = get_redis_client()
         full_key = self._make_key(key)
-        ttl = ttl or settings.cache_ttl
+        ttl = ttl or get_settings().CACHE_TTL
 
         try:
             serialized = json.dumps(value) if not isinstance(value, str) else value
             await client.setex(full_key, ttl, serialized)
             return True
         except Exception as e:
-            logger.error("Cache set error", key=full_key, error=str(e))
+            logger.error("Cache set error", { key: full_key, error: str(e) })
             return False
 
     async def delete(self, key: str) -> bool:
@@ -113,7 +112,7 @@ class CacheManager:
             result = await client.delete(full_key)
             return bool(result)
         except Exception as e:
-            logger.error("Cache delete error", key=full_key, error=str(e))
+            logger.error("Cache delete error", { key: full_key, error: str(e) })
             return False
 
     async def delete_pattern(self, pattern: str) -> int:
@@ -131,7 +130,7 @@ class CacheManager:
             return 0
         except Exception as e:
             logger.error(
-                "Cache delete pattern error", pattern=full_pattern, error=str(e)
+                "Cache delete pattern error", {pattern: full_pattern, error: str(e)}
             )
             return 0
 
@@ -143,7 +142,7 @@ class CacheManager:
         try:
             return bool(await client.exists(full_key))
         except Exception as e:
-            logger.error("Cache exists error", key=full_key, error=str(e))
+            logger.error("Cache exists error", { key: full_key, error: str(e) })
             return False
 
     async def get_many(self, keys: List[str]) -> Dict[str, Any]:
@@ -162,7 +161,7 @@ class CacheManager:
                         result[key] = value
             return result
         except Exception as e:
-            logger.error("Cache get many error", error=str(e))
+            logger.error("Cache get many error", { error: str(e) })
             return {}
 
     async def set_many(
@@ -170,7 +169,7 @@ class CacheManager:
     ) -> bool:
         """Set multiple values in cache."""
         client = get_redis_client()
-        ttl = ttl or settings.cache_ttl
+        ttl = ttl or get_settings().CACHE_TTL
 
         try:
             pipe = client.pipeline()
@@ -181,7 +180,7 @@ class CacheManager:
             await pipe.execute()
             return True
         except Exception as e:
-            logger.error("Cache set many error", error=str(e))
+            logger.error("Cache set many error", { error: str(e) })
             return False
 
     async def increment(self, key: str, amount: int = 1) -> Optional[int]:
@@ -192,7 +191,7 @@ class CacheManager:
         try:
             return await client.incr(full_key, amount)
         except Exception as e:
-            logger.error("Cache increment error", key=full_key, error=str(e))
+            logger.error("Cache increment error", { key: full_key, error: str(e) })
             return None
 
     async def get_ttl(self, key: str) -> Optional[int]:
@@ -204,7 +203,7 @@ class CacheManager:
             ttl = await client.ttl(full_key)
             return ttl if ttl > 0 else None
         except Exception as e:
-            logger.error("Cache get TTL error", key=full_key, error=str(e))
+            logger.error("Cache get TTL error", { key: full_key, error: str(e) })
             return None
 
 

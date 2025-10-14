@@ -33,7 +33,7 @@ A production-grade FastAPI application integrating LangChain, LangGraph, and Lan
 
 ## 📋 Prerequisites
 
--   Python 3.9+
+-   Python 3.11+
 -   [uv](https://docs.astral.sh/uv/) - Fast Python package manager (recommended)
 -   Docker and Docker Compose
 -   API Keys:
@@ -46,7 +46,7 @@ A production-grade FastAPI application integrating LangChain, LangGraph, and Lan
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/Harmeet10000/langchain-fastapi-production.git
 cd langchain-fastapi-production
 ```
 
@@ -93,28 +93,11 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 # Install project dependencies (reads pyproject.toml)
 uv pip install -e .
 
-# Install Playwright browsers (for Crawl4AI)
-playwright install chromium
+# For dev dependencies too
+uv pip install -e ".[dev]"
 
-# Run the application
-uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 5000
-```
-
-### 6. Alternative: Traditional pip approach
-
-```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install project dependencies (reads pyproject.toml)
-uv pip install -e .
-
-# Install Playwright browsers (for Crawl4AI)
-playwright install chromium
-
-# Run the application
-uvicorn src.main:app --reload --host 0.0.0.0 --port 5000
+# Run the application 
+uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 5000
 ```
 
 ## ⚡ Why Use uv?

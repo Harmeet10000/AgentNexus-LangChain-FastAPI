@@ -1,184 +1,113 @@
-"""Application settings and configuration management."""
+# src/settings.py
 
-import json
 from functools import lru_cache
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-from pydantic import Field, field_validator
+from typing import List, Optional
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
+    # Pydantic will now automatically look for the exact UPPERCASE name
+    # defined in the class (e.g., Settings.APP_NAME will look for the APP_NAME env var).
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env.development",
         env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="allow",
+        # Case sensitivity is set to True for clarity, but False works too
+        # since we are enforcing the case in the model now.
+        case_sensitive=True,
+        extra="ignore",  # Ignore environment variables not explicitly defined in this model
     )
 
-    # Application Settings
-    app_name: str = Field(default="LangChain FastAPI Production")
-    app_version: str = Field(default="1.0.0")
-    environment: str = Field(default="development")
-    debug: bool = Field(default=False)
-    api_prefix: str = Field(default="/api/v1")
-    cors_origins: List[str] = Field(default_factory=lambda: ["*"])
+    # --- Application Settings ---
+    APP_NAME: str = Field(default="LangChain FastAPI Production")
+    APP_VERSION: str = Field(default="1.0.0")
+    ENVIRONMENT: str = Field(default="development")
+    DEBUG: bool = Field(default=False)
+    API_PREFIX: str = Field(default="/api/v1")
+    CORS_ORIGINS: List[str] = Field(default_factory=lambda: ["*"])
 
-    # Server Configuration
-    host: str = Field(default="0.0.0.0")
-    port: int = Field(default=5000)
-    workers: int = Field(default=4)
+    # --- Server Configuration ---
+    HOST: str = Field(default="0.0.0.0")
+    PORT: int = Field(default=8000)
+    WORKERS: int = Field(default=1)
 
-    # Security
-    secret_key: str = Field(default="change-this-secret-key")
-    jwt_algorithm: str = Field(default="HS256")
-    access_token_expire_minutes: int = Field(default=30)
-    refresh_token_expire_days: int = Field(default=7)
+    # --- Database ---
+    MONGODB_URL: str = Field(default="mongodb://localhost:27017/langchain_db")
+    MONGODB_DATABASE: str = Field(default="langchain_db")
+    POSTGRES_URL: str = Field(
+        default="postgresql://user:pass@host/db"
+    )  # Added this missing field
+    POSTGRES_MAX_OVERFLOW: int = Field(default=10)  # Added this missing field
+    POSTGRES_POOL_SIZE: int = Field(default=5)  # Added this missing field
+    # --- Redis Cache ---
+    REDIS_HOST: str = Field(default="localhost")
+    REDIS_PORT: int = Field(default=6379)
+    REDIS_USERNAME: str = Field(default="default")
+    REDIS_PASSWORD: Optional[str] = Field(default=None)
 
-    # Database
-    mongodb_url: str = Field(default="mongodb://localhost:27017/langchain_db")
-    mongodb_database: str = Field(default="langchain_db")
+    # Note: REDIS_DB and CACHE_TTL were not in your ENV, so they remain as defaults
+    REDIS_DB: int = Field(default=0)
+    CACHE_TTL: int = Field(default=3600)
 
-    # Redis Cache
-    redis_host: str = Field(default="localhost")
-    redis_port: int = Field(default=6379)
-    redis_db: int = Field(default=0)
-    redis_password: Optional[str] = Field(default=None)
-    cache_ttl: int = Field(default=3600)
+    # --- Google Gemini API ---
+    GOOGLE_API_KEY: str = Field(default="")
+    GEMINI_MODEL: str = Field(default="gemini-2.5-flash")
+    GEMINI_VISION_MODEL: str = Field(default="gemini-2.5-flash-image")
+    GEMINI_EMBEDDING_MODEL: str = Field(default="text-embedding-005")
+    GEMINI_TEMPERATURE: float = Field(default=0.7)
+    GEMINI_MAX_TOKENS: int = Field(default=2048)
 
-    # Google Gemini API
-    google_api_key: str = Field(default="")
-    gemini_model: str = Field(default="gemini-pro")
-    gemini_vision_model: str = Field(default="gemini-pro-vision")
-    gemini_embedding_model: str = Field(default="models/embedding-001")
-    gemini_temperature: float = Field(default=0.7)
-    gemini_max_tokens: int = Field(default=2048)
+    # --- Pinecone Vector Database ---
+    PINECONE_API_KEY: str = Field(default="")
+    PINECONE_ENVIRONMENT: str = Field(default="")
+    PINECONE_INDEX_NAME: str = Field(default="langchain-index")
+    PINECONE_DIMENSION: int = Field(default=768)
+    PINECONE_METRIC: str = Field(default="cosine")
 
-    # Pinecone Vector Database
-    pinecone_api_key: str = Field(default="")
-    pinecone_environment: str = Field(default="")
-    pinecone_index_name: str = Field(default="langchain-index")
-    pinecone_dimension: int = Field(default=768)
-    pinecone_metric: str = Field(default="cosine")
+    # --- LangSmith ---
+    # Renamed to match the variable in your ENV file: LANGSMITH_TRACING=true
+    LANGSMITH_TRACING: bool = Field(default=False)
+    LANGSMITH_ENDPOINT: str = Field(default="https://api.smith.langchain.com")
+    LANGSMITH_API_KEY: str = Field(default="")  # Note: Your ENV had LANGSMITH_API_KEY
+    LANGSMITH_PROJECT: str = Field(default="langchain-production")
+    LANGCHAIN_PROJECT: str = Field(
+        default="langchain-production"
+    )  # Note: Your ENV had LANGCHAIN_PROJECT
 
-    # LangSmith
-    langsmith_api_key: str = Field(default="")
-    langsmith_project: str = Field(default="langchain-production")
-    langsmith_endpoint: str = Field(default="https://api.smith.langchain.com")
-    langchain_tracing_v2: bool = Field(default=False)
-    langchain_project: str = Field(default="langchain-production")
-
-    # Crawl4AI Configuration
-    crawl4ai_headless: bool = Field(default=True)
-    crawl4ai_timeout: int = Field(default=30000)
-    crawl4ai_user_agent: str = Field(
+    # --- Crawl4AI Configuration ---
+    CRAWL4AI_HEADLESS: bool = Field(default=True)
+    CRAWL4AI_TIMEOUT: int = Field(default=30000)
+    CRAWL4AI_USER_AGENT: str = Field(
         default="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     )
 
-    # Logging
-    log_level: str = Field(default="INFO")
-    log_format: str = Field(default="json")
-    log_file: str = Field(default="logs/app.log")
+    # --- Logging ---
+    LOG_LEVEL: str = Field(default="INFO")
+    LOG_FORMAT: str = Field(default="json")
+    LOG_FILE: str = Field(default="logs/app.log")
 
-    # Rate Limiting
-    rate_limit_enabled: bool = Field(default=True)
-    rate_limit_requests: int = Field(default=100)
-    rate_limit_period: int = Field(default=60)
+    # --- Rate Limiting ---
+    RATE_LIMIT_ENABLED: bool = Field(default=True)
+    RATE_LIMIT_REQUESTS: int = Field(default=100)
+    RATE_LIMIT_PERIOD: int = Field(default=60)
 
-    # File Upload
-    max_upload_size: int = Field(default=10485760)  # 10MB
-    allowed_extensions: List[str] = Field(
+    # --- File Upload ---
+    MAX_UPLOAD_SIZE: int = Field(default=10485760)  # 10MB
+    ALLOWED_EXTENSIONS: List[str] = Field(
         default_factory=lambda: ["pdf", "txt", "docx", "xlsx", "pptx", "md", "html"]
     )
 
-    # OpenTelemetry
-    otel_exporter_otlp_endpoint: str = Field(default="http://localhost:4317")
-    otel_service_name: str = Field(default="langchain-fastapi")
-    otel_traces_exporter: str = Field(default="otlp")
-    otel_metrics_exporter: str = Field(default="otlp")
-
-    @field_validator("cors_origins", mode="before")
-    def parse_cors_origins(cls, v):
-        """Parse CORS origins from string or list."""
-        if isinstance(v, str):
-            if v.startswith("["):
-                return json.loads(v)
-            return [origin.strip() for origin in v.split(",")]
-        return v
-
-    @field_validator("allowed_extensions", mode="before")
-    def parse_allowed_extensions(cls, v):
-        """Parse allowed extensions from string or list."""
-        if isinstance(v, str):
-            if v.startswith("["):
-                return json.loads(v)
-            return [ext.strip() for ext in v.split(",")]
-        return v
-
-    @property
-    def redis_url(self) -> str:
-        """Construct Redis URL."""
-        if self.redis_password:
-            return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}/{self.redis_db}"
-        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
-
-    @property
-    def is_development(self) -> bool:
-        """Check if running in development mode."""
-        return self.environment.lower() in ["development", "dev"]
-
-    @property
-    def is_production(self) -> bool:
-        """Check if running in production mode."""
-        return self.environment.lower() in ["production", "prod"]
-
-    @property
-    def is_testing(self) -> bool:
-        """Check if running in test mode."""
-        return self.environment.lower() in ["testing", "test"]
-
-    def get_langchain_env(self) -> Dict[str, Any]:
-        """Get LangChain-specific environment variables."""
-        return {
-            "LANGCHAIN_TRACING_V2": str(self.langchain_tracing_v2).lower(),
-            "LANGCHAIN_PROJECT": self.langchain_project,
-            "LANGSMITH_API_KEY": self.langsmith_api_key,
-            "LANGSMITH_ENDPOINT": self.langsmith_endpoint,
-        }
-
-    def validate_config(self) -> None:
-        """Validate critical configuration."""
-        errors = []
-
-        if not self.google_api_key and not self.is_testing:
-            errors.append("GOOGLE_API_KEY is required")
-
-        if not self.pinecone_api_key and not self.is_testing:
-            errors.append("PINECONE_API_KEY is required")
-
-        if self.is_production:
-            if self.secret_key == "change-this-secret-key":
-                errors.append("SECRET_KEY must be changed in production")
-            if self.debug:
-                errors.append("DEBUG must be False in production")
-
-        if errors:
-            raise ValueError(f"Configuration errors: {', '.join(errors)}")
+    # --- OpenTelemetry ---
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = Field(default="http://localhost:4317")
+    OTEL_SERVICE_NAME: str = Field(default="langchain-fastapi")
+    OTEL_TRACES_EXPORTER: str = Field(default="otlp")
+    OTEL_METRICS_EXPORTER: str = Field(default="otlp")
 
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings instance."""
-    settings = Settings()
-    # Set LangChain environment variables
-    import os
-    for key, value in settings.get_langchain_env().items():
-        os.environ[key] = str(value)
-    return settings
-
-
-# Create global settings instance
-settings = get_settings()
+    """Returns a cached instance of the application settings."""
+    # Instantiating the class here ensures it's only done once (due to @lru_cache)
+    return Settings()
