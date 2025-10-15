@@ -4,6 +4,10 @@ from functools import lru_cache
 from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+
+# Load environment variables from .env.development
+load_dotenv(".env.development")
 
 
 class Settings(BaseSettings):

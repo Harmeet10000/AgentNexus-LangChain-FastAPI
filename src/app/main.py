@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Application starting")
 
     # Connect to databases
-    # await connect_to_mongodb()
+    await connect_to_mongodb()
     # await connect_to_redis()
     # await init_db()
 
