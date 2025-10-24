@@ -1,17 +1,18 @@
 """System and application health check utilities."""
+
 import os
 import time
+from typing import Any
+
 import psutil
-from typing import Dict, Any
 from motor.motor_asyncio import AsyncIOMotorClient
 from redis.asyncio import Redis
-
 
 # Store startup time
 _start_time = time.time()
 
 
-def get_system_health() -> Dict[str, Any]:
+def get_system_health() -> dict[str, Any]:
     """Get system health metrics."""
     cpu_percent = psutil.cpu_percent(interval=1)
     memory = psutil.virtual_memory()
@@ -26,7 +27,7 @@ def get_system_health() -> Dict[str, Any]:
     }
 
 
-def get_application_health() -> Dict[str, Any]:
+def get_application_health() -> dict[str, Any]:
     """Get application health metrics."""
     process = psutil.Process()
     memory_info = process.memory_info()
@@ -44,7 +45,7 @@ def get_application_health() -> Dict[str, Any]:
     }
 
 
-async def check_database(db_client: AsyncIOMotorClient) -> Dict[str, Any]:
+async def check_database(db_client: AsyncIOMotorClient) -> dict[str, Any]:
     """Check MongoDB database health."""
     try:
         start = time.time()
@@ -63,7 +64,7 @@ async def check_database(db_client: AsyncIOMotorClient) -> Dict[str, Any]:
         }
 
 
-async def check_redis(redis_client: Redis) -> Dict[str, Any]:
+async def check_redis(redis_client: Redis) -> dict[str, Any]:
     """Check Redis health."""
     try:
         start = time.time()
@@ -83,7 +84,7 @@ async def check_redis(redis_client: Redis) -> Dict[str, Any]:
         }
 
 
-def check_memory() -> Dict[str, Any]:
+def check_memory() -> dict[str, Any]:
     """Check memory usage."""
     process = psutil.Process()
     memory_info = process.memory_info()
@@ -99,7 +100,7 @@ def check_memory() -> Dict[str, Any]:
     }
 
 
-def check_disk() -> Dict[str, Any]:
+def check_disk() -> dict[str, Any]:
     """Check disk health."""
     try:
         disk = psutil.disk_usage(".")

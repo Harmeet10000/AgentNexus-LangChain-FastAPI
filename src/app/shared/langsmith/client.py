@@ -1,22 +1,21 @@
 """LangSmith monitoring and tracing service."""
 
 import os
-from typing import Optional, Dict, Any, List
-from datetime import datetime
 import uuid
+from datetime import datetime
+from typing import Any
 
+from langchain.callbacks.manager import CallbackManager
+from langchain.callbacks.tracers import LangChainTracer
 from langsmith import Client
 from langsmith.evaluation import evaluate
-from langchain.callbacks.tracers import LangChainTracer
-from langchain.callbacks.manager import CallbackManager
 
-from src.app.core.settings import Settings, get_settings
 from app.utils.logger import logger
-
+from src.app.core.settings import get_settings
 
 # Global LangSmith client
-langsmith_client: Optional[Client] = None
-langchain_tracer: Optional[LangChainTracer] = None
+langsmith_client: Client | None = None
+langchain_tracer: LangChainTracer | None = None
 
 
 def initialize_langsmith():
@@ -38,7 +37,8 @@ def initialize_langsmith():
 
         # Initialize LangSmith client
         langsmith_client = Client(
-            api_url=get_settings().LANGSMITH_ENDPOINT, api_key=get_settings().LANGSMITH_API_KEY
+            api_url=get_settings().LANGSMITH_ENDPOINT,
+            api_key=get_settings().LANGSMITH_API_KEY,
         )
 
         # Create tracer for callbacks
@@ -62,13 +62,13 @@ class LangSmithService:
         self.tracer = langchain_tracer
         self.project_name = get_settings().LANGSMITH_PROJECT
 
-    def get_callback_manager(self) -> Optional[CallbackManager]:
+    def get_callback_manager(self) -> CallbackManager | None:
         """Get callback manager with LangSmith tracer."""
         if self.tracer:
             return CallbackManager([self.tracer])
         return None
 
-    def get_callbacks(self) -> List:
+    def get_callbacks(self) -> list:
         """Get list of callbacks for LangChain."""
         if self.tracer:
             return [self.tracer]
@@ -77,12 +77,12 @@ class LangSmithService:
     async def log_run(
         self,
         run_type: str,
-        inputs: Dict[str, Any],
-        outputs: Dict[str, Any],
-        metadata: Optional[Dict[str, Any]] = None,
-        error: Optional[str] = None,
-        run_id: Optional[str] = None,
-    ) -> Optional[str]:
+        inputs: dict[str, Any],
+        outputs: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+        error: str | None = None,
+        run_id: str | None = None,
+    ) -> str | None:
         """Log a run to LangSmith."""
         try:
             if not self.client:
@@ -110,15 +110,15 @@ class LangSmithService:
             return run_id
 
         except Exception as e:
-            logger.error("Failed to log run to LangSmith", {error:str(e)})
+            logger.error("Failed to log run to LangSmith", {error: str(e)})
             return None
 
     async def log_feedback(
         self,
         run_id: str,
         score: float,
-        value: Optional[str] = None,
-        comment: Optional[str] = None,
+        value: str | None = None,
+        comment: str | None = None,
         feedback_type: str = "user",
     ) -> bool:
         """Log feedback for a run."""
@@ -138,12 +138,12 @@ class LangSmithService:
             return True
 
         except Exception as e:
-            logger.error("Failed to log feedback", {error:str(e)})
+            logger.error("Failed to log feedback", {error: str(e)})
             return False
 
     async def evaluate_dataset(
-        self, dataset_name: str, llm_chain, evaluators: Optional[List] = None
-    ) -> Optional[Dict[str, Any]]:
+        self, dataset_name: str, llm_chain, evaluators: list | None = None
+    ) -> dict[str, Any] | None:
         """Evaluate a chain against a dataset."""
         try:
             if not self.client:
@@ -162,11 +162,11 @@ class LangSmithService:
             return results
 
         except Exception as e:
-            logger.error("Failed to evaluate dataset", {error:str(e)})
+            logger.error("Failed to evaluate dataset", {error: str(e)})
             return None
 
     async def create_dataset(
-        self, name: str, description: str, examples: List[Dict[str, Any]]
+        self, name: str, description: str, examples: list[dict[str, Any]]
     ) -> bool:
         """Create a new dataset for evaluation."""
         try:
@@ -190,18 +190,16 @@ class LangSmithService:
             return True
 
         except Exception as e:
-            logger.error("Failed to create dataset",{ error:str(e)})
+            logger.error("Failed to create dataset", {error: str(e)})
             return False
 
     def get_run_url(self, run_id: str) -> str:
         """Get URL for viewing a run in LangSmith UI."""
-        return (
-            f"{get_settings().LANGSMITH_ENDPOINT}/projects/{self.project_name}/runs/{run_id}"
-        )
+        return f"{get_settings().LANGSMITH_ENDPOINT}/projects/{self.project_name}/runs/{run_id}"
 
     async def get_run_metrics(
-        self, run_id: Optional[str] = None, limit: int = 10
-    ) -> List[Dict[str, Any]]:
+        self, run_id: str | None = None, limit: int = 10
+    ) -> list[dict[str, Any]]:
         """Get metrics for recent runs."""
         try:
             if not self.client:
@@ -233,7 +231,7 @@ class LangSmithService:
             return metrics
 
         except Exception as e:
-            logger.error("Failed to get run metrics", {error:str(e)})
+            logger.error("Failed to get run metrics", {error: str(e)})
             return []
 
 

@@ -1,18 +1,12 @@
 """Pinecone vector store service."""
 
-import os
-from typing import List, Dict, Any, Optional, Tuple
-from uuid import uuid4
-
 from pinecone import Pinecone, ServerlessSpec
-from langchain_community.vectorstores import Pinecone as LangchainPinecone
-from langchain.schema import Document
-from app.utils.logger import logger
-from app.core.settings import Settings, get_settings
 
+from app.core.settings import get_settings
+from app.utils.logger import logger
 
 # Global Pinecone client and index
-pinecone_client: Optional[Pinecone] = None
+pinecone_client: Pinecone | None = None
 pinecone_index = None
 
 
@@ -30,13 +24,16 @@ def initialize_pinecone() -> None:
         existing_indexes = pinecone_client.list_indexes().names()
 
         if get_settings().PINECONE_INDEX_NAME not in existing_indexes:
-            logger.info(f"Creating Pinecone index: {get_settings().PINECONE_INDEX_NAME}")
+            logger.info(
+                f"Creating Pinecone index: {get_settings().PINECONE_INDEX_NAME}"
+            )
             pinecone_client.create_index(
                 name=get_settings().PINECONE_INDEX_NAME,
                 dimension=get_settings().PINECONE_DIMENSION,
                 metric=get_settings().PINECONE_METRIC,
                 spec=ServerlessSpec(
-                    cloud="aws", region="us-east-1"  # Change based on your preference
+                    cloud="aws",
+                    region="us-east-1",  # Change based on your preference
                 ),
             )
 
@@ -59,6 +56,7 @@ class VectorStoreService:
 
     def __init__(self):
         """Initialize vector store service."""
+
 
 # Create global instance
 vector_store_service = VectorStoreService()

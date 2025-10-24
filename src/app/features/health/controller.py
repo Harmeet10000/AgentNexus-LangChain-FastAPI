@@ -1,20 +1,22 @@
-from typing import Any, Dict
+from typing import Any
+
 from fastapi import Request
+
+from app.connections import mongodb as mongo_db
+from app.core.cache import get_redis_client
 from app.utils.httpResponse import http_response
 from app.utils.quicker import (
+    check_database,
+    check_disk,
+    check_memory,
+    check_redis,
     get_application_health,
     get_system_health,
-    check_memory,
-    check_disk,
-    check_database,
-    check_redis,
 )
-from app.core.cache import get_redis_client
-from app.connections import mongodb as mongo_db
 
 
 async def self_info(request: Request) -> Any:
-    server_info: Dict[str, Any] = {
+    server_info: dict[str, Any] = {
         "server": request.app.title or "unknown",
         "container": request.client.host if request.client else "unknown",
         "timestamp": request.scope.get("time", None) or None,

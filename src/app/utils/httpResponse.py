@@ -1,17 +1,20 @@
 """Standardized HTTP response utility."""
-from typing import Any, Optional
+
+import os
+from typing import Any
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from loguru import logger
+
 from app.shared.enums import Environment
-import os
 
 
 def http_response(
     message: str,
     data: Any = None,
     status_code: int = 200,
-    request: Optional[Request] = None,
+    request: Request | None = None,
 ) -> JSONResponse:
     """
     Create standardized HTTP success response.

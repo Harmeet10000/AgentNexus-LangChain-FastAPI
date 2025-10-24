@@ -1,10 +1,10 @@
 # src/settings.py
 
 from functools import lru_cache
-from typing import List, Optional
+
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from dotenv import load_dotenv
 
 # Load environment variables from .env.development
 load_dotenv(".env.development")
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = Field(default="development")
     DEBUG: bool = Field(default=False)
     API_PREFIX: str = Field(default="/api/v1")
-    CORS_ORIGINS: List[str] = Field(default_factory=lambda: ["*"])
+    CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
 
     # --- Server Configuration ---
     HOST: str = Field(default="0.0.0.0")
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     REDIS_HOST: str = Field(default="localhost")
     REDIS_PORT: int = Field(default=6379)
     REDIS_USERNAME: str = Field(default="default")
-    REDIS_PASSWORD: Optional[str] = Field(default=None)
+    REDIS_PASSWORD: str | None = Field(default=None)
 
     # Note: REDIS_DB and CACHE_TTL were not in your ENV, so they remain as defaults
     REDIS_DB: int = Field(default=0)
@@ -99,7 +99,7 @@ class Settings(BaseSettings):
 
     # --- File Upload ---
     MAX_UPLOAD_SIZE: int = Field(default=10485760)  # 10MB
-    ALLOWED_EXTENSIONS: List[str] = Field(
+    ALLOWED_EXTENSIONS: list[str] = Field(
         default_factory=lambda: ["pdf", "txt", "docx", "xlsx", "pptx", "md", "html"]
     )
 
@@ -110,7 +110,7 @@ class Settings(BaseSettings):
     OTEL_METRICS_EXPORTER: str = Field(default="otlp")
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Returns a cached instance of the application settings."""
     # Instantiating the class here ensures it's only done once (due to @lru_cache)

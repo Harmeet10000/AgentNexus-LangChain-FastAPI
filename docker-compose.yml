@@ -20,31 +20,31 @@ services:
       - langchain-network
     restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
-    container_name: langchain-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    command: redis-server --appendonly yes
-    networks:
-      - langchain-network
-    restart: unless-stopped
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: langchain-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis-data:/data
+  #   command: redis-server --appendonly yes
+  #   networks:
+  #     - langchain-network
+  #   restart: unless-stopped
 
-  mongodb:
-    image: mongo:7.0
-    container_name: langchain-mongodb
-    ports:
-      - "27017:27017"
-    environment:
-      - MONGO_INITDB_DATABASE=langchain_db
-    volumes:
-      - mongodb-data:/data/db
-      - mongodb-config:/data/configdb
-    networks:
-      - langchain-network
-    restart: unless-stopped
+  # mongodb:
+  #   image: mongo:7.0
+  #   container_name: langchain-mongodb
+  #   ports:
+  #     - "27017:27017"
+  #   environment:
+  #     - MONGO_INITDB_DATABASE=langchain_db
+  #   volumes:
+  #     - mongodb-data:/data/db
+  #     - mongodb-config:/data/configdb
+  #   networks:
+  #     - langchain-network
+  #   restart: unless-stopped
 
 networks:
   langchain-network:

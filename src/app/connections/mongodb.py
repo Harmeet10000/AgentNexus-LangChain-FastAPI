@@ -1,18 +1,16 @@
 """MongoDB connection and database management."""
 
-import os
-from typing import Any, Optional
+from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 
-from app.core.settings import Settings, get_settings
+from app.core.settings import get_settings
 from app.utils.logger import logger
 
-
 # Global MongoDB client and database instances
-mongodb_client: Optional[AsyncIOMotorClient] = None
-mongodb: Optional[AsyncIOMotorDatabase] = None
+mongodb_client: AsyncIOMotorClient | None = None
+mongodb: AsyncIOMotorDatabase | None = None
 
 
 async def connect_to_mongodb() -> bool:
@@ -52,8 +50,8 @@ async def connect_to_mongodb() -> bool:
             meta={
                 "readyState": 1,  # 1 = connected in MongoDB
                 "poolSize": mongo_options["maxPoolSize"],
-                "version": server_info.get("version", "unknown")
-            }
+                "version": server_info.get("version", "unknown"),
+            },
         )
 
         logger.info("MongoDB client connected and ready")

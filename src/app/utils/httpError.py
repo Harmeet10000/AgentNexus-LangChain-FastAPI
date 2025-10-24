@@ -1,16 +1,18 @@
 """Standardized HTTP error response utility."""
-from typing import Optional, Any
-from fastapi import Request, HTTPException
-from loguru import logger
-from app.shared.enums import SOMETHING_WENT_WRONG, Environment
+
 import os
+
+from fastapi import HTTPException, Request
+from loguru import logger
+
+from app.shared.enums import SOMETHING_WENT_WRONG, Environment
 
 
 def http_error(
     message: str = SOMETHING_WENT_WRONG,
     status_code: int = 500,
-    request: Optional[Request] = None,
-    exc: Optional[Exception] = None,
+    request: Request | None = None,
+    exc: Exception | None = None,
 ) -> HTTPException:
     """
     Create standardized HTTP error response.
@@ -33,7 +35,9 @@ def http_error(
             "ip": request.client.host if request and request.client else None,
             "method": request.method if request else None,
             "url": str(request.url) if request else None,
-            "correlationId": getattr(request.state, "correlation_id", None) if request else None,
+            "correlationId": getattr(request.state, "correlation_id", None)
+            if request
+            else None,
         },
         "message": message,
         "data": None,
@@ -41,10 +45,7 @@ def http_error(
     }
 
     # Log error
-    logger.error(
-        "CONTROLLER_ERROR",
-        extra={"meta": error_obj}
-    )
+    logger.error("CONTROLLER_ERROR", extra={"meta": error_obj})
 
     # Remove sensitive data in production
     if os.getenv("ENVIRONMENT") == Environment.PRODUCTION:

@@ -1,9 +1,11 @@
 """Application enums and constants."""
+
 from enum import Enum
 
 
 class Environment(str, Enum):
     """Application environment."""
+
     DEVELOPMENT = "development"
     PRODUCTION = "production"
     TESTING = "testing"

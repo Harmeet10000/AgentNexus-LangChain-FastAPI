@@ -1,16 +1,16 @@
 """Redis cache client and operations."""
 
 import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import redis.asyncio as redis
 from tenacity import retry, stop_after_attempt, wait_exponential
-from app.core.settings import Settings, get_settings
+
+from app.core.settings import get_settings
 from app.utils.logger import logger
 
-
 # Global Redis client instance
-redis_client: Optional[redis.Redis] = None
+redis_client: redis.Redis | None = None
 
 
 async def connect_to_redis() -> None:
@@ -19,7 +19,8 @@ async def connect_to_redis() -> None:
 
     try:
         logger.info(
-            "Connecting to Redis", { host: get_settings().REDIS_HOST, port: get_settings().REDIS_PORT }
+            "Connecting to Redis",
+            {host: get_settings().REDIS_HOST, port: get_settings().REDIS_PORT},
         )
 
         redis_client = await redis.from_url(
@@ -35,7 +36,7 @@ async def connect_to_redis() -> None:
         logger.info("Successfully connected to Redis")
 
     except Exception as e:
-        logger.error("Failed to connect to Redis", { error: str(e) })
+        logger.error("Failed to connect to Redis", {error: str(e)})
         raise
 
 
@@ -70,7 +71,7 @@ class CacheManager:
     @retry(
         stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10)
     )
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """Get value from cache."""
         client = get_redis_client()
         full_key = self._make_key(key)
@@ -83,13 +84,13 @@ class CacheManager:
         except json.JSONDecodeError:
             return value
         except Exception as e:
-            logger.error("Cache get error", { key: full_key, error: str(e) })
+            logger.error("Cache get error", {key: full_key, error: str(e)})
             return None
 
     @retry(
         stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10)
     )
-    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
         """Set value in cache."""
         client = get_redis_client()
         full_key = self._make_key(key)
@@ -100,7 +101,7 @@ class CacheManager:
             await client.setex(full_key, ttl, serialized)
             return True
         except Exception as e:
-            logger.error("Cache set error", { key: full_key, error: str(e) })
+            logger.error("Cache set error", {key: full_key, error: str(e)})
             return False
 
     async def delete(self, key: str) -> bool:
@@ -112,7 +113,7 @@ class CacheManager:
             result = await client.delete(full_key)
             return bool(result)
         except Exception as e:
-            logger.error("Cache delete error", { key: full_key, error: str(e) })
+            logger.error("Cache delete error", {key: full_key, error: str(e)})
             return False
 
     async def delete_pattern(self, pattern: str) -> int:
@@ -142,10 +143,10 @@ class CacheManager:
         try:
             return bool(await client.exists(full_key))
         except Exception as e:
-            logger.error("Cache exists error", { key: full_key, error: str(e) })
+            logger.error("Cache exists error", {key: full_key, error: str(e)})
             return False
 
-    async def get_many(self, keys: List[str]) -> Dict[str, Any]:
+    async def get_many(self, keys: list[str]) -> dict[str, Any]:
         """Get multiple values from cache."""
         client = get_redis_client()
         full_keys = [self._make_key(k) for k in keys]
@@ -153,7 +154,7 @@ class CacheManager:
         try:
             values = await client.mget(full_keys)
             result = {}
-            for key, value in zip(keys, values):
+            for key, value in zip(keys, values, strict=False):
                 if value:
                     try:
                         result[key] = json.loads(value)
@@ -161,12 +162,10 @@ class CacheManager:
                         result[key] = value
             return result
         except Exception as e:
-            logger.error("Cache get many error", { error: str(e) })
+            logger.error("Cache get many error", {error: str(e)})
             return {}
 
-    async def set_many(
-        self, mapping: Dict[str, Any], ttl: Optional[int] = None
-    ) -> bool:
+    async def set_many(self, mapping: dict[str, Any], ttl: int | None = None) -> bool:
         """Set multiple values in cache."""
         client = get_redis_client()
         ttl = ttl or get_settings().CACHE_TTL
@@ -180,10 +179,10 @@ class CacheManager:
             await pipe.execute()
             return True
         except Exception as e:
-            logger.error("Cache set many error", { error: str(e) })
+            logger.error("Cache set many error", {error: str(e)})
             return False
 
-    async def increment(self, key: str, amount: int = 1) -> Optional[int]:
+    async def increment(self, key: str, amount: int = 1) -> int | None:
         """Increment a counter in cache."""
         client = get_redis_client()
         full_key = self._make_key(key)
@@ -191,10 +190,10 @@ class CacheManager:
         try:
             return await client.incr(full_key, amount)
         except Exception as e:
-            logger.error("Cache increment error", { key: full_key, error: str(e) })
+            logger.error("Cache increment error", {key: full_key, error: str(e)})
             return None
 
-    async def get_ttl(self, key: str) -> Optional[int]:
+    async def get_ttl(self, key: str) -> int | None:
         """Get TTL for a key."""
         client = get_redis_client()
         full_key = self._make_key(key)
@@ -203,7 +202,7 @@ class CacheManager:
             ttl = await client.ttl(full_key)
             return ttl if ttl > 0 else None
         except Exception as e:
-            logger.error("Cache get TTL error", { key: full_key, error: str(e) })
+            logger.error("Cache get TTL error", {key: full_key, error: str(e)})
             return None
 
 

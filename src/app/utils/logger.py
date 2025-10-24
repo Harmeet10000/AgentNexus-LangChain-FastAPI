@@ -1,10 +1,12 @@
 """Production-grade Loguru logging configuration."""
+
 import sys
-import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
+
 from loguru import logger as loguru_logger
 from pydantic_settings import BaseSettings
+
 from app.shared.enums import Environment
 
 
@@ -24,7 +26,7 @@ class LogConfig(BaseSettings):
         env_file = ".env"
 
 
-def serialize_record(record: Dict[str, Any]) -> str:
+def serialize_record(record: dict[str, Any]) -> str:
     """Custom JSON serialization for file logs."""
     import json
 
@@ -37,7 +39,7 @@ def serialize_record(record: Dict[str, Any]) -> str:
                     log_meta[key] = {
                         "name": value.__class__.__name__,
                         "message": str(value),
-                        "trace": getattr(value, "__traceback__", "")
+                        "trace": getattr(value, "__traceback__", ""),
                     }
                 else:
                     log_meta[key] = value
@@ -46,13 +48,13 @@ def serialize_record(record: Dict[str, Any]) -> str:
         "level": record["level"].name,
         "message": record["message"],
         "timestamp": record["time"].isoformat(),
-        "meta": log_meta
+        "meta": log_meta,
     }
 
     return json.dumps(log_data, indent=4)
 
 
-def console_format(record: Dict[str, Any]) -> str:
+def console_format(record: dict[str, Any]) -> str:
     """Custom console format with colors."""
     level = record["level"].name
     time = record["time"].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
@@ -64,7 +66,7 @@ def console_format(record: Dict[str, Any]) -> str:
         "INFO": "<blue>",
         "WARNING": "<yellow>",
         "ERROR": "<red>",
-        "CRITICAL": "<red><bold>"
+        "CRITICAL": "<red><bold>",
     }
 
     color = level_colors.get(level, "")
@@ -74,7 +76,7 @@ def console_format(record: Dict[str, Any]) -> str:
     return f"{color}{level}</>  [<green>{time}</green>] {message}{meta_str}\n"
 
 
-def setup_logging(config: Optional[LogConfig] = None) -> None:
+def setup_logging(config: LogConfig | None = None) -> None:
     """Configure Loguru with Winston-like features."""
     if config is None:
         config = LogConfig()
@@ -125,19 +127,19 @@ class Logger:
     """Custom logger wrapper."""
 
     @staticmethod
-    def info(message: str, meta: Optional[Dict[str, Any]] = None) -> None:
+    def info(message: str, meta: dict[str, Any] | None = None) -> None:
         loguru_logger.bind(meta=meta or {}).info(message)
 
     @staticmethod
-    def error(message: str, meta: Optional[Dict[str, Any]] = None) -> None:
+    def error(message: str, meta: dict[str, Any] | None = None) -> None:
         loguru_logger.bind(meta=meta or {}).error(message)
 
     @staticmethod
-    def warn(message: str, meta: Optional[Dict[str, Any]] = None) -> None:
+    def warn(message: str, meta: dict[str, Any] | None = None) -> None:
         loguru_logger.bind(meta=meta or {}).warning(message)
 
     @staticmethod
-    def debug(message: str, meta: Optional[Dict[str, Any]] = None) -> None:
+    def debug(message: str, meta: dict[str, Any] | None = None) -> None:
         loguru_logger.bind(meta=meta or {}).debug(message)
 
 

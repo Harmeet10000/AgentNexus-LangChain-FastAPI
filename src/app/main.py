@@ -1,38 +1,34 @@
 """Main FastAPI application module."""
+
 from dotenv import load_dotenv
 
 # Load the specific environment file
 load_dotenv(".env.development")
+import sys
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Dict, AsyncIterator
+from typing import Any
 
+import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-from app.utils.httpResponse import http_response
-import inspect
 
-from app.core.cache import connect_to_redis
-from app.core.settings import Settings, get_settings
-from app.core.exceptions import register_exception_handlers
 from app.connections.mongodb import connect_to_mongodb
-from app.connections.postgres import init_db
+from app.core.exceptions import register_exception_handlers
+from app.core.settings import get_settings
+from app.features.health.router import router as health_router
 from app.middleware.server_middleware import (
     CorrelationMiddleware,
     MetricsMiddleware,
     SecurityHeadersMiddleware,
     TimeoutMiddleware,
-    init_rate_limiter,
-    rate_limiter,
     get_metrics,
 )
+from app.utils.httpResponse import http_response
 from app.utils.logger import logger, setup_logging
-from app.features.health.router import router as health_router
-import uvicorn
-import sys
-from app.middleware.server_middleware import MetricsMiddleware, get_metrics
 
 
 @asynccontextmanager
@@ -58,7 +54,7 @@ def create_app() -> FastAPI:
         title="LangChain FastAPI Production",
         version="1.0.0",
         lifespan=lifespan,
-        docs_url=None if get_settings().ENVIRONMENT else  "/api-docs",
+        docs_url=None if get_settings().ENVIRONMENT else "/api-docs",
         redoc_url=None if get_settings().ENVIRONMENT else "/api-redoc",
         openapi_url=None if get_settings().ENVIRONMENT else "/swagger.json",
     )
@@ -95,7 +91,7 @@ def create_app() -> FastAPI:
 
     # Root endpoint
     @app.get("/")
-    async def root() -> Dict[str, str]:
+    async def root() -> dict[str, str]:
         return {"message": "Welcome to LangChain FastAPI Production 🚀"}
 
     @app.get("/metrics")
@@ -150,16 +146,12 @@ def setup_signal_handlers() -> None:
 
 
 if __name__ == "__main__":
-
-
     # Setup signal handlers
     setup_signal_handlers()
 
     # Handle unhandled exceptions
     def handle_exception(
-        exc_type: type[BaseException],
-        exc_value: BaseException,
-        exc_traceback: Any
+        exc_type: type[BaseException], exc_value: BaseException, exc_traceback: Any
     ) -> None:
         if issubclass(exc_type, KeyboardInterrupt):
             sys.__excepthook__(exc_type, exc_value, exc_traceback)
@@ -173,5 +165,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=5000,
         reload=True,
-        log_config=None  # Use loguru instead
+        log_config=None,  # Use loguru instead
     )

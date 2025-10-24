@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request
-from .controller import self_info, health_check
+
+from .controller import health_check, self_info
 
 router = APIRouter(prefix="/api/v1/health", tags=["health"])
 

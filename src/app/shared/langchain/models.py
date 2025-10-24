@@ -1,13 +1,11 @@
 """LangChain model initialization and management."""
 
 from functools import lru_cache
-from typing import Optional
 
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_core.callbacks import AsyncCallbackHandler
 
-from src.app.core.s import s, get_s
 from app.utils.logger import logger
+from src.app.core.s import get_s
 
 
 class LangChainModels:
@@ -15,9 +13,9 @@ class LangChainModels:
 
     def __init__(self) -> None:
         """Initialize LangChain models."""
-        self._chat_model: Optional[ChatGoogleGenerativeAI] = None
-        self._embedding_model: Optional[GoogleGenerativeAIEmbeddings] = None
-        self._vision_model: Optional[ChatGoogleGenerativeAI] = None
+        self._chat_model: ChatGoogleGenerativeAI | None = None
+        self._embedding_model: GoogleGenerativeAIEmbeddings | None = None
+        self._vision_model: ChatGoogleGenerativeAI | None = None
 
     @property
     def chat_model(self) -> ChatGoogleGenerativeAI:
@@ -59,7 +57,7 @@ class LangChainModels:
         return self._vision_model
 
 
-@lru_cache()
+@lru_cache
 def get_langchain_models() -> LangChainModels:
     """Get cached LangChain models instance."""
     return LangChainModels()
