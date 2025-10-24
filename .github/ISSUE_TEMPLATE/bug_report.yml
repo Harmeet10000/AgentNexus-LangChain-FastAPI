@@ -19,11 +19,19 @@ body:
 
   - type: input
     attributes:
-      label: Node.js Version
-      description: What version of Node.js are you running?
-      placeholder: v22.14.0
+      label: Python Version
+      description: What version of Python are you running?
+      placeholder: "3.12.0"
     validations:
       required: true
+
+  - type: input
+    attributes:
+      label: FastAPI Version
+      description: What version of FastAPI are you using?
+      placeholder: "0.115.0"
+    validations:
+      required: false
 
   - type: dropdown
     attributes:
