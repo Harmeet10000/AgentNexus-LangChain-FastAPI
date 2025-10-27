@@ -94,7 +94,6 @@ poetry.lock
 .pdm-python
 
 # uv
-uv.lock
 .uv/
 
 # PEP 582

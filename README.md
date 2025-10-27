@@ -96,7 +96,7 @@ uv pip install -e .
 # For dev dependencies too
 uv pip install -e ".[dev]"
 
-# Run the application 
+# Run the application
 uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 5000
 ```
 
@@ -473,10 +473,10 @@ await agent.cleanup()
 
 ### MCP Benefits
 
-✅ **Dynamic Tool Discovery** - Automatically discover and use tools from multiple servers  
-✅ **Mixed Transports** - Support both local (stdio) and remote (HTTP) servers  
-✅ **Scalability** - Easily add new tool servers without modifying agent code  
-✅ **Isolation** - Each server runs independently with its own dependencies  
+✅ **Dynamic Tool Discovery** - Automatically discover and use tools from multiple servers
+✅ **Mixed Transports** - Support both local (stdio) and remote (HTTP) servers
+✅ **Scalability** - Easily add new tool servers without modifying agent code
+✅ **Isolation** - Each server runs independently with its own dependencies
 ✅ **Reusability** - Share MCP servers across multiple agents and applications
 
 **📘 For detailed examples, server implementations, and integration patterns, see: [MCP_INTEGRATION_GUIDE.md](./MCP_INTEGRATION_GUIDE.md)**

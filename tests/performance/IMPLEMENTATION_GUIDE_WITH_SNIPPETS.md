@@ -66,12 +66,12 @@ class BaseToolInput(BaseModel):
 
 class CustomBaseTool(BaseTool):
     """Base class for custom tools with enhanced features."""
-    
+
     name: str
     description: str
     args_schema: Type[BaseModel] = BaseToolInput
     return_direct: bool = False
-    
+
     def _run(
         self,
         query: str,
@@ -79,7 +79,7 @@ class CustomBaseTool(BaseTool):
     ) -> str:
         """Synchronous execution."""
         raise NotImplementedError("Must implement _run method")
-    
+
     async def _arun(
         self,
         query: str,
@@ -105,7 +105,7 @@ class WebSearchInput(BaseModel):
 
 class WebSearchTool(BaseTool):
     """Web search tool using DuckDuckGo or Tavily."""
-    
+
     name: str = "web_search"
     description: str = """
     Useful for searching the web for current information.
@@ -113,7 +113,7 @@ class WebSearchTool(BaseTool):
     Input should be a search query string.
     """
     args_schema: type[BaseModel] = WebSearchInput
-    
+
     async def _arun(
         self,
         query: str,
@@ -124,7 +124,7 @@ class WebSearchTool(BaseTool):
         try:
             # Example using DuckDuckGo
             from duckduckgo_search import AsyncDDGS
-            
+
             async with AsyncDDGS() as ddgs:
                 results = []
                 async for result in ddgs.text(query, max_results=num_results):
@@ -133,28 +133,28 @@ class WebSearchTool(BaseTool):
                         "snippet": result.get("body", ""),
                         "url": result.get("href", "")
                     })
-                
+
                 return self._format_results(results)
-                
+
         except Exception as e:
             return f"Search error: {str(e)}"
-    
+
     def _run(self, query: str, num_results: int = 5) -> str:
         """Sync wrapper - not recommended for production."""
         import asyncio
         return asyncio.run(self._arun(query, num_results))
-    
+
     def _format_results(self, results: list) -> str:
         """Format search results."""
         if not results:
             return "No results found."
-        
+
         formatted = "Search Results:\n\n"
         for i, result in enumerate(results, 1):
             formatted += f"{i}. {result['title']}\n"
             formatted += f"   {result['snippet']}\n"
             formatted += f"   URL: {result['url']}\n\n"
-        
+
         return formatted
 ```
 
@@ -172,7 +172,7 @@ class CalculatorInput(BaseModel):
 
 class CalculatorTool(BaseTool):
     """Calculator for mathematical operations."""
-    
+
     name: str = "calculator"
     description: str = """
     Useful for mathematical calculations and numeric operations.
@@ -180,7 +180,7 @@ class CalculatorTool(BaseTool):
     Examples: "2 + 2", "sqrt(16)", "log(100)"
     """
     args_schema: type[BaseModel] = CalculatorInput
-    
+
     def _run(self, expression: str) -> str:
         """Calculate mathematical expression."""
         try:
@@ -189,7 +189,7 @@ class CalculatorTool(BaseTool):
             return f"Result: {result}"
         except Exception as e:
             return f"Calculation error: {str(e)}"
-    
+
     async def _arun(self, expression: str) -> str:
         """Async version."""
         return self._run(expression)
@@ -206,28 +206,28 @@ from src.tools.computation.calculator import CalculatorTool
 
 class ToolRegistry:
     """Central registry for all tools."""
-    
+
     def __init__(self):
         self._tools: Dict[str, BaseTool] = {}
         self._register_default_tools()
-    
+
     def _register_default_tools(self):
         """Register default tools."""
         self.register(WebSearchTool())
         self.register(CalculatorTool())
-    
+
     def register(self, tool: BaseTool):
         """Register a new tool."""
         self._tools[tool.name] = tool
-    
+
     def get(self, name: str) -> BaseTool:
         """Get tool by name."""
         return self._tools.get(name)
-    
+
     def get_all(self) -> List[BaseTool]:
         """Get all registered tools."""
         return list(self._tools.values())
-    
+
     def get_by_category(self, category: str) -> List[BaseTool]:
         """Get tools by category."""
         return [t for t in self._tools.values() if category in t.name]
@@ -280,7 +280,7 @@ Final Answer: [Your final response]
 
 class ReActAgent:
     """ReAct (Reasoning + Acting) agent implementation."""
-    
+
     def __init__(self, model_name: str = "gemini-pro", temperature: float = 0.7):
         self.llm = ChatGoogleGenerativeAI(
             model=model_name,
@@ -288,7 +288,7 @@ class ReActAgent:
         )
         self.tools = tool_registry.get_all()
         self.graph = self._create_graph()
-    
+
     def _create_graph(self):
         """Create ReAct agent graph."""
         # Create prompt with tools
@@ -298,41 +298,41 @@ class ReActAgent:
             )),
             MessagesPlaceholder(variable_name="messages"),
         ])
-        
+
         # Bind tools to LLM
         llm_with_tools = self.llm.bind_tools(self.tools)
-        
+
         # Define agent node
         def agent_node(state: AgentState):
             """Agent reasoning node."""
             messages = state["messages"]
             response = llm_with_tools.invoke(messages)
             return {"messages": [response]}
-        
+
         # Create tool node
         tool_node = ToolNode(self.tools)
-        
+
         # Define routing logic
         def should_continue(state: AgentState):
             """Determine if we should continue or end."""
             messages = state["messages"]
             last_message = messages[-1]
-            
+
             # If no tool calls, we're done
             if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
                 return "end"
             return "continue"
-        
+
         # Build graph
         workflow = StateGraph(AgentState)
-        
+
         # Add nodes
         workflow.add_node("agent", agent_node)
         workflow.add_node("tools", tool_node)
-        
+
         # Set entry point
         workflow.set_entry_point("agent")
-        
+
         # Add conditional edges
         workflow.add_conditional_edges(
             "agent",
@@ -342,18 +342,18 @@ class ReActAgent:
                 "end": END,
             }
         )
-        
+
         # Tool node always goes back to agent
         workflow.add_edge("tools", "agent")
-        
+
         return workflow.compile()
-    
+
     async def run(self, query: str) -> str:
         """Execute agent with query."""
         initial_state = {
             "messages": [HumanMessage(content=query)]
         }
-        
+
         result = await self.graph.ainvoke(initial_state)
         return result["messages"][-1].content
 ```
@@ -387,7 +387,7 @@ async def execute_agent(request: AgentRequest):
     try:
         if request.agent_type == "react":
             response = await react_agent.run(request.query)
-            
+
             return AgentResponse(
                 response=response,
                 agent_type="react",
@@ -395,7 +395,7 @@ async def execute_agent(request: AgentRequest):
             )
         else:
             raise HTTPException(400, f"Unknown agent type: {request.agent_type}")
-            
+
     except Exception as e:
         raise HTTPException(500, str(e))
 ```
@@ -447,15 +447,15 @@ Generate an improved response:"""
 
 class ReflectionAgent:
     """Reflection agent that improves responses through self-critique."""
-    
+
     def __init__(self, model_name: str = "gemini-pro", max_iterations: int = 2):
         self.llm = ChatGoogleGenerativeAI(model=model_name, temperature=0.7)
         self.max_iterations = max_iterations
         self.graph = self._create_graph()
-    
+
     def _create_graph(self):
         """Create reflection workflow graph."""
-        
+
         def generate_draft(state: ReflectionState):
             """Generate initial draft response."""
             response = self.llm.invoke([
@@ -463,7 +463,7 @@ class ReflectionAgent:
                 HumanMessage(content=state["query"])
             ])
             return {"draft": response.content, "iteration": 1}
-        
+
         def critique_draft(state: ReflectionState):
             """Critique the draft response."""
             critique_response = self.llm.invoke([
@@ -471,7 +471,7 @@ class ReflectionAgent:
                 HumanMessage(content=CRITIQUE_PROMPT.format(draft=state["draft"]))
             ])
             return {"critique": critique_response.content}
-        
+
         def improve_response(state: ReflectionState):
             """Improve based on critique."""
             improved = self.llm.invoke([
@@ -486,45 +486,45 @@ class ReflectionAgent:
                 "draft": improved.content,
                 "iteration": state["iteration"] + 1
             }
-        
+
         def should_continue(state: ReflectionState):
             """Check if should continue refining."""
             if state["iteration"] >= state["max_iterations"]:
                 return "finalize"
             return "critique"
-        
+
         def finalize(state: ReflectionState):
             """Finalize the response."""
             return {"final_response": state["draft"]}
-        
+
         # Build graph
         workflow = StateGraph(ReflectionState)
-        
+
         workflow.add_node("generate", generate_draft)
         workflow.add_node("critique", critique_draft)
         workflow.add_node("improve", improve_response)
         workflow.add_node("finalize", finalize)
-        
+
         workflow.set_entry_point("generate")
-        
+
         workflow.add_conditional_edges(
             "generate",
             should_continue,
             {"critique": "critique", "finalize": "finalize"}
         )
-        
+
         workflow.add_edge("critique", "improve")
-        
+
         workflow.add_conditional_edges(
             "improve",
             should_continue,
             {"critique": "critique", "finalize": "finalize"}
         )
-        
+
         workflow.add_edge("finalize", END)
-        
+
         return workflow.compile()
-    
+
     async def run(self, query: str) -> dict:
         """Execute reflection agent."""
         initial_state = {
@@ -535,7 +535,7 @@ class ReflectionAgent:
             "iteration": 0,
             "max_iterations": self.max_iterations
         }
-        
+
         result = await self.graph.ainvoke(initial_state)
         return {
             "response": result["final_response"],
@@ -574,47 +574,47 @@ class Article(BaseModel):
 
 class StructuredOutputChain:
     """Chain for generating structured outputs."""
-    
+
     def __init__(self):
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-pro",
             temperature=0
         )
-    
+
     async def extract_person_info(self, text: str) -> Person:
         """Extract person information from text."""
         parser = PydanticOutputParser(pydantic_object=Person)
-        
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", "Extract person information from the text."),
             ("human", "{text}\n\n{format_instructions}")
         ])
-        
+
         chain = prompt | self.llm | parser
-        
+
         result = await chain.ainvoke({
             "text": text,
             "format_instructions": parser.get_format_instructions()
         })
-        
+
         return result
-    
+
     async def analyze_article(self, text: str) -> Article:
         """Analyze article and return structured output."""
         parser = PydanticOutputParser(pydantic_object=Article)
-        
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", "Analyze the article and extract key information."),
             ("human", "{text}\n\n{format_instructions}")
         ])
-        
+
         chain = prompt | self.llm | parser
-        
+
         result = await chain.ainvoke({
             "text": text,
             "format_instructions": parser.get_format_instructions()
         })
-        
+
         return result
 ```
 
@@ -634,12 +634,12 @@ def search_database(
 ) -> str:
     """
     Search the database with query and filters.
-    
+
     Args:
         query: Search query string
         limit: Maximum number of results
         filters: Optional filters as dict
-    
+
     Returns:
         Search results as formatted string
     """
@@ -654,12 +654,12 @@ def send_email(
 ) -> str:
     """
     Send an email.
-    
+
     Args:
         to: Recipient email address
         subject: Email subject
         body: Email body content
-    
+
     Returns:
         Confirmation message
     """
@@ -667,16 +667,16 @@ def send_email(
 
 class FunctionCallingAgent:
     """Agent with function calling capabilities."""
-    
+
     def __init__(self):
         self.llm = ChatGoogleGenerativeAI(model="gemini-pro")
         self.tools = [search_database, send_email]
         self.llm_with_tools = self.llm.bind_tools(self.tools)
-    
+
     async def execute(self, query: str) -> str:
         """Execute query with function calling."""
         response = await self.llm_with_tools.ainvoke(query)
-        
+
         # Check if function was called
         if hasattr(response, 'tool_calls') and response.tool_calls:
             # Execute the function calls
@@ -684,14 +684,14 @@ class FunctionCallingAgent:
             for tool_call in response.tool_calls:
                 tool_name = tool_call["name"]
                 tool_args = tool_call["args"]
-                
+
                 # Find and execute tool
                 tool = next(t for t in self.tools if t.name == tool_name)
                 result = await tool.ainvoke(tool_args)
                 results.append(result)
-            
+
             return "\n".join(results)
-        
+
         return response.content
 ```
 
@@ -718,68 +718,68 @@ class MultiAgentState(TypedDict):
 
 class MultiAgentWorkflow:
     """Workflow with multiple specialized agents."""
-    
+
     def __init__(self):
         self.researcher_llm = ChatGoogleGenerativeAI(model="gemini-pro")
         self.analyst_llm = ChatGoogleGenerativeAI(model="gemini-pro")
         self.writer_llm = ChatGoogleGenerativeAI(model="gemini-pro")
         self.graph = self._create_graph()
-    
+
     def _create_graph(self):
         """Create multi-agent collaboration graph."""
-        
+
         def researcher_node(state: MultiAgentState):
             """Research agent - gathers information."""
             query = state["messages"][-1].content
-            
+
             prompt = f"Research the following topic and gather key facts:\n{query}"
             research = self.researcher_llm.invoke(prompt)
-            
+
             return {
                 "messages": [AIMessage(content=research.content)],
                 "current_agent": "analyst",
                 "research_complete": True
             }
-        
+
         def analyst_node(state: MultiAgentState):
             """Analysis agent - analyzes research."""
             research = state["messages"][-1].content
-            
+
             prompt = f"Analyze this research and identify key insights:\n{research}"
             analysis = self.analyst_llm.invoke(prompt)
-            
+
             return {
                 "messages": [AIMessage(content=analysis.content)],
                 "current_agent": "writer",
                 "analysis_complete": True
             }
-        
+
         def writer_node(state: MultiAgentState):
             """Writer agent - creates final report."""
             analysis = state["messages"][-1].content
-            
+
             prompt = f"Write a comprehensive report based on this analysis:\n{analysis}"
             report = self.writer_llm.invoke(prompt)
-            
+
             return {
                 "messages": [AIMessage(content=report.content)],
                 "final_report": report.content
             }
-        
+
         # Build graph
         workflow = StateGraph(MultiAgentState)
-        
+
         workflow.add_node("researcher", researcher_node)
         workflow.add_node("analyst", analyst_node)
         workflow.add_node("writer", writer_node)
-        
+
         workflow.set_entry_point("researcher")
         workflow.add_edge("researcher", "analyst")
         workflow.add_edge("analyst", "writer")
         workflow.add_edge("writer", END)
-        
+
         return workflow.compile()
-    
+
     async def run(self, query: str) -> str:
         """Execute multi-agent workflow."""
         initial_state = {
@@ -789,7 +789,7 @@ class MultiAgentWorkflow:
             "analysis_complete": False,
             "final_report": ""
         }
-        
+
         result = await self.graph.ainvoke(initial_state)
         return result["final_report"]
 ```
@@ -803,42 +803,42 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 class HumanInLoopWorkflow:
     """Workflow with human intervention points."""
-    
+
     def __init__(self):
         self.llm = ChatGoogleGenerativeAI(model="gemini-pro")
         # Add checkpointer for persistence
         self.checkpointer = SqliteSaver.from_conn_string(":memory:")
         self.graph = self._create_graph()
-    
+
     def _create_graph(self):
         """Create workflow with human checkpoints."""
-        
+
         def draft_node(state):
             """Generate draft."""
             draft = self.llm.invoke(state["query"])
             return {"draft": draft.content, "status": "needs_review"}
-        
+
         def human_review_node(state):
             """Human reviews draft - interruption point."""
             # This node will pause execution
             return {"status": "under_review"}
-        
+
         def finalize_node(state):
             """Finalize after human approval."""
             return {
                 "final_output": state["draft"],
                 "status": "complete"
             }
-        
+
         workflow = StateGraph(dict)
-        
+
         workflow.add_node("draft", draft_node)
         workflow.add_node("human_review", human_review_node)
         workflow.add_node("finalize", finalize_node)
-        
+
         workflow.set_entry_point("draft")
         workflow.add_edge("draft", "human_review")
-        
+
         # Add conditional edge after human review
         workflow.add_conditional_edges(
             "human_review",
@@ -848,33 +848,33 @@ class HumanInLoopWorkflow:
                 False: "draft"  # Regenerate if not approved
             }
         )
-        
+
         workflow.add_edge("finalize", END)
-        
+
         return workflow.compile(
             checkpointer=self.checkpointer,
             interrupt_before=["human_review"]  # Pause here
         )
-    
+
     async def run(self, query: str, thread_id: str):
         """Execute with thread for resumability."""
         config = {"configurable": {"thread_id": thread_id}}
-        
+
         result = await self.graph.ainvoke(
             {"query": query, "draft": "", "status": "pending"},
             config=config
         )
-        
+
         return result
-    
+
     async def resume(self, thread_id: str, approved: bool):
         """Resume after human review."""
         config = {"configurable": {"thread_id": thread_id}}
-        
+
         # Update state and continue
         current_state = self.graph.get_state(config)
         current_state.values["approved"] = approved
-        
+
         result = await self.graph.ainvoke(None, config=config)
         return result
 ```
@@ -894,12 +894,12 @@ from typing import List
 
 class RedisBackedMemory(BaseChatMessageHistory):
     """Redis-backed chat history."""
-    
+
     def __init__(self, session_id: str, redis_client):
         self.session_id = session_id
         self.redis = redis_client
         self.key = f"chat_history:{session_id}"
-    
+
     def add_message(self, message: BaseMessage) -> None:
         """Add message to history."""
         import json
@@ -909,12 +909,12 @@ class RedisBackedMemory(BaseChatMessageHistory):
         }
         self.redis.lpush(self.key, json.dumps(msg_dict))
         self.redis.expire(self.key, 86400)  # 24 hours
-    
+
     def messages(self) -> List[BaseMessage]:
         """Get all messages."""
         import json
         messages = []
-        
+
         raw_messages = self.redis.lrange(self.key, 0, -1)
         for raw in reversed(raw_messages):
             msg_dict = json.loads(raw)
@@ -922,23 +922,23 @@ class RedisBackedMemory(BaseChatMessageHistory):
                 messages.append(HumanMessage(content=msg_dict["content"]))
             elif msg_dict["type"] == "ai":
                 messages.append(AIMessage(content=msg_dict["content"]))
-        
+
         return messages
-    
+
     def clear(self) -> None:
         """Clear history."""
         self.redis.delete(self.key)
 
 class ConversationMemoryManager:
     """Manage conversation memory."""
-    
+
     def __init__(self, redis_client):
         self.redis = redis_client
-    
+
     def get_memory(self, session_id: str) -> ConversationBufferMemory:
         """Get memory for session."""
         chat_history = RedisBackedMemory(session_id, self.redis)
-        
+
         return ConversationBufferMemory(
             chat_memory=chat_history,
             return_messages=True,
@@ -956,7 +956,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 class VectorMemoryManager:
     """Semantic memory using vector store."""
-    
+
     def __init__(self, pinecone_index):
         self.embeddings = GoogleGenerativeAIEmbeddings(
             model="models/embedding-001"
@@ -966,13 +966,13 @@ class VectorMemoryManager:
             embedding=self.embeddings,
             text_key="text"
         )
-    
+
     def create_memory(self, namespace: str, k: int = 5):
         """Create vector-backed memory."""
         retriever = self.vectorstore.as_retriever(
             search_kwargs={"k": k, "namespace": namespace}
         )
-        
+
         return VectorStoreRetrieverMemory(
             retriever=retriever,
             memory_key="relevant_history"
@@ -1040,19 +1040,19 @@ def create_fewshot_prompt():
         ("human", "{input}"),
         ("ai", "{output}")
     ])
-    
+
     few_shot_prompt = FewShotChatMessagePromptTemplate(
         example_prompt=example_prompt,
         examples=FEWSHOT_EXAMPLES,
     )
-    
+
     final_prompt = ChatPromptTemplate.from_messages([
         ("system", REACT_AGENT_SYSTEM),
         few_shot_prompt,
         MessagesPlaceholder(variable_name="chat_history", optional=True),
         ("human", "{input}"),
     ])
-    
+
     return final_prompt
 
 # Chain-of-Thought prompt
@@ -1079,10 +1079,10 @@ from typing import Dict, List
 
 class DynamicPromptBuilder:
     """Build prompts dynamically based on context."""
-    
+
     def __init__(self):
         self.base_templates = {}
-    
+
     def build_prompt(
         self,
         task_type: str,
@@ -1090,26 +1090,26 @@ class DynamicPromptBuilder:
         examples: List = None
     ) -> ChatPromptTemplate:
         """Build prompt dynamically."""
-        
+
         # Base system message
         system_message = self._get_system_message(task_type)
-        
+
         # Add context
         if context:
             system_message += f"\n\nContext:\n{self._format_context(context)}"
-        
+
         # Add examples
         messages = [("system", system_message)]
-        
+
         if examples:
             for ex in examples:
                 messages.append(("human", ex["input"]))
                 messages.append(("ai", ex["output"]))
-        
+
         messages.append(("human", "{query}"))
-        
+
         return ChatPromptTemplate.from_messages(messages)
-    
+
     def _get_system_message(self, task_type: str) -> str:
         """Get system message for task type."""
         templates = {
@@ -1119,7 +1119,7 @@ class DynamicPromptBuilder:
             "summarization": "You are a summarization expert. Create concise, informative summaries."
         }
         return templates.get(task_type, "You are a helpful AI assistant.")
-    
+
     def _format_context(self, context: Dict) -> str:
         """Format context dictionary."""
         return "\n".join([f"- {k}: {v}" for k, v in context.items()])
@@ -1167,7 +1167,7 @@ async def execute_agent(request: AgentRequest):
                 agent_type="react",
                 metadata={"tools_used": []}
             )
-        
+
         elif request.agent_type == "reflection":
             result = await reflection_agent.run(request.query)
             return AgentResponse(
@@ -1178,10 +1178,10 @@ async def execute_agent(request: AgentRequest):
                     "final_critique": result["final_critique"]
                 }
             )
-        
+
         else:
             raise HTTPException(400, f"Unknown agent type: {request.agent_type}")
-    
+
     except Exception as e:
         raise HTTPException(500, f"Agent execution failed: {str(e)}")
 
@@ -1224,32 +1224,32 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 async def main():
     """Complete chatbot example."""
-    
+
     # Initialize agent
     agent = ReActAgent(temperature=0.7)
-    
+
     # Initialize memory
     memory_manager = ConversationMemoryManager(redis_client)
     memory = memory_manager.get_memory("session_123")
-    
+
     # Create chat loop
     print("Chatbot ready! (Type 'exit' to quit)")
-    
+
     while True:
         user_input = input("\nYou: ")
-        
+
         if user_input.lower() == "exit":
             break
-        
+
         # Get response with memory
         response = await agent.run(user_input)
-        
+
         # Save to memory
         memory.save_context(
             {"input": user_input},
             {"output": response}
         )
-        
+
         print(f"\nAssistant: {response}")
 
 if __name__ == "__main__":
@@ -1271,9 +1271,9 @@ from src.agents.react.react_agent import ReActAgent
 async def test_react_agent_basic():
     """Test basic ReAct agent functionality."""
     agent = ReActAgent()
-    
+
     response = await agent.run("What is 2 + 2?")
-    
+
     assert response is not None
     assert "4" in response.lower()
 
@@ -1281,9 +1281,9 @@ async def test_react_agent_basic():
 async def test_react_agent_with_tools():
     """Test agent with tool usage."""
     agent = ReActAgent()
-    
+
     response = await agent.run("Search for Python tutorials")
-    
+
     assert response is not None
     # Verify tool was called
 ```
@@ -1301,6 +1301,6 @@ async def test_react_agent_with_tools():
 
 ---
 
-**Version**: 1.0  
-**Last Updated**: 2025-10-04  
+**Version**: 1.0
+**Last Updated**: 2025-10-04
 **Framework Versions**: LangChain 0.2+, LangGraph 0.1+

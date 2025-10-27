@@ -1,31 +1,62 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.7.1
-    hooks:
-      - id: ruff
-        args: ["--fix"]
-        language_version: python3.12
-      - id: ruff-format
-        language_version: python3.12
+  # uv
+  # - repo: https://github.com/astral-sh/uv-pre-commit
+  #   rev: 0.5.4
+  #   hooks:
+  #     - id: uv-lock
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.18.2
-    hooks:
-      - id: mypy
-        name: mypy (type-check)
-        additional_dependencies: ["mypy==1.18.2"]
-        args: ["--config-file", "mypy.ini"]
+#   # Ruff - Linting and Formatting
+#   - repo: https://github.com/astral-sh/ruff-pre-commit
+#     rev: v0.7.1
+#     hooks:
+#       - id: ruff
+#         args: ["--fix"]
+#         types_or: [python, pyi]
+#       - id: ruff-format
+#         types_or: [python, pyi]
 
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.5
-    hooks:
-      - id: bandit
-        args: ["-r", "src"]
+#   # MyPy - Type Checking
+#   - repo: https://github.com/pre-commit/mirrors-mypy
+#     rev: v1.18.2
+#     hooks:
+#       - id: mypy
+#         additional_dependencies:
+#           - "pydantic>=2.9.0"
+#           - "types-redis"
+#           - "types-aiofiles"
+#         files: ^src/
+#         args: ["--config-file=pyproject.toml"]
 
+  # Bandit - Security Linting
+  # - repo: https://github.com/PyCQA/bandit
+  #   rev: 1.7.10
+  #   hooks:
+  #     - id: bandit
+  #       args: ["-c", "pyproject.toml"]
+  #       additional_dependencies: ["bandit[toml]"]
+
+  # Pre-commit Hooks - General Checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v5.0.0
     hooks:
-      - id: end-of-file-fixer
       - id: trailing-whitespace
+      - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+#   # Python-specific checks
+#   - repo: https://github.com/pre-commit/pygrep-hooks
+#     rev: v1.10.0
+#     hooks:
+#       - id: python-check-blanket-noqa
+#       - id: python-check-blanket-type-ignore
+#       - id: python-no-eval
+#       - id: python-use-type-annotations

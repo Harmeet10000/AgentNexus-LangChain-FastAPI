@@ -1,79 +1,66 @@
-# Multi-stage Development Dockerfile (switched from alpine -> slim to allow manylinux wheels)
+# ================================ Builder Stage ================================
 FROM python:3.12-slim AS builder
 
-# Set build environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    UV_CACHE_DIR=/tmp/uv-cache
+    PYTHONUNBUFFERED=1
 
-# Install build deps (Debian)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install --no-install-recommends -y \
     build-essential \
-    gcc \
-    libffi-dev \
-    libssl-dev \
     curl \
-    python3-dev \
-    python3-distutils \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    mv /root/.local/bin/uv /usr/local/bin/uv
+ADD https://astral.sh/uv/install.sh /install.sh
+RUN chmod -R 655 /install.sh && /install.sh && rm /install.sh
+ENV PATH="/root/.local/bin:${PATH}"
 
-# Create virtual environment with uv
-RUN uv venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Copy and install Python dependencies with uv
-COPY pyproject.toml ./
-RUN uv pip install --no-cache -e .
-
-# Stage 2: Development Runtime
-FROM python:3.12-slim AS runtime
-
-# Install only essential runtime dependencies
-# RUN apk add --no-cache \
-#     ca-certificates \
-#     tzdata \
-#     && rm -rf /var/cache/apk/*
-
-# Copy virtual environment from builder stage
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Set runtime environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH="/app/src" \
-    PORT=5000
-
-# Install runtime deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates tzdata \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user
-RUN groupadd -g 1001 appuser && \
-    useradd -u 1001 -g appuser -m -d /app -s /bin/sh appuser
-
-# Set working directory
 WORKDIR /app
 
-# Create directories and set ownership
-RUN mkdir -p /app/src /app/logs /app/tmp && \
-    chown -R appuser:appuser /app
+COPY pyproject.toml ./
+RUN uv sync --no-dev
 
-# Switch to non-root user
+# ============================== Production Stage ==============================
+FROM python:3.12-slim AS production
+
+# Environment variables from .env.example
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    APP_NAME="LangChain FastAPI Production" \
+    APP_VERSION="1.0.0" \
+    ENVIRONMENT=production \
+    DEBUG=False \
+    API_PREFIX=/api/v1 \
+    HOST=0.0.0.0 \
+    PORT=5000 \
+    WORKERS=4 \
+    LOG_LEVEL=INFO \
+    LOG_FORMAT=json \
+    RATE_LIMIT_ENABLED=True \
+    RATE_LIMIT_REQUESTS=100 \
+    RATE_LIMIT_PERIOD=60
+
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash appuser
+
+WORKDIR /app
+
+# Copy virtual environment from builder
+COPY --from=builder /app/.venv .venv
+
+# Copy application code
+COPY src/ src/
+
+# Copy .env files if they exist (optional for Railway compatibility)
+COPY .env.development* ./
+
+# Set ownership
+RUN chown -R appuser:appuser /app
+
 USER appuser
 
-# Copy application code (will be overridden by volume mount in development)
-COPY --chown=appuser:appuser src/ ./src/
-COPY --chown=appuser:appuser pyproject.toml ./
+# Set PATH to use virtual environment
+ENV PATH="/app/.venv/bin:$PATH"
 
-# Expose port
 EXPOSE 5000
 
-# Development command with auto-reload
-CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "5000", "--reload"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "4"]

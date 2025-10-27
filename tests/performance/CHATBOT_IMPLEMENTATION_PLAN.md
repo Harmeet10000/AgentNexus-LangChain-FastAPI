@@ -32,7 +32,7 @@ Support Services:
 •  src/services/docling/ - Document processing
 •  src/services/crawl4ai/ - Web scraping
 
-Simple rule: 
+Simple rule:
 •  FastAPI = Everything in src/api/ + src/main.py
 •  LangChain = src/chains/ + src/services/langchain/ + src/tools/
 •  LangGraph = src/graphs/ + src/services/langgraph/
@@ -52,23 +52,23 @@ This document outlines the implementation plan for building a production-grade c
   - Web search integration (DuckDuckGo, Tavily, Serper)
   - Vector store search for knowledge base
   - Document search within uploaded files
-  
+
 - **Computation Tools**
   - Calculator for mathematical operations
   - Code execution sandbox (Python REPL)
   - Data analysis tools (pandas operations)
-  
+
 - **Information Retrieval Tools**
   - Wikipedia lookup
   - News API integration
   - Weather API integration
   - Time/date utilities
-  
+
 - **Content Generation Tools**
   - Image generation (DALL-E, Stable Diffusion)
   - Text summarization
   - Translation services
-  
+
 - **Database Tools**
   - SQL query execution
   - MongoDB queries
@@ -111,7 +111,7 @@ src/tools/
   - Database context
   - API context
   - Environment context
-  
+
 - **Resource Management**
   - Dynamic resource loading
   - Context caching
@@ -142,7 +142,7 @@ src/mcp/
 - **Initial Response Generation**
   - Generate response based on user query
   - Capture reasoning steps
-  
+
 - **Reflection Loop**
   - Critique own response
   - Identify weaknesses/errors
@@ -174,12 +174,12 @@ src/agents/reflection/
 - **Task Execution**
   - Execute task with current strategy
   - Collect execution trace
-  
+
 - **Self-Reflection**
   - Analyze failures/successes
   - Generate verbal feedback
   - Update strategy
-  
+
 - **Memory Integration**
   - Store reflection history
   - Use past reflections for future tasks
@@ -247,7 +247,7 @@ Action: final_answer("...")
   - Define response structures
   - Automatic validation
   - Type safety
-  
+
 - **Function Calling**
   - Tool schemas
   - Parameter extraction
@@ -289,7 +289,7 @@ src/schemas/structured/
   - Tool nodes (actions)
   - Router nodes (conditional routing)
   - Human-in-the-loop nodes
-  
+
 - **Edge Types**
   - Conditional edges
   - Direct edges
@@ -331,7 +331,7 @@ src/graphs/stategraph/
   - Agent state (thoughts, actions, observations)
   - Tool state (inputs, outputs, status)
   - Memory state (short-term, long-term)
-  
+
 - **Transformation Operations**
   - Message addition
   - Context update

@@ -54,11 +54,11 @@ import os
 
 class MCPClientManager:
     """Manage MCP client and server connections."""
-    
+
     def __init__(self, server_config: Dict[str, Dict[str, Any]]):
         """
         Initialize MCP client with server configurations.
-        
+
         Args:
             server_config: Dictionary of server configurations
                 {
@@ -73,33 +73,33 @@ class MCPClientManager:
         self.server_config = server_config
         self.client: MultiServerMCPClient = None
         self._tools: List[BaseTool] = None
-    
+
     async def initialize(self):
         """Initialize the MCP client and connect to servers."""
         self.client = MultiServerMCPClient(self.server_config)
         await self.client.start()
         self._tools = await self.client.get_tools()
         return self
-    
+
     async def get_tools(self) -> List[BaseTool]:
         """Get all tools from connected MCP servers."""
         if self._tools is None:
             self._tools = await self.client.get_tools()
         return self._tools
-    
+
     async def get_tools_by_server(self, server_name: str) -> List[BaseTool]:
         """Get tools from a specific server."""
         all_tools = await self.get_tools()
         return [tool for tool in all_tools if tool.metadata.get("server") == server_name]
-    
+
     async def cleanup(self):
         """Clean up MCP client connections."""
         if self.client:
             await self.client.stop()
-    
+
     def __enter__(self):
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         asyncio.run(self.cleanup())
 ```
@@ -124,28 +124,28 @@ MCP_SERVER_CONFIG = {
         "args": [str(SERVERS_DIR / "math_server.py")],
         "enabled": True,
     },
-    
+
     "filesystem": {
         "transport": "stdio",
         "command": "python",
         "args": [str(SERVERS_DIR / "filesystem_server.py")],
         "enabled": True,
     },
-    
+
     "database": {
         "transport": "stdio",
         "command": "python",
         "args": [str(SERVERS_DIR / "database_server.py")],
         "enabled": os.getenv("ENABLE_DB_MCP", "false").lower() == "true",
     },
-    
+
     # HTTP-based remote servers
     "weather": {
         "transport": "streamable_http",
         "url": os.getenv("WEATHER_MCP_URL", "http://localhost:5000/mcp"),
         "enabled": os.getenv("ENABLE_WEATHER_MCP", "false").lower() == "true",
     },
-    
+
     "external_api": {
         "transport": "streamable_http",
         "url": os.getenv("EXTERNAL_MCP_URL", "http://api.example.com/mcp"),
@@ -182,7 +182,7 @@ import math
 # Simple MCP server implementation
 class MathMCPServer:
     """MCP server providing math operations."""
-    
+
     def __init__(self):
         self.tools = {
             "add": self.add,
@@ -192,52 +192,52 @@ class MathMCPServer:
             "power": self.power,
             "sqrt": self.sqrt,
         }
-    
+
     async def add(self, a: float, b: float) -> float:
         """Add two numbers."""
         return a + b
-    
+
     async def subtract(self, a: float, b: float) -> float:
         """Subtract b from a."""
         return a - b
-    
+
     async def multiply(self, a: float, b: float) -> float:
         """Multiply two numbers."""
         return a * b
-    
+
     async def divide(self, a: float, b: float) -> float:
         """Divide a by b."""
         if b == 0:
             raise ValueError("Cannot divide by zero")
         return a / b
-    
+
     async def power(self, base: float, exponent: float) -> float:
         """Raise base to the power of exponent."""
         return base ** exponent
-    
+
     async def sqrt(self, x: float) -> float:
         """Calculate square root of x."""
         if x < 0:
             raise ValueError("Cannot calculate square root of negative number")
         return math.sqrt(x)
-    
+
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle incoming MCP request."""
         tool_name = request.get("tool")
         params = request.get("params", {})
-        
+
         if tool_name not in self.tools:
             return {
                 "error": f"Unknown tool: {tool_name}",
                 "available_tools": list(self.tools.keys())
             }
-        
+
         try:
             result = await self.tools[tool_name](**params)
             return {"result": result}
         except Exception as e:
             return {"error": str(e)}
-    
+
     async def run(self):
         """Run the MCP server."""
         # Read from stdin, write to stdout
@@ -248,13 +248,13 @@ class MathMCPServer:
                 )
                 if not line:
                     break
-                
+
                 request = json.loads(line.strip())
                 response = await self.handle_request(request)
-                
+
                 # Write response to stdout
                 print(json.dumps(response), flush=True)
-                
+
             except json.JSONDecodeError:
                 print(json.dumps({"error": "Invalid JSON"}), flush=True)
             except Exception as e:
@@ -290,15 +290,15 @@ class MCPResponse(BaseModel):
 
 class WeatherService:
     """Weather data service."""
-    
+
     def __init__(self, api_key: str = None):
         self.api_key = api_key or "demo_key"
         self.base_url = "https://api.openweathermap.org/data/2.5"
-    
+
     async def get_current_weather(self, city: str, country: str = None) -> Dict:
         """Get current weather for a city."""
         location = f"{city},{country}" if country else city
-        
+
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self.base_url}/weather",
@@ -308,13 +308,13 @@ class WeatherService:
                     "units": "metric"
                 }
             )
-            
+
             if response.status_code != 200:
                 raise HTTPException(
                     status_code=response.status_code,
                     detail="Failed to fetch weather data"
                 )
-            
+
             data = response.json()
             return {
                 "temperature": data["main"]["temp"],
@@ -323,7 +323,7 @@ class WeatherService:
                 "description": data["weather"][0]["description"],
                 "wind_speed": data["wind"]["speed"],
             }
-    
+
     async def get_forecast(self, city: str, days: int = 5) -> Dict:
         """Get weather forecast for a city."""
         async with httpx.AsyncClient() as client:
@@ -336,13 +336,13 @@ class WeatherService:
                     "cnt": days * 8  # 8 forecasts per day
                 }
             )
-            
+
             if response.status_code != 200:
                 raise HTTPException(
                     status_code=response.status_code,
                     detail="Failed to fetch forecast data"
                 )
-            
+
             return response.json()
 
 weather_service = WeatherService()
@@ -354,17 +354,17 @@ async def handle_mcp_request(request: MCPRequest) -> MCPResponse:
         if request.tool == "get_current_weather":
             result = await weather_service.get_current_weather(**request.params)
             return MCPResponse(result=result)
-        
+
         elif request.tool == "get_forecast":
             result = await weather_service.get_forecast(**request.params)
             return MCPResponse(result=result)
-        
+
         else:
             return MCPResponse(
                 error=f"Unknown tool: {request.tool}",
                 result={"available_tools": ["get_current_weather", "get_forecast"]}
             )
-    
+
     except Exception as e:
         return MCPResponse(error=str(e))
 
@@ -390,12 +390,12 @@ import os
 
 class DatabaseMCPServer:
     """MCP server for database queries."""
-    
+
     def __init__(self):
         mongo_url = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
         self.client = AsyncIOMotorClient(mongo_url)
         self.db = self.client[os.getenv("MONGODB_DATABASE", "langchain_db")]
-    
+
     async def query_documents(
         self,
         collection: str,
@@ -406,14 +406,14 @@ class DatabaseMCPServer:
         coll = self.db[collection]
         cursor = coll.find(filter or {}).limit(limit)
         documents = await cursor.to_list(length=limit)
-        
+
         # Convert ObjectId to string
         for doc in documents:
             if "_id" in doc:
                 doc["_id"] = str(doc["_id"])
-        
+
         return documents
-    
+
     async def insert_document(
         self,
         collection: str,
@@ -423,7 +423,7 @@ class DatabaseMCPServer:
         coll = self.db[collection]
         result = await coll.insert_one(document)
         return str(result.inserted_id)
-    
+
     async def update_document(
         self,
         collection: str,
@@ -434,7 +434,7 @@ class DatabaseMCPServer:
         coll = self.db[collection]
         result = await coll.update_many(filter, {"$set": update})
         return result.modified_count
-    
+
     async def delete_document(
         self,
         collection: str,
@@ -444,31 +444,31 @@ class DatabaseMCPServer:
         coll = self.db[collection]
         result = await coll.delete_many(filter)
         return result.deleted_count
-    
+
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle incoming MCP request."""
         tool_name = request.get("tool")
         params = request.get("params", {})
-        
+
         tools = {
             "query_documents": self.query_documents,
             "insert_document": self.insert_document,
             "update_document": self.update_document,
             "delete_document": self.delete_document,
         }
-        
+
         if tool_name not in tools:
             return {
                 "error": f"Unknown tool: {tool_name}",
                 "available_tools": list(tools.keys())
             }
-        
+
         try:
             result = await tools[tool_name](**params)
             return {"result": result}
         except Exception as e:
             return {"error": str(e)}
-    
+
     async def run(self):
         """Run the MCP server."""
         while True:
@@ -478,11 +478,11 @@ class DatabaseMCPServer:
                 )
                 if not line:
                     break
-                
+
                 request = json.loads(line.strip())
                 response = await self.handle_request(request)
                 print(json.dumps(response), flush=True)
-                
+
             except Exception as e:
                 print(json.dumps({"error": str(e)}), flush=True)
 
@@ -509,68 +509,68 @@ from src.mcp.config.server_config import get_enabled_servers
 
 class MCPAgent:
     """Agent with MCP tool integration."""
-    
+
     def __init__(self, model_name: str = "gemini-pro"):
         self.model_name = model_name
         self.mcp_client: MultiServerMCPClient = None
         self.agent = None
         self.memory = MemorySaver()
-    
+
     async def initialize(self):
         """Initialize MCP client and agent."""
         # Get enabled server configurations
         server_config = get_enabled_servers()
-        
+
         # Initialize MCP client
         self.mcp_client = MultiServerMCPClient(server_config)
-        
+
         # Get tools from all MCP servers
         tools = await self.mcp_client.get_tools()
-        
+
         # Initialize language model
         model = init_chat_model(self.model_name, model_provider="google")
-        
+
         # Create agent with MCP tools
         self.agent = create_react_agent(
             model,
             tools,
             checkpointer=self.memory
         )
-        
+
         return self
-    
+
     async def run(self, query: str, thread_id: str = "default") -> Dict[str, Any]:
         """Execute agent with MCP tools."""
         if not self.agent:
             raise RuntimeError("Agent not initialized. Call initialize() first.")
-        
+
         config = {"configurable": {"thread_id": thread_id}}
-        
+
         result = await self.agent.ainvoke(
             {"messages": [{"role": "user", "content": query}]},
             config=config
         )
-        
+
         return {
             "response": result["messages"][-1].content,
             "messages": result["messages"],
             "thread_id": thread_id
         }
-    
+
     async def stream(self, query: str, thread_id: str = "default"):
         """Stream agent responses."""
         if not self.agent:
             raise RuntimeError("Agent not initialized. Call initialize() first.")
-        
+
         config = {"configurable": {"thread_id": thread_id}}
-        
+
         async for chunk in self.agent.astream(
             {"messages": [{"role": "user", "content": query}]},
             config=config,
             stream_mode="values"
         ):
             yield chunk
-    
+
     async def cleanup(self):
         """Clean up MCP client."""
         if self.mcp_client:
@@ -586,11 +586,11 @@ from src.agents.mcp.mcp_agent import MCPAgent
 
 async def main():
     """Example using MCP agent with multiple servers."""
-    
+
     # Initialize agent
     agent = MCPAgent(model_name="gemini-pro")
     await agent.initialize()
-    
+
     try:
         # Math query (uses math MCP server)
         print("Testing Math Server:")
@@ -599,7 +599,7 @@ async def main():
             thread_id="math_session"
         )
         print(f"Math Result: {math_result['response']}\n")
-        
+
         # Weather query (uses weather MCP server)
         print("Testing Weather Server:")
         weather_result = await agent.run(
@@ -607,7 +607,7 @@ async def main():
             thread_id="weather_session"
         )
         print(f"Weather Result: {weather_result['response']}\n")
-        
+
         # Database query (uses database MCP server)
         print("Testing Database Server:")
         db_result = await agent.run(
@@ -615,7 +615,7 @@ async def main():
             thread_id="db_session"
         )
         print(f"Database Result: {db_result['response']}\n")
-        
+
         # Multi-tool query
         print("Testing Multi-Tool Query:")
         multi_result = await agent.run(
@@ -623,7 +623,7 @@ async def main():
             thread_id="multi_session"
         )
         print(f"Multi-Tool Result: {multi_result['response']}\n")
-        
+
     finally:
         await agent.cleanup()
 
@@ -666,11 +666,11 @@ class MCPAgentResponse(BaseModel):
 async def get_mcp_agent() -> MCPAgent:
     """Get or initialize MCP agent."""
     global mcp_agent
-    
+
     if mcp_agent is None:
         mcp_agent = MCPAgent()
         await mcp_agent.initialize()
-    
+
     return mcp_agent
 
 @router.post("/execute", response_model=MCPAgentResponse)
@@ -684,7 +684,7 @@ async def execute_mcp_agent(
             query=request.query,
             thread_id=request.thread_id
         )
-        
+
         return MCPAgentResponse(
             response=result["response"],
             thread_id=result["thread_id"],
@@ -692,7 +692,7 @@ async def execute_mcp_agent(
                 "message_count": len(result["messages"])
             }
         )
-    
+
     except Exception as e:
         raise HTTPException(500, f"Agent execution failed: {str(e)}")
 
@@ -702,7 +702,7 @@ async def stream_mcp_agent(
     agent: MCPAgent = Depends(get_mcp_agent)
 ):
     """Stream MCP agent responses."""
-    
+
     async def generate():
         try:
             async for chunk in agent.stream(
@@ -717,10 +717,10 @@ async def stream_mcp_agent(
                         "type": last_message.type if hasattr(last_message, "type") else "unknown"
                     }
                     yield f"data: {json.dumps(data)}\n\n"
-        
+
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
-    
+
     return StreamingResponse(
         generate(),
         media_type="text/event-stream"
@@ -730,9 +730,9 @@ async def stream_mcp_agent(
 async def list_mcp_servers():
     """List connected MCP servers."""
     from src.mcp.config.server_config import get_enabled_servers
-    
+
     servers = get_enabled_servers()
-    
+
     return {
         "servers": [
             {
@@ -749,7 +749,7 @@ async def list_mcp_servers():
 async def list_mcp_tools(agent: MCPAgent = Depends(get_mcp_agent)):
     """List all available MCP tools."""
     tools = await agent.mcp_client.get_tools()
-    
+
     return {
         "tools": [
             {
@@ -814,7 +814,7 @@ async def test_mcp_agent_math():
     """Test MCP agent with math server."""
     agent = MCPAgent()
     await agent.initialize()
-    
+
     try:
         result = await agent.run("What is 5 + 3?")
         assert result["response"] is not None
@@ -827,7 +827,7 @@ async def test_mcp_agent_multi_tool():
     """Test MCP agent with multiple tools."""
     agent = MCPAgent()
     await agent.initialize()
-    
+
     try:
         result = await agent.run(
             "Calculate 10 * 5 and tell me the weather in London"
@@ -849,10 +849,10 @@ from src.agents.mcp.mcp_agent import MCPAgent
 async def example():
     agent = MCPAgent()
     await agent.initialize()
-    
+
     result = await agent.run("What's 25 * 4?")
     print(result["response"])
-    
+
     await agent.cleanup()
 ```
 
@@ -862,11 +862,11 @@ async def example():
 async def streaming_example():
     agent = MCPAgent()
     await agent.initialize()
-    
+
     async for chunk in agent.stream("Calculate 100 / 5"):
         if "messages" in chunk:
             print(chunk["messages"][-1].content)
-    
+
     await agent.cleanup()
 ```
 
@@ -895,7 +895,7 @@ services:
     environment:
       - ENABLE_DB_MCP=true
       - ENABLE_WEATHER_MCP=true
-  
+
   weather-mcp:
     build:
       context: .
@@ -918,6 +918,6 @@ services:
 
 ---
 
-**Version**: 1.0  
-**Last Updated**: 2025-10-04  
+**Version**: 1.0
+**Last Updated**: 2025-10-04
 **Compatible with**: langchain-mcp-adapters latest

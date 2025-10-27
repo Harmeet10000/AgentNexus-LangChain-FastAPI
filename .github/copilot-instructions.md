@@ -8,7 +8,7 @@
 			<principles>functional, DRY, KISS</principles>
 			<immutability>Prefer immutability and pure functions; avoid module-level mutable state</immutability>
 			<typing>Use type hints everywhere; write code compatible with strict mypy checks</typing>
-			<formatting>Follow Black and isort rules; use project's pyproject.toml where present</formatting>
+			<formatting>Use Ruff for linting and formatting; use project's pyproject.toml where present</formatting>
 		</style>
 	</meta>
 
@@ -21,7 +21,7 @@
     		<async>Prefer async handlers and async I/O. When using blocking code, run it via anyio.to_thread.run_sync or similar.</async>
     		<errors>Centralize error handling in middleware (see src/api/middleware/error_handler.py). Return typed error responses.</errors>
     		<security>Use FastAPI security utilities and follow least-privilege patterns. Put auth logic in dependencies, not in route handlers.</security>
-			<serverRun>Always use uvicorn to run the application (do not run apps with bare "python" processes). Prefer explicit uvicorn commands that reference the ASGI app import path or factory. Examples: dev: <code>uvicorn src.main:app --reload --host 0.0.0.0 --port 8000</code>; production (process manager): <code>uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4</code> or via Gunicorn with Uvicorn workers: <code>gunicorn -k uvicorn.workers.UvicornWorker src.main:app -w 4 --bind 0.0.0.0:8000</code>. When using an app factory, pass --factory (e.g., <code>uvicorn src.main:create_app --factory --reload</code>).</serverRun>
+			<serverRun>Always use uvicorn to run the application (do not run apps with bare "python" processes). Prefer uv run for local development. Examples: dev: <code>uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000</code>; production (process manager): <code>uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4</code> or via Gunicorn with Uvicorn workers: <code>gunicorn -k uvicorn.workers.UvicornWorker src.main:app -w 4 --bind 0.0.0.0:8000</code>. When using an app factory, pass --factory (e.g., <code>uv run uvicorn src.main:create_app --factory --reload</code>).</serverRun>
     	</bestPractices>
     </fastapi>
 
@@ -38,8 +38,8 @@
     	</types>
 
     	<formatting>
-    		<black>Adopt Black formatting (project default line length). Let formatter run in CI and pre-commit.</black>
-    		<isort>Use isort with black profile; group imports: stdlib, third-party, local packages.</isort>
+    		<ruff>Use Ruff for both linting and formatting (line-length: 88). Ruff replaces Black, isort, Pylint, and Flake8.</ruff>
+    		<imports>Ruff handles import sorting automatically; group imports: stdlib, third-party, local packages.</imports>
     		<indentation>Use 4 spaces. Ensure Python indent extension rules are satisfied.</indentation>
     	</formatting>
     </codingGuidelines>
@@ -67,7 +67,9 @@
     	<structure>Group by feature: src/features/<feature>/{api,schemas,services,tests}. Keep services independent of FastAPI internals.</structure>
     	<imports>Avoid heavy imports at module top-level. Use local imports inside functions when needed to prevent import-time I/O.</imports>
     	<logging>Use structured logging from src/core/logging and include correlation ids from middleware.</logging>
-    	<ci>Run black --check, isort --check-only, mypy, and pytest in CI. Fail on formatting/type errors.</ci>
+    	<ci>Run ruff check, ruff format --check, mypy, and pytest in CI. Fail on formatting/type errors.</ci>
+    	<preCommit>Use pre-commit hooks: uv-lock (dependency sync), ruff (lint+format), mypy (types), bandit (security), and standard checks (trailing whitespace, YAML/JSON/TOML validation, private key detection).</preCommit>
+    	<packageManager>Use uv for dependency management. Commands: uv pip install, uv run, uv sync. No manual venv activation needed with uv.</packageManager>
     </practicalTips>
 
     <examples>
@@ -125,11 +127,21 @@ self.\_client = client
     	</items>
     </doNot>
 
+    <toolchain>
+    	<linter>Ruff (v0.7.1+) - Fast linter replacing Pylint/Flake8. Config in pyproject.toml [tool.ruff.lint].</linter>
+    	<formatter>Ruff Format - Fast formatter replacing Black. Config in pyproject.toml [tool.ruff.format].</formatter>
+    	<typeChecker>MyPy (v1.18.2+) - Strict type checking. Config in pyproject.toml [tool.mypy].</typeChecker>
+    	<security>Bandit (v1.7.10+) - Security linting. Config in pyproject.toml [tool.bandit].</security>
+    	<packageManager>uv - Fast Python package manager (10-100x faster than pip). Use uv pip install, uv run, uv sync.</packageManager>
+    	<preCommit>Pre-commit hooks enforce: uv-lock sync, ruff lint+format, mypy types, bandit security, file checks (trailing whitespace, YAML/JSON/TOML, private keys, merge conflicts).</preCommit>
+    </toolchain>
+
     <final>
     	<summary>Favor clarity, immutability, testability, and types. Keep endpoints thin and services pure. Enforce formatting and typing through pre-commit/CI.</summary>
     	<followups>
-    		<item>Add or align pyproject.toml settings for black/isort and mypy.ini for type rules.</item>
-    		<item>Consider pre-commit hooks for black/isort/mypy to keep the repo clean.</item>
+    		<item>Ensure pyproject.toml has [tool.ruff], [tool.ruff.lint], [tool.ruff.format], and [tool.mypy] sections.</item>
+    		<item>Run pre-commit install to enable hooks. Use pre-commit run --all-files to validate.</item>
+    		<item>Use uv for all dependency operations: uv pip install -e ".[dev]", uv run pytest, uv run uvicorn.</item>
     	</followups>
     </final>
 
@@ -209,10 +221,10 @@ async def get_users(
         "sort": sort,
         "fields": fields,
     }
-    
+
     features = APIFeatures(db.users, query_params)
     users = await features.filter().sort().limit_fields().paginate().execute()
-    
+
     return http_response("Users retrieved", users, request=request)
 
 # Cursor pagination
@@ -226,6 +238,6 @@ async def get_posts(
     query_params = {"cursor": cursor, "direction": direction, "limit": limit}
     features = APIFeatures(db.posts, query_params)
     posts = await features.cursor_paginate().execute()
-    
+
     return http_response("Posts retrieved", posts)
 ```

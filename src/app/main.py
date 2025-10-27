@@ -1,6 +1,7 @@
 """Main FastAPI application module."""
 
 from dotenv import load_dotenv
+
 load_dotenv(".env.development")
 
 # Load the specific environment file
@@ -16,7 +17,6 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
-
 from app.connections.mongodb import connect_to_mongodb
 from app.core.exceptions import register_exception_handlers
 from app.core.settings import get_settings
@@ -30,7 +30,6 @@ from app.middleware.server_middleware import (
 )
 from app.utils.httpResponse import http_response
 from app.utils.logger import logger, setup_logging
-
 
 
 @asynccontextmanager
