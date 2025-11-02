@@ -1,5 +1,4 @@
-"""Production-grade Loguru logging configuration."""
-
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,7 +14,7 @@ class LogConfig(BaseSettings):
 
     ENVIRONMENT: str = Environment.DEVELOPMENT
     LOG_LEVEL: str = "DEBUG"
-    LOG_DIR: Path = Path("logs")
+    LOG_DIR: Path = Path("logs/")
     LOG_ROTATION: str = "500 MB"
     LOG_RETENTION: str = "30 days"
     LOG_COMPRESSION: str = "zip"
@@ -23,12 +22,11 @@ class LogConfig(BaseSettings):
     LOG_DIAGNOSE: bool = False
 
     class Config:
-        env_file = ".env"
+        env_file = ".env.development"
 
 
 def serialize_record(record: dict[str, Any]) -> str:
     """Custom JSON serialization for file logs."""
-    import json
 
     log_meta = {}
     if record.get("extra", {}).get("meta"):
@@ -146,4 +144,4 @@ class Logger:
 # Export logger instance
 logger = Logger()
 
-__all__ = ["logger", "setup_logging", "LogConfig"]
+# __all__ = ["logger", "setup_logging", "LogConfig"]

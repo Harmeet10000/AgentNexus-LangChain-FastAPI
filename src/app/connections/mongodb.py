@@ -18,7 +18,6 @@ async def connect_to_mongodb() -> bool:
     global mongodb_client, mongodb
 
     try:
-        logger.info("MongoDB client connecting...")
 
         # MongoDB connection options matching JS configuration
         mongo_options: dict[str, Any] = {
@@ -54,16 +53,13 @@ async def connect_to_mongodb() -> bool:
             },
         )
 
-        logger.info("MongoDB client connected and ready")
 
         return True
 
     except (ConnectionFailure, ServerSelectionTimeoutError) as e:
         logger.error("MongoDB client error:", meta={"error": str(e)})
         raise
-    except Exception as e:
-        logger.error("Failed to connect to MongoDB", meta={"error": str(e)})
-        raise
+
 
 
 async def close_mongodb_connection() -> None:

@@ -31,16 +31,14 @@ dependencies = [
     "pydantic>=2.9.0,<3.0.0",
     "pydantic-settings>=2.5.0,<3.0.0", # Latest major is 2.11.0 (Sep 24, 2025)
     "httpx>=0.27.0,<1.0.0",
-
-    # --- LLM/RAG STACK (Kept Tight Due to Volatility) ---
-    "langchain==0.3.27",
-    "langchain-core==0.3.76",
-    "langchain-community==0.3.30",
-    "langchain-google-genai==2.1.12",
-    "langgraph==0.6.8",
-    "langsmith==0.4.32",
     "pinecone>=7.3.0",
-
+    # Core LLM, RAG, AI agents framework
+    "langchain>=1.0.3",
+    "langchain-core>=1.0.2",
+    "langchain-community>=0.4.1",
+    "langchain-google-genai>=3.0.0",
+    "langgraph>=1.0.2",
+    "langsmith>=0.4.39",
     # --- UTILITIES & STORAGE (Relaxed Upper Bounds) ---
     "python-multipart>=0.0.12,<1.0.0",
     "fastmcp>=2.11.0,<3.0.0",
@@ -70,6 +68,7 @@ dependencies = [
     "aiohttp-retry==2.9.1",
     "fastapi-limiter==0.1.6",
     "prometheus-client>=0.23.1",
+    "faststream>=0.6.2",
 ]
 
 [project.optional-dependencies]
@@ -106,9 +105,7 @@ Documentation = "https://github.com/Harmeet10000/langchain-fastapi-production#re
 Repository = "https://github.com/Harmeet10000/langchain-fastapi-production"
 "Bug Tracker" = "https://github.com/Harmeet10000/langchain-fastapi-production/issues"
 
-[project.scripts]
-start = "uvicorn.main:main"
-dev = "src.cli:main"
+
 
 # Tool configurations
 [tool.setuptools.packages.find]
@@ -141,26 +138,40 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 
-# MyPy configuration
-[tool.mypy]
-python_version = "3.12"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
-show_error_codes = true
+# Ty configuration (approximate migration from MyPy)
+# Note: Ty does not have 1:1 mappings for all MyPy options, as it uses its own rule-based system.
+# Many strict MyPy checks (e.g., disallow_untyped_defs, check_untyped_defs) are covered by default
+# "error"-level rules like invalid-return-type, invalid-assignment, etc.
+# For per-module overrides like ignore_missing_imports, Ty lacks direct support (file-based globs only).
+# Here, we approximate by globally ignoring unresolved-import (common for untyped third-party libs).
+# Install type stubs (e.g., types-redis, openai-stubs) where possible for better checking.
+# Use # ty: ignore[unresolved-import] on specific import lines if needed for precision.
 
-[[tool.mypy.overrides]]
-module = ["langchain.*", "openai.*", "redis.*", "asyncpg.*"]
-ignore_missing_imports = true
+[tool.ty]
+# Equivalent to MyPy's python_version
+environment.python-version = "3.12"
+# Equivalent to show_error_codes (full output includes codes)
+terminal.output-format = "full"
+# Optional: Treat warnings as errors for stricter enforcement (no direct MyPy equiv, but aligns with overall strictness)
+# terminal.error-on-warning = true
+
+[tool.ty.rules]
+# warn_redundant_casts=true → redundant-cast (default is warn, explicit for clarity)
+redundant-cast = "warn"
+# warn_unused_ignores=true → unused-ignore-comment (default ignore, set to warn)
+unused-ignore-comment = "warn"
+# warn_no_return=true → Covered by invalid-return-type (default error)
+# warn_unreachable=true → No direct rule; Ty may handle via inference (consider terminal.error-on-warning if needed)
+# strict_equality=true → Handled in default type checking (e.g., invalid-assignment)
+# Approximate ignore_missing_imports for listed modules (global; set unresolved-import to ignore)
+# This prevents errors on imports from untyped libs like langchain.*, openai.*, etc.
+unresolved-import = "ignore"
+# Other disallow_* options (untyped_defs, incomplete_defs, untyped_decorators) → Default "error" rules like
+# invalid-declaration, invalid-parameter-default cover similar ground; no change needed.
+# warn_return_any=true → No direct; invalid-return-type catches mismatches, including Any issues.
+# warn_unused_configs=true → No direct; Ty has no equivalent (config validation is built-in).
+# no_implicit_optional=true → Handled in Ty's type inference by default.
+
 
 # Pytest configuration
 [tool.pytest.ini_options]
@@ -215,3 +226,9 @@ exclude_lines = [
 [tool.bandit]
 exclude_dirs = ["tests", "migrations"]
 skips = ["B101", "B601"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.3.0",
+    "ty>=0.0.1a25",
+]

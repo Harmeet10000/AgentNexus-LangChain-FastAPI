@@ -1,5 +1,3 @@
-"""Application enums and constants."""
-
 from enum import Enum
 
 

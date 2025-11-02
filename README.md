@@ -33,8 +33,10 @@ A production-grade FastAPI application integrating LangChain, LangGraph, and Lan
 
 ## 📋 Prerequisites
 
--   Python 3.11+
+-   Python 3.12+
 -   [uv](https://docs.astral.sh/uv/) - Fast Python package manager (recommended)
+-   [ruff](https://docs.astral.sh/ruff/) - Fast Python linter anf formater (recommended)
+-   [ty](https://docs.astral.sh/ty/) - Fast Python type checker (recommended)
 -   Docker and Docker Compose
 -   API Keys:
     -   Google Gemini API Key
@@ -91,10 +93,10 @@ uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install project dependencies (reads pyproject.toml)
-uv pip install -e .
+uv sync
 
 # For dev dependencies too
-uv pip install -e ".[dev]"
+uv sync --extra dev
 
 # Run the application
 uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 5000
@@ -121,7 +123,7 @@ For the best development experience, you can combine Docker for services with lo
 
 ```bash
 # Start only the services (database, redis, etc.)
-docker-compose up -d mongodb redis
+docker compose up -d
 
 # Run the application locally with uv
 uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 5000
@@ -570,22 +572,6 @@ uv run pytest tests/test_mcp_integration.py -v
 uv run pytest -n auto
 ```
 
-### Using traditional pip
-
-```bash
-# Install test dependencies
-pip install pytest pytest-asyncio pytest-cov httpx
-
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=src --cov-report=html
-
-# Run specific test file
-pytest tests/test_mcp_integration.py
-```
-
 ### Docker Testing
 
 ```bash
@@ -631,19 +617,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 For questions and support, please open an issue on GitHub.
 
 ---
-
-## 🚀 Quick Start
-
-```bash
-# Clone and setup with uv (fastest way)
-git clone <repository-url>
-cd langchain-fastapi-production
-chmod +x scripts/dev.sh
-./scripts/dev.sh
-
-# Or on Windows
-scripts\dev.bat
-```
 
 **Note**: This is a template project. Remember to:
 

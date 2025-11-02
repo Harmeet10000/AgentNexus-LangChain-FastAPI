@@ -18,10 +18,10 @@ async def connect_to_redis() -> None:
     global redis_client
 
     try:
-        logger.info(
-            "Connecting to Redis",
-            {host: get_settings().REDIS_HOST, port: get_settings().REDIS_PORT},
-        )
+        # logger.info(
+        #     "Connecting to Redis",
+        #     {host: get_settings().REDIS_HOST, port: get_settings().REDIS_PORT},
+        # )
 
         redis_client = await redis.from_url(
             get_settings().REDIS_URL,

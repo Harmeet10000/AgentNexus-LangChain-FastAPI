@@ -1,17 +1,27 @@
 """Neon Postgres database configuration with SQLAlchemy."""
 
 from collections.abc import AsyncGenerator
+from urllib.parse import urlparse
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
 from app.core.settings import get_settings
+from app.utils.logger import logger
 
 
 def get_database_url() -> str:
     """Convert psycopg2 URL to asyncpg URL."""
     postgres_url = get_settings().POSTGRES_URL
-    return postgres_url.replace("postgresql://", "postgresql+asyncpg://")
+    # Convert to asyncpg and fix SSL parameters
+    asyncpg_url = postgres_url.replace("postgresql://", "postgresql+asyncpg://")
+    # Remove psycopg2-specific SSL parameters that asyncpg doesn't support
+    asyncpg_url = asyncpg_url.replace("&sslmode=require", "")
+    asyncpg_url = asyncpg_url.replace("&channel_binding=require", "")
+    asyncpg_url = asyncpg_url.replace("?sslmode=require", "")
+    asyncpg_url = asyncpg_url.replace("?channel_binding=require", "")
+    return asyncpg_url
 
 
 # Create async engine
@@ -53,6 +63,23 @@ async def init_db() -> None:
     """Initialize database tables."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # Get connection info for logging
+        result = await conn.execute(text("SELECT version()"))
+        version = result.scalar()
+
+        # Parse URL for host info
+        parsed_url = urlparse(get_settings().POSTGRES_URL)
+        host = parsed_url.hostname
+
+        logger.info(
+            f"PostgreSQL Connected: {host}",
+            meta={
+                "readyState": 1,  # 1 = connected
+                "poolSize": engine.pool.size(),
+                "version": version.split()[1] if version else "unknown",
+            },
+        )
 
 
 async def close_db() -> None:

@@ -1,25 +1,18 @@
-"""Main FastAPI application module."""
-
-from dotenv import load_dotenv
-
-load_dotenv(".env.development")
-
-# Load the specific environment file
 import sys
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
-from app.connections.mongodb import connect_to_mongodb
 from app.core.exceptions import register_exception_handlers
+from app.core.lifespan import lifespan
 from app.core.settings import get_settings
+from app.core.signals import setup_signal_handlers
 from app.features.health.router import router as health_router
 from app.middleware.server_middleware import (
     CorrelationMiddleware,
@@ -29,23 +22,9 @@ from app.middleware.server_middleware import (
     get_metrics,
 )
 from app.utils.httpResponse import http_response
-from app.utils.logger import logger, setup_logging
+from app.utils.logger import logger
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan."""
-    setup_logging()
-    logger.info("Application starting")
-
-    # Connect to databases
-    await connect_to_mongodb()
-    # await connect_to_redis()
-    # await init_db()
-
-    yield
-
-    logger.info("Application shutdown")
+load_dotenv(".env.development")
 
 
 def create_app() -> FastAPI:
@@ -93,7 +72,7 @@ def create_app() -> FastAPI:
     # Root endpoint
     @app.get("/")
     async def root() -> dict[str, str]:
-        return {"message": "Welcome to LangChain FastAPI Production 🚀"}
+        return {"message": "Welcome to LangChain FastAPI  🚀"}
 
     @app.get("/metrics")
     async def metrics(request: Request):
@@ -125,27 +104,6 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-def setup_signal_handlers() -> None:
-    """Setup graceful shutdown handlers."""
-    import signal
-    import sys
-    from types import FrameType
-
-    def graceful_shutdown(sig_name: str) -> None:
-        """Handle graceful shutdown."""
-        logger.info(f"Received {sig_name}, shutting down gracefully...")
-        sys.exit(0)
-
-    def handle_sigterm(signum: int, frame: FrameType | None) -> None:
-        graceful_shutdown("SIGTERM")
-
-    def handle_sigint(signum: int, frame: FrameType | None) -> None:
-        graceful_shutdown("SIGINT")
-
-    signal.signal(signal.SIGTERM, handle_sigterm)
-    signal.signal(signal.SIGINT, handle_sigint)
-
-
 if __name__ == "__main__":
     # Setup signal handlers
     setup_signal_handlers()
@@ -166,5 +124,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=5000,
         reload=True,
-        log_config=None,  # Use loguru instead
+        log_config=None,
+        access_log=False,
     )

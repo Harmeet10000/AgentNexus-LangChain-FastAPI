@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     POSTGRES_MAX_OVERFLOW: int = Field(default=10)  # Added this missing field
     POSTGRES_POOL_SIZE: int = Field(default=5)  # Added this missing field
     # --- Redis Cache ---
+    REDIS_URL: str = Field(default="redis://localhost:6379")
     REDIS_HOST: str = Field(default="localhost")
     REDIS_PORT: int = Field(default=6379)
     REDIS_USERNAME: str = Field(default="default")
