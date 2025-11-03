@@ -1,5 +1,3 @@
-"""Standardized HTTP error response utility."""
-
 import os
 
 from fastapi import HTTPException, Request

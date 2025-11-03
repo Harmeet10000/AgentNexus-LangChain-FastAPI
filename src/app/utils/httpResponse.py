@@ -1,5 +1,3 @@
-"""Standardized HTTP response utility."""
-
 import os
 from typing import Any
 

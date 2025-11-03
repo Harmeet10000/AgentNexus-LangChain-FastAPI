@@ -1,0 +1,56 @@
+# HTTP-only Caddyfile for development
+:5000 {
+    # Logging
+    log {
+        output file /var/log/caddy/access.log
+        level INFO
+    }
+
+    # Security headers
+    header {
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+    }
+
+    # Compression (automatic in Caddy)
+    encode gzip
+
+    # Static assets caching
+    @static {
+        path *.js *.css *.png *.jpg *.jpeg *.gif *.ico *.svg
+    }
+    header @static Cache-Control "public, immutable, max-age=31536000"
+
+    # Health check endpoint (no rate limiting)
+    handle /api/v1/health/self {
+        reverse_proxy ai-service-1:5000 ai-service-2:5000 {
+            lb_policy least_conn
+            health_uri /api/v1/health/self
+            health_interval 30s
+        }
+    }
+
+    # General API endpoints
+    handle /api/* {
+        reverse_proxy ai-service-1:5000 ai-service-2:5000 {
+            lb_policy least_conn
+            health_uri /api/v1/health/self
+            health_interval 30s
+            fail_duration 30s
+            max_fails 3
+
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Fallback for other routes
+    handle {
+        reverse_proxy ai-service-1:5000 ai-service-2:5000 {
+            lb_policy least_conn
+        }
+    }
+}

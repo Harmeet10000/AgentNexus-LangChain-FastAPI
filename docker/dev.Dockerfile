@@ -17,27 +17,10 @@ ENV PATH="/root/.local/bin:${PATH}"
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN uv sync --no-dev
+RUN uv sync
 
 # ============================== Production Stage ==============================
 FROM python:3.12-slim AS production
-
-# Environment variables from .env.example
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    APP_NAME="LangChain FastAPI Production" \
-    APP_VERSION="1.0.0" \
-    ENVIRONMENT=production \
-    DEBUG=False \
-    API_PREFIX=/api/v1 \
-    HOST=0.0.0.0 \
-    PORT=5000 \
-    WORKERS=4 \
-    LOG_LEVEL=INFO \
-    LOG_FORMAT=json \
-    RATE_LIMIT_ENABLED=True \
-    RATE_LIMIT_REQUESTS=100 \
-    RATE_LIMIT_PERIOD=60
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash appuser
@@ -63,4 +46,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 5000
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "4"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "5000"]

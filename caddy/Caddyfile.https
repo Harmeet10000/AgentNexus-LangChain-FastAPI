@@ -1,0 +1,79 @@
+# HTTPS Caddyfile for production
+yourdomain.com {
+    # Automatic HTTPS with Let's Encrypt
+    # For self-signed certs, use: tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+
+    # Logging
+    log {
+        output file /var/log/caddy/access.log
+        level INFO
+    }
+
+    # Security headers
+    header {
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+    }
+
+    # Compression
+    encode gzip
+
+    # Static assets caching
+    @static {
+        path *.js *.css *.png *.jpg *.jpeg *.gif *.ico *.svg
+    }
+    header @static Cache-Control "public, immutable, max-age=31536000"
+
+    # Health check endpoint (no rate limiting, no logging)
+    handle /api/v1/health/self {
+        log {
+            output discard
+        }
+        reverse_proxy ai-service-1:5000 ai-service-2:5000 {
+            lb_policy least_conn
+            health_uri /api/v1/health/self
+            health_interval 30s
+        }
+    }
+
+    # General API endpoints
+    handle /api/* {
+        reverse_proxy ai-service-1:5000 ai-service-2:5000 {
+            lb_policy least_conn
+            health_uri /api/v1/health/self
+            health_interval 30s
+            fail_duration 30s
+            max_fails 3
+
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 30s
+            }
+        }
+    }
+
+    # Fallback for other routes
+    handle {
+        reverse_proxy ai-service-1:5000 ai-service-2:5000 {
+            lb_policy least_conn
+            health_uri /api/v1/health/self
+            health_interval 30s
+            fail_duration 30s
+            max_fails 3
+        }
+    }
+}
+
+# HTTP to HTTPS redirect
+http://yourdomain.com {
+    redir https://{host}{uri} permanent
+}

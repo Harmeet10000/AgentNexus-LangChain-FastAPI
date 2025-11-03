@@ -3,8 +3,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-
 from app.connections.mongodb import connect_to_mongodb
 from app.connections.postgres import init_db
 from app.connections.redis import connect_to_redis
@@ -13,7 +11,7 @@ from app.utils.uvicorn_logger import setup_uvicorn_logging
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan() -> AsyncIterator[None]:
     """Manage application startup and shutdown."""
     # setup_logging()
     setup_uvicorn_logging()

@@ -1,11 +1,28 @@
 services:
-  app:
+  caddy:
+    image: caddy:2-alpine
+    container_name: langchain-caddy
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./caddy/Caddyfile.http:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    depends_on:
+      - ai-service-1
+      - ai-service-2
+
+  ai-service-1:
     build:
       context: .
       dockerfile: docker/dev.Dockerfile
-    container_name: langchain-fastapi
-    ports:
-      - "5000:5000"
+    container_name: ai-service-1
+    expose:
+      - "5000"
     volumes:
       - ./src:/app/src
       - ./data:/app/data
@@ -13,9 +30,24 @@ services:
       - ENVIRONMENT=development
     env_file:
       - .env.development
-    depends_on:
-      - redis
-      - mongodb
+    networks:
+      - langchain-network
+    restart: unless-stopped
+
+  ai-service-2:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+    container_name: ai-service-2
+    expose:
+      - "5000"
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+    environment:
+      - ENVIRONMENT=development
+    env_file:
+      - .env.development
     networks:
       - langchain-network
     restart: unless-stopped
@@ -52,5 +84,6 @@ networks:
 
 volumes:
   redis-data:
-  mongodb-data:
-  mongodb-config:
+  caddy-data:
+  caddy-config:
+  caddy-logs:
