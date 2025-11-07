@@ -6,14 +6,13 @@ build-backend = "setuptools.build_meta"
 name = "langchain-fastapi-production"
 version = "1.0.0"
 description = "Production-grade FastAPI application with LangChain integration"
-readme = "README.md"
-license = { file = "LICENSE" }
+# readme = "README.md"
+license = "MIT"
 authors = [{ name = "Harmeet Singh", email = "harmeetsinghfbd@gmail.com" }]
 maintainers = [{ name = "Harmeet Singh", email = "harmeetsinghfbd@gmail.com" }]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",

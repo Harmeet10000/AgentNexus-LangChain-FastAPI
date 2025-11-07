@@ -114,58 +114,6 @@ uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 5000
 -   **Parallel downloads** and installations
 
 
-
-## � Deveelopment Workflow
-
-### Docker + uv Hybrid Development
-
-For the best development experience, you can combine Docker for services with local uv for the application:
-
-```bash
-# Start only the services (database, redis, etc.)
-docker compose up -d
-
-# Run the application locally with uv
-uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 5000
-
-# Or use the development script
-chmod +x scripts/dev.sh
-./scripts/dev.sh
-```
-
-### Development Scripts
-
-```bash
-# scripts/dev.sh
-#!/bin/bash
-set -e
-
-echo "🚀 Starting development environment..."
-
-# Start services
-docker-compose up -d mongodb redis
-
-# Wait for services to be ready
-echo "⏳ Waiting for services..."
-sleep 5
-
-# Run the application with uv
-echo "🏃 Starting FastAPI application..."
-uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 5000
-```
-
-### Hot Reloading with Docker
-
-If you prefer full Docker development:
-
-```bash
-# Development with hot reloading
-docker-compose -f docker-compose.dev.yml up --build
-
-# View logs
-docker-compose -f docker-compose.dev.yml logs -f app
-```
-
 ## 📁 Project Structure
 
 ```
@@ -505,49 +453,6 @@ await agent.cleanup()
 -   **Redis Commander**: http://localhost:8082
 -   **MCP Weather Server**: http://localhost:8001/docs (if enabled)
 
-## 🚀 Deployment
-
-### Production Docker Build
-
-```bash
-# Build production image
-docker build -f docker/production/Dockerfile -t langchain-fastapi:prod .
-
-# Run with production config
-docker run -p 5000:5000 --env-file .env.prod langchain-fastapi:prod
-```
-
-### Cloud Deployment
-
-The application is ready for deployment on:
-
--   AWS ECS/EKS
--   Google Cloud Run/GKE
--   Azure Container Instances/AKS
--   Railway
--   Render
-
-### MCP Servers in Production
-
-```yaml
-# docker-compose.yml additions for MCP
-services:
-    app:
-        environment:
-            - ENABLE_DB_MCP=true
-            - ENABLE_WEATHER_MCP=true
-
-    weather-mcp:
-        build:
-            context: .
-            dockerfile: docker/mcp/weather.Dockerfile
-        ports:
-            - "8001:5000"
-        environment:
-            - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
-        restart: unless-stopped
-```
-
 ## 🧪 Testing
 
 ### Using uv (Recommended)
@@ -570,16 +475,6 @@ uv run pytest tests/test_mcp_integration.py -v
 
 # Run tests in parallel
 uv run pytest -n auto
-```
-
-### Docker Testing
-
-```bash
-# Run tests in Docker
-docker-compose -f docker-compose.test.yml up --build
-
-# Run specific test suite
-docker-compose -f docker-compose.test.yml run --rm test pytest tests/test_mcp_integration.py
 ```
 
 ## 🔒 Security

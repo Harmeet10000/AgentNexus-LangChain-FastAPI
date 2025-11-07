@@ -3,12 +3,12 @@ services:
     image: caddy:2-alpine
     container_name: langchain-caddy
     ports:
-      - "5000:5000"
+      - "80:80"
+      - "443:443"
     volumes:
-      - ./caddy/Caddyfile.http:/etc/caddy/Caddyfile:ro
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro  # Production config
       - caddy-data:/data
       - caddy-config:/config
-      - caddy-logs:/var/log/caddy
     networks:
       - langchain-network
     restart: unless-stopped
@@ -22,10 +22,11 @@ services:
       dockerfile: docker/dev.Dockerfile
     container_name: ai-service-1
     expose:
-      - "5000"
+      - "5000:5000"
     volumes:
       - ./src:/app/src
       - ./data:/app/data
+      - ./.venv:/app/.venv
     environment:
       - ENVIRONMENT=development
     env_file:
@@ -40,10 +41,11 @@ services:
       dockerfile: docker/dev.Dockerfile
     container_name: ai-service-2
     expose:
-      - "5000"
+      - "5001:5000"
     volumes:
       - ./src:/app/src
       - ./data:/app/data
+      - ./.venv:/app/.venv
     environment:
       - ENVIRONMENT=development
     env_file:
@@ -86,4 +88,3 @@ volumes:
   redis-data:
   caddy-data:
   caddy-config:
-  caddy-logs:

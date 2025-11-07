@@ -17,7 +17,8 @@ ENV PATH="/root/.local/bin:${PATH}"
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN uv sync
+COPY src/ src/
+RUN uv sync --no-editable
 
 # ============================== Production Stage ==============================
 FROM python:3.12-slim AS production
@@ -46,4 +47,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 5000
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "5000", "--reload"]

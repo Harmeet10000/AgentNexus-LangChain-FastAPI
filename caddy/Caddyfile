@@ -1,5 +1,5 @@
-# HTTP-only Caddyfile for development
-:5000 {
+# HTTP Caddyfile for ai-service domain
+http://damn-ai-service {
     # Logging
     log {
         output file /var/log/caddy/access.log
@@ -13,7 +13,7 @@
         X-XSS-Protection "1; mode=block"
     }
 
-    # Compression (automatic in Caddy)
+    # Compression
     encode gzip
 
     # Static assets caching
@@ -22,7 +22,7 @@
     }
     header @static Cache-Control "public, immutable, max-age=31536000"
 
-    # Health check endpoint (no rate limiting)
+    # Health check endpoint (no rate limiting, no logging)
     handle /api/v1/health/self {
         reverse_proxy ai-service-1:5000 ai-service-2:5000 {
             lb_policy least_conn
@@ -44,6 +44,11 @@
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto {scheme}
+
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 30s
+            }
         }
     }
 
@@ -51,6 +56,10 @@
     handle {
         reverse_proxy ai-service-1:5000 ai-service-2:5000 {
             lb_policy least_conn
+            health_uri /api/v1/health/self
+            health_interval 30s
+            fail_duration 30s
+            max_fails 3
         }
     }
 }

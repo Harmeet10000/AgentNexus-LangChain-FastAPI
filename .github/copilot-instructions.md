@@ -241,3 +241,17 @@ async def get_posts(
 
     return http_response("Posts retrieved", posts)
 ```
+
+
+<!-- always use these kinds of imports Modern Python Pattern (Cleaner Imports) -->
+<!-- You can make imports even cleaner using __init__.py: -->
+```py
+utils/__init__.py:
+pythonfrom .logger import logger
+from .http_error import httpError
+
+__all__ = ['logger', 'httpError']
+Now in routes/users.py:
+pythonfrom ..utils import logger, httpError 
+```
+<!-- use python syntax for v3.12 and use context7 for fetching latest documents -->

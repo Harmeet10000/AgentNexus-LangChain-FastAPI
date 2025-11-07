@@ -1,5 +1,5 @@
 # HTTPS Caddyfile for production
-yourdomain.com {
+damn-ai-service.com {
     # Automatic HTTPS with Let's Encrypt
     # For self-signed certs, use: tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
 
@@ -30,9 +30,6 @@ yourdomain.com {
 
     # Health check endpoint (no rate limiting, no logging)
     handle /api/v1/health/self {
-        log {
-            output discard
-        }
         reverse_proxy ai-service-1:5000 ai-service-2:5000 {
             lb_policy least_conn
             health_uri /api/v1/health/self
@@ -74,6 +71,6 @@ yourdomain.com {
 }
 
 # HTTP to HTTPS redirect
-http://yourdomain.com {
+http://damn-ai-service.com {
     redir https://{host}{uri} permanent
 }
