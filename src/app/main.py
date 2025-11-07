@@ -9,7 +9,6 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
-from app.core.exceptions import register_exception_handlers
 from app.core.lifespan import lifespan
 from app.core.settings import get_settings
 from app.core.signals import setup_signal_handlers
@@ -17,14 +16,17 @@ from app.features.health.router import router as health_router
 from app.middleware.server_middleware import (
     CorrelationMiddleware,
     MetricsMiddleware,
-    SecurityHeadersMiddleware,
     TimeoutMiddleware,
     get_metrics,
 )
+from app.middleware.global_exception_handler import global_exception_handler
 from app.utils.httpResponse import http_response
-from app.utils.logger import logger
+from app.utils.logger import logger, setup_logging
 
 load_dotenv(".env.development")
+
+# Initialize logging
+# setup_logging()
 
 
 def create_app() -> FastAPI:
@@ -42,8 +44,6 @@ def create_app() -> FastAPI:
     # Correlation ID
     app.add_middleware(CorrelationMiddleware)
 
-    # Security middleware (first)
-    app.add_middleware(SecurityHeadersMiddleware)
     # Trusted hosts
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 
@@ -65,9 +65,6 @@ def create_app() -> FastAPI:
 
     # Timeout (30 seconds)
     app.add_middleware(TimeoutMiddleware, timeout=30)
-
-    # Exception handlers
-    register_exception_handlers(app)
 
     # Root endpoint
     @app.get("/")
@@ -104,20 +101,12 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
+# Register GLOBAL exception handlers (equivalent to Express error middleware)
+app.add_exception_handler(Exception, global_exception_handler)
+
 if __name__ == "__main__":
     # Setup signal handlers
     setup_signal_handlers()
-
-    # Handle unhandled exceptions
-    def handle_exception(
-        exc_type: type[BaseException], exc_value: BaseException, exc_traceback: Any
-    ) -> None:
-        if issubclass(exc_type, KeyboardInterrupt):
-            sys.__excepthook__(exc_type, exc_value, exc_traceback)
-            return
-        logger.error("UNHANDLED EXCEPTION! 💥", {"error": str(exc_value)})
-
-    sys.excepthook = handle_exception
 
     uvicorn.run(
         "app.main:app",

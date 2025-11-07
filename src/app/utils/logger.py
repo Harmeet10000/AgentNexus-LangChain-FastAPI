@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,7 +14,7 @@ class LogConfig(BaseSettings):
     ENVIRONMENT: str = Environment.DEVELOPMENT
     LOG_LEVEL: str = "DEBUG"
     LOG_DIR: Path = Path("logs/")
-    LOG_ROTATION: str = "500 MB"
+    LOG_ROTATION: str = "5 MB"
     LOG_RETENTION: str = "30 days"
     LOG_COMPRESSION: str = "zip"
     LOG_BACKTRACE: bool = True
@@ -23,125 +22,93 @@ class LogConfig(BaseSettings):
 
     class Config:
         env_file = ".env.development"
-
-
-def serialize_record(record: dict[str, Any]) -> str:
-    """Custom JSON serialization for file logs."""
-
-    log_meta = {}
-    if record.get("extra", {}).get("meta"):
-        meta = record["extra"]["meta"]
-        if isinstance(meta, dict):
-            for key, value in meta.items():
-                if isinstance(value, Exception):
-                    log_meta[key] = {
-                        "name": value.__class__.__name__,
-                        "message": str(value),
-                        "trace": getattr(value, "__traceback__", ""),
-                    }
-                else:
-                    log_meta[key] = value
-
-    log_data = {
-        "level": record["level"].name,
-        "message": record["message"],
-        "timestamp": record["time"].isoformat(),
-        "meta": log_meta,
-    }
-
-    return json.dumps(log_data, indent=4)
+        extra = "ignore"  # Ignore extra fields from .env file
 
 
 def console_format(record: dict[str, Any]) -> str:
-    """Custom console format with colors."""
+    """Format logs for console with INFO/META structure."""
     level = record["level"].name
-    time = record["time"].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    time = record["time"].strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     message = record["message"]
 
     # Color mapping
-    level_colors = {
+    colors = {
         "DEBUG": "<cyan>",
-        "INFO": "<blue>",
+        "INFO": "<green>",
         "WARNING": "<yellow>",
         "ERROR": "<red>",
         "CRITICAL": "<red><bold>",
     }
+    color = colors.get(level, "<white>")
+    end_color = "</>"
 
-    color = level_colors.get(level, "")
-    meta = record.get("extra", {}).get("meta", {})
-    meta_str = f"\n<magenta>META</magenta> {meta}" if meta else ""
+    # Base format
+    fmt = f"{color}{level}{end_color} <dim>[{time}]</dim> {message}"
 
-    return f"{color}{level}</>  [<green>{time}</green>] {message}{meta_str}\n"
+    # Add extra data (filter out internal loguru keys)
+    extra_data = {
+        k: v
+        for k, v in record["extra"].items()
+        if not k.startswith("_")
+    }
+
+    if extra_data:
+        meta_parts = [f"<cyan>{k}</>={repr(v)}" for k, v in extra_data.items()]
+        meta_str = " ".join(meta_parts)
+        fmt += f" <dim>|</dim> {meta_str}"
+
+    # Add exception if present
+    if record["exception"]:
+        fmt += "\n{exception}"
+
+    return fmt + "\n"
 
 
 def setup_logging(config: LogConfig | None = None) -> None:
-    """Configure Loguru with Winston-like features."""
+    """Configure loguru logger with console and file handlers."""
     if config is None:
-        config = LogConfig()
+        try:
+            config = LogConfig()
+        except Exception:
+            # Fallback to defaults if config fails
+            config = LogConfig(
+                ENVIRONMENT=Environment.DEVELOPMENT,
+                LOG_LEVEL="DEBUG",
+                LOG_DIR=Path("logs/"),
+                LOG_ROTATION="5 MB",
+                LOG_RETENTION="30 days",
+                LOG_COMPRESSION="zip",
+                LOG_BACKTRACE=True,
+                LOG_DIAGNOSE=False,
+            )
 
+    # Remove default handler
     loguru_logger.remove()
 
-    # Determine log level based on environment
-    log_level = "DEBUG" if config.ENVIRONMENT == Environment.DEVELOPMENT else "INFO"
-
-    # Console handler with custom format
+    # Console handler with colors and custom format
     loguru_logger.add(
-        sys.stdout,
+        sys.stderr,
+        format=console_format,  # type: ignore[arg-type]
+        level=config.LOG_LEVEL,
         colorize=True,
-        format=(
-            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-            "<level>{level: <8}</level> | "
-            "<cyan>{extra[request_id]}</cyan> | "
-            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-            "<level>{message}</level>"
-        ),
-        level=log_level,
         backtrace=config.LOG_BACKTRACE,
         diagnose=config.LOG_DIAGNOSE,
-        enqueue=True,
     )
 
-    # Create logs directory
+    # File handler with JSON serialization
     config.LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-    # File handler with JSON format (like Winston)
     loguru_logger.add(
-        config.LOG_DIR / f"{config.ENVIRONMENT}.log",
-        format=serialize_record,
-        level="DEBUG",
+        config.LOG_DIR / "app_{time:YYYY-MM-DD}.log",
+        format="{message}",
+        level=config.LOG_LEVEL,
         rotation=config.LOG_ROTATION,
         retention=config.LOG_RETENTION,
         compression=config.LOG_COMPRESSION,
+        serialize=True,
         backtrace=config.LOG_BACKTRACE,
         diagnose=config.LOG_DIAGNOSE,
-        enqueue=True,
     )
 
-    loguru_logger.info("Logging configured")
 
-
-# Async logger wrapper (like Winston setImmediate)
-class Logger:
-    """Custom logger wrapper."""
-
-    @staticmethod
-    def info(message: str, meta: dict[str, Any] | None = None) -> None:
-        loguru_logger.bind(meta=meta or {}).info(message)
-
-    @staticmethod
-    def error(message: str, meta: dict[str, Any] | None = None) -> None:
-        loguru_logger.bind(meta=meta or {}).error(message)
-
-    @staticmethod
-    def warn(message: str, meta: dict[str, Any] | None = None) -> None:
-        loguru_logger.bind(meta=meta or {}).warning(message)
-
-    @staticmethod
-    def debug(message: str, meta: dict[str, Any] | None = None) -> None:
-        loguru_logger.bind(meta=meta or {}).debug(message)
-
-
-# Export logger instance
-logger = Logger()
-
-# __all__ = ["logger", "setup_logging", "LogConfig"]
+# Export configured logger
+logger = loguru_logger

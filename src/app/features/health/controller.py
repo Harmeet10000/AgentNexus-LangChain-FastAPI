@@ -4,7 +4,6 @@ from fastapi import Request
 
 from app.connections import mongodb as mongo_db
 from app.connections.redis import get_redis_client
-from app.utils import logger
 from app.utils.httpResponse import http_response
 from app.utils.quicker import (
     check_database,
@@ -22,7 +21,6 @@ async def self_info(request: Request) -> Any:
         "container": request.client.host if request.client else "unknown",
         "timestamp": request.scope.get("time", None) or None,
     }
-    # logger.info(f"Server info: {server_info}", extra={"meta": server_info})
 
     return http_response(
         message="Success",

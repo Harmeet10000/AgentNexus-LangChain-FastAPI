@@ -21,7 +21,8 @@ from prometheus_client import (
 from redis.asyncio import Redis
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.utils.httpError import http_error
+from app.utils.exceptions import APIException
+
 
 # Context variable for correlation ID
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
@@ -133,42 +134,6 @@ def get_correlation_id() -> str:
     return correlation_id_var.get()
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add security headers to responses (Helmet equivalent)."""
-
-    def __init__(self, app: Any) -> None:
-        super().__init__(app)
-
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        response = await call_next(request)
-
-        csp_directives = [
-            "default-src 'self'",
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-            "script-src 'self'",
-            "font-src 'self' https://fonts.gstatic.com",
-            "img-src 'self' data: https:",
-            "connect-src 'self'",
-            "frame-src 'none'",
-            "object-src 'none'",
-            "media-src 'self'",
-            "manifest-src 'self'",
-        ]
-        response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Strict-Transport-Security"] = (
-            "max-age=31536000; includeSubDomains; preload"
-        )
-        response.headers["Referrer-Policy"] = "same-origin"
-        response.headers["Permissions-Policy"] = (
-            "geolocation=(), microphone=(), camera=()"
-        )
-
-        return response
-
-
 class TimeoutMiddleware(BaseHTTPMiddleware):
     """Timeout requests after specified duration."""
 
@@ -180,8 +145,10 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
         try:
             return await asyncio.wait_for(call_next(request), timeout=self.timeout)
         except TimeoutError:
-            raise http_error(
-                "Request took too long to process", 408, request, Exception("Timeout")
+            raise APIException(
+                status_code=408,
+                message="Request took too long to process",
+                name="TimeoutError",
             )
 
 
@@ -195,10 +162,10 @@ async def rate_limit_handler(
 ) -> Response:
     """Custom rate limit exceeded handler."""
     expire_minutes = pexpire // 60000
-    raise http_error(
-        message=f"Too many requests from this IP, please try again in {expire_minutes} minutes!",
+    raise APIException(
         status_code=429,
-        request=request,
+        message=f"Too many requests from this IP, please try again in {expire_minutes} minutes!",
+        name="RateLimitError",
     )
 
 

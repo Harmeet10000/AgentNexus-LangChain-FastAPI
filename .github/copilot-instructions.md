@@ -253,5 +253,87 @@ from .http_error import httpError
 __all__ = ['logger', 'httpError']
 Now in routes/users.py:
 pythonfrom ..utils import logger, httpError 
+
+
+from fastapi import APIRouter, Depends, Request, status
+from models.auth_models import RegisterRequest, RegisterResponse
+from services.auth_service import AuthService
+from utils.responses import http_response
+from utils.exceptions import APIException
+
+router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+# Dependency injection (optional, but best practice)
+def get_auth_service() -> AuthService:
+    return AuthService()
+
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register(
+    request: Request,
+    body: RegisterRequest,  # Pydantic automatically validates!
+    auth_service: AuthService = Depends(get_auth_service)
+):
+
+    
+    # If validation fails, FastAPI automatically returns 422 error
+    # No need for manual validation like in Express!
+    
+    new_user = await auth_service.register_user(body)
+         # Example: Check if user exists
+         if new_user:
+             raise APIException(
+                 status_code=409,
+                 message="User already exists",
+                 name="ConflictError"
+             )
+        
+    return http_response(
+        request=request,
+        status_code=status.HTTP_201_CREATED,
+        message="User registered successfully",
+        data={"_id": new_user.id}
+    )
+
+    # routes/auth_routes.py
+# ============================================
+from fastapi import APIRouter, Depends, Request, status
+from models.auth_models import RegisterRequest, RegisterResponse
+from services.auth_service import AuthService
+from utils.responses import http_response
+from utils.exceptions import APIException
+
+router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+# Dependency injection (optional, but best practice)
+def get_auth_service() -> AuthService:
+    return AuthService()
+
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register(
+    request: Request,
+    body: RegisterRequest,  # Pydantic automatically validates!
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    Register a new user
+    
+    No try-catch needed! FastAPI handles validation automatically.
+    Just raise exceptions when needed.
+    """
+    
+    # If validation fails, FastAPI automatically returns 422 error
+    # No need for manual validation like in Express!
+    
+    new_user = await auth_service.register_user(body)
+    
+    return http_response(
+        request=request,
+        status_code=status.HTTP_201_CREATED,
+        message="User registered successfully",
+        data={"_id": new_user.id}
+    )
+
+    
+
 ```
 <!-- use python syntax for v3.12 and use context7 for fetching latest documents -->

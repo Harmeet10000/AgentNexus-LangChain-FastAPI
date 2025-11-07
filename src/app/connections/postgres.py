@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import DeclarativeBase
 
 from app.core.settings import get_settings
 from app.utils.logger import logger
@@ -42,9 +42,6 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
-# Base class for models
-Base = declarative_base()
-
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency for database sessions."""
@@ -62,7 +59,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     """Initialize database tables."""
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
         # Get connection info for logging
         result = await conn.execute(text("SELECT version()"))
@@ -74,11 +70,8 @@ async def init_db() -> None:
 
         logger.info(
             f"PostgreSQL Connected: {host}",
-            meta={
-                "readyState": 1,  # 1 = connected
-                "poolSize": engine.pool.size(),
-                "version": version.split()[1] if version else "unknown",
-            },
+            readyState=1,
+            database= 'neon-postgres',
         )
 
 

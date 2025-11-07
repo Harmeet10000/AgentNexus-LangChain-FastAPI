@@ -46,18 +46,16 @@ async def connect_to_mongodb() -> bool:
 
         logger.info(
             f"MongoDB Connected: {host}",
-            meta={
-                "readyState": 1,  # 1 = connected in MongoDB
-                "poolSize": mongo_options["maxPoolSize"],
-                "version": server_info.get("version", "unknown"),
-            },
+            readyState=1,
+            poolSize=mongo_options["maxPoolSize"],
+            version=server_info.get("version", "unknown"),
         )
 
 
         return True
 
     except (ConnectionFailure, ServerSelectionTimeoutError) as e:
-        logger.error("MongoDB client error:", meta={"error": str(e)})
+        logger.error("MongoDB client error", error=str(e))
         raise
 
 
@@ -67,8 +65,8 @@ async def close_mongodb_connection() -> None:
     global mongodb_client, mongodb
 
     if mongodb_client:
-        logger.warn("MongoDB connection closed")
+        logger.warning("MongoDB connection closing")
         mongodb_client.close()
         mongodb_client = None
         mongodb = None
-        logger.warn("MongoDB connection ended")
+        logger.info("MongoDB connection closed")

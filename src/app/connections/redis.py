@@ -18,10 +18,11 @@ async def connect_to_redis() -> None:
     global redis_client
 
     try:
-        # logger.info(
-        #     "Connecting to Redis",
-        #     {host: get_settings().REDIS_HOST, port: get_settings().REDIS_PORT},
-        # )
+        logger.info(
+            "Connecting to Redis",
+            host=get_settings().REDIS_HOST,
+            port=get_settings().REDIS_PORT,
+        )
 
         redis_client = await redis.from_url(
             get_settings().REDIS_URL,
@@ -33,10 +34,14 @@ async def connect_to_redis() -> None:
         # Verify connection
         await redis_client.ping()
 
-        logger.info("Successfully connected to Redis")
+        logger.info(
+            "Successfully connected to Redis",
+            host=get_settings().REDIS_HOST,
+            max_connections=50,
+        )
 
     except Exception as e:
-        logger.error("Failed to connect to Redis", {error: str(e)})
+        logger.error("Failed to connect to Redis", error=str(e))
         raise
 
 
@@ -84,7 +89,7 @@ class CacheManager:
         except json.JSONDecodeError:
             return value
         except Exception as e:
-            logger.error("Cache get error", {key: full_key, error: str(e)})
+            logger.error("Cache get error", key=full_key, error=str(e))
             return None
 
     @retry(
@@ -101,7 +106,7 @@ class CacheManager:
             await client.setex(full_key, ttl, serialized)
             return True
         except Exception as e:
-            logger.error("Cache set error", {key: full_key, error: str(e)})
+            logger.error("Cache set error", key=full_key, error=str(e))
             return False
 
     async def delete(self, key: str) -> bool:
@@ -113,7 +118,7 @@ class CacheManager:
             result = await client.delete(full_key)
             return bool(result)
         except Exception as e:
-            logger.error("Cache delete error", {key: full_key, error: str(e)})
+            logger.error("Cache delete error", key=full_key, error=str(e))
             return False
 
     async def delete_pattern(self, pattern: str) -> int:
@@ -131,7 +136,7 @@ class CacheManager:
             return 0
         except Exception as e:
             logger.error(
-                "Cache delete pattern error", {pattern: full_pattern, error: str(e)}
+                "Cache delete pattern error", pattern=full_pattern, error=str(e)
             )
             return 0
 
@@ -143,7 +148,7 @@ class CacheManager:
         try:
             return bool(await client.exists(full_key))
         except Exception as e:
-            logger.error("Cache exists error", {key: full_key, error: str(e)})
+            logger.error("Cache exists error", key=full_key, error=str(e))
             return False
 
     async def get_many(self, keys: list[str]) -> dict[str, Any]:
@@ -162,7 +167,7 @@ class CacheManager:
                         result[key] = value
             return result
         except Exception as e:
-            logger.error("Cache get many error", {error: str(e)})
+            logger.error("Cache get many error", error=str(e))
             return {}
 
     async def set_many(self, mapping: dict[str, Any], ttl: int | None = None) -> bool:
@@ -179,7 +184,7 @@ class CacheManager:
             await pipe.execute()
             return True
         except Exception as e:
-            logger.error("Cache set many error", {error: str(e)})
+            logger.error("Cache set many error", error=str(e))
             return False
 
     async def increment(self, key: str, amount: int = 1) -> int | None:
@@ -190,7 +195,7 @@ class CacheManager:
         try:
             return await client.incr(full_key, amount)
         except Exception as e:
-            logger.error("Cache increment error", {key: full_key, error: str(e)})
+            logger.error("Cache increment error", key=full_key, error=str(e))
             return None
 
     async def get_ttl(self, key: str) -> int | None:
@@ -202,7 +207,7 @@ class CacheManager:
             ttl = await client.ttl(full_key)
             return ttl if ttl > 0 else None
         except Exception as e:
-            logger.error("Cache get TTL error", {key: full_key, error: str(e)})
+            logger.error("Cache get TTL error", key=full_key, error=str(e))
             return None
 
 
