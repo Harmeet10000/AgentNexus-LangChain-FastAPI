@@ -1,14 +1,13 @@
-"""Server middleware for correlation ID, metrics, security, timeout, and rate limiting."""
+"""Server middleware for correlation ID, metrics, security, and timeout."""
 
 import asyncio
+import logging
 import time
 from collections.abc import Callable
 from contextvars import ContextVar
-from typing import Any
 
 from fastapi import Request, Response
-from fastapi_limiter import FastAPILimiter
-from fastapi_limiter.depends import RateLimiter
+from fastapi.responses import JSONResponse
 from nanoid import generate
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -18,11 +17,10 @@ from prometheus_client import (
     Histogram,
     generate_latest,
 )
-from redis.asyncio import Redis
-from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.utils.exceptions import APIException
 
+# Setup logging
+logger = logging.getLogger(__name__)
 
 # Context variable for correlation ID
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
@@ -60,48 +58,64 @@ app_up = Gauge(
 app_up.labels(project="langchain-fastapi").set(1)
 
 
-class CorrelationMiddleware(BaseHTTPMiddleware):
-    """Add correlation ID to requests."""
+# ✅ Using decorator-style middleware for better performance
+async def correlation_middleware(request: Request, call_next: Callable) -> Response:
+    """Add correlation ID to requests for distributed tracing."""
+    # Generate unique correlation ID
+    correlation_id = generate(size=21)
+    correlation_id_var.set(correlation_id)
+    request.state.correlation_id = correlation_id
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        correlation_id = generate(size=21)
-        correlation_id_var.set(correlation_id)
-        request.state.correlation_id = correlation_id
+    logger.info(f"[{correlation_id}] {request.method} {request.url.path} started")
 
+    try:
         response = await call_next(request)
         response.headers["X-Correlation-ID"] = correlation_id
 
+        logger.info(
+            f"[{correlation_id}] {request.method} {request.url.path} "
+            f"completed with status {response.status_code}"
+        )
+
         return response
+    except Exception as e:
+        logger.error(
+            f"[{correlation_id}] {request.method} {request.url.path} "
+            f"failed with error: {str(e)}",
+            exc_info=True
+        )
+        raise
 
 
-class MetricsMiddleware(BaseHTTPMiddleware):
-    """Prometheus metrics middleware."""
+def create_metrics_middleware(project_name: str = "langchain-fastapi"):
+    """Factory function to create metrics middleware with project name."""
 
-    def __init__(self, app: Any, project_name: str = "langchain-fastapi") -> None:
-        super().__init__(app)
-        self.project_name = project_name
-
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Skip metrics endpoint itself
+    async def metrics_middleware(request: Request, call_next: Callable) -> Response:
+        """Prometheus metrics middleware for monitoring."""
+        # Skip metrics endpoint itself to avoid infinite loop
         if request.url.path == "/metrics":
-            response: Response = await call_next(request)
-            return response
+            return await call_next(request)
 
         method = request.method
         path = request.url.path
 
         # Track in-progress requests
         http_requests_in_progress.labels(
-            method=method, path=path, project=self.project_name
+            method=method, path=path, project=project_name
         ).inc()
 
         start_time = time.time()
+        status_code = 500  # Default to 500 in case of exception
 
         try:
             response = await call_next(request)
             status_code = response.status_code
-        except Exception:
-            status_code = 500
+            return response
+        except Exception as e:
+            logger.error(
+                f"Exception in request {method} {path}: {str(e)}",
+                exc_info=True
+            )
             raise
         finally:
             duration = time.time() - start_time
@@ -111,68 +125,76 @@ class MetricsMiddleware(BaseHTTPMiddleware):
                 method=method,
                 path=path,
                 status_code=status_code,
-                project=self.project_name,
+                project=project_name,
             ).inc()
 
             http_request_duration_seconds.labels(
                 method=method,
                 path=path,
                 status_code=status_code,
-                project=self.project_name,
+                project=project_name,
             ).observe(duration)
 
             # Decrement in-progress
             http_requests_in_progress.labels(
-                method=method, path=path, project=self.project_name
+                method=method, path=path, project=project_name
             ).dec()
 
-        return response
+    return metrics_middleware
+
+
+def create_timeout_middleware(timeout_seconds: int = 30):
+    """Factory function to create timeout middleware with custom timeout."""
+
+    async def timeout_middleware(request: Request, call_next: Callable) -> Response:
+        """Timeout requests after specified duration to prevent hanging."""
+        try:
+            return await asyncio.wait_for(
+                call_next(request),
+                timeout=timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Request timeout: {request.method} {request.url.path} "
+                f"exceeded {timeout_seconds}s"
+            )
+            # Return JSON response instead of raising exception
+            return JSONResponse(
+                status_code=408,
+                content={
+                    "error": "Request Timeout",
+                    "message": f"Request took longer than {timeout_seconds} seconds to process",
+                    "path": request.url.path
+                }
+            )
+
+    return timeout_middleware
+
+
+async def security_headers_middleware(request: Request, call_next: Callable) -> Response:
+    """Add security headers to all responses."""
+    response = await call_next(request)
+
+    # Security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = (
+        "max-age=31536000; includeSubDomains"
+    )
+    # Add CSP for production
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+
+    return response
 
 
 def get_correlation_id() -> str:
-    """Get current correlation ID."""
+    """Get current correlation ID from context."""
     return correlation_id_var.get()
 
 
-class TimeoutMiddleware(BaseHTTPMiddleware):
-    """Timeout requests after specified duration."""
-
-    def __init__(self, app: Any, timeout: int = 30) -> None:
-        super().__init__(app)
-        self.timeout = timeout
-
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        try:
-            return await asyncio.wait_for(call_next(request), timeout=self.timeout)
-        except TimeoutError:
-            raise APIException(
-                status_code=408,
-                message="Request took too long to process",
-                name="TimeoutError",
-            )
-
-
-async def init_rate_limiter(redis_client: Redis) -> None:
-    """Initialize rate limiter with Redis."""
-    await FastAPILimiter.init(redis_client)
-
-
-async def rate_limit_handler(
-    request: Request, response: Response, pexpire: int
-) -> Response:
-    """Custom rate limit exceeded handler."""
-    expire_minutes = pexpire // 60000
-    raise APIException(
-        status_code=429,
-        message=f"Too many requests from this IP, please try again in {expire_minutes} minutes!",
-        name="RateLimitError",
-    )
-
-
-# Rate limiter dependency (500 requests per 15 minutes)
-rate_limiter = RateLimiter(times=500, seconds=900)
-
-
 def get_metrics() -> tuple[bytes, str]:
-    """Get Prometheus metrics."""
+    """Get Prometheus metrics in text format."""
     return generate_latest(metrics_registry), CONTENT_TYPE_LATEST

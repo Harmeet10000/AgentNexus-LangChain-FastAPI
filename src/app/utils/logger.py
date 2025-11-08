@@ -28,7 +28,8 @@ class LogConfig(BaseSettings):
 def console_format(record: dict[str, Any]) -> str:
     """Format logs for console with INFO/META structure."""
     level = record["level"].name
-    time = record["time"].strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    time_utc = record["time"].astimezone().astimezone(tz=__import__('datetime').timezone.utc)
+    time = time_utc.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     message = record["message"]
 
     # Color mapping

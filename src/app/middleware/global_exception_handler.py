@@ -15,7 +15,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     """
 
     correlation_id = getattr(request.state, "correlation_id", None)
-    is_production = os.getenv("ENV") == "production"
+    is_production = os.getenv("ENV", "").lower() == "production"
 
     # Determine error type and build error object
     if isinstance(exc, APIException):

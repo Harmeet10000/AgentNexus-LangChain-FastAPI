@@ -38,33 +38,21 @@ dependencies = [
     "langchain-google-genai>=3.0.0",
     "langgraph>=1.0.2",
     "langsmith>=0.4.39",
-    # --- UTILITIES & STORAGE (Relaxed Upper Bounds) ---
-    "python-multipart>=0.0.12,<1.0.0",
     "fastmcp>=2.11.0,<3.0.0",
-    "crawl4ai>=0.7.4,<1.0.0",
-    "beautifulsoup4==4.12.3", # Keep tight if specific version behavior is needed
-    "lxml==5.3.0", # Keep tight for C-lib dependencies
+    "crawl4ai>=0.7.4,<1.0.0", # Keep tight for C-lib dependencies
     "bleach>=6.2.0,<7.0.0",
-    "motor==3.7.1", # Keep tight for C-lib/async stability
-    "pymongo==4.11.0", # Keep tight for C-lib stability
+    "motor==3.7.1", # Keep tight for C-lib stability
     "redis[hiredis]>=5.1.0,<6.0.0",
     "sqlalchemy==2.0.39",
     "alembic==1.16.5",
     "asyncpg==0.29.0",
     "python-dotenv==1.1.0",
     "loguru==0.7.3",
-    "cryptography==46.0.2",
-    "tenacity==9.1.2",
     "aiofiles==24.1.0",
     "orjson==3.10.1",
     "nanoid==2.0.0",
-    "python-slugify==8.0.4",
     "fastapi-pagination==0.12.1",
-    "fastapi-cache2==0.2.1",
     "psutil==7.1.0",
-    "celery==5.5.3",
-    "aiohttp==3.12.15",
-    "aiohttp-retry==2.9.1",
     "fastapi-limiter==0.1.6",
     "prometheus-client>=0.23.1",
     "faststream>=0.6.2",

@@ -18,7 +18,7 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY src/ src/
-RUN uv sync --no-editable
+RUN uv sync --no-editable --no-dev
 
 # ============================== Production Stage ==============================
 FROM python:3.12-slim AS production

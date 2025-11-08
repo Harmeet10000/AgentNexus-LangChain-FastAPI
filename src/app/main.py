@@ -1,5 +1,4 @@
-import sys
-from typing import Any
+"""FastAPI application entry point with properly ordered middleware."""
 
 import uvicorn
 from dotenv import load_dotenv
@@ -7,112 +6,202 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.core.lifespan import lifespan
 from app.core.settings import get_settings
 from app.core.signals import setup_signal_handlers
 from app.features.health.router import router as health_router
 from app.middleware.server_middleware import (
-    CorrelationMiddleware,
-    MetricsMiddleware,
-    TimeoutMiddleware,
+    correlation_middleware,
+    create_metrics_middleware,
+    create_timeout_middleware,
+    security_headers_middleware,
     get_metrics,
 )
 from app.middleware.global_exception_handler import global_exception_handler
-from app.utils.httpResponse import http_response
-from app.utils.logger import logger, setup_logging
+from app.utils.logger import logger
 
+# Load environment variables
 load_dotenv(".env.development")
-
-# Initialize logging
-# setup_logging()
 
 
 def create_app() -> FastAPI:
-    """Create and configure FastAPI application."""
+    """Create and configure FastAPI application with proper middleware order."""
+
+    settings = get_settings()
 
     app = FastAPI(
         title="LangChain FastAPI Production",
         version="1.0.0",
         lifespan=lifespan,
-        docs_url=None if get_settings().ENVIRONMENT else "/api-docs",
-        redoc_url=None if get_settings().ENVIRONMENT else "/api-redoc",
-        openapi_url=None if get_settings().ENVIRONMENT else "/swagger.json",
+        # Hide docs in production
+        docs_url="/api-docs" if not settings.ENVIRONMENT == "production" else None,
+        redoc_url="/api-redoc" if not settings.ENVIRONMENT == "production" else None,
+        openapi_url="/swagger.json" if not settings.ENVIRONMENT == "production" else None,
     )
 
-    # Correlation ID
-    app.add_middleware(CorrelationMiddleware)
+    # ============================================================================
+    # MIDDLEWARE ORDER (CRITICAL!)
+    # Add middlewares in REVERSE order of execution
+    # Last added = First executed
+    # ============================================================================
 
-    # Trusted hosts
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+    # 1. CORS (First to execute - handles preflight requests)
+    # ✅ Fixed: Specific origins in production
+    cors_origins = ["*"] if settings.ENVIRONMENT != "production" else [
+        "https://yourdomain.com",
+        "https://app.yourdomain.com",
+    ]
 
-    # Compression (15KB threshold like Express)
-    app.add_middleware(GZipMiddleware, minimum_size=15000, compresslevel=6)
-
-    # Metrics
-    app.add_middleware(MetricsMiddleware, project_name="langchain-fastapi")
-    # CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["*"],
-        expose_headers=["X-Total-Count"],
+        allow_origins=cors_origins,
+        # ✅ Fixed: Can't use allow_credentials=True with allow_origins=["*"]
+        allow_credentials=settings.ENVIRONMENT == "production",
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-Correlation-ID"],
+        expose_headers=["X-Total-Count", "X-Correlation-ID", "X-Process-Time"],
         max_age=3600,
     )
 
-    # Timeout (30 seconds)
-    app.add_middleware(TimeoutMiddleware, timeout=30)
+    # 2. Trusted hosts (Security)
+    allowed_hosts = ["*"] if settings.ENVIRONMENT != "production" else [
+        "yourdomain.com",
+        "*.yourdomain.com",
+        "localhost",
+    ]
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
-    # Root endpoint
-    @app.get("/")
+    # 3. Compression (Performance optimization)
+    app.add_middleware(
+        GZipMiddleware,
+        minimum_size=15000,
+        compresslevel=6
+    )
+
+    # ============================================================================
+    # CUSTOM MIDDLEWARES (Using decorator style for better performance)
+    # ============================================================================
+
+    # # 4. Security headers (Execute early)
+    # @app.middleware("http")
+    # async def add_security_headers(request: Request, call_next):
+    #     return await security_headers_middleware(request, call_next)
+
+    # 5. Correlation ID (For distributed tracing)
+    @app.middleware("http")
+    async def add_correlation_id(request: Request, call_next):
+        return await correlation_middleware(request, call_next)
+
+    # 6. Metrics collection (Monitor all requests)
+    @app.middleware("http")
+    async def collect_metrics(request: Request, call_next):
+        metrics_middleware = create_metrics_middleware(project_name="langchain-fastapi")
+        return await metrics_middleware(request, call_next)
+
+    # 7. Request timeout (Prevent hanging requests)
+    @app.middleware("http")
+    async def timeout_requests(request: Request, call_next):
+        timeout_middleware = create_timeout_middleware(timeout_seconds=30)
+        return await timeout_middleware(request, call_next)
+
+    # 8. Error handling (Last middleware = catches all errors)
+    @app.middleware("http")
+    async def error_handler(request: Request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as e:
+            # Log the error
+            correlation_id = getattr(request.state, "correlation_id", "unknown")
+            logger.error(
+                f"[{correlation_id}] Unhandled exception: {str(e)}",
+                exc_info=True
+            )
+
+            # Return JSON error response
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "Internal Server Error",
+                    "message": "An unexpected error occurred",
+                }
+            )
+
+    # ============================================================================
+    # ROUTES
+    # ============================================================================
+
+    @app.get("/", tags=["Root"])
     async def root() -> dict[str, str]:
-        return {"message": "Welcome to LangChain FastAPI  🚀"}
+        """Root endpoint - health check."""
+        return {
+            "message": "Welcome to LangChain FastAPI 🚀",
+            "status": "healthy",
+            "version": "1.0.0"
+        }
 
-    @app.get("/metrics")
-    async def metrics(request: Request):
+    @app.get("/metrics", tags=["Monitoring"])
+    async def metrics() -> Response:
+        """Prometheus metrics endpoint."""
         data, content_type = get_metrics()
-        return http_response(
-            message="Success",
-            data=data,
-            status_code=200,
-            request=request,
-        )
+        return Response(content=data, media_type=content_type)
 
-    app.include_router(health_router)
+    # Include feature routers
+    app.include_router(health_router, prefix="/api/v1")
 
-    # 404 handler
+    # 404 handler (Catch-all route)
     @app.api_route(
-        "/{path_name:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"]
+        "/{path_name:path}",
+        methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        include_in_schema=False
     )
     async def catch_all(request: Request, path_name: str) -> JSONResponse:
-        return http_response(
-            message=f"Can't find {request.url.path} on this server!",
-            data=None,
+        """Handle 404 errors for undefined routes."""
+        correlation_id = getattr(request.state, "correlation_id", "unknown")
+        logger.warning(
+            f"[{correlation_id}] 404 Not Found: {request.method} {request.url.path}"
+        )
+
+        return JSONResponse(
             status_code=404,
-            request=request,
+            content={
+                "error": "Not Found",
+                "message": f"Can't find {request.url.path} on this server",
+                "path": request.url.path,
+                "correlation_id": correlation_id
+            }
         )
 
     return app
 
 
+# Create application instance
 app = create_app()
 
 
-# Register GLOBAL exception handlers (equivalent to Express error middleware)
+# ============================================================================
+# GLOBAL EXCEPTION HANDLERS
+# ============================================================================
+# Note: These are separate from middleware and handle specific exception types
 app.add_exception_handler(Exception, global_exception_handler)
 
+
 if __name__ == "__main__":
-    # Setup signal handlers
+    # Setup signal handlers for graceful shutdown
     setup_signal_handlers()
+
+    settings = get_settings()
+
+    logger.info(f"Starting server in {settings.ENVIRONMENT} mode...")
 
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
         port=5000,
-        reload=True,
-        log_config=None,
-        access_log=False,
+        reload=settings.ENVIRONMENT != "production",
+        log_config=None,  # Use custom logging
+        access_log=False,  # Custom access logging via middleware
+        # ✅ For production: use workers
+        # workers=4 if settings.ENVIRONMENT == "production" else 1,
     )

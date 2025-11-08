@@ -114,6 +114,36 @@ uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 5000
 -   **Parallel downloads** and installations
 
 
+
+## Middleware Execution Flow
+```
+Request Flow:
+┌─────────────────────────────────────────────────────────────┐
+│ 1. CORS Middleware (Preflight checks)                       │
+│ 2. Trusted Host Middleware (Host validation)                │
+│ 3. GZip Middleware (Compression)                            │
+│ 4. Security Headers (Add security headers)                  │
+│ 5. Correlation ID (Add tracking ID)                         │
+│ 6. Metrics Middleware (Start timing)                        │
+│ 7. Timeout Middleware (Wrap with timeout)                   │
+│ 8. Error Handler (Catch exceptions)                         │
+│ 9. Your Route Handler (/api/endpoint)                       │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+Response Flow (reverse order):
+┌─────────────────────────────────────────────────────────────┐
+│ 9. Route Handler Returns Response                           │
+│ 8. Error Handler (Pass through or catch)                    │
+│ 7. Timeout Middleware (Check timeout)                       │
+│ 6. Metrics Middleware (Record duration)                     │
+│ 5. Correlation ID (Add X-Correlation-ID header)             │
+│ 4. Security Headers (Add headers to response)               │
+│ 3. GZip Middleware (Compress if needed)                     │
+│ 2. Trusted Host Middleware (Pass through)                   │
+│ 1. CORS Middleware (Add CORS headers)                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
 ## 📁 Project Structure
 
 ```
@@ -397,40 +427,6 @@ Once the application is running, you can access:
 5. **Web Crawling** - `/api/v1/crawl` - Intelligent web scraping
 6. **Workflows** - `/api/v1/workflows/execute` - LangGraph workflow execution
 
-## 🤖 MCP (Model Context Protocol) Integration
-
-### What is MCP?
-
-MCP enables dynamic tool discovery and communication with multiple tool servers, allowing agents to access a wide range of capabilities:
-
--   **Math Operations**: Calculations, equations, and mathematical functions
--   **Weather Data**: Real-time weather information from OpenWeatherMap
--   **Database Queries**: MongoDB operations and data retrieval
--   **File System**: File operations and management
--   **Custom Tools**: Easily add your own MCP servers
-
-### Quick Example
-
-```python
-from src.agents.mcp.mcp_agent import MCPAgent
-
-# Initialize and use MCP agent
-agent = MCPAgent(model_name="gemini-pro")
-await agent.initialize()
-result = await agent.run("Calculate 25 * 4 and check weather in NYC")
-await agent.cleanup()
-```
-
-### MCP Benefits
-
-✅ **Dynamic Tool Discovery** - Automatically discover and use tools from multiple servers
-✅ **Mixed Transports** - Support both local (stdio) and remote (HTTP) servers
-✅ **Scalability** - Easily add new tool servers without modifying agent code
-✅ **Isolation** - Each server runs independently with its own dependencies
-✅ **Reusability** - Share MCP servers across multiple agents and applications
-
-**📘 For detailed examples, server implementations, and integration patterns, see: [MCP_INTEGRATION_GUIDE.md](./MCP_INTEGRATION_GUIDE.md)**
-
 ## 📊 Monitoring
 
 ### LangSmith Integration
@@ -442,16 +438,6 @@ await agent.cleanup()
     - Token usage
     - Latency metrics
     - Error rates
-
-### Application Metrics
-
--   **Health Check**: http://localhost:5000/health
-
-### Service UIs
-
--   **MongoDB Express**: http://localhost:8081 (admin/changeme)
--   **Redis Commander**: http://localhost:8082
--   **MCP Weather Server**: http://localhost:8001/docs (if enabled)
 
 ## 🧪 Testing
 
@@ -517,7 +503,7 @@ For questions and support, please open an issue on GitHub.
 
 1. **Install uv** for faster dependency management: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 2. Add your API keys to `.env`
-3. Install `langchain-mcp-adapters` for MCP support: `uv add langchain-mcp-adapters`
+3. Install `FastMCP` for MCP support: `uv add fastmcp`
 4. Configure MCP servers in `src/mcp/config/server_config.py`
 5. Configure security settings for production
 6. Set up proper monitoring and alerting
