@@ -18,7 +18,7 @@
     		<dependencyInjection>Prefer fastapi.Depends for injecting services and config. Avoid singletons at import time; use factories to create clients.</dependencyInjection>
     		<startupShutdown>Use lifespan/startup events for connections and background resources; don't run I/O at import time.</startupShutdown>
     		<pydantic>Use Pydantic models for request/response. Prefer validation through typed models; for Pydantic v2 prefer .model_dump() and validators that are pure.</pydantic>
-    		<async>Prefer async handlers and async I/O. When using blocking code, run it via anyio.to_thread.run_sync or similar.</async>
+    		<async>Prefer async handlers and async I/O. When using blocking code, run it via asyncio.to_thread.run_sync or similar.</async>
     		<errors>Centralize error handling in middleware (see src/api/middleware/error_handler.py). Return typed error responses.</errors>
     		<security>Use FastAPI security utilities and follow least-privilege patterns. Put auth logic in dependencies, not in route handlers.</security>
 			<serverRun>Always use uvicorn to run the application (do not run apps with bare "python" processes). Prefer uv run for local development. Examples: dev: <code>uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000</code>; production (process manager): <code>uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4</code> or via Gunicorn with Uvicorn workers: <code>gunicorn -k uvicorn.workers.UvicornWorker src.main:app -w 4 --bind 0.0.0.0:8000</code>. When using an app factory, pass --factory (e.g., <code>uv run uvicorn src.main:create_app --factory --reload</code>).</serverRun>
@@ -147,8 +147,8 @@ self.\_client = client
 
 </copilot-instructions>
 ```
-from app.utils.httpResponse import http_response
 ```python
+from app.utils.httpResponse import http_response
 @app.get("/users/{user_id}")
 async def get_user(user_id: int, request: Request):
     user = await get_user_from_db(user_id)
@@ -247,12 +247,12 @@ async def get_posts(
 <!-- You can make imports even cleaner using __init__.py: -->
 ```py
 utils/__init__.py:
-pythonfrom .logger import logger
+from .logger import logger
 from .http_error import httpError
 
 __all__ = ['logger', 'httpError']
 Now in routes/users.py:
-pythonfrom ..utils import logger, httpError 
+from ..utils import logger, httpError 
 
 
 from fastapi import APIRouter, Depends, Request, status
@@ -335,5 +335,81 @@ async def register(
 
     
 
+```
+use 'is' for check is None, boolean value instead of == and 'is not' instead of != 
+use list, dictionary, sets comprehension instead of a for loop
+use 'with' context manager where necessary and required
+prefer try, except blocks over if else where possible
+example :-
+```py
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Iterator
+from pathlib import Path
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+FOOD_CSV = Path("food.csv")
+ACTIVITY_CSV = Path("activities.csv")
+
+
+@dataclass
+class Entry:
+    date: str
+    description: str
+    calories: int
+
+def today() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+def append_entry(path: Path, entry: Entry) -> None:
+    with path.open("a") as f:
+        f.write(f"{entry.date},{entry.description},{entry.calories}\n")
+    logging.info(f"Appended entry to {path}: {entry.description} ({entry.calories} kcal)")
+
+def log_food(description: str, calories: int, date: str | None = None) -> None:
+    if date is None:
+        date = today()
+    append_entry(FOOD_CSV, Entry(date, description, calories))
+
+def log_activity(description: str, calories: int, date: str | None = None) -> None:
+    if date is None:
+        date = today()
+    append_entry(ACTIVITY_CSV, Entry(date, description, calories))
+
+def read_entries(path: Path) -> Iterator[Entry]:
+    try:
+        with path.open() as f:
+            for line in f:
+                date, desc, cals = line.strip().split(",")
+                yield Entry(date, desc, int(cals))
+    except FileNotFoundError:
+        logging.warning(f"File not found: {path}")
+        return iter([])
+
+
+def run_day_summary(date: str) -> None:
+    food = list(read_entries(FOOD_CSV))
+    activity = list(read_entries(ACTIVITY_CSV))
+
+    food_total = sum(entry.calories for entry in food if entry.date == date)
+    activity_total = sum(entry.calories for entry in activity if entry.date == date)
+    net = food_total - activity_total
+
+    print(f"\nSummary for {date}")
+    print(f"  🍎 Food:     {food_total} kcal")
+    print(f"  🏃 Activity: {activity_total} kcal")
+    print(f"  ⚖️  Net:       {net} kcal")
+
+    logging.info(f"Daily summary: +{food_total} kcal intake, -{activity_total} burned, net = {net}")
+
+def main() -> None:
+    log_food("Banana", 100)
+    log_activity("Running", 300)
+    run_day_summary(today())
+
+if __name__ == "__main__":
+    main()
 ```
 <!-- use python syntax for v3.12 and use context7 for fetching latest documents -->

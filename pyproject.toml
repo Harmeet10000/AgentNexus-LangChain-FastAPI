@@ -56,6 +56,7 @@ dependencies = [
     "fastapi-limiter==0.1.6",
     "prometheus-client>=0.23.1",
     "faststream>=0.6.2",
+    "mem0ai>=1.0.0",
 ]
 
 [project.optional-dependencies]

@@ -1,5 +1,3 @@
-"""FastAPI application entry point with properly ordered middleware."""
-
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -16,7 +14,7 @@ from app.middleware.server_middleware import (
     correlation_middleware,
     create_metrics_middleware,
     create_timeout_middleware,
-    security_headers_middleware,
+    create_security_headers_middleware,
     get_metrics,
 )
 from app.middleware.global_exception_handler import global_exception_handler
@@ -57,8 +55,8 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
-        # ✅ Fixed: Can't use allow_credentials=True with allow_origins=["*"]
-        allow_credentials=settings.ENVIRONMENT == "production",
+        # Can't use allow_credentials=True with allow_origins=["*"]
+        allow_credentials=cors_origins != ["*"],
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization", "X-Correlation-ID"],
         expose_headers=["X-Total-Count", "X-Correlation-ID", "X-Process-Time"],
@@ -87,7 +85,7 @@ def create_app() -> FastAPI:
     # # 4. Security headers (Execute early)
     # @app.middleware("http")
     # async def add_security_headers(request: Request, call_next):
-    #     return await security_headers_middleware(request, call_next)
+    #     return await create_security_headers_middleware(request, call_next)
 
     # 5. Correlation ID (For distributed tracing)
     @app.middleware("http")
@@ -95,9 +93,9 @@ def create_app() -> FastAPI:
         return await correlation_middleware(request, call_next)
 
     # 6. Metrics collection (Monitor all requests)
+    metrics_middleware = create_metrics_middleware(project_name="langchain-fastapi")
     @app.middleware("http")
     async def collect_metrics(request: Request, call_next):
-        metrics_middleware = create_metrics_middleware(project_name="langchain-fastapi")
         return await metrics_middleware(request, call_next)
 
     # 7. Request timeout (Prevent hanging requests)
@@ -125,6 +123,7 @@ def create_app() -> FastAPI:
                 content={
                     "error": "Internal Server Error",
                     "message": "An unexpected error occurred",
+                    "correlation_id": correlation_id,
                 }
             )
 
@@ -148,7 +147,7 @@ def create_app() -> FastAPI:
         return Response(content=data, media_type=content_type)
 
     # Include feature routers
-    app.include_router(health_router, prefix="/api/v1")
+    app.include_router(health_router)
 
     # 404 handler (Catch-all route)
     @app.api_route(

@@ -1,5 +1,3 @@
-"""Server middleware for correlation ID, metrics, security, and timeout."""
-
 import asyncio
 import logging
 import time
@@ -82,7 +80,7 @@ async def correlation_middleware(request: Request, call_next: Callable) -> Respo
         logger.error(
             f"[{correlation_id}] {request.method} {request.url.path} "
             f"failed with error: {str(e)}",
-            exc_info=True
+            exc_info=True,
         )
         raise
 
@@ -113,8 +111,7 @@ def create_metrics_middleware(project_name: str = "langchain-fastapi"):
             return response
         except Exception as e:
             logger.error(
-                f"Exception in request {method} {path}: {str(e)}",
-                exc_info=True
+                f"Exception in request {method} {path}: {str(e)}", exc_info=True
             )
             raise
         finally:
@@ -149,12 +146,9 @@ def create_timeout_middleware(timeout_seconds: int = 30):
     async def timeout_middleware(request: Request, call_next: Callable) -> Response:
         """Timeout requests after specified duration to prevent hanging."""
         try:
-            return await asyncio.wait_for(
-                call_next(request),
-                timeout=timeout_seconds
-            )
+            return await asyncio.wait_for(call_next(request), timeout=timeout_seconds)
         except asyncio.TimeoutError:
-            logger.error(
+            logger.exception(
                 f"Request timeout: {request.method} {request.url.path} "
                 f"exceeded {timeout_seconds}s"
             )
@@ -164,30 +158,40 @@ def create_timeout_middleware(timeout_seconds: int = 30):
                 content={
                     "error": "Request Timeout",
                     "message": f"Request took longer than {timeout_seconds} seconds to process",
-                    "path": request.url.path
-                }
+                    "path": request.url.path,
+                },
             )
 
     return timeout_middleware
 
 
-async def security_headers_middleware(request: Request, call_next: Callable) -> Response:
-    """Add security headers to all responses."""
-    response = await call_next(request)
+def create_security_headers_middleware(
+    enable_csp: bool = False, csp_policy: str = "default-src 'self'"
+) -> Callable:
+    """Factory to create security headers middleware with configurable CSP."""
 
-    # Security headers
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = (
-        "max-age=31536000; includeSubDomains"
-    )
-    # Add CSP for production
-    response.headers["Content-Security-Policy"] = "default-src 'self'"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    async def security_headers_middleware(
+        request: Request, call_next: Callable
+    ) -> Response:
+        """Add security headers to all responses."""
+        response = await call_next(request)
 
-    return response
+        # Security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+        if enable_csp:
+            response.headers["Content-Security-Policy"] = csp_policy
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = (
+            "geolocation=(), microphone=(), camera=()"
+        )
+
+        return response
+
+    return security_headers_middleware
 
 
 def get_correlation_id() -> str:
