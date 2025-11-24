@@ -1,0 +1,45 @@
+# Terraform files
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+tfplan
+tfplan.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# GCP
+.gcp/
+gcloud/
+
+# Local environment files (but keep templates)
+*.local.tfvars
+terraform.tfvars
+
+# Sensitive files
+*.pem
+*.key
+*.pub
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp

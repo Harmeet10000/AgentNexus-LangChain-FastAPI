@@ -28,7 +28,9 @@ class LogConfig(BaseSettings):
 def console_format(record: dict[str, Any]) -> str:
     """Format logs for console with INFO/META structure."""
     level = record["level"].name
-    time_utc = record["time"].astimezone().astimezone(tz=__import__('datetime').timezone.utc)
+    time_utc = (
+        record["time"].astimezone().astimezone(tz=__import__("datetime").timezone.utc)
+    )
     time = time_utc.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     message = record["message"]
 
@@ -47,14 +49,10 @@ def console_format(record: dict[str, Any]) -> str:
     fmt = f"{color}{level}{end_color} <dim>[{time}]</dim> {message}"
 
     # Add extra data (filter out internal loguru keys)
-    extra_data = {
-        k: v
-        for k, v in record["extra"].items()
-        if not k.startswith("_")
-    }
+    extra_data = {k: v for k, v in record["extra"].items() if not k.startswith("_")}
 
     if extra_data:
-        meta_parts = [f"<cyan>{k}</>={repr(v)}" for k, v in extra_data.items()]
+        meta_parts = [f"<cyan>{k}</>={v!r}" for k, v in extra_data.items()]
         meta_str = " ".join(meta_parts)
         fmt += f" <dim>|</dim> {meta_str}"
 

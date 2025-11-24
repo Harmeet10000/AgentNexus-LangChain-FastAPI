@@ -1,5 +1,3 @@
-"""API query features for filtering, sorting, pagination."""
-
 import re
 from typing import Any
 

@@ -10,14 +10,14 @@ from app.core.lifespan import lifespan
 from app.core.settings import get_settings
 from app.core.signals import setup_signal_handlers
 from app.features.health.router import router as health_router
+from app.middleware.global_exception_handler import global_exception_handler
 from app.middleware.server_middleware import (
     correlation_middleware,
     create_metrics_middleware,
+    # create_security_headers_middleware,
     create_timeout_middleware,
-    create_security_headers_middleware,
     get_metrics,
 )
-from app.middleware.global_exception_handler import global_exception_handler
 from app.utils.logger import logger
 
 # Load environment variables
@@ -34,9 +34,11 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
         # Hide docs in production
-        docs_url="/api-docs" if not settings.ENVIRONMENT == "production" else None,
-        redoc_url="/api-redoc" if not settings.ENVIRONMENT == "production" else None,
-        openapi_url="/swagger.json" if not settings.ENVIRONMENT == "production" else None,
+        docs_url="/api-docs" if settings.ENVIRONMENT != "production" else None,
+        redoc_url="/api-redoc" if settings.ENVIRONMENT != "production" else None,
+        openapi_url="/swagger.json"
+        if  settings.ENVIRONMENT != "production"
+        else None,
     )
 
     # ============================================================================
@@ -47,10 +49,14 @@ def create_app() -> FastAPI:
 
     # 1. CORS (First to execute - handles preflight requests)
     # ✅ Fixed: Specific origins in production
-    cors_origins = ["*"] if settings.ENVIRONMENT != "production" else [
-        "https://yourdomain.com",
-        "https://app.yourdomain.com",
-    ]
+    cors_origins = (
+        ["*"]
+        if settings.ENVIRONMENT != "production"
+        else [
+            "https://yourdomain.com",
+            "https://app.yourdomain.com",
+        ]
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -64,19 +70,19 @@ def create_app() -> FastAPI:
     )
 
     # 2. Trusted hosts (Security)
-    allowed_hosts = ["*"] if settings.ENVIRONMENT != "production" else [
-        "yourdomain.com",
-        "*.yourdomain.com",
-        "localhost",
-    ]
+    allowed_hosts = (
+        ["*"]
+        if settings.ENVIRONMENT != "production"
+        else [
+            "yourdomain.com",
+            "*.yourdomain.com",
+            "localhost",
+        ]
+    )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
     # 3. Compression (Performance optimization)
-    app.add_middleware(
-        GZipMiddleware,
-        minimum_size=15000,
-        compresslevel=6
-    )
+    app.add_middleware(GZipMiddleware, minimum_size=15000, compresslevel=6)
 
     # ============================================================================
     # CUSTOM MIDDLEWARES (Using decorator style for better performance)
@@ -94,6 +100,7 @@ def create_app() -> FastAPI:
 
     # 6. Metrics collection (Monitor all requests)
     metrics_middleware = create_metrics_middleware(project_name="langchain-fastapi")
+
     @app.middleware("http")
     async def collect_metrics(request: Request, call_next):
         return await metrics_middleware(request, call_next)
@@ -113,8 +120,7 @@ def create_app() -> FastAPI:
             # Log the error
             correlation_id = getattr(request.state, "correlation_id", "unknown")
             logger.error(
-                f"[{correlation_id}] Unhandled exception: {str(e)}",
-                exc_info=True
+                f"[{correlation_id}] Unhandled exception: {str(e)}", exc_info=True
             )
 
             # Return JSON error response
@@ -124,7 +130,7 @@ def create_app() -> FastAPI:
                     "error": "Internal Server Error",
                     "message": "An unexpected error occurred",
                     "correlation_id": correlation_id,
-                }
+                },
             )
 
     # ============================================================================
@@ -137,7 +143,7 @@ def create_app() -> FastAPI:
         return {
             "message": "Welcome to LangChain FastAPI 🚀",
             "status": "healthy",
-            "version": "1.0.0"
+            "version": "1.0.0",
         }
 
     @app.get("/metrics", tags=["Monitoring"])
@@ -153,13 +159,13 @@ def create_app() -> FastAPI:
     @app.api_route(
         "/{path_name:path}",
         methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-        include_in_schema=False
+        include_in_schema=False,
     )
     async def catch_all(request: Request, path_name: str) -> JSONResponse:
         """Handle 404 errors for undefined routes."""
         correlation_id = getattr(request.state, "correlation_id", "unknown")
         logger.warning(
-            f"[{correlation_id}] 404 Not Found: {request.method} {request.url.path}"
+            f"[{correlation_id}] 404 Not Found: {request.method} {request.url.path} {path_name}"
         )
 
         return JSONResponse(
@@ -168,21 +174,19 @@ def create_app() -> FastAPI:
                 "error": "Not Found",
                 "message": f"Can't find {request.url.path} on this server",
                 "path": request.url.path,
-                "correlation_id": correlation_id
-            }
+                "correlation_id": correlation_id,
+            },
         )
 
     return app
 
 
-# Create application instance
 app = create_app()
 
 
 # ============================================================================
 # GLOBAL EXCEPTION HANDLERS
 # ============================================================================
-# Note: These are separate from middleware and handle specific exception types
 app.add_exception_handler(Exception, global_exception_handler)
 
 
@@ -201,6 +205,6 @@ if __name__ == "__main__":
         reload=settings.ENVIRONMENT != "production",
         log_config=None,  # Use custom logging
         access_log=False,  # Custom access logging via middleware
-        # ✅ For production: use workers
+        # For production: use workers
         # workers=4 if settings.ENVIRONMENT == "production" else 1,
     )

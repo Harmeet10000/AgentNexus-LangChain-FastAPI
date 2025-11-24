@@ -1,8 +1,9 @@
-from fastapi import Request, status
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError, HTTPException
-import traceback
 import os
+import traceback
+
+from fastapi import Request, status
+from fastapi.exceptions import HTTPException, RequestValidationError
+from fastapi.responses import JSONResponse
 
 from app.utils.exceptions import APIException
 from app.utils.logger import logger
@@ -28,11 +29,13 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
                 "ip": request.client.host if request.client else None,
                 "method": request.method,
                 "url": str(request.url),
-                "correlationId": correlation_id
+                "correlationId": correlation_id,
             },
             "message": exc.message,
             "data": exc.data,
-            "trace": {"error": traceback.format_exc()} if exc.status_code >= 500 else None
+            "trace": {"error": traceback.format_exc()}
+            if exc.status_code >= 500
+            else None,
         }
         log_type = "CONTROLLER_ERROR"
 
@@ -40,11 +43,13 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         # Pydantic validation errors (422)
         errors = []
         for error in exc.errors():
-            errors.append({
-                "field": ".".join(str(x) for x in error["loc"][1:]),
-                "message": error["msg"],
-                "type": error["type"]
-            })
+            errors.append(
+                {
+                    "field": ".".join(str(x) for x in error["loc"][1:]),
+                    "message": error["msg"],
+                    "type": error["type"],
+                }
+            )
 
         error_obj = {
             "name": "ValidationError",
@@ -54,11 +59,11 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
                 "ip": request.client.host if request.client else None,
                 "method": request.method,
                 "url": str(request.url),
-                "correlationId": correlation_id
+                "correlationId": correlation_id,
             },
             "message": "Validation failed",
             "data": {"errors": errors},
-            "trace": None
+            "trace": None,
         }
         log_type = "VALIDATION_ERROR"
 
@@ -72,11 +77,11 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
                 "ip": request.client.host if request.client else None,
                 "method": request.method,
                 "url": str(request.url),
-                "correlationId": correlation_id
+                "correlationId": correlation_id,
             },
             "message": exc.detail if isinstance(exc.detail, str) else "HTTP error",
             "data": None,
-            "trace": None
+            "trace": None,
         }
         log_type = "HTTP_ERROR"
 
@@ -90,11 +95,11 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
                 "ip": request.client.host if request.client else None,
                 "method": request.method,
                 "url": str(request.url),
-                "correlationId": correlation_id
+                "correlationId": correlation_id,
             },
             "message": "Something went wrong",
             "data": None,
-            "trace": {"error": traceback.format_exc()}
+            "trace": {"error": traceback.format_exc()},
         }
         log_type = "UNHANDLED_ERROR"
 
@@ -116,7 +121,4 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         if error_obj.get("trace"):
             del error_obj["trace"]
 
-    return JSONResponse(
-        status_code=error_obj["statusCode"],
-        content=error_obj
-    )
+    return JSONResponse(status_code=error_obj["statusCode"], content=error_obj)

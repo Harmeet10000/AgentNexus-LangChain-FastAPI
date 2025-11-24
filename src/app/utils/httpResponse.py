@@ -50,12 +50,6 @@ def http_response(
     logger.info(
         "CONTROLLER_RESPONSE",
         response=response,
-        # status_code=status_code,
-        # method=response["request"]["method"],
-        # url=response["request"]["url"],
-        # correlation_id=response["request"]["correlationId"],
-        # message=message,
-        # data=data,
     )
 
     return JSONResponse(status_code=status_code, content=response)
