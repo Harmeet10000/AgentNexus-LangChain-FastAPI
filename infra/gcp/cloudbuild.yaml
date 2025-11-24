@@ -1,0 +1,88 @@
+steps:
+  # Step 1: Build Docker image
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build"
+    args:
+      - "build"
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/${_SERVICE_NAME}:${SHORT_SHA}"
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/${_SERVICE_NAME}:latest"
+      - "-f"
+      - "docker/prod.Dockerfile"
+      - "."
+    env:
+      - "DOCKER_BUILDKIT=1"
+
+  # Step 2: Push image to Artifact Registry
+  - name: "gcr.io/cloud-builders/docker"
+    id: "push"
+    args:
+      - "push"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/${_SERVICE_NAME}"
+    env:
+      - "DOCKER_BUILDKIT=1"
+
+  # Step 3: Deploy Terraform
+  - name: "gcr.io/cloud-builders/terraform"
+    id: "terraform-plan"
+    args:
+      - "-chdir=infra/gcp/terraform"
+      - "plan"
+      - "-var"
+      - "gcp_project_id=${PROJECT_ID}"
+      - "-var"
+      - "docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/${_SERVICE_NAME}:${SHORT_SHA}"
+      - "-var-file=environments/${_ENVIRONMENT}.tfvars"
+      - "-out=tfplan"
+    env:
+      - "CLOUDSDK_COMPUTE_REGION=${_REGION}"
+
+  # Step 4: Terraform apply
+  - name: "gcr.io/cloud-builders/terraform"
+    id: "terraform-apply"
+    args:
+      - "-chdir=infra/gcp/terraform"
+      - "apply"
+      - "-auto-approve"
+      - "tfplan"
+    env:
+      - "CLOUDSDK_COMPUTE_REGION=${_REGION}"
+
+  # Step 5: Run database migrations (if needed)
+  - name: "gcr.io/cloud-builders/gke-deploy"
+    id: "migrations"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        echo "Running database migrations..."
+        gcloud run jobs create ${_SERVICE_NAME}-migrate-${SHORT_SHA} \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/${_SERVICE_NAME}:${SHORT_SHA} \
+          --region=${_REGION} \
+          --set-env-vars=COMMAND=migrate \
+          --no-gen2 \
+          --execute || echo "Migration job already exists or succeeded"
+
+substitutions:
+  _REGION: "us-central1"
+  _ARTIFACT_REPO: "langchain-fastapi-docker"
+  _SERVICE_NAME: "langchain-fastapi"
+  _ENVIRONMENT: "dev"
+
+options:
+  machineType: "N1_HIGHCPU_8"
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: "ALLOW_LOOSE"
+
+timeout: "3600s"
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/${_SERVICE_NAME}:${SHORT_SHA}"
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/${_SERVICE_NAME}:latest"
+
+artifacts:
+  objects:
+    location: "gs://${_REGION}-cloud-build-logs-${PROJECT_ID}/builds/${BUILD_ID}/tfplan"
+    paths:
+      - "infra/gcp/terraform/tfplan"

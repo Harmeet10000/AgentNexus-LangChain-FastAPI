@@ -14,3 +14,7 @@
 14. check if uvicorn logger is disabled
 15. 
 ```
+what is yield 
+does HTTPException sends back a error response. if yes do i need to use global_exception_handler?
+do i need to inject my service layer in router or can i do an import 
+

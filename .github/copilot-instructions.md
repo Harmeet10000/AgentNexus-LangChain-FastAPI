@@ -1,8 +1,6 @@
 ```xml
 <copilot-instructions>
 	<meta>
-		<author>Repository conventions</author>
-		<date>2025-10-11</date>
 		<language name="python" version="3.12" />
 		<style>
 			<principles>functional, DRY, KISS</principles>
@@ -16,12 +14,9 @@
     	<bestPractices>
     		<routers>Use APIRouter per feature and mount routers in a single place. Keep routes thin: delegate logic to services.</routers>
     		<dependencyInjection>Prefer fastapi.Depends for injecting services and config. Avoid singletons at import time; use factories to create clients.</dependencyInjection>
-    		<startupShutdown>Use lifespan/startup events for connections and background resources; don't run I/O at import time.</startupShutdown>
     		<pydantic>Use Pydantic models for request/response. Prefer validation through typed models; for Pydantic v2 prefer .model_dump() and validators that are pure.</pydantic>
     		<async>Prefer async handlers and async I/O. When using blocking code, run it via asyncio.to_thread.run_sync or similar.</async>
-    		<errors>Centralize error handling in middleware (see src/api/middleware/error_handler.py). Return typed error responses.</errors>
-    		<security>Use FastAPI security utilities and follow least-privilege patterns. Put auth logic in dependencies, not in route handlers.</security>
-			<serverRun>Always use uvicorn to run the application (do not run apps with bare "python" processes). Prefer uv run for local development. Examples: dev: <code>uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000</code>; production (process manager): <code>uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4</code> or via Gunicorn with Uvicorn workers: <code>gunicorn -k uvicorn.workers.UvicornWorker src.main:app -w 4 --bind 0.0.0.0:8000</code>. When using an app factory, pass --factory (e.g., <code>uv run uvicorn src.main:create_app --factory --reload</code>).</serverRun>
+    		<errors>Centralize error handling in middleware (see src/api/middleware/global_exception_handler.py). Return typed error responses.</errors
     	</bestPractices>
     </fastapi>
 
@@ -40,7 +35,7 @@
     	<formatting>
     		<ruff>Use Ruff for both linting and formatting (line-length: 88). Ruff replaces Black, isort, Pylint, and Flake8.</ruff>
     		<imports>Ruff handles import sorting automatically; group imports: stdlib, third-party, local packages.</imports>
-    		<indentation>Use 4 spaces. Ensure Python indent extension rules are satisfied.</indentation>
+    		<indentation>Use 4 spaces.</indentation>
     	</formatting>
     </codingGuidelines>
 
@@ -54,18 +49,10 @@
     		<when>Use adapter to wrap third-party/mutable/blocking clients and present a small async-friendly interface to the app.</when>
     		<how>Expose only the methods needed by the app, convert sync APIs to async via thread pools or provide async wrappers.</how>
     	</adapter>
-
-    	<functionalAdvice>Prefer functions and small data structures; when state is needed, create it via factories and inject via Depends.</functionalAdvice>
     </designPatterns>
-
-    <tests>
-    	<unit>Write unit tests for pure business logic with pytest. Mock external dependencies injected via Depends or passed explicitly.</unit>
-    	<integration>Use TestClient/AsyncClient for router tests. Seed fixtures for DB/vector stores; keep tests hermetic.</integration>
-    </tests>
 
     <practicalTips>
     	<structure>Group by feature: src/features/<feature>/{api,schemas,services,tests}. Keep services independent of FastAPI internals.</structure>
-    	<imports>Avoid heavy imports at module top-level. Use local imports inside functions when needed to prevent import-time I/O.</imports>
     	<logging>Use structured logging from src/core/logging and include correlation ids from middleware.</logging>
     	<ci>Run ruff check, ruff format --check, mypy, and pytest in CI. Fail on formatting/type errors.</ci>
     	<preCommit>Use pre-commit hooks: uv-lock (dependency sync), ruff (lint+format), mypy (types), bandit (security), and standard checks (trailing whitespace, YAML/JSON/TOML validation, private key detection).</preCommit>
@@ -74,7 +61,7 @@
 
     <examples>
     	<endpoint description="Pure function + FastAPI wiring">
-    		<code><![CDATA[
+    		<code>
 from typing import List
 from fastapi import APIRouter, Depends
 from src.features.documents import services as doc_services
@@ -88,11 +75,11 @@ return await doc_services.list_documents_for_user(user_id)
 @router.get("/", response_model=List[DocumentOut])
 async def get_documents(result = Depends(list_documents)):
 return result
-]]></code>
+</code>
 </endpoint>
 
     	<factoryExample>
-    		<code><![CDATA[
+    		<code>
 
 from typing import Callable
 from src.core.cache.redis_client import RedisClient
@@ -102,11 +89,11 @@ def factory() -> RedisClient: # create/configure client, avoid connecting at imp
 return RedisClient.from_url(url)
 
     	return factory
-    		]]></code>
+    </code>
     	</factoryExample>
 
     	<adapterExample>
-    		<code><![CDATA[
+    		<code>
 
 class VectorDBAdapter:
 def **init**(self, client):
@@ -115,7 +102,7 @@ self.\_client = client
     	async def upsert(self, items: list[dict]) -> bool:
     			# adapt third-party API to the async interface expected by the app
     			return await self._client.async_upsert(items)
-    		]]></code>
+    	</code>
     	</adapterExample>
     </examples>
 

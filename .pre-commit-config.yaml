@@ -5,27 +5,15 @@ repos:
   #   hooks:
   #     - id: uv-lock
 
-#   # Ruff - Linting and Formatting
-#   - repo: https://github.com/astral-sh/ruff-pre-commit
-#     rev: v0.7.1
-#     hooks:
-#       - id: ruff
-#         args: ["--fix"]
-#         types_or: [python, pyi]
-#       - id: ruff-format
-#         types_or: [python, pyi]
-
-#   # MyPy - Type Checking
-#   - repo: https://github.com/pre-commit/mirrors-mypy
-#     rev: v1.18.2
-#     hooks:
-#       - id: mypy
-#         additional_dependencies:
-#           - "pydantic>=2.9.0"
-#           - "types-redis"
-#           - "types-aiofiles"
-#         files: ^src/
-#         args: ["--config-file=pyproject.toml"]
+  # Ruff - Linting and Formatting
+  # - repo: https://github.com/astral-sh/ruff-pre-commit
+  #   rev: v0.7.1
+  #   hooks:
+  #     - id: ruff
+  #       args: ["--fix"]
+  #       types_or: [python, pyi]
+  #     - id: ruff-format
+  #       types_or: [python, pyi]
 
   # Bandit - Security Linting
   # - repo: https://github.com/PyCQA/bandit
@@ -51,7 +39,6 @@ repos:
       - id: detect-private-key
       - id: mixed-line-ending
         args: ["--fix=lf"]
-
 #   # Python-specific checks
 #   - repo: https://github.com/pre-commit/pygrep-hooks
 #     rev: v1.10.0

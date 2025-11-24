@@ -16,7 +16,6 @@ from prometheus_client import (
     generate_latest,
 )
 
-
 # Setup logging
 logger = logging.getLogger(__name__)
 
@@ -79,7 +78,7 @@ async def correlation_middleware(request: Request, call_next: Callable) -> Respo
     except Exception as e:
         logger.error(
             f"[{correlation_id}] {request.method} {request.url.path} "
-            f"failed with error: {str(e)}",
+            f"failed with error: {e!s}",
             exc_info=True,
         )
         raise
@@ -110,9 +109,7 @@ def create_metrics_middleware(project_name: str = "langchain-fastapi"):
             status_code = response.status_code
             return response
         except Exception as e:
-            logger.error(
-                f"Exception in request {method} {path}: {str(e)}", exc_info=True
-            )
+            logger.error(f"Exception in request {method} {path}: {e!s}", exc_info=True)
             raise
         finally:
             duration = time.time() - start_time
@@ -147,7 +144,7 @@ def create_timeout_middleware(timeout_seconds: int = 30):
         """Timeout requests after specified duration to prevent hanging."""
         try:
             return await asyncio.wait_for(call_next(request), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.exception(
                 f"Request timeout: {request.method} {request.url.path} "
                 f"exceeded {timeout_seconds}s"

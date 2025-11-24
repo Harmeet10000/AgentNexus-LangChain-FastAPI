@@ -1,5 +1,3 @@
-"""System and application health check utilities."""
-
 import os
 import time
 from typing import Any
