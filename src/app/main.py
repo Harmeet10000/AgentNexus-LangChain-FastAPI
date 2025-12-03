@@ -33,12 +33,9 @@ def create_app() -> FastAPI:
         title="LangChain FastAPI Production",
         version="1.0.0",
         lifespan=lifespan,
-        # Hide docs in production
-        docs_url="/api-docs" if settings.ENVIRONMENT != "production" else None,
-        redoc_url="/api-redoc" if settings.ENVIRONMENT != "production" else None,
-        openapi_url="/swagger.json"
-        if  settings.ENVIRONMENT != "production"
-        else None,
+        docs_url="/api-docs",
+        redoc_url="/api-redoc",
+        openapi_url="/swagger.json",
     )
 
     # ============================================================================

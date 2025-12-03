@@ -1,12 +1,12 @@
 services:
   caddy:
     image: caddy:2-alpine
-    container_name: langchain-caddy
+    container_name: caddy
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro  # Production config
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro # Production config
       - caddy-data:/data
       - caddy-config:/config
     networks:
@@ -21,7 +21,7 @@ services:
       context: .
       dockerfile: docker/dev.Dockerfile
     container_name: ai-service-1
-    expose:
+    ports:
       - "5000:5000"
     volumes:
       - ./src:/app/src
@@ -40,7 +40,7 @@ services:
       context: .
       dockerfile: docker/dev.Dockerfile
     container_name: ai-service-2
-    expose:
+    ports:
       - "5001:5000"
     volumes:
       - ./src:/app/src

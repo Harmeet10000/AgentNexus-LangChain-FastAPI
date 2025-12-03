@@ -1,50 +1,40 @@
-# ================================ Builder Stage ================================
-FROM python:3.12-slim AS builder
+# --- Stage 1: Base Setup (Slim) ---
+FROM python:3.12-slim AS python_base
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-RUN apt-get update && apt-get install --no-install-recommends -y \
-    build-essential \
-    curl \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install uv
-ADD https://astral.sh/uv/install.sh /install.sh
-RUN chmod -R 655 /install.sh && /install.sh && rm /install.sh
-ENV PATH="/root/.local/bin:${PATH}"
+# Python optimizations
+ENV PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-COPY src/ src/
-RUN uv sync --no-editable --no-dev
+# --- Stage 2: Builder ---
+FROM python_base AS builder
 
-# ============================== Production Stage ==============================
-FROM python:3.12-slim AS production
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash appuser
+COPY pyproject.toml uv.lock ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev
+
+# --- Stage 3: Dev Environment ---
+FROM python_base AS dev
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Copy virtual environment from builder
-COPY --from=builder /app/.venv .venv
+COPY --from=builder /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/src"
 
-# Copy application code
-COPY src/ src/
-
-# Copy .env files if they exist (optional for Railway compatibility)
+COPY pyproject.toml uv.lock ./
+COPY src ./src
 COPY .env.development* ./
 
-# Set ownership
-RUN chown -R appuser:appuser /app
-
-USER appuser
-
-# Set PATH to use virtual environment
-ENV PATH="/app/.venv/bin:$PATH"
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project
 
 EXPOSE 5000
 
-CMD ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "5000", "--reload"]
+CMD ["uv", "run", "uvicorn", "src.app.main:app", "--reload", "--host", "0.0.0.0", "--port", "5000"]

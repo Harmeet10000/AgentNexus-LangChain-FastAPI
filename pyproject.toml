@@ -57,6 +57,7 @@ dependencies = [
     "prometheus-client>=0.23.1",
     "faststream>=0.6.2",
     "mem0ai>=1.0.0",
+    "neo4j>=6.0.3",
 ]
 
 [project.optional-dependencies]
