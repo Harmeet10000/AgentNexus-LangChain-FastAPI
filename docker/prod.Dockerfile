@@ -1,30 +1,26 @@
-# ================================ Builder Stage ================================
-FROM python:3.12-slim AS builder
+# --- Stage 1: Base Setup (Slim) ---
+FROM python:3.12-slim AS python_base
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-RUN apt-get update && apt-get install --no-install-recommends -y \
-    build-essential \
-    curl \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install uv
-ADD https://astral.sh/uv/install.sh /install.sh
-RUN chmod -R 655 /install.sh && /install.sh && rm /install.sh
-ENV PATH="/root/.local/bin:${PATH}"
+# Python optimizations
+ENV PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-RUN uv sync --no-dev
+# --- Stage 2: Builder ---
+FROM python_base AS builder
 
-# ============================== Production Stage ==============================
-FROM python:3.12-slim AS production
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    ENVIRONMENT=production \
+COPY pyproject.toml uv.lock ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev
+
+# --- Stage 3: Production (The Tiny Image) ---
+FROM python_base AS production
+
+ENV ENVIRONMENT=production \
     DEBUG=False \
     HOST=0.0.0.0 \
     PORT=5000 \
@@ -32,21 +28,21 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     LOG_LEVEL=INFO \
     LOG_FORMAT=json
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash appuser
+RUN addgroup -S appuser && adduser -S appuser -G appuser -h /app
+
+USER appuser
 
 WORKDIR /app
 
-# Copy virtual environment from builder
-COPY --from=builder /app/.venv .venv
+COPY --from=builder /app/.venv /app/.venv
+COPY src ./src
 
-# Copy application code
-COPY --chown=appuser:appuser src/ src/
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/src"
 
-# Set ownership
-RUN chown -R appuser:appuser /app
+EXPOSE 5000
 
-USER appuser
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000"]
 
 # Set PATH to use virtual environment
 ENV PATH="/app/.venv/bin:$PATH"

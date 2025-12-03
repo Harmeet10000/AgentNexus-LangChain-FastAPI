@@ -1,11 +1,13 @@
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from loguru import logger as loguru_logger
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
-from app.shared.enums import Environment
+from src.app.shared.enums import Environment
 
 
 class LogConfig(BaseSettings):
@@ -20,17 +22,13 @@ class LogConfig(BaseSettings):
     LOG_BACKTRACE: bool = True
     LOG_DIAGNOSE: bool = False
 
-    class Config:
-        env_file = ".env.development"
-        extra = "ignore"  # Ignore extra fields from .env file
+    model_config = ConfigDict(env_file=".env.development", extra="ignore")
 
 
 def console_format(record: dict[str, Any]) -> str:
     """Format logs for console with INFO/META structure."""
     level = record["level"].name
-    time_utc = (
-        record["time"].astimezone().astimezone(tz=__import__("datetime").timezone.utc)
-    )
+    time_utc = record["time"].astimezone(timezone.utc)
     time = time_utc.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     message = record["message"]
 
@@ -108,6 +106,9 @@ def setup_logging(config: LogConfig | None = None) -> None:
         diagnose=config.LOG_DIAGNOSE,
     )
 
+
+# Initialize logger with setup
+setup_logging()
 
 # Export configured logger
 logger = loguru_logger

@@ -1,9 +1,8 @@
----
-agent: Plan
-description: Clarify before planning in more detail
----
-Before doing your research workflow, gather preliminary context using #runSubagent (instructed to use max 5 tool calls) to get a high-level overview.
+Convert the provided Copilot instructions into an MDX file that clearly communicates the project context for an AI agent. Ensure the MDX includes:
 
-Then ask 3 clarifying questions and PAUSE for the user to answer them.
+- A concise project overview section.
+- Explicit instructions for code writing standards.
+- Well-structured code examples demonstrating best practices.
+- Clear separation between instructional text and code blocks.
+- Sufficient context for an AI agent to understand the project's purpose and requirements.
 
-AFTER the user has answered, start the <workflow>. Add extra details to your planning draft.
