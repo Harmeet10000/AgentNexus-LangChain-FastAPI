@@ -34,13 +34,6 @@ from graphiti_core.search.search_config_recipes import NODE_HYBRID_SEARCH_RRF
 # connecting to Neo4j database
 #################################################
 
-# Configure logging
-logging.basicConfig(
-    level=INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-)
-logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -240,3 +233,43 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
+from graphiti_core import Graphiti
+from graphiti_core.driver.neo4j_driver import Neo4jDriver
+
+# Create a Neo4j driver with custom database name
+driver = Neo4jDriver(
+    uri="bolt://localhost:7687",
+    user="neo4j",
+    password="password",
+    database="my_custom_database",  # Custom database name
+)
+
+# Pass the driver to Graphiti
+graphiti = Graphiti(graph_driver=driver)
+
+from graphiti_core import Graphiti
+from graphiti_core.llm_client.gemini_client import GeminiClient, LLMConfig
+from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
+from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
+
+# Google API key configuration
+api_key = "<your-google-api-key>"
+
+# Initialize Graphiti with Gemini clients
+graphiti = Graphiti(
+    "bolt://localhost:7687",
+    "neo4j",
+    "password",
+    llm_client=GeminiClient(
+        config=LLMConfig(api_key=api_key, model="gemini-2.0-flash")
+    ),
+    embedder=GeminiEmbedder(
+        config=GeminiEmbedderConfig(api_key=api_key, embedding_model="embedding-001")
+    ),
+    cross_encoder=GeminiRerankerClient(
+        config=LLMConfig(api_key=api_key, model="gemini-2.5-flash-lite")
+    ),
+)
+
+# Now you can use Graphiti with Google Gemini for all components

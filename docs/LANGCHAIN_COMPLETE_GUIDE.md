@@ -1,20 +1,96 @@
 # LangChain Complete Documentation Guide
-
-**Last Updated**: November 28, 2025  
-**Source**: MCP Context7 - Official LangChain Documentation
-
-## Table of Contents
-
-1. [Core Concepts](#core-concepts)
-2. [Installation & Setup](#installation--setup)
-3. [Vector Stores](#vector-stores)
-4. [Agents & Tools](#agents--tools)
-5. [RAG (Retrieval-Augmented Generation)](#rag-retrieval-augmented-generation)
-6. [Chat Models](#chat-models)
-7. [SQL Agents](#sql-agents)
-8. [Best Practices](#best-practices)
+Perfect! Now I have comprehensive information. Let me compile a structured learning path for building models with LangChain and LangGraph.
 
 ---
+
+## **LangChain & LangGraph Learning Path for Building AI Models**
+
+Here's an ordered list of all essential topics to learn for building AI models, organized from foundational to advanced:
+
+### **Foundation (Start Here)**
+
+1. **Models & Chat Models** - Understand how to use language models and their interfaces
+2. **Messages & Prompts** - Learn message formats, prompt templates, and dynamic prompting
+3. **Tools** - Define and create tools for your models to use
+4. **Tool Calling** - Enable models to decide which tools to invoke
+
+### **Building Agents (Core Development)**
+
+5. **Agents** - Create agents using `create_agent` for autonomous task execution
+6. **Middleware** - Add customization hooks (prebuilt and custom middleware)
+7. **Context Engineering** - Dynamically manage information flow to models
+8. **Structured Output** - Generate responses in specific formats
+
+### **Knowledge & Data (RAG & Retrieval)**
+
+9. **Document Loaders** - Load data from various sources
+10. **Embeddings** - Convert text to vector representations
+11. **Vector Stores** - Store and search embeddings
+12. **Retrievers** - Build retrieval components for fetching relevant documents
+13. **Retrieval (RAG)** - Implement retrieval-augmented generation architectures
+14. **2-Step RAG** - Simple, predictable retrieval and generation
+15. **Agentic RAG** - Agent-driven retrieval with dynamic tool use
+16. **Hybrid RAG** - Combine 2-Step and Agentic approaches
+
+### **State & Memory (Conversation Management)**
+
+17. **Messages** - Understand message types and formats
+18. **Short-term Memory** - Maintain conversation state
+19. **Long-term Memory (Store)** - Persist data across sessions
+20. **State Management** - Define and manage custom state schemas
+
+### **Advanced Agent Features**
+
+21. **Streaming** - Stream tokens, tool calls, and updates in real-time
+22. **Human-in-the-Loop** - Add approval gates for sensitive actions
+23. **Error Handling** - Implement tool error handling with middleware
+
+### **Orchestration & Workflows (LangGraph)**
+
+24. **LangGraph Overview** - Understand graph-based agent orchestration
+25. **State Graph** - Define nodes and edges for agent workflows
+26. **Graph API** - Build custom workflows with nodes and conditionals
+27. **Persistence** - Save and resume agent execution (checkpointing)
+28. **Durable Execution** - Build agents resilient to failures
+29. **Interrupts** - Pause execution for human oversight
+
+### **Production & Observability**
+
+30. **Tracing** - Track agent execution with LangSmith
+31. **Evaluation** - Measure and validate model outputs
+32. **Deployment** - Deploy agents to production
+33. **Middleware Patterns** - Implement middleware for production concerns
+34. **Summarization** - Manage long conversations with context summarization
+35. **PII Redaction** - Protect sensitive information in prompts
+
+### **Optional Advanced Topics**
+
+36. **Runnables** - Chain components together
+37. **Document Transformers** - Process and transform documents
+38. **Text Splitters** - Split documents into retrievable chunks
+39. **Callbacks** - Add custom logging and monitoring
+40. **Prompt Management** - Version and manage prompts in LangSmith
+
+---
+
+## **Recommended Learning Sequence by Use Case**
+
+**Simple Chatbot:** 1 → 2 → 3 → 4 → 5 → 30
+
+**RAG Application:** 1 → 2 → 9 → 10 → 11 → 12 → 13 → 14 → 30
+
+**Intelligent Agent:** 1 → 2 → 3 → 4 → 5 → 6 → 7 → 21 → 30
+
+**Production Agent:** All items in order (1-40)
+
+**Relevant docs:**
+
+- [Agents Documentation](https://docs.langchain.com/oss/python/langchain/agents)
+- [Tools Documentation](https://docs.langchain.com/oss/python/langchain/tools)
+- [Retrieval & RAG](https://docs.langchain.com/oss/python/langchain/retrieval)
+- [LangGraph Overview](https://docs.langchain.com/oss/python/langgraph/overview)
+- [Prompts & Messages](https://docs.langchain.com/oss/python/langchain/messages)
+- [Streaming](https://docs.langchain.com/oss/python/langchain/streaming)
 
 ## Core Concepts
 

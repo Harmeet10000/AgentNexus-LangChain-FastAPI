@@ -2,12 +2,8 @@
 
 from functools import lru_cache
 
-from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-# Load environment variables from .env.development
-load_dotenv(".env.development")
 
 
 class Settings(BaseSettings):
