@@ -24,13 +24,12 @@ keywords = ["fastapi", "langchain", "ai", "api", "async"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     # --- CORE FRAMEWORK (Relaxed Upper Bounds) ---
-    "fastapi[standard]>=0.115.0,<1.0.0", # Latest major is 0.120.0 (Oct 23, 2025) - relaxed to <1.0.0
+    "fastapi[standard]==0.124.0", 
     "uvicorn[standard]>=0.30.0,<1.0.0",
     "uvloop>=0.21.0,<1.0.0",
     "pydantic>=2.9.0,<3.0.0",
     "pydantic-settings>=2.5.0,<3.0.0", # Latest major is 2.11.0 (Sep 24, 2025)
     "httpx>=0.27.0,<1.0.0",
-    "pinecone>=7.3.0",
     # Core LLM, RAG, AI agents framework
     "langchain>=1.0.3",
     "langchain-core>=1.0.2",
@@ -46,7 +45,6 @@ dependencies = [
     "sqlalchemy==2.0.39",
     "alembic==1.16.5",
     "asyncpg==0.29.0",
-    "python-dotenv==1.1.0",
     "loguru==0.7.3",
     "aiofiles==24.1.0",
     "orjson==3.10.1",
@@ -58,6 +56,8 @@ dependencies = [
     "faststream>=0.6.2",
     "mem0ai>=1.0.0",
     "neo4j>=6.0.3",
+    "langgraph-checkpoint-postgres>=3.0.1",
+    "graphiti-core[google-genai]>=0.24.1",
 ]
 
 [project.optional-dependencies]

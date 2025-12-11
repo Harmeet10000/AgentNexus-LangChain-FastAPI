@@ -52,23 +52,10 @@ git clone https://github.com/Harmeet10000/langchain-fastapi-production.git
 cd langchain-fastapi-production
 ```
 
-### 2. Install uv (if not already installed)
-
-```bash
-# On macOS and Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# On Windows
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# Or using pip
-pip install uv
-```
-
 ### 3. Set up environment variables
 
 ```bash
-cp .env.example .env
+touch .env.development 
 # Edit .env and add your API keys
 ```
 
@@ -405,8 +392,6 @@ my_fastapi_project/
 ### 6. MCP (Model Context Protocol)
 
 -   **Multi-Server**: Connect to unlimited MCP servers
--   **Transport Types**: stdio (local) and HTTP (remote)
--   **Built-in Servers**: Math, Weather, Database, Filesystem
 -   **Custom Servers**: Easy extension with custom tools
 -   **Auto-Discovery**: Automatic tool detection and registration
 
@@ -439,38 +424,6 @@ Once the application is running, you can access:
     - Latency metrics
     - Error rates
 
-## 🧪 Testing
-
-### Using uv (Recommended)
-
-```bash
-# Install test dependencies
-uv add --dev pytest pytest-asyncio pytest-cov httpx
-
-# Run all tests
-uv run pytest
-
-# Run with coverage
-uv run pytest --cov=src --cov-report=html
-
-# Run specific test file
-uv run pytest tests/test_mcp_integration.py
-
-# Run MCP agent tests with verbose output
-uv run pytest tests/test_mcp_integration.py -v
-
-# Run tests in parallel
-uv run pytest -n auto
-```
-
-## 🔒 Security
-
--   Rate limiting on all endpoints
--   Input validation with Pydantic
--   CORS configuration
--   Secrets management via environment variables
--   MCP server isolation and sandboxing
--   API key rotation support
 
 ## 🤝 Contributing
 
@@ -489,7 +442,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 -   LangChain team for the amazing framework and MCP adapters
 -   Google for Gemini models
 -   Anthropic for the Model Context Protocol specification
--   Pinecone for vector database
+-   PsotgresSQL for vector database
 -   FastAPI for the web framework
 -   The open-source community
 

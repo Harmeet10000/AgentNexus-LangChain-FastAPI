@@ -5,7 +5,7 @@ from .settings import Settings
 from .signals import setup_signal_handlers
 
 __all__ = [
-    "lifespan",
+    lifespan,
     "Settings",
     "setup_signal_handlers",
 ]
