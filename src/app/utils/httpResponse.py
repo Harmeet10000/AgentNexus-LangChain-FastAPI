@@ -1,8 +1,9 @@
+from app.core.settings import get_settings
 import os
 from typing import Any
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import ORJSONResponse
 from loguru import logger
 
 from app.shared.enums import Environment
@@ -13,7 +14,7 @@ def http_response(
     data: Any = None,
     status_code: int = 200,
     request: Request | None = None,
-) -> JSONResponse:
+) -> ORJSONResponse:
     """
     Create standardized HTTP success response.
 
@@ -52,4 +53,53 @@ def http_response(
         response=response,
     )
 
-    return JSONResponse(status_code=status_code, content=response)
+    return ORJSONResponse(status_code=status_code, content=response)
+
+
+def http_error(
+    message: str,
+    status_code: int = 400,
+    data: Any = None,
+    request: Request | None = None,
+) -> ORJSONResponse:
+    """
+    Create standardized HTTP error response.
+
+    Args:
+        message: Error message
+        status_code: HTTP status code
+        data: Additional error data
+        request: FastAPI request object
+
+    Returns:
+        ORJSONResponse with standardized error format
+    """
+    settings = get_settings()
+
+    response = {
+        "success": False,
+        "statusCode": status_code,
+        "request": {
+            "ip": request.client.host if request and request.client else None,
+            "method": request.method if request else None,
+            "url": str(request.url) if request else None,
+            "correlationId": (
+                getattr(request.state, "correlation_id", None) if request else None
+            ),
+        },
+        "message": message,
+        "data": data,
+    }
+
+    # Remove sensitive data in production
+    if settings.environment == Environment.PRODUCTION:
+        response["request"]["ip"] = None
+
+    logger.error(
+        "CONTROLLER_ERROR",
+        status_code=status_code,
+        message=message,
+        response=response,
+    )
+
+    return ORJSONResponse(status_code=status_code, content=response)
