@@ -18,7 +18,14 @@
 18. refactor RAG code
 19. update FastAPI to 0.124    DONE
 20. figure out using depends in FastAPI with DB session, logger, service layer, correlational ID and more 
+21. add this from fastapi import BackgroundTasks
 
+@app.post("/process")
+async def process_data(data: DataModel, background_tasks: BackgroundTasks):
+    # Return immediately, process in background
+    background_tasks.add_task(heavy_processing, data)
+    return {"status": "processing"}
+22.
 ```
 what is yield 
 does HTTPException sends back a error response. if yes do i need to use global_exception_handler?

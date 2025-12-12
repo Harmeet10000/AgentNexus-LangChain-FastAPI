@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse,ORJSONResponse, Response
 
 from app.core.lifespan import lifespan
 from app.core.settings import get_settings
@@ -36,6 +36,7 @@ def create_app() -> FastAPI:
         docs_url="/api-docs",
         redoc_url="/api-redoc",
         openapi_url="/swagger.json",
+        default_response_class=ORJSONResponse
     )
 
     # ============================================================================
