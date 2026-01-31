@@ -1,11 +1,10 @@
 import asyncio
-import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 
 from fastapi import Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import ORJSONResponse
 from nanoid import generate
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -16,10 +15,9 @@ from prometheus_client import (
     generate_latest,
 )
 
-# Setup logging
-logger = logging.getLogger(__name__)
+from app.utils.logger import logger
 
-# Context variable for correlation ID
+# Context variable for correlation ID (thread-safe)
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
 
 # Prometheus metrics registry
@@ -29,21 +27,22 @@ metrics_registry = CollectorRegistry()
 http_requests_total = Counter(
     "http_requests_total",
     "Total HTTP requests",
-    ["method", "path", "status_code", "project"],
+    ["method", "endpoint", "status_code", "project"],
     registry=metrics_registry,
 )
 
 http_request_duration_seconds = Histogram(
     "http_request_duration_seconds",
     "HTTP request duration in seconds",
-    ["method", "path", "status_code", "project"],
+    ["method", "endpoint", "status_code", "project"],
+    buckets=(0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0),
     registry=metrics_registry,
 )
 
 http_requests_in_progress = Gauge(
     "http_requests_in_progress",
     "HTTP requests in progress",
-    ["method", "path", "project"],
+    ["method", "endpoint", "project"],
     registry=metrics_registry,
 )
 
@@ -51,149 +50,193 @@ app_up = Gauge(
     "app_up", "Application up status", ["project"], registry=metrics_registry
 )
 
-# Set app up on import
-app_up.labels(project="langchain-fastapi").set(1)
+
+def _normalize_path(path: str) -> str:
+    """
+    Normalize path for metrics to avoid high cardinality.
+    Converts /users/123 -> /users/{id}
+    """
+    # Skip normalization for common paths
+    if path in {"/", "/health", "/metrics", "/docs", "/redoc", "/openapi.json"}:
+        return path
+
+    # Simple normalization: replace UUIDs and numeric IDs
+    parts = path.split("/")
+    normalized = []
+    for part in parts:
+        if part.isdigit() or (len(part) == 36 and part.count("-") == 4):  # UUID
+            normalized.append("{id}")
+        else:
+            normalized.append(part)
+
+    return "/".join(normalized)
 
 
-# ✅ Using decorator-style middleware for better performance
 async def correlation_middleware(request: Request, call_next: Callable) -> Response:
     """Add correlation ID to requests for distributed tracing."""
-    # Generate unique correlation ID
-    correlation_id = generate(size=21)
+    # Check if correlation ID already exists (from upstream service)
+    correlation_id = request.headers.get("X-Correlation-ID") or generate(size=21)
+
     correlation_id_var.set(correlation_id)
     request.state.correlation_id = correlation_id
 
-    logger.info(f"[{correlation_id}] {request.method} {request.url.path} started")
-
-    try:
+    # Bind correlation_id to logger context for this request
+    with logger.contextualize(
+        correlation_id=correlation_id, path=request.url.path, method=request.method
+    ):
         response = await call_next(request)
         response.headers["X-Correlation-ID"] = correlation_id
-
-        logger.info(
-            f"[{correlation_id}] {request.method} {request.url.path} "
-            f"completed with status {response.status_code}"
-        )
-
         return response
-    except Exception as e:
-        logger.error(
-            f"[{correlation_id}] {request.method} {request.url.path} "
-            f"failed with error: {e!s}",
-            exc_info=True,
-        )
-        raise
 
 
-def create_metrics_middleware(project_name: str = "langchain-fastapi"):
-    """Factory function to create metrics middleware with project name."""
+class MetricsMiddleware:
+    """Pure ASGI middleware for Prometheus metrics."""
 
-    async def metrics_middleware(request: Request, call_next: Callable) -> Response:
-        """Prometheus metrics middleware for monitoring."""
-        # Skip metrics endpoint itself to avoid infinite loop
-        if request.url.path == "/metrics":
-            return await call_next(request)
+    def __init__(
+        self,
+        app: Callable[[dict, Callable, Callable], Awaitable],
+        project_name: str = "langchain-fastapi",
+    ):
+        self.app = app
+        self.project_name = project_name
+        # Set app up status on creation
+        app_up.labels(project=project_name).set(1)
 
-        method = request.method
-        path = request.url.path
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        """ASGI interface."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Skip metrics endpoint to avoid infinite loop
+        path = scope["path"]
+        if path == "/metrics":
+            await self.app(scope, receive, send)
+            return
+
+        method = scope["method"]
+        endpoint = _normalize_path(path)
 
         # Track in-progress requests
         http_requests_in_progress.labels(
-            method=method, path=path, project=project_name
+            method=method, endpoint=endpoint, project=self.project_name
         ).inc()
 
-        start_time = time.time()
+        start_time = time.perf_counter()
         status_code = 500  # Default to 500 in case of exception
 
+        async def send_wrapper(message: dict) -> None:
+            """Wrapper to capture status code and add headers."""
+            nonlocal status_code
+
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+
+                # Add process time header
+                process_time = time.perf_counter() - start_time
+                headers = list(message.get("headers", []))
+                headers.append((b"x-process-time", f"{process_time:.3f}".encode()))
+                message["headers"] = headers
+
+            await send(message)
+
         try:
-            response = await call_next(request)
-            status_code = response.status_code
-            return response
-        except Exception as e:
-            logger.error(f"Exception in request {method} {path}: {e!s}", exc_info=True)
-            raise
+            await self.app(scope, receive, send_wrapper)
         finally:
-            duration = time.time() - start_time
+            duration = time.perf_counter() - start_time
 
             # Record metrics
             http_requests_total.labels(
                 method=method,
-                path=path,
+                endpoint=endpoint,
                 status_code=status_code,
-                project=project_name,
+                project=self.project_name,
             ).inc()
 
             http_request_duration_seconds.labels(
                 method=method,
-                path=path,
+                endpoint=endpoint,
                 status_code=status_code,
-                project=project_name,
+                project=self.project_name,
             ).observe(duration)
 
             # Decrement in-progress
             http_requests_in_progress.labels(
-                method=method, path=path, project=project_name
+                method=method, endpoint=endpoint, project=self.project_name
             ).dec()
 
-    return metrics_middleware
 
+class TimeoutMiddleware:
+    """Pure ASGI middleware for request timeouts."""
 
-def create_timeout_middleware(timeout_seconds: int = 30):
-    """Factory function to create timeout middleware with custom timeout."""
+    def __init__(
+        self,
+        app: Callable[[dict, Callable, Callable], Awaitable],
+        timeout_seconds: int = 30,
+    ):
+        self.app = app
+        self.timeout_seconds = timeout_seconds
 
-    async def timeout_middleware(request: Request, call_next: Callable) -> Response:
-        """Timeout requests after specified duration to prevent hanging."""
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        """ASGI interface."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         try:
-            return await asyncio.wait_for(call_next(request), timeout=timeout_seconds)
-        except TimeoutError:
-            logger.exception(
-                f"Request timeout: {request.method} {request.url.path} "
-                f"exceeded {timeout_seconds}s"
+            await asyncio.wait_for(
+                self.app(scope, receive, send),
+                timeout=self.timeout_seconds,
             )
-            # Return JSON response instead of raising exception
-            return JSONResponse(
+        except asyncio.TimeoutError:
+            # Get correlation ID from scope if available
+            correlation_id = "unknown"
+            for key, value in scope.get("headers", []):
+                if key == b"x-correlation-id":
+                    correlation_id = value.decode()
+                    break
+
+            path = scope["path"]
+            method = scope["method"]
+
+            logger.error(
+                f"[{correlation_id}] Request timeout: {method} {path} "
+                f"exceeded {self.timeout_seconds}s"
+            )
+
+            # Send timeout response
+            response = ORJSONResponse(
                 status_code=408,
                 content={
                     "error": "Request Timeout",
-                    "message": f"Request took longer than {timeout_seconds} seconds to process",
-                    "path": request.url.path,
+                    "message": f"Request took longer than {self.timeout_seconds} seconds",
+                    "path": path,
+                    "correlationId": correlation_id,
                 },
             )
 
-    return timeout_middleware
+            await response(scope, receive, send)
 
 
-def create_security_headers_middleware(
-    enable_csp: bool = False, csp_policy: str = "default-src 'self'"
-) -> Callable:
-    """Factory to create security headers middleware with configurable CSP."""
+async def create_security_headers_middleware(
+    request: Request, call_next: Callable
+) -> Response:
+    """Add security headers to all responses."""
+    response = await call_next(request)
 
-    async def security_headers_middleware(
-        request: Request, call_next: Callable
-    ) -> Response:
-        """Add security headers to all responses."""
-        response = await call_next(request)
+    # Security headers (OWASP recommended)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = (
+        "max-age=31536000; includeSubDomains; preload"
+    )
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = (
+        "geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=()"
+    )
 
-        # Security headers
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Strict-Transport-Security"] = (
-            "max-age=31536000; includeSubDomains"
-        )
-        if enable_csp:
-            response.headers["Content-Security-Policy"] = csp_policy
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = (
-            "geolocation=(), microphone=(), camera=()"
-        )
-
-        return response
-
-    return security_headers_middleware
-
-
-def get_correlation_id() -> str:
-    """Get current correlation ID from context."""
-    return correlation_id_var.get()
+    return response
 
 
 def get_metrics() -> tuple[bytes, str]:

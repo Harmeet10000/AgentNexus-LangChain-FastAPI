@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     OTEL_METRICS_EXPORTER: str = Field(default="otlp")
 
 
-@lru_cache
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Returns a cached instance of the application settings."""
     # Instantiating the class here ensures it's only done once (due to @lru_cache)

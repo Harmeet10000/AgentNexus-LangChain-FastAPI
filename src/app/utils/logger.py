@@ -1,28 +1,10 @@
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from loguru import logger as loguru_logger
-from pydantic import ConfigDict
-from pydantic_settings import BaseSettings
 
-from src.app.shared.enums import Environment
-
-
-class LogConfig(BaseSettings):
-    """Logging configuration."""
-
-    ENVIRONMENT: str = Environment.DEVELOPMENT
-    LOG_LEVEL: str = "DEBUG"
-    LOG_DIR: Path = Path("logs/")
-    LOG_ROTATION: str = "5 MB"
-    LOG_RETENTION: str = "30 days"
-    LOG_COMPRESSION: str = "zip"
-    LOG_BACKTRACE: bool = True
-    LOG_DIAGNOSE: bool = False
-
-    model_config = ConfigDict(env_file=".env.development", extra="ignore")
+from app.config.settings import get_settings
 
 
 def console_format(record: dict[str, Any]) -> str:
@@ -61,23 +43,9 @@ def console_format(record: dict[str, Any]) -> str:
     return fmt + "\n"
 
 
-def setup_logging(config: LogConfig | None = None) -> None:
+def setup_logging() -> None:
     """Configure loguru logger with console and file handlers."""
-    if config is None:
-        try:
-            config = LogConfig()
-        except Exception:
-            # Fallback to defaults if config fails
-            config = LogConfig(
-                ENVIRONMENT=Environment.DEVELOPMENT,
-                LOG_LEVEL="DEBUG",
-                LOG_DIR=Path("logs/"),
-                LOG_ROTATION="5 MB",
-                LOG_RETENTION="30 days",
-                LOG_COMPRESSION="zip",
-                LOG_BACKTRACE=True,
-                LOG_DIAGNOSE=False,
-            )
+    settings = get_settings()
 
     # Remove default handler
     loguru_logger.remove()
@@ -86,24 +54,24 @@ def setup_logging(config: LogConfig | None = None) -> None:
     loguru_logger.add(
         sys.stderr,
         format=console_format,  # type: ignore[arg-type]
-        level=config.LOG_LEVEL,
+        level=settings.LOG_LEVEL,
         colorize=True,
-        backtrace=config.LOG_BACKTRACE,
-        diagnose=config.LOG_DIAGNOSE,
+        backtrace=settings.LOG_BACKTRACE,
+        diagnose=settings.LOG_DIAGNOSE,
     )
 
     # File handler with JSON serialization
-    config.LOG_DIR.mkdir(parents=True, exist_ok=True)
+    settings.LOG_DIR.mkdir(parents=True, exist_ok=True)
     loguru_logger.add(
-        config.LOG_DIR / "app_{time:YYYY-MM-DD}.log",
+        settings.LOG_DIR / "app_{time:YYYY-MM-DD}.log",
         format="{message}",
-        level=config.LOG_LEVEL,
-        rotation=config.LOG_ROTATION,
-        retention=config.LOG_RETENTION,
-        compression=config.LOG_COMPRESSION,
+        level=settings.LOG_LEVEL,
+        rotation=settings.LOG_ROTATION,
+        retention=settings.LOG_RETENTION,
+        compression=settings.LOG_COMPRESSION,
         serialize=True,
-        backtrace=config.LOG_BACKTRACE,
-        diagnose=config.LOG_DIAGNOSE,
+        backtrace=settings.LOG_BACKTRACE,
+        diagnose=settings.LOG_DIAGNOSE,
     )
 
 

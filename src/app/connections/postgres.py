@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.settings import get_settings
+from app.config.settings import get_settings
 from app.utils.logger import logger
 
 
@@ -30,6 +30,8 @@ engine = create_async_engine(
     pool_size=get_settings().POSTGRES_POOL_SIZE,
     max_overflow=get_settings().POSTGRES_MAX_OVERFLOW,
     pool_pre_ping=True,
+    pool_timeout=30,
+    pool_recycle=3600
 )
 
 # Create session factory
