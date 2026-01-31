@@ -1465,6 +1465,7 @@ dependencies = [
     { name = "fastmcp" },
     { name = "faststream" },
     { name = "graphiti-core", extra = ["google-genai"] },
+    { name = "httptools" },
     { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-community" },
@@ -1535,6 +1536,7 @@ requires-dist = [
     { name = "fastmcp", specifier = ">=2.11.0,<3.0.0" },
     { name = "faststream", specifier = ">=0.6.2" },
     { name = "graphiti-core", extras = ["google-genai"], specifier = ">=0.24.1" },
+    { name = "httptools", specifier = ">=0.7.1" },
     { name = "httpx", specifier = ">=0.27.0,<1.0.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0,<1.0.0" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27.0,<1.0.0" },
@@ -1570,7 +1572,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.14.2" },
     { name = "safety", marker = "extra == 'dev'", specifier = ">=3.6.2,<4.0.0" },
     { name = "sqlalchemy", specifier = "==2.0.39" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0,<1.0.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = "==0.34.0" },
     { name = "uvloop", specifier = ">=0.21.0,<1.0.0" },
 ]
 provides-extras = ["dev", "test", "docs"]
@@ -3539,15 +3541,15 @@ wheels = [
 
 [[package]]
 name = "uvicorn"
-version = "0.30.6"
+version = "0.34.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "h11" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5a/01/5e637e7aa9dd031be5376b9fb749ec20b86f5a5b6a49b87fabd374d5fa9f/uvicorn-0.30.6.tar.gz", hash = "sha256:4b15decdda1e72be08209e860a1e10e92439ad5b97cf44cc945fcbee66fc5788", size = 42825, upload-time = "2024-08-13T09:27:35.098Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/4d/938bd85e5bf2edeec766267a5015ad969730bb91e31b44021dfe8b22df6c/uvicorn-0.34.0.tar.gz", hash = "sha256:404051050cd7e905de2c9a7e61790943440b3416f49cb409f965d9dcd0fa73e9", size = 76568, upload-time = "2024-12-15T13:33:30.42Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/8e/cdc7d6263db313030e4c257dd5ba3909ebc4e4fb53ad62d5f09b1a2f5458/uvicorn-0.30.6-py3-none-any.whl", hash = "sha256:65fd46fe3fda5bdc1b03b94eb634923ff18cd35b2f084813ea79d1f103f711b5", size = 62835, upload-time = "2024-08-13T09:27:33.536Z" },
+    { url = "https://files.pythonhosted.org/packages/61/14/33a3a1352cfa71812a3a21e8c9bfb83f60b0011f5e36f2b1399d51928209/uvicorn-0.34.0-py3-none-any.whl", hash = "sha256:023dc038422502fa28a09c7a30bf2b6991512da7dcdb8fd35fe57cfc154126f4", size = 62315, upload-time = "2024-12-15T13:33:27.467Z" },
 ]
 
 [package.optional-dependencies]

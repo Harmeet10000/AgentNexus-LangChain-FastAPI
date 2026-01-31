@@ -888,12 +888,12 @@ logger.info(
 ```python
 # src/api/middleware/global_exception_handler.py
 from fastapi import Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import ORJSONResponse
 from src.app.utils.logger import logger
 from src.app.utils.exceptions import APIException
 
 @app.exception_handler(APIException)
-async def api_exception_handler(request: Request, exc: APIException) -> JSONResponse:
+async def api_exception_handler(request: Request, exc: APIException) -> ORJSONResponse:
     """Centralized exception handling with structured logging."""
     logger.error(
         "API exception occurred",
@@ -902,7 +902,7 @@ async def api_exception_handler(request: Request, exc: APIException) -> JSONResp
         path=str(request.url.path),
         method=request.method
     )
-    return JSONResponse(
+    return ORJSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail}
     )

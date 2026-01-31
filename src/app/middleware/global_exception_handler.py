@@ -1,71 +1,72 @@
-import os
 import traceback
 
 from fastapi import Request, status
 from fastapi.exceptions import HTTPException, RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import ORJSONResponse
 
+from app.config.settings import get_settings
 from app.utils.exceptions import APIException
 from app.utils.logger import logger
 
 
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def global_exception_handler(request: Request, exc: Exception) -> ORJSONResponse:
     """
-    Single unified exception handler for ALL errors
-    Handles: APIException, ValidationError, HTTPException, and unexpected errors
+    Unified exception handler for all errors.
+    Handles: APIException, RequestValidationError, HTTPException, and unexpected errors.
     """
+    settings = get_settings()
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    is_production = settings.ENVIRONMENT == "production"
 
-    correlation_id = getattr(request.state, "correlation_id", None)
-    is_production = os.getenv("ENV", "").lower() == "production"
+    # Build base request info (reused across all error types)
+    request_info = {
+        "method": request.method,
+        "url": str(request.url),
+        "correlationId": correlation_id,
+    }
 
-    # Determine error type and build error object
+    # Include IP only in non-production
+    if not is_production and request.client:
+        request_info["ip"] = request.client.host
+
+    # Determine error type and build error response
     if isinstance(exc, APIException):
         # Custom API exceptions
         error_obj = {
             "name": exc.name,
             "success": False,
             "statusCode": exc.status_code,
-            "request": {
-                "ip": request.client.host if request.client else None,
-                "method": request.method,
-                "url": str(request.url),
-                "correlationId": correlation_id,
-            },
+            "request": request_info,
             "message": exc.message,
             "data": exc.data,
-            "trace": {"error": traceback.format_exc()}
-            if exc.status_code >= 500
-            else None,
         }
-        log_type = "CONTROLLER_ERROR"
+
+        # Add trace for 5xx errors in non-production
+        if exc.status_code >= 500 and not is_production:
+            error_obj["trace"] = traceback.format_exc()
+
+        log_level = "error" if exc.status_code >= 500 else "warning"
 
     elif isinstance(exc, RequestValidationError):
         # Pydantic validation errors (422)
-        errors = []
-        for error in exc.errors():
-            errors.append(
-                {
-                    "field": ".".join(str(x) for x in error["loc"][1:]),
-                    "message": error["msg"],
-                    "type": error["type"],
-                }
-            )
+        errors = [
+            {
+                "field": ".".join(str(x) for x in error["loc"][1:]),
+                "message": error["msg"],
+                "type": error["type"],
+            }
+            for error in exc.errors()
+        ]
 
         error_obj = {
             "name": "ValidationError",
             "success": False,
             "statusCode": status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "request": {
-                "ip": request.client.host if request.client else None,
-                "method": request.method,
-                "url": str(request.url),
-                "correlationId": correlation_id,
-            },
+            "request": request_info,
             "message": "Validation failed",
             "data": {"errors": errors},
-            "trace": None,
         }
-        log_type = "VALIDATION_ERROR"
+        log_level = "warning"
 
     elif isinstance(exc, HTTPException):
         # FastAPI HTTP exceptions
@@ -73,17 +74,11 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             "name": "HTTPException",
             "success": False,
             "statusCode": exc.status_code,
-            "request": {
-                "ip": request.client.host if request.client else None,
-                "method": request.method,
-                "url": str(request.url),
-                "correlationId": correlation_id,
-            },
+            "request": request_info,
             "message": exc.detail if isinstance(exc.detail, str) else "HTTP error",
-            "data": None,
-            "trace": None,
+            "data": exc.detail if not isinstance(exc.detail, str) else None,
         }
-        log_type = "HTTP_ERROR"
+        log_level = "error" if exc.status_code >= 500 else "warning"
 
     else:
         # Unexpected errors (500)
@@ -91,34 +86,27 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             "name": type(exc).__name__,
             "success": False,
             "statusCode": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "request": {
-                "ip": request.client.host if request.client else None,
-                "method": request.method,
-                "url": str(request.url),
-                "correlationId": correlation_id,
-            },
-            "message": "Something went wrong",
+            "request": request_info,
+            "message": "An unexpected error occurred" if is_production else str(exc),
             "data": None,
-            "trace": {"error": traceback.format_exc()},
         }
-        log_type = "UNHANDLED_ERROR"
 
-    # Log the error
-    logger.error(
-        log_type,
-        error_name=error_obj["name"],
+        # Add trace in non-production
+        if not is_production:
+            error_obj["trace"] = traceback.format_exc()
+
+        log_level = "error"
+
+    # Log the error with appropriate level
+    log_func = getattr(logger, log_level)
+    log_func(
+        f"[{correlation_id}] {error_obj['name']}: {error_obj['message']}",
         status_code=error_obj["statusCode"],
-        method=error_obj["request"]["method"],
-        url=error_obj["request"]["url"],
-        correlation_id=correlation_id,
-        message=error_obj["message"],
+        method=request_info["method"],
+        url=request_info["url"],
     )
 
-    # Remove sensitive data in production
-    if is_production:
-        if "ip" in error_obj["request"]:
-            del error_obj["request"]["ip"]
-        if error_obj.get("trace"):
-            del error_obj["trace"]
-
-    return JSONResponse(status_code=error_obj["statusCode"], content=error_obj)
+    return ORJSONResponse(
+        status_code=error_obj["statusCode"],
+        content=error_obj,
+    )

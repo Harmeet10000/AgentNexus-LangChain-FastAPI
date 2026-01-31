@@ -6,8 +6,8 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.core.db.postgres import Base
-from app.core.db.postgres import config as db_config
+from app.lifecycle.db.postgres import Base
+from app.lifecycle.db.postgres import config as db_config
 
 
 # Alembic Config object

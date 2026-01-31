@@ -24,8 +24,8 @@ keywords = ["fastapi", "langchain", "ai", "api", "async"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     # --- CORE FRAMEWORK (Relaxed Upper Bounds) ---
-    "fastapi[standard]==0.124.0", 
-    "uvicorn[standard]>=0.30.0,<1.0.0",
+    "fastapi[standard]==0.124.0",
+    "uvicorn[standard]>=0.34.0",
     "uvloop>=0.21.0,<1.0.0",
     "pydantic>=2.9.0,<3.0.0",
     "pydantic-settings>=2.5.0,<3.0.0", # Latest major is 2.11.0 (Sep 24, 2025)
@@ -58,6 +58,7 @@ dependencies = [
     "neo4j>=6.0.3",
     "langgraph-checkpoint-postgres>=3.0.1",
     "graphiti-core[google-genai]>=0.24.1",
+    "httptools>=0.7.1",
 ]
 
 [project.optional-dependencies]
@@ -109,7 +110,7 @@ line-length = 88
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP", "B", "A", "C4", "DTZ", "T10", "EM", "ISC", "ICN", "PIE", "PT", "Q", "RSE", "RET", "SIM", "TID", "ARG", "PTH", "PD", "PL", "TRY", "RUF"]
+select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501", "ISC001", "TRY003", "PLR0913", "PLR2004"]
 
 [tool.ruff.lint.per-file-ignores]

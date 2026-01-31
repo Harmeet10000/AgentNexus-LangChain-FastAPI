@@ -3,9 +3,9 @@ from typing import Any
 from fastapi import Request
 
 from app.connections import mongodb as mongo_db
-from app.connections.redis import get_redis_client
+from app.connections.redis import create_redis_client
 from app.utils.httpResponse import http_response
-from app.utils.quicker import (
+from .service import (
     check_database,
     check_disk,
     check_memory,

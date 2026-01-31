@@ -2,20 +2,18 @@
 
 from .global_exception_handler import global_exception_handler
 from .server_middleware import (
+    MetricsMiddleware,
+    TimeoutMiddleware,
     correlation_middleware,
-    create_metrics_middleware,
     create_security_headers_middleware,
-    create_timeout_middleware,
-    get_correlation_id,
     get_metrics,
 )
 
 __all__ = [
-    "global_exception_handler",
+    "MetricsMiddleware",
+    "TimeoutMiddleware",
     "correlation_middleware",
-    "create_metrics_middleware",
-    "create_timeout_middleware",
     "create_security_headers_middleware",
-    "get_correlation_id",
     "get_metrics",
+    "global_exception_handler",
 ]
