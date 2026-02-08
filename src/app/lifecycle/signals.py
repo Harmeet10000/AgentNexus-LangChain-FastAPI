@@ -17,3 +17,4 @@ def setup_signal_handlers() -> None:
 
     signal.signal(signal.SIGTERM, graceful_shutdown)
     signal.signal(signal.SIGINT, graceful_shutdown)
+

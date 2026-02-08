@@ -4,11 +4,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from beanie import init_beanie
 
 from app.config.settings import get_settings
 from app.connections.mongodb import create_mongo_client
 from app.connections.redis import create_redis_client
+from app.features.auth.model import User
+from app.features.search.model import Search
 from app.utils.logger import logger
 
 
@@ -19,17 +20,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("Application starting", app_name=app.title, version=app.version)
 
-    # MongoDB: Create client and store in app.state
-    mongo_client = create_mongo_client(settings.MONGODB_URI)
+    # MongoDB: Initialize using Beanie's recommended approach
+    mongo_client, db = await create_mongo_client(
+        uri=settings.MONGODB_URI,
+        db_name=settings.MONGODB_DB_NAME,
+        document_models=[User, Search],
+    )
     app.state.mongo_client = mongo_client
-    app.state.db = mongo_client[settings.MONGODB_DB_NAME]
-    # await init_beanie(
-    #     database=database,
-    #     document_models=[
-    #         User,
-    #         # add more models here
-    #     ],
-    # )
+    app.state.db = db
     # Redis: Connect and store in app.state
     redis = create_redis_client(settings.REDIS_URL)
     app.state.redis = redis
@@ -67,5 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.mongo_client.close()
         logger.info("MongoDB connection closed")
 
-    await redis.close()
+    if hasattr(app.state, "redis"):
+        await app.state.redis.close()
+        logger.info("Redis connection closed")
     logger.info("Application shutdown complete", status="stopped")
