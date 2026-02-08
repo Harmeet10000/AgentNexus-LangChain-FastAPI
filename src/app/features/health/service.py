@@ -1,3 +1,5 @@
+"""Health check service functions."""
+
 import os
 import time
 from typing import Any
@@ -16,7 +18,7 @@ def get_system_health() -> dict[str, Any]:
     memory = psutil.virtual_memory()
 
     return {
-        "cpuUsage": psutil.getloadavg(),
+        "cpuUsage": list(psutil.getloadavg()),
         "cpuUsagePercent": f"{cpu_percent:.2f}%",
         "totalMemory": f"{memory.total / 1024 / 1024:.2f} MB",
         "freeMemory": f"{memory.available / 1024 / 1024:.2f} MB",
@@ -33,31 +35,36 @@ def get_application_health() -> dict[str, Any]:
 
     return {
         "environment": os.getenv("ENVIRONMENT", "development"),
-        "uptime": f"{uptime:.2f} Seconds",
+        "uptime": f"{uptime:.2f} seconds",
         "memoryUsage": {
-            "heapTotal": f"{memory_info.rss / 1024 / 1024:.2f} MB",
-            "heapUsed": f"{memory_info.rss / 1024 / 1024:.2f} MB",
+            "rss": f"{memory_info.rss / 1024 / 1024:.2f} MB",
+            "vms": f"{memory_info.vms / 1024 / 1024:.2f} MB",
         },
         "pid": os.getpid(),
-        "version": f"Python {os.sys.version.split()[0]}",
+        # "pythonVersion": f"{os.sys.version.split()[0]}",
     }
 
 
-async def check_database(db_client: AsyncIOMotorClient) -> dict[str, Any]:
+async def check_database(mongo_client: AsyncIOMotorClient) -> dict[str, Any]:
     """Check MongoDB database health."""
     try:
-        start = time.time()
-        await db_client.admin.command("ping")
-        response_time = time.time() - start
+        start = time.perf_counter()
+        await mongo_client.admin.command("ping")
+        response_time = (time.perf_counter() - start) * 1000
+
+        # Get server info
+        server_info = await mongo_client.server_info()
 
         return {
             "status": "healthy",
             "state": "connected",
-            "responseTime": f"{response_time * 1000:.2f}ms",
+            "responseTime": f"{response_time:.2f}ms",
+            "version": server_info.get("version", "unknown"),
         }
     except Exception as e:
         return {
             "status": "unhealthy",
+            "state": "disconnected",
             "error": str(e),
         }
 
@@ -65,36 +72,46 @@ async def check_database(db_client: AsyncIOMotorClient) -> dict[str, Any]:
 async def check_redis(redis_client: Redis) -> dict[str, Any]:
     """Check Redis health."""
     try:
-        start = time.time()
+        start = time.perf_counter()
         await redis_client.ping()
-        response_time = (time.time() - start) * 1000
+        response_time = (time.perf_counter() - start) * 1000
+
+        # Get Redis info
+        info = await redis_client.info()
 
         return {
             "status": "healthy",
+            "state": "connected",
             "responseTime": f"{response_time:.2f}ms",
-            "connection": "connected",
+            "version": info.get("redis_version", "unknown"),
+            "connectedClients": info.get("connected_clients", 0),
         }
     except Exception as e:
         return {
             "status": "unhealthy",
+            "state": "disconnected",
             "error": str(e),
-            "connection": "disconnected",
         }
 
 
 def check_memory() -> dict[str, Any]:
     """Check memory usage."""
+    memory = psutil.virtual_memory()
     process = psutil.Process()
-    memory_info = process.memory_info()
-    total_mb = memory_info.rss / 1024 / 1024
-    used_mb = memory_info.rss / 1024 / 1024
-    usage_percent = psutil.virtual_memory().percent
+    process_memory = process.memory_info()
 
     return {
-        "status": "healthy" if usage_percent < 90 else "warning",
-        "totalMB": round(total_mb),
-        "usedMB": round(used_mb),
-        "usagePercent": round(usage_percent),
+        "status": "healthy" if memory.percent < 90 else "warning",
+        "system": {
+            "total": f"{memory.total / 1024 / 1024:.2f} MB",
+            "available": f"{memory.available / 1024 / 1024:.2f} MB",
+            "used": f"{memory.used / 1024 / 1024:.2f} MB",
+            "percent": f"{memory.percent:.1f}%",
+        },
+        "process": {
+            "rss": f"{process_memory.rss / 1024 / 1024:.2f} MB",
+            "vms": f"{process_memory.vms / 1024 / 1024:.2f} MB",
+        },
     }
 
 
@@ -104,15 +121,16 @@ def check_disk() -> dict[str, Any]:
         disk = psutil.disk_usage(".")
 
         return {
-            "status": "healthy",
+            "status": "healthy" if disk.percent < 90 else "warning",
             "accessible": True,
             "total": f"{disk.total / 1024 / 1024 / 1024:.2f} GB",
             "used": f"{disk.used / 1024 / 1024 / 1024:.2f} GB",
             "free": f"{disk.free / 1024 / 1024 / 1024:.2f} GB",
-            "percent": f"{disk.percent}%",
+            "percent": f"{disk.percent:.1f}%",
         }
     except Exception as e:
         return {
             "status": "unhealthy",
+            "accessible": False,
             "error": str(e),
         }
