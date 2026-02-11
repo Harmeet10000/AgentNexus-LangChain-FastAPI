@@ -59,6 +59,12 @@ dependencies = [
     "langgraph-checkpoint-postgres>=3.0.1",
     "graphiti-core[google-genai]>=0.24.1",
     "httptools>=0.7.1",
+    "beanie>=2.0.1",
+    "tenacity>=9.1.2",
+    "slowapi>=0.1.9",
+    "docling>=2.72.0",
+    "celery>=5.6.2",
+    "scrapy>=2.14.1",
 ]
 
 [project.optional-dependencies]

@@ -53,7 +53,7 @@ def setup_logging() -> None:
     # Console handler with colors and custom format
     loguru_logger.add(
         sys.stderr,
-        format=console_format,  # type: ignore[arg-type]
+        format=console_format,
         level=settings.LOG_LEVEL,
         colorize=True,
         backtrace=settings.LOG_BACKTRACE,

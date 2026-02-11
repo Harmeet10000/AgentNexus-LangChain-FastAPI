@@ -31,7 +31,7 @@ async def create_mongo_client(uri: str, db_name: str, document_models: list):
     database = client[db_name]
 
     await init_beanie(
-        database=database,
+        database=database, # type: ignore
         document_models=document_models,
     )
 
