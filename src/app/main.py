@@ -1,14 +1,13 @@
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import ORJSONResponse, Response
 
 from app.config.settings import get_settings
-from app.lifecycle.lifespan import lifespan
 from app.features.health.router import router as health_router
+from app.lifecycle.lifespan import lifespan
 from app.middleware.global_exception_handler import global_exception_handler
 from app.middleware.server_middleware import (
     MetricsMiddleware,
@@ -20,7 +19,7 @@ from app.middleware.server_middleware import (
 from app.utils.logger import logger
 
 # Load environment variables
-load_dotenv(".env.development")
+load_dotenv(dotenv_path=".env.development")
 
 
 def create_app() -> FastAPI:
@@ -28,8 +27,8 @@ def create_app() -> FastAPI:
 
     settings = get_settings()
 
-    app = FastAPI(
-        title="ShipThis",
+    app: FastAPI = FastAPI(
+        title="Langchain FastAPI Template",
         version="1.0.0",
         lifespan=lifespan,
         docs_url="/api-docs",
@@ -75,7 +74,7 @@ def create_app() -> FastAPI:
 
     # 6. Security headers (Execute early)
     @app.middleware("http")
-    async def add_security_headers(request: Request, call_next: Callable):
+    async def add_security_headers(request, call_next):
         return await create_security_headers_middleware(request, call_next)
 
     # 7. Correlation ID (For distributed tracing)
@@ -136,4 +135,4 @@ def create_app() -> FastAPI:
     return app
 
 
-app = create_app()
+app: FastAPI = create_app()

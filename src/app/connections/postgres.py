@@ -9,10 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config.settings import get_settings
 from app.utils.logger import logger
 
-
+settings = get_settings()
 def get_database_url() -> str:
     """Convert psycopg2 URL to asyncpg URL."""
-    postgres_url = get_settings().POSTGRES_URL
+    postgres_url = settings.POSTGRES_URL
     # Convert to asyncpg and fix SSL parameters
     asyncpg_url = postgres_url.replace("postgresql://", "postgresql+asyncpg://")
     # Remove psycopg2-specific SSL parameters that asyncpg doesn't support
@@ -27,8 +27,8 @@ def get_database_url() -> str:
 engine = create_async_engine(
     get_database_url(),
     echo=False,
-    pool_size=get_settings().POSTGRES_POOL_SIZE,
-    max_overflow=get_settings().POSTGRES_MAX_OVERFLOW,
+    pool_size=settings.POSTGRES_POOL_SIZE,
+    max_overflow=settings.POSTGRES_MAX_OVERFLOW,
     pool_pre_ping=True,
     pool_timeout=30,
     pool_recycle=3600
@@ -65,7 +65,7 @@ async def init_db() -> None:
         version = result.scalar()
 
         # Parse URL for host info
-        parsed_url = urlparse(get_settings().POSTGRES_URL)
+        parsed_url = urlparse(settings.POSTGRES_URL)
         host = parsed_url.hostname
 
         logger.info(

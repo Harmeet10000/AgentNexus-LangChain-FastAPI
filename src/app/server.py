@@ -1,7 +1,8 @@
 import uvicorn
-from app.main import app
+
 from app.config.settings import get_settings
 from app.lifecycle.signals import setup_signal_handlers
+from app.main import app
 from app.utils.logger import logger
 
 

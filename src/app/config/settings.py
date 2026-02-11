@@ -1,6 +1,7 @@
 # src/settings.py
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,18 +25,17 @@ class Settings(BaseSettings):
     APP_NAME: str = Field(default="LangChain FastAPI Production")
     APP_VERSION: str = Field(default="1.0.0")
     ENVIRONMENT: str = Field(default="development")
-    DEBUG: bool = Field(default=False)
     API_PREFIX: str = Field(default="/api/v1")
     CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
 
     # --- Server Configuration ---
     HOST: str = Field(default="0.0.0.0")
-    PORT: int = Field(default=8000)
+    PORT: int = Field(default=5000)
     WORKERS: int = Field(default=1)
 
     # --- Database ---
-    MONGODB_URL: str = Field(default="mongodb://localhost:27017/langchain_db")
-    MONGODB_DATABASE: str = Field(default="langchain_db")
+    MONGODB_URI: str = Field(default="mongodb://localhost:27017/langchain_db")
+    MONGODB_DB_NAME: str = Field(default="langchain_db")
     POSTGRES_URL: str = Field(
         default="postgresql://user:pass@host/db"
     )  # Added this missing field
@@ -85,9 +85,16 @@ class Settings(BaseSettings):
     )
 
     # --- Logging ---
+    DEBUG: bool = Field(default=False)
     LOG_LEVEL: str = Field(default="INFO")
     LOG_FORMAT: str = Field(default="json")
     LOG_FILE: str = Field(default="logs/app.log")
+    LOG_BACKTRACE: bool = Field(default=True)
+    LOG_DIAGNOSE: bool = Field(default=True)
+    LOG_ROTATION: str = Field(default="10 MB")
+    LOG_RETENTION: str = Field(default="7 days")
+    LOG_COMPRESSION: str = Field(default="zip")
+    LOG_DIR: Path = Path("logs")
 
     # --- Rate Limiting ---
     RATE_LIMIT_ENABLED: bool = Field(default=True)
