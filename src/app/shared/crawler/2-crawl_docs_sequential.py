@@ -15,9 +15,7 @@ async def crawl_sequential(urls: list[str]):
         extra_args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
     )
 
-    crawl_config = CrawlerRunConfig(
-        markdown_generator=DefaultMarkdownGenerator()
-    )
+    crawl_config = CrawlerRunConfig(markdown_generator=DefaultMarkdownGenerator())
 
     # Create the crawler (opens the browser)
     crawler = AsyncWebCrawler(config=browser_config)
@@ -27,9 +25,7 @@ async def crawl_sequential(urls: list[str]):
         session_id = "session1"  # Reuse the same session across all URLs
         for url in urls:
             result = await crawler.arun(
-                url=url,
-                config=crawl_config,
-                session_id=session_id
+                url=url, config=crawl_config, session_id=session_id
             )
             if result.success:
                 print(f"Successfully crawled: {url}")
@@ -40,6 +36,7 @@ async def crawl_sequential(urls: list[str]):
     finally:
         # After all URLs are done, close the crawler (and the browser)
         await crawler.close()
+
 
 def get_pydantic_ai_docs_urls():
     """
@@ -59,13 +56,14 @@ def get_pydantic_ai_docs_urls():
 
         # Extract all URLs from the sitemap
         # The namespace is usually defined in the root element
-        namespace = {'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
-        urls = [loc.text for loc in root.findall('.//ns:loc', namespace)]
+        namespace = {"ns": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+        urls = [loc.text for loc in root.findall(".//ns:loc", namespace)]
 
         return urls
     except Exception as e:
         print(f"Error fetching sitemap: {e}")
         return []
+
 
 async def main():
     urls = get_pydantic_ai_docs_urls()
@@ -74,6 +72,7 @@ async def main():
         await crawl_sequential(urls)
     else:
         print("No URLs found to crawl")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

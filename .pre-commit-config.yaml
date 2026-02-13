@@ -1,9 +1,9 @@
 repos:
   # uv
-  # - repo: https://github.com/astral-sh/uv-pre-commit
-  #   rev: 0.5.4
-  #   hooks:
-  #     - id: uv-lock
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.5.4
+    hooks:
+      - id: uv-lock
 
   # Ruff - Linting and Formatting
   # - repo: https://github.com/astral-sh/ruff-pre-commit

@@ -86,7 +86,20 @@ uv sync
 uv sync --extra dev
 
 # Run the application
-uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 5000
+uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 5000 --no-access-log
+
+# Run Pre-commit hooks
+uv run pre-commit run --all-files
+
+# Create migration
+uv run alembic revision --autogenerate -m "Add user table"
+
+# Apply migrations
+uv run alembic upgrade head
+
+# Rollback
+uv run alembic downgrade -1
+
 ```
 
 ## ⚡ Why Use uv?

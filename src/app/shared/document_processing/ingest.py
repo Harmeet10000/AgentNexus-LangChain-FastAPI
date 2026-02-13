@@ -2,32 +2,30 @@
 Main ingestion script for processing markdown documents into vector DB and knowledge graph.
 """
 
-import os
-import asyncio
-import logging
-import json
-import glob
-from pathlib import Path
-from typing import List, Dict, Any, Optional
-from datetime import datetime
 import argparse
+import asyncio
+import glob
+import json
+import logging
+import os
+from datetime import datetime
 
 from dotenv import load_dotenv
 
-from .chunker import ChunkingConfig, create_chunker, DocumentChunk
+from .chunker import ChunkingConfig, DocumentChunk, create_chunker
 from .embedder import create_embedder
 
 # Import utilities
 try:
-    from ..utils.db_utils import initialize_database, close_database, db_pool
+    from ..utils.db_utils import close_database, db_pool, initialize_database
     from ..utils.models import IngestionConfig, IngestionResult
 except ImportError:
     # For direct execution or testing
-    import sys
     import os
+    import sys
 
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from utils.db_utils import initialize_database, close_database, db_pool
+    from utils.db_utils import close_database, db_pool, initialize_database
     from utils.models import IngestionConfig, IngestionResult
 
 # Load environment variables
@@ -327,7 +325,7 @@ class DocumentIngestionPipeline:
                 # Fall back to raw text if Docling fails
                 logger.warning(f"Falling back to raw text extraction for {file_path}")
                 try:
-                    with open(file_path, "r", encoding="utf-8") as f:
+                    with open(file_path, encoding="utf-8") as f:
                         return (f.read(), None)
                 except:
                     return (
@@ -338,21 +336,22 @@ class DocumentIngestionPipeline:
         # Text-based formats (read directly)
         else:
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, encoding="utf-8") as f:
                     return (f.read(), None)
             except UnicodeDecodeError:
                 # Try with different encoding
-                with open(file_path, "r", encoding="latin-1") as f:
+                with open(file_path, encoding="latin-1") as f:
                     return (f.read(), None)
 
     def _transcribe_audio(self, file_path: str) -> str:
         """Transcribe audio file using Whisper ASR via Docling."""
         try:
             from pathlib import Path
-            from docling.document_converter import DocumentConverter, AudioFormatOption
-            from docling.datamodel.pipeline_options import AsrPipelineOptions
+
             from docling.datamodel import asr_model_specs
             from docling.datamodel.base_models import InputFormat
+            from docling.datamodel.pipeline_options import AsrPipelineOptions
+            from docling.document_converter import AudioFormatOption, DocumentConverter
             from docling.pipeline.asr_pipeline import AsrPipeline
 
             # Use Path object - Docling expects this

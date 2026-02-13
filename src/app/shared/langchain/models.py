@@ -1,8 +1,5 @@
-
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langsmith import traceable
-
-
 
 # Initialize the Gemini model
 model = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite")

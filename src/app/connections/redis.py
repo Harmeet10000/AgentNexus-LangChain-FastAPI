@@ -14,10 +14,10 @@ def create_redis_client(url: str) -> Redis:
 
     retry_strategy = Retry(
         backoff=ExponentialBackoff(
-            base=0.1,      # ~ retryDelayOnFailover (100ms)
+            base=0.1,  # ~ retryDelayOnFailover (100ms)
             cap=2.0,
         ),
-        retries=3,        # maxRetriesPerRequest
+        retries=3,  # maxRetriesPerRequest
     )
 
     # logger.info(
@@ -31,7 +31,7 @@ def create_redis_client(url: str) -> Redis:
         db=0,
         # Connection & command timeouts
         socket_connect_timeout=120.0,  # connectTimeout (ms → sec)
-        socket_timeout=5.0,            # commandTimeout (ms → sec)
+        socket_timeout=5.0,  # commandTimeout (ms → sec)
         # TCP keepalive
         socket_keepalive=True,
         socket_keepalive_options={
@@ -46,6 +46,7 @@ def create_redis_client(url: str) -> Redis:
         # Health check
         health_check_interval=30,
     )
+
 
 def get_redis(request: Request) -> Redis:
     return request.app.state.redis

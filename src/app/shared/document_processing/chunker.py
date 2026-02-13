@@ -14,15 +14,13 @@ Benefits over custom chunking:
 - Battle-tested (maintained by Docling team)
 """
 
-import os
 import logging
-from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-from dotenv import load_dotenv
-from transformers import AutoTokenizer
 from docling.chunking import HybridChunker
 from docling_core.types.doc import DoclingDocument
+from dotenv import load_dotenv
+from transformers import AutoTokenizer
 
 # Load environment variables
 load_dotenv()
@@ -58,9 +56,9 @@ class DocumentChunk:
     index: int
     start_char: int
     end_char: int
-    metadata: Dict[str, Any]
-    token_count: Optional[int] = None
-    embedding: Optional[List[float]] = None  # For embedder compatibility
+    metadata: dict[str, any]
+    token_count: int | None = None  # Will be calculated based on content
+    embedding: list[float] | None = None  # For embedder compatibility
 
     def __post_init__(self):
         """Calculate token count if not provided."""
@@ -108,9 +106,9 @@ class DoclingHybridChunker:
         content: str,
         title: str,
         source: str,
-        metadata: Optional[Dict[str, Any]] = None,
-        docling_doc: Optional[DoclingDocument] = None,
-    ) -> List[DocumentChunk]:
+        metadata: dict[str, any] | None = None,
+        docling_doc: DoclingDocument | None = None,
+    ) -> list[DocumentChunk]:
         """
         Chunk a document using Docling's HybridChunker.
 
@@ -193,8 +191,8 @@ class DoclingHybridChunker:
             return self._simple_fallback_chunk(content, base_metadata)
 
     def _simple_fallback_chunk(
-        self, content: str, base_metadata: Dict[str, Any]
-    ) -> List[DocumentChunk]:
+        self, content: str, base_metadata: dict[str, any]
+    ) -> list[DocumentChunk]:
         """
         Simple fallback chunking when HybridChunker can't be used.
 
@@ -285,9 +283,9 @@ class SimpleChunker:
         content: str,
         title: str,
         source: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, any] | None = None,
         **kwargs,  # Ignore extra args like docling_doc
-    ) -> List[DocumentChunk]:
+    ) -> list[DocumentChunk]:
         """
         Chunk document using simple paragraph-based rules.
 
@@ -375,7 +373,7 @@ class SimpleChunker:
         index: int,
         start_pos: int,
         end_pos: int,
-        metadata: Dict[str, Any],
+        metadata: dict[str, any],
     ) -> DocumentChunk:
         """Create a DocumentChunk object."""
         return DocumentChunk(

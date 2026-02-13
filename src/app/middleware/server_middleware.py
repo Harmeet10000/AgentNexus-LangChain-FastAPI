@@ -188,7 +188,7 @@ class TimeoutMiddleware:
                 self.app(scope, receive, send),
                 timeout=self.timeout_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Get correlation ID from scope if available
             correlation_id = "unknown"
             for key, value in scope.get("headers", []):

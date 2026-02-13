@@ -10,13 +10,13 @@ Notes:
   content is present.
 """
 
-from typing import List, Dict, Any
 import json
+from typing import Any
 
 # Try to import LLM and document classes. Adjust imports to your environment.
 try:
-    from langchain.schema import HumanMessage, Document  # type: ignore
     from langchain.chat_models import ChatOpenAI  # type: ignore
+    from langchain.schema import Document, HumanMessage  # type: ignore
 except Exception:
     # Placeholders if LangChain is not installed. Users should replace these with real classes.
     class HumanMessage:
@@ -24,7 +24,7 @@ except Exception:
             self.content = content
 
     class Document:
-        def __init__(self, page_content: str, metadata: Dict[str, Any] = None):
+        def __init__(self, page_content: str, metadata: dict[str, Any] = None):
             self.page_content = page_content
             self.metadata = metadata or {}
 
@@ -33,7 +33,7 @@ except Exception:
             self.model = model
             self.temperature = temperature
 
-        def invoke(self, messages: List[HumanMessage]):
+        def invoke(self, messages: list[HumanMessage]):
             # Simple stubbed response for environments without an LLM.
             class Resp:
                 def __init__(self, content: str):
@@ -46,7 +46,7 @@ except Exception:
             return Resp(content=(combined[:200] + "... (stubbed LLM response)"))
 
 
-def separate_content_types(chunk: Any) -> Dict[str, Any]:
+def separate_content_types(chunk: Any) -> dict[str, Any]:
     """Analyze what types of content are in a chunk.
 
     Expects `chunk` to have attributes:
@@ -87,7 +87,7 @@ def separate_content_types(chunk: Any) -> Dict[str, Any]:
     return content_data
 
 
-def create_ai_enhanced_summary(text: str, tables: List[str], images: List[str]) -> str:
+def create_ai_enhanced_summary(text: str, tables: list[str], images: list[str]) -> str:
     """Create AI-enhanced summary for mixed content.
 
     This function calls an LLM to produce a searchable description. If the LLM invocation fails
@@ -139,7 +139,7 @@ def create_ai_enhanced_summary(text: str, tables: List[str], images: List[str]) 
         response = llm.invoke([message])
         return response.content
 
-    except Exception as e:
+    except Exception:
         # Fallback behavior: return a truncated text summary plus indicators about attachments
         summary = (text or "")[:300] + ("..." if (text or "") else "")
         if tables:
@@ -149,14 +149,14 @@ def create_ai_enhanced_summary(text: str, tables: List[str], images: List[str]) 
         return summary
 
 
-def summarise_chunks(chunks: List[Any]) -> List[Document]:
+def summarise_chunks(chunks: list[Any]) -> list[Document]:
     """Process all chunks and return a list of Document objects with enhanced content or raw text.
 
     Prints simple progress information to stdout similar to the original notebook.
     """
 
     print("🧠 Processing chunks with AI Summaries...")
-    langchain_documents: List[Document] = []
+    langchain_documents: list[Document] = []
     total_chunks = len(chunks)
 
     for i, chunk in enumerate(chunks):
@@ -209,8 +209,6 @@ def summarise_chunks(chunks: List[Any]) -> List[Document]:
 #     # Provide `chunks` as a list of objects matching the expected shape
 #     processed_chunks = summarise_chunks(chunks)
 
-import json
-
 
 def export_chunks_to_json(chunks, filename="chunks_export.json"):
     """Export processed chunks to clean JSON format."""
@@ -241,6 +239,7 @@ json_data = export_chunks_to_json(processed_chunks)
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
 
+
 def create_vector_store(documents, persist_directory="dbv1/chroma_db"):
     """Create and persist ChromaDB vector store."""
     print("🔮 Creating embeddings and storing in ChromaDB...")
@@ -252,12 +251,13 @@ def create_vector_store(documents, persist_directory="dbv1/chroma_db"):
         documents=documents,
         embedding=embedding_model,
         persist_directory=persist_directory,
-        collection_metadata={"hnsw:space": "cosine"}
+        collection_metadata={"hnsw:space": "cosine"},
     )
     print("--- Finished creating vector store ---")
 
     print(f"✅ Vector store created and saved to {persist_directory}")
     return vectorstore
+
 
 # Usage:
 db = create_vector_store(processed_chunks)

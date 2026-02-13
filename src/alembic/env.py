@@ -1,27 +1,35 @@
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.lifecycle.db.postgres import Base
-from app.lifecycle.db.postgres import config as db_config
+from alembic import context
 
+# Import settings to get database URL from environment
+from app.config.settings import get_settings
 
 # Alembic Config object
 config = context.config
 
-# Set SQLAlchemy URL from environment
-config.set_main_option("sqlalchemy.url", db_config.database_url)
+# Get database URL from settings (loaded from .env)
+settings = get_settings()
+config.set_main_option("sqlalchemy.url", settings.POSTGRES_URL.replace("postgresql://", "postgresql+asyncpg://"))
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Add your model's MetaData object here for 'autogenerate' support
-target_metadata = Base.metadata
+# Import all models here for autogenerate support
+# Add your SQLAlchemy models' metadata
+try:
+    # Import Base and all models
+    from app.database.models import Base
+    target_metadata = Base.metadata
+except ImportError:
+    # If no models exist yet, use None
+    target_metadata = None
 
 
 def run_migrations_offline() -> None:

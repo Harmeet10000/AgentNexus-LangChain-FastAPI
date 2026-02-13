@@ -2,15 +2,13 @@
 Document embedding generation for vector search.
 """
 
-import os
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+import os
 from datetime import datetime
-import json
 
-from openai import RateLimitError, APIError
 from dotenv import load_dotenv
+from openai import APIError, RateLimitError
 
 from .chunker import DocumentChunk
 
@@ -19,8 +17,8 @@ try:
     from ..utils.providers import get_embedding_client, get_embedding_model
 except ImportError:
     # For direct execution or testing
-    import sys
     import os
+    import sys
 
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from utils.providers import get_embedding_client, get_embedding_model
@@ -72,7 +70,7 @@ class EmbeddingGenerator:
         else:
             self.config = self.model_configs[model]
 
-    async def generate_embedding(self, text: str) -> List[float]:
+    async def generate_embedding(self, text: str) -> list[float]:
         """
         Generate embedding for a single text.
 
@@ -94,7 +92,7 @@ class EmbeddingGenerator:
 
                 return response.data[0].embedding
 
-            except RateLimitError as e:
+            except RateLimitError:
                 if attempt == self.max_retries - 1:
                     raise
 
@@ -115,7 +113,7 @@ class EmbeddingGenerator:
                     raise
                 await asyncio.sleep(self.retry_delay)
 
-    async def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+    async def generate_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
         """
         Generate embeddings for a batch of texts.
 
@@ -146,7 +144,7 @@ class EmbeddingGenerator:
 
                 return [data.embedding for data in response.data]
 
-            except RateLimitError as e:
+            except RateLimitError:
                 if attempt == self.max_retries - 1:
                     raise
 

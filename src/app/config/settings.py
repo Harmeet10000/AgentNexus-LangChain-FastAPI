@@ -33,14 +33,17 @@ class Settings(BaseSettings):
     PORT: int = Field(default=5000)
     WORKERS: int = Field(default=1)
 
-    # --- Database ---
+    # --- Mongo Database ---
     MONGODB_URI: str = Field(default="mongodb://localhost:27017/langchain_db")
     MONGODB_DB_NAME: str = Field(default="langchain_db")
+
+    # --- PostgreSQL Database ---
     POSTGRES_URL: str = Field(
         default="postgresql://user:pass@host/db"
     )  # Added this missing field
     POSTGRES_MAX_OVERFLOW: int = Field(default=10)  # Added this missing field
     POSTGRES_POOL_SIZE: int = Field(default=5)  # Added this missing field
+
     # --- Redis Cache ---
     REDIS_URL: str = Field(default="redis://localhost:6379")
     REDIS_HOST: str = Field(default="localhost")
@@ -100,6 +103,12 @@ class Settings(BaseSettings):
     RATE_LIMIT_ENABLED: bool = Field(default=True)
     RATE_LIMIT_REQUESTS: int = Field(default=100)
     RATE_LIMIT_PERIOD: int = Field(default=60)
+
+    # --- JWT Authentication ---
+    JWT_SECRET_KEY: str = Field(default="super-secret-change-this-in-production")
+    JWT_ALGORITHM: str = Field(default="HS256")
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=10080)  # 7 days
+    JWT_REFRESH_TOKEN_EXPIRE_MINUTES: int = Field(default=10080)  # 7 days
 
     # --- File Upload ---
     MAX_UPLOAD_SIZE: int = Field(default=10485760)  # 10MB

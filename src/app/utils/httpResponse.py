@@ -1,4 +1,3 @@
-from app.config.settings import get_settings
 import os
 from typing import Any
 
@@ -7,6 +6,7 @@ from fastapi.responses import ORJSONResponse
 from loguru import logger
 
 from app.config.enums import Environment
+from app.config.settings import get_settings
 
 
 def http_response(

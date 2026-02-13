@@ -2,8 +2,6 @@ from math import ceil
 
 from bson import ObjectId
 
-from app.utils.logger import logger
-
 
 class SearchService:
     def __init__(self, repo, redis):

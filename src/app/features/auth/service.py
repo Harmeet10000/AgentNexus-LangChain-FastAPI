@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from jose import JWTError, jwt
@@ -20,7 +20,9 @@ settings = get_settings()
 
 
 class AuthService:
-    def __init__(self, user_repo: UserRepository, refresh_token_repo: RefreshTokenRepository):
+    def __init__(
+        self, user_repo: UserRepository, refresh_token_repo: RefreshTokenRepository
+    ):
         self.user_repo = user_repo
         self.refresh_token_repo = refresh_token_repo
 
@@ -41,7 +43,10 @@ class AuthService:
             logger.warning(f"Registration failed for {data.email}: {str(e)}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error during registration for {data.email}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Unexpected error during registration for {data.email}: {str(e)}",
+                exc_info=True,
+            )
             raise
 
     async def login(self, email: str, password: str):
@@ -66,7 +71,7 @@ class AuthService:
             )
 
             payload = jwt.decode(refresh, SECRET_KEY, algorithms=[ALGORITHM])
-            ttl = payload["exp"] - int(datetime.now(tz=timezone.utc).timestamp())
+            ttl = payload["exp"] - int(datetime.now(tz=UTC).timestamp())
 
             await self.refresh_token_repo.store(payload["jti"], payload["sub"], ttl)
 
@@ -80,7 +85,9 @@ class AuthService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Unexpected error during login for {email}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Unexpected error during login for {email}: {str(e)}", exc_info=True
+            )
             raise
 
     async def refresh(self, refresh_token: str):
@@ -91,7 +98,9 @@ class AuthService:
             logger.warning(f"Invalid refresh token - JWT decode failed: {str(e)}")
             raise HTTPException(status_code=401, detail="Invalid refresh token")
         except Exception as e:
-            logger.error(f"Unexpected error decoding refresh token: {str(e)}", exc_info=True)
+            logger.error(
+                f"Unexpected error decoding refresh token: {str(e)}", exc_info=True
+            )
             raise HTTPException(status_code=401, detail="Invalid refresh token")
 
         try:
@@ -117,7 +126,9 @@ class AuthService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Unexpected error during token refresh: {str(e)}", exc_info=True)
+            logger.error(
+                f"Unexpected error during token refresh: {str(e)}", exc_info=True
+            )
             raise HTTPException(status_code=500, detail="Token refresh failed")
 
     async def logout(self, refresh_token: str):

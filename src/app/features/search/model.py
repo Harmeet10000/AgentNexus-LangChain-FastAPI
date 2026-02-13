@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Annotated
 
@@ -41,7 +41,7 @@ class Search(Document):
     efficient_route: RouteInfo
     metadata: Metadata
     created_at: Annotated[datetime, Indexed()] = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
 
     class Settings:

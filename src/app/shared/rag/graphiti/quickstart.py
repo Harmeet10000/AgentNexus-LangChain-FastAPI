@@ -16,13 +16,10 @@ limitations under the License.
 
 import asyncio
 import json
-import logging
 import os
-from datetime import datetime, timezone
-from logging import INFO
+from datetime import UTC, datetime
 
 from dotenv import load_dotenv
-
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
 from graphiti_core.search.search_config_recipes import NODE_HYBRID_SEARCH_RRF
@@ -39,12 +36,12 @@ load_dotenv()
 
 # Neo4j connection parameters
 # Make sure Neo4j Desktop is running with a local DBMS started
-neo4j_uri = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
-neo4j_user = os.environ.get('NEO4J_USER', 'neo4j')
-neo4j_password = os.environ.get('NEO4J_PASSWORD', 'password')
+neo4j_uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+neo4j_user = os.environ.get("NEO4J_USER", "neo4j")
+neo4j_password = os.environ.get("NEO4J_PASSWORD", "password")
 
 if not neo4j_uri or not neo4j_user or not neo4j_password:
-    raise ValueError('NEO4J_URI, NEO4J_USER, and NEO4J_PASSWORD must be set')
+    raise ValueError("NEO4J_URI, NEO4J_USER, and NEO4J_PASSWORD must be set")
 
 
 async def main():
@@ -76,49 +73,49 @@ async def main():
         # Episodes list containing both text and JSON episodes
         episodes = [
             {
-                'content': 'Claude is the flagship AI assistant from Anthropic. It was previously '
-                'known as Claude Instant in its earlier versions.',
-                'type': EpisodeType.text,
-                'description': 'AI podcast transcript',
+                "content": "Claude is the flagship AI assistant from Anthropic. It was previously "
+                "known as Claude Instant in its earlier versions.",
+                "type": EpisodeType.text,
+                "description": "AI podcast transcript",
             },
             {
-                'content': 'As an AI assistant, Claude has been available since December 15, 2022 – Present',
-                'type': EpisodeType.text,
-                'description': 'AI podcast transcript',
+                "content": "As an AI assistant, Claude has been available since December 15, 2022 – Present",
+                "type": EpisodeType.text,
+                "description": "AI podcast transcript",
             },
             {
-                'content': {
-                    'name': 'GPT-4',
-                    'creator': 'OpenAI',
-                    'capability': 'Multimodal Reasoning',
-                    'previous_version': 'GPT-3.5',
-                    'training_data_cutoff': 'April 2023',
+                "content": {
+                    "name": "GPT-4",
+                    "creator": "OpenAI",
+                    "capability": "Multimodal Reasoning",
+                    "previous_version": "GPT-3.5",
+                    "training_data_cutoff": "April 2023",
                 },
-                'type': EpisodeType.json,
-                'description': 'AI model metadata',
+                "type": EpisodeType.json,
+                "description": "AI model metadata",
             },
             {
-                'content': {
-                    'name': 'GPT-4',
-                    'release_date': 'March 14, 2023',
-                    'context_window': '128,000 tokens',
-                    'status': 'Active',
+                "content": {
+                    "name": "GPT-4",
+                    "release_date": "March 14, 2023",
+                    "context_window": "128,000 tokens",
+                    "status": "Active",
                 },
-                'type': EpisodeType.json,
-                'description': 'AI model metadata',
+                "type": EpisodeType.json,
+                "description": "AI model metadata",
             },
         ]
 
         # Add episodes to the graph
         for i, episode in enumerate(episodes):
             await graphiti.add_episode(
-                name=f'AI Agents Unleashed {i}',
-                episode_body=episode['content']
-                if isinstance(episode['content'], str)
-                else json.dumps(episode['content']),
-                source=episode['type'],
-                source_description=episode['description'],
-                reference_time=datetime.now(timezone.utc),
+                name=f"AI Agents Unleashed {i}",
+                episode_body=episode["content"]
+                if isinstance(episode["content"], str)
+                else json.dumps(episode["content"]),
+                source=episode["type"],
+                source_description=episode["description"],
+                reference_time=datetime.now(UTC),
             )
             print(f'Added episode: AI Agents Unleashed {i} ({episode["type"].value})')
 
@@ -133,18 +130,18 @@ async def main():
 
         # Perform a hybrid search combining semantic similarity and BM25 retrieval
         print("\nSearching for: 'Which AI assistant is from Anthropic?'")
-        results = await graphiti.search('Which AI assistant is from Anthropic?')
+        results = await graphiti.search("Which AI assistant is from Anthropic?")
 
         # Print search results
-        print('\nSearch Results:')
+        print("\nSearch Results:")
         for result in results:
-            print(f'UUID: {result.uuid}')
-            print(f'Fact: {result.fact}')
-            if hasattr(result, 'valid_at') and result.valid_at:
-                print(f'Valid from: {result.valid_at}')
-            if hasattr(result, 'invalid_at') and result.invalid_at:
-                print(f'Valid until: {result.invalid_at}')
-            print('---')
+            print(f"UUID: {result.uuid}")
+            print(f"Fact: {result.fact}")
+            if hasattr(result, "valid_at") and result.valid_at:
+                print(f"Valid from: {result.valid_at}")
+            if hasattr(result, "invalid_at") and result.invalid_at:
+                print(f"Valid until: {result.invalid_at}")
+            print("---")
 
         #################################################
         # CENTER NODE SEARCH
@@ -159,25 +156,26 @@ async def main():
             # Get the source node UUID from the top result
             center_node_uuid = results[0].source_node_uuid
 
-            print('\nReranking search results based on graph distance:')
-            print(f'Using center node UUID: {center_node_uuid}')
+            print("\nReranking search results based on graph distance:")
+            print(f"Using center node UUID: {center_node_uuid}")
 
             reranked_results = await graphiti.search(
-                'Which AI assistant is from Anthropic?', center_node_uuid=center_node_uuid
+                "Which AI assistant is from Anthropic?",
+                center_node_uuid=center_node_uuid,
             )
 
             # Print reranked search results
-            print('\nReranked Search Results:')
+            print("\nReranked Search Results:")
             for result in reranked_results:
-                print(f'UUID: {result.uuid}')
-                print(f'Fact: {result.fact}')
-                if hasattr(result, 'valid_at') and result.valid_at:
-                    print(f'Valid from: {result.valid_at}')
-                if hasattr(result, 'invalid_at') and result.invalid_at:
-                    print(f'Valid until: {result.invalid_at}')
-                print('---')
+                print(f"UUID: {result.uuid}")
+                print(f"Fact: {result.fact}")
+                if hasattr(result, "valid_at") and result.valid_at:
+                    print(f"Valid from: {result.valid_at}")
+                if hasattr(result, "invalid_at") and result.invalid_at:
+                    print(f"Valid until: {result.invalid_at}")
+                print("---")
         else:
-            print('No results found in the initial search to use as center node.')
+            print("No results found in the initial search to use as center node.")
 
         #################################################
         # NODE SEARCH USING SEARCH RECIPES
@@ -190,7 +188,7 @@ async def main():
 
         # Example: Perform a node search using _search method with standard recipes
         print(
-            '\nPerforming node search using _search method with standard recipe NODE_HYBRID_SEARCH_RRF:'
+            "\nPerforming node search using _search method with standard recipe NODE_HYBRID_SEARCH_RRF:"
         )
 
         # Use a predefined search configuration recipe and modify its limit
@@ -199,24 +197,26 @@ async def main():
 
         # Execute the node search
         node_search_results = await graphiti._search(
-            query='Large Language Models',
+            query="Large Language Models",
             config=node_search_config,
         )
 
         # Print node search results
-        print('\nNode Search Results:')
+        print("\nNode Search Results:")
         for node in node_search_results.nodes:
-            print(f'Node UUID: {node.uuid}')
-            print(f'Node Name: {node.name}')
-            node_summary = node.summary[:100] + '...' if len(node.summary) > 100 else node.summary
-            print(f'Content Summary: {node_summary}')
+            print(f"Node UUID: {node.uuid}")
+            print(f"Node Name: {node.name}")
+            node_summary = (
+                node.summary[:100] + "..." if len(node.summary) > 100 else node.summary
+            )
+            print(f"Content Summary: {node_summary}")
             print(f'Node Labels: {", ".join(node.labels)}')
-            print(f'Created At: {node.created_at}')
-            if hasattr(node, 'attributes') and node.attributes:
-                print('Attributes:')
+            print(f"Created At: {node.created_at}")
+            if hasattr(node, "attributes") and node.attributes:
+                print("Attributes:")
                 for key, value in node.attributes.items():
-                    print(f'  {key}: {value}')
-            print('---')
+                    print(f"  {key}: {value}")
+            print("---")
 
     finally:
         #################################################
@@ -228,13 +228,12 @@ async def main():
 
         # Close the connection
         await graphiti.close()
-        print('\nConnection closed')
+        print("\nConnection closed")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
 
-from graphiti_core import Graphiti
 from graphiti_core.driver.neo4j_driver import Neo4jDriver
 
 # Create a Neo4j driver with custom database name
@@ -249,9 +248,9 @@ driver = Neo4jDriver(
 graphiti = Graphiti(graph_driver=driver)
 
 from graphiti_core import Graphiti
-from graphiti_core.llm_client.gemini_client import GeminiClient, LLMConfig
-from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
 from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
+from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
+from graphiti_core.llm_client.gemini_client import GeminiClient, LLMConfig
 
 # Google API key configuration
 api_key = "<your-google-api-key>"

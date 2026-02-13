@@ -1,7 +1,7 @@
 import logging
 import time
-from typing import Any, List, Optional, Tuple, Union
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
 from config.settings import get_settings
@@ -25,7 +25,7 @@ class VectorStore:
             time_partition_interval=self.vector_settings.time_partition_interval,
         )
 
-    def get_embedding(self, text: str) -> List[float]:
+    def get_embedding(self, text: str) -> list[float]:
         """
         Generate embedding for the given text.
 
@@ -79,11 +79,11 @@ class VectorStore:
         self,
         query_text: str,
         limit: int = 5,
-        metadata_filter: Union[dict, List[dict]] = None,
-        predicates: Optional[client.Predicates] = None,
-        time_range: Optional[Tuple[datetime, datetime]] = None,
+        metadata_filter: dict | list[dict] = None,
+        predicates: client.Predicates | None = None,
+        time_range: tuple[datetime, datetime] | None = None,
         return_dataframe: bool = True,
-    ) -> Union[List[Tuple[Any, ...]], pd.DataFrame]:
+    ) -> list[tuple[Any, ...]] | pd.DataFrame:
         """
         Query the vector database for similar embeddings based on input text.
 
@@ -153,7 +153,7 @@ class VectorStore:
 
     def _create_dataframe_from_results(
         self,
-        results: List[Tuple[Any, ...]],
+        results: list[tuple[Any, ...]],
     ) -> pd.DataFrame:
         """
         Create a pandas DataFrame from the search results.
@@ -181,7 +181,7 @@ class VectorStore:
 
     def delete(
         self,
-        ids: List[str] = None,
+        ids: list[str] = None,
         metadata_filter: dict = None,
         delete_all: bool = False,
     ) -> None:
