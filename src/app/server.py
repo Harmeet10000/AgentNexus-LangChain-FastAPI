@@ -13,13 +13,13 @@ def main():
     logger.info(f"Starting server in {settings.ENVIRONMENT} mode...")
 
     uvicorn.run(
-        app,
+        app=app,
         host="0.0.0.0",
         port=5000,
         reload=settings.ENVIRONMENT != "production",
         log_config=None,  # Use custom logging
         access_log=False,  # Custom access logging via middleware
-        # workers=4 if settings.ENVIRONMENT == "production" else 1,
+        workers=4 if settings.ENVIRONMENT == "production" else 1,
     )
 
 

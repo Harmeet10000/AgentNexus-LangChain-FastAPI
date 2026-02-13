@@ -1,5 +1,5 @@
 # app/features/auth/security.py
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from jose import jwt
@@ -30,7 +30,7 @@ def create_token(
     token_type: str,
     expires_minutes: int,
 ):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": user_id,
         "email": email,
@@ -40,4 +40,3 @@ def create_token(
         "exp": int((now + timedelta(minutes=expires_minutes)).timestamp()),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-

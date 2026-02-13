@@ -1,5 +1,5 @@
 import sys
-from datetime import datetime, timezone
+from datetime import UTC
 from typing import Any
 
 from loguru import logger as loguru_logger
@@ -10,7 +10,7 @@ from app.config.settings import get_settings
 def console_format(record: dict[str, Any]) -> str:
     """Format logs for console with INFO/META structure."""
     level = record["level"].name
-    time_utc = record["time"].astimezone(timezone.utc)
+    time_utc = record["time"].astimezone(UTC)
     time = time_utc.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     message = record["message"]
 

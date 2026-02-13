@@ -1,12 +1,16 @@
 """Knowledge Graphs RAG - Using Graphiti by Zep for temporal knowledge graphs"""
-from pydantic_ai import Agent
+
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
+from pydantic_ai import Agent
 
-agent = Agent('openai:gpt-4o', system_prompt='You are a GraphRAG assistant with Graphiti.')
+agent = Agent(
+    "openai:gpt-4o", system_prompt="You are a GraphRAG assistant with Graphiti."
+)
 
 # Initialize Graphiti (connects to Neo4j)
 graphiti = Graphiti("neo4j://localhost:7687", "neo4j", "password")
+
 
 async def ingest_document(text: str, source: str):
     """Ingest document into Graphiti knowledge graph"""
@@ -15,9 +19,10 @@ async def ingest_document(text: str, source: str):
         name=source,
         episode_body=text,
         source=EpisodeType.text,
-        source_description=f"Document: {source}"
+        source_description=f"Document: {source}",
     )
     # Graphiti builds the graph incrementally with temporal awareness
+
 
 @agent.tool
 async def search_knowledge_graph(query: str) -> str:
@@ -28,10 +33,7 @@ async def search_knowledge_graph(query: str) -> str:
     # - Graph structure traversal
     # - Temporal context (when was this true?)
 
-    results = await graphiti.search(
-        query=query,
-        num_results=5
-    )
+    results = await graphiti.search(query=query, num_results=5)
 
     # Format results from graph
     response_parts = []
@@ -44,6 +46,7 @@ async def search_knowledge_graph(query: str) -> str:
         )
 
     return "\n---\n".join(response_parts)
+
 
 # Run agent
 result = await agent.run("Who runs ACME Corp and what changed in Q2?")

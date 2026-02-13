@@ -17,26 +17,26 @@
 16. refactor crawl4ai code
 17. refactor vectorStore code
 18. refactor RAG code
-20. figure out using depends in FastAPI with DB session, logger, service layer, correlational ID and more 
+20. figure out using depends in FastAPI with DB session, logger, service layer, correlational ID and more             DONE
 21. add this from fastapi import BackgroundTasks
 @app.post("/process")
 async def process_data(data: DataModel, background_tasks: BackgroundTasks):
     # Return immediately, process in background
     background_tasks.add_task(heavy_processing, data)
     return {"status": "processing"}
-22. do proper validations using pydantic
-23.  --no-access-log  in uvicorn main:app for 15% boost in perf
-24. Cache expensive dependencies to avoid repeated computations, Stream large responses to reduce memory usage by 80-90%
+22. do proper validations using pydantic          DONE
+23.  --no-access-log  in uvicorn main:app for 15% boost in perf    DONE
+24. Cache expensive dependencies to avoid repeated computations, Stream large responses to reduce memory usage by 80-90%                           TO_BE_DONE
 25. Use background tasks so users don't wait for non-critical operations
 26. optimise pydantic models for speed by provideing config
-27. For expensive resources that don't change often, you can create singleton dependencies that live for your entire application lifetime. by lru_cache
+27. For expensive resources that don't change often, you can create singleton dependencies that live for your entire application lifetime. by lru_cache         DONE
 28. # Slower: BaseHTTPMiddleware approach
 @app.middleware("http")
 # Slower: BaseHTTPMiddleware approach
 # Faster: Pure ASGI middleware
-app.add_middleware(ProcessTimeMiddleware)
-29. check if default response is ORJSON do i need to write it everywhere or just the return would work
-30. @app.on_event("startup") is old and replaced by 'lifespan' context manager - check if i need to inject db if i use this
+app.add_middleware(ProcessTimeMiddleware)                    DONE
+29. check if default response is ORJSON do i need to write it everywhere or just the return would work                              DONE
+30. @app.on_event("startup") is old and replaced by 'lifespan' context manager - check if i need to inject db if i use this 
     You don't want to connect to MongoDB or Postgres on every single request; you want to create a connection pool when the app starts and close it when the app stops.
 32. check if need global for closing and do this 
 async def connect_db():
@@ -47,11 +47,19 @@ async def connect_db():
         minPoolSize=2,
         serverSelectionTimeoutMS=5000,
     )
-33. Using @lru_cache without bounds not recommended
-34. use cache in dockerfile
-31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you aren't just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).
+33. Using @lru_cache without bounds not recommended          DONE
+34. use cache in dockerfile Running as Root: Containers should not run as root in production due to security liabilities (1:10-1:13). The video advises creating and switching to a non-root user in the Dockerfile and ensuring volume mounts are owned by this user (1:13-1:24).
+Neglecting .dockerignore: Failing to use a .dockerignore file leads to shipping unnecessary files like .git or node_modules to production, bloating images and potentially exposing secrets (1:24-1:37).
+Bloated One-Stage Dockerfiles: Including all build tools, compilers, and test dependencies in the final image leads to large, inefficient images (1:39-1:44). The solution is to use multi-stage builds (1:44-1:46).
+Manual Builds Without Caching: Typing docker build . manually every time is inefficient (1:48-1:50). Enabling BuildKit (docker buildkit=1) and using layer caching with dev-mount for package managers and build systems significantly speeds up builds (1:50-2:05).
+35. global_error_handler vs @app.exception_handler(APIException) where to place in request exection model, which one is better in design native to FastAPI and check how to write GEH wrt APIException, HTTPException and more exception class types
+36. update copilot instructions
+37. check out the commented out pre commit hooks 
+38. check with/asynccontextmanager and finally in DB in lifespan
+39. add state of a request in logs as it goes through diff layers in our app
+31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you arent just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).          MAYBE_DONE
 
-This ensures you don't leak connections while keeping your Service and Repository layers clean and testable.
+This ensures you dont leak connections while keeping your Service and Repository layers clean and testable.
 
 ---
 
@@ -186,3 +194,8 @@ def get_tenant_db(request: Request):
 |$out        |Write result to new collection (older)          |Similar to $merge but drops & recreates collection       |Less flexible than $merge                              |
 
 ```
+
+
+anti pattern - starting a consumer from a server.js and consuming off a queue and doing a CPU heavy op thus blocking the event loop
+starting a background processing(CPU heavy task) after sending a fulfil response even worse anti pattern 
+what to do - each kind of traffic in out system needs to have a separate event loop (http server needs to be separate from queue based system)

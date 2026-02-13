@@ -17,20 +17,15 @@ Python packages used (install in your venv):
     # pip install unstructured[all-docs] langchain_chroma langchain langchain-community langchain-openai python_dotenv
 """
 
-from typing import List, Set
 import json
 import os
 
+from dotenv import load_dotenv
+
+# from unstructured.chunking.title import chunk_by_title   # imported in notebook but unused
+# LangChain components (imports kept to mirror notebook; adjust/trim as needed)
 # Unstructured for document parsing
 from unstructured.partition.pdf import partition_pdf
-# from unstructured.chunking.title import chunk_by_title   # imported in notebook but unused
-
-# LangChain components (imports kept to mirror notebook; adjust/trim as needed)
-from langchain_core.documents import Document
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_chroma import Chroma
-from langchain_core.messages import HumanMessage
-from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -56,12 +51,12 @@ def partition_document(file_path: str):
     return elements
 
 
-def element_types(elements: List) -> Set[str]:
+def element_types(elements: list) -> set[str]:
     """Return a set of element type strings found in elements."""
     return set([str(type(el)) for el in elements])
 
 
-def element_to_dict_safe(elements: List, idx: int):
+def element_to_dict_safe(elements: list, idx: int):
     """
     Safely return elements[idx].to_dict() if available, else return a helpful message.
     """
@@ -120,13 +115,8 @@ System deps: poppler, tesseract, libmagic (install on your OS as needed).
 Python packages: unstructured[all-docs], langchain_chroma, langchain, langchain-openai, python_dotenv
 """
 
-import os
-import json
 import base64
-from typing import List, Dict, Any, Set
-
-from unstructured.partition.pdf import partition_pdf
-from unstructured.chunking.title import chunk_by_title
+from typing import Any
 
 # optional langchain imports retained from notebook (not used directly here)
 # from langchain_core.documents import Document
@@ -134,6 +124,7 @@ from unstructured.chunking.title import chunk_by_title
 # from langchain_chroma import Chroma
 # from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
+from unstructured.chunking.title import chunk_by_title
 
 load_dotenv()
 
@@ -152,9 +143,11 @@ def partition_document(file_path: str):
     return elements
 
 
-def gather_images(elements: List[Any]) -> List[Any]:
+def gather_images(elements: list[Any]) -> list[Any]:
     """Return list of elements whose category is 'Image' (as in notebook)."""
-    images = [element for element in elements if getattr(element, "category", None) == "Image"]
+    images = [
+        element for element in elements if getattr(element, "category", None) == "Image"
+    ]
     print(f"Found {len(images)} images")
     return images
 
@@ -213,7 +206,7 @@ def save_image_element(image_element: Any, out_dir: str, index: int) -> str:
     return out_path
 
 
-def extract_and_save_images(elements: List[Any], out_dir: str) -> List[str]:
+def extract_and_save_images(elements: list[Any], out_dir: str) -> list[str]:
     """Find image elements and save them to out_dir. Returns list of saved file paths."""
     os.makedirs(out_dir, exist_ok=True)
     images = gather_images(elements)
@@ -228,9 +221,11 @@ def extract_and_save_images(elements: List[Any], out_dir: str) -> List[str]:
     return saved_paths
 
 
-def gather_tables(elements: List[Any]) -> List[Any]:
+def gather_tables(elements: list[Any]) -> list[Any]:
     """Return list of elements whose category is 'Table'."""
-    tables = [element for element in elements if getattr(element, "category", None) == "Table"]
+    tables = [
+        element for element in elements if getattr(element, "category", None) == "Table"
+    ]
     print(f"Found {len(tables)} tables")
     return tables
 
@@ -256,7 +251,7 @@ def save_table_html(table_element: Any, out_dir: str, index: int) -> str:
     return out_path
 
 
-def extract_and_save_tables(elements: List[Any], out_dir: str) -> List[str]:
+def extract_and_save_tables(elements: list[Any], out_dir: str) -> list[str]:
     """Find table elements and save HTML/text files. Returns list of saved file paths."""
     os.makedirs(out_dir, exist_ok=True)
     tables = gather_tables(elements)
@@ -270,8 +265,12 @@ def extract_and_save_tables(elements: List[Any], out_dir: str) -> List[str]:
     return saved_paths
 
 
-def create_chunks_by_title(elements: List[Any], max_characters: int = 3000,
-                           new_after_n_chars: int = 2400, combine_text_under_n_chars: int = 500) -> List[Any]:
+def create_chunks_by_title(
+    elements: list[Any],
+    max_characters: int = 3000,
+    new_after_n_chars: int = 2400,
+    combine_text_under_n_chars: int = 500,
+) -> list[Any]:
     """Create intelligent chunks from elements using chunk_by_title (same args as notebook)."""
     print("🔨 Creating smart chunks...")
     chunks = chunk_by_title(
@@ -284,12 +283,12 @@ def create_chunks_by_title(elements: List[Any], max_characters: int = 3000,
     return chunks
 
 
-def element_type_set(obj_list: List[Any]) -> Set[str]:
+def element_type_set(obj_list: list[Any]) -> set[str]:
     """Return set of string type names for given list of elements or chunks."""
     return set([str(type(x)) for x in obj_list])
 
 
-def element_to_dict_safe(elements: List[Any], idx: int) -> Dict[str, Any]:
+def element_to_dict_safe(elements: list[Any], idx: int) -> dict[str, Any]:
     """Return a safe dict representation (tries to use to_dict) of element at idx."""
     if not elements:
         return {"error": "elements list is empty"}
@@ -384,11 +383,10 @@ This script assumes:
 If not, integrate this into the main script I wrote earlier.
 """
 
-import json
-from typing import Any, Dict, List
+from typing import Any
 
 
-def safe_to_dict(obj: Any) -> Dict:
+def safe_to_dict(obj: Any) -> dict:
     """Safely convert an element or chunk to a dict."""
     if hasattr(obj, "to_dict"):
         try:
@@ -403,7 +401,9 @@ def safe_to_dict(obj: Any) -> Dict:
         return {"error": "repr failed", "exception": str(e)}
 
 
-def inspect_original_element_from_chunk(chunks: List[Any], chunk_index: int, elem_index: int):
+def inspect_original_element_from_chunk(
+    chunks: list[Any], chunk_index: int, elem_index: int
+):
     """
     Replicates the notebook behavior:
 
@@ -461,7 +461,9 @@ def main():
     # You should import or generate `chunks` before running this.
     # Here we assume they exist in the imported context.
     try:
-        from your_previous_script_namespace import chunks  # adjust to your actual script/module
+        from your_previous_script_namespace import (
+            chunks,  # adjust to your actual script/module
+        )
     except Exception:
         print("ERROR: You must load `chunks` before calling inspect function.")
         return

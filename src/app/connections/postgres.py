@@ -10,6 +10,8 @@ from app.config.settings import get_settings
 from app.utils.logger import logger
 
 settings = get_settings()
+
+
 def get_database_url() -> str:
     """Convert psycopg2 URL to asyncpg URL."""
     postgres_url = settings.POSTGRES_URL
@@ -31,7 +33,7 @@ engine = create_async_engine(
     max_overflow=settings.POSTGRES_MAX_OVERFLOW,
     pool_pre_ping=True,
     pool_timeout=30,
-    pool_recycle=3600
+    pool_recycle=3600,
 )
 
 # Create session factory

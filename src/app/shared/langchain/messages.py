@@ -1,5 +1,5 @@
 from langchain.chat_models import init_chat_model
-from langchain.messages import HumanMessage, AIMessage, SystemMessage
+from langchain.messages import AIMessage, HumanMessage, SystemMessage
 
 model = init_chat_model("gpt-5-nano")
 
@@ -15,7 +15,7 @@ response = model.invoke(messages)  # Returns AIMessage
 # You want minimal code complexity
 # ​
 
-from langchain.messages import SystemMessage, HumanMessage, AIMessage
+from langchain.messages import HumanMessage, SystemMessage
 
 messages = [
     SystemMessage("You are a poetry expert"),
@@ -35,8 +35,7 @@ for chunk in model.stream("Hi"):
     print(chunk.text)
     full_message = chunk if full_message is None else full_message + chunk
 
-from langchain.messages import AIMessage
-from langchain.messages import ToolMessage
+from langchain.messages import AIMessage, ToolMessage
 
 # After a model makes a tool call
 # (Here, we demonstrate manually creating the messages for brevity)

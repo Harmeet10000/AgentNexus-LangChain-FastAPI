@@ -10,8 +10,8 @@
 
 **Project**: langchain-fastapi-production
 **Language**: Python 3.12
-**Framework**: FastAPI + LangChain
-**Architecture Style**: Modular, feature-driven with emphasis on clean code principles
+**Framework**: FastAPI + LangChain + LangGraph + Pydantic v2 + SQLAlchemy + beanie + Redis + httpx
+**Architecture Style**: Modular Monolith, feature-driven with emphasis on clean code principles
 
 ---
 
@@ -63,25 +63,7 @@ async def get_documents(
 
 ```python
 # ✅ CORRECT: Factory function + Depends for DI
-from typing import Callable
-from fastapi import Depends
 
-def get_document_service() -> DocumentService:
-    """Factory function - called per request, not at import time."""
-    return DocumentService()
-
-@router.get("/documents")
-async def list_documents(
-    service: DocumentService = Depends(get_document_service)
-) -> List[DocumentOut]:
-    return await service.list_documents()
-
-# ❌ WRONG: Global singleton at import time
-service = DocumentService()  # BAD: Blocks startup, untestable
-
-@router.get("/documents")
-async def list_documents() -> List[DocumentOut]:
-    return await service.list_documents()
 ```
 
 ### Pydantic Models (v2)
@@ -227,11 +209,11 @@ from src.app.utils.exceptions import APIException  # Use package instead
 from src.app.connections.postgres import get_db  # Use package instead
 ```
 
-#### Rules for **init**.py Files
+#### Rules for __init__.py Files
 
 1. **Always include docstrings**: Describe the package purpose
 2. **Import all public exports**: Any class, function, or constant that external code should access
-3. **Maintain **all****: Explicitly list all public exports in `__all__`
+3. **Maintain __all__**: Explicitly list all public exports in `__all__`
 4. **Handle empty modules**: For modules under development, use placeholder comments:
 
     ```python
@@ -245,80 +227,12 @@ from src.app.connections.postgres import get_db  # Use package instead
     __all__ = []
     ```
 
-5. **Organize by layer**: Group imports logically (connections, core, utils, etc.)
+5. **Organize by layer**: Group imports logically
 
 #### Directory Structure for Imports
 
 ```
-src/app/
-├── __init__.py                 # Exports: app
-├── connections/
-│   ├── __init__.py            # Exports: get_db, CacheManager, VectorStoreService, etc.
-│   ├── postgres.py
-│   ├── redis.py
-│   ├── mongodb.py
-│   └── pinecone.py
-├── core/
-│   ├── __init__.py            # Exports: Settings, lifespan, setup_signal_handlers
-│   ├── settings.py
-│   ├── lifespan.py
-│   └── signals.py
-├── utils/
-│   ├── __init__.py            # Exports: logger, APIException, APIResponse, etc.
-│   ├── logger.py
-│   ├── exceptions.py
-│   ├── httpResponse.py
-│   └── quicker.py
-├── middleware/
-│   ├── __init__.py            # Exports: middleware functions and handlers
-│   ├── global_exception_handler.py
-│   └── server_middleware.py
-├── features/
-│   ├── __init__.py            # Lists all features
-│   ├── documents/
-│   │   ├── __init__.py        # Exports: router, schema, service
-│   │   ├── router.py
-│   │   ├── schema.py
-│   │   └── service.py
-│   └── agents/
-│       ├── __init__.py        # Exports: router, schema, service
-│       ├── router.py
-│       ├── schema.py
-│       └── service.py
-└── shared/
-    ├── __init__.py            # Lists shared modules
-    ├── agents/
-    │   ├── __init__.py        # Exports: agent classes, factory, registry
-    │   ├── base_agent.py
-    │   ├── agent_factory.py
-    │   └── agent_registry.py
-    ├── langchain/
-    │   ├── __init__.py        # Exports: LangChain utilities
-    │   └── agents.py
-    └── rag/
-        ├── __init__.py        # Exports: RAG utilities
-        └── ...
-```
 
-#### Example: Using Properly Exported Packages
-
-```python
-# src/app/main.py
-from src.app.core import Settings, lifespan
-from src.app.connections import get_db, connect_to_mongodb, connect_to_redis
-from src.app.middleware import (
-    global_exception_handler,
-    correlation_middleware,
-)
-from src.app.utils import logger, APIException
-
-# Feature routes
-from src.app.features.documents import router as documents_router
-from src.app.features.agents import router as agents_router
-
-app = FastAPI(...)
-
-# Clean, predictable imports with full IDE autocomplete support
 ```
 
 ---
@@ -365,10 +279,7 @@ async def process_order(order_id: str):
 
 ```python
 # ✅ CORRECT: Comprehensive type hints
-from typing import Optional, Callable, TypeVar
-from datetime import datetime
-
-T = TypeVar('T')
+use python v3.12+ recommened syntax (PEP 695) with built-in generics and type aliases
 
 async def fetch_resource(
     resource_id: str,
@@ -396,7 +307,7 @@ async def fetch_resource(resource_id, retry_count=3):
 
 ```python
 # ✅ CORRECT: Use 'is' and 'is not' for None/boolean
-value: Optional[str] = get_value()
+value: str | None = get_value()
 if value is None:
     handle_missing()
 
@@ -508,271 +419,12 @@ def get_user(user_id: str) -> User:
 
 ### Factory Pattern
 
-```python
-# ✅ CORRECT: Factory for creating configured clients
-from typing import Callable
-from src.core.config import get_settings
-
-def make_redis_client(url: str) -> Callable[[], RedisClient]:
-    """
-    Factory function returns a callable that creates clients.
-    Initialization (connection) happens separately at startup.
-    """
-    def factory() -> RedisClient:
-        # Create and configure, but don't connect yet
-        return RedisClient.from_url(url)
-    return factory
-
-# In app startup:
-@app.on_event("startup")
-async def startup():
-    settings = get_settings()
-    redis_factory = make_redis_client(settings.REDIS_URL)
-    redis_client = redis_factory()
-    await redis_client.connect()  # Connect at startup, not import time
-
-# Dependency:
-async def get_redis(client: RedisClient = Depends(lambda: redis_client)) -> RedisClient:
-    return client
-```
-
 ### Adapter Pattern
-
-```python
-# ✅ CORRECT: Adapter wrapping third-party client
-from typing import Any
-import asyncio
-
-class VectorDBAdapter:
-    """Adapter for vector database - exposes only needed methods."""
-
-    def __init__(self, client: Any):
-        self._client = client
-
-    async def upsert(self, items: list[dict[str, Any]]) -> bool:
-        """Adapt sync API to async."""
-        return await asyncio.to_thread(
-            self._client.upsert,
-            items
-        )
-
-    async def search(
-        self,
-        query_vector: list[float],
-        top_k: int = 10
-    ) -> list[dict[str, Any]]:
-        """Search with type safety."""
-        results = await asyncio.to_thread(
-            self._client.search,
-            query_vector,
-            top_k
-        )
-        return results
-
-# Usage:
-@router.post("/vectors/search")
-async def search_vectors(
-    query: SearchRequest,
-    adapter: VectorDBAdapter = Depends(get_vector_adapter)
-) -> list[SearchResult]:
-    results = await adapter.search(query.vector, top_k=query.limit)
-    return [SearchResult.from_vector(r) for r in results]
-```
+### Repository Pattern
 
 ---
 
-## Project Structure
 
-### Directory Organization
-
-```
-src/
-└── app/
-    ├── main.py                        # FastAPI app factory
-    ├── api/
-    │   ├── routes.py                  # Mount all routers here
-    │   ├── middleware/
-    │   │   └── global_exception_handler.py
-    │   │   ├── server_middleware.py              # Global middlewares
-    ├── features/
-    │   ├── documents/
-    │   │   ├── __init__.py
-    │   │   ├── router.py              # APIRouter with endpoints (thin)
-    │   │   ├── schema.py              # Pydantic models
-    │   │   ├── service.py             # Pure business logic functions
-    │   │   ├── repository.py          # Database access functions
-    │   │   ├── model.py               # Database models
-    │   │   ├── constants.py           # Feature constants
-    │   │   ├── dependencies.py        # Route dependencies
-    │   │   └── tests/
-    │   │       ├── test_router.py
-    │   │       ├── test_service.py
-    │   │       └── test_repository.py
-    ├── connections/
-    │   ├── mongodb.py
-    │   ├── pinecone.py
-    │   ├── postgres.py
-    │   ├── redis.py
-    ├── core/
-    │   ├── lifespan.py                  # App startup/shutdown events
-    │   ├── settings.py                # Settings/configuration
-    │   ├── signals.py              # Custom exceptions
-    ├── shared/
-    │   ├── enums.py                   # Shared enumerations
-    │   ├── agents/
-    │   ├── document_processing/
-    │   ├── langchain/
-    │   ├── langgraph/
-    │   ├── langsmith/
-    │   ├── rag/
-    │   ├── vectorstore/
-    │   └── crawler/
-
-    └── utils/
-        ├── apiFeatures.py                  # Structured logging with loguru
-        ├── logger.py                       # Loguru logger setup
-        ├── exceptions.py                   # Custom exception classes
-        ├── httpResponse.py                 # Standardized HTTP responses
-        └── quicker.py                      # Utility functions
-
-tests/
-├── unit/
-│   ├── features/
-│   ├── core/
-│   └── utils/
-├── integration/
-└── fixtures/
-```
-
-### Service Layer Pattern (Function-Based)
-
-**Key Principle**: Services are **pure functions**, not classes. Avoid instantiation and side effects.
-
-```python
-# src/app/features/documents/repository.py
-from typing import Optional
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from src.app.features.documents.model import Document
-
-async def find_documents_by_user(
-    user_id: str,
-    session: AsyncSession
-) -> list[Document]:
-    """Retrieve documents for a user - database access layer."""
-    result = await session.execute(
-        select(Document).where(Document.user_id == user_id)
-    )
-    return result.scalars().all()
-
-async def save_document(
-    document: Document,
-    session: AsyncSession
-) -> Document:
-    """Persist document to database."""
-    session.add(document)
-    await session.commit()
-    await session.refresh(document)
-    return document
-
-async def get_document_by_id(
-    doc_id: str,
-    session: AsyncSession
-) -> Optional[Document]:
-    """Retrieve single document by ID."""
-    return await session.get(Document, doc_id)
-
-# src/app/features/documents/service.py
-from sqlalchemy.ext.asyncio import AsyncSession
-from src.app.utils.logger import logger
-from src.app.features.documents.schema import DocumentCreate
-from src.app.features.documents.model import Document
-from src.app.features.documents import repository
-
-async def list_user_documents(
-    user_id: str,
-    session: AsyncSession
-) -> list[Document]:
-    """Pure business logic - list documents for user."""
-    documents = await repository.find_documents_by_user(user_id, session)
-    logger.info(
-        "User documents retrieved",
-        user_id=user_id,
-        count=len(documents)
-    )
-    return documents
-
-async def create_user_document(
-    user_id: str,
-    create_req: DocumentCreate,
-    session: AsyncSession
-) -> Document:
-    """Pure business logic - create new document with validation."""
-    if not create_req.title.strip():
-        raise ValueError("Title cannot be empty")
-
-    document = Document(
-        user_id=user_id,
-        title=create_req.title.strip(),
-        content=create_req.content
-    )
-
-    result = await repository.save_document(document, session)
-    logger.info(
-        "Document created",
-        user_id=user_id,
-        doc_id=result.id
-    )
-    return result
-
-# src/app/features/documents/router.py
-from fastapi import APIRouter, Depends, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from src.core.database import get_session
-from src.app.utils.logger import logger
-from src.app.features.documents import service
-from src.app.features.documents.schema import DocumentCreate, DocumentOut
-from src.app.core.exceptions import NotFoundException
-
-router = APIRouter(prefix="/documents", tags=["documents"])
-
-async def get_user_id(request: Request) -> str:
-    """Extract user ID from request context."""
-    return request.headers.get("X-User-ID", "anonymous")
-
-@router.get("/", response_model=list[DocumentOut])
-async def list_documents(
-    user_id: str = Depends(get_user_id),
-    session: AsyncSession = Depends(get_session)
-) -> list[DocumentOut]:
-    """List all documents for user - thin endpoint."""
-    documents = await service.list_user_documents(user_id, session)
-    return [DocumentOut.model_validate(d) for d in documents]
-
-@router.post("/", status_code=status.HTTP_201_CREATED, response_model=DocumentOut)
-async def create_document(
-    create_req: DocumentCreate,
-    user_id: str = Depends(get_user_id),
-    session: AsyncSession = Depends(get_session)
-) -> DocumentOut:
-    """Create new document - delegates to service layer."""
-    document = await service.create_user_document(user_id, create_req, session)
-    return DocumentOut.model_validate(document)
-
-@router.get("/{doc_id}", response_model=DocumentOut)
-async def get_document(
-    doc_id: str,
-    user_id: str = Depends(get_user_id),
-    session: AsyncSession = Depends(get_session)
-) -> DocumentOut:
-    """Get single document by ID."""
-    from src.app.features.documents import repository
-    document = await repository.get_document_by_id(doc_id, session)
-    if document is None or document.user_id != user_id:
-        raise NotFoundException("Document", doc_id)
-    logger.info("Document retrieved", doc_id=doc_id, user_id=user_id)
-    return DocumentOut.model_validate(document)
-```
 
 **Service Layer Principles**:
 
@@ -809,45 +461,8 @@ known-first-party = ["src"]
 known-third-party = ["fastapi", "pydantic", "sqlalchemy"]
 ```
 
-### MyPy Configuration
-
-```toml
-# pyproject.toml
-[tool.mypy]
-python_version = "3.12"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-check_untyped_defs = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
-```
 
 ---
-
-## Development Workflow
-
-### Package Management with uv
-
-```bash
-# Install dependencies
-uv add [name]
-
-# Run a command with uv
-uv run python -m pytest
-
-# Sync dependencies from lock file
-uv sync
-
-# Run the application
-uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 5000
-```
 
 ## Logging
 
@@ -908,78 +523,6 @@ async def api_exception_handler(request: Request, exc: APIException) -> ORJSONRe
     )
 ```
 
-### FastAPI Endpoint Logging Example
-
-```python
-# src/features/documents/router.py
-from fastapi import APIRouter, Depends, status
-from src.app.utils.logger import logger
-
-router = APIRouter(prefix="/documents", tags=["documents"])
-
-@router.get("/{doc_id}")
-async def get_document(
-    doc_id: str,
-    service: DocumentService = Depends(get_document_service)
-) -> DocumentOut:
-    """Get document by ID with structured logging."""
-    logger.debug("Fetching document", doc_id=doc_id)
-
-    try:
-        document = await service.get_by_id(doc_id)
-
-        logger.info(
-            "DOCUMENT_RETRIEVED",
-            doc_id=doc_id,
-            status_code=200,
-            title=document.title
-        )
-        return document
-
-    except DocumentNotFound as e:
-        logger.warning(
-            "DOCUMENT_NOT_FOUND",
-            doc_id=doc_id,
-            error=str(e),
-            status_code=404
-        )
-        raise
-
-@router.post("/")
-async def create_document(
-    create_req: DocumentCreate,
-    user_id: str = Depends(get_user_id),
-    service: DocumentService = Depends(get_document_service)
-) -> DocumentOut:
-    """Create new document with validation logging."""
-    logger.debug(
-        "Creating document",
-        user_id=user_id,
-        title=create_req.title
-    )
-
-    try:
-        document = await service.create_document(user_id, create_req)
-
-        logger.info(
-            "DOCUMENT_CREATED",
-            doc_id=document.id,
-            user_id=user_id,
-            status_code=201,
-            duration_ms=45.3
-        )
-        return document
-
-    except ValidationError as e:
-        logger.warning(
-            "VALIDATION_FAILED",
-            user_id=user_id,
-            errors=str(e),
-            provided_data=create_req.model_dump()
-        )
-        raise
-```
-
 ---
 
 ## Things to Avoid (❌ Anti-Patterns)
@@ -1027,21 +570,3 @@ async def create_document(
 
 ---
 
-## Summary Checklist
-
-When writing code, ensure:
-
--   [ ] All functions have type hints
--   [ ] No module-level mutable state
--   [ ] Endpoints delegate logic to services
--   [ ] Services are pure (no FastAPI imports)
--   [ ] Async I/O is used; blocking calls run in thread pool
--   [ ] Custom exceptions inherit from `HTTPException`
--   [ ] Centralized error handling in middleware
--   [ ] Structured logging with context
--   [ ] Tests cover both happy path and edge cases
--   [ ] Code passes `ruff format`, `ruff check`, `mypy`, and `bandit`
--   [ ] All dependencies injected via `Depends`
--   [ ] Feature-based directory structure maintained
-
----

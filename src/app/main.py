@@ -6,6 +6,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import ORJSONResponse, Response
 
 from app.config.settings import get_settings
+from app.features.auth.router import router as auth_router
 from app.features.health.router import router as health_router
 from app.lifecycle.lifespan import lifespan
 from app.middleware.global_exception_handler import global_exception_handler
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
 
     # Include feature routers
     app.include_router(health_router)
+    app.include_router(auth_router)
 
     # 404 handler (Catch-all route)
     @app.api_route(

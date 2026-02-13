@@ -14,19 +14,18 @@ Notes:
 - This file contains simple fallbacks so it can run in environments where those libs are not installed.
 """
 
-from typing import List, Any, Dict
 import json
 import os
-import sys
+from typing import Any
 
 # -----------------------
 # Lightweight fallbacks
 # -----------------------
 try:
     # Replace these with the libraries you use (langchain, chromadb, openai embeddings, etc.)
-    from langchain.schema import HumanMessage, Document  # type: ignore
     from langchain.chat_models import ChatOpenAI  # type: ignore
     from langchain.embeddings import OpenAIEmbeddings  # type: ignore
+    from langchain.schema import Document, HumanMessage  # type: ignore
     from langchain.vectorstores import Chroma  # type: ignore
 except Exception:
     # Minimal stub classes so the module imports for demo/testing work without external deps.
@@ -35,7 +34,7 @@ except Exception:
             self.content = content
 
     class Document:
-        def __init__(self, page_content: str, metadata: Dict[str, Any] = None):
+        def __init__(self, page_content: str, metadata: dict[str, Any] = None):
             self.page_content = page_content
             self.metadata = metadata or {}
 
@@ -44,7 +43,7 @@ except Exception:
             self.model = model
             self.temperature = temperature
 
-        def invoke(self, messages: List[HumanMessage]):
+        def invoke(self, messages: list[HumanMessage]):
             class Resp:
                 def __init__(self, content: str):
                     self.content = content
@@ -63,17 +62,17 @@ except Exception:
         def __init__(self, model: str = "text-embedding-3-small"):
             self.model = model
 
-        def embed_documents(self, texts: List[str]):
+        def embed_documents(self, texts: list[str]):
             # return dummy vectors
             return [[float(len(t))] for t in texts]
 
     class Chroma:
         @staticmethod
         def from_documents(
-            documents: List[Document],
+            documents: list[Document],
             embedding: Any,
             persist_directory: str,
-            collection_metadata: Dict = None,
+            collection_metadata: dict = None,
         ):
             # Very small stubbed "vector store" object
             class Store:
@@ -109,7 +108,7 @@ except Exception:
 # -----------------------
 # Chunk summarizer helpers (converted from earlier cell)
 # -----------------------
-def separate_content_types(chunk: Any) -> Dict[str, Any]:
+def separate_content_types(chunk: Any) -> dict[str, Any]:
     """Analyze chunk for text, tables, images. Expects chunk to have .text and chunk.metadata.orig_elements (optional)."""
     content_data = {
         "text": getattr(chunk, "text", "") or "",
@@ -142,7 +141,7 @@ def separate_content_types(chunk: Any) -> Dict[str, Any]:
     return content_data
 
 
-def create_ai_enhanced_summary(text: str, tables: List[str], images: List[str]) -> str:
+def create_ai_enhanced_summary(text: str, tables: list[str], images: list[str]) -> str:
     """Call LLM to produce searchable description. Fallback to truncated summary on failure."""
     try:
         llm = ChatOpenAI(model="gpt-4o", temperature=0.0)
@@ -183,7 +182,7 @@ def create_ai_enhanced_summary(text: str, tables: List[str], images: List[str]) 
         message = HumanMessage(content=message_content)
         response = llm.invoke([message])
         return response.content
-    except Exception as e:
+    except Exception:
         summary = (text or "")[:300] + ("..." if (text or "") else "")
         if tables:
             summary += f" [Contains {len(tables)} table(s)]"
@@ -192,10 +191,10 @@ def create_ai_enhanced_summary(text: str, tables: List[str], images: List[str]) 
         return summary
 
 
-def summarise_chunks(chunks: List[Any]) -> List[Document]:
+def summarise_chunks(chunks: list[Any]) -> list[Document]:
     """Process chunks: produce AI summaries for mixed content or raw text for pure text."""
     print("🧠 Processing chunks with AI Summaries...")
-    langchain_documents: List[Document] = []
+    langchain_documents: list[Document] = []
     total_chunks = len(chunks)
 
     for i, chunk in enumerate(chunks):
@@ -245,8 +244,8 @@ def summarise_chunks(chunks: List[Any]) -> List[Document]:
 # Export helper
 # -----------------------
 def export_chunks_to_json(
-    chunks: List[Document], filename: str = "chunks_export.json"
-) -> List[Dict[str, Any]]:
+    chunks: list[Document], filename: str = "chunks_export.json"
+) -> list[dict[str, Any]]:
     """Export processed chunks to clean JSON format."""
     export_data = []
 
@@ -274,7 +273,7 @@ def export_chunks_to_json(
 # Vector store
 # -----------------------
 def create_vector_store(
-    documents: List[Document], persist_directory: str = "dbv2/chroma_db"
+    documents: list[Document], persist_directory: str = "dbv2/chroma_db"
 ):
     """Create and persist ChromaDB vector store from Document list."""
     print("🔮 Creating embeddings and storing in ChromaDB...")
@@ -354,7 +353,7 @@ def run_complete_ingestion_pipeline(path_to_pdf: str) -> Any:
 # -----------------------
 # Retrieval + answer generation
 # -----------------------
-def generate_final_answer(chunks: List[Document], query: str) -> str:
+def generate_final_answer(chunks: list[Document], query: str) -> str:
     """
     Build a multimodal prompt from retrieved chunks and call an LLM that can process text+images.
     Returns string answer (or fallback message).
