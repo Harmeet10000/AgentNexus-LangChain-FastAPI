@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.features.auth.dependency import get_current_user
 from app.features.search.dependency import get_search_service
 
-router = APIRouter(prefix="/api/v1/searches", tags=["Searches"])
+router = APIRouter(prefix="/searches", tags=["Searches"])
 
 
 @router.get("")

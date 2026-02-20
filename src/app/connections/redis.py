@@ -4,7 +4,10 @@ from redis.asyncio import Redis
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
 
+# from tenacity import retry, stop_after_attempt, wait_exponential
 
+
+# @retry(stop=stop_after_attempt(max_attempt_number=3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def create_redis_client(url: str) -> Redis:
     """
     Create and return a configured async Redis client.

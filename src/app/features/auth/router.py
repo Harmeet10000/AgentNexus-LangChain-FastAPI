@@ -1,6 +1,8 @@
 # app/features/auth/router.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.features.auth.dependency import get_auth_service, get_current_user
 from app.features.auth.dto import (
@@ -11,12 +13,16 @@ from app.features.auth.dto import (
 )
 from app.features.auth.service import AuthService
 
-router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
-security = HTTPBearer()
+limiter = Limiter(key_func=get_remote_address)
+
+router: APIRouter = APIRouter(prefix="/auth", tags=["Auth"])
+security: HTTPBearer = HTTPBearer()
 
 
 @router.post("/register")
+@limiter.limit("5/minute")
 async def register(
+    request: Request,
     data: RegisterRequest,
     service: AuthService = Depends(get_auth_service),
 ):
@@ -32,7 +38,9 @@ async def register(
 
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     data: LoginRequest,
     service: AuthService = Depends(get_auth_service),
 ):

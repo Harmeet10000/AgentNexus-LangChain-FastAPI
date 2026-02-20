@@ -10,7 +10,7 @@ async def create_mongo_client(uri: str, db_name: str, document_models: list):
     Initialize database connection using Beanie's recommended approach.
     """
     client = AsyncIOMotorClient(
-        uri,  # Connection pool
+        host=uri,  # Connection pool
         maxPoolSize=10,
         minPoolSize=2,
         maxIdleTimeMS=30_000,
@@ -38,5 +38,5 @@ async def create_mongo_client(uri: str, db_name: str, document_models: list):
     return client, database
 
 
-def get_db(request: Request) -> AsyncIOMotorDatabase:
+def get_mongodb(request: Request) -> AsyncIOMotorDatabase:
     return request.app.state.db

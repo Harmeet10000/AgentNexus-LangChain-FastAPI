@@ -3,7 +3,7 @@
 ## 🎯 Project Overview
 
 **Project**: langchain-fastapi-production  
-**Language**: Python 3.12  
+**Language**: Python 3.14  
 **Package Manager**: uv (REQUIRED)  
 **Linter/Formatter**: ruff (REQUIRED)  
 **Type Checker**: ty (REQUIRED)  

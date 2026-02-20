@@ -1,34 +1,15 @@
 ```py
-1. try out alembic
-2. figure out docker compose as it appears to be not working   DONE
 3. set up integration guide for FastMCP             Delayed
-5. figure out extra in logger/loguru   DONE
 8. make a Copilot instructions improved final based on todo.md   Undergoing
+5. figure out extra in logger/loguru   DONE
+2. figure out docker compose as it appears to be not working   DONE
 9. re write server-middleware @app.middleware('http') and check with claude   - DONE
 11. checkout why Swagger Docs not working  - DONE
 13. move to __init__.py for better relative imports   DONE
 14. check if uvicorn logger is disabled              DONE
 19. update FastAPI to 0.124    DONE
-4. promtail/prometheus integration
-6. set up performance tests
-7. set up pgVector
-10. figure what are exception wrt FastAPI, fastapi-security and more with claude
-15. refactor docling code
-16. refactor crawl4ai code
-17. refactor vectorStore code
-18. refactor RAG code
-20. figure out using depends in FastAPI with DB session, logger, service layer, correlational ID and more             DONE
-21. add this from fastapi import BackgroundTasks
-@app.post("/process")
-async def process_data(data: DataModel, background_tasks: BackgroundTasks):
-    # Return immediately, process in background
-    background_tasks.add_task(heavy_processing, data)
-    return {"status": "processing"}
 22. do proper validations using pydantic          DONE
 23.  --no-access-log  in uvicorn main:app for 15% boost in perf    DONE
-24. Cache expensive dependencies to avoid repeated computations, Stream large responses to reduce memory usage by 80-90%                           TO_BE_DONE
-25. Use background tasks so users don't wait for non-critical operations
-26. optimise pydantic models for speed by provideing config
 27. For expensive resources that don't change often, you can create singleton dependencies that live for your entire application lifetime. by lru_cache         DONE
 28. # Slower: BaseHTTPMiddleware approach
 @app.middleware("http")
@@ -36,8 +17,12 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 # Faster: Pure ASGI middleware
 app.add_middleware(ProcessTimeMiddleware)                    DONE
 29. check if default response is ORJSON do i need to write it everywhere or just the return would work                              DONE
-30. @app.on_event("startup") is old and replaced by 'lifespan' context manager - check if i need to inject db if i use this 
-    You don't want to connect to MongoDB or Postgres on every single request; you want to create a connection pool when the app starts and close it when the app stops.
+20. figure out using depends in FastAPI with DB session, logger, service layer, correlational ID and more             DONE
+33. Using @lru_cache without bounds not recommended          DONE
+38. check with/asynccontextmanager and finally in DB in   DONE
+31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you arent just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).          
+
+This ensures you dont leak connections while keeping your Service and Repository layers clean and testable.                  DONE
 32. check if need global for closing and do this 
 async def connect_db():
     global client
@@ -46,20 +31,35 @@ async def connect_db():
         maxPoolSize=10,
         minPoolSize=2,
         serverSelectionTimeoutMS=5000,
-    )
-33. Using @lru_cache without bounds not recommended          DONE
-34. use cache in dockerfile Running as Root: Containers should not run as root in production due to security liabilities (1:10-1:13). The video advises creating and switching to a non-root user in the Dockerfile and ensuring volume mounts are owned by this user (1:13-1:24).
-Neglecting .dockerignore: Failing to use a .dockerignore file leads to shipping unnecessary files like .git or node_modules to production, bloating images and potentially exposing secrets (1:24-1:37).
-Bloated One-Stage Dockerfiles: Including all build tools, compilers, and test dependencies in the final image leads to large, inefficient images (1:39-1:44). The solution is to use multi-stage builds (1:44-1:46).
-Manual Builds Without Caching: Typing docker build . manually every time is inefficient (1:48-1:50). Enabling BuildKit (docker buildkit=1) and using layer caching with dev-mount for package managers and build systems significantly speeds up builds (1:50-2:05).
-35. global_error_handler vs @app.exception_handler(APIException) where to place in request exection model, which one is better in design native to FastAPI and check how to write GEH wrt APIException, HTTPException and more exception class types
+    )                      DONE
+35. global_error_handler vs @app.exception_handler(APIException) where to place in request exection model, which one is better in design native to FastAPI and check how to write GEH wrt APIException, HTTPException and more exception class types        DONE #(samaj ni aaya kya kiya but ok)
+4. promtail/prometheus integration          MAYBE_DONE
+6. set up performance tests
+7. set up pgVector
+15. refactor docling code
+16. refactor crawl4ai code
+17. refactor vectorStore code
+18. refactor RAG code
+21. add this from fastapi import BackgroundTasks
+1. try out alembic
+10. figure what are exception wrt FastAPI, fastapi-security and more with claude
 36. update copilot instructions
+@app.post("/process")
+async def process_data(data: DataModel, background_tasks: BackgroundTasks):
+    # Return immediately, process in background
+    background_tasks.add_task(heavy_processing, data)
+    return {"status": "processing"}
 37. check out the commented out pre commit hooks 
-38. check with/asynccontextmanager and finally in DB in lifespan
+24. Cache expensive dependencies to avoid repeated computations, Stream large responses to reduce memory usage by 80-90%                           TO_BE_DONE
+25. Use background tasks so users don't wait for non-critical operations
+26. optimise pydantic models for speed by provideing config
+30. @app.on_event("startup") is old and replaced by 'lifespan' context manager - check if i need to inject db if i use this 
+    You don't want to connect to MongoDB or Postgres on every single request; you want to create a connection pool when the app starts and close it when the app stops.
+34. use cache in dockerfile Running as Root: Containers should not run as root in production due to security liabilities. The video advises creating and switching to a non-root user in the Dockerfile and ensuring volume mounts are owned by this user.
+Neglecting .dockerignore: Failing to use a .dockerignore file leads to shipping unnecessary files like .git or node_modules to production, bloating images and potentially exposing .
+Bloated One-Stage Dockerfiles: Including all build tools, compilers, and test dependencies in the final image leads to large, inefficient images. The solution is to use multi-stage builds.
+Manual Builds Without Caching: Typing docker build . manually every time is inefficient. Enabling BuildKit (docker buildkit=1) and using layer caching with dev-mount for package managers and build systems significantly speeds up builds.
 39. add state of a request in logs as it goes through diff layers in our app
-31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you arent just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).          MAYBE_DONE
-
-This ensures you dont leak connections while keeping your Service and Repository layers clean and testable.
 
 ---
 
@@ -196,6 +196,3 @@ def get_tenant_db(request: Request):
 ```
 
 
-anti pattern - starting a consumer from a server.js and consuming off a queue and doing a CPU heavy op thus blocking the event loop
-starting a background processing(CPU heavy task) after sending a fulfil response even worse anti pattern 
-what to do - each kind of traffic in out system needs to have a separate event loop (http server needs to be separate from queue based system)

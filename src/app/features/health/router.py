@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request
 
 from .handler import health_check, self_info
 
-router = APIRouter(prefix="/api/v1/health", tags=["health"])
+router = APIRouter(prefix="/health", tags=["health"])
 
 
 @router.get("/self", response_model=None)

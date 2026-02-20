@@ -38,9 +38,9 @@ dependencies = [
     "langgraph>=1.0.8",
     "langsmith>=0.7.1",
     "fastmcp>=2.11.0,<3.0.0",
-    "crawl4ai>=0.8.0,<1.0.0", # Keep tight for C-lib dependencies
+    "crawl4ai>=0.8.0,<1.0.0",               # Keep tight for C-lib dependencies
     "bleach>=6.2.0,<7.0.0",
-    "motor==3.7.1", # Keep tight for C-lib stability
+    "motor==3.7.1",                         # Keep tight for C-lib stability
     "redis[hiredis]>=5.1.0,<6.0.0",
     "sqlalchemy==2.0.39",
     "alembic==1.16.5",
@@ -68,22 +68,20 @@ dependencies = [
     "bcrypt>=5.0.0",
     "passlib[bcrypt]>=1.7.4",
     "python-jose[cryptography]>=3.5.0",
+    "langextract>=1.1.1",
 ]
 
 [project.optional-dependencies]
 dev = [
     # --- TESTING (Updated) ---
-    "pytest>=8.2.2,<9.0.0", # Latest is 8.2.2 (Sep 24, 2025) - Relaxed to <9.0.0
+    "pytest>=8.2.2,<9.0.0",          # Latest is 8.2.2 (Sep 24, 2025) - Relaxed to <9.0.0
     "pytest-asyncio>=0.23.7,<1.0.0", # Latest is 0.23.7 (Oct 16, 2025) - Relaxed to <1.0.0
-    "pytest-cov>=5.0.0,<6.0.0", # Latest is 7.0.0 (Sep 9, 2025) - Relaxed to <6.0.0
-    "httpx>=0.27.0,<1.0.0", # Matched to runtime version
-
-    # --- QUALITY (Latest Versions) ---
-    "mypy==1.18.2", # Latest stable version (Sep 18, 2025)
-    "ruff==0.14.2", # Latest stable version (Oct 23, 2025)
-    "pre-commit==4.3.0", # Latest stable version (Aug 9, 2025)
-    "bandit>=1.8.6,<2.0.0", # Latest stable version is 1.8.6 (Jul 5, 2025)
-    "safety>=3.6.2,<4.0.0", # Latest stable version is 3.6.2 (Sep 24, 2025)
+    "pytest-cov>=5.0.0,<6.0.0",      # Latest is 7.0.0 (Sep 9, 2025) - Relaxed to <6.0.0
+    "httpx>=0.27.0,<1.0.0",          # Latest stable version (Sep 18, 2025)
+    "ruff==0.14.2",                  # Latest stable version (Oct 23, 2025)
+    "pre-commit==4.3.0",             # Latest stable version (Aug 9, 2025)
+    "bandit>=1.8.6,<2.0.0",          # Latest stable version is 1.8.6 (Jul 5, 2025)
+    "safety>=3.6.2,<4.0.0",          # Latest stable version is 3.6.2 (Sep 24, 2025)
 ]
 test = [
     "pytest>=8.2.2,<9.0.0",
@@ -104,7 +102,23 @@ Documentation = "https://github.com/Harmeet10000/langchain-fastapi-production#re
 Repository = "https://github.com/Harmeet10000/langchain-fastapi-production"
 "Bug Tracker" = "https://github.com/Harmeet10000/langchain-fastapi-production/issues"
 
+# Database migration configuration (Alembic)
+[tool.alembic]
+script_location = "src/alembic"
+version_locations = "src/database/migrations"
 
+# Post-write hooks for Alembic to format generated migration scripts with Black and isort
+[[tool.alembic.post_write_hooks]]
+name      = "ruff-format"               # just a unique identifier
+type      = "exec"
+executable = "ruff"                     # uv puts it on PATH inside .venv
+options   = "format REVISION_SCRIPT_FILENAME"
+
+[[tool.alembic.post_write_hooks]]
+name      = "ruff-fix"                  # must be different name from previous hook
+type      = "exec"
+executable = "ruff"
+options   = "check --fix REVISION_SCRIPT_FILENAME"
 
 # Tool configurations
 [tool.setuptools.packages.find]
@@ -129,7 +143,13 @@ ignore = ["E501", "ISC001", "TRY003", "PLR0913", "PLR2004"]
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
 known-third-party = ["fastapi", "pydantic", "sqlalchemy", "langchain"]
-section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "first-party",
+    "local-folder",
+]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -148,7 +168,7 @@ line-ending = "auto"
 
 [tool.ty]
 # Equivalent to MyPy's python_version
-environment.python-version = "3.12"
+environment.python-version = "3.14"
 # Equivalent to show_error_codes (full output includes codes)
 terminal.output-format = "full"
 # Optional: Treat warnings as errors for stricter enforcement (no direct MyPy equiv, but aligns with overall strictness)
@@ -227,7 +247,4 @@ exclude_dirs = ["tests", "migrations"]
 skips = ["B101", "B601"]
 
 [dependency-groups]
-dev = [
-    "pre-commit>=4.3.0",
-    "ty>=0.0.1a25",
-]
+dev = ["pre-commit>=4.3.0", "ty>=0.0.1a25"]
