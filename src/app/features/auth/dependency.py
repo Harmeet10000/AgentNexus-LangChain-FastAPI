@@ -3,16 +3,17 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-from app.connections.mongodb import get_db
+from app.config.settings import get_settings
+from app.connections.mongodb import get_mongodb
 from app.connections.redis import get_redis
 from app.features.auth.repository import RefreshTokenRepository, UserRepository
-from app.features.auth.security import ALGORITHM, SECRET_KEY
 from app.features.auth.service import AuthService
 
 security = HTTPBearer()
+settings = get_settings()
 
 
-def get_user_repository(db=Depends(get_db)) -> UserRepository:
+def get_user_repository(db=Depends(get_mongodb)) -> UserRepository:
     return UserRepository(db)
 
 
@@ -33,9 +34,9 @@ async def get_current_user(
 ):
     try:
         payload = jwt.decode(
-            creds.credentials,
-            SECRET_KEY,
-            algorithms=[ALGORITHM],
+            token=creds.credentials,
+            key=settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
         )
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")

@@ -1,112 +1,217 @@
 import traceback
+from typing import Any
 
 from fastapi import Request, status
-from fastapi.exceptions import HTTPException, RequestValidationError
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import ORJSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config.settings import get_settings
-from app.utils.exceptions import APIException
+from app.utils.exceptions import APIException  # ← your base class
 from app.utils.logger import logger
+
+
+def _build_request_context(request: Request) -> dict[str, Any]:
+    """Extract relevant request information (safe for logging & response)."""
+    settings = get_settings()
+    ctx = {
+        "method": request.method,
+        "url": str(request.url),
+        "correlationId": getattr(request.state, "correlation_id", "unknown"),
+    }
+    # Only include client IP in non-production environments
+    if settings.ENVIRONMENT != "production" and request.client:
+        ctx["clientIp"] = request.client.host
+    return ctx
+
+
+def _build_error_response(
+    status_code: int,
+    message: str,
+    error_code: str,
+    data: Any | None = None,
+    request_ctx: dict[str, Any] | None = None,
+    trace: str | None = None,
+    inner_error: str | None = None,
+) -> dict[str, Any]:
+    """Unified error shape — used for both known and unknown errors."""
+    error_detail: dict[str, Any] = {
+        "code": error_code,
+        "message": message,
+    }
+
+    if data is not None:
+        error_detail["data"] = data
+
+    response: dict[str, Any] = {
+        "success": False,
+        "statusCode": status_code,
+        "error": error_detail,
+        "request": request_ctx or {},
+    }
+
+    # Development & staging extras (never in production)
+    settings = get_settings()
+    if settings.ENVIRONMENT != "production":
+        if trace:
+            error_detail["trace"] = trace
+        if inner_error:
+            error_detail["innerError"] = inner_error
+
+    return response
 
 
 async def global_exception_handler(request: Request, exc: Exception) -> ORJSONResponse:
     """
-    Unified exception handler for all errors.
-    Handles: APIException, RequestValidationError, HTTPException, and unexpected errors.
+    Unified global exception handler.
+
+    Handles:
+    - APIException family (custom business/validation/auth errors)
+    - RequestValidationError (Pydantic / query / body validation)
+    - StarletteHTTPException (plain HTTPException or raised by dependencies)
+    - All other unexpected exceptions → 500
     """
     settings = get_settings()
-    correlation_id = getattr(request.state, "correlation_id", "unknown")
-    is_production = settings.ENVIRONMENT == "production"
+    request_ctx = _build_request_context(request)
+    correlation_id = request_ctx["correlationId"]
 
-    # Build base request info (reused across all error types)
-    request_info = {
-        "method": request.method,
-        "url": str(request.url),
-        "correlationId": correlation_id,
-    }
-
-    # Include IP only in non-production
-    if not is_production and request.client:
-        request_info["ip"] = request.client.host
-
-    # Determine error type and build error response
+    # ────────────────────────────────────────────────
+    # 1. Custom APIException family (business/validation/auth errors)
+    # ────────────────────────────────────────────────
     if isinstance(exc, APIException):
-        # Custom API exceptions
-        error_obj = {
-            "name": exc.name,
-            "success": False,
-            "statusCode": exc.status_code,
-            "request": request_info,
-            "message": exc.message,
-            "data": exc.data,
-        }
+        status_code = exc.status_code
+        error_code = exc.error_code
+        message = (
+            exc.detail.get("message", str(exc.detail))
+            if isinstance(exc.detail, dict)
+            else str(exc.detail)
+        )
+        data = exc.detail.get("data") if isinstance(exc.detail, dict) else None
 
-        # Add trace for 5xx errors in non-production
-        if exc.status_code >= 500 and not is_production:
-            error_obj["trace"] = traceback.format_exc()
+        response_body = _build_error_response(
+            status_code=status_code,
+            message=message,
+            error_code=error_code,
+            data=data,
+            request_ctx=request_ctx,
+        )
 
-        log_level = "error" if exc.status_code >= 500 else "warning"
+        if status_code < 500:
+            logger.warning(
+                f"[{correlation_id}] {error_code} - {message}",
+                status_code=status_code,
+                method=request_ctx["method"],
+                url=request_ctx["url"],
+                error_code=error_code,
+            )
+        else:
+            logger.error(
+                f"[{correlation_id}] {error_code} - {message}",
+                status_code=status_code,
+                method=request_ctx["method"],
+                url=request_ctx["url"],
+                error_code=error_code,
+            )
 
-    elif isinstance(exc, RequestValidationError):
-        # Pydantic validation errors (422)
-        errors = [
+        return ORJSONResponse(status_code=status_code, content=response_body)
+
+    # ────────────────────────────────────────────────
+    # 2. Pydantic / FastAPI validation errors (422)
+    # ────────────────────────────────────────────────
+    if isinstance(exc, RequestValidationError):
+        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+        error_code = "VALIDATION_ERROR"
+        message = "Request validation failed"
+
+        # Format errors in a client-friendly way
+        validation_errors = [
             {
-                "field": ".".join(str(x) for x in error["loc"][1:]),
-                "message": error["msg"],
-                "type": error["type"],
+                "field": " → ".join(map(str, err["loc"])),
+                "message": err["msg"],
+                "type": err["type"],
             }
-            for error in exc.errors()
+            for err in exc.errors()
         ]
 
-        error_obj = {
-            "name": "ValidationError",
-            "success": False,
-            "statusCode": status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "request": request_info,
-            "message": "Validation failed",
-            "data": {"errors": errors},
-        }
-        log_level = "warning"
+        response_body = _build_error_response(
+            status_code=status_code,
+            message=message,
+            error_code=error_code,
+            data={"errors": validation_errors},
+            request_ctx=request_ctx,
+        )
 
-    elif isinstance(exc, HTTPException):
-        # FastAPI HTTP exceptions
-        error_obj = {
-            "name": "HTTPException",
-            "success": False,
-            "statusCode": exc.status_code,
-            "request": request_info,
-            "message": exc.detail if isinstance(exc.detail, str) else "HTTP error",
-            "data": exc.detail if not isinstance(exc.detail, str) else None,
-        }
-        log_level = "error" if exc.status_code >= 500 else "warning"
+        logger.warning(
+            f"[{correlation_id}] VALIDATION_ERROR - {message}",
+            status_code=status_code,
+            method=request_ctx["method"],
+            url=request_ctx["url"],
+            validation_errors=validation_errors[:3],
+        )
 
-    else:
-        # Unexpected errors (500)
-        error_obj = {
-            "name": type(exc).__name__,
-            "success": False,
-            "statusCode": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "request": request_info,
-            "message": "An unexpected error occurred" if is_production else str(exc),
-            "data": None,
-        }
+        return ORJSONResponse(status_code=status_code, content=response_body)
 
-        # Add trace in non-production
-        if not is_production:
-            error_obj["trace"] = traceback.format_exc()
+    # ────────────────────────────────────────────────
+    # 3. Plain HTTPException / Starlette exceptions
+    # ────────────────────────────────────────────────
+    if isinstance(exc, StarletteHTTPException):
+        status_code = exc.status_code
+        error_code = f"HTTP_{status_code}"
+        message = exc.detail if isinstance(exc.detail, str) else "HTTP error"
 
-        log_level = "error"
+        response_body = _build_error_response(
+            status_code=status_code,
+            message=message,
+            error_code=error_code,
+            request_ctx=request_ctx,
+        )
 
-    # Log the error with appropriate level
-    log_func = getattr(logger, log_level)
-    log_func(
-        f"[{correlation_id}] {error_obj['name']}: {error_obj['message']}",
-        status_code=error_obj["statusCode"],
-        method=request_info["method"],
-        url=request_info["url"],
+        if status_code < 500:
+            logger.warning(
+                f"[{correlation_id}] {error_code} - {message}",
+                status_code=status_code,
+                method=request_ctx["method"],
+                url=request_ctx["url"],
+            )
+        else:
+            logger.error(
+                f"[{correlation_id}] {error_code} - {message}",
+                status_code=status_code,
+                method=request_ctx["method"],
+                url=request_ctx["url"],
+            )
+
+        return ORJSONResponse(
+            status_code=status_code, content=response_body, headers=exc.headers
+        )
+
+    # ────────────────────────────────────────────────
+    # 4. Catch-all — unexpected server errors (500)
+    # ────────────────────────────────────────────────
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    error_code = "INTERNAL_SERVER_ERROR"
+    message = "An unexpected error occurred"
+
+    # In production: minimal info
+    # In dev/staging: include traceback
+    trace = traceback.format_exc() if settings.ENVIRONMENT != "production" else None
+
+    response_body: dict[str, Any] = _build_error_response(
+        status_code=status_code,
+        message=message,
+        error_code=error_code,
+        request_ctx=request_ctx,
+        trace=trace,
     )
 
-    return ORJSONResponse(
-        status_code=error_obj["statusCode"],
-        content=error_obj,
+    # Always log full exception in production (critical!)
+    logger.error(
+        f"[{correlation_id}] {error_code} - Unhandled exception",
+        status_code=status_code,
+        method=request_ctx["method"],
+        url=request_ctx["url"],
+        traceback=trace,
+        exc_info=True,
     )
+
+    return ORJSONResponse(status_code=status_code, content=response_body)

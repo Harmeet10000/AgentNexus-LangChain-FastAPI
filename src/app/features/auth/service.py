@@ -8,8 +8,6 @@ from app.features.auth.dto import RegisterRequest
 from app.features.auth.model import User
 from app.features.auth.repository import RefreshTokenRepository, UserRepository
 from app.features.auth.security import (
-    ALGORITHM,
-    SECRET_KEY,
     create_token,
     hash_password,
     verify_password,
@@ -70,7 +68,7 @@ class AuthService:
                 expires_minutes=settings.JWT_REFRESH_TOKEN_EXPIRE_MINUTES,
             )
 
-            payload = jwt.decode(refresh, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(token=refresh, key=settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
             ttl = payload["exp"] - int(datetime.now(tz=UTC).timestamp())
 
             await self.refresh_token_repo.store(payload["jti"], payload["sub"], ttl)
@@ -93,7 +91,7 @@ class AuthService:
     async def refresh(self, refresh_token: str):
         try:
             logger.info("Attempting to refresh token")
-            payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(token=refresh_token, key=settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         except JWTError as e:
             logger.warning(f"Invalid refresh token - JWT decode failed: {str(e)}")
             raise HTTPException(status_code=401, detail="Invalid refresh token")
@@ -133,7 +131,7 @@ class AuthService:
 
     async def logout(self, refresh_token: str):
         try:
-            payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(token=refresh_token, key=settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
             if payload.get("jti"):
                 await self.refresh_token_repo.revoke(payload["jti"])
                 logger.info(f"User logged out successfully: {payload.get('sub')}")

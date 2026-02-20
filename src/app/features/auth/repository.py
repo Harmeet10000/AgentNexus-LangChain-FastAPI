@@ -21,10 +21,10 @@ class UserRepository:
 
 class RefreshTokenRepository:
     def __init__(self, redis: Redis):
-        self.redis = redis
+        self.redis: Redis = redis
 
     async def store(self, jti: str, user_id: str, ttl_seconds: int):
-        await self.redis.setex(f"refresh_token:{jti}", ttl_seconds, user_id)
+        await self.redis.setex(name=f"refresh_token:{jti}", time=ttl_seconds, value=user_id)
 
     async def exists(self, jti: str) -> bool:
         return await self.redis.exists(f"refresh_token:{jti}") == 1

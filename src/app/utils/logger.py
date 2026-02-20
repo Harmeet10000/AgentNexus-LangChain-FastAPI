@@ -52,7 +52,7 @@ def setup_logging() -> None:
 
     # Console handler with colors and custom format
     loguru_logger.add(
-        sys.stderr,
+        sink=sys.stderr,
         format=console_format,
         level=settings.LOG_LEVEL,
         colorize=True,
@@ -63,7 +63,7 @@ def setup_logging() -> None:
     # File handler with JSON serialization
     settings.LOG_DIR.mkdir(parents=True, exist_ok=True)
     loguru_logger.add(
-        settings.LOG_DIR / "app_{time:YYYY-MM-DD}.log",
+        sink=settings.LOG_DIR / "app_{time:YYYY-MM-DD}.log",
         format="{message}",
         level=settings.LOG_LEVEL,
         rotation=settings.LOG_ROTATION,

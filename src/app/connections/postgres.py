@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 from urllib.parse import urlparse
 
+from fastapi import Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -15,9 +16,7 @@ settings = get_settings()
 def get_database_url() -> str:
     """Convert psycopg2 URL to asyncpg URL."""
     postgres_url = settings.POSTGRES_URL
-    # Convert to asyncpg and fix SSL parameters
     asyncpg_url = postgres_url.replace("postgresql://", "postgresql+asyncpg://")
-    # Remove psycopg2-specific SSL parameters that asyncpg doesn't support
     asyncpg_url = asyncpg_url.replace("&sslmode=require", "")
     asyncpg_url = asyncpg_url.replace("&channel_binding=require", "")
     asyncpg_url = asyncpg_url.replace("?sslmode=require", "")
@@ -25,30 +24,56 @@ def get_database_url() -> str:
     return asyncpg_url
 
 
-# Create async engine
-engine = create_async_engine(
-    get_database_url(),
-    echo=False,
-    pool_size=settings.POSTGRES_POOL_SIZE,
-    max_overflow=settings.POSTGRES_MAX_OVERFLOW,
-    pool_pre_ping=True,
-    pool_timeout=30,
-    pool_recycle=3600,
-)
+async def init_db() -> tuple[create_async_engine, async_sessionmaker[AsyncSession]]:
+    """Initialize database engine and session factory.
 
-# Create session factory
-AsyncSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+    Returns:
+        tuple: (engine, AsyncSessionLocal) for app.state injection
+    """
+    engine = create_async_engine(
+        url=get_database_url(),
+        echo=False,
+        pool_size=settings.POSTGRES_POOL_SIZE,
+        max_overflow=settings.POSTGRES_MAX_OVERFLOW,
+        pool_pre_ping=True,
+        pool_timeout=30,
+        pool_recycle=3600,
+    )
+
+    session_local = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+
+    # Test connection and log version info
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(text("SELECT version()"))
+            version = result.scalar()
+            parsed_url = urlparse(settings.POSTGRES_URL)
+            host = parsed_url.hostname
+
+            logger.info(
+                "PostgreSQL connected",
+                host=host,
+                database=settings.POSTGRES_URL.split("/")[-1],
+                version=version,
+            )
+    except Exception as e:
+        logger.error(f"PostgreSQL initialization failed: {e}", exc_info=True)
+        await engine.dispose()
+        raise
+
+    return engine, session_local
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for database sessions."""
-    async with AsyncSessionLocal() as session:
+async def get_postgres_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """Dependency for database sessions retrieved from app.state."""
+    session_local = request.app.state.db_session_local
+    async with session_local() as session:
         try:
             yield session
             await session.commit()
@@ -57,27 +82,3 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
-
-
-async def init_db() -> None:
-    """Initialize database tables."""
-    async with engine.begin() as conn:
-        # Get connection info for logging
-        result = await conn.execute(text("SELECT version()"))
-        version = result.scalar()
-
-        # Parse URL for host info
-        parsed_url = urlparse(settings.POSTGRES_URL)
-        host = parsed_url.hostname
-
-        logger.info(
-            f"PostgreSQL Connected: {host}",
-            readyState=1,
-            database="neon-postgres",
-            version=version,
-        )
-
-
-async def close_db() -> None:
-    """Close database connections."""
-    await engine.dispose()

@@ -100,6 +100,15 @@ uv run alembic upgrade head
 # Rollback
 uv run alembic downgrade -1
 
+# Most common commands people actually type
+uv run alembic revision --autogenerate -m        # make migrations
+uv run alembic upgrade head                      # apply
+uv run alembic current                           # check state
+uv run alembic history --verbose                 # show history
+uv run ruff check --fix                          # lint + auto-fix
+uv run ruff format                               # format
+uv run pytest -x                                 # test & stop on first failure
+
 ```
 
 ## ⚡ Why Use uv?

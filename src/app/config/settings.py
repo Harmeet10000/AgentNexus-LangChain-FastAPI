@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     GEMINI_EMBEDDING_MODEL: str = Field(default="text-embedding-005")
     GEMINI_TEMPERATURE: float = Field(default=0.7)
     GEMINI_MAX_TOKENS: int = Field(default=2048)
+    LANGEXTRACT_API_KEY: str = Field(default="empty-langextract-api-key")  # Added this missing field
 
     # --- Pinecone Vector Database ---
     PINECONE_API_KEY: str = Field(default="")

@@ -5,9 +5,9 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import ORJSONResponse, Response
 
+from app.api.v1 import v1_router
+from app.api.v2 import v2_router
 from app.config.settings import get_settings
-from app.features.auth.router import router as auth_router
-from app.features.health.router import router as health_router
 from app.lifecycle.lifespan import lifespan
 from app.middleware.global_exception_handler import global_exception_handler
 from app.middleware.server_middleware import (
@@ -55,10 +55,10 @@ def create_app() -> FastAPI:
     )
 
     # 2. Trusted hosts (Security)
-    app.add_middleware(
-        TrustedHostMiddleware,
-        allowed_hosts=settings.CORS_ORIGINS,
-    )
+    # app.add_middleware(
+    #     TrustedHostMiddleware,
+    #     allowed_hosts=settings.CORS_ORIGINS,
+    # )
 
     # 3. Compression (Performance optimization)
     app.add_middleware(GZipMiddleware, minimum_size=15000, compresslevel=6)
@@ -87,6 +87,8 @@ def create_app() -> FastAPI:
     # EXCEPTION HANDLERS (Register after middleware, before routes)
     # ============================================================================
     app.add_exception_handler(Exception, global_exception_handler)
+    # app.add_exception_handler(RequestValidationError, global_exception_handler)
+    # app.add_exception_handler(StarletteHTTPException, global_exception_handler)
 
     # ============================================================================
     # ROUTES
@@ -108,8 +110,8 @@ def create_app() -> FastAPI:
         return Response(content=data, media_type=content_type)
 
     # Include feature routers
-    app.include_router(health_router)
-    app.include_router(auth_router)
+    app.include_router(v1_router)
+    app.include_router(v2_router)
 
     # 404 handler (Catch-all route)
     @app.api_route(
