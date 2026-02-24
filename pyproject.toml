@@ -24,7 +24,7 @@ keywords = ["fastapi", "langchain", "ai", "api", "async"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     # --- CORE FRAMEWORK (Relaxed Upper Bounds) ---
-    "fastapi[standard]==0.133.0",
+    "fastapi[standard]==0.129.0",
     "uvicorn[standard]>=0.34.0",
     "uvloop>=0.21.0,<1.0.0",
     "pydantic>=2.9.0,<3.0.0",
@@ -71,6 +71,7 @@ dependencies = [
     "langextract>=1.1.1",
     "toons>=0.5.3",
     "python-multipart>=0.0.20",
+    "pgvector>=0.4.2",
 ]
 
 [project.optional-dependencies]

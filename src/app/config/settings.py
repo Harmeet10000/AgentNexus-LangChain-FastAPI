@@ -62,7 +62,9 @@ class Settings(BaseSettings):
     GEMINI_EMBEDDING_MODEL: str = Field(default="text-embedding-005")
     GEMINI_TEMPERATURE: float = Field(default=0.7)
     GEMINI_MAX_TOKENS: int = Field(default=2048)
-    LANGEXTRACT_API_KEY: str = Field(default="empty-langextract-api-key")  # Added this missing field
+    LANGEXTRACT_API_KEY: str = Field(
+        default="empty-langextract-api-key"
+    )  # Added this missing field
 
     # --- Pinecone Vector Database ---
     PINECONE_API_KEY: str = Field(default="")
@@ -87,6 +89,23 @@ class Settings(BaseSettings):
     CRAWL4AI_USER_AGENT: str = Field(
         default="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     )
+    CRAWL4AI_PROXY: str | None = Field(default=None)
+    CRAWL4AI_PROXY_ENABLED: bool = Field(default=False)
+    CRAWL4AI_MAX_DEPTH: int = Field(default=3)
+    CRAWL4AI_MAX_PAGES: int = Field(default=10)
+    CRAWL4AI_MAX_CONTENT_SIZE: int = Field(default=102400)  # 100KB
+
+    # --- Tavily Search Configuration ---
+    TAVILY_API_KEY: str = Field(default="")
+
+    # --- Crawl/Search Rate Limiting ---
+    CRAWL_RATE_LIMIT_PER_MINUTE: int = Field(default=10)
+    CRAWL_RATE_LIMIT_PER_HOUR: int = Field(default=100)
+    SEARCH_RATE_LIMIT_PER_MINUTE: int = Field(default=30)
+    SEARCH_RATE_LIMIT_PER_HOUR: int = Field(default=500)
+
+    # --- Redis Cache for Crawler ---
+    REDIS_CRAWL_CACHE_TTL: int = Field(default=3600)  # 1 hour
 
     # --- Logging ---
     DEBUG: bool = Field(default=False)
