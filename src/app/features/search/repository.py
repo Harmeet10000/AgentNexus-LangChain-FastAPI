@@ -3,6 +3,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.features.search.model import DocumentVector
+
 
 class SearchRepository:
     def __init__(self, session: AsyncSession):
@@ -12,63 +14,102 @@ class SearchRepository:
         self,
         query: str,
         embedding: list[float],
+        user_id: str,
         limit: int,
         offset: int,
         candidate_limit: int,
         rrf_k: int,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], bool]:
         """
-        Executes a Reciprocal Rank Fusion (RRF) query.
-        - pg_textsearch uses <@> (returns negative BM25 score, so ASC order is best match)
-        - pgvectorscale uses <=> (returns cosine distance, so ASC order is best match)
+        Reciprocal Rank Fusion over vector search (pgvectorscale / cosine distance)
+        and keyword search (pg_textsearch / BM25).
+
+        Returns (results, has_more).
         """
+        # Convert embedding list to PostgreSQL vector format string
+        embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+
         sql = """
         WITH vector_search AS (
-            SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> :embedding::vector) as rank
-            FROM documents
+            SELECT id,
+                   ROW_NUMBER() OVER (ORDER BY embedding <=> CAST(:embedding AS vector)) AS rank
+            FROM document_vectors
+            WHERE user_id = :user_id
             LIMIT :candidate_limit
         ),
         keyword_search AS (
-            SELECT id, ROW_NUMBER() OVER (ORDER BY content <@> :query) as rank
-            FROM documents
+            SELECT id,
+                   ROW_NUMBER() OVER (ORDER BY content <@> :query) AS rank
+            FROM document_vectors
+            WHERE user_id = :user_id
             LIMIT :candidate_limit
         )
         SELECT
-            d.id, d.title, d.content,
-            COALESCE(1.0 / (:rrf_k + v.rank), 0.0) + COALESCE(1.0 / (:rrf_k + k.rank), 0.0) as combined_score
-        FROM documents d
+            d.id,
+            d.document_id,
+            d.title,
+            d.content,
+            d.meta_data,
+            COALESCE(1.0 / (:rrf_k + v.rank), 0.0)
+                + COALESCE(1.0 / (:rrf_k + k.rank), 0.0) AS combined_score
+        FROM document_vectors d
         LEFT JOIN vector_search v ON d.id = v.id
         LEFT JOIN keyword_search k ON d.id = k.id
-        WHERE v.id IS NOT NULL OR k.id IS NOT NULL
+        WHERE (v.id IS NOT NULL OR k.id IS NOT NULL)
+          AND d.user_id = :user_id
         ORDER BY combined_score DESC
-        LIMIT :limit OFFSET :offset;
+        LIMIT :fetch_limit OFFSET :offset
         """
+
+        fetch_limit = limit + 1  # one extra to detect has_more
 
         result = await self.session.execute(
             text(sql),
             {
                 "query": query,
-                "embedding": str(
-                    embedding
-                ),  # pgvector expects a string representation of the array
-                "limit": limit + 1,  # Fetch 1 extra to determine 'has_more'
+                "embedding": embedding_str,
+                "user_id": user_id,
+                "fetch_limit": fetch_limit,
                 "offset": offset,
                 "candidate_limit": candidate_limit,
                 "rrf_k": rrf_k,
             },
         )
-        return result.mappings().all()
+        rows = result.mappings().all()
+        has_more = len(rows) > limit
+        return rows[:limit], has_more
 
-    async def fuzzy_autocomplete(self, query: str, limit: int) -> list[dict[str, Any]]:
+    async def fuzzy_autocomplete(
+        self,
+        query: str,
+        user_id: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
         """
-        Uses pg_trgm for ultra-fast, typo-tolerant substring matching.
+        Uses pg_trgm for typo-tolerant prefix/substring matching on titles.
+        Requires: CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        And a GIN/GiST trgm index on title for performance:
+          CREATE INDEX ON document_vectors USING gin(title gin_trgm_ops);
         """
         sql = """
-        SELECT title, similarity(title, :query) as score
-        FROM documents
-        WHERE title % :query
+        SELECT title,
+               similarity(title, :query) AS score
+        FROM document_vectors
+        WHERE user_id = :user_id
+          AND title % :query
         ORDER BY title <-> :query
-        LIMIT :limit;
+        LIMIT :limit
         """
-        result = await self.session.execute(text(sql), {"query": query, "limit": limit})
+        result = await self.session.execute(
+            text(sql),
+            {"query": query, "user_id": user_id, "limit": limit},
+        )
         return result.mappings().all()
+
+    async def create_document_vector(self, data: dict[str, Any]) -> DocumentVector:
+        """Insert a new document vector into the database."""
+        doc = DocumentVector(**data)
+        self.session.add(doc)
+        await self.session.commit()
+        await self.session.refresh(doc)
+        return doc

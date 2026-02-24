@@ -39,7 +39,7 @@ async def connect_db():
 6. set up performance tests
 7. set up pgVectorScale with pg_textsearch and pg_trgm
 15. refactor docling code
-16. refactor crawl4ai code
+16. refactor crawl4ai code         DONE
 17. refactor vectorStore code
 18. refactor RAG code
 21. add this from fastapi import BackgroundTasks
@@ -62,7 +62,7 @@ Manual Builds Without Caching: Typing docker build . manually every time is inef
 39. add state of a request in logs as it goes through diff layers in our app
 40. implement search using postgres Extensions
 41. add this from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-
+42. fix the search code as it is not using the pg_textsearch properly
 # After creating your engine
 SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
 42.

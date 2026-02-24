@@ -86,7 +86,7 @@ uv sync
 uv sync --extra dev
 
 # Run the application
-uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 5000 --no-access-log
+uv run uvicorn src.app.main:app --reload --reload-dir src --host 0.0.0.0 --port 5000 --no-access-log
 
 # Run Pre-commit hooks
 uv run pre-commit run --all-files

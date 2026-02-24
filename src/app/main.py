@@ -95,7 +95,7 @@ def create_app() -> FastAPI:
     # ROUTES
     # ============================================================================
 
-    @app.get("/", tags=["Root"])
+    @app.get(path="/", tags=["Root"])
     async def root() -> dict[str, str]:
         """Root endpoint - health check."""
         return {
@@ -104,7 +104,7 @@ def create_app() -> FastAPI:
             "version": "1.0.0",
         }
 
-    @app.get("/metrics", tags=["Monitoring"])
+    @app.get(path="/metrics", tags=["Monitoring"])
     async def metrics() -> Response:
         """Prometheus metrics endpoint."""
         data, content_type = get_metrics()
@@ -116,7 +116,7 @@ def create_app() -> FastAPI:
 
     # 404 handler (Catch-all route)
     @app.api_route(
-        "/{path_name:path}",
+        path="/{path_name:path}",
         methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
         include_in_schema=False,
     )

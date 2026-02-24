@@ -2,13 +2,14 @@ name: Run Tests
 
 on:
   push:
-    branches: [js-mongoDB]
+    branches: [main, develop]
   pull_request:
-    branches: [js-mongoDB]
+    branches: [main, develop]
   workflow_dispatch:
 
 env:
-  NODE_ENV: test
+  PYTHON_VERSION: "3.12"
+  UV_CACHE_DIR: ~/.cache/uv
 
 jobs:
   test:
@@ -16,6 +17,20 @@ jobs:
     timeout-minutes: 30
 
     services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
       mongodb:
         image: mongo:6
         ports:
@@ -36,117 +51,80 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      rabbitmq:
-        image: rabbitmq:3-management
-        ports:
-          - 5672:5672
-          - 15672:15672
-        options: >-
-          --health-cmd "rabbitmq-diagnostics -q ping"
-          --health-interval 30s
-          --health-timeout 10s
-          --health-retries 5
-        env:
-          RABBITMQ_DEFAULT_USER: test
-          RABBITMQ_DEFAULT_PASS: test
-
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [22.x]
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "latest"
+
+      - name: Cache uv dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: ${{ runner.os }}-uv-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
 
       - name: Install dependencies
-        run: npm ci --prefer-offline --no-audit
+        run: uv sync --extra dev
 
-      - name: Create .env.dev file
+      - name: Create .env.test file
         run: |
-          cat > .env.dev << EOF
-          NODE_ENV=test
-          PORT=${{ secrets.PORT }}
-          SERVER_URL=${{ secrets.SERVER_URL }}
-          FRONTEND_URL=${{ secrets.FRONTEND_URL }}
-          DATABASE=${{ secrets.DATABASE }}
-          DB_POOL_SIZE=${{ secrets.DB_POOL_SIZE }}
-          MIGRATE_MONGO_URI=${{ secrets.MIGRATE_MONGO_URI }}
-          MIGRATE_AUTOSYNC=${{ secrets.MIGRATE_AUTOSYNC }}
-          REDIS_HOST=${{ secrets.REDIS_HOST }}
-          REDIS_PORT=${{ secrets.REDIS_PORT }}
-          REDIS_USERNAME=${{ secrets.REDIS_USERNAME }}
-          REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
-          RABBITMQ_URL=${{ secrets.RABBITMQ_URL }}
-          RABBITMQ_PRIVATE_URL=${{ secrets.RABBITMQ_PRIVATE_URL }}
-          RABBITMQ_NODENAME=${{ secrets.RABBITMQ_NODENAME }}
-          RABBITMQ_DEFAULT_USER=${{ secrets.RABBITMQ_DEFAULT_USER }}
-          RABBITMQ_DEFAULT_PASS=${{ secrets.RABBITMQ_DEFAULT_PASS }}
-          KAFKA_BROKER=${{ secrets.KAFKA_BROKER }}
-          KAFKA_USERNAME=${{ secrets.KAFKA_USERNAME }}
-          KAFKA_PASSWORD=${{ secrets.KAFKA_PASSWORD }}
-          KAFKA_TOPIC=${{ secrets.KAFKA_TOPIC }}
-          KAFKA_SERVICE_URI=${{ secrets.KAFKA_SERVICE_URI }}
-          KAFKA_HOST=${{ secrets.KAFKA_HOST }}
-          KAFKA_PORT=${{ secrets.KAFKA_PORT }}
-          KAFKA_SSL_CA_CERT=${{ secrets.KAFKA_SSL_CA_CERT }}
-          KAFKA_SSL_CERT=${{ secrets.KAFKA_SSL_CERT }}
-          KAFKA_SSL_KEY=${{ secrets.KAFKA_SSL_KEY }}
-          KAFKA_SSL_ENABLED=${{ secrets.KAFKA_SSL_ENABLED }}
-          ACCESS_TOKEN_SECRET=${{ secrets.ACCESS_TOKEN_SECRET }}
-          REFRESH_TOKEN_SECRET=${{ secrets.REFRESH_TOKEN_SECRET }}
-          ACCESS_TOKEN_EXPIRY=${{ secrets.ACCESS_TOKEN_EXPIRY }}
-          REFRESH_TOKEN_EXPIRY=${{ secrets.REFRESH_TOKEN_EXPIRY }}
-          RESEND_KEY=${{ secrets.RESEND_KEY }}
-          LOG_LEVEL=${{ secrets.LOG_LEVEL }}
-          S3_BACKUP_ENABLED=${{ secrets.S3_BACKUP_ENABLED }}
-          S3_BUCKET_NAME=${{ secrets.S3_BUCKET_NAME }}
-          AWS_REGION=${{ secrets.AWS_REGION }}
-          S3_PREFIX=${{ secrets.S3_PREFIX }}
-          BUCKET_NAME=${{ secrets.BUCKET_NAME }}
-          BUCKET_REGION=${{ secrets.BUCKET_REGION }}
-          ACCESS_KEY=${{ secrets.ACCESS_KEY }}
-          SECRET_ACCESS_KEY=${{ secrets.SECRET_ACCESS_KEY }}
-          RUN_BACKUP_ONCE=${{ secrets.RUN_BACKUP_ONCE }}
-          GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REDIRECT_URIS=${{ secrets.GOOGLE_REDIRECT_URIS }}
+          cat > .env.test << EOF
+          ENVIRONMENT=test
+          MONGODB_URI=mongodb://localhost:27017
+          MONGODB_DB_NAME=test_db
+          POSTGRES_HOST=localhost
+          POSTGRES_PORT=5432
+          POSTGRES_USER=test
+          POSTGRES_PASSWORD=test
+          POSTGRES_DB=test_db
+          REDIS_URL=redis://localhost:6379
+          LOG_LEVEL=DEBUG
           EOF
 
       - name: Wait for services
         run: |
+          echo "Waiting for PostgreSQL..."
+          timeout 60 bash -c 'until pg_isready -h localhost -p 5432; do sleep 1; done'
           echo "Waiting for MongoDB..."
           timeout 60 bash -c 'until nc -z localhost 27017; do sleep 1; done'
           echo "Waiting for Redis..."
           timeout 60 bash -c 'until nc -z localhost 6379; do sleep 1; done'
-          echo "Waiting for RabbitMQ..."
-          timeout 60 bash -c 'until nc -z localhost 5672; do sleep 1; done'
           echo "All services are ready!"
 
-      - name: Lint code
-        run: npm run lint
+      - name: Run migrations
+        run: uv run alembic upgrade head
 
-      - name: Run tests
-        run: npm run test
+      - name: Lint code with ruff
+        run: uv run ruff check src/ tests/
+
+      - name: Format check with ruff
+        run: uv run ruff format --check src/ tests/
+
+      - name: Type check with ty
+        run: uv run ty check src/
+
+      - name: Run tests with pytest
+        run: uv run pytest tests/ -v --tb=short
         env:
-          CI: true
+          ENVIRONMENT: test
 
-      - name: Generate test coverage
-        if: matrix.node-version == '20.x'
-        run: npm run test:coverage
+      - name: Generate coverage report
+        run: uv run pytest tests/ --cov=src --cov-report=lcov --cov-report=term-missing
 
       - name: Upload coverage to Codecov
-        if: matrix.node-version == '20.x'
         uses: codecov/codecov-action@v4
         with:
-          file: ./coverage/lcov.info
+          file: ./coverage.lcov
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
@@ -155,9 +133,8 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.node-version }}
+          name: test-results
           path: |
-            test-results.xml
-            coverage/
-            logs/
+            .pytest_cache/
+            htmlcov/
           retention-days: 7
