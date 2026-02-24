@@ -10,7 +10,6 @@ from app.connections.mongodb import create_mongo_client
 from app.connections.postgres import init_db
 from app.connections.redis import create_redis_client
 from app.features.auth.model import User
-from app.features.search.model import Search
 from app.utils.logger import logger
 
 
@@ -35,7 +34,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         mongo_client, db = await create_mongo_client(
             uri=settings.MONGODB_URI,
             db_name=settings.MONGODB_DB_NAME,
-            document_models=[User, Search],
+            document_models=[User],
         )
         app.state.mongo_client = mongo_client
         app.state.db = db

@@ -33,15 +33,16 @@ async def connect_db():
         serverSelectionTimeoutMS=5000,
     )                      DONE
 35. global_error_handler vs @app.exception_handler(APIException) where to place in request exection model, which one is better in design native to FastAPI and check how to write GEH wrt APIException, HTTPException and more exception class types        DONE #(samaj ni aaya kya kiya but ok)
+1. try out alembic                        DONE
+30. @app.on_event("startup") is old and replaced by 'lifespan' context manager -  DONE
 4. promtail/prometheus integration          MAYBE_DONE
 6. set up performance tests
-7. set up pgVector
+7. set up pgVectorScale with pg_textsearch and pg_trgm
 15. refactor docling code
 16. refactor crawl4ai code
 17. refactor vectorStore code
 18. refactor RAG code
 21. add this from fastapi import BackgroundTasks
-1. try out alembic
 10. figure what are exception wrt FastAPI, fastapi-security and more with claude
 36. update copilot instructions
 @app.post("/process")
@@ -52,15 +53,19 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 37. check out the commented out pre commit hooks 
 24. Cache expensive dependencies to avoid repeated computations, Stream large responses to reduce memory usage by 80-90%                           TO_BE_DONE
 25. Use background tasks so users don't wait for non-critical operations
-26. optimise pydantic models for speed by provideing config
-30. @app.on_event("startup") is old and replaced by 'lifespan' context manager - check if i need to inject db if i use this 
-    You don't want to connect to MongoDB or Postgres on every single request; you want to create a connection pool when the app starts and close it when the app stops.
+26. optimise pydantic models for speed by providing config
+
 34. use cache in dockerfile Running as Root: Containers should not run as root in production due to security liabilities. The video advises creating and switching to a non-root user in the Dockerfile and ensuring volume mounts are owned by this user.
 Neglecting .dockerignore: Failing to use a .dockerignore file leads to shipping unnecessary files like .git or node_modules to production, bloating images and potentially exposing .
 Bloated One-Stage Dockerfiles: Including all build tools, compilers, and test dependencies in the final image leads to large, inefficient images. The solution is to use multi-stage builds.
 Manual Builds Without Caching: Typing docker build . manually every time is inefficient. Enabling BuildKit (docker buildkit=1) and using layer caching with dev-mount for package managers and build systems significantly speeds up builds.
 39. add state of a request in logs as it goes through diff layers in our app
+40. implement search using postgres Extensions
+41. add this from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
+# After creating your engine
+SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
+42.
 ---
 
 ### 1. The Lifespan (The "Heavy" Pool)
