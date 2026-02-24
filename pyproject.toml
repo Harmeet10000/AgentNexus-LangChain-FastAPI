@@ -24,7 +24,7 @@ keywords = ["fastapi", "langchain", "ai", "api", "async"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     # --- CORE FRAMEWORK (Relaxed Upper Bounds) ---
-    "fastapi[standard]==0.124.0",
+    "fastapi[standard]==0.133.0",
     "uvicorn[standard]>=0.34.0",
     "uvloop>=0.21.0,<1.0.0",
     "pydantic>=2.9.0,<3.0.0",
@@ -38,9 +38,9 @@ dependencies = [
     "langgraph>=1.0.8",
     "langsmith>=0.7.1",
     "fastmcp>=2.11.0,<3.0.0",
-    "crawl4ai>=0.8.0,<1.0.0",               # Keep tight for C-lib dependencies
+    "crawl4ai>=0.8.0,<1.0.0", # Keep tight for C-lib dependencies
     "bleach>=6.2.0,<7.0.0",
-    "motor==3.7.1",                         # Keep tight for C-lib stability
+    "motor==3.7.1", # Keep tight for C-lib stability
     "redis[hiredis]>=5.1.0,<6.0.0",
     "sqlalchemy==2.0.39",
     "alembic==1.16.5",
@@ -69,6 +69,8 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "python-jose[cryptography]>=3.5.0",
     "langextract>=1.1.1",
+    "toons>=0.5.3",
+    "python-multipart>=0.0.20",
 ]
 
 [project.optional-dependencies]

@@ -38,6 +38,27 @@ async def init_db() -> tuple[create_async_engine, async_sessionmaker[AsyncSessio
         pool_pre_ping=True,
         pool_timeout=30,
         pool_recycle=3600,
+        connect_args={
+            # Timeouts are critical when managing your own pool directly
+            "server_settings": {
+                "statement_timeout": "10000",
+                "idle_in_transaction_session_timeout": "10000",
+            }
+        },
+        # if using Pg-Bouncer, set poolclass to NullPool to disable connection pooling at the SQLAlchemy level
+        # Disable SQLAlchemy's pool, let PgBouncer handle concurrency.
+        # Alternatively, keep poolclass default but set pool_size to something very small (e.g., 2 to 5).
+        # poolclass=NullPool,
+        # connect_args={
+        #     # CRITICAL: Disables prepared statements to prevent PgBouncer transaction errors
+        #     "prepared_statement_cache_size": 0,
+        #     "statement_cache_size": 0,
+        #     # Prevent bad queries from hanging connections forever (value in milliseconds)
+        #     "server_settings": {
+        #         "statement_timeout": "10000",
+        #         "idle_in_transaction_session_timeout": "10000"
+        #     }
+        # }
     )
 
     session_local = async_sessionmaker(
