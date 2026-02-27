@@ -17,7 +17,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 COPY pyproject.toml uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project
+    uv sync --frozen --no-install-project && \
+    test -d .venv || (echo "ERROR: .venv not created"; exit 1)
 
 # --- Development Stage ---
 FROM base AS dev
