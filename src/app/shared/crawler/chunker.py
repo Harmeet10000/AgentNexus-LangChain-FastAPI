@@ -1,12 +1,12 @@
 """Content chunking utilities for crawled content."""
 
 import re
-from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel
 
-@dataclass
-class Chunk:
+
+class Chunk(BaseModel):
     """A chunk of content with metadata."""
 
     text: str

@@ -3,6 +3,8 @@
 import time
 from typing import Any
 
+from redis.asyncio import Redis
+
 from app.features.crawler.constants import CrawlMode, SchemaType
 from app.features.crawler.dto import (
     CrawlRequest,
@@ -35,18 +37,20 @@ class CrawlerService:
         processor: GeminiProcessor | None = None,
         tavily: TavilyClient | None = None,
         rate_limiter: RateLimiter | None = None,
+        redis_client: Redis | None = None,
     ):
         self._crawler = crawler
         self._processor = processor
         self._tavily = tavily
         self._rate_limiter = rate_limiter
+        self._redis_client = redis_client
 
     @property
     def crawler(self) -> WebCrawler:
         if self._crawler is None:
             import asyncio
 
-            self._crawler = asyncio.run(get_crawler())
+            self._crawler = asyncio.run(get_crawler(redis_client=self._redis_client))
         return self._crawler
 
     @property

@@ -4,7 +4,7 @@ from typing import Any
 
 from langchain_core.tools import BaseTool
 
-from app.shared.crawler import CrawlResult, get_crawler, truncate_content
+from app.shared.crawler import get_crawler, truncate_content
 from app.shared.crawler.processor import (
     SchemaType as ProcessorSchemaType,
 )
@@ -104,7 +104,7 @@ class CrawlUrlTool(BaseTool):
         if result.links:
             links = [link.get("href", "") for link in result.links[:10]]
             parts.append(
-                f"\n## Links Found\n" + "\n".join(f"- {link}" for link in links)
+                "\n## Links Found\n" + "\n".join(f"- {link}" for link in links)
             )
 
         await crawler.close()

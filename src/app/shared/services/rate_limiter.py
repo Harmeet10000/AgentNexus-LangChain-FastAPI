@@ -1,9 +1,9 @@
 """Rate limiting using slowapi and Redis."""
 
-from dataclasses import dataclass
 from enum import Enum
 
-import redis.asyncio as redis
+from pydantic import BaseModel
+from redis.asyncio import Redis
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -17,8 +17,7 @@ class RateLimitScope(str, Enum):
     SEARCH = "search"
 
 
-@dataclass
-class RateLimitConfig:
+class RateLimitConfig(BaseModel):
     """Rate limit configuration."""
 
     per_minute: int
@@ -40,9 +39,9 @@ RATE_LIMIT_CONFIGS = {
 class RateLimiter:
     """Rate limiter using slowapi and Redis backend."""
 
-    def __init__(self):
+    def __init__(self, redis_client: Redis | None = None):
         self._limiter: Limiter | None = None
-        self._redis: redis.Redis | None = None
+        self.redis_client = redis_client
 
     def get_limiter(self) -> Limiter:
         """Get slowapi limiter instance."""
@@ -52,19 +51,6 @@ class RateLimiter:
                 storage_uri=get_settings().REDIS_URL,
             )
         return self._limiter
-
-    async def _get_redis(self) -> redis.Redis:
-        """Get Redis connection."""
-        if self._redis is None:
-            settings = get_settings()
-            self._redis = redis.Redis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                db=settings.REDIS_DB,
-                password=settings.REDIS_PASSWORD,
-                decode_responses=True,
-            )
-        return self._redis
 
     async def check_rate_limit(
         self,
@@ -81,23 +67,24 @@ class RateLimiter:
         Returns:
             Tuple of (is_allowed, rate_limit_info)
         """
+        if not self.redis_client:
+            return True, {}
+
         config = RATE_LIMIT_CONFIGS.get(scope)
         if not config:
             return True, {}
 
-        redis_client = await self._get_redis()
-
         minute_key = f"rate:{scope.value}:{identifier}:min"
         hour_key = f"rate:{scope.value}:{identifier}:hour"
 
-        minute_count = await redis_client.get(minute_key)
-        hour_count = await redis_client.get(hour_key)
+        minute_count = await self.redis_client.get(minute_key)
+        hour_count = await self.redis_client.get(hour_key)
 
         current_minute = int(minute_count) if minute_count else 0
         current_hour = int(hour_count) if hour_count else 0
 
         if current_minute >= config.per_minute:
-            ttl_minute = await redis_client.ttl(minute_key)
+            ttl_minute = await self.redis_client.ttl(minute_key)
             return False, {
                 "error": "Rate limit exceeded",
                 "limit": config.per_minute,
@@ -106,7 +93,7 @@ class RateLimiter:
             }
 
         if current_hour >= config.per_hour:
-            ttl_hour = await redis_client.ttl(hour_key)
+            ttl_hour = await self.redis_client.ttl(hour_key)
             return False, {
                 "error": "Rate limit exceeded",
                 "limit": config.per_hour,
@@ -125,12 +112,13 @@ class RateLimiter:
         scope: RateLimitScope,
     ):
         """Increment rate limit counter."""
-        redis_client = await self._get_redis()
+        if not self.redis_client:
+            return
 
         minute_key = f"rate:{scope.value}:{identifier}:min"
         hour_key = f"rate:{scope.value}:{identifier}:hour"
 
-        pipe = redis_client.pipeline()
+        pipe = self.redis_client.pipeline()
         pipe.incr(minute_key)
         pipe.expire(minute_key, 60)
         pipe.incr(hour_key)
@@ -143,17 +131,18 @@ class RateLimiter:
         scope: RateLimitScope,
     ) -> dict:
         """Get remaining rate limit quota."""
+        if not self.redis_client:
+            return {"remaining_minute": 0, "remaining_hour": 0}
+
         config = RATE_LIMIT_CONFIGS.get(scope)
         if not config:
             return {"remaining_minute": 0, "remaining_hour": 0}
 
-        redis_client = await self._get_redis()
-
         minute_key = f"rate:{scope.value}:{identifier}:min"
         hour_key = f"rate:{scope.value}:{identifier}:hour"
 
-        minute_count = await redis_client.get(minute_key)
-        hour_count = await redis_client.get(hour_key)
+        minute_count = await self.redis_client.get(minute_key)
+        hour_count = await self.redis_client.get(hour_key)
 
         current_minute = int(minute_count) if minute_count else 0
         current_hour = int(hour_count) if hour_count else 0
@@ -163,18 +152,15 @@ class RateLimiter:
             "remaining_hour": max(0, config.per_hour - current_hour),
         }
 
-    async def close(self):
-        """Close Redis connection."""
-        if self._redis:
-            await self._redis.close()
-
 
 _rate_limiter: RateLimiter | None = None
 
 
-def get_rate_limiter() -> RateLimiter:
+def get_rate_limiter(redis_client: Redis | None = None) -> RateLimiter:
     """Get rate limiter instance."""
     global _rate_limiter
     if _rate_limiter is None:
-        _rate_limiter = RateLimiter()
+        _rate_limiter = RateLimiter(redis_client)
+    elif redis_client is not None:
+        _rate_limiter.redis_client = redis_client
     return _rate_limiter

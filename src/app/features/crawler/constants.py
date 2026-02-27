@@ -1,9 +1,9 @@
 """Crawler feature constants."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class CrawlMode(str, Enum):
+class CrawlMode(StrEnum):
     """Crawl output modes."""
 
     MARKDOWN = "markdown"
@@ -12,7 +12,7 @@ class CrawlMode(str, Enum):
     SUMMARY = "summary"
 
 
-class SchemaType(str, Enum):
+class SchemaType(StrEnum):
     """Predefined schema types."""
 
     PRODUCT = "product"

@@ -1,7 +1,7 @@
 """Crawler feature API endpoints."""
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import ORJSONResponse
 
 from app.features.crawler.constants import CRAWLER_PREFIX, CRAWLER_TAG
 from app.features.crawler.dependencies import get_crawler_service, get_rate_limiter
@@ -59,7 +59,7 @@ async def crawl_url(
         client_id, RateLimitScope.CRAWL
     )
     if not is_allowed:
-        return JSONResponse(
+        return ORJSONResponse(
             status_code=429,
             content={
                 "error": "Rate limit exceeded",

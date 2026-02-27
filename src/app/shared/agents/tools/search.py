@@ -52,7 +52,7 @@ class WebSearchTool(BaseTool):
         if response.answer:
             parts.append(f"# Answer\n{response.answer}\n")
 
-        parts.append(f"# Search Results\n")
+        parts.append("# Search Results\n")
 
         for i, result in enumerate(response.results, 1):
             parts.append(f"## {i}. {result.title}")

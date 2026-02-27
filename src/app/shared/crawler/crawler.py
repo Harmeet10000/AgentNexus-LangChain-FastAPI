@@ -2,12 +2,14 @@
 
 import asyncio
 import hashlib
+import json
 import time
-from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urldefrag
 
-import redis.asyncio as redis
+from pydantic import BaseModel, Field
+from redis.asyncio import Redis
+
 from crawl4ai import (
     AsyncWebCrawler,
     BrowserConfig,
@@ -18,13 +20,15 @@ from crawl4ai import (
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 
 from app.config.settings import get_settings
+from app.connections.redis import get_redis
 from app.shared.crawler.config import CrawlerConfig, get_crawler_config
 from app.shared.crawler.validator import is_valid_url, sanitize_url
 
 
-@dataclass
-class CrawlResult:
+class CrawlResult(BaseModel):
     """Result from crawling a URL."""
+
+    model_config = {"arbitrary_types_allowed": True}
 
     url: str
     success: bool
@@ -39,29 +43,15 @@ class CrawlResult:
 
 
 class WebCrawler:
-    """Web crawler using Crawl4AI with caching and rate limiting."""
+    """Web crawler using Crawl4AI with caching."""
 
-    def __init__(self, config: CrawlerConfig | None = None):
+    def __init__(
+        self,
+        config: CrawlerConfig | None = None,
+        redis_client: Redis | None = None,
+    ):
         self.config = config or get_crawler_config()
-        self._redis: redis.Redis | None = None
-
-    async def _get_redis(self) -> redis.Redis:
-        """Get Redis connection."""
-        if self._redis is None:
-            settings = get_settings()
-            self._redis = redis.Redis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                db=settings.REDIS_DB,
-                password=settings.REDIS_PASSWORD,
-                decode_responses=True,
-            )
-        return self._redis
-
-    async def close(self):
-        """Close Redis connection."""
-        if self._redis:
-            await self._redis.close()
+        self.redis_client = redis_client
 
     def _get_cache_key(self, url: str) -> str:
         """Generate cache key for URL."""
@@ -70,18 +60,18 @@ class WebCrawler:
 
     async def _get_from_cache(self, url: str) -> CrawlResult | None:
         """Get cached crawl result."""
+        if not self.redis_client:
+            return None
+
         try:
             settings = get_settings()
             if not settings.CRAWL4AI_PROXY:
                 return None
 
-            redis_client = await self._get_redis()
             cache_key = self._get_cache_key(url)
+            cached = await self.redis_client.get(cache_key)
 
-            cached = await redis_client.get(cache_key)
             if cached:
-                import json
-
                 data = json.loads(cached)
                 result = CrawlResult(
                     url=data["url"],
@@ -102,12 +92,12 @@ class WebCrawler:
 
     async def _save_to_cache(self, url: str, result: CrawlResult):
         """Save crawl result to cache."""
+        if not self.redis_client:
+            return
+
         try:
             settings = get_settings()
-            redis_client = await self._get_redis()
             cache_key = self._get_cache_key(url)
-
-            import json
 
             data = {
                 "url": result.url,
@@ -121,7 +111,7 @@ class WebCrawler:
                 "word_count": result.word_count,
             }
 
-            await redis_client.setex(
+            await self.redis_client.setex(
                 cache_key,
                 settings.REDIS_CRAWL_CACHE_TTL,
                 json.dumps(data),
