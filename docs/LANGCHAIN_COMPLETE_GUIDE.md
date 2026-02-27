@@ -115,31 +115,7 @@ LangChain is a framework for developing applications powered by large language m
 
 ---
 
-## Installation & Setup
 
-### Install Project Dependencies
-
-You can use either `pip` or the modern `uv` package manager:
-
-```bash
-# Using pip
-pip install -e .
-
-# Using uv (faster and recommended)
-uv sync
-```
-
-### Install LangChain with OpenAI Support
-
-```bash
-pip install -U "langchain[openai]"
-```
-
-### Environment Variables
-
-```bash
-export OPENAI_API_KEY="sk-..."
-```
 
 ---
 
@@ -207,63 +183,6 @@ vector_store = Chroma(
 )
 ```
 
-### FAISS Vector Store
-
-**Installation:**
-```bash
-pip install -qU langchain-community
-```
-
-**Usage:**
-```python
-import faiss
-from langchain_community.docstore.in_memory import InMemoryDocstore
-from langchain_community.vectorstores import FAISS
-
-embedding_dim = len(embeddings.embed_query("hello world"))
-index = faiss.IndexFlatL2(embedding_dim)
-
-vector_store = FAISS(
-    embedding_function=embeddings,
-    index=index,
-    docstore=InMemoryDocstore(),
-    index_to_docstore_id={},
-)
-```
-
-### Milvus Vector Store
-
-**Installation:**
-```bash
-pip install -qU langchain-milvus
-```
-
-**Usage:**
-```python
-from langchain_milvus import Milvus
-
-URI = "./milvus_example.db"
-
-vector_store = Milvus(
-    embedding_function=embeddings,
-    connection_args={"uri": URI},
-    index_params={"index_type": "FLAT", "metric_type": "L2"},
-)
-```
-
-### Fake Embeddings (for Testing)
-
-```bash
-pip install -qU langchain-core
-```
-
-```python
-from langchain_core.embeddings import DeterministicFakeEmbedding
-
-embeddings = DeterministicFakeEmbedding(size=4096)
-```
-
----
 
 ## Agents & Tools
 

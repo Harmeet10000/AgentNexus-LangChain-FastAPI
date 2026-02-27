@@ -78,3 +78,59 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER update_documents_updated_at BEFORE UPDATE ON documents
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- RAG data table for extracted content (tables, code, images, entities)
+DROP TABLE IF EXISTS rag_data CASCADE;
+DROP INDEX IF EXISTS idx_rag_data_document_id;
+DROP INDEX IF EXISTS idx_rag_data_content_type;
+DROP INDEX IF EXISTS idx_rag_data_metadata;
+
+CREATE TABLE rag_data (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    content_type TEXT NOT NULL CHECK (content_type IN ('markdown', 'json', 'doctags', 'table', 'code', 'image', 'entity')),
+    data JSONB NOT NULL DEFAULT '{}',
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_rag_data_document_id ON rag_data (document_id);
+CREATE INDEX idx_rag_data_content_type ON rag_data (content_type);
+CREATE INDEX idx_rag_data_metadata ON rag_data USING GIN (metadata);
+CREATE INDEX idx_rag_data_created_at ON rag_data (created_at DESC);
+
+-- Function to search rag_data by content
+CREATE OR REPLACE FUNCTION search_rag_data(
+    search_query TEXT,
+    content_type_filter TEXT DEFAULT NULL,
+    match_count INT DEFAULT 10
+)
+RETURNS TABLE (
+    id UUID,
+    document_id UUID,
+    content TEXT,
+    content_type TEXT,
+    data JSONB,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        r.id,
+        r.document_id,
+        r.content,
+        r.content_type,
+        r.data,
+        r.metadata,
+        r.created_at
+    FROM rag_data r
+    WHERE r.content ILIKE '%' || search_query || '%'
+      AND (content_type_filter IS NULL OR r.content_type = content_type_filter)
+    ORDER BY r.created_at DESC
+    LIMIT match_count;
+END;
+$$;

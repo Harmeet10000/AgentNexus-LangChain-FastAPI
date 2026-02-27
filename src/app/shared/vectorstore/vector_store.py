@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 from config.settings import get_settings
-from openai import OpenAI
+from google import genai
 from timescale_vector import client
 
 
@@ -13,10 +13,10 @@ class VectorStore:
     """A class for managing vector operations and database interactions."""
 
     def __init__(self):
-        """Initialize the VectorStore with settings, OpenAI client, and Timescale Vector client."""
+        """Initialize the VectorStore with settings, Gemini client, and Timescale Vector client."""
         self.settings = get_settings()
-        self.openai_client = OpenAI(api_key=self.settings.openai.api_key)
-        self.embedding_model = self.settings.openai.embedding_model
+        self.gemini_client = genai.Client()
+        self.embedding_model = "gemini-embedding-001"
         self.vector_settings = self.settings.vector_store
         self.vec_client = client.Sync(
             self.settings.database.service_url,
@@ -27,7 +27,7 @@ class VectorStore:
 
     def get_embedding(self, text: str) -> list[float]:
         """
-        Generate embedding for the given text.
+        Generate embedding for the given text using Gemini.
 
         Args:
             text: The input text to generate an embedding for.
@@ -37,14 +37,12 @@ class VectorStore:
         """
         text = text.replace("\n", " ")
         start_time = time.time()
-        embedding = (
-            self.openai_client.embeddings.create(
-                input=[text],
-                model=self.embedding_model,
-            )
-            .data[0]
-            .embedding
+        response = self.gemini_client.models.embed_content(
+            model=self.embedding_model,
+            contents=text,
+            config={"task_type": "retrieval_query"},
         )
+        embedding = list(response.embedding.values)
         elapsed_time = time.time() - start_time
         logging.info(f"Embedding generated in {elapsed_time:.3f} seconds")
         return embedding

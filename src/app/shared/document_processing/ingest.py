@@ -9,6 +9,7 @@ import json
 import logging
 import os
 from datetime import datetime
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -88,8 +89,8 @@ class DocumentIngestionPipeline:
             self._initialized = False
 
     async def ingest_documents(
-        self, progress_callback: Optional[callable] = None
-    ) -> List[IngestionResult]:
+        self, progress_callback = None
+    ) -> list[IngestionResult]:
         """
         Ingest all documents from the documents folder.
 
@@ -235,7 +236,7 @@ class DocumentIngestionPipeline:
             errors=graph_errors,
         )
 
-    def _find_document_files(self) -> List[str]:
+    def _find_document_files(self) -> list[str]:
         """Find all supported document files in the documents folder."""
         if not os.path.exists(self.documents_folder):
             logger.error(f"Documents folder not found: {self.documents_folder}")
@@ -271,7 +272,7 @@ class DocumentIngestionPipeline:
 
         return sorted(files)
 
-    def _read_document(self, file_path: str) -> tuple[str, Optional[Any]]:
+    def _read_document(self, file_path: str) -> tuple[str, Any | None]:
         """
         Read document content from file - supports multiple formats via Docling.
 
@@ -440,8 +441,8 @@ class DocumentIngestionPipeline:
         title: str,
         source: str,
         content: str,
-        chunks: List[DocumentChunk],
-        metadata: Dict[str, Any],
+        chunks: list[DocumentChunk],
+        metadata: dict[str, Any],
     ) -> str:
         """Save document and chunks to PostgreSQL."""
         async with db_pool.acquire() as conn:

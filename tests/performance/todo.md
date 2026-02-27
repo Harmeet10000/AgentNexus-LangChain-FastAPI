@@ -65,7 +65,17 @@ Manual Builds Without Caching: Typing docker build . manually every time is inef
 42. fix the search code as it is not using the pg_textsearch properly
 # After creating your engine
 SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
-42.
+43. add langextract to agent tools
+44. correct the code for crawler and the packages used
+45. make neo4j connector for langchain
+46. use CacheBackedEmbeddings fore reusing embeddings
+47. check whether i will need to use sandboxed execution environemnt in future
+48. check the page https://docs.langchain.com/langsmith/deployments#
+49. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
+50. learn what is PEP standard, ruff linting standards
+51. use timescaleDB and neo4j docker image and check what extensions work with it 
+52. legal tool will be based on Saul for finding out of the box ideas for legal advice also.
+53. add voice support by using qwenTTS or something else 
 ---
 
 ### 1. The Lifespan (The "Heavy" Pool)
@@ -169,6 +179,25 @@ async def submit_declaration(
 def get_tenant_db(request: Request):
     tenant_id = request.headers["X-Tenant"]
     return client[f"tenant_{tenant_id}"]
+
+
+    1. Reliable Communication via Typed Schemas
+Multi-agent workflows often break because agents pass inconsistent or malformed data to one another.
+
+The Problem: Inconsistent JSON or shifting field names lead to downstream "guessing" and system failure.
+
+The Solution: Use Typed Schemas (like TypeScript interfaces). These act as machine-checkable contracts that ensure data integrity at every boundary.
+
+Benefit: Failures become "schema violations" rather than silent logic bugs, allowing systems to retry or repair state before it propagates.
+
+2. Eliminating Ambiguity with Action Schemas
+Even with valid data, agents often fail because their intent is too broad (e.g., "help the team").
+
+The Problem: LLMs may interpret vague instructions in ways that aren't automatable (assigning vs. closing vs. escalating).
+
+The Solution: Implement Action Schemas (using tools like Zod). These force the agent to choose from a "discriminated union" of specific, predefined actions.
+
+Benefit: Every agent output must resolve to an explicit, valid command, turning unpredictable text into predictable execution.
     
 |Issue           |Symptom             |Fix                                                    |
 |----------------|--------------------|-------------------------------------------------------|

@@ -72,6 +72,11 @@ dependencies = [
     "toons>=0.5.3",
     "python-multipart>=0.0.20",
     "pgvector>=0.4.2",
+    "langchain-docling>=2.0.0",
+    "deepagents>=0.4.3",
+    "langchain-tavily>=0.2.17",
+    "langchain-neo4j>=0.8.0",
+    "pageindex>=0.2.5.1",
 ]
 
 [project.optional-dependencies]

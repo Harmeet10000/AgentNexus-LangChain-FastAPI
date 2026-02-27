@@ -1,55 +1,41 @@
-# --- Stage 1: Base Setup (Slim) ---
-FROM python:3.12-slim AS python_base
+# syntax=docker/dockerfile:1.4
+FROM python:3.12-slim AS base
 
-# Python optimizations
 ENV PYTHONUNBUFFERED=1 \
-    UV_COMPILE_BYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
 
 WORKDIR /app
 
-# --- Stage 2: Builder ---
-FROM python_base AS builder
+# --- Builder Stage ---
+FROM base AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 COPY pyproject.toml uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
-# --- Stage 3: Production (The Tiny Image) ---
-FROM python_base AS production
+# --- Production Stage ---
+FROM base AS production
 
-ENV ENVIRONMENT=production \
-    DEBUG=False \
-    HOST=0.0.0.0 \
-    PORT=5000 \
-    WORKERS=4 \
-    LOG_LEVEL=INFO \
-    LOG_FORMAT=json
+RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser
 
-RUN addgroup -S appuser && adduser -S appuser -G appuser -h /app
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+
+COPY --chown=appuser:appuser src ./src
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/src" \
+    ENVIRONMENT=production
 
 USER appuser
 
-WORKDIR /app
-
-COPY --from=builder /app/.venv /app/.venv
-COPY src ./src
-
-ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONPATH="/app/src"
-
 EXPOSE 5000
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000"]
-
-# Set PATH to use virtual environment
-ENV PATH="/app/.venv/bin:$PATH"
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=10)" || exit 1
-
-EXPOSE 5000
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/v1/health', timeout=10)" || exit 1
 
 CMD ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "4"]

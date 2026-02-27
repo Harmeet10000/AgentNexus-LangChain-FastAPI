@@ -21,6 +21,7 @@ from docling.chunking import HybridChunker
 from docling_core.types.doc import DoclingDocument
 from dotenv import load_dotenv
 from transformers import AutoTokenizer
+from tyoing import Any
 
 # Load environment variables
 load_dotenv()
@@ -56,7 +57,7 @@ class DocumentChunk:
     index: int
     start_char: int
     end_char: int
-    metadata: dict[str, any]
+    metadata: dict[str, Any]
     token_count: int | None = None  # Will be calculated based on content
     embedding: list[float] | None = None  # For embedder compatibility
 
@@ -106,7 +107,7 @@ class DoclingHybridChunker:
         content: str,
         title: str,
         source: str,
-        metadata: dict[str, any] | None = None,
+        metadata: dict[str, Any] | None = None,
         docling_doc: DoclingDocument | None = None,
     ) -> list[DocumentChunk]:
         """
@@ -191,7 +192,7 @@ class DoclingHybridChunker:
             return self._simple_fallback_chunk(content, base_metadata)
 
     def _simple_fallback_chunk(
-        self, content: str, base_metadata: dict[str, any]
+        self, content: str, base_metadata: dict[str, Any]
     ) -> list[DocumentChunk]:
         """
         Simple fallback chunking when HybridChunker can't be used.
@@ -283,7 +284,7 @@ class SimpleChunker:
         content: str,
         title: str,
         source: str,
-        metadata: dict[str, any] | None = None,
+        metadata: dict[str, Any] | None = None,
         **kwargs,  # Ignore extra args like docling_doc
     ) -> list[DocumentChunk]:
         """
@@ -373,7 +374,7 @@ class SimpleChunker:
         index: int,
         start_pos: int,
         end_pos: int,
-        metadata: dict[str, any],
+        metadata: dict[str, Any],
     ) -> DocumentChunk:
         """Create a DocumentChunk object."""
         return DocumentChunk(

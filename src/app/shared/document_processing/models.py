@@ -3,13 +3,14 @@ Pydantic models for data validation and serialization.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # Enums
-class SearchType(str, Enum):
+class SearchType(StrEnum):
     """Search type enum."""
 
     SEMANTIC = "semantic"
@@ -17,7 +18,7 @@ class SearchType(str, Enum):
     HYBRID = "hybrid"
 
 
-class MessageRole(str, Enum):
+class MessageRole(StrEnum):
     """Message role enum."""
 
     USER = "user"
@@ -46,10 +47,10 @@ class DocumentMetadata(BaseModel):
     id: str
     title: str
     source: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
-    chunk_count: Optional[int] = None
+    chunk_count: int | None = None
 
 
 class ChunkResult(BaseModel):
@@ -59,7 +60,7 @@ class ChunkResult(BaseModel):
     document_id: str
     content: str
     score: float
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     document_title: str
     document_source: str
 
@@ -73,7 +74,7 @@ class ChunkResult(BaseModel):
 class SearchResponse(BaseModel):
     """Search response model."""
 
-    results: List[ChunkResult] = Field(default_factory=list)
+    results: list[ChunkResult] = Field(default_factory=list)
     total_results: int = 0
     search_type: SearchType
     query_time_ms: float
@@ -83,8 +84,8 @@ class ToolCall(BaseModel):
     """Tool call information model."""
 
     tool_name: str
-    args: Dict[str, Any] = Field(default_factory=dict)
-    tool_call_id: Optional[str] = None
+    args: dict[str, Any] = Field(default_factory=dict)
+    tool_call_id: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -92,9 +93,9 @@ class ChatResponse(BaseModel):
 
     message: str
     session_id: str
-    sources: List[DocumentMetadata] = Field(default_factory=list)
-    tools_used: List[ToolCall] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    sources: list[DocumentMetadata] = Field(default_factory=list)
+    tools_used: list[ToolCall] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class StreamDelta(BaseModel):
@@ -102,63 +103,63 @@ class StreamDelta(BaseModel):
 
     content: str
     delta_type: Literal["text", "tool_call", "end"] = "text"
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # Database Models
 class Document(BaseModel):
     """Document model."""
 
-    id: Optional[str] = None
+    id: str | None = None
     title: str
     source: str
     content: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class Chunk(BaseModel):
     """Document chunk model."""
 
-    id: Optional[str] = None
+    id: str | None = None
     document_id: str
     content: str
-    embedding: Optional[List[float]] = None
+    embedding: list[float] | None = None
     chunk_index: int
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    token_count: Optional[int] = None
-    created_at: Optional[datetime] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    token_count: int | None = None
+    created_at: datetime | None = None
 
     @field_validator("embedding")
     @classmethod
-    def validate_embedding(cls, v: Optional[List[float]]) -> Optional[List[float]]:
-        """Validate embedding dimensions."""
-        if v is not None and len(v) != 1536:  # OpenAI text-embedding-3-small
-            raise ValueError(f"Embedding must have 1536 dimensions, got {len(v)}")
+    def validate_embedding(cls, v: list[float] | None) -> list[float] | None:
+        """Validate embedding is not empty if provided."""
+        if v is not None and len(v) == 0:
+            raise ValueError("Embedding cannot be empty")
         return v
 
 
 class Session(BaseModel):
     """Session model."""
 
-    id: Optional[str] = None
-    user_id: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    expires_at: Optional[datetime] = None
+    id: str | None = None
+    user_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    expires_at: datetime | None = None
 
 
 class Message(BaseModel):
     """Message model."""
 
-    id: Optional[str] = None
+    id: str | None = None
     session_id: str
     role: MessageRole
     content: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    created_at: Optional[datetime] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime | None = None
 
     model_config = ConfigDict(use_enum_values=True)
 
@@ -168,8 +169,8 @@ class AgentDependencies(BaseModel):
     """Dependencies for the agent."""
 
     session_id: str
-    database_url: Optional[str] = None
-    openai_api_key: Optional[str] = None
+    database_url: str | None = None
+    openai_api_key: str | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -178,10 +179,10 @@ class AgentContext(BaseModel):
     """Agent execution context."""
 
     session_id: str
-    messages: List[Message] = Field(default_factory=list)
-    tool_calls: List[ToolCall] = Field(default_factory=list)
-    search_results: List[ChunkResult] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    messages: list[Message] = Field(default_factory=list)
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+    search_results: list[ChunkResult] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # Ingestion Models
@@ -212,4 +213,4 @@ class IngestionResult(BaseModel):
     title: str
     chunks_created: int
     processing_time_ms: float
-    errors: List[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)

@@ -1,13 +1,14 @@
 """Tavily search service integration."""
 
-from dataclasses import dataclass
 from typing import Any
+
+import httpx
+from pydantic import BaseModel
 
 from app.config.settings import get_settings
 
 
-@dataclass
-class SearchResult:
+class SearchResult(BaseModel):
     """Result from Tavily search."""
 
     url: str
@@ -17,8 +18,7 @@ class SearchResult:
     published_date: str | None = None
 
 
-@dataclass
-class SearchResponse:
+class SearchResponse(BaseModel):
     """Response from search."""
 
     query: str
@@ -55,8 +55,6 @@ class TavilyClient:
         Returns:
             SearchResponse with results
         """
-        import aiohttp
-
         if not self.api_key:
             raise ValueError("Tavily API key not configured")
 
@@ -72,19 +70,18 @@ class TavilyClient:
             "search_depth": "basic",
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
                 f"{self.base_url}/search",
                 json=payload,
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(
-                        f"Tavily API error: {response.status} - {error_text}"
-                    )
+            )
 
-                data = await response.json()
+            if response.status_code != 200:
+                raise Exception(
+                    f"Tavily API error: {response.status_code} - {response.text}"
+                )
+
+            data = response.json()
 
         results = [
             SearchResult(

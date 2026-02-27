@@ -1,4 +1,26 @@
 services:
+  timescale:
+    image: timescale/timescaledb-ha:pg18
+    container_name: timescale_db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_secure_password}
+      POSTGRES_DB: ${POSTGRES_DB:-langchain_db}
+      TS_TUNE_MEMORY: 2GB
+    volumes:
+      - timescale-data:/home/postgres/pgdata/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   caddy:
     image: caddy:2-alpine
     container_name: caddy
@@ -6,7 +28,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro # Production config
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
     networks:
@@ -14,77 +36,35 @@ services:
     restart: unless-stopped
     depends_on:
       - ai-service-1
-      - ai-service-2
 
   ai-service-1:
     build:
       context: .
       dockerfile: docker/dev.Dockerfile
+      target: dev
     container_name: ai-service-1
     ports:
       - "5000:5000"
     volumes:
-      - ./src:/app/src
+      - ./src:/app/src:ro
       - ./data:/app/data
-      - ./.venv:/app/.venv
     environment:
-      - ENVIRONMENT=development
+      ENVIRONMENT: development
+      POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your_secure_password}@timescale:5432/${POSTGRES_DB:-langchain_db}
     env_file:
       - .env.development
     networks:
       - langchain-network
     restart: unless-stopped
-
-  ai-service-2:
-    build:
-      context: .
-      dockerfile: docker/dev.Dockerfile
-    container_name: ai-service-2
-    ports:
-      - "5001:5000"
-    volumes:
-      - ./src:/app/src
-      - ./data:/app/data
-      - ./.venv:/app/.venv
-    environment:
-      - ENVIRONMENT=development
-    env_file:
-      - .env.development
-    networks:
-      - langchain-network
-    restart: unless-stopped
-
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: langchain-redis
-  #   ports:
-  #     - "6379:6379"
-  #   volumes:
-  #     - redis-data:/data
-  #   command: redis-server --appendonly yes
-  #   networks:
-  #     - langchain-network
-  #   restart: unless-stopped
-
-  # mongodb:
-  #   image: mongo:7.0
-  #   container_name: langchain-mongodb
-  #   ports:
-  #     - "27017:27017"
-  #   environment:
-  #     - MONGO_INITDB_DATABASE=langchain_db
-  #   volumes:
-  #     - mongodb-data:/data/db
-  #     - mongodb-config:/data/configdb
-  #   networks:
-  #     - langchain-network
-  #   restart: unless-stopped
+    depends_on:
+      timescale:
+        condition: service_healthy
 
 networks:
   langchain-network:
     driver: bridge
 
 volumes:
-  redis-data:
+  timescale-data:
   caddy-data:
   caddy-config:

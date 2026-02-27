@@ -1,16 +1,16 @@
 """Gemini processing for content extraction and summarization."""
 
 import json
-from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel
 
 from app.config.settings import get_settings
 
 
-class SchemaType(str, Enum):
+class SchemaType(StrEnum):
     """Predefined schema types for structured extraction."""
 
     PRODUCT = "product"
@@ -118,8 +118,7 @@ PREDEFINED_SCHEMAS = {
 }
 
 
-@dataclass
-class ExtractionResult:
+class ExtractionResult(BaseModel):
     """Result from Gemini extraction."""
 
     success: bool
@@ -156,13 +155,13 @@ class GeminiProcessor:
             ExtractionResult with summary
         """
         try:
-            prompt = f"""You are a helpful assistant. Summarize the following content 
-            in a concise way (maximum {max_length} characters). 
+            prompt = f"""You are a helpful assistant. Summarize the following content
+            in a concise way (maximum {max_length} characters).
             Focus on the main points and key information.
-            
+
             Content:
             {content}
-            
+
             Summary:"""
 
             response = self.model.invoke(prompt)
@@ -218,15 +217,15 @@ class GeminiProcessor:
         try:
             schema_json = json.dumps(schema, indent=2)
 
-            prompt = f"""You are a data extraction assistant. Extract information from the 
+            prompt = f"""You are a data extraction assistant. Extract information from the
             following content and format it as JSON according to the provided schema.
-            
+
             Schema:
             {schema_json}
-            
+
             Content:
             {content[:15000]}
-            
+
             Output ONLY valid JSON, no other text. If a field cannot be found, use null.
             JSON:"""
 

@@ -1,44 +1,31 @@
 """
-Document embedding generation for vector search.
+Document embedding generation for vector search using Gemini.
 """
 
 import asyncio
 import logging
-import os
 from datetime import datetime
 
 from dotenv import load_dotenv
-from openai import APIError, RateLimitError
+from google.genai import errors as genai_errors
 
 from .chunker import DocumentChunk
 
-# Import flexible providers
-try:
-    from ..utils.providers import get_embedding_client, get_embedding_model
-except ImportError:
-    # For direct execution or testing
-    import os
-    import sys
-
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from utils.providers import get_embedding_client, get_embedding_model
-
-# Load environment variables
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Initialize client with flexible provider
-embedding_client = get_embedding_client()
-EMBEDDING_MODEL = get_embedding_model()
+# Gemini embedding configuration
+GEMINI_EMBEDDING_MODEL = "gemini-embedding-001"
+GEMINI_TASK_TYPE = "retrieval_document"
 
 
 class EmbeddingGenerator:
-    """Generates embeddings for document chunks."""
+    """Generates embeddings for document chunks using Google Gemini."""
 
     def __init__(
         self,
-        model: str = EMBEDDING_MODEL,
+        model: str = GEMINI_EMBEDDING_MODEL,
         batch_size: int = 100,
         max_retries: int = 3,
         retry_delay: float = 1.0,
@@ -47,7 +34,7 @@ class EmbeddingGenerator:
         Initialize embedding generator.
 
         Args:
-            model: OpenAI embedding model to use
+            model: Gemini embedding model to use
             batch_size: Number of texts to process in parallel
             max_retries: Maximum number of retry attempts
             retry_delay: Delay between retries in seconds
@@ -57,16 +44,21 @@ class EmbeddingGenerator:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
 
+        # Initialize Gemini client
+        from google import genai
+
+        self.client = genai.Client()
+        logger.info(f"Initialized Gemini embedding generator with model: {model}")
+
         # Model-specific configurations
         self.model_configs = {
-            "text-embedding-3-small": {"dimensions": 1536, "max_tokens": 8191},
-            "text-embedding-3-large": {"dimensions": 3072, "max_tokens": 8191},
-            "text-embedding-ada-002": {"dimensions": 1536, "max_tokens": 8191},
+            "gemini-embedding-001": {"dimensions": 1536, "max_tokens": 2048},
+            "gemini-embedding": {"dimensions": 1536, "max_tokens": 2048},
         }
 
         if model not in self.model_configs:
             logger.warning(f"Unknown model {model}, using default config")
-            self.config = {"dimensions": 1536, "max_tokens": 8191}
+            self.config = {"dimensions": 1536, "max_tokens": 2048}
         else:
             self.config = self.model_configs[model]
 
@@ -81,31 +73,26 @@ class EmbeddingGenerator:
             Embedding vector
         """
         # Truncate text if too long
-        if len(text) > self.config["max_tokens"] * 4:  # Rough token estimation
+        if len(text) > self.config["max_tokens"] * 4:
             text = text[: self.config["max_tokens"] * 4]
 
         for attempt in range(self.max_retries):
             try:
-                response = await embedding_client.embeddings.create(
-                    model=self.model, input=text
+                response = self.client.models.embed_content(
+                    model=self.model,
+                    contents=text,
+                    config={"task_type": GEMINI_TASK_TYPE},
                 )
 
-                return response.data[0].embedding
+                return response.embedding.values
 
-            except RateLimitError:
+            except genai_errors.ClientError as e:
+                logger.error(f"Gemini API error: {e}")
                 if attempt == self.max_retries - 1:
                     raise
-
-                # Exponential backoff for rate limits
                 delay = self.retry_delay * (2**attempt)
                 logger.warning(f"Rate limit hit, retrying in {delay}s")
                 await asyncio.sleep(delay)
-
-            except APIError as e:
-                logger.error(f"OpenAI API error: {e}")
-                if attempt == self.max_retries - 1:
-                    raise
-                await asyncio.sleep(self.retry_delay)
 
             except Exception as e:
                 logger.error(f"Unexpected error generating embedding: {e}")
@@ -130,7 +117,6 @@ class EmbeddingGenerator:
                 processed_texts.append("")
                 continue
 
-            # Truncate if too long
             if len(text) > self.config["max_tokens"] * 4:
                 text = text[: self.config["max_tokens"] * 4]
 
@@ -138,24 +124,22 @@ class EmbeddingGenerator:
 
         for attempt in range(self.max_retries):
             try:
-                response = await embedding_client.embeddings.create(
-                    model=self.model, input=processed_texts
-                )
+                # Gemini doesn't support batch embedding in the same way
+                # Process individually and collect
+                embeddings = []
+                for text in processed_texts:
+                    response = self.client.models.embed_content(
+                        model=self.model,
+                        contents=text,
+                        config={"task_type": GEMINI_TASK_TYPE},
+                    )
+                    embeddings.append(response.embedding.values)
 
-                return [data.embedding for data in response.data]
+                return embeddings
 
-            except RateLimitError:
+            except genai_errors.ClientError as e:
+                logger.error(f"Gemini API error in batch: {e}")
                 if attempt == self.max_retries - 1:
-                    raise
-
-                delay = self.retry_delay * (2**attempt)
-                logger.warning(f"Rate limit hit, retrying batch in {delay}s")
-                await asyncio.sleep(delay)
-
-            except APIError as e:
-                logger.error(f"OpenAI API error in batch: {e}")
-                if attempt == self.max_retries - 1:
-                    # Fallback to individual processing
                     return await self._process_individually(processed_texts)
                 await asyncio.sleep(self.retry_delay)
 
@@ -165,7 +149,7 @@ class EmbeddingGenerator:
                     return await self._process_individually(processed_texts)
                 await asyncio.sleep(self.retry_delay)
 
-    async def _process_individually(self, texts: List[str]) -> List[List[float]]:
+    async def _process_individually(self, texts: list[str]) -> list[list[float]]:
         """
         Process texts individually as fallback.
 
@@ -197,8 +181,8 @@ class EmbeddingGenerator:
         return embeddings
 
     async def embed_chunks(
-        self, chunks: List[DocumentChunk], progress_callback: Optional[callable] = None
-    ) -> List[DocumentChunk]:
+        self, chunks: list[DocumentChunk], progress_callback=None
+    ) -> list[DocumentChunk]:
         """
         Generate embeddings for document chunks.
 
@@ -270,7 +254,7 @@ class EmbeddingGenerator:
         logger.info(f"Generated embeddings for {len(embedded_chunks)} chunks")
         return embedded_chunks
 
-    async def embed_query(self, query: str) -> List[float]:
+    async def embed_query(self, query: str) -> list[float]:
         """
         Generate embedding for a search query.
 
@@ -293,11 +277,11 @@ class EmbeddingCache:
 
     def __init__(self, max_size: int = 1000):
         """Initialize cache."""
-        self.cache: Dict[str, List[float]] = {}
-        self.access_times: Dict[str, datetime] = {}
+        self.cache: dict[str, list[float]] = {}
+        self.access_times: dict[str, datetime] = {}
         self.max_size = max_size
 
-    def get(self, text: str) -> Optional[List[float]]:
+    def get(self, text: str) -> list[float] | None:
         """Get embedding from cache."""
         text_hash = self._hash_text(text)
         if text_hash in self.cache:
@@ -305,7 +289,7 @@ class EmbeddingCache:
             return self.cache[text_hash]
         return None
 
-    def put(self, text: str, embedding: List[float]):
+    def put(self, text: str, embedding: list[float]):
         """Store embedding in cache."""
         text_hash = self._hash_text(text)
 
@@ -349,7 +333,7 @@ def create_embedder(
         cache = EmbeddingCache()
         original_generate = embedder.generate_embedding
 
-        async def cached_generate(text: str) -> List[float]:
+        async def cached_generate(text: str) -> list[float]:
             cached = cache.get(text)
             if cached is not None:
                 return cached

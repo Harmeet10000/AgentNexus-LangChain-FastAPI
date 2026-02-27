@@ -1,13 +1,13 @@
 """Crawler configuration and settings."""
 
-from dataclasses import dataclass
 from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
 
 from app.config.settings import get_settings
 
 
-@dataclass
-class CrawlerConfig:
+class CrawlerConfig(BaseModel):
     """Configuration for the web crawler."""
 
     headless: bool = True
@@ -23,16 +23,21 @@ class CrawlerConfig:
     proxy_server: str | None = None
     proxy_enabled: bool = False
 
-    def __post_init__(self):
+    @model_validator(mode="before")
+    @classmethod
+    def load_from_settings(cls, values):
+        """Load configuration from settings."""
         settings = get_settings()
-        self.headless = settings.CRAWL4AI_HEADLESS
-        self.timeout = settings.CRAWL4AI_TIMEOUT
-        self.user_agent = settings.CRAWL4AI_USER_AGENT
-        self.max_depth = settings.CRAWL4AI_MAX_DEPTH
-        self.max_pages = settings.CRAWL4AI_MAX_PAGES
-        self.max_content_size = settings.CRAWL4AI_MAX_CONTENT_SIZE
-        self.proxy_server = settings.CRAWL4AI_PROXY
-        self.proxy_enabled = settings.CRAWL4AI_PROXY_ENABLED
+        return {
+            "headless": settings.CRAWL4AI_HEADLESS,
+            "timeout": settings.CRAWL4AI_TIMEOUT,
+            "user_agent": settings.CRAWL4AI_USER_AGENT,
+            "max_depth": settings.CRAWL4AI_MAX_DEPTH,
+            "max_pages": settings.CRAWL4AI_MAX_PAGES,
+            "max_content_size": settings.CRAWL4AI_MAX_CONTENT_SIZE,
+            "proxy_server": settings.CRAWL4AI_PROXY,
+            "proxy_enabled": settings.CRAWL4AI_PROXY_ENABLED,
+        }
 
     def get_proxy_dict(self) -> dict[str, Any] | None:
         """Get proxy configuration for Crawl4AI."""
