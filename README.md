@@ -13,7 +13,7 @@ A production-grade FastAPI application integrating LangChain, LangGraph, and Lan
 ### Advanced Capabilities
 
 -   **MCP Protocol**: Dynamic tool discovery and multi-server communication
--   **Vector Store**: Pinecone integration for efficient semantic search and RAG
+-   **Vector Store**: Postgres's pg_vectorscale integration for efficient semantic search and RAG
 -   **Document Processing**: Multi-format document parsing with Docling (PDF, DOCX, PPTX, HTML, Markdown)
 -   **Web Crawling**: Intelligent web scraping with Crawl4AI (JavaScript rendering, rate limiting)
 -   **Structured Outputs**: Type-safe LLM responses with Pydantic models
@@ -123,249 +123,7 @@ uv run pytest -x                                 # test & stop on first failure
 -   **Parallel downloads** and installations
 
 
-
-## Middleware Execution Flow
-```
-Request Flow:
-┌─────────────────────────────────────────────────────────────┐
-│ 1. CORS Middleware (Preflight checks)                       │
-│ 2. Trusted Host Middleware (Host validation)                │
-│ 3. GZip Middleware (Compression)                            │
-│ 4. Security Headers (Add security headers)                  │
-│ 5. Correlation ID (Add tracking ID)                         │
-│ 6. Metrics Middleware (Start timing)                        │
-│ 7. Timeout Middleware (Wrap with timeout)                   │
-│ 8. Error Handler (Catch exceptions)                         │
-│ 9. Your Route Handler (/api/endpoint)                       │
-└─────────────────────────────────────────────────────────────┘
-                          ↓
-Response Flow (reverse order):
-┌─────────────────────────────────────────────────────────────┐
-│ 9. Route Handler Returns Response                           │
-│ 8. Error Handler (Pass through or catch)                    │
-│ 7. Timeout Middleware (Check timeout)                       │
-│ 6. Metrics Middleware (Record duration)                     │
-│ 5. Correlation ID (Add X-Correlation-ID header)             │
-│ 4. Security Headers (Add headers to response)               │
-│ 3. GZip Middleware (Compress if needed)                     │
-│ 2. Trusted Host Middleware (Pass through)                   │
-│ 1. CORS Middleware (Add CORS headers)                       │
-└─────────────────────────────────────────────────────────────┘
-```
-
 ## 📁 Project Structure
-
-```
-my_fastapi_project/
-│
-├── app/
-│   ├── __init__.py
-│   ├── main.py
-│   ├── config.py
-│   ├── dependencies.py
-│   │
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── security.py
-│   │   ├── database.py
-│   │   ├── cache.py
-│   │   ├── logging.py
-│   │   └── exceptions.py
-│   │
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── base.py
-│   │
-│   ├── shared/                           # Shared AI/ML components
-│   │   ├── __init__.py
-│   │   │
-│   │   ├── langchain/                    # LangChain components
-│   │   │   ├── __init__.py
-│   │   │   ├── chains.py                 # Custom chains
-│   │   │   ├── prompts.py                # Prompt templates
-│   │   │   ├── agents.py                 # Agent configurations
-│   │   │   ├── callbacks.py              # Custom callbacks
-│   │   │   └── models.py                 # LLM model configurations
-│   │   │
-│   │   ├── langgraph/                    # LangGraph workflows
-│   │   │   ├── __init__.py
-│   │   │   ├── graphs.py                 # Graph definitions
-│   │   │   ├── nodes.py                  # Custom nodes
-│   │   │   ├── edges.py                  # Edge conditions
-│   │   │   └── state.py                  # State management
-│   │   │
-│   │   ├── langsmith/                    # LangSmith integration
-│   │   │   ├── __init__.py
-│   │   │   ├── tracing.py                # Tracing configuration
-│   │   │   ├── evaluation.py             # Evaluation sets
-│   │   │   └── monitoring.py             # Performance monitoring
-│   │   ├── agents/                       # Agent system
-|   |   |   |
-│   │   │   ├── __init__.py
-│   │   │   ├── base_agent.py             # Base agent class
-│   │   │   ├── agent_factory.py          # Agent creation factory
-│   │   │   ├── agent_registry.py         # Agent registry
-│   │   │   ├── memory/                   # Agent memory systems
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── conversation.py       # Conversation memory
-│   │   │   │   ├── entity.py             # Entity memory
-│   │   │   │   └── vector.py             # Vector memory
-│   │   │   ├── tools/                    # Agent tools
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── search_tool.py
-│   │   │   │   ├── calculator_tool.py
-│   │   │   │   ├── code_executor_tool.py
-│   │   │   │   └── database_tool.py
-│   │   │   ├── types/                    # Predefined agent types
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── conversational.py     # Conversational agent
-│   │   │   │   ├── research.py           # Research agent
-│   │   │   │   ├── code_assistant.py     # Code assistant agent
-│   │   │   │   └── data_analyst.py       # Data analyst agent
-│   │   │   └── orchestration/            # Multi-agent orchestration
-│   │   │       ├── __init__.py
-│   │   │       ├── coordinator.py        # Agent coordinator
-│   │   │       ├── communication.py      # Inter-agent communication
-│   │   │       └── delegation.py         # Task delegation
-│   │   │
-│   │   ├── rag/                          # RAG components
-│   │   │   ├── __init__.py
-│   │   │   ├── retriever.py              # Retrieval logic
-│   │   │   ├── embeddings.py             # Embedding models
-│   │   │   ├── reranker.py               # Reranking logic
-│   │   │   ├── chunking.py               # Document chunking strategies
-│   │   │   └── pipelines.py              # RAG pipelines
-│   │   │
-│   │   ├── vectorstore/                  # Vector database
-│   │   │   ├── __init__.py
-│   │   │   ├── pinecone_client.py        # Pinecone connection
-│   │   │   ├── operations.py             # CRUD operations
-│   │   │   ├── indexing.py               # Index management
-│   │   │   └── search.py                 # Search strategies
-│   │   │
-│   │   ├── crawler/                      # Web crawling
-│   │   │   ├── __init__.py
-│   │   │   ├── crawl4ai_client.py        # Crawl4AI integration
-│   │   │   ├── extractors.py             # Content extractors
-│   │   │   ├── parsers.py                # HTML/content parsers
-│   │   │   └── schedulers.py             # Crawl scheduling
-│   │   │
-│   │   ├── document_processing/          # Document handling
-│   │   │   ├── __init__.py
-│   │   │   ├── docling_client.py         # Docling integration
-│   │   │   ├── loaders.py                # Document loaders
-│   │   │   ├── converters.py             # Format converters
-│   │   │   └── preprocessors.py          # Text preprocessing
-│   │   │
-│   │   └── utils/                        # Shared AI utilities
-│   │       ├── __init__.py
-│   │       ├── token_counter.py
-│   │       ├── text_splitter.py
-│   │       └── validators.py
-│   │
-│   ├── features/                         # Business features
-│   │   ├── __init__.py
-│   │   │
-│   │   ├── chat/                         # AI Chat feature
-│   │   │   ├── __init__.py
-│   │   │   ├── model.py
-│   │   │   ├── schema.py
-│   │   │   ├── router.py
-│   │   │   ├── service.py                # Uses shared/langchain
-│   │   │   ├── repository.py
-│   │   │   ├── dependencies.py
-│   │   │   └── constants.py
-│   │   │
-│   │   ├── documents/                    # Document management
-│   │   │   ├── __init__.py
-│   │   │   ├── model.py
-│   │   │   ├── schema.py
-│   │   │   ├── router.py
-│   │   │   ├── service.py                # Uses shared/document_processing
-│   │   │   ├── repository.py
-│   │   │   ├── dependencies.py
-│   │   │   └── constants.py
-│   │   │
-│   │   ├── knowledge_base/               # RAG knowledge base
-│   │   │   ├── __init__.py
-│   │   │   ├── model.py
-│   │   │   ├── schema.py
-│   │   │   ├── router.py
-│   │   │   ├── service.py                # Uses shared/rag, shared/vectorstore
-│   │   │   ├── repository.py
-│   │   │   ├── dependencies.py
-│   │   │   └── constants.py
-│   │   │
-│   │   ├── web_scraping/                 # Web scraping feature
-│   │   │   ├── __init__.py
-│   │   │   ├── model.py
-│   │   │   ├── schema.py
-│   │   │   ├── router.py
-│   │   │   ├── service.py                # Uses shared/crawler
-│   │   │   ├── repository.py
-│   │   │   ├── dependencies.py
-│   │   │   └── constants.py
-│   │   │
-│   │   └── agents/                       # AI Agents feature
-│   │       ├── __init__.py
-│   │       ├── model.py
-│   │       ├── schema.py
-│   │       ├── router.py
-│   │       ├── service.py                # Uses shared/langgraph
-│   │       ├── repository.py
-│   │       ├── dependencies.py
-│   │       └── constants.py
-│   │
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── v1/
-│   │       ├── __init__.py
-│   │       └── router.py
-│   │
-│   ├── middleware/
-│   │   ├── __init__.py
-│   │   ├── error_handler.py
-│   │   ├── request_logging.py
-│   │   └── rate_limit.py
-│   │
-│   └── utils/
-│       ├── __init__.py
-│       ├── validators.py
-│       ├── formatters.py
-│       └── helpers.py
-│
-├── tests/
-│   ├── __init__.py
-│   ├── conftest.py
-│   ├── unit/
-│   │   ├── shared/
-│   │   │   ├── test_langchain.py
-│   │   │   ├── test_rag.py
-│   │   │   └── test_vectorstore.py
-│   │   └── features/
-│   │       ├── test_chat.py
-│   │       └── test_knowledge_base.py
-│   ├── integration/
-│   │   └── test_api.py
-│   └── e2e/
-│       └── test_flows.py
-│
-├── alembic/
-├── scripts/
-│   ├── seed_data.py
-│   ├── init_pinecone.py
-│   └── index_documents.py
-│
-├── .env
-├── .env.example
-├── .gitignore
-├── alembic.ini
-├── pyproject.toml
-├── requirements.txt
-├── Dockerfile
-├── docker-compose.yml
-└── README.md
-```
 
 ## 🔧 Configuration
 
@@ -375,7 +133,7 @@ my_fastapi_project/
 
 -   **Chat Models**: Google Gemini Pro, Flash, and custom models
 -   **Chains**: RAG, Conversation, Summarization, Q&A
--   **Tools**: Web search, calculations, database queries, file operations
+-   **Tools**: Web search, file query, database queries, file operations
 -   **Memory**: Conversation buffers, summaries, and entity tracking
 -   **Callbacks**: Token counting, latency tracking, custom handlers
 
@@ -389,8 +147,8 @@ my_fastapi_project/
 
 ### 3. Vector Store & RAG
 
--   **Pinecone Integration**: Production-grade vector storage
--   **Embeddings**: Google Vertex AI, OpenAI, and custom embeddings
+-   **Postgres Integration**: Production-grade vector storage
+-   **Embeddings**: Google Vertex AI
 -   **Chunking Strategies**: Recursive, semantic, and custom splitters
 -   **Retrieval**: Similarity search, MMR, and hybrid search
 -   **Re-ranking**: Cross-encoder and LLM-based re-ranking
@@ -417,22 +175,6 @@ my_fastapi_project/
 -   **Custom Servers**: Easy extension with custom tools
 -   **Auto-Discovery**: Automatic tool detection and registration
 
-## 📚 API Documentation
-
-Once the application is running, you can access:
-
--   **Swagger UI**: http://localhost:5000/api/v1/docs
--   **ReDoc**: http://localhost:5000/api/v1/redoc
--   **OpenAPI JSON**: http://localhost:5000/api/v1/openapi.json
-
-### Available Endpoints
-
-1. **Chat** - `/api/v1/chat` - Conversational AI with Gemini
-2. **RAG Query** - `/api/v1/rag/query` - Semantic search and retrieval
-3. **MCP Agents** - `/api/v1/mcp-agents/execute` - Multi-tool agent execution
-4. **Document Upload** - `/api/v1/documents/upload` - Multi-format document processing
-5. **Web Crawling** - `/api/v1/crawl` - Intelligent web scraping
-6. **Workflows** - `/api/v1/workflows/execute` - LangGraph workflow execution
 
 ## 📊 Monitoring
 
@@ -447,18 +189,6 @@ Once the application is running, you can access:
     - Error rates
 
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## 🙏 Acknowledgments
 
 -   LangChain team for the amazing framework and MCP adapters
@@ -468,9 +198,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 -   FastAPI for the web framework
 -   The open-source community
 
-## 📮 Contact
-
-For questions and support, please open an issue on GitHub.
 
 ---
 

@@ -414,14 +414,6 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Interrupt
 ```
 
-### Vector Stores
-```python
-from langchain_pinecone import PineconeVectorStore
-from langchain_qdrant import QdrantVectorStore
-from langchain_chroma import Chroma
-from langchain_community.vectorstores import FAISS
-from langchain_milvus import Milvus
-```
 
 ---
 

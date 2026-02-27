@@ -169,7 +169,6 @@ ehthumbs.db
 data/
 tmp/
 temp/
-cache/
 logs/
 .langsmith/
 .langgraph/
