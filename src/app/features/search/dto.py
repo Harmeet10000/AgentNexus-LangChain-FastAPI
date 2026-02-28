@@ -47,3 +47,9 @@ class DocumentVectorResponse(BaseModel):
     content: str
     vector_id: str | None
     metadata: dict | None = Field(alias="meta_data", default=None)
+
+
+class AutocompleteResponse(BaseModel):
+    suggestions: list[str] = Field(
+        description="List of suggested titles for autocomplete"
+    )

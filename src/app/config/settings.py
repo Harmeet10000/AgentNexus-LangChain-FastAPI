@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     POSTGRES_MAX_OVERFLOW: int = Field(default=10)  # Added this missing field
     POSTGRES_POOL_SIZE: int = Field(default=5)  # Added this missing field
 
+    # --- Neo4j Database ---
+    NEO4J_URI: str = Field(default="bolt://localhost:7687")
+    NEO4J_USERNAME: str = Field(default="neo4j")
+    NEO4J_PASSWORD: str = Field(default="password")
+    NEO4J_DATABASE: str = Field(default="neo4j")
+
     # --- Redis Cache ---
     REDIS_URL: str = Field(default="redis://localhost:6379")
     REDIS_HOST: str = Field(default="localhost")

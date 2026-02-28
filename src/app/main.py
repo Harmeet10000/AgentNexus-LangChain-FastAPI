@@ -18,8 +18,10 @@ from app.middleware.server_middleware import (
     create_security_headers_middleware,
     get_metrics,
 )
+from app.shared.langchain_layer.callback import configure_langsmith
 from app.utils.logger import logger
 
+configure_langsmith()
 # Load environment variables
 load_dotenv(dotenv_path=".env.development")
 
