@@ -92,96 +92,13 @@ Here's an ordered list of all essential topics to learn for building AI models, 
 - [Prompts & Messages](https://docs.langchain.com/oss/python/langchain/messages)
 - [Streaming](https://docs.langchain.com/oss/python/langchain/streaming)
 
-## Core Concepts
-
-### LangChain Overview
-
-LangChain is a framework for developing applications powered by large language models (LLMs). It simplifies every stage of the LLM application lifecycle by offering:
-
-- **Open-source components** for building LLM applications
-- **Third-party integrations** with various LLM providers
-- **Standardized interfaces** for consistent model interactions
-- **Tools and memory** for building complex AI applications
-- **Streaming support** for real-time LLM interactions
-
-### Key Components
-
-- **Chat Models**: Language models optimized for conversation
-- **Tools**: Functions that agents can call to perform actions
-- **Agents**: LLM-powered decision makers that use tools
-- **Chains**: Sequences of operations on LLM outputs
-- **Memory**: Persistent state management for conversations
-- **Vector Stores**: Semantic search and embedding storage
-
----
-
 
 
 ---
 
 ## Vector Stores
 
-Vector stores are critical for RAG systems, enabling semantic search and similarity matching.
-
-### Pinecone Vector Store
-
-**Installation:**
-```bash
-pip install -qU langchain-pinecone
-```
-
-**Usage:**
-```python
-from langchain_pinecone import PineconeVectorStore
-from pinecone import Pinecone
-
-pc = Pinecone(api_key=...)
-index = pc.Index(index_name)
-
-vector_store = PineconeVectorStore(embedding=embeddings, index=index)
-```
-
-### Qdrant Vector Store
-
-**Installation:**
-```bash
-pip install -qU langchain-qdrant
-```
-
-**Setup:**
-```python
-from qdrant_client.models import Distance, VectorParams
-from langchain_qdrant import QdrantVectorStore
-from qdrant_client import QdrantClient
-
-# Initialize Qdrant client
-client = QdrantClient(...)
-
-# Create vector store
-vector_store = QdrantVectorStore(
-    client=client,
-    collection_name="my_collection",
-    embedding=embeddings,
-)
-```
-
-### Chroma Vector Store
-
-**Installation:**
-```bash
-pip install -qU langchain-chroma
-```
-
-**Usage:**
-```python
-from langchain_chroma import Chroma
-
-vector_store = Chroma(
-    collection_name="example_collection",
-    embedding_function=embeddings,
-    persist_directory="./chroma_langchain_db",
-)
-```
+Vector stores are critical for RAG systems, enabling semantic search and similarity matching
 
 
 ## Agents & Tools

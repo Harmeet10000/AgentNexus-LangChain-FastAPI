@@ -77,6 +77,9 @@ dependencies = [
     "langchain-tavily>=0.2.17",
     "langchain-neo4j>=0.8.0",
     "pageindex>=0.2.5.1",
+    "opentelemetry-api>=1.39.1",
+    "opentelemetry-sdk>=1.39.1",
+    "opentelemetry-instrumentation-sqlalchemy>=0.60b1",
 ]
 
 [project.optional-dependencies]

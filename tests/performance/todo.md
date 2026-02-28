@@ -56,15 +56,13 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 26. optimise pydantic models for speed by providing config
 
 34. use cache in dockerfile Running as Root: Containers should not run as root in production due to security liabilities. The video advises creating and switching to a non-root user in the Dockerfile and ensuring volume mounts are owned by this user.
-Neglecting .dockerignore: Failing to use a .dockerignore file leads to shipping unnecessary files like .git or node_modules to production, bloating images and potentially exposing .
-Bloated One-Stage Dockerfiles: Including all build tools, compilers, and test dependencies in the final image leads to large, inefficient images. The solution is to use multi-stage builds.
-Manual Builds Without Caching: Typing docker build . manually every time is inefficient. Enabling BuildKit (docker buildkit=1) and using layer caching with dev-mount for package managers and build systems significantly speeds up builds.
+Manual Builds Without Caching: Typing docker build . manually every time is inefficient. Enabling BuildKit (docker buildkit=1) and using layer caching with dev-mount for package managers and build systems significantly speeds up builds.          DONE
 39. add state of a request in logs as it goes through diff layers in our app
 40. implement search using postgres Extensions
-41. add this from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 42. fix the search code as it is not using the pg_textsearch properly
+41. add this from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 # After creating your engine
-SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
+SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
 43. add langextract to agent tools
 44. correct the code for crawler and the packages used
 45. make neo4j connector for langchain
@@ -73,9 +71,31 @@ SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
 48. check the page https://docs.langchain.com/langsmith/deployments#
 49. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
 50. learn what is PEP standard, ruff linting standards
-51. use timescaleDB and neo4j docker image and check what extensions work with it 
+51. use neo4j docker image and check what extensions work with it 
 52. legal tool will be based on Saul for finding out of the box ideas for legal advice also.
 53. add voice support by using qwenTTS or something else 
+54. complete the features from google-langchain
+55. check where to add prefix in routes v1 router or router file
+56. use AsyncMemoryClient for mem0
+57. No agent-to-agent message passing format standard
+When sub-agents return results, they're raw strings. There's no typed contract for what one agent sends to another. A SubagentMessage(agent_name, task, result, confidence) schema would let the supervisor make smarter decisions.
+58. Circular delegation is possible
+Agent A can hand off to Agent B, which can hand off back to Agent A. There's no loop detection beyond completed_agents in SupervisorState, and that only works in the supervisor graph — not in the tool-based MultiAgentSystem.
+59. No skill composition
+Skills are flat callables. There's no way to chain skills (skill A's output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
+60. Batch uses asyncio.gather with a semaphore but no queue
+Under high load, all batch requests start simultaneously and race for the semaphore. A proper async queue with backpressure would give more predictable latency and prevent thundering herd.
+61.Embeddings aren't cached
+aembed_batch calls the API every time. Embeddings for the same text are deterministic — a simple LRU cache keyed on SHA256(text) would eliminate redundant API calls entirely.
+62. Model instances are rebuilt on every call
+build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's called. The model object should be a module-level singleton (or per-spec singleton) since it's stateless.
+63. No connection pooling for the LLM client
+langchain_google_genai uses httpx under the hood. Without explicit connection pool configuration, each concurrent request potentially opens a new TCP connection to the Google API. This adds 50-150ms per cold request.
+64. No eval framework
+There's no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
+No structured reasoning traces
+The agent just produces output. For debugging production failures you need to store the full reasoning trace (all tool calls, intermediate states, the exact prompt sent) not just the final message.
+65. 
 ---
 
 ### 1. The Lifespan (The "Heavy" Pool)

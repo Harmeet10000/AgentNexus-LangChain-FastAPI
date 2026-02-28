@@ -23,10 +23,10 @@ client.search(query, version="v2", filters=filters)
 
 
 # =====================================================
-def retrieve_context(query: str, user_id: str) -> List[Dict]:
+def retrieve_context(query: str, user_id: str) -> list[dict]:
     """Retrieve relevant context from Mem0"""
     try:
-        memories = mem0.search(query, user_id=user_id)
+        memories = client.search(query, user_id=user_id)
         memory_list = memories["results"]
 
         serialized_memories = " ".join([mem["memory"] for mem in memory_list])
@@ -44,7 +44,7 @@ def retrieve_context(query: str, user_id: str) -> List[Dict]:
         return [{"role": "user", "content": query}]
 
 
-def generate_response(input: str, context: List[Dict]) -> str:
+def generate_response(input: str, context: list[dict]) -> str:
     """Generate a response using the language model"""
     chain = prompt | llm
     response = chain.invoke({"context": context, "input": input})
@@ -58,7 +58,7 @@ def save_interaction(user_id: str, user_input: str, assistant_response: str):
             {"role": "user", "content": user_input},
             {"role": "assistant", "content": assistant_response},
         ]
-        result = mem0.add(interaction, user_id=user_id)
+        result = client.add(interaction, user_id=user_id)
         print(
             f"Memory saved successfully: {len(result.get('results', []))} memories added"
         )

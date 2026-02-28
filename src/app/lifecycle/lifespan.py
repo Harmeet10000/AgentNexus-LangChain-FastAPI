@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.config.settings import get_settings
+from app.connections import close_neo4j_driver, init_neo4j
 from app.connections.mongodb import create_mongo_client
 from app.connections.postgres import init_db
 from app.connections.redis import create_redis_client
@@ -58,6 +59,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         logger.error(f"Redis connection failed: {e}", exc_info=True)
 
+
+    # Neo4j initialization
+    try:
+        neo4j_driver = await init_neo4j()
+        neo4j_driver.verify_connectivity()
+        app.state.neo4j_driver = neo4j_driver
+        logger.info("Neo4j driver initialized and stored in app state")
+    except Exception as e:
+            logger.error(f"Neo4j initialization failed: {e}", exc_info=True)
+
+
     logger.info("Application ready", status="running")
 
     yield
@@ -86,5 +98,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.info("PostgreSQL connection pool closed")
         except Exception:
             logger.error("PostgreSQL close failed", exc_info=True)
+
+    if hasattr(app.state, "neo4j_driver"):
+        try:
+            await close_neo4j_driver(driver=app.state.neo4j_driver)
+            logger.info("Neo4j driver closed")
+        except Exception:
+            logger.error("Neo4j close failed", exc_info=True)
 
     logger.info("Application shutdown complete", status="stopped")
