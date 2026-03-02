@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 
 from langchain.agents.middleware import (
     HumanInTheLoopMiddleware,
-    LLMToolEmulatorMiddleware,
+    # LLMToolEmulatorMiddleware,
     LLMToolSelectorMiddleware,
     SummarizationMiddleware,
     ToolRetryMiddleware,
@@ -57,7 +57,7 @@ __all__ = [
     "HumanInTheLoopMiddleware",
     "LLMToolSelectorMiddleware",
     "ToolRetryMiddleware",
-    "LLMToolEmulatorMiddleware",
+    # "LLMToolEmulatorMiddleware",
     # Custom below:
     "ModelRetryMiddleware",
     "TodoListMiddleware",

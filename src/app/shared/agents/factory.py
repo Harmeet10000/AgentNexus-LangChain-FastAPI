@@ -18,20 +18,18 @@ NOTE on naming:
 
 from __future__ import annotations
 
-import dataclasses
 import logging
+from collections.abc import Any, AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
 
 from agents.memory.manager import MemoryManager
 from agents.tools.base import registry as tool_registry
 from config.settings import get_settings
 from langchain.agents import create_agent
-from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
-from langchain_layer.models import build_chat_model, build_fast_model
+from langchain_layer.models import build_chat_model
 from langchain_layer.prompts import AGENT_SYSTEM_PROMPT, SystemPromptParts
-from langgraph_layer.state import BaseContext, RichContext
+from langgraph_layer.state import BaseContext
 
 logger = logging.getLogger(__name__)
 _settings = get_settings()
@@ -94,7 +92,7 @@ class AgentSpec:
 # ---------------------------------------------------------------------------
 
 
-def create_production_agent(spec: AgentSpec) -> "ProductionAgent":
+def create_production_agent(spec: AgentSpec) -> ProductionAgent:
     """
     Build a fully configured production agent from a spec.
 

@@ -13,7 +13,7 @@ from uuid import UUID
 from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
 from langsmith import Client
 
-from config.settings import get_settings
+from app.config.settings import get_settings
 
 
 def configure_langsmith() -> Client | None:
@@ -21,18 +21,9 @@ def configure_langsmith() -> Client | None:
     Bootstrap LangSmith tracing by setting env vars.
     Call this at application startup, before any agents are built.
     """
-    settings = get_settings().langsmith
-    if not settings.langchain_api_key:
-        return None
-
-    os.environ["LANGCHAIN_TRACING_V2"] = str(settings.langchain_tracing_v2).lower()
-    os.environ["LANGCHAIN_PROJECT"] = settings.langchain_project
-    os.environ["LANGCHAIN_ENDPOINT"] = settings.langchain_endpoint
-    os.environ["LANGCHAIN_API_KEY"] = settings.langchain_api_key.get_secret_value()
-
+    settings = get_settings()
     return Client(
-        api_url=settings.langchain_endpoint,
-        api_key=settings.langchain_api_key.get_secret_value(),
+        api_url=settings.LANGSMITH_ENDPOINT, api_key=settings.LANGSMITH_API_KEY
     )
 
 

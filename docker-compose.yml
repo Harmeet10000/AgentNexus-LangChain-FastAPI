@@ -1,4 +1,24 @@
 services:
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   timescale:
     image: timescale/timescaledb-ha:pg18
     container_name: timescale_db
@@ -51,6 +71,7 @@ services:
     environment:
       ENVIRONMENT: development
       POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your_secure_password}@timescale:5432/${POSTGRES_DB:-langchain_db}
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672//
     env_file:
       - .env.development
     networks:
@@ -59,6 +80,8 @@ services:
     depends_on:
       timescale:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
 networks:
   langchain-network:
@@ -66,5 +89,6 @@ networks:
 
 volumes:
   timescale-data:
+  rabbitmq-data:
   caddy-data:
   caddy-config:

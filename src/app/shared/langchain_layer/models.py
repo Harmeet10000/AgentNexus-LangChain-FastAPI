@@ -14,14 +14,15 @@ from __future__ import annotations
 import asyncio
 import base64
 import mimetypes
+from collections.abc import Any, AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
 
-from config.settings import get_settings
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from pydantic import BaseModel
+
+from src.app.config.settings import get_settings
 
 _settings = get_settings()
 _mcfg = _settings.model
@@ -62,7 +63,6 @@ def build_fast_model(**kwargs: Any) -> ChatGoogleGenerativeAI:
 def build_embedding_model() -> GoogleGenerativeAIEmbeddings:
     return GoogleGenerativeAIEmbeddings(
         model=_mcfg.gemini_embedding_model,
-        google_api_key=_mcfg.google_api_key.get_secret_value(),
     )
 
 
@@ -110,7 +110,7 @@ async def abatch_text(
 
     message_batches = [_build(p) for p in prompts]
     results = await llm.abatch(message_batches, config={"max_concurrency": max_c})
-    return [r.content for r in results]  # type: ignore[return-value]
+    return [r.content for r in results]
 
 
 async def astream_text(
@@ -169,7 +169,7 @@ def build_image_message(
     content: list[dict[str, Any]] = [{"type": "text", "text": text}]
 
     if image_path:
-        b64, mime = _encode_file(image_path)
+        b64, mime = _encode_file(path=image_path)
         content.append(
             {
                 "type": "image_url",
@@ -206,7 +206,7 @@ async def ainvoke_multimodal(
         messages.append(SystemMessage(content=system))
     messages.append(
         build_image_message(
-            text,
+            text=text,
             image_path=image_path,
             image_url=image_url,
             image_b64=image_b64,
@@ -231,7 +231,7 @@ async def abatch_multimodal(
     """
     tasks = [
         ainvoke_multimodal(
-            item["text"],
+            text=item["text"],
             image_path=item.get("image_path"),
             image_url=item.get("image_url"),
             image_b64=item.get("image_b64"),
@@ -246,7 +246,7 @@ async def abatch_multimodal(
         async with sem:
             return await coro
 
-    return await asyncio.gather(*[bounded(t) for t in tasks])
+    return await asyncio.gather(*[bounded(coro=t) for t in tasks])
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +274,7 @@ def with_structured_output(
         result: Answer = await chain.ainvoke("What is 2+2?")
     """
     llm = model or build_chat_model()
-    return llm.with_structured_output(schema, method=method)
+    return llm.with_structured_output(schema=schema, method=method)
 
 
 # ---------------------------------------------------------------------------

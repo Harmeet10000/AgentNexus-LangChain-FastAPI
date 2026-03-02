@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 keywords = ["fastapi", "langchain", "ai", "api", "async"]
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     # --- CORE FRAMEWORK (Relaxed Upper Bounds) ---
     "fastapi[standard]==0.129.0",
@@ -80,6 +80,9 @@ dependencies = [
     "opentelemetry-api>=1.39.1",
     "opentelemetry-sdk>=1.39.1",
     "opentelemetry-instrumentation-sqlalchemy>=0.60b1",
+    "asyncer>=0.0.17",
+    "asyncio>=4.0.0",
+    "flower>=2.0.1",
 ]
 
 [project.optional-dependencies]
@@ -201,7 +204,8 @@ unresolved-import = "ignore"
 # warn_return_any=true → No direct; invalid-return-type catches mismatches, including Any issues.
 # warn_unused_configs=true → No direct; Ty has no equivalent (config validation is built-in).
 # no_implicit_optional=true → Handled in Ty's type inference by default.
-
+possibly-missing-attribute = "error"
+possibly-missing-import = "error"
 
 # Pytest configuration
 [tool.pytest.ini_options]

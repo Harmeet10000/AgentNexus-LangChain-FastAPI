@@ -15,11 +15,12 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
-from langgraph_layer.edges import after_guardrail, after_tools, should_continue
+from langgraph_layer.edges import after_guardrail, should_continue
 from langgraph_layer.nodes import (
     agent_node,
     guardrail_node,
     human_approval_node,
+    supervisor_node,
     synthesizer_node,
 )
 from langgraph_layer.state import AgentState, SupervisorState
@@ -93,9 +94,6 @@ def build_supervisor_graph(
     Flow:
       START → supervisor → [agent_1 | agent_2 | ...] → supervisor → ... → synthesizer → END
     """
-    from functools import partial
-
-    from langgraph_layer.nodes import supervisor_node
 
     agent_names = list(agent_nodes.keys())
 
@@ -165,7 +163,6 @@ def build_parallel_fanout_graph(
 
     Flow: START → [node_a | node_b | node_c] → merge → END
     """
-    from langgraph.types import Send
 
     graph = StateGraph(state_schema)
 

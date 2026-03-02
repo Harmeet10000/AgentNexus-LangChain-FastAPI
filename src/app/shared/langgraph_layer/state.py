@@ -10,9 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Annotated, Any, TypeVar
 
-from langchain_core.messages import AnyMessage, BaseMessage
 from langgraph.graph import MessagesState
-from langgraph.graph.message import add_messages
 
 # ---------------------------------------------------------------------------
 # Base agent state (extends LangGraph's MessagesState)
