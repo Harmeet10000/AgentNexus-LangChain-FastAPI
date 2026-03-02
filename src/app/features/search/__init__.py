@@ -14,12 +14,12 @@ from app.features.search.router import router
 from app.features.search.service import SearchService
 
 __all__ = [
-    "get_search_service",
-    "get_search_repository",
+    "AutocompleteResponse",
     "SearchRequest",
     "SearchResponse",
     "SearchResultItem",
-    "AutocompleteResponse",
     "SearchService",
+    "get_search_repository",
+    "get_search_service",
     "router",
 ]

@@ -77,7 +77,7 @@ def serialize_data(value: Any) -> str:
         return orjson.dumps(value).decode("utf-8")
     except Exception as e:
         raise DatabaseException(
-            detail=f"Failed to serialize data: {str(e)}",
+            detail=f"Failed to serialize data: {e!s}",
             original_exc=e,
         )
 
@@ -100,7 +100,7 @@ def deserialize_data(value: str | bytes) -> Any:
         return orjson.loads(value.encode("utf-8") if isinstance(value, str) else value)
     except Exception as e:
         raise DatabaseException(
-            detail=f"Failed to deserialize data: {str(e)}",
+            detail=f"Failed to deserialize data: {e!s}",
             original_exc=e,
         )
 

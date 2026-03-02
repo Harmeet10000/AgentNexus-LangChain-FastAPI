@@ -8,10 +8,9 @@ The registry enables dynamic tool lookup and middleware (LLMToolSelector).
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 
-from langchain_core.tools import BaseTool, StructuredTool, tool
+from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -34,11 +33,11 @@ class ToolOutput(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
-    def ok(cls, data: Any, **metadata: Any) -> "ToolOutput":
+    def ok(cls, data: Any, **metadata: Any) -> ToolOutput:
         return cls(success=True, data=data, metadata=metadata)
 
     @classmethod
-    def fail(cls, error: str, **metadata: Any) -> "ToolOutput":
+    def fail(cls, error: str, **metadata: Any) -> ToolOutput:
         return cls(success=False, error=error, metadata=metadata)
 
     def to_agent_string(self) -> str:

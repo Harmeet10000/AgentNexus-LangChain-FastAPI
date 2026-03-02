@@ -9,18 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
-import json
-import os
-import shlex
-import subprocess
 from pathlib import Path
-from typing import Annotated
-
-from langchain_core.tools import tool
-from pydantic import BaseModel, Field
 
 from agents.tools.base import ToolOutput, register_tool
-
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Shell tool
@@ -62,7 +55,7 @@ async def shell_tool(command: str, cwd: str | None = None, timeout: int = 30) ->
             success=proc.returncode == 0,
         )
         return result.model_dump_json()
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return ToolOutput.fail(f"Command timed out after {timeout}s").to_agent_string()
     except Exception as exc:
         return ToolOutput.fail(str(exc)).to_agent_string()

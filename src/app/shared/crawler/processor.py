@@ -243,7 +243,7 @@ class GeminiProcessor:
         except json.JSONDecodeError as e:
             return ExtractionResult(
                 success=False,
-                error=f"Failed to parse JSON: {str(e)}",
+                error=f"Failed to parse JSON: {e!s}",
             )
         except Exception as e:
             return ExtractionResult(

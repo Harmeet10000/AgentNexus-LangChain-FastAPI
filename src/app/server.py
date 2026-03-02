@@ -6,7 +6,7 @@ from app.main import app
 from app.utils.logger import logger
 
 
-def main():
+def main() -> None:
     setup_signal_handlers()
     settings = get_settings()
 

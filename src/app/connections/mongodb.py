@@ -5,7 +5,7 @@ from fastapi import Request
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 
-async def create_mongo_client(uri: str, db_name: str, document_models: list):
+async def create_mongo_client(uri: str, db_name: str, document_models: list) -> tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
     """
     Initialize database connection using Beanie's recommended approach.
     """

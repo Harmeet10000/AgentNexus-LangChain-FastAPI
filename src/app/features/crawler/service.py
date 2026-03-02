@@ -5,7 +5,7 @@ from typing import Any
 
 from redis.asyncio import Redis
 
-from app.features.crawler.constants import CrawlMode, SchemaType
+from app.features.crawler.constants import CrawlMode
 from app.features.crawler.dto import (
     CrawlRequest,
     CrawlResponse,

@@ -242,7 +242,7 @@ async def abatch_multimodal(
     ]
     sem = asyncio.Semaphore(max_concurrency or _mcfg.max_concurrency)
 
-    async def bounded(coro):  # noqa: ANN001
+    async def bounded(coro):
         async with sem:
             return await coro
 

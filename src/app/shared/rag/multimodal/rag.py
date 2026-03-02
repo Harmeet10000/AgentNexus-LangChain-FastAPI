@@ -66,7 +66,7 @@ def process_docling_document(pdf_path: str | Path) -> list[Document]:
     converter = DocumentConverter()
     result = converter.convert(pdf_path)
 
-    print(f"✅ Document converted successfully")
+    print("✅ Document converted successfully")
     print(f"📊 Found {len(result.document.pages)} pages")
 
     chunks = result.document.export_to_document_tokens(

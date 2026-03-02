@@ -18,16 +18,16 @@ from app.features.auth.router import router
 from app.features.auth.service import AuthService
 
 __all__ = [
-    "get_auth_service",
-    "get_current_user",
-    "get_refresh_token_repository",
-    "get_user_repository",
+    "AuthService",
     "LoginRequest",
     "LogoutResponse",
     "RegisterRequest",
     "TokenResponse",
-    "UserResponse",
     "User",
+    "UserResponse",
+    "get_auth_service",
+    "get_current_user",
+    "get_refresh_token_repository",
+    "get_user_repository",
     "router",
-    "AuthService",
 ]

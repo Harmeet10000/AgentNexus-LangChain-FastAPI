@@ -52,7 +52,7 @@ async def get_nodes(
             }
 
     except Exception as e:
-        logger.error(f"Failed to get nodes: {str(e)}", exc_info=True)
+        logger.error(f"Failed to get nodes: {e!s}", exc_info=True)
         raise
 
 
@@ -93,7 +93,7 @@ async def create_node(
             }
 
     except Exception as e:
-        logger.error(f"Failed to create node: {str(e)}", exc_info=True)
+        logger.error(f"Failed to create node: {e!s}", exc_info=True)
         raise
 
 
@@ -122,7 +122,7 @@ async def search_cypher(
             }
 
     except Exception as e:
-        logger.error(f"Cypher query failed: {str(e)}", exc_info=True)
+        logger.error(f"Cypher query failed: {e!s}", exc_info=True)
         raise
 
 
@@ -164,7 +164,7 @@ async def get_relationships(
 
     except Exception as e:
         logger.error(
-            f"Failed to get relationships for node {node_id}: {str(e)}",
+            f"Failed to get relationships for node {node_id}: {e!s}",
             exc_info=True,
         )
         raise
@@ -227,5 +227,5 @@ async def rag_query(question: str) -> dict:
         }
 
     except Exception as e:
-        logger.error(f"RAG query failed: {str(e)}", exc_info=True)
+        logger.error(f"RAG query failed: {e!s}", exc_info=True)
         raise

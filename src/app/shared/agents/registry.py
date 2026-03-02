@@ -7,19 +7,16 @@ Each agent is a module-level singleton, lazy-initialised on first use.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from functools import lru_cache
-
-from langchain_core.tools import tool
-from pydantic import BaseModel, Field
 
 from agents.factory import AgentSpec, ProductionAgent, create_production_agent
 from agents.orchestration.supervisor import LLMRouter, MultiAgentSystem, Skill
 from agents.tools.shell import file_search, list_directory, read_file, shell_tool, write_file
+from langchain_core.tools import tool
 from langchain_layer.prompts import SystemPromptParts
 from langgraph_layer.state import BaseContext, RichContext
-
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Example: simple research tool

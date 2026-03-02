@@ -1,26 +1,22 @@
 """Core crawler module using Crawl4AI."""
 
-import asyncio
 import hashlib
 import json
 import time
 from typing import Any
 from urllib.parse import urldefrag
 
-from pydantic import BaseModel, Field
-from redis.asyncio import Redis
-
 from crawl4ai import (
     AsyncWebCrawler,
     BrowserConfig,
-    CacheMode,
     CrawlerRunConfig,
     MemoryAdaptiveDispatcher,
 )
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
+from pydantic import BaseModel
+from redis.asyncio import Redis
 
 from app.config.settings import get_settings
-from app.connections.redis import get_redis
 from app.shared.crawler.config import CrawlerConfig, get_crawler_config
 from app.shared.crawler.validator import is_valid_url, sanitize_url
 
@@ -196,7 +192,7 @@ class WebCrawler:
                         crawl_time_ms=crawl_time_ms,
                     )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return CrawlResult(
                 url=url,
                 success=False,

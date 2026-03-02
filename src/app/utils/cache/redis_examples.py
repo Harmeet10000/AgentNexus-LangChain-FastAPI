@@ -209,7 +209,7 @@ async def get_user_endpoint(
         user = await get_cached_user(user_id, redis)
         return user
     except Exception as e:
-        logger.error(f"Failed to get user {user_id}: {str(e)}")
+        logger.error(f"Failed to get user {user_id}: {e!s}")
         raise HTTPException(status_code=500, detail="Failed to retrieve user")
 
 
@@ -237,7 +237,7 @@ async def update_user_endpoint(
         user = await update_cached_user(user_id, updates, redis)
         return user
     except Exception as e:
-        logger.error(f"Failed to update user {user_id}: {str(e)}")
+        logger.error(f"Failed to update user {user_id}: {e!s}")
         raise HTTPException(status_code=500, detail="Failed to update user")
 
 
@@ -323,7 +323,7 @@ async def get_activity_endpoint(
             "activities": activities,
         }
     except Exception as e:
-        logger.error(f"Failed to get activities for user {user_id}: {str(e)}")
+        logger.error(f"Failed to get activities for user {user_id}: {e!s}")
         return {"user_id": user_id, "total": 0, "activities": []}
 
 
@@ -353,7 +353,7 @@ async def get_multiple_users(
             user = await get_cached_user(user_id, redis)
             users[user_id] = user.model_dump()
         except Exception as e:
-            logger.error(f"Failed to get user {user_id}: {str(e)}")
+            logger.error(f"Failed to get user {user_id}: {e!s}")
             failed.append(user_id)
 
     return {
@@ -386,7 +386,7 @@ async def warm_user_cache(user_ids: list[str], redis: Redis) -> None:
                 expire_seconds=3600,
             )
         except Exception as e:
-            logger.error(f"Failed to warm cache for user {user_id}: {str(e)}")
+            logger.error(f"Failed to warm cache for user {user_id}: {e!s}")
 
 
 # ────────────────────────────────────────────────────────────
@@ -418,7 +418,7 @@ async def cache_with_fallback(
         return await get_cached_user(user_id, redis)
     except Exception as e:
         logger.error(
-            f"Complete failure retrieving user {user_id}: {str(e)}",
+            f"Complete failure retrieving user {user_id}: {e!s}",
             user_id=user_id,
         )
         return None

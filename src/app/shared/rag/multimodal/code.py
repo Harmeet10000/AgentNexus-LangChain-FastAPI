@@ -425,7 +425,7 @@ def inspect_original_element_from_chunk(
         print("ERROR: chunk has no metadata attribute")
         return
 
-    meta = getattr(chunk, "metadata")
+    meta = chunk.metadata
     if not hasattr(meta, "orig_elements"):
         print("ERROR: chunk.metadata has no orig_elements attribute")
         return

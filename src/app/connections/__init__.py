@@ -12,16 +12,16 @@ from app.connections.postgres import get_postgres_db, init_db
 from app.connections.redis import create_redis_client, get_redis
 
 __all__ = [
+    "celery_app",
+    "close_neo4j_driver",
+    "create_celery_app",
     "create_mongo_client",
     "create_redis_client",
-    "create_celery_app",
-    "celery_app",
     "get_mongodb",
-    "get_redis",
-    "init_db",
-    "get_postgres_db",
-    "init_neo4j",
     "get_neo4j_driver",
     "get_neo4j_session",
-    "close_neo4j_driver",
+    "get_postgres_db",
+    "get_redis",
+    "init_db",
+    "init_neo4j",
 ]
