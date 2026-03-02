@@ -13,7 +13,6 @@ Features:
 import re
 from dataclasses import dataclass, field
 from io import BytesIO
-from typing import Optional
 
 from app.utils.logger import logger
 
@@ -357,7 +356,6 @@ class DoclingEnhancedConverter:
 
     def _extract_code_fallback(self, markdown: str) -> list[ExtractedCodeBlock]:
         """Fallback regex-based code extraction."""
-        import re
 
         code_blocks = []
         pattern = r"```(\w+)?\n(.*?)```"

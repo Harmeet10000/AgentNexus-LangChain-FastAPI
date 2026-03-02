@@ -20,7 +20,7 @@ app.add_middleware(ProcessTimeMiddleware)                    DONE
 20. figure out using depends in FastAPI with DB session, logger, service layer, correlational ID and more             DONE
 33. Using @lru_cache without bounds not recommended          DONE
 38. check with/asynccontextmanager and finally in DB in   DONE
-31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you arent just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).          
+34. use cache in dockerfile Running as Root: Containers should not run as root in production due to security liabilities. The video advises creating and switching to a non-root user in the Dockerfile and ensuring volume mounts are owned by this user. Manual Builds Without Caching: Typing docker build . manually every time is inefficient. Enabling BuildKit (docker buildkit=1) and using layer caching with dev-mount for package managers and build systems significantly speeds up builds.          DONE
 
 This ensures you dont leak connections while keeping your Service and Repository layers clean and testable.                  DONE
 32. check if need global for closing and do this 
@@ -34,12 +34,20 @@ async def connect_db():
     )                      DONE
 35. global_error_handler vs @app.exception_handler(APIException) where to place in request exection model, which one is better in design native to FastAPI and check how to write GEH wrt APIException, HTTPException and more exception class types        DONE #(samaj ni aaya kya kiya but ok)
 1. try out alembic                        DONE
+45. make neo4j connector for langchain           DONE
 30. @app.on_event("startup") is old and replaced by 'lifespan' context manager -  DONE
 4. promtail/prometheus integration          MAYBE_DONE
+41. add this from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+# After creating your engine
+SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
+66. is it a good idea to inject a dependancy from req.app.state   DONE
+50. learn what is PEP standard, ruff linting standards   DONE
+15. refactor docling code          DONE
+16. refactor crawl4ai code         DONE
+51. use neo4j docker image and check what extensions work with it     DONE
+54. complete the features from google-langchain   DONE
 6. set up performance tests
 7. set up pgVectorScale with pg_textsearch and pg_trgm
-15. refactor docling code
-16. refactor crawl4ai code         DONE
 17. refactor vectorStore code
 18. refactor RAG code
 21. add this from fastapi import BackgroundTasks
@@ -51,30 +59,19 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
     background_tasks.add_task(heavy_processing, data)
     return {"status": "processing"}
 37. check out the commented out pre commit hooks 
-24. Cache expensive dependencies to avoid repeated computations, Stream large responses to reduce memory usage by 80-90%                           TO_BE_DONE
 25. Use background tasks so users don't wait for non-critical operations
-26. optimise pydantic models for speed by providing config and include it in copilot-instructions
 
-34. use cache in dockerfile Running as Root: Containers should not run as root in production due to security liabilities. The video advises creating and switching to a non-root user in the Dockerfile and ensuring volume mounts are owned by this user.
-Manual Builds Without Caching: Typing docker build . manually every time is inefficient. Enabling BuildKit (docker buildkit=1) and using layer caching with dev-mount for package managers and build systems significantly speeds up builds.          DONE
 39. add state of a request in logs as it goes through diff layers in our app
 40. implement search using postgres Extensions
 42. fix the search code as it is not using the pg_textsearch properly
-41. add this from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-# After creating your engine
-SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
 43. add langextract to agent tools
 44. correct the code for crawler and the packages used
-45. make neo4j connector for langchain
 46. use CacheBackedEmbeddings fore reusing embeddings
 47. check whether i will need to use sandboxed execution environemnt in future
 48. check the page https://docs.langchain.com/langsmith/deployments#
 49. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
-50. learn what is PEP standard, ruff linting standards
-51. use neo4j docker image and check what extensions work with it 
 52. legal tool will be based on Saul for finding out of the box ideas for legal advice also.
 53. add voice support by using qwenTTS or something else 
-54. complete the features from google-langchain
 55. check where to add prefix in routes v1 router or router file
 56. use AsyncMemoryClient for mem0
 57. No agent-to-agent message passing format standard
@@ -96,7 +93,54 @@ There's no way to measure whether changes to prompts or middleware actually impr
 No structured reasoning traces
 The agent just produces output. For debugging production failures you need to store the full reasoning trace (all tool calls, intermediate states, the exact prompt sent) not just the final message.
 65. in pyproject.toml make proper config for ty ans uv and replace unnecessary/old configs and include the new rules in copilot-instructions
+26. optimise pydantic models for speed by providing config and include it in copilot-instructions
+24. Cache expensive dependencies to avoid repeated computations, Stream large responses to reduce memory usage by 80-90%                           TO_BE_DONE
+31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you arent just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).          
 ---
+# Agent archteture 
+  user should be authenticated before anything for better state context(langgraph)
+1. QnA agent asking for more clarity 
+    responds in realtime 
+2. router agent understands user intent and assigns diff agent task based on skills and tools.
+    and should be HITL for clarifications
+3. planner agent is called after router agent (decides functional calling and a deterministic workflow)
+4. planner should return status to QnA agent to talk to user
+
+
+
+# best practices for DI and req.app.stateEspecially bad for:
+
+Database sessions/transactions (PostgreSQL asyncpg/SQLAlchemy 2.0, Beanie/Motor sessions) → need per-request scope + cleanup → use yield dependencies
+Anything that needs request context (current user, request ID for logging/tracing)
+Highly testable code (you want to mock/inject fakes easily)
+
+Much better for:
+
+Redis client (connection pool)
+Neo4j driver (pool)
+Celery app instance (usually global anyway)
+MongoDB client (Motor client is thread-safe & pool-aware)
+Rate limiters, background task queues, config objects, ML models loaded once
+
+Recommended Modern Patterns (2026 Best Practice)
+
+Singleton-style shared clients (your DB client, Redis, Neo4j driver, Celery app)
+→ app.state + Depends(get_xxx) → yes, good & recommended
+Per-request resources (DB session, transaction, user context)
+→ Classic Depends with yield → preferred over app.statePythonasync def get_db_session():
+    async with session_maker() as session:
+        yield session
+Hybrid (most real apps do this)Python# shared client
+def get_mongo_client(request: Request):
+    return request.app.state.mongo
+
+# per-request db
+async def get_db(request: Request):
+    client = request.app.state.mongo
+    db = client["dbname"]
+    # or even better: yield per-db context if needed
+    yield db
+
 
 ### 1. The Lifespan (The "Heavy" Pool)
 

@@ -3,4 +3,4 @@
 from database.base import Base
 from database.schemas import ChatMessage, ChatSession, DocumentVector
 
-__all__ = ["Base", "DocumentVector", "ChatMessage", "ChatSession"]
+__all__ = ["Base", "ChatMessage", "ChatSession", "DocumentVector"]

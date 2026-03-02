@@ -9,10 +9,10 @@
 # from .web_scraping import ...
 
 __all__ = [
-    "documents",
     "agents",
     "chat",
-    "knowledge_base",
+    "documents",
     "health",
+    "knowledge_base",
     "web_scraping",
 ]

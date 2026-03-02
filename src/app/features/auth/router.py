@@ -19,52 +19,52 @@ router: APIRouter = APIRouter(prefix="/auth", tags=["Auth"])
 security: HTTPBearer = HTTPBearer()
 
 
-@router.post("/register")
-@limiter.limit("5/minute")
+@router.post(path="/register")
+@limiter.limit(limit_value="5/minute")
 async def register(
     request: Request,
     data: RegisterRequest,
     service: AuthService = Depends(get_auth_service),
 ):
     try:
-        user = await service.register(data)
+        user = await service.register(data=data)
         return {
             "id": str(user.id),
             "email": user.email,
             "full_name": user.full_name,
         }
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(object=e))
 
 
-@router.post("/login", response_model=TokenResponse)
-@limiter.limit("5/minute")
+@router.post(path="/login", response_model=TokenResponse)
+@limiter.limit(limit_value="5/minute")
 async def login(
     request: Request,
     data: LoginRequest,
     service: AuthService = Depends(get_auth_service),
 ):
-    return await service.login(data.email, data.password)
+    return await service.login(email=data.email, password=data.password)
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post(path="/refresh", response_model=TokenResponse)
 async def refresh(
     creds: HTTPAuthorizationCredentials = Depends(security),
     service: AuthService = Depends(get_auth_service),
 ):
-    return await service.refresh(creds.credentials)
+    return await service.refresh(refresh_token=creds.credentials)
 
 
-@router.post("/logout", response_model=LogoutResponse)
+@router.post(path="/logout", response_model=LogoutResponse)
 async def logout(
     creds: HTTPAuthorizationCredentials = Depends(security),
     service: AuthService = Depends(get_auth_service),
 ):
-    await service.logout(creds.credentials)
+    await service.logout(refresh_token=creds.credentials)
     return {"detail": "Logged out successfully"}
 
 
-@router.get("/me")
+@router.get(path="/me")
 async def me(user=Depends(get_current_user)):
     return {
         "id": str(user.id),

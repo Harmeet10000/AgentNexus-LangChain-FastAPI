@@ -12,19 +12,14 @@ Supports:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, TypeVar
-
-from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command
+from typing import Any
 
 from agents.factory import AgentSpec, ProductionAgent, create_production_agent
 from agents.memory.manager import MemoryManager
 from agents.tools.subagent import make_subagent_tool
-from langchain_layer.models import build_chat_model
-from langgraph_layer.state import SupervisorState
+from langgraph.types import Command
 
 logger = logging.getLogger(__name__)
 
@@ -120,11 +115,11 @@ class MultiAgentSystem:
     _skills: dict[str, Skill] = field(default_factory=dict)
     _compiled: Any = field(default=None, init=False)
 
-    def register_agent(self, agent: ProductionAgent) -> "MultiAgentSystem":
+    def register_agent(self, agent: ProductionAgent) -> MultiAgentSystem:
         self._agents[agent.spec.name] = agent
         return self
 
-    def register_skill(self, skill: Skill) -> "MultiAgentSystem":
+    def register_skill(self, skill: Skill) -> MultiAgentSystem:
         self._skills[skill.name] = skill
         return self
 
@@ -224,7 +219,7 @@ class LLMRouter:
     def __init__(self) -> None:
         self._routes: dict[str, tuple[Any, str]] = {}  # name → (handler, description)
 
-    def add_route(self, name: str, handler: Any, description: str) -> "LLMRouter":
+    def add_route(self, name: str, handler: Any, description: str) -> LLMRouter:
         self._routes[name] = (handler, description)
         return self
 

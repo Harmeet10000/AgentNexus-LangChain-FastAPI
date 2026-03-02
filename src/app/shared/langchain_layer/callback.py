@@ -5,7 +5,6 @@ Must be imported before any LangChain/LangGraph objects are created.
 
 from __future__ import annotations
 
-import os
 import time
 from typing import Any
 from uuid import UUID
@@ -13,7 +12,7 @@ from uuid import UUID
 from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
 from langsmith import Client
 
-from app.config.settings import get_settings
+from app.config import get_settings
 
 
 def configure_langsmith() -> Client | None:

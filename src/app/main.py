@@ -1,3 +1,5 @@
+from collections.abc import Awaitable, Callable
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -78,12 +80,17 @@ def create_app() -> FastAPI:
 
     # 6. Security headers (Execute early)
     @app.middleware("http")
-    async def add_security_headers(request, call_next):
+    async def add_security_headers(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         return await create_security_headers_middleware(request, call_next)
 
     # 7. Correlation ID (For distributed tracing)
     @app.middleware("http")
-    async def add_correlation_id(request: Request, call_next):
+    async def add_correlation_id(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         return await correlation_middleware(request, call_next)
 
     # ============================================================================

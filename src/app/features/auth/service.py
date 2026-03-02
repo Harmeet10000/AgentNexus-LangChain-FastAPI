@@ -38,11 +38,11 @@ class AuthService:
             logger.info(f"User registered successfully: {data.email}")
             return user
         except ValueError as e:
-            logger.warning(f"Registration failed for {data.email}: {str(e)}")
+            logger.warning(f"Registration failed for {data.email}: {e!s}")
             raise
         except Exception as e:
             logger.error(
-                f"Unexpected error during registration for {data.email}: {str(e)}",
+                f"Unexpected error during registration for {data.email}: {e!s}",
                 exc_info=True,
             )
             raise
@@ -84,7 +84,7 @@ class AuthService:
             raise
         except Exception as e:
             logger.error(
-                f"Unexpected error during login for {email}: {str(e)}", exc_info=True
+                f"Unexpected error during login for {email}: {e!s}", exc_info=True
             )
             raise
 
@@ -93,11 +93,11 @@ class AuthService:
             logger.info("Attempting to refresh token")
             payload = jwt.decode(token=refresh_token, key=settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         except JWTError as e:
-            logger.warning(f"Invalid refresh token - JWT decode failed: {str(e)}")
+            logger.warning(f"Invalid refresh token - JWT decode failed: {e!s}")
             raise HTTPException(status_code=401, detail="Invalid refresh token")
         except Exception as e:
             logger.error(
-                f"Unexpected error decoding refresh token: {str(e)}", exc_info=True
+                f"Unexpected error decoding refresh token: {e!s}", exc_info=True
             )
             raise HTTPException(status_code=401, detail="Invalid refresh token")
 
@@ -125,7 +125,7 @@ class AuthService:
             raise
         except Exception as e:
             logger.error(
-                f"Unexpected error during token refresh: {str(e)}", exc_info=True
+                f"Unexpected error during token refresh: {e!s}", exc_info=True
             )
             raise HTTPException(status_code=500, detail="Token refresh failed")
 
@@ -136,8 +136,8 @@ class AuthService:
                 await self.refresh_token_repo.revoke(payload["jti"])
                 logger.info(f"User logged out successfully: {payload.get('sub')}")
         except JWTError as e:
-            logger.warning(f"Logout with invalid token (idempotent): {str(e)}")
+            logger.warning(f"Logout with invalid token (idempotent): {e!s}")
             return  # idempotent logout
         except Exception as e:
-            logger.error(f"Unexpected error during logout: {str(e)}", exc_info=True)
+            logger.error(f"Unexpected error during logout: {e!s}", exc_info=True)
             return  # idempotent logout

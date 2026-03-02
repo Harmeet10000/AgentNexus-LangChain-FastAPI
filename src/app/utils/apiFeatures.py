@@ -73,7 +73,7 @@ class APIFeatures:
         """Apply field limiting (projection)."""
         if self.query_params.get("fields"):
             fields = self.query_params["fields"].split(",")
-            self.projection = {field: 1 for field in fields}
+            self.projection = dict.fromkeys(fields, 1)
         else:
             self.projection = {"__v": 0}
 

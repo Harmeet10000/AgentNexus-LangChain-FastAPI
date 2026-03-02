@@ -1,6 +1,5 @@
 """Tavily search service integration."""
 
-from typing import Any
 
 import httpx
 from pydantic import BaseModel

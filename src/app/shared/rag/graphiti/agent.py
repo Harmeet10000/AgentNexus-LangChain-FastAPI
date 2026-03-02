@@ -104,7 +104,7 @@ async def search_graphiti(
         return formatted_results
     except Exception as e:
         # Log the error but don't close the connection since it's managed by the dependency
-        print(f"Error searching Graphiti: {str(e)}")
+        print(f"Error searching Graphiti: {e!s}")
         raise
 
 
@@ -127,7 +127,7 @@ async def main():
         await graphiti_client.build_indices_and_constraints()
         print("Graphiti indices built successfully.")
     except Exception as e:
-        print(f"Note: {str(e)}")
+        print(f"Note: {e!s}")
         print("Continuing with existing indices...")
 
     console = Console()
@@ -162,7 +162,7 @@ async def main():
                     messages.extend(result.all_messages())
 
             except Exception as e:
-                print(f"\n[Error] An error occurred: {str(e)}")
+                print(f"\n[Error] An error occurred: {e!s}")
     finally:
         # Close the Graphiti connection when done
         await graphiti_client.close()
@@ -175,5 +175,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nProgram terminated by user.")
     except Exception as e:
-        print(f"\nUnexpected error: {str(e)}")
+        print(f"\nUnexpected error: {e!s}")
         raise

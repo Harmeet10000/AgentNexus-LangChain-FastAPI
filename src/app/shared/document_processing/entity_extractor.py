@@ -9,7 +9,6 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 from app.utils.logger import logger
 
@@ -212,7 +211,6 @@ class GraphitiExtractor:
 
     def _extract_entities_simple(self, text: str, document_id: str) -> list[Entity]:
         """Simple pattern-based entity extraction."""
-        import re
 
         entities = []
         entity_id = 0
@@ -349,7 +347,6 @@ class SimpleEntityExtractor:
         document_id: str,
     ) -> ExtractionResult:
         """Extract entities using pattern matching."""
-        import re
         import time
 
         start_time = time.time()

@@ -67,7 +67,7 @@ def make_subagent_tool(
                 config=config,
             )
             # Extract last AI message or structured output
-            if "structured_output" in state and state["structured_output"]:
+            if state.get("structured_output"):
                 result = json.dumps(state["structured_output"])
             else:
                 messages = state.get("messages", [])

@@ -4,8 +4,6 @@ import ipaddress
 import re
 from urllib.parse import urlparse
 
-from pydantic import HttpUrl
-
 PRIVATE_IP_RANGES = [
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),

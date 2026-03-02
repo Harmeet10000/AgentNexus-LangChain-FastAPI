@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "langchain-fastapi-production"
 version = "1.0.0"
 description = "Production-grade FastAPI application with LangChain integration"
-# readme = "README.md"
 license = "MIT"
 authors = [{ name = "Harmeet Singh", email = "harmeetsinghfbd@gmail.com" }]
 maintainers = [{ name = "Harmeet Singh", email = "harmeetsinghfbd@gmail.com" }]
@@ -19,83 +18,102 @@ classifiers = [
     "Framework :: FastAPI",
     "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
     "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: AI Agents :: Libraries :: Langchain",
 ]
 keywords = ["fastapi", "langchain", "ai", "api", "async"]
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    # --- CORE FRAMEWORK (Relaxed Upper Bounds) ---
+    # --- WEB FRAMEWORK ---
     "fastapi[standard]==0.129.0",
     "uvicorn[standard]>=0.34.0",
     "uvloop>=0.21.0,<1.0.0",
+    "httptools>=0.7.1",
+    "python-multipart>=0.0.20",
+    # --- DATA VALIDATION ---
     "pydantic>=2.9.0,<3.0.0",
-    "pydantic-settings>=2.5.0,<3.0.0", # Latest major is 2.11.0 (Sep 24, 2025)
+    "pydantic-settings>=2.5.0,<3.0.0",
+    # --- HTTP CLIENT ---
     "httpx>=0.27.0,<1.0.0",
-    # Core LLM, RAG, AI agents framework
+    # --- AI/LLM FRAMEWORK ---
     "langchain>=1.2.10",
     "langchain-core>=1.2.11",
     "langchain-community>=0.4.1",
     "langchain-google-genai>=4.2.0",
+    "langchain-tavily>=0.2.17",
+    "langchain-neo4j>=0.8.0",
+    "langchain-docling>=2.0.0",
     "langgraph>=1.0.8",
+    "langgraph-checkpoint-postgres>=3.0.1",
     "langsmith>=0.7.1",
-    "fastmcp>=2.11.0,<3.0.0",
-    "crawl4ai>=0.8.0,<1.0.0", # Keep tight for C-lib dependencies
-    "bleach>=6.2.0,<7.0.0",
-    "motor==3.7.1", # Keep tight for C-lib stability
-    "redis[hiredis]>=5.1.0,<6.0.0",
+    "deepagents>=0.4.3",
+    # --- DATABASE: POSTGRESQL ---
     "sqlalchemy==2.0.39",
     "alembic==1.16.5",
     "asyncpg==0.29.0",
-    "loguru==0.7.3",
-    "aiofiles==24.1.0",
-    "orjson==3.10.1",
-    "nanoid==2.0.0",
-    "fastapi-pagination==0.12.1",
-    "psutil==7.1.0",
-    "fastapi-limiter==0.1.6",
-    "prometheus-client>=0.23.1",
-    "faststream>=0.6.2",
-    "mem0ai>=1.0.0",
-    "neo4j>=6.0.3",
-    "langgraph-checkpoint-postgres>=3.0.1",
-    "graphiti-core[google-genai]>=0.24.1",
-    "httptools>=0.7.1",
+    "pgvector>=0.4.2",
+    # --- DATABASE: MONGODB ---
+    "motor==3.7.1",
     "beanie>=2.0.1",
-    "tenacity>=9.1.2",
-    "slowapi>=0.1.9",
-    "docling>=2.72.0",
+    # --- DATABASE: NEO4J ---
+    "neo4j>=6.0.3",
+    # --- CACHE: REDIS ---
+    "redis[hiredis]>=5.1.0,<6.0.0",
+    # --- MESSAGE QUEUE: CELERY + RABBITMQ ---
     "celery>=5.6.2",
-    "scrapy>=2.14.1",
+    "flower>=2.0.1",
+    # --- MEMORY/GRAPH ---
+    "mem0ai>=1.0.0",
+    "graphiti-core[google-genai]>=0.24.1",
+    # --- WEB SCRAPING ---
+    "crawl4ai>=0.8.0,<1.0.0",
+    "bleach>=6.2.0,<7.0.0",
+    # --- DOCUMENT PROCESSING ---
+    "docling>=2.72.0",
+    "pageindex>=0.2.5.1",
+    # --- AUTHENTICATION ---
     "bcrypt>=5.0.0",
     "passlib[bcrypt]>=1.7.4",
     "python-jose[cryptography]>=3.5.0",
-    "langextract>=1.1.1",
-    "toons>=0.5.3",
-    "python-multipart>=0.0.20",
-    "pgvector>=0.4.2",
-    "langchain-docling>=2.0.0",
-    "deepagents>=0.4.3",
-    "langchain-tavily>=0.2.17",
-    "langchain-neo4j>=0.8.0",
-    "pageindex>=0.2.5.1",
+    # --- LOGGING ---
+    "loguru==0.7.3",
+    # --- UTILITIES ---
+    "aiofiles==24.1.0",
+    "orjson==3.10.1",
+    "nanoid==2.0.0",
+    "psutil==7.1.0",
+    "tenacity>=9.1.2",
+    "asyncer>=0.0.17",
+    "asyncio>=4.0.0",
+    # --- API FEATURES ---
+    "fastapi-pagination==0.12.1",
+    "fastapi-limiter==0.1.6",
+    "slowapi>=0.1.9",
+    # --- MONITORING ---
+    "prometheus-client>=0.23.1",
     "opentelemetry-api>=1.39.1",
     "opentelemetry-sdk>=1.39.1",
     "opentelemetry-instrumentation-sqlalchemy>=0.60b1",
-    "asyncer>=0.0.17",
-    "asyncio>=4.0.0",
-    "flower>=2.0.1",
+    # --- STREAMING ---
+    "faststream>=0.6.2",
+    # --- LANGUAGE DETECTION ---
+    "langextract>=1.1.1",
+    # --- MCP ---
+    "fastmcp>=2.11.0,<3.0.0",
+    # --- OTHER ---
+    "toons>=0.5.3",
 ]
 
 [project.optional-dependencies]
 dev = [
-    # --- TESTING (Updated) ---
-    "pytest>=8.2.2,<9.0.0",          # Latest is 8.2.2 (Sep 24, 2025) - Relaxed to <9.0.0
-    "pytest-asyncio>=0.23.7,<1.0.0", # Latest is 0.23.7 (Oct 16, 2025) - Relaxed to <1.0.0
-    "pytest-cov>=5.0.0,<6.0.0",      # Latest is 7.0.0 (Sep 9, 2025) - Relaxed to <6.0.0
-    "httpx>=0.27.0,<1.0.0",          # Latest stable version (Sep 18, 2025)
-    "ruff==0.14.2",                  # Latest stable version (Oct 23, 2025)
-    "pre-commit==4.3.0",             # Latest stable version (Aug 9, 2025)
-    "bandit>=1.8.6,<2.0.0",          # Latest stable version is 1.8.6 (Jul 5, 2025)
-    "safety>=3.6.2,<4.0.0",          # Latest stable version is 3.6.2 (Sep 24, 2025)
+    "pytest>=8.2.2,<9.0.0",
+    "pytest-asyncio>=0.23.7,<1.0.0",
+    "pytest-cov>=5.0.0,<6.0.0",
+    "httpx>=0.27.0,<1.0.0",
+    "ruff>=0.14.2",               # bumped slightly; use latest stable
+    "pre-commit==4.3.0",
+    "bandit>=1.8.6,<2.0.0",
+    "safety>=3.6.2,<4.0.0",
+    "ty>=0.0.1a25",               # Astral type checker
 ]
 test = [
     "pytest>=8.2.2,<9.0.0",
@@ -116,43 +134,74 @@ Documentation = "https://github.com/Harmeet10000/langchain-fastapi-production#re
 Repository = "https://github.com/Harmeet10000/langchain-fastapi-production"
 "Bug Tracker" = "https://github.com/Harmeet10000/langchain-fastapi-production/issues"
 
-# Database migration configuration (Alembic)
-[tool.alembic]
-script_location = "src/alembic"
-version_locations = "src/database/migrations"
+# ────────────────────────────────────────
+# UV – Dependency & Lockfile Management
+# ────────────────────────────────────────
+[tool.uv]
+resolution = "lowest-direct"           # Stable with huge trees (langchain, docling)
+default-groups = ["dev"]               # uv sync installs dev tools by default
+# Optional: add if you hit index issues
+# index-strategy = "first-index"
 
-# Post-write hooks for Alembic to format generated migration scripts with Black and isort
-[[tool.alembic.post_write_hooks]]
-name      = "ruff-format"               # just a unique identifier
-type      = "exec"
-executable = "ruff"                     # uv puts it on PATH inside .venv
-options   = "format REVISION_SCRIPT_FILENAME"
+# Your existing dependency-groups is perfect (modern replacement for old dev-dependencies)
+[dependency-groups]
+dev = ["pre-commit>=4.3.0", "ty>=0.0.1a25"]
 
-[[tool.alembic.post_write_hooks]]
-name      = "ruff-fix"                  # must be different name from previous hook
-type      = "exec"
-executable = "ruff"
-options   = "check --fix REVISION_SCRIPT_FILENAME"
-
-# Tool configurations
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-"*" = ["*.txt", "*.md", "*.yml", "*.yaml", "*.json"]
-
-# Ruff configuration
+# ────────────────────────────────────────
+# RUFF – Linting & Formatting
+# ────────────────────────────────────────
 [tool.ruff]
-line-length = 88
+line-length = 100                      # Modern choice; more room for chains
 target-version = "py312"
+src = ["src"]                          # First-party code layout
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501", "ISC001", "TRY003", "PLR0913", "PLR2004"]
+select = [
+    "E", "W",        # pycodestyle
+    "F",             # pyflakes (unused/undefined)
+    "I",             # isort
+    "UP",            # pyupgrade (modern syntax)
+    "B",             # bugbear (common bugs)
+    "A",             # builtins shadowing
+    "C4",            # comprehensions
+    "PERF",          # performance hints (hot paths)
+    "TRY",           # tryceratops (exceptions in async)
+    "ASYNC",         # async misuse (critical!)
+    "RUF",           # ruff-specific
+    "PL",            # pylint port (selective)
+    "ANN",           # annotations (complements ty)
+]
+ignore = [
+    "E501",          # line-too-long → formatter handles
+    "ANN101",        # Missing type annotation for self
+    "ANN102",        # Missing type annotation for cls
+    "ANN401",        # Any type (LangChain heavy)
+    "ISC001",        # conflicting with formatter
+    "TRY003",        # raise from e – sometimes verbose
+    "PLR0913",       # too-many-arguments (agents/graphs)
+    "PLR2004",       # magic values (AI logic)
+    "PLR0911",       # too-many-returns (graph flows)
+    "ANN001",        # Missing type annotation (too noisy in AI code)
+    "ANN002",        # Missing type annotation for function/method (too noisy in AI code)
+    "ANN003",        # Missing type annotation for *args (too noisy in AI code)
+]
 
-[tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "PLR2004", "ARG001"]
-"__init__.py" = ["F401"]
+[tool.ruff.lint.flake8-type-checking]
+strict = true
+exempt-modules = [
+    "pydantic",
+    "fastapi",
+    "langchain",
+    "langgraph",
+    "docling",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "pydantic.Field",
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
@@ -165,49 +214,93 @@ section-order = [
     "local-folder",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "ANN",       # No type annotations required in tests
+    "D",         # No docstrings required in tests
+    "S101",      # Allow assert statements
+    "PLR2004",   # Allow magic values
+    "ARG001",    # Allow unused arguments
+    "E501",      # Allow long lines
+]
+"src/alembic/migrations/*.py" = [
+    "ANN",
+    "N999",      # Allow invalid module names
+    "E501",      # Allow long lines
+    "F401",      # Allow unused imports
+]
+"**/__init__.py" = [
+    "ANN",       # No type annotations required in __init__.py
+    "F401",      # Allow unused imports (re-exports)
+    "E402",      # Allow imports not at top
+]
+"**/generated/**.py" = [
+    "ANN",       # No type annotations required in generated code
+    "E402",      # Allow imports not at top
+    "F841",      # Allow unused variables
+    "ANN",       # No type annotations required
+]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 
-# Ty configuration (approximate migration from MyPy)
-# Note: Ty does not have 1:1 mappings for all MyPy options, as it uses its own rule-based system.
-# Many strict MyPy checks (e.g., disallow_untyped_defs, check_untyped_defs) are covered by default
-# "error"-level rules like invalid-return-type, invalid-assignment, etc.
-# For per-module overrides like ignore_missing_imports, Ty lacks direct support (file-based globs only).
-# Here, we approximate by globally ignoring unresolved-import (common for untyped third-party libs).
-# Install type stubs (e.g., types-redis, openai-stubs) where possible for better checking.
-# Use # ty: ignore[unresolved-import] on specific import lines if needed for precision.
-
+# ────────────────────────────────────────
+# TY – Type Checker (Astral)
+# ────────────────────────────────────────
 [tool.ty]
-# Equivalent to MyPy's python_version
-environment.python-version = "3.14"
-# Equivalent to show_error_codes (full output includes codes)
-terminal.output-format = "full"
-# Optional: Treat warnings as errors for stricter enforcement (no direct MyPy equiv, but aligns with overall strictness)
-# terminal.error-on-warning = true
+# Inferred from requires-python, but be explicit
+[tool.ty.environment]
+python-version = "3.12"
+root = ["src"]                         # Matches your src layout
 
 [tool.ty.rules]
-# warn_redundant_casts=true → redundant-cast (default is warn, explicit for clarity)
+all = "error"                          # Strict baseline
+unresolved-attribute = "warn"          # Allows Pydantic v2 magic
+# Keep / adjust your originals; made more consistent
 redundant-cast = "warn"
-# warn_unused_ignores=true → unused-ignore-comment (default ignore, set to warn)
 unused-ignore-comment = "warn"
-# warn_no_return=true → Covered by invalid-return-type (default error)
-# warn_unreachable=true → No direct rule; Ty may handle via inference (consider terminal.error-on-warning if needed)
-# strict_equality=true → Handled in default type checking (e.g., invalid-assignment)
-# Approximate ignore_missing_imports for listed modules (global; set unresolved-import to ignore)
-# This prevents errors on imports from untyped libs like langchain.*, openai.*, etc.
-unresolved-import = "ignore"
-# Other disallow_* options (untyped_defs, incomplete_defs, untyped_decorators) → Default "error" rules like
-# invalid-declaration, invalid-parameter-default cover similar ground; no change needed.
-# warn_return_any=true → No direct; invalid-return-type catches mismatches, including Any issues.
-# warn_unused_configs=true → No direct; Ty has no equivalent (config validation is built-in).
-# no_implicit_optional=true → Handled in Ty's type inference by default.
+unresolved-import = "error"            # stricter than your ignore
 possibly-missing-attribute = "error"
 possibly-missing-import = "error"
+invalid-assignment = "error"
+unresolved-reference = "error"
+await-on-non-awaitable = "error"       # Critical for asyncpg/motor
+non-awaitable-in-async-function = "error"  # upgraded from warn
+possibly-unbound-variable = "error"
+invalid-type-comment = "error"
 
-# Pytest configuration
+[tool.ty.terminal]
+output-format = "full"
+
+# ────────────────────────────────────────
+# Other sections unchanged (alembic, pytest, coverage, bandit)
+# ────────────────────────────────────────
+
+[tool.alembic]
+script_location = "src/alembic"
+version_locations = "src/database/migrations"
+
+[[tool.alembic.post_write_hooks]]
+name = "ruff-format"
+type = "exec"
+executable = "ruff"
+options = "format REVISION_SCRIPT_FILENAME"
+
+[[tool.alembic.post_write_hooks]]
+name = "ruff-fix"
+type = "exec"
+executable = "ruff"
+options = "check --fix REVISION_SCRIPT_FILENAME"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.txt", "*.md", "*.yml", "*.yaml", "*.json"]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = [
@@ -230,7 +323,6 @@ markers = [
     "unit: marks tests as unit tests",
 ]
 
-# Coverage configuration
 [tool.coverage.run]
 source = ["src"]
 omit = [
@@ -256,10 +348,6 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 
-# Bandit configuration (security linting)
 [tool.bandit]
 exclude_dirs = ["tests", "migrations"]
 skips = ["B101", "B601"]
-
-[dependency-groups]
-dev = ["pre-commit>=4.3.0", "ty>=0.0.1a25"]
