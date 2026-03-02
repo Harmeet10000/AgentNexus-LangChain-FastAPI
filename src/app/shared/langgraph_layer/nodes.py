@@ -8,7 +8,7 @@ Nodes are composed in graph.py.
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_layer.models import build_chat_model

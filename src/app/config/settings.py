@@ -61,6 +61,13 @@ class Settings(BaseSettings):
     REDIS_DB: int = Field(default=0)
     CACHE_TTL: int = Field(default=3600)
 
+    # ---RabbitMQ Configuration---
+    RABBITMQ_URL: str = Field(default="amqp://guest:guest@localhost:5672//")
+    RABBITMQ_PRIVATE_URL: str = Field(default="amqp://guest:guest@localhost:5672//")
+    RABBITMQ_DEFAULT_USER: str = Field(default="guest")
+    RABBITMQ_DEFAULT_PASS: str = Field(default="guest")
+    RABBITMQ_NODENAME: str = Field(default="rabbit@localhost")
+
     # --- Google Gemini API ---
     GOOGLE_API_KEY: str = Field(default="")
     GEMINI_MODEL: str = Field(default="gemini-2.5-flash")

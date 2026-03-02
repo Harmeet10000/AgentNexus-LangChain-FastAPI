@@ -9,20 +9,17 @@ Strategies:
 
 from __future__ import annotations
 
-from typing import Callable, Sequence
+from collections.abc import Callable, Sequence
 
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
-    HumanMessage,
     RemoveMessage,
     SystemMessage,
     ToolMessage,
     trim_messages,
 )
-
 from langchain_layer.models import build_fast_model
-
 
 # ---------------------------------------------------------------------------
 # Trim

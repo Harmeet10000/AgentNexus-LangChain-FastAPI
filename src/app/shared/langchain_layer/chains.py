@@ -10,7 +10,6 @@ from typing import Any
 
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
-
 from langchain_layer.models import build_chat_model, build_fast_model
 from langchain_layer.prompts import (
     GUARDRAIL_SYSTEM_PROMPT,
@@ -18,7 +17,6 @@ from langchain_layer.prompts import (
     SUMMARIZER_SYSTEM_PROMPT,
     build_chat_prompt,
 )
-
 
 # ---------------------------------------------------------------------------
 # Summarization chain

@@ -53,7 +53,7 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 37. check out the commented out pre commit hooks 
 24. Cache expensive dependencies to avoid repeated computations, Stream large responses to reduce memory usage by 80-90%                           TO_BE_DONE
 25. Use background tasks so users don't wait for non-critical operations
-26. optimise pydantic models for speed by providing config
+26. optimise pydantic models for speed by providing config and include it in copilot-instructions
 
 34. use cache in dockerfile Running as Root: Containers should not run as root in production due to security liabilities. The video advises creating and switching to a non-root user in the Dockerfile and ensuring volume mounts are owned by this user.
 Manual Builds Without Caching: Typing docker build . manually every time is inefficient. Enabling BuildKit (docker buildkit=1) and using layer caching with dev-mount for package managers and build systems significantly speeds up builds.          DONE
@@ -95,7 +95,7 @@ langchain_google_genai uses httpx under the hood. Without explicit connection po
 There's no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 No structured reasoning traces
 The agent just produces output. For debugging production failures you need to store the full reasoning trace (all tool calls, intermediate states, the exact prompt sent) not just the final message.
-65. 
+65. in pyproject.toml make proper config for ty ans uv and replace unnecessary/old configs and include the new rules in copilot-instructions
 ---
 
 ### 1. The Lifespan (The "Heavy" Pool)

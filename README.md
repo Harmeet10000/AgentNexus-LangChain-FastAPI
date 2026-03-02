@@ -108,6 +108,7 @@ uv run alembic history --verbose                 # show history
 uv run ruff check --fix                          # lint + auto-fix
 uv run ruff format                               # format
 uv run pytest -x                                 # test & stop on first failure
+uv run celery -A celery_config worker --loglevel=info
 
 ```
 
