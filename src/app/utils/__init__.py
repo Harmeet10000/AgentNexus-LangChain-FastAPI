@@ -12,7 +12,7 @@ from .exceptions import (
     ValidationException,
 )
 from .httpResponse import http_response
-from .logger import logger
+from .logger import logger, request_state
 
 __all__ = [
     "APIException",
@@ -26,4 +26,5 @@ __all__ = [
     "ValidationException",
     "http_response",
     "logger",
+    "request_state",
 ]

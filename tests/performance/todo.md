@@ -1,6 +1,6 @@
 ```py
 3. set up integration guide for FastMCP             Delayed
-8. make a Copilot instructions improved final based on todo.md   Undergoing
+8. make a Copilot instructions improved final based on todo.md   DONE
 5. figure out extra in logger/loguru   DONE
 2. figure out docker compose as it appears to be not working   DONE
 9. re write server-middleware @app.middleware('http') and check with claude   - DONE
@@ -40,19 +40,24 @@ async def connect_db():
 41. add this from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 # After creating your engine
 SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
+65. in pyproject.toml make proper config for ty ans uv and replace unnecessary/old configs and include the new rules in copilot-instructions         DONE
 66. is it a good idea to inject a dependancy from req.app.state   DONE
 50. learn what is PEP standard, ruff linting standards   DONE
 15. refactor docling code          DONE
 16. refactor crawl4ai code         DONE
 51. use neo4j docker image and check what extensions work with it     DONE
 54. complete the features from google-langchain   DONE
+7. set up pgVectorScale with pg_textsearch and pg_trgm  DONE
+40. implement search using postgres Extensions  DONE
+66. take the prompt template of anthropic from sreenshot   DONE
+39. add state of a request in logs as it goes through diff layers in our app   DONE
+69. format Bun-FFI and Node-FFI properly for agents   DONE
+32. checkout fastapi-pagination             DONE
+68. learn about abc and collections         DONE
 6. set up performance tests
-7. set up pgVectorScale with pg_textsearch and pg_trgm
 17. refactor vectorStore code
 18. refactor RAG code
 21. add this from fastapi import BackgroundTasks
-10. figure what are exception wrt FastAPI, fastapi-security and more with claude
-36. update copilot instructions
 @app.post("/process")
 async def process_data(data: DataModel, background_tasks: BackgroundTasks):
     # Return immediately, process in background
@@ -61,10 +66,7 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 37. check out the commented out pre commit hooks 
 25. Use background tasks so users don't wait for non-critical operations
 
-39. add state of a request in logs as it goes through diff layers in our app
-40. implement search using postgres Extensions
-42. fix the search code as it is not using the pg_textsearch properly
-43. add langextract to agent tools
+42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
 44. correct the code for crawler and the packages used
 46. use CacheBackedEmbeddings fore reusing embeddings
 47. check whether i will need to use sandboxed execution environemnt in future
@@ -72,7 +74,6 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 49. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
 52. legal tool will be based on Saul for finding out of the box ideas for legal advice also.
 53. add voice support by using qwenTTS or something else 
-55. check where to add prefix in routes v1 router or router file
 56. use AsyncMemoryClient for mem0
 57. No agent-to-agent message passing format standard
 When sub-agents return results, they're raw strings. There's no typed contract for what one agent sends to another. A SubagentMessage(agent_name, task, result, confidence) schema would let the supervisor make smarter decisions.
@@ -92,12 +93,21 @@ langchain_google_genai uses httpx under the hood. Without explicit connection po
 There's no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 No structured reasoning traces
 The agent just produces output. For debugging production failures you need to store the full reasoning trace (all tool calls, intermediate states, the exact prompt sent) not just the final message.
-65. in pyproject.toml make proper config for ty ans uv and replace unnecessary/old configs and include the new rules in copilot-instructions
 26. optimise pydantic models for speed by providing config and include it in copilot-instructions
 24. Cache expensive dependencies to avoid repeated computations, Stream large responses to reduce memory usage by 80-90%                           TO_BE_DONE
-31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you arent just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).          
+31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you arent just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).    
+43. add langextract to agent tools
+33. add pageindex properly  and include it in agent tools
+36. update copilot instructions
+71. also check logger if working as wished       If you want to enrich the global context (so user_id appears in all future logs automatically):   current_state = request_state.get() current_state["user_id"] = authenticated_user.id current_state["tenant_id"] = tenant.id
+55. check where to add prefix in routes v1 router or router file
+10. figure what are exception wrt FastAPI, fastapi-security and more with claude
+65. do i need return type of every public function ask
+67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
+70. rewrite health, serach & auth for using APIExceptions, removing http_response, removing handler file and use dependencies file 
+71. ensure response shape is uniform through out the app
 ---
-# Agent archteture 
+# Agent architecture 
   user should be authenticated before anything for better state context(langgraph)
 1. QnA agent asking for more clarity 
     responds in realtime 
@@ -105,7 +115,15 @@ The agent just produces output. For debugging production failures you need to st
     and should be HITL for clarifications
 3. planner agent is called after router agent (decides functional calling and a deterministic workflow)
 4. planner should return status to QnA agent to talk to user
+5. Reliable Communication via Typed Schemas
+    Multi-agent workflows often break because agents pass inconsistent or malformed data to one another.     The Problem: Inconsistent JSON or shifting field names lead to downstream "guessing" and system failure.      The Solution: Use Typed Schemas (like TypeScript interfaces). These act as machine-checkable contracts that ensure data integrity at every boundary.     Benefit: Failures become "schema violations" rather than silent logic bugs, allowing systems to retry or repair state before it propagates.
+# hierarchical arc - one orchestrator managing multiple agents
+# HITL arc
+# network/swarm arc
+# sequential arc
 
+6. Eliminating Ambiguity with Action Schemas
+    Even with valid data, agents often fail because their intent is too broad (e.g., "help the team").     The Problem: LLMs may interpret vague instructions in ways that arent automatable (assigning vs. closing vs. escalating).      The Solution: Implement Action Schemas (using tools like Zod). These force the agent to choose from a "discriminated union" of specific, predefined actions.      Benefit: Every agent output must resolve to an explicit, valid command, turning unpredictable text into predictable execution.
 
 
 # best practices for DI and req.app.stateEspecially bad for:
@@ -142,126 +160,12 @@ async def get_db(request: Request):
     yield db
 
 
-### 1. The Lifespan (The "Heavy" Pool)
-
-This stays in your main entry point. It ensures the pool exists before any request arrives.
-
-```python
-from fastapi import FastAPI, Request, Depends
-from contextlib import asynccontextmanager
-from motor.motor_asyncio import AsyncIOMotorClient
-
-# 1. SETUP THE POOL IN LIFESPAN
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # The client stays alive for the entire life of the app
-    app.state.mongodb_client = AsyncIOMotorClient("mongodb://localhost:27017")
-    app.state.db = app.state.mongodb_client["customs_database"]
-    print("Connection Pool Created")
-    yield
-    # Cleanup on shutdown
-    app.state.mongodb_client.close()
-    print("Connection Pool Destroyed")
-
-app = FastAPI(lifespan=lifespan)
 
 ```
 
----
-
-### 2. The Layers (Repository & Service)
-
-Notice these classes don't know anything about FastAPI or Request objects. They just take a `db` object in their `__init__`. This is **Dependency Injection**.
-
-```python
-# 2. THE REPOSITORY LAYER (Handles Raw DB Queries)
-class CustomsRepository:
-    def __init__(self, db):
-        self.collection = db["submissions"]
-
-    async def save_declaration(self, data: dict):
-        result = await self.collection.insert_one(data)
-        return str(result.inserted_id)
-
-# 3. THE SERVICE LAYER (Handles Logic & XML Prep)
-class CustomsService:
-    def __init__(self, repo: CustomsRepository):
-        self.repo = repo
-
-    async def process_submission(self, xml_data: str):
-        # Logic: Transform XML -> Dict, Validate, then Save
-        # (Imagine xmltodict logic here)
-        data_to_save = {"payload": xml_data, "status": "PENDING"}
-        return await self.repo.save_declaration(data_to_save)
-
-```
-
----
-
-### 3. The Dependency "Bridge" (The Hybrid Part)
-
-This is where the magic happens. We use a FastAPI dependency to bridge the **Global App State** and the **Local Request**.
-
-```python
-# 4. THE INJECTION BRIDGE
-def get_customs_service(request: Request) -> CustomsService:
-    # Pull the pool from the app state
-    db = request.app.state.db
-    # Build the hierarchy
-    repo = CustomsRepository(db)
-    return CustomsService(repo)
-
-```
-
----
-
-### 4. The Route Handler
-
-The route remains extremely thin. It doesn't know how to talk to MongoDB; it only knows how to ask for the `CustomsService`.
-
-```python
-@app.post("/submit")
-async def submit_declaration(
-    xml_body: str, 
-    service: CustomsService = Depends(get_customs_service)
-):
-    submission_id = await service.process_submission(xml_body)
-    return {"id": submission_id, "message": "Customs declaration queued"}
-
-```
-
----
-
-## Why this is the "No-Nonsense" Winner
-
-1. **Zero Global State Issues:** Your Service and Repository are just regular Python classes. You can unit test them by passing a mock `db` object in the constructor. You don't need to "run" FastAPI to test your business logic.
-2. **Resource Efficiency:** Because the `AsyncIOMotorClient` is attached to `app.state`, Motor manages its own internal connection pooling. You aren't opening a new connection for every request; you are simply "borrowing" one from the pool.
-3. **Traceability:** If a database query fails, the traceback shows exactly which layer it came from. You aren't guessing which global variable was modified.
 
 
-## better approach example for multitenant
-def get_tenant_db(request: Request):
-    tenant_id = request.headers["X-Tenant"]
-    return client[f"tenant_{tenant_id}"]
 
-
-    1. Reliable Communication via Typed Schemas
-Multi-agent workflows often break because agents pass inconsistent or malformed data to one another.
-
-The Problem: Inconsistent JSON or shifting field names lead to downstream "guessing" and system failure.
-
-The Solution: Use Typed Schemas (like TypeScript interfaces). These act as machine-checkable contracts that ensure data integrity at every boundary.
-
-Benefit: Failures become "schema violations" rather than silent logic bugs, allowing systems to retry or repair state before it propagates.
-
-2. Eliminating Ambiguity with Action Schemas
-Even with valid data, agents often fail because their intent is too broad (e.g., "help the team").
-
-The Problem: LLMs may interpret vague instructions in ways that aren't automatable (assigning vs. closing vs. escalating).
-
-The Solution: Implement Action Schemas (using tools like Zod). These force the agent to choose from a "discriminated union" of specific, predefined actions.
-
-Benefit: Every agent output must resolve to an explicit, valid command, turning unpredictable text into predictable execution.
     
 |Issue           |Symptom             |Fix                                                    |
 |----------------|--------------------|-------------------------------------------------------|

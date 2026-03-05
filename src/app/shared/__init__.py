@@ -1,8 +1,8 @@
 """Shared utilities and integrations across features."""
-
-from app.shared.enums import *
+from .base import Base
 
 __all__ = [
+    "Base"
     "agents",
     "cache",
     "crawler",

@@ -16,9 +16,9 @@ from app.middleware.global_exception_handler import global_exception_handler
 from app.middleware.server_middleware import (
     MetricsMiddleware,
     TimeoutMiddleware,
-    correlation_middleware,
     create_security_headers_middleware,
     get_metrics,
+    log_request_state_middleware,
 )
 from app.shared.langchain_layer.callback import configure_langsmith
 from app.utils.logger import logger
@@ -50,7 +50,7 @@ def create_app() -> FastAPI:
 
     # 1. CORS (First to execute - handles preflight requests)
     app.add_middleware(
-        CORSMiddleware,
+        CORSMiddleware,  # ty:ignore[invalid-argument-type]
         allow_origins=settings.CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -66,13 +66,13 @@ def create_app() -> FastAPI:
     # )
 
     # 3. Compression (Performance optimization)
-    app.add_middleware(GZipMiddleware, minimum_size=15000, compresslevel=6)
+    app.add_middleware(GZipMiddleware, minimum_size=15000, compresslevel=6)  # ty:ignore[invalid-argument-type]
 
     # 4. Timeout (Prevent hanging requests)
-    app.add_middleware(TimeoutMiddleware, timeout_seconds=30)
+    app.add_middleware(TimeoutMiddleware, timeout_seconds=30)  # ty:ignore[invalid-argument-type]
 
     # 5. Metrics collection (Monitor all requests)
-    app.add_middleware(MetricsMiddleware, project_name="langchain-fastapi")
+    app.add_middleware(MetricsMiddleware, project_name="langchain-fastapi")  # ty:ignore[invalid-argument-type]
 
     # ============================================================================
     # CUSTOM MIDDLEWARES (Using decorator style for better performance)
@@ -85,20 +85,18 @@ def create_app() -> FastAPI:
     ) -> Response:
         return await create_security_headers_middleware(request, call_next)
 
-    # 7. Correlation ID (For distributed tracing)
+    # 7. Request state logging (For distributed tracing)
     @app.middleware("http")
-    async def add_correlation_id(
+    async def add_request_state(
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        return await correlation_middleware(request, call_next)
+        return await log_request_state_middleware(request, call_next)
 
     # ============================================================================
     # EXCEPTION HANDLERS (Register after middleware, before routes)
     # ============================================================================
-    app.add_exception_handler(Exception, global_exception_handler)
-    # app.add_exception_handler(RequestValidationError, global_exception_handler)
-    # app.add_exception_handler(StarletteHTTPException, global_exception_handler)
+    app.add_exception_handler(exc_class_or_status_code=Exception, handler=global_exception_handler)
 
     # ============================================================================
     # ROUTES

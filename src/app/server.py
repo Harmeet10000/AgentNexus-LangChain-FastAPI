@@ -13,10 +13,12 @@ def main() -> None:
     logger.info(f"Starting server in {settings.ENVIRONMENT} mode...")
 
     uvicorn.run(
-        app=app,
-        host="0.0.0.0",
-        port=5000,
+        app="app.main:app",
+        host=settings.HOST,
+        port=settings.PORT,
         reload=settings.ENVIRONMENT != "production",
+        reload_dirs=["src"] if settings.ENVIRONMENT != "production" else None,
+        reload_excludes=[".venv/*", "*.pyc", "__pycache__/*"],
         log_config=None,  # Use custom logging
         access_log=False,  # Custom access logging via middleware
         workers=4 if settings.ENVIRONMENT == "production" else 1,

@@ -34,7 +34,7 @@ async def setup_mongodb(uri: str, db_name: str, document_models: list):
         db_name=db_name,
         document_models=document_models,
     )
-    await mongo_client.admin.command("ping")
+    await mongo_client.admin.command(command="ping")
     server_info = await mongo_client.server_info()
     logger.info(
         "MongoDB connected",
@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Application starting", app_name=app.title, version=app.version)
 
     # STARTUP: Parallel execution using TaskGroup (fail-fast)
-    async with asyncio.TaskGroup() as tg:  # type: ignore[attr-defined]
+    async with asyncio.TaskGroup() as tg:
         pg_task = tg.create_task(coro=init_db())
         mongo_task = tg.create_task(
             coro=setup_mongodb(
@@ -90,12 +90,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = redis_task.result()
     app.state.neo4j_driver = neo_task.result()
 
+
+
     # Celery setup (optional, non-blocking)
     try:
-        celery = await asyncio.wait_for(
-            asyncio.to_thread(setup_celery),
-            timeout=3.0
-        )
+        celery = await asyncio.wait_for(asyncio.to_thread(setup_celery), timeout=3.0)
         app.state.celery = celery
     except TimeoutError:
         logger.warning("Celery setup timed out, continuing without task queue")
@@ -111,7 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # SHUTDOWN: Parallel graceful cleanup
     logger.info("Application shutting down", status="stopping")
 
-    async with asyncio.TaskGroup() as tg: # type: ignore[attr-defined]
+    async with asyncio.TaskGroup() as tg:
         if hasattr(app.state, "redis"):
             tg.create_task(coro=app.state.redis.close())
         if hasattr(app.state, "db_engine"):

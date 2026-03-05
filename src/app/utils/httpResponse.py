@@ -3,10 +3,9 @@ from typing import Any
 
 from fastapi import Request
 from fastapi.responses import ORJSONResponse
-from loguru import logger
 
-from app.config.enums import Environment
-from app.config.settings import get_settings
+from app.config import Environment, get_settings
+from app.utils import logger
 
 
 def http_response(
@@ -44,7 +43,7 @@ def http_response(
     }
 
     # Remove sensitive data in production
-    if os.getenv("ENVIRONMENT") == Environment.PRODUCTION:
+    if os.getenv(key="ENVIRONMENT") == Environment.PRODUCTION:
         response["request"]["ip"] = None
 
     # Log response
@@ -92,7 +91,7 @@ def http_error(
     }
 
     # Remove sensitive data in production
-    if settings.environment == Environment.PRODUCTION:
+    if settings.ENVIRONMENT == Environment.PRODUCTION:
         response["request"]["ip"] = None
 
     logger.error(

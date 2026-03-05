@@ -1,7 +1,7 @@
-from app.utils.logging import logger
 from celery import Celery
 
-from app.config.settings import get_settings
+from app.config import get_settings
+from app.utils import logger
 
 settings = get_settings()
 
@@ -51,7 +51,7 @@ celery_app.conf.task_publish_retry_policy = {
     retry_backoff_max=600,  # Max wait 10 mins
     max_retries=5,  # Give up after 5 tries
 )
-def send_email_task(self, email: str, content: str):
+def send_email_task(self, email: str, content: str) -> None:
     try:
         # Business logic here
         pass
