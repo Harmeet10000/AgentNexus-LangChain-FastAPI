@@ -4,14 +4,15 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi_limiter.depends import RateLimiter
 from pyrate_limiter import Duration, Limiter, Rate
 
-from app.features.auth.dependency import get_auth_service, get_current_user
-from app.features.auth.dto import (
+from app.features.auth import (
+    AuthService,
     LoginRequest,
     LogoutResponse,
     RegisterRequest,
     TokenResponse,
+    get_auth_service,
+    get_current_user,
 )
-from app.features.auth.service import AuthService
 from app.utils import logger
 
 router: APIRouter = APIRouter(prefix="/auth", tags=["Auth"])
@@ -25,7 +26,7 @@ security: HTTPBearer = HTTPBearer()
 async def register(
     data: RegisterRequest,
     service: AuthService = Depends(get_auth_service),
-):
+) -> dict[str, str]:
     try:
         user = await service.register(data=data)
         return {

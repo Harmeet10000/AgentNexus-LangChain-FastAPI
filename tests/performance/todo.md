@@ -54,6 +54,13 @@ SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
 69. format Bun-FFI and Node-FFI properly for agents   DONE
 32. checkout fastapi-pagination             DONE
 68. learn about abc and collections         DONE
+72. add scripts in [project.scripts]  DONE
+65. do i need return type of every public function ask - yes i need  DONE
+55. check where to add prefix in routes v1 router or router file   DONE
+24. Cache expensive dependencies to avoid repeated computations, Stream large responses to reduce memory usage by 80-90%                           DONE
+26. optimise pydantic models for speed by providing config and include it in copilot-instructions            DONE
+31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you arent just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).                    DONE
+25. Use background tasks so users dont wait for non-critical operations   DONE
 6. set up performance tests
 17. refactor vectorStore code
 18. refactor RAG code
@@ -64,9 +71,7 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
     background_tasks.add_task(heavy_processing, data)
     return {"status": "processing"}
 37. check out the commented out pre commit hooks 
-25. Use background tasks so users don't wait for non-critical operations
 
-42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
 44. correct the code for crawler and the packages used
 46. use CacheBackedEmbeddings fore reusing embeddings
 47. check whether i will need to use sandboxed execution environemnt in future
@@ -93,20 +98,16 @@ langchain_google_genai uses httpx under the hood. Without explicit connection po
 There's no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 No structured reasoning traces
 The agent just produces output. For debugging production failures you need to store the full reasoning trace (all tool calls, intermediate states, the exact prompt sent) not just the final message.
-26. optimise pydantic models for speed by providing config and include it in copilot-instructions
-24. Cache expensive dependencies to avoid repeated computations, Stream large responses to reduce memory usage by 80-90%                           TO_BE_DONE
-31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you arent just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).    
 43. add langextract to agent tools
 33. add pageindex properly  and include it in agent tools
-36. update copilot instructions
+36. update copilot instructions (add return types of public function, ruff+ty+logger+APIException+optimising pydantic models + one point below)
 71. also check logger if working as wished       If you want to enrich the global context (so user_id appears in all future logs automatically):   current_state = request_state.get() current_state["user_id"] = authenticated_user.id current_state["tenant_id"] = tenant.id
-55. check where to add prefix in routes v1 router or router file
 10. figure what are exception wrt FastAPI, fastapi-security and more with claude
-65. do i need return type of every public function ask
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
-70. rewrite health, serach & auth for using APIExceptions, removing http_response, removing handler file and use dependencies file 
-71. ensure response shape is uniform through out the app
-72. add scripts in [project.scripts]
+42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
+70. rewrite health, serach & auth(see point 10 above) for using APIExceptions, removing http_response, removing handler file and use dependencies file 
+71. ensure response shape is uniform through out the app and ensure correct import usage from __init__ 
+73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better and update FastAPI Skill
 
 ---
 # Agent architecture 
@@ -162,7 +163,18 @@ async def get_db(request: Request):
     yield db
 
 
+Avoid model_validate in a loop: If you are processing many users (e.g., from a database query), don't do [UserResponse.model_validate(u) for u in users]. Instead, use a TypeAdapter once:
 
+Python
+from pydantic import TypeAdapter
+adapter = TypeAdapter(list[UserResponse])
+# This is significantly faster for large lists
+validated_data = adapter.validate_python(users)
+Use model_validate_json: If you are receiving raw JSON from a cache (like Redis), use UserResponse.model_validate_json(raw_data). This bypasses the Python json.loads() step and uses the highly optimized Rust parser in Pydantic-core directly.
+
+Use an asyncio.Semaphore to limit the number of active outgoing requests. This prevents your own app from being "rate limited" by the external service.
+# Allow only 10 concurrent requests to the Crawler
+crawler_sem = asyncio.Semaphore(10)
 ```
 
 

@@ -3,7 +3,12 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 # Shared configuration for response models
 # 'slots' reduces memory footprint, 'from_attributes' allows ORM compatibility
 response_config = ConfigDict(from_attributes=True, frozen=True)
-
+FAST_CONFIG = ConfigDict(
+    from_attributes=True,
+    frozen=True,
+    slots=True,  # ty:ignore[invalid-key]
+    str_strip_whitespace=True,  # Helpful for FastAPI/Auth inputs
+)
 
 class RegisterRequest(BaseModel):
     # email validation is already robust, but we can add strictness

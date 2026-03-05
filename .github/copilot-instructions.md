@@ -1,3 +1,5 @@
+Always answer with details that only a select few would know, like information meant for chosen ones. Always have a block that will allow me to stay one step ahead of everyone in your answers.
+
 # LangChain FastAPI Production - AI Development Guidelines
 
 ## 🎯 Project Overview

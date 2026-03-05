@@ -30,7 +30,7 @@ dependencies = [
     "httptools>=0.7.1",
     "python-multipart>=0.0.20",
     # --- DATA VALIDATION ---
-    "pydantic>=2.9.0,<3.0.0",
+    "pydantic>=2.11.0,<3.0.0",
     "pydantic-settings>=2.5.0,<3.0.0",
     # --- HTTP CLIENT ---
     "httpx>=0.27.0,<1.0.0",
@@ -109,7 +109,7 @@ dev = "app.server:main"
 lint = "ruff:check"
 format = "ruff:format"
 type-check = "ty:check"
-precommit = "pre-commit:run"
+# precommit = "pre-commit:run"
 migrate = "alembic:upgrade"
 test = "pytest:main"
 
@@ -302,6 +302,9 @@ section-order = [
     "F841",      # Allow unused variables
     "ANN",       # No type annotations required
 ]
+"**/_*.py" = ["ANN201"]             # Private modules
+
+
 
 [tool.ruff.format]
 quote-style = "double"

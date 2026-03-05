@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.connections import (
     celery_app,
     close_neo4j_driver,
+    create_httpx_client,
     create_mongo_client,
     create_redis_client,
     init_db,
@@ -90,6 +91,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = redis_task.result()
     app.state.neo4j_driver = neo_task.result()
 
+    # Initialize HTTPX client (HTTP/2 + connection pooling)
+    app.state.httpx_client = create_httpx_client()
+    logger.info("HTTPX client initialized with HTTP/2")
+
 
 
     # Celery setup (optional, non-blocking)
@@ -100,7 +105,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Celery setup timed out, continuing without task queue")
         app.state.celery = None
     except Exception as e:
-        logger.warning("Celery setup failed", error=str(e))
+        logger.error("Celery setup failed", error=str(e))
         app.state.celery = None
 
     logger.info("Application ready", status="running")
@@ -109,6 +114,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # SHUTDOWN: Parallel graceful cleanup
     logger.info("Application shutting down", status="stopping")
+
+    # Close HTTPX client
+    if hasattr(app.state, "httpx_client"):
+        await app.state.httpx_client.aclose()
 
     async with asyncio.TaskGroup() as tg:
         if hasattr(app.state, "redis"):
