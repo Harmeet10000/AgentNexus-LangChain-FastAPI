@@ -106,6 +106,8 @@ The agent just produces output. For debugging production failures you need to st
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 70. rewrite health, serach & auth for using APIExceptions, removing http_response, removing handler file and use dependencies file 
 71. ensure response shape is uniform through out the app
+72. add scripts in [project.scripts]
+
 ---
 # Agent architecture 
   user should be authenticated before anything for better state context(langgraph)

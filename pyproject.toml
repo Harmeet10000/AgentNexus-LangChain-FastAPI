@@ -102,11 +102,16 @@ dependencies = [
     "toons>=0.5.3",
     "urllib3>=2.2.0",
     "charset-normalizer>=3.0.0",
-    "requests>=2.32.5",
 ]
 
 [project.scripts]
 dev = "app.server:main"
+lint = "ruff:check"
+format = "ruff:format"
+type-check = "ty:check"
+precommit = "pre-commit:run"
+migrate = "alembic:upgrade"
+test = "pytest:main"
 
 
 [project.optional-dependencies]
