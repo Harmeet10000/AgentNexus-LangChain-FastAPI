@@ -1,8 +1,8 @@
 # app/features/auth/router.py
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from fastapi_limiter.depends import RateLimiter
+from pyrate_limiter import Duration, Limiter, Rate
 
 from app.features.auth.dependency import get_auth_service, get_current_user
 from app.features.auth.dto import (
@@ -12,17 +12,17 @@ from app.features.auth.dto import (
     TokenResponse,
 )
 from app.features.auth.service import AuthService
-
-limiter = Limiter(key_func=get_remote_address)
+from app.utils import logger
 
 router: APIRouter = APIRouter(prefix="/auth", tags=["Auth"])
 security: HTTPBearer = HTTPBearer()
 
 
-@router.post(path="/register")
-@limiter.limit(limit_value="5/minute")
+@router.post(
+    path="/register",
+    dependencies=[Depends(RateLimiter(limiter=Limiter(argument=Rate(5, Duration.SECOND * 60))))],
+)
 async def register(
-    request: Request,
     data: RegisterRequest,
     service: AuthService = Depends(get_auth_service),
 ):
@@ -37,10 +37,12 @@ async def register(
         raise HTTPException(status_code=400, detail=str(object=e))
 
 
-@router.post(path="/login", response_model=TokenResponse)
-@limiter.limit(limit_value="5/minute")
+@router.post(
+    path="/login",
+    response_model=TokenResponse,
+    dependencies=[Depends(RateLimiter(limiter=Limiter(Rate(5, Duration.SECOND * 60))))],
+)
 async def login(
-    request: Request,
     data: LoginRequest,
     service: AuthService = Depends(get_auth_service),
 ):
@@ -66,6 +68,7 @@ async def logout(
 
 @router.get(path="/me")
 async def me(user=Depends(get_current_user)):
+    logger.info(f"User info accessed for user_id: {user.id}")
     return {
         "id": str(user.id),
         "email": user.email,

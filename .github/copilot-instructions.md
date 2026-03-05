@@ -7,7 +7,7 @@
 **Package Manager**: uv (REQUIRED)  
 **Linter/Formatter**: ruff (REQUIRED)  
 **Type Checker**: ty (REQUIRED)  
-**Framework**: FastAPI + LangChain + LangGraph + Pydantic v2 + SQLAlchemy + Beanie + Redis  
+**Framework**: FastAPI + LangChain + LangGraph + Pydantic v2 + SQLAlchemy + Beanie + Redis + celery + loguru
 **Architecture**: Modular Monolith, feature-driven with clean code principles
 
 ---
@@ -100,10 +100,7 @@ async def login(
     return await service.login(data.email, data.password)
 
 
-Copy
 
-Insert at cursor
-python
 3. Repository Pattern
 # ✅ CORRECT: Repository handles all DB operations
 # repository.py
@@ -124,10 +121,7 @@ class UserRepository:
         await user.insert()
         return user
 
-Copy
 
-Insert at cursor
-python
 4. Service Layer Pattern
 # ✅ CORRECT: Service contains business logic
 # service.py
@@ -158,10 +152,7 @@ class AuthService:
         return user
 
 
-Copy
 
-Insert at cursor
-python
 5. Router Pattern (Thin Endpoints)
 # ✅ CORRECT: Thin routers delegate to services
 # router.py
@@ -184,10 +175,7 @@ async def register(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-Copy
 
-Insert at cursor
-python
 🗄️ Database Patterns
 MongoDB with Beanie
 # ✅ CORRECT: Beanie document model
@@ -206,10 +194,7 @@ class User(Document):
     class Settings:
         name = "users"
 
-Copy
 
-Insert at cursor
-python
 PostgreSQL with SQLAlchemy
 # ✅ CORRECT: Async session pattern
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -240,10 +225,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-Copy
 
-Insert at cursor
-python
 Redis Caching
 # ✅ CORRECT: Redis client with retry
 from redis.asyncio import Redis
@@ -267,10 +249,7 @@ def create_redis_client(url: str) -> Redis:
         health_check_interval=30,
     )
 
-Copy
 
-Insert at cursor
-python
 🔐 Configuration & Settings
 Settings Pattern with Pydantic
 # ✅ CORRECT: Type-safe settings with lru_cache
@@ -295,10 +274,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     return Settings()
 
-Copy
 
-Insert at cursor
-python
 🚀 Application Lifecycle
 Lifespan Management
 # ✅ CORRECT: Async context manager for startup/shutdown
@@ -333,10 +309,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Application stopped")
 
 
-Copy
 
-Insert at cursor
-python
 🛡️ Middleware Patterns
 Middleware Order (CRITICAL)
 # ✅ CORRECT: Add middleware in REVERSE order of execution
@@ -361,10 +334,7 @@ def create_app() -> FastAPI:
 
     return app
 
-Copy
 
-Insert at cursor
-python
 Custom Middleware Pattern
 # ✅ CORRECT: Pure ASGI middleware
 class MetricsMiddleware:
@@ -389,10 +359,7 @@ class MetricsMiddleware:
 
         await self.app(scope, receive, send_wrapper)
 
-Copy
 
-Insert at cursor
-python
 🎨 Pydantic v2 Patterns
 DTO (Data Transfer Objects)
 # ✅ CORRECT: Request/Response DTOs
@@ -415,10 +382,7 @@ class UserResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-Copy
 
-Insert at cursor
-python
 📝 Logging Patterns
 Structured Logging with Loguru
 # ✅ CORRECT: Structured logging with context
@@ -444,10 +408,7 @@ logger.error(
 with logger.contextualize(correlation_id=correlation_id, user_id=user_id):
     logger.info("Processing request")
 
-Copy
 
-Insert at cursor
-python
 ⚠️ Error Handling
 Custom Exception Pattern
 # ✅ CORRECT: Custom API exception
@@ -466,10 +427,7 @@ class APIException(HTTPException):
         self.data = data
         super().__init__(status_code=status_code, detail=message)
 
-Copy
 
-Insert at cursor
-python
 Global Exception Handler
 # ✅ CORRECT: Centralized exception handling
 async def global_exception_handler(request: Request, exc: Exception):
@@ -498,10 +456,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-Copy
 
-Insert at cursor
-python
 🧪 Type Hints (Python 3.12+)
 # ✅ CORRECT: Modern Python 3.12 type hints
 from collections.abc import Awaitable, Callable
@@ -529,10 +484,7 @@ def create_handler(
         pass
     return handler
 
-Copy
 
-Insert at cursor
-python
 📦 Package Structure & Imports
 init.py Pattern
 # ✅ CORRECT: Clean package exports
@@ -547,10 +499,7 @@ __all__ = [
     "create_redis_client",
 ]
 
-Copy
 
-Insert at cursor
-python
 Import Style
 # ✅ CORRECT: Import from package __init__.py
 from app.config import Settings, get_settings
@@ -561,10 +510,7 @@ from app.utils import logger
 from app.config.settings import get_settings
 from app.connections.mongodb import create_mongo_client
 
-Copy
 
-Insert at cursor
-python
 🚫 Anti-Patterns to Avoid
 ❌ Module-Level I/O
 # ❌ WRONG: I/O at import time
@@ -574,10 +520,7 @@ db = connect_to_database()  # Blocks startup!
 def get_db():
     return connect_to_database()
 
-Copy
 
-Insert at cursor
-python
 ❌ Global Mutable State
 # ❌ WRONG: Global mutable singleton
 config = load_config()
@@ -587,10 +530,7 @@ config = load_config()
 def get_config():
     return load_config()
 
-Copy
 
-Insert at cursor
-python
 ❌ Fat Endpoints
 # ❌ WRONG: Business logic in router
 @router.post("/users")
@@ -609,28 +549,26 @@ async def create_user(
 ):
     return await service.create_user(data)
 
-Copy
 
-Insert at cursor
-python
 🎯 Code Quality Checklist
-Before committing code, ensure:
 
- uv used for dependency management
- ruff format applied to all files
- ruff check --fix passed with no errors
- ty check passed with no type errors
- All functions have type hints
- All async I/O uses await
- No blocking operations in async functions
- Endpoints are thin (< 15 lines)
- Business logic in service layer
- Database operations in repository layer
- Proper error handling with custom exceptions
- Structured logging with context
- init.py exports public API
- No module-level mutable state
- Dependency injection used throughout
+uv used for dependency management
+
+All functions have type hints
+All async I/O uses await
+No blocking operations in async functions
+Endpoints are thin (< 15 lines)
+Business logic in service layer
+Database operations in repository layer
+Proper error handling with custom exceptions
+Structured logging with context
+init.py exports public API
+No module-level mutable state
+Dependency injection used throughout
+Use asyncer for sync code in async context
+No print statements (use logger)
+Remember: Always use uv + ruff + ty for all development tasks!
+
 📚 Quick Reference
 Command Cheat Sheet
 # Development
@@ -651,23 +589,98 @@ uv add package-name
 uv add --dev package-name
 uv lock
 
-Copy
 
-Insert at cursor
-bash
-File Naming Conventions
-model.py - Database models (Beanie/SQLAlchemy)
+these code quality rules needs to be passed for all code in the project, including tests, scripts, and documentation generation. Always run ruff and ty before committing code to ensure it meets the project's standards.
+[tool.ty.rules]
+unresolved-attribute = "warn"          # Allows Pydantic v2 magic
+redundant-cast = "warn"
+unused-ignore-comment = "warn"
+unresolved-import = "error"
+possibly-missing-attribute = "error"
+possibly-missing-import = "error"
+invalid-assignment = "error"
+unresolved-reference = "error"
+await-on-non-awaitable = "error"       # Critical for asyncpg/motor
+non-awaitable-in-async-function = "error"  # upgraded from warn
+possibly-unbound-variable = "error"
 
-dto.py - Pydantic request/response schemas
+[tool.ruff.lint]
+select = [
+    "E", "W",        # pycodestyle
+    "F",             # pyflakes (unused/undefined)
+    "I",             # isort
+    "UP",            # pyupgrade (modern syntax)
+    "B",             # bugbear (common bugs)
+    "A",             # builtins shadowing
+    "C4",            # comprehensions
+    "PERF",          # performance hints (hot paths)
+    "TRY",           # tryceratops (exceptions in async)
+    "ASYNC",         # async misuse (critical!)
+    "RUF",           # ruff-specific
+    "PL",            # pylint port (selective)
+    "ANN",           # annotations (complements ty)
+    "S",             # bandit (security)
+    "SIM",           # simplify
+    "PTH",           # pathlib over os.path
+    "TCH",           # type-checking imports
+    "RET",           # return statements
+    "ARG",           # unused arguments
+]
 
-router.py - FastAPI endpoints
+# Enable autofix for safe rules only
+fixable = [
+    "I",             # isort (import sorting)
+    "F401",          # unused imports
+    "UP",            # pyupgrade (syntax modernization)
+    "C4",            # comprehensions
+    "SIM",           # simplifications
+    "PTH",           # pathlib
+    "RUF",           # ruff-specific
+    "TCH",           # type-checking imports
+]
+unfixable = [
+    "B",             # bugbear (needs review)
+    "ANN",           # annotations (manual decision)
+    "S",             # security (needs review)
+]
+ignore = [
+    "E501",          # line-too-long → formatter handles
+    "ANN401",        # Any type (LangChain heavy)
+    "ISC001",        # conflicting with formatter
+    "TRY003",        # raise from e – sometimes verbose
+    "PLR0913",       # too-many-arguments (agents/graphs)
+    "PLR2004",       # magic values (AI logic)
+    "PLR0911",       # too-many-returns (graph flows)
+    "ANN001",        # Missing type annotation (too noisy in AI code)
+    "ANN002",        # Missing type annotation for function/method (too noisy in AI code)
+    "ANN003",        # Missing type annotation for *args (too noisy in AI code)
+    "ANN204",        # Missing type annotation for self (common in FastAPI)
+]
 
-service.py - Business logic
+[tool.ruff.lint.flake8-type-checking]
+strict = true
+exempt-modules = [
+    "pydantic",
+    "fastapi",
+    "langchain",
+    "langgraph",
+    "docling",
+]
 
-repository.py - Database operations
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "pydantic.Field",
+]
 
-dependency.py - DI factories
-
-constants.py - Feature constants
-
-Remember: Always use uv + ruff + ty for all development tasks!
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+known-third-party = ["fastapi", "pydantic", "sqlalchemy", "langchain"]
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "first-party",
+    "local-folder",
+]

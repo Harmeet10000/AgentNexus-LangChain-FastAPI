@@ -3,7 +3,7 @@
 import signal
 import sys
 
-from app.utils.logger import logger
+from app.utils import logger
 
 
 def setup_signal_handlers() -> None:
@@ -11,9 +11,9 @@ def setup_signal_handlers() -> None:
 
     def graceful_shutdown(signum: int, frame) -> None:
         """Handle graceful shutdown."""
-        sig_name = signal.Signals(signum).name
+        sig_name = signal.Signals(value=signum).name
         logger.warning(f"Received {sig_name}, shutting down gracefully")
         sys.exit(0)
 
-    signal.signal(signal.SIGTERM, graceful_shutdown)
-    signal.signal(signal.SIGINT, graceful_shutdown)
+    signal.signal(signalnum=signal.SIGTERM, handler=graceful_shutdown)
+    signal.signal(signalnum=signal.SIGINT, handler=graceful_shutdown)

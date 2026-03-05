@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
 
     # --- Server Configuration ---
-    HOST: str = Field(default="0.0.0.0")
+    HOST: str = Field(default="0.0.0.0")  # noqa: S104
     PORT: int = Field(default=5000)
     WORKERS: int = Field(default=1)
 

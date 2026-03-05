@@ -15,7 +15,7 @@ from prometheus_client import (
     generate_latest,
 )
 
-from app.utils.logger import logger
+from app.utils import logger, request_state
 
 # Context variable for correlation ID (thread-safe)
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
@@ -25,29 +25,32 @@ metrics_registry = CollectorRegistry()
 
 # Metrics
 http_requests_total = Counter(
-    "http_requests_total",
-    "Total HTTP requests",
-    ["method", "endpoint", "status_code", "project"],
+    name="http_requests_total",
+    documentation="Total HTTP requests",
+    labelnames=["method", "endpoint", "status_code", "project"],
     registry=metrics_registry,
 )
 
 http_request_duration_seconds = Histogram(
-    "http_request_duration_seconds",
-    "HTTP request duration in seconds",
-    ["method", "endpoint", "status_code", "project"],
+    name="http_request_duration_seconds",
+    documentation="HTTP request duration in seconds",
+    labelnames=["method", "endpoint", "status_code", "project"],
     buckets=(0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0),
     registry=metrics_registry,
 )
 
 http_requests_in_progress = Gauge(
-    "http_requests_in_progress",
-    "HTTP requests in progress",
-    ["method", "endpoint", "project"],
+    name="http_requests_in_progress",
+    documentation="HTTP requests in progress",
+    labelnames=["method", "endpoint", "project"],
     registry=metrics_registry,
 )
 
 app_up = Gauge(
-    "app_up", "Application up status", ["project"], registry=metrics_registry
+    name="app_up",
+    documentation="Application up status",
+    labelnames=["project"],
+    registry=metrics_registry
 )
 
 
@@ -72,21 +75,56 @@ def _normalize_path(path: str) -> str:
     return "/".join(normalized)
 
 
-async def correlation_middleware(request: Request, call_next: Callable) -> Response:
-    """Add correlation ID to requests for distributed tracing."""
-    # Check if correlation ID already exists (from upstream service)
-    correlation_id = request.headers.get("X-Correlation-ID") or generate(size=21)
 
-    correlation_id_var.set(correlation_id)
-    request.state.correlation_id = correlation_id
+async def log_request_state_middleware(request: Request, call_next: Callable) -> Response:
+    """Add request state tracking to all logs."""
+    # Check if request_id already exists (from upstream service)
+    request_id = request.headers.get("X-Correlation-ID") or generate(size=21)
 
-    # Bind correlation_id to logger context for this request
-    with logger.contextualize(
-        correlation_id=correlation_id, path=request.url.path, method=request.method
-    ):
-        response = await call_next(request)
-        response.headers["X-Correlation-ID"] = correlation_id
-        return response
+    state = {
+        "request_id": request_id,
+        "path": request.url.path,
+        "method": request.method,
+        "user_id": None,
+        "layer": "middleware",
+    }
+
+    token = request_state.set(state)
+    request.state.correlation_id = request_id
+
+    start_time = time.perf_counter()
+    with logger.contextualize(**state):
+        try:
+            logger.info("Request started")
+
+            response = await call_next(request)
+
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 1)
+
+            # Update state (fresh copy — avoids mutation races)
+            exit_state = state.copy()
+            exit_state.update(
+                {
+                    "layer": "http_middleware_exit",
+                    "status_code": response.status_code,
+                    "duration_ms": duration_ms,
+                }
+            )
+
+            logger.bind(**exit_state).info("Request finished")
+
+            # Propagate correlation id downstream
+            response.headers["X-Correlation-ID"] = request_id
+
+            return response  # noqa: TRY300
+
+        except Exception:
+            # You can log more here or let global exception handler do it
+            logger.exception("Request failed")
+            raise
+
+        finally:
+            request_state.reset(token)
 
 
 class MetricsMiddleware:

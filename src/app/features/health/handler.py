@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import Request
 
-from app.utils.httpResponse import http_response
+from app.utils import http_response
 
 from .service import (
     check_database,

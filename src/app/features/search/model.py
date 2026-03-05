@@ -4,7 +4,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.database.base import Base
+from app.shared.base import Base
 
 
 class DocumentVector(Base):

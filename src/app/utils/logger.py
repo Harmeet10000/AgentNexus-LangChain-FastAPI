@@ -1,10 +1,14 @@
 import sys
+from contextvars import ContextVar
 from datetime import UTC
 from typing import Any
 
 from loguru import logger as loguru_logger
 
 from app.config.settings import get_settings
+
+# Global context var for entire request state
+request_state: ContextVar[dict[str, Any]] = ContextVar("request_state", default={})
 
 
 def console_format(record: dict[str, Any]) -> str:
@@ -58,21 +62,21 @@ def setup_logging() -> None:
         colorize=True,
         backtrace=settings.LOG_BACKTRACE,
         diagnose=settings.LOG_DIAGNOSE,
-    )
+    )  # ty:ignore[no-matching-overload]
 
     # File handler with JSON serialization
-    settings.LOG_DIR.mkdir(parents=True, exist_ok=True)
-    loguru_logger.add(
-        sink=settings.LOG_DIR / "app_{time:YYYY-MM-DD}.log",
-        format="{message}",
-        level=settings.LOG_LEVEL,
-        rotation=settings.LOG_ROTATION,
-        retention=settings.LOG_RETENTION,
-        compression=settings.LOG_COMPRESSION,
-        serialize=True,
-        backtrace=settings.LOG_BACKTRACE,
-        diagnose=settings.LOG_DIAGNOSE,
-    )
+    # settings.LOG_DIR.mkdir(parents=True, exist_ok=True)
+    # loguru_logger.add(
+    #     sink=settings.LOG_DIR / "app_{time:YYYY-MM-DD}.log",
+    #     format="{message}",
+    #     level=settings.LOG_LEVEL,
+    #     rotation=settings.LOG_ROTATION,
+    #     retention=settings.LOG_RETENTION,
+    #     compression=settings.LOG_COMPRESSION,
+    #     serialize=True,
+    #     backtrace=settings.LOG_BACKTRACE,
+    #     diagnose=settings.LOG_DIAGNOSE,
+    # )
 
 
 # Initialize logger with setup

@@ -1,13 +1,11 @@
-"""Rate limiting using slowapi and Redis."""
+"""Rate limiting using fastapi-limiter and Redis."""
 
 from enum import Enum
 
 from pydantic import BaseModel
 from redis.asyncio import Redis
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
-from app.config.settings import get_settings
+from app.config import get_settings
 
 
 class RateLimitScope(str, Enum):
@@ -37,20 +35,10 @@ RATE_LIMIT_CONFIGS = {
 
 
 class RateLimiter:
-    """Rate limiter using slowapi and Redis backend."""
+    """Rate limiter using fastapi-limiter and Redis backend."""
 
     def __init__(self, redis_client: Redis | None = None):
-        self._limiter: Limiter | None = None
         self.redis_client = redis_client
-
-    def get_limiter(self) -> Limiter:
-        """Get slowapi limiter instance."""
-        if self._limiter is None:
-            self._limiter = Limiter(
-                key_func=get_remote_address,
-                storage_uri=get_settings().REDIS_URL,
-            )
-        return self._limiter
 
     async def check_rate_limit(
         self,
