@@ -26,7 +26,7 @@ def create_token(
     email: str,
     token_type: str,
     expires_minutes: int,
-):
+) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": user_id,

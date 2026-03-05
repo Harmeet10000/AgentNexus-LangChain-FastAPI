@@ -18,7 +18,9 @@ class Settings(BaseSettings):
         # Case sensitivity is set to True for clarity, but False works too
         # since we are enforcing the case in the model now.
         case_sensitive=True,
-        extra="ignore",  # Ignore environment variables not explicitly defined in this model
+        slots=True,  # Faster attribute access  # ty:ignore[invalid-key]
+        frozen=True,  # Immutable configuration
+        extra="forbid",  # Prevents "pollution" from unknown env vars
     )
 
     # --- Application Settings ---

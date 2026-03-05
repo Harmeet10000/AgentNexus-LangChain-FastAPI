@@ -44,14 +44,13 @@ def build_chat_model(
     """Return a configured ChatGoogleGenerativeAI instance."""
     return ChatGoogleGenerativeAI(
         model=model_name or _mcfg.gemini_pro_model,
-        temperature=temperature
-        if temperature is not None
-        else _mcfg.default_temperature,
+        temperature=temperature if temperature is not None else _mcfg.default_temperature,
         max_output_tokens=max_tokens or _mcfg.default_max_tokens,
         google_api_key=_mcfg.google_api_key.get_secret_value(),
         streaming=streaming,
         timeout=_mcfg.default_timeout,
         **kwargs,
+        # http_async_client=app.state.http_client,
     )
 
 
@@ -90,7 +89,7 @@ async def ainvoke_text(
 async def abatch_text(
     prompts: list[str],
     *,
-    system: str | None = None,
+    system: str | None = None,get_httpx_client
     model: ChatGoogleGenerativeAI | None = None,
     max_concurrency: int | None = None,
 ) -> list[str]:
