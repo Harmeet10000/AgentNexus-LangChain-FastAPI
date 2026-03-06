@@ -1,67 +1,50 @@
-"""Fine-tuned Embeddings - Custom embedding model for domain-specific retrieval"""
+"""Fine-tuned embeddings RAG with LangChain generation for final answers."""
+
+from __future__ import annotations
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
-from pydantic_ai import Agent
 from sentence_transformers import SentenceTransformer
 
-agent = Agent(
-    "openai:gpt-4o", system_prompt="You are a RAG assistant with fine-tuned embeddings."
-)
+from app.shared.langchain_layer.models import build_chat_model
 
-conn = psycopg2.connect("dbname=rag_db")
-register_vector(conn)
-
-# Load fine-tuned embedding model (trained on domain data)
-embedding_model = SentenceTransformer("./fine_tuned_model")  # Custom trained model
+_CONN = psycopg2.connect("dbname=rag_db")
+register_vector(_CONN)
+_CHAT = build_chat_model()
+_EMBEDDING_MODEL = SentenceTransformer("./fine_tuned_model")
 
 
-def prepare_training_data():
-    """Create domain-specific query-document pairs"""
-    training_pairs = [
+def prepare_training_data() -> list[tuple[str, str]]:
+    return [
         ("What is EBITDA?", "financial_doc_about_ebitda.txt"),
         ("Explain capital expenditure", "capex_explanation.txt"),
-        # ... thousands more domain-specific pairs
     ]
-    return training_pairs
 
 
-def fine_tune_model():
-    """Fine-tune on domain data (one-time process)"""
-    base_model = SentenceTransformer("all-MiniLM-L6-v2")
-    training_data = prepare_training_data()
-    # Train with MultipleNegativesRankingLoss
-    fine_tuned_model = base_model.fit(training_data, epochs=3)
-    fine_tuned_model.save("./fine_tuned_model")
+def get_embedding(text: str) -> list[float]:
+    return _EMBEDDING_MODEL.encode(text).tolist()
 
 
-def get_embedding(text: str):
-    """Use fine-tuned model for embeddings"""
-    return embedding_model.encode(text)
+def _chunk_text(text: str, size: int = 500) -> list[str]:
+    return [text[i : i + size] for i in range(0, len(text), size)]
 
 
-def ingest_document(text: str):
-    chunks = [text[i : i + 500] for i in range(0, len(text), 500)]
-    with conn.cursor() as cur:
-        for chunk in chunks:
-            embedding = get_embedding(chunk)  # Uses fine-tuned model
+def ingest_document(text: str) -> None:
+    with _CONN.cursor() as cur:
+        for chunk in _chunk_text(text):
             cur.execute(
                 "INSERT INTO chunks (content, embedding) VALUES (%s, %s)",
-                (chunk, embedding),
+                (chunk, get_embedding(chunk)),
             )
-    conn.commit()
+    _CONN.commit()
 
 
-@agent.tool
-def search_knowledge_base(query: str) -> str:
-    with conn.cursor() as cur:
-        query_embedding = get_embedding(query)  # Uses fine-tuned model
+def search_knowledge_base(query: str, *, top_k: int = 3) -> str:
+    with _CONN.cursor() as cur:
         cur.execute(
-            "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT 3",
-            (query_embedding,),
+            "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT %s",
+            (get_embedding(query), top_k),
         )
-        return "\n".join([row[0] for row in cur.fetchall()])
-
-
-result = agent.run_sync("What is working capital?")
-print(result.data)
+        context = "\n\n".join(row[0] for row in cur.fetchall())
+    prompt = f"Answer using this context.\n\nQuestion: {query}\n\nContext:\n{context}"
+    return str(_CHAT.invoke(prompt).content)

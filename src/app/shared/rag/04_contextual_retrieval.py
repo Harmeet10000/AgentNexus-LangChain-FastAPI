@@ -1,54 +1,53 @@
-"""Contextual Retrieval - Add document context to chunks (Anthropic)"""
+"""Contextual Retrieval - LLM context prefixing + LangChain retrieval function."""
+
+from __future__ import annotations
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
-from pydantic_ai import Agent
 
-agent = Agent("anthropic:claude-3-5-sonnet", system_prompt="You are a RAG assistant.")
+from app.shared.langchain_layer.models import build_chat_model, build_embedding_model
 
-conn = psycopg2.connect("dbname=rag_db")
-register_vector(conn)
+_CONN = psycopg2.connect("dbname=rag_db")
+register_vector(_CONN)
+_EMBEDDINGS = build_embedding_model()
+_CHAT = build_chat_model()
+
+
+def _embed(text: str) -> list[float]:
+    return _EMBEDDINGS.embed_query(text)
+
+
+def _chunk_text(text: str, size: int = 500) -> list[str]:
+    return [text[i : i + size] for i in range(0, len(text), size)]
 
 
 def add_context_to_chunk(document: str, chunk: str) -> str:
-    """Use LLM to generate chunk-specific context"""
-    prompt = f"""Document: {document[:500]}...
-
-Chunk: {chunk}
-
-Provide brief context explaining what this chunk is about in relation to the document."""
-
-    context = llm_generate(prompt)  # Returns: "This chunk is from..."
-    return f"{context} {chunk}"
+    prompt = (
+        "Provide a short contextual prefix for this chunk.\n\n"
+        f"Document preview:\n{document[:700]}\n\nChunk:\n{chunk}"
+    )
+    context = str(_CHAT.invoke(prompt).content).strip()
+    return f"{context}\n{chunk}"
 
 
-def ingest_document(text: str):
-    chunks = [text[i : i + 500] for i in range(0, len(text), 500)]
-
-    with conn.cursor() as cur:
-        for chunk in chunks:
-            # Add contextual prefix to chunk
-            contextualized_chunk = add_context_to_chunk(text, chunk)
-
-            # Embed contextualized version
-            embedding = get_embedding(contextualized_chunk)
+def ingest_document(text: str) -> None:
+    with _CONN.cursor() as cur:
+        for chunk in _chunk_text(text):
+            contextualized = add_context_to_chunk(text, chunk)
             cur.execute(
                 "INSERT INTO chunks (content, embedding) VALUES (%s, %s)",
-                (contextualized_chunk, embedding),
+                (contextualized, _embed(contextualized)),
             )
-    conn.commit()
+    _CONN.commit()
 
 
-@agent.tool
-def search_knowledge_base(query: str) -> str:
-    with conn.cursor() as cur:
-        query_embedding = get_embedding(query)
+def search_knowledge_base(query: str, *, top_k: int = 3) -> str:
+    with _CONN.cursor() as cur:
         cur.execute(
-            "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT 3",
-            (query_embedding,),
+            "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT %s",
+            (_embed(query), top_k),
         )
-        return "\n".join([row[0] for row in cur.fetchall()])
-
-
-result = agent.run_sync("What were Q2 earnings?")
-print(result.data)
+        rows = [row[0] for row in cur.fetchall()]
+    context = "\n\n".join(rows)
+    prompt = f"Answer from the retrieved context.\n\nQuestion: {query}\n\nContext:\n{context}"
+    return str(_CHAT.invoke(prompt).content)

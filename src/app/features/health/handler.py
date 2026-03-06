@@ -8,9 +8,12 @@ from fastapi import Request
 from app.utils import http_response
 
 from .service import (
-    check_database,
+    check_celery,
     check_disk,
     check_memory,
+    check_mongodb,
+    check_neo4j,
+    check_postgres,
     check_redis,
     get_application_health,
     get_system_health,
@@ -49,11 +52,20 @@ async def health_check(request: Request) -> Any:
     except RuntimeError:
         redis_client = None
 
+    # Get Postgres session factory from app.state
+    session_local = getattr(request.app.state, "db_session_local", None)
+
+    # Get Neo4j driver from app.state
+    neo4j_driver = getattr(request.app.state, "neo4j_driver", None)
+
+    # Get optional Celery app from app.state
+    celery_app = getattr(request.app.state, "celery", None)
+
     # Run async checks for external services
     database_check = {"status": "unknown", "state": "not_configured"}
     if mongo_client:
         try:
-            database_check = await check_database(mongo_client)
+            database_check = await check_mongodb(mongo_client)
         except Exception as e:
             database_check = {"status": "unhealthy", "state": "error", "error": str(e)}
 
@@ -64,12 +76,37 @@ async def health_check(request: Request) -> Any:
         except Exception as e:
             redis_check = {"status": "unhealthy", "state": "error", "error": str(e)}
 
+    postgres_check = {"status": "unknown", "state": "not_configured"}
+    if session_local:
+        try:
+            async with session_local() as session:
+                postgres_check = await check_postgres(session)
+        except Exception as e:
+            postgres_check = {"status": "unhealthy", "state": "error", "error": str(e)}
+
+    neo4j_check = {"status": "unknown", "state": "not_configured"}
+    if neo4j_driver:
+        try:
+            neo4j_check = await check_neo4j(neo4j_driver)
+        except Exception as e:
+            neo4j_check = {"status": "unhealthy", "state": "error", "error": str(e)}
+
+    celery_check = check_celery(celery_app)
+
     # Synchronous checks
     memory_check = check_memory()
     disk_check = check_disk()
 
     # Determine overall health status
-    all_checks = [database_check, redis_check, memory_check, disk_check]
+    all_checks = [
+        database_check,
+        redis_check,
+        postgres_check,
+        neo4j_check,
+        celery_check,
+        memory_check,
+        disk_check,
+    ]
     overall_status = "healthy"
 
     if any(check.get("status") == "unhealthy" for check in all_checks):
@@ -85,6 +122,9 @@ async def health_check(request: Request) -> Any:
         "checks": {
             "database": database_check,
             "redis": redis_check,
+            "postgres": postgres_check,
+            "neo4j": neo4j_check,
+            "celery": celery_check,
             "memory": memory_check,
             "disk": disk_check,
         },

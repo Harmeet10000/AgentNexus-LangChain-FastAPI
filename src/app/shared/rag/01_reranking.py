@@ -1,50 +1,54 @@
-"""Re-ranking RAG - Two-stage retrieval with cross-encoder"""
+"""Re-ranking RAG - Two-stage retrieval with LangChain + cross-encoder."""
+
+from __future__ import annotations
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
-from pydantic_ai import Agent
+from sentence_transformers import CrossEncoder
 
-agent = Agent("openai:gpt-4o", system_prompt="You are a RAG assistant with re-ranking.")
+from app.shared.langchain_layer.models import build_chat_model, build_embedding_model
 
-conn = psycopg2.connect("dbname=rag_db")
-register_vector(conn)
+_CONN = psycopg2.connect("dbname=rag_db")
+register_vector(_CONN)
+_EMBEDDINGS = build_embedding_model()
+_CHAT = build_chat_model()
+_RERANKER = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
 
-def ingest_document(text: str):
-    chunks = [text[i : i + 500] for i in range(0, len(text), 500)]
-    with conn.cursor() as cur:
+def _chunk_text(text: str, size: int = 500) -> list[str]:
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+def _embed(text: str) -> list[float]:
+    return _EMBEDDINGS.embed_query(text)
+
+
+def ingest_document(text: str) -> None:
+    """Split and store document chunks with embeddings."""
+    chunks = _chunk_text(text)
+    with _CONN.cursor() as cur:
         for chunk in chunks:
-            embedding = get_embedding(chunk)
             cur.execute(
                 "INSERT INTO chunks (content, embedding) VALUES (%s, %s)",
-                (chunk, embedding),
+                (chunk, _embed(chunk)),
             )
-    conn.commit()
+    _CONN.commit()
 
 
-@agent.tool
-def search_with_reranking(query: str) -> str:
-    """Two-stage: fast retrieval + accurate reranking"""
-    # Stage 1: Fast vector search (retrieve 20 candidates)
-    with conn.cursor() as cur:
-        query_embedding = get_embedding(query)
+def search_with_reranking(query: str, *, top_k: int = 5, candidate_k: int = 20) -> str:
+    """Retrieve with vectors, then rerank with a cross-encoder."""
+    with _CONN.cursor() as cur:
         cur.execute(
-            "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT 20",
-            (query_embedding,),
+            "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT %s",
+            (_embed(query), candidate_k),
         )
-        candidates = [row[0] for row in cur.fetchall()]
+        candidates: list[str] = [row[0] for row in cur.fetchall()]
 
-    # Stage 2: Re-rank with cross-encoder
-    scored_results = []
-    for doc in candidates:
-        score = cross_encoder_score(query, doc)  # Assume cross-encoder function
-        scored_results.append((doc, score))
+    if not candidates:
+        return "No relevant context found."
 
-    # Return top 5 after re-ranking
-    scored_results.sort(key=lambda x: x[1], reverse=True)
-    return "\n".join([doc for doc, _ in scored_results[:5]])
-
-
-# Run agent
-result = agent.run_sync("Explain neural networks")
-print(result.data)
+    scores = _RERANKER.predict([(query, doc) for doc in candidates])
+    ranked = sorted(zip(candidates, scores, strict=False), key=lambda item: item[1], reverse=True)
+    context = "\n\n".join(doc for doc, _ in ranked[:top_k])
+    prompt = f"Answer the question using only this context.\n\nQuestion: {query}\n\nContext:\n{context}"
+    return str(_CHAT.invoke(prompt).content)
