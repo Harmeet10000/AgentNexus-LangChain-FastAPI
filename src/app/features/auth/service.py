@@ -3,16 +3,17 @@ from datetime import UTC, datetime
 from fastapi import HTTPException
 from jose import JWTError, jwt
 
-from app.config.settings import get_settings
-from app.features.auth.dto import RegisterRequest
-from app.features.auth.model import User
-from app.features.auth.repository import RefreshTokenRepository, UserRepository
-from app.features.auth.security import (
+from app.config import get_settings
+from app.features.auth import (
+    RefreshTokenRepository,
+    RegisterRequest,
+    User,
+    UserRepository,
     create_token,
     hash_password,
     verify_password,
 )
-from app.utils.logger import logger
+from app.utils import logger
 
 settings = get_settings()
 

@@ -118,8 +118,8 @@ def create_app() -> FastAPI:
         return Response(content=data, media_type=content_type)
 
     # Include feature routers
-    app.include_router(v1_router)
-    app.include_router(v2_router)
+    app.include_router(router=v1_router)
+    app.include_router(router=v2_router)
 
     # 404 handler (Catch-all route)
     @app.api_route(

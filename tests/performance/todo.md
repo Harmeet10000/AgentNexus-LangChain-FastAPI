@@ -61,6 +61,7 @@ SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
 26. optimise pydantic models for speed by providing config and include it in copilot-instructions            DONE
 31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you arent just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).                    DONE
 25. Use background tasks so users dont wait for non-critical operations   DONE
+63. No connection pooling for the LLM client - langchain_google_genai uses httpx under the hood. Without explicit connection pool configuration, each concurrent request potentially opens a new TCP connection to the Google API. This adds 50-150ms per cold request.   DONE
 6. set up performance tests
 17. refactor vectorStore code
 18. refactor RAG code
@@ -92,8 +93,6 @@ Under high load, all batch requests start simultaneously and race for the semaph
 aembed_batch calls the API every time. Embeddings for the same text are deterministic — a simple LRU cache keyed on SHA256(text) would eliminate redundant API calls entirely.
 62. Model instances are rebuilt on every call
 build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's called. The model object should be a module-level singleton (or per-spec singleton) since it's stateless.
-63. No connection pooling for the LLM client
-langchain_google_genai uses httpx under the hood. Without explicit connection pool configuration, each concurrent request potentially opens a new TCP connection to the Google API. This adds 50-150ms per cold request.
 64. No eval framework
 There's no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 No structured reasoning traces
@@ -108,7 +107,11 @@ The agent just produces output. For debugging production failures you need to st
 70. rewrite health, serach & auth(see point 10 above) for using APIExceptions, removing http_response, removing handler file and use dependencies file 
 71. ensure response shape is uniform through out the app and ensure correct import usage from __init__ 
 73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better and update FastAPI Skill
-
+74. learn about TOML 
+75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
+76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach? 
+77. learn if langchain recommends a way of making APIs between Frontend and backend
+78. use toons for efficient token utilisation.
 ---
 # Agent architecture 
   user should be authenticated before anything for better state context(langgraph)
@@ -127,6 +130,62 @@ The agent just produces output. For debugging production failures you need to st
 
 6. Eliminating Ambiguity with Action Schemas
     Even with valid data, agents often fail because their intent is too broad (e.g., "help the team").     The Problem: LLMs may interpret vague instructions in ways that arent automatable (assigning vs. closing vs. escalating).      The Solution: Implement Action Schemas (using tools like Zod). These force the agent to choose from a "discriminated union" of specific, predefined actions.      Benefit: Every agent output must resolve to an explicit, valid command, turning unpredictable text into predictable execution.
+7. Task Router
+     │
+Planner Agent
+     │
+Research Agent
+     │
+Tool Agent
+     │
+Evaluator Agent
+Each one acts independently.
+
+Communication happens via messages.
+IngestionAgent
+     │
+ClauseExtractionAgent
+     │
+RiskAnalysisAgent
+     │
+PrecedentSearchAgent
+     │
+SummaryAgent
+No long-lived state.
+
+State lives in:
+
+message queues
+
+databases
+
+distributed storage
+
+Actors simply reconstruct state from messages.
+
+This principle is extremely powerful for AI agents.
+
+Because LLM agents are inherently unreliable.
+
+If an agent crashes:
+
+restart agent
+replay messages
+continue workflow
+# it is a harness when  
+LLM with access to a complete runtime environment, including bash executions, file system access, web search, and external APIs. This is a powerful but experimental stage
+#  it becomes multiagent system when
+where an orchestrator agent manages multiple sub-agents, each with its own context window. This helps manage context bloat in longer tasks 
+
+
+# best practice for MCP tools
+https://youtu.be/bvuaF0B9vfA?si=x1KsfjpjbLxxTFpv
+1. Focus on Intent, Not Operations (0:43): Design MCP tools around the user's intent (e.g., "track order") rather than exposing individual operations (e.g., "get user by email," "get last order"). The MCP tool should handle the underlying complexity.
+2. Flatten Arguments (2:05): Avoid using dictionaries for MCP tool arguments as this can lead to agent hallucination. Instead, declare specific, flattened arguments to make it easier for the agent to use.
+3. Instructions are Context (4:15): The LLM (Large Language Model) uses not only tool names but also descriptions, argument hints, and even the tool's internal code to understand its purpose and how to use it effectively. Provide clear error messages and success information.
+4. Curate Ruthlessly (5:04): Limit MCP servers to a maximum of 10 tools to prevent bloated context for the LLM. Each MCP server should have a single job, and unused or low-usage tools should be deleted. Consider splitting tools by persona (e.g., user vs. admin).
+5. Naming Tools (5:54): Prefix tool names with the server name (e.g., "linear create issue" instead of "create issue") to avoid confusion when multiple servers might have similarly named functions.
+6. Implement Pagination (6:41): Just like with APIs, MCP servers should support pagination for large results. Provide arguments for pagination (e.g., offset, limit) and return relevant information like total counts to the agent.
 
 
 # best practices for DI and req.app.stateEspecially bad for:

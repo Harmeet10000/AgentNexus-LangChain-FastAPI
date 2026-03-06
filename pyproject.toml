@@ -61,12 +61,13 @@ dependencies = [
     # --- MESSAGE QUEUE: CELERY + RABBITMQ ---
     "celery>=5.6.2",
     "flower>=2.0.1",
+    "faststream>=0.6.2",
     # --- MEMORY/GRAPH ---
     "mem0ai>=1.0.0",
     "graphiti-core[google-genai]>=0.24.1",
     # --- WEB SCRAPING ---
     "crawl4ai>=0.8.0,<1.0.0",
-    "bleach>=6.2.0,<7.0.0",
+    "nh3>=0.3.3",
     # --- DOCUMENT PROCESSING ---
     "docling>=2.72.0",
     "pageindex>=0.2.5.1",
@@ -92,16 +93,15 @@ dependencies = [
     "opentelemetry-api>=1.39.1",
     "opentelemetry-sdk>=1.39.1",
     "opentelemetry-instrumentation-sqlalchemy>=0.60b1",
-    # --- STREAMING ---
-    "faststream>=0.6.2",
     # --- LANGUAGE DETECTION ---
     "langextract>=1.1.1",
     # --- MCP ---
-    "fastmcp>=2.11.0,<3.0.0",
+    "fastmcp>=3.1.0",
     # --- OTHER ---
     "toons>=0.5.3",
     "urllib3>=2.2.0",
     "charset-normalizer>=3.0.0",
+
 ]
 
 [project.scripts]
@@ -227,7 +227,7 @@ fixable = [
     "SIM",           # simplifications
     "PTH",           # pathlib
     "RUF",           # ruff-specific
-    "TCH",           # type-checking imports
+    "TC",           # type-checking imports
 ]
 unfixable = [
     "B",             # bugbear (needs review)
@@ -300,7 +300,6 @@ section-order = [
     "ANN",       # No type annotations required in generated code
     "E402",      # Allow imports not at top
     "F841",      # Allow unused variables
-    "ANN",       # No type annotations required
 ]
 "**/_*.py" = ["ANN201"]             # Private modules
 
