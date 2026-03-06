@@ -14,15 +14,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import mimetypes
-from collections.abc import Any, AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
+from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from pydantic import BaseModel
 
-from src.app.config.settings import get_settings
+from app.config import get_settings
+from app.connections import get_httpx_client
 
 _settings = get_settings()
 _mcfg = _settings.model
@@ -50,7 +52,7 @@ def build_chat_model(
         streaming=streaming,
         timeout=_mcfg.default_timeout,
         **kwargs,
-        # http_async_client=app.state.http_client,
+        http_async_client=get_httpx_client(),
     )
 
 
@@ -89,7 +91,7 @@ async def ainvoke_text(
 async def abatch_text(
     prompts: list[str],
     *,
-    system: str | None = None,get_httpx_client
+    system: str | None = None,
     model: ChatGoogleGenerativeAI | None = None,
     max_concurrency: int | None = None,
 ) -> list[str]:

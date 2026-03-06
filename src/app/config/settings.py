@@ -20,7 +20,7 @@ class Settings(BaseSettings):
         case_sensitive=True,
         slots=True,  # Faster attribute access  # ty:ignore[invalid-key]
         frozen=True,  # Immutable configuration
-        extra="forbid",  # Prevents "pollution" from unknown env vars
+        extra="ignore",  # Prevents "pollution" from unknown env vars
     )
 
     # --- Application Settings ---
