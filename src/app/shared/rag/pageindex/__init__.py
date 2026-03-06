@@ -1,12 +1,6 @@
-"""RAG (Retrieval-Augmented Generation) utilities."""
+"""PageIndex async utilities."""
 
-from app.shared.rag.langextract import (
-    LangExtractBatchConfig,
-    LangExtractConfig,
-    abatch_extract_langextract,
-    aextract_langextract,
-)
-from app.shared.rag.pageindex import (
+from app.shared.rag.pageindex.client import (
     PageIndexBatchConfig,
     PageIndexChatConfig,
     PageIndexConfig,
@@ -19,15 +13,11 @@ from app.shared.rag.pageindex import (
 )
 
 __all__ = [
-    "LangExtractBatchConfig",
-    "LangExtractConfig",
     "PageIndexBatchConfig",
     "PageIndexChatConfig",
     "PageIndexConfig",
-    "abatch_extract_langextract",
     "abatch_page_index",
     "achat_completion",
-    "aextract_langextract",
     "apage_index",
     "astream_chat_completions",
     "create_node_map",
