@@ -1,62 +1,67 @@
-"""Context-Aware Chunking - Semantic boundaries using embedding similarity"""
+"""Context-aware chunking using embedding similarity + LangChain retrieval."""
+
+from __future__ import annotations
+
+import math
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
-from pydantic_ai import Agent
 
-agent = Agent(
-    "openai:gpt-4o", system_prompt="You are a RAG assistant with semantic chunking."
-)
+from app.shared.langchain_layer.models import build_chat_model, build_embedding_model
 
-conn = psycopg2.connect("dbname=rag_db")
-register_vector(conn)
+_CONN = psycopg2.connect("dbname=rag_db")
+register_vector(_CONN)
+_EMBEDDINGS = build_embedding_model()
+_CHAT = build_chat_model()
 
 
-def semantic_chunk(text: str, similarity_threshold=0.8) -> list[str]:
-    """Chunk based on semantic similarity, not fixed size"""
-    sentences = text.split(". ")  # Simple sentence split
-    sentence_embeddings = [get_embedding(s) for s in sentences]
+def _embed(text: str) -> list[float]:
+    return _EMBEDDINGS.embed_query(text)
 
-    chunks = []
+
+def _cosine_similarity(v1: list[float], v2: list[float]) -> float:
+    dot = sum(a * b for a, b in zip(v1, v2, strict=False))
+    n1 = math.sqrt(sum(a * a for a in v1))
+    n2 = math.sqrt(sum(b * b for b in v2))
+    if n1 == 0 or n2 == 0:
+        return 0.0
+    return dot / (n1 * n2)
+
+
+def semantic_chunk(text: str, *, similarity_threshold: float = 0.8) -> list[str]:
+    sentences = [part.strip() for part in text.split(". ") if part.strip()]
+    if not sentences:
+        return []
+    sentence_embeddings = [_embed(sentence) for sentence in sentences]
+    chunks: list[str] = []
     current_chunk = [sentences[0]]
-
-    for i in range(len(sentences) - 1):
-        similarity = cosine_similarity(
-            sentence_embeddings[i], sentence_embeddings[i + 1]
-        )
-
-        if similarity > similarity_threshold:  # Same topic
-            current_chunk.append(sentences[i + 1])
-        else:  # Topic boundary detected
-            chunks.append(". ".join(current_chunk))
-            current_chunk = [sentences[i + 1]]
-
+    for idx in range(len(sentences) - 1):
+        similarity = _cosine_similarity(sentence_embeddings[idx], sentence_embeddings[idx + 1])
+        if similarity > similarity_threshold:
+            current_chunk.append(sentences[idx + 1])
+            continue
+        chunks.append(". ".join(current_chunk))
+        current_chunk = [sentences[idx + 1]]
     chunks.append(". ".join(current_chunk))
     return chunks
 
 
-def ingest_document(text: str):
-    chunks = semantic_chunk(text)  # Semantic chunking
-    with conn.cursor() as cur:
+def ingest_document(text: str) -> None:
+    chunks = semantic_chunk(text)
+    with _CONN.cursor() as cur:
         for chunk in chunks:
-            embedding = get_embedding(chunk)
             cur.execute(
                 "INSERT INTO chunks (content, embedding) VALUES (%s, %s)",
-                (chunk, embedding),
+                (chunk, _embed(chunk)),
             )
-    conn.commit()
+    _CONN.commit()
 
 
-@agent.tool
-def search_knowledge_base(query: str) -> str:
-    with conn.cursor() as cur:
-        query_embedding = get_embedding(query)
+def search_knowledge_base(query: str, *, top_k: int = 3) -> str:
+    with _CONN.cursor() as cur:
         cur.execute(
-            "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT 3",
-            (query_embedding,),
+            "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT %s",
+            (_embed(query), top_k),
         )
-        return "\n".join([row[0] for row in cur.fetchall()])
-
-
-result = agent.run_sync("What is deep learning?")
-print(result.data)
+        context = "\n\n".join(row[0] for row in cur.fetchall())
+    return str(_CHAT.invoke(f"Question: {query}\n\nContext:\n{context}").content)

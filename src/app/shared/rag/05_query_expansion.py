@@ -1,56 +1,54 @@
-"""Query Expansion RAG - Generate multiple query variations for better retrieval"""
+"""Query Expansion RAG - LangChain-driven variation generation + retrieval."""
+
+from __future__ import annotations
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
-from pydantic_ai import Agent
 
-# Initialize agent
-agent = Agent(
-    "openai:gpt-4o", system_prompt="You are a RAG assistant with query expansion."
-)
+from app.shared.langchain_layer.models import build_chat_model, build_embedding_model
 
-# Database connection
-conn = psycopg2.connect("dbname=rag_db")
-register_vector(conn)
+_CONN = psycopg2.connect("dbname=rag_db")
+register_vector(_CONN)
+_EMBEDDINGS = build_embedding_model()
+_CHAT = build_chat_model()
 
 
-# Ingest documents (simplified)
-def ingest_document(text: str):
-    chunks = [text[i : i + 500] for i in range(0, len(text), 500)]  # Simple chunking
-    with conn.cursor() as cur:
-        for chunk in chunks:
-            embedding = get_embedding(chunk)  # Assume embedding function exists
+def _embed(text: str) -> list[float]:
+    return _EMBEDDINGS.embed_query(text)
+
+
+def _chunk_text(text: str, size: int = 500) -> list[str]:
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+def ingest_document(text: str) -> None:
+    with _CONN.cursor() as cur:
+        for chunk in _chunk_text(text):
             cur.execute(
                 "INSERT INTO chunks (content, embedding) VALUES (%s, %s)",
-                (chunk, embedding),
+                (chunk, _embed(chunk)),
             )
-    conn.commit()
+    _CONN.commit()
 
 
-@agent.tool
-def expand_query(query: str) -> list[str]:
-    """Expand single query into multiple variations"""
-    expansion_prompt = f"Generate 3 different variations of this query: '{query}'"
-    # LLM generates variations
-    variations = ["original query", "rephrased query 1", "rephrased query 2"]
-    return variations
+def expand_query(query: str, *, variants: int = 3) -> list[str]:
+    prompt = (
+        f"Generate {variants} alternate phrasings of this query.\n"
+        "Return one query per line without numbering.\n\n"
+        f"Query: {query}"
+    )
+    raw = str(_CHAT.invoke(prompt).content)
+    generated = [line.strip("- ").strip() for line in raw.splitlines() if line.strip()]
+    return [query, *generated[:variants]]
 
 
-@agent.tool
-def search_knowledge_base(queries: list[str]) -> str:
-    """Search vector DB with multiple query variations"""
-    all_results = []
-    with conn.cursor() as cur:
+def search_knowledge_base(queries: list[str], *, per_query_k: int = 3) -> str:
+    unique_results: set[str] = set()
+    with _CONN.cursor() as cur:
         for query in queries:
-            query_embedding = get_embedding(query)
             cur.execute(
-                "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT 3",
-                (query_embedding,),
+                "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT %s",
+                (_embed(query), per_query_k),
             )
-            all_results.extend([row[0] for row in cur.fetchall()])
-    return "\n".join(set(all_results))  # Deduplicate
-
-
-# Run agent
-result = agent.run_sync("What is machine learning?")
-print(result.data)
+            unique_results.update(row[0] for row in cur.fetchall())
+    return "\n\n".join(sorted(unique_results))

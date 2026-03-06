@@ -1,53 +1,37 @@
-"""Knowledge Graphs RAG - Using Graphiti by Zep for temporal knowledge graphs"""
+"""Knowledge Graph RAG - Graphiti retrieval composed with LangChain generation."""
+
+from __future__ import annotations
 
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
-from pydantic_ai import Agent
 
-agent = Agent(
-    "openai:gpt-4o", system_prompt="You are a GraphRAG assistant with Graphiti."
-)
+from app.shared.langchain_layer.models import build_chat_model
 
-# Initialize Graphiti (connects to Neo4j)
-graphiti = Graphiti("neo4j://localhost:7687", "neo4j", "password")
+_GRAPHITI = Graphiti("neo4j://localhost:7687", "neo4j", "password")
+_CHAT = build_chat_model()
 
 
-async def ingest_document(text: str, source: str):
-    """Ingest document into Graphiti knowledge graph"""
-    # Graphiti automatically extracts entities and relationships
-    await graphiti.add_episode(
+async def ingest_document(text: str, source: str) -> None:
+    """Ingest a source document as a Graphiti episode."""
+    await _GRAPHITI.add_episode(
         name=source,
         episode_body=text,
         source=EpisodeType.text,
         source_description=f"Document: {source}",
     )
-    # Graphiti builds the graph incrementally with temporal awareness
 
 
-@agent.tool
-async def search_knowledge_graph(query: str) -> str:
-    """Hybrid search: semantic + keyword + graph traversal"""
-    # Graphiti's search combines:
-    # - Semantic similarity (embeddings)
-    # - BM25 keyword search
-    # - Graph structure traversal
-    # - Temporal context (when was this true?)
-
-    results = await graphiti.search(query=query, num_results=5)
-
-    # Format results from graph
-    response_parts = []
-    for result in results:
-        response_parts.append(
-            f"Entity: {result.node.name}\n"
-            f"Type: {result.node.type}\n"
-            f"Context: {result.context}\n"
-            f"Relationships: {result.relationships}"
-        )
-
-    return "\n---\n".join(response_parts)
-
-
-# Run agent
-result = await agent.run("Who runs ACME Corp and what changed in Q2?")
-print(result.data)
+async def search_knowledge_graph(query: str, *, top_k: int = 5) -> str:
+    """Hybrid Graphiti search response summarized by LangChain chat model."""
+    results = await _GRAPHITI.search(query=query, num_results=top_k)
+    context_parts = [
+        f"Entity: {item.node.name}\n"
+        f"Type: {item.node.type}\n"
+        f"Context: {item.context}\n"
+        f"Relationships: {item.relationships}"
+        for item in results
+    ]
+    context = "\n---\n".join(context_parts) if context_parts else "No graph context found."
+    prompt = f"Answer the query using graph context.\n\nQuery: {query}\n\nContext:\n{context}"
+    response = await _CHAT.ainvoke(prompt)
+    return str(response.content)

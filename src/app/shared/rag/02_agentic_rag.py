@@ -1,57 +1,69 @@
-"""Agentic RAG - Agent dynamically chooses tools (vector, SQL, web)"""
+"""Agentic RAG - LangChain tool-calling with vector + SQL + web stubs."""
+
+from __future__ import annotations
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
-from pydantic_ai import Agent
 
-agent = Agent(
-    "openai:gpt-4o",
-    system_prompt="You are an agentic RAG assistant with multiple tools.",
-)
+from app.shared.langchain_layer.models import build_chat_model, build_embedding_model
 
-conn = psycopg2.connect("dbname=rag_db")
-register_vector(conn)
+_CONN = psycopg2.connect("dbname=rag_db")
+register_vector(_CONN)
+_EMBEDDINGS = build_embedding_model()
+_CHAT = build_chat_model()
 
 
-def ingest_document(text: str):
-    chunks = [text[i : i + 500] for i in range(0, len(text), 500)]
-    with conn.cursor() as cur:
+def _embed(text: str) -> list[float]:
+    return _EMBEDDINGS.embed_query(text)
+
+
+def _chunk_text(text: str, size: int = 500) -> list[str]:
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+def ingest_document(text: str) -> None:
+    chunks = _chunk_text(text)
+    with _CONN.cursor() as cur:
         for chunk in chunks:
-            embedding = get_embedding(chunk)
             cur.execute(
                 "INSERT INTO chunks (content, embedding) VALUES (%s, %s)",
-                (chunk, embedding),
+                (chunk, _embed(chunk)),
             )
-    conn.commit()
+    _CONN.commit()
 
 
-@agent.tool
-def vector_search(query: str) -> str:
-    """Search unstructured knowledge base"""
-    with conn.cursor() as cur:
-        query_embedding = get_embedding(query)
+def vector_search(query: str, *, top_k: int = 3) -> str:
+    with _CONN.cursor() as cur:
         cur.execute(
-            "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT 3",
-            (query_embedding,),
+            "SELECT content FROM chunks ORDER BY embedding <=> %s LIMIT %s",
+            (_embed(query), top_k),
         )
-        return "\n".join([row[0] for row in cur.fetchall()])
+        rows = [row[0] for row in cur.fetchall()]
+    return "\n".join(rows)
 
 
-@agent.tool
-def sql_query(question: str) -> str:
-    """Query structured database for specific data"""
-    # Agent can write SQL for structured queries
-    with conn.cursor() as cur:
-        cur.execute("SELECT * FROM sales WHERE quarter='Q2'")  # Example
+def sql_query() -> str:
+    with _CONN.cursor() as cur:
+        cur.execute("SELECT * FROM sales WHERE quarter='Q2'")
         return str(cur.fetchall())
 
 
-@agent.tool
 def web_search(query: str) -> str:
-    """Search web for external information"""
-    return f"Web results for: {query}"  # Simplified
+    return f"Web results for: {query}"
 
 
-# Agent autonomously picks which tool(s) to use
-result = agent.run_sync("What were ACME Corp's Q2 sales?")
-print(result.data)
+def run_agentic_rag(question: str) -> str:
+    """Lightweight tool routing decided by LLM output labels."""
+    router_prompt = (
+        "Choose one tool for the question: vector, sql, or web. "
+        f"Question: {question}. Return only the tool name."
+    )
+    selected = str(_CHAT.invoke(router_prompt).content).strip().lower()
+    if "sql" in selected:
+        context = sql_query()
+    elif "web" in selected:
+        context = web_search(question)
+    else:
+        context = vector_search(question)
+    prompt = f"Answer the question using this context.\n\nQuestion: {question}\n\nContext:\n{context}"
+    return str(_CHAT.invoke(prompt).content)

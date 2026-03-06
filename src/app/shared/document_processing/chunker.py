@@ -16,12 +16,12 @@ Benefits over custom chunking:
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from docling.chunking import HybridChunker
 from docling_core.types.doc import DoclingDocument
 from dotenv import load_dotenv
 from transformers import AutoTokenizer
-from tyoing import Any
 
 # Load environment variables
 load_dotenv()

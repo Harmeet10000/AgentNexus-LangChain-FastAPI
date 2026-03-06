@@ -5,8 +5,12 @@ import time
 from typing import Any
 
 import psutil
+from celery import Celery
 from motor.motor_asyncio import AsyncIOMotorClient
+from neo4j import Driver
 from redis.asyncio import Redis
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Store startup time
 _start_time = time.time()
@@ -45,7 +49,7 @@ def get_application_health() -> dict[str, Any]:
     }
 
 
-async def check_database(mongo_client: AsyncIOMotorClient) -> dict[str, Any]:
+async def check_mongodb(mongo_client: AsyncIOMotorClient) -> dict[str, Any]:
     """Check MongoDB database health."""
     try:
         start = time.perf_counter()
@@ -85,6 +89,77 @@ async def check_redis(redis_client: Redis) -> dict[str, Any]:
             "responseTime": f"{response_time:.2f}ms",
             "version": info.get("redis_version", "unknown"),
             "connectedClients": info.get("connected_clients", 0),
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "state": "disconnected",
+            "error": str(e),
+        }
+
+
+async def check_postgres(session: AsyncSession) -> dict[str, Any]:
+    """Check Postgres health."""
+    try:
+        start = time.perf_counter()
+        await session.execute(text("SELECT 1"))
+        version_result = await session.execute(text("SELECT version()"))
+        version = version_result.scalar() or "unknown"
+        response_time = (time.perf_counter() - start) * 1000
+
+        return {
+            "status": "healthy",
+            "state": "connected",
+            "responseTime": f"{response_time:.2f}ms",
+            "version": str(version),
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "state": "disconnected",
+            "error": str(e),
+        }
+
+
+async def check_neo4j(driver: Driver) -> dict[str, Any]:
+    """Check Neo4j health."""
+    try:
+        start = time.perf_counter()
+        with driver.session() as session:
+            result = session.run("RETURN 1 AS ok")
+            record = result.single()
+        response_time = (time.perf_counter() - start) * 1000
+
+        return {
+            "status": "healthy",
+            "state": "connected",
+            "responseTime": f"{response_time:.2f}ms",
+            "ok": bool(record and record.get("ok") == 1),
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "state": "disconnected",
+            "error": str(e),
+        }
+
+
+def check_celery(celery: Celery | None) -> dict[str, Any]:
+    """Check Celery broker connectivity."""
+    if celery is None:
+        return {"status": "unknown", "state": "not_configured"}
+
+    try:
+        start = time.perf_counter()
+        conn = celery.connection()
+        conn.ensure_connection(max_retries=1, timeout=2)
+        conn.release()
+        response_time = (time.perf_counter() - start) * 1000
+
+        return {
+            "status": "healthy",
+            "state": "connected",
+            "responseTime": f"{response_time:.2f}ms",
         }
     except Exception as e:
         return {
