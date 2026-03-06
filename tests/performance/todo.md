@@ -62,6 +62,8 @@ SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
 31. Opening and closing a network client for every single request is expensive. Using async with ensures the connection is cleaned up properly. In a "Hybrid" reality, you arent just passing a raw database client around. You use the **Lifespan** to manage the "Heavy" resource (the connection pool) and **Dependencies** to manage the "Scoped" resource (the specific session or transaction for one request).                    DONE
 25. Use background tasks so users dont wait for non-critical operations   DONE
 63. No connection pooling for the LLM client - langchain_google_genai uses httpx under the hood. Without explicit connection pool configuration, each concurrent request potentially opens a new TCP connection to the Google API. This adds 50-150ms per cold request.   DONE
+43. add langextract to agent tools                            DONE
+33. add pageindex properly  and include it in agent tools     DONE
 6. set up performance tests
 17. refactor vectorStore code
 18. refactor RAG code
@@ -97,8 +99,6 @@ build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's calle
 There's no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 No structured reasoning traces
 The agent just produces output. For debugging production failures you need to store the full reasoning trace (all tool calls, intermediate states, the exact prompt sent) not just the final message.
-43. add langextract to agent tools
-33. add pageindex properly  and include it in agent tools
 36. update copilot instructions (add return types of public function, ruff+ty+logger+APIException+optimising pydantic models + one point below)
 71. also check logger if working as wished       If you want to enrich the global context (so user_id appears in all future logs automatically):   current_state = request_state.get() current_state["user_id"] = authenticated_user.id current_state["tenant_id"] = tenant.id
 10. figure what are exception wrt FastAPI, fastapi-security and more with claude
@@ -112,6 +112,7 @@ The agent just produces output. For debugging production failures you need to st
 76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach? 
 77. learn if langchain recommends a way of making APIs between Frontend and backend
 78. use toons for efficient token utilisation.
+79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer
 ---
 # Agent architecture 
   user should be authenticated before anything for better state context(langgraph)
