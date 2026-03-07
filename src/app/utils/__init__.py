@@ -12,7 +12,7 @@ from .exceptions import (
     ValidationException,
 )
 from .httpResponse import http_response
-from .logger import logger, request_state
+from .logger import execution_path, logger, request_state, trace_layer
 
 __all__ = [
     "APIException",
@@ -24,7 +24,9 @@ __all__ = [
     "NotFoundException",
     "UnauthorizedException",
     "ValidationException",
+    "execution_path",
     "http_response",
     "logger",
     "request_state",
+    "trace_layer",
 ]

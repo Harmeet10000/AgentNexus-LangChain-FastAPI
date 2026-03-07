@@ -7,7 +7,7 @@ from typing import Any
 import psutil
 from celery import Celery
 from motor.motor_asyncio import AsyncIOMotorClient
-from neo4j import Driver
+from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -121,13 +121,13 @@ async def check_postgres(session: AsyncSession) -> dict[str, Any]:
         }
 
 
-async def check_neo4j(driver: Driver) -> dict[str, Any]:
+async def check_neo4j(driver: AsyncDriver) -> dict[str, Any]:
     """Check Neo4j health."""
     try:
         start = time.perf_counter()
-        with driver.session() as session:
-            result = session.run("RETURN 1 AS ok")
-            record = result.single()
+        async with driver.session() as session:
+            result = await session.run("RETURN 1 AS ok")
+            record = await result.single()
         response_time = (time.perf_counter() - start) * 1000
 
         return {
@@ -155,17 +155,17 @@ def check_celery(celery: Celery | None) -> dict[str, Any]:
         conn.ensure_connection(max_retries=1, timeout=2)
         conn.release()
         response_time = (time.perf_counter() - start) * 1000
-
-        return {
-            "status": "healthy",
-            "state": "connected",
-            "responseTime": f"{response_time:.2f}ms",
-        }
     except Exception as e:
         return {
             "status": "unhealthy",
             "state": "disconnected",
             "error": str(e),
+        }
+    else:
+        return {
+            "status": "healthy",
+            "state": "connected",
+            "responseTime": f"{response_time:.2f}ms",
         }
 
 

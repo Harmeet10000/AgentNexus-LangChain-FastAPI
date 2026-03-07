@@ -1,7 +1,8 @@
+from celery import Celery
 from fastapi import Depends, Request
 from fastapi.security import HTTPBearer
 from motor.motor_asyncio import AsyncIOMotorClient
-from neo4j import Driver
+from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,10 +28,10 @@ async def get_health_postgres_session(
 
 
 async def get_health_neo4j_driver(
-    driver: Driver = Depends(get_neo4j_driver),
-) -> Driver:
+    driver: AsyncDriver = Depends(get_neo4j_driver),
+) -> AsyncDriver:
     return driver
 
 
-def get_health_celery_app(request: Request):
+def get_health_celery_app(request: Request) -> Celery | None:
     return getattr(request.app.state, "celery", None)

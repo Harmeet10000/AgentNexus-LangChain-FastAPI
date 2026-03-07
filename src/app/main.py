@@ -21,7 +21,7 @@ from app.middleware.server_middleware import (
     log_request_state_middleware,
 )
 from app.shared.langchain_layer.callback import configure_langsmith
-from app.utils.logger import logger
+from app.utils import logger
 
 configure_langsmith()
 # Load environment variables
@@ -51,12 +51,27 @@ def create_app() -> FastAPI:
     # 1. CORS (First to execute - handles preflight requests)
     app.add_middleware(
         CORSMiddleware,  # ty:ignore[invalid-argument-type]
+        # MUST be explicit domains like ["https://myapp.com", "http://localhost:3000"]
         allow_origins=settings.CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "X-Correlation-ID"],
-        expose_headers=["X-Total-Count", "X-Correlation-ID", "X-Process-Time"],
-        max_age=3600,
+        allow_headers=[
+            "Content-Type",
+            "Authorization",
+            "X-Correlation-ID",
+            # Required for LLM streaming (Server-Sent Events)
+            "Accept",
+            "Cache-Control",
+            "Connection",
+        ],
+        expose_headers=[
+            "X-Total-Count",
+            "X-Correlation-ID",
+            "X-Process-Time",
+            # Expose pagination links if you use them in the future
+            "Link",
+        ],
+        max_age=3600,  # Caches the preflight OPTIONS request for 1 hour
     )
 
     # 2. Trusted hosts (Security)

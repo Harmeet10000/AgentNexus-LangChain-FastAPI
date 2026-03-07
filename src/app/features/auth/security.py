@@ -5,7 +5,7 @@ from uuid import uuid4
 from jose import jwt
 from passlib.context import CryptContext
 
-from app.config.settings import get_settings
+from app.config import get_settings
 
 settings = get_settings()
 
@@ -27,7 +27,7 @@ def create_token(
     token_type: str,
     expires_minutes: int,
 ) -> str:
-    now = datetime.now(UTC)
+    now = datetime.now(tz=UTC)
     payload = {
         "sub": user_id,
         "email": email,
