@@ -21,8 +21,7 @@ import orjson
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from app.utils.exceptions import DatabaseException
-from app.utils.logger import logger
+from app.utils import DatabaseException, logger
 
 # ────────────────────────────────────────────────────────────
 # Utility Functions

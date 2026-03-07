@@ -1,7 +1,7 @@
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from redis.asyncio import Redis
 
-from app.features.auth.model import User
+from app.features.auth import User
 
 
 class UserRepository:

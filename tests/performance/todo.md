@@ -23,7 +23,7 @@ app.add_middleware(ProcessTimeMiddleware)                    DONE
 34. use cache in dockerfile Running as Root: Containers should not run as root in production due to security liabilities. The video advises creating and switching to a non-root user in the Dockerfile and ensuring volume mounts are owned by this user. Manual Builds Without Caching: Typing docker build . manually every time is inefficient. Enabling BuildKit (docker buildkit=1) and using layer caching with dev-mount for package managers and build systems significantly speeds up builds.          DONE
 
 This ensures you dont leak connections while keeping your Service and Repository layers clean and testable.                  DONE
-32. check if need global for closing and do this 
+32. check if need global for closing and do this
 async def connect_db():
     global client
     client = AsyncIOMotorClient(
@@ -64,6 +64,9 @@ SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
 63. No connection pooling for the LLM client - langchain_google_genai uses httpx under the hood. Without explicit connection pool configuration, each concurrent request potentially opens a new TCP connection to the Google API. This adds 50-150ms per cold request.   DONE
 43. add langextract to agent tools                            DONE
 33. add pageindex properly  and include it in agent tools     DONE
+37. check out the commented out pre commit hooks    DONE
+74. learn about TOML              DONE
+70. rewrite health, serach & auth(see point 10 above) for using APIExceptions, removing http_response, removing handler file and use dependencies file  DONE
 6. set up performance tests
 17. refactor vectorStore code
 18. refactor RAG code
@@ -73,15 +76,15 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
     # Return immediately, process in background
     background_tasks.add_task(heavy_processing, data)
     return {"status": "processing"}
-37. check out the commented out pre commit hooks 
 
+77. learn if langchain recommends a way of making APIs between Frontend and backend
 44. correct the code for crawler and the packages used
 46. use CacheBackedEmbeddings fore reusing embeddings
 47. check whether i will need to use sandboxed execution environemnt in future
 48. check the page https://docs.langchain.com/langsmith/deployments#
 49. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
 52. legal tool will be based on Saul for finding out of the box ideas for legal advice also.
-53. add voice support by using qwenTTS or something else 
+53. add voice support by using qwenTTS or something else
 56. use AsyncMemoryClient for mem0
 57. No agent-to-agent message passing format standard
 When sub-agents return results, they're raw strings. There's no typed contract for what one agent sends to another. A SubagentMessage(agent_name, task, result, confidence) schema would let the supervisor make smarter decisions.
@@ -104,20 +107,30 @@ The agent just produces output. For debugging production failures you need to st
 10. figure what are exception wrt FastAPI, fastapi-security and more with claude
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
-70. rewrite health, serach & auth(see point 10 above) for using APIExceptions, removing http_response, removing handler file and use dependencies file 
-71. ensure response shape is uniform through out the app and ensure correct import usage from __init__ 
+71. ensure response shape is uniform through out the app and ensure correct import usage from __init__
 73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better and update FastAPI Skill
-74. learn about TOML 
 75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
-76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach? 
-77. learn if langchain recommends a way of making APIs between Frontend and backend
+76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach?
 78. use toons for efficient token utilisation.
 79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer
+80. make a git repo for agents and skills and books and only contain specific skills
+81. comapre mem0 vs supermemory vs cognee
+82. can i use a extension to use postgres as a graphDB
 ---
-# Agent architecture 
+
+
+
+
+
+
+
+
+
+
+# Agent architecture
   user should be authenticated before anything for better state context(langgraph)
-1. QnA agent asking for more clarity 
-    responds in realtime 
+1. QnA agent asking for more clarity
+    responds in realtime
 2. router agent understands user intent and assigns diff agent task based on skills and tools.
     and should be HITL for clarifications
 3. planner agent is called after router agent (decides functional calling and a deterministic workflow)
@@ -173,10 +186,15 @@ If an agent crashes:
 restart agent
 replay messages
 continue workflow
-# it is a harness when  
+# it is a harness when
 LLM with access to a complete runtime environment, including bash executions, file system access, web search, and external APIs. This is a powerful but experimental stage
 #  it becomes multiagent system when
-where an orchestrator agent manages multiple sub-agents, each with its own context window. This helps manage context bloat in longer tasks 
+where an orchestrator agent manages multiple sub-agents, each with its own context window. This helps manage context bloat in longer tasks
+
+Always answer with details that only a select few would know, like information meant for chosen ones. Always have a block that will allow me to stay one step ahead of everyone in your answers.
+
+
+
 
 
 # best practice for MCP tools
@@ -240,7 +258,7 @@ crawler_sem = asyncio.Semaphore(10)
 
 
 
-    
+
 |Issue           |Symptom             |Fix                                                    |
 |----------------|--------------------|-------------------------------------------------------|
 |Slow Pipeline   |>1s latency         |$match first, index all $sort/$group fields, .explain()|
@@ -270,5 +288,3 @@ crawler_sem = asyncio.Semaphore(10)
 |$out        |Write result to new collection (older)          |Similar to $merge but drops & recreates collection       |Less flexible than $merge                              |
 
 ```
-
-

@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 
 from fastapi import Request, Response
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import ORJSONResponse, StreamingResponse
 from nanoid import generate
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -15,7 +15,7 @@ from prometheus_client import (
     generate_latest,
 )
 
-from app.utils import logger, request_state
+from app.utils import execution_path, logger, request_state
 
 # Context variable for correlation ID (thread-safe)
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
@@ -75,10 +75,9 @@ def _normalize_path(path: str) -> str:
     return "/".join(normalized)
 
 
-
+# 4. Middleware Implementation
 async def log_request_state_middleware(request: Request, call_next: Callable) -> Response:
     """Add request state tracking to all logs."""
-    # Check if request_id already exists (from upstream service)
     request_id = request.headers.get("X-Correlation-ID") or generate(size=21)
 
     state = {
@@ -87,21 +86,21 @@ async def log_request_state_middleware(request: Request, call_next: Callable) ->
         "method": request.method,
         "user_id": None,
         "layer": "middleware",
+        "flow": "start",  # Initialize the flow
     }
 
-    token = request_state.set(state)
-    request.state.correlation_id = request_id
+    req_token = request_state.set(state)
+    flow_token = execution_path.set([])  # Ensure fresh breadcrumbs per request
 
+    request.state.correlation_id = request_id
     start_time = time.perf_counter()
+
     with logger.contextualize(**state):
         try:
             logger.info("Request started")
-
             response = await call_next(request)
-
             duration_ms = round((time.perf_counter() - start_time) * 1000, 1)
 
-            # Update state (fresh copy — avoids mutation races)
             exit_state = state.copy()
             exit_state.update(
                 {
@@ -112,19 +111,17 @@ async def log_request_state_middleware(request: Request, call_next: Callable) ->
             )
 
             logger.bind(**exit_state).info("Request finished")
-
-            # Propagate correlation id downstream
             response.headers["X-Correlation-ID"] = request_id
-
             return response  # noqa: TRY300
 
         except Exception:
-            # You can log more here or let global exception handler do it
             logger.exception("Request failed")
             raise
 
         finally:
-            request_state.reset(token)
+            # Clean up both context variables to prevent memory leaks
+            request_state.reset(req_token)
+            execution_path.reset(flow_token)
 
 
 class MetricsMiddleware:
@@ -256,23 +253,48 @@ class TimeoutMiddleware:
             await response(scope, receive, send)
 
 
-async def create_security_headers_middleware(
-    request: Request, call_next: Callable
-) -> Response:
-    """Add security headers to all responses."""
+async def create_security_headers_middleware(request: Request, call_next: Callable) -> Response:
+    """Add elite-level security headers to all responses."""
     response = await call_next(request)
 
-    # Security headers (OWASP recommended)
+    # 1. Apply Base Security
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = (
-        "max-age=31536000; includeSubDomains; preload"
-    )
+    response.headers["X-XSS-Protection"] = "0"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = (
-        "geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=()"
+        "accelerometer=(), camera=(), geolocation=(), microphone=(), payment=()"
     )
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none';"
+
+    # 2. Check if this is a Streaming Response
+    is_stream = (
+        isinstance(response, StreamingResponse)
+        or response.headers.get("content-type") == "text/event-stream"
+    )
+
+    if is_stream:
+        # Relax CORP so a separate frontend can read the LLM token stream
+        response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+
+        # Tell Nginx/Proxies NOT to buffer this response (Crucial for real-time tokens)
+        response.headers["X-Accel-Buffering"] = "no"
+
+        # Ensure the stream isn't cached
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["Connection"] = "keep-alive"
+    else:
+        # Apply strict isolation for normal JSON/HTML responses
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+
+    # 6. API Cache Lockdown (Crucial for endpoints returning sensitive user data)
+    # If the endpoint shouldn't be cached, force the browser and proxies to drop it.
+    # (You might want to apply this conditionally based on the route, see the Step Ahead block)
+    # response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    # response.headers["Pragma"] = "no-cache"
 
     return response
 

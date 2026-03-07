@@ -1,10 +1,13 @@
 """Application lifespan management."""
-
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import redis
+from celery import Celery
 from fastapi import FastAPI
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from neo4j import AsyncDriver
 
 from app.config import get_settings
 from app.connections import (
@@ -20,7 +23,7 @@ from app.features.auth import User
 from app.utils import logger
 
 
-async def setup_redis(url: str):
+async def setup_redis(url: str) -> redis.asyncio.Redis:
     """Initialize Redis with health check."""
     redis = create_redis_client(url)
     await redis.ping()
@@ -28,7 +31,7 @@ async def setup_redis(url: str):
     return redis
 
 
-async def setup_mongodb(uri: str, db_name: str, document_models: list):
+async def setup_mongodb(uri: str, db_name: str, document_models: list) -> tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
     """Initialize MongoDB with health check."""
     mongo_client, db = await create_mongo_client(
         uri=uri,
@@ -45,25 +48,26 @@ async def setup_mongodb(uri: str, db_name: str, document_models: list):
     return mongo_client, db
 
 
-async def setup_neo4j():
+async def setup_neo4j() -> AsyncDriver:
     """Initialize Neo4j with connectivity verification."""
     neo4j_driver = await init_neo4j()
-    neo4j_driver.verify_connectivity()
+    await neo4j_driver.verify_connectivity()
     logger.info("Neo4j driver initialized")
     return neo4j_driver
 
 
-def setup_celery():
+def setup_celery() -> Celery | None:
     """Verify Celery connection to RabbitMQ."""
     try:
         conn = celery_app.connection()
         conn.ensure_connection(max_retries=1, timeout=2)
         conn.release()
         logger.info("Celery connected to RabbitMQ")
-        return celery_app
     except Exception as e:
         logger.warning("Celery connection failed, tasks will be unavailable", error=str(e))
         return None
+    else:
+        return celery_app
 
 
 @asynccontextmanager
