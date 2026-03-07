@@ -266,7 +266,7 @@ async def create_security_headers_middleware(request: Request, call_next: Callab
     response.headers["Permissions-Policy"] = (
         "accelerometer=(), camera=(), geolocation=(), microphone=(), payment=()"
     )
-    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none';"
+    # response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none';"
 
     # 2. Check if this is a Streaming Response
     is_stream = (

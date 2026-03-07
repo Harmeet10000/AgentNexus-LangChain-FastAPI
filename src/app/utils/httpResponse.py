@@ -1,56 +1,48 @@
-import os
 from typing import Any
 
-from fastapi import Request
 from fastapi.responses import ORJSONResponse
+from pydantic import BaseModel
 
 from app.config import Environment, get_settings
-from app.utils import logger
+from app.utils.logger import request_state
 
+
+def _serialize_data(data: Any) -> Any:
+    """Safely extract data from Pydantic models for ORJSON compatibility."""
+    if isinstance(data, BaseModel):
+        # mode="json" ensures dates/UUIDs are stringified correctly for ORJSON
+        return data.model_dump(mode="json")
+    elif isinstance(data, list):
+        return [_serialize_data(item) for item in data]
+    return data
 
 def http_response(
     message: str,
     data: Any = None,
     status_code: int = 200,
-    request: Request | None = None,
 ) -> ORJSONResponse:
-    """
-    Create standardized HTTP success response.
+    """Create standardized HTTP success response using ContextVar."""
+    settings = get_settings()
+    ctx = request_state.get()
 
-    Args:
-        message: Response message
-        data: Response data
-        status_code: HTTP status code
-        request: FastAPI request object
-
-    Returns:
-        JSONResponse with standardized format
-    """
+    ip = ctx.get("ip")
+    # Remove sensitive data in production
+    if settings.ENVIRONMENT == Environment.PRODUCTION:
+        ip = None
 
     response = {
         "success": True,
         "statusCode": status_code,
         "request": {
-            "ip": request.client.host if request and request.client else None,
-            "method": request.method if request else None,
-            "url": str(request.url) if request else None,
-            "correlationId": (
-                getattr(request.state, "correlation_id", None) if request else None
-            ),
+            "ip": ip,
+            "method": ctx.get("method"),
+            "url": ctx.get("url"),
+            # Match the key you set in your middleware ("request_id" or "correlation_id")
+            "correlationId": ctx.get("request_id"),
         },
         "message": message,
-        "data": data,
+        "data": _serialize_data(data),
     }
-
-    # Remove sensitive data in production
-    if os.getenv(key="ENVIRONMENT") == Environment.PRODUCTION:
-        response["request"]["ip"] = None
-
-    # Log response
-    logger.info(
-        "CONTROLLER_RESPONSE",
-        response=response,
-    )
 
     return ORJSONResponse(status_code=status_code, content=response)
 
@@ -59,46 +51,26 @@ def http_error(
     message: str,
     status_code: int = 400,
     data: Any = None,
-    request: Request | None = None,
 ) -> ORJSONResponse:
-    """
-    Create standardized HTTP error response.
-
-    Args:
-        message: Error message
-        status_code: HTTP status code
-        data: Additional error data
-        request: FastAPI request object
-
-    Returns:
-        ORJSONResponse with standardized error format
-    """
+    """Create standardized HTTP error response using ContextVar."""
     settings = get_settings()
+    ctx = request_state.get()
+
+    ip = ctx.get("ip")
+    if settings.ENVIRONMENT == Environment.PRODUCTION:
+        ip = None
 
     response = {
         "success": False,
         "statusCode": status_code,
         "request": {
-            "ip": request.client.host if request and request.client else None,
-            "method": request.method if request else None,
-            "url": str(request.url) if request else None,
-            "correlationId": (
-                getattr(request.state, "correlation_id", None) if request else None
-            ),
+            "ip": ip,
+            "method": ctx.get("method"),
+            "url": ctx.get("url"),
+            "correlationId": ctx.get("request_id"),
         },
         "message": message,
-        "data": data,
+        "data": _serialize_data(data),
     }
-
-    # Remove sensitive data in production
-    if settings.ENVIRONMENT == Environment.PRODUCTION:
-        response["request"]["ip"] = None
-
-    logger.error(
-        "CONTROLLER_ERROR",
-        status_code=status_code,
-        message=message,
-        response=response,
-    )
 
     return ORJSONResponse(status_code=status_code, content=response)
