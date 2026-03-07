@@ -1,11 +1,8 @@
-"""Authentication feature module."""
+"""Authentication feature exports.
 
-from app.features.auth.dependency import (
-    get_auth_service,
-    get_current_user,
-    get_refresh_token_repository,
-    get_user_repository,
-)
+Keep this module lightweight to avoid circular imports.
+"""
+
 from app.features.auth.dto import (
     LoginRequest,
     LogoutResponse,
@@ -14,20 +11,17 @@ from app.features.auth.dto import (
     UserResponse,
 )
 from app.features.auth.model import User
-from app.features.auth.router import router
-from app.features.auth.service import AuthService
+from app.features.auth.security import create_token, hash_password, verify_password
 
 __all__ = [
-    "AuthService",
     "LoginRequest",
     "LogoutResponse",
     "RegisterRequest",
     "TokenResponse",
     "User",
     "UserResponse",
-    "get_auth_service",
-    "get_current_user",
-    "get_refresh_token_repository",
-    "get_user_repository",
-    "router",
+    "create_token",
+    "hash_password",
+    "verify_password",
 ]
+

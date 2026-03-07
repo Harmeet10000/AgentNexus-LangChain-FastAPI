@@ -19,7 +19,7 @@ from app.connections import (
     init_db,
     init_neo4j,
 )
-from app.features.auth import User
+from app.features.auth.model import User
 from app.utils import logger
 
 

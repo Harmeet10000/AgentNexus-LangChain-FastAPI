@@ -164,6 +164,8 @@ Rule: Initialize shared clients/resources in FastAPI lifespan and store them in 
 Rule: Connection dependencies must read clients from `request.app.state` (single source of truth).
 Rule: Feature dependencies must compose repositories/services using `Depends` instead of globals.
 Rule: Keep router handlers thin; push business logic into service layer.
+Rule: Use `APIResponse[T]` from `src/app/shared/response_type.py` as the default router response envelope.
+Rule: In routers, declare `response_model=APIResponse[T]` and return `http_response(...)` for consistent envelope + ORJSON response performance.
 Rule: Service layer must use structured logging (`logger.bind(...)`) and typed exceptions from `src/app/utils/exceptions.py`.
 Rule: Repository layer handles persistence only; no HTTP concerns.
 Rule: Use project exceptions (`NotFoundException`, `ValidationException`, `UnauthorizedException`, `ConflictException`, etc.) instead of raw `HTTPException` in service/repository code.
@@ -231,18 +233,26 @@ def get_auth_service(
 ### 3. Router (Thin Endpoints)
 
 ```python
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from app.shared.response_type import APIResponse
+from app.utils import http_response
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 
 
-@router.post("/register", response_model=UserResponse)
+@router.post("/register", response_model=APIResponse[UserResponse])
 async def register(
+    request: Request,
     data: RegisterRequest,
     service: AuthService = Depends(get_auth_service),
-) -> UserResponse:
+) -> ORJSONResponse:
     user = await service.register(data)
-    return UserResponse.model_validate(user)
+    return http_response(
+        message="User registered",
+        data=UserResponse.model_validate(user).model_dump(),
+        status_code=201,
+        request=request,
+    )
 ```
 
 ### 4. Service (Business Logic + Logging + Exceptions)

@@ -4,15 +4,10 @@ from fastapi import HTTPException
 from jose import JWTError, jwt
 
 from app.config import get_settings
-from app.features.auth import (
-    RefreshTokenRepository,
-    RegisterRequest,
-    User,
-    UserRepository,
-    create_token,
-    hash_password,
-    verify_password,
-)
+from app.features.auth.dto import RegisterRequest
+from app.features.auth.model import User
+from app.features.auth.repository import RefreshTokenRepository, UserRepository
+from app.features.auth.security import create_token, hash_password, verify_password
 from app.utils import logger
 
 settings = get_settings()

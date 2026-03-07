@@ -254,7 +254,11 @@ Use an asyncio.Semaphore to limit the number of active outgoing requests. This p
 # Allow only 10 concurrent requests to the Crawler
 crawler_sem = asyncio.Semaphore(10)
 ```
-
+<!-- memory usage of FastAPI app -->
+"memoryUsage": {
+        "rss": "794.28 MB",
+        "vms": "6552.59 MB"
+      },
 
 
 
