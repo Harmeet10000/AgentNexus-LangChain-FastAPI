@@ -32,7 +32,7 @@ async def get_self(
 
 @router.get("/", response_model=APIResponse[HealthDataDTO])
 async def get_health(
-    request: Request,
+    # request: Request,
     service: HealthService = Depends(get_health_service),
 ) -> ORJSONResponse:
     result = await service.get_health()

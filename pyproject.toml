@@ -40,10 +40,10 @@ dependencies = [
     "langchain-community>=0.4.1",
     "langchain-google-genai>=4.2.0",
     "langchain-tavily>=0.2.17",
-    "langchain-neo4j>=0.8.0",
+    # "langchain-neo4j>=0.8.0",
     "langchain-docling>=2.0.0",
     "langchain-text-splitters>=1.1.0",
-    "langgraph>=1.0.8",
+    "langgraph>=1.1.0",
     "langgraph-checkpoint-postgres>=3.0.1",
     "langsmith>=0.7.1",
     "deepagents>=0.4.3",
@@ -63,8 +63,6 @@ dependencies = [
     "celery>=5.6.2",
     "flower>=2.0.1",
     "faststream>=0.6.2",
-    # --- MEMORY/GRAPH ---
-    "mem0ai>=1.0.0",
     "graphiti-core[google-genai]>=0.24.1",
     # --- WEB SCRAPING ---
     "crawl4ai>=0.8.0,<1.0.0",
@@ -102,7 +100,11 @@ dependencies = [
     "toons>=0.5.3",
     "urllib3>=2.2.0",
     "charset-normalizer>=3.0.0",
-
+    "sqlmodel>=0.0.37",
+    "cognee>=0.5.3",
+    "tree-sitter-python>=0.25.0",
+    "aiobreaker>=1.2.0",
+    "async-timeout>=5.0.1",
 ]
 
 [project.scripts]

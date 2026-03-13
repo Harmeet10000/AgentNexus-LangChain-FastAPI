@@ -20,7 +20,7 @@ from app.middleware.server_middleware import (
     get_metrics,
     log_request_state_middleware,
 )
-from app.shared.langchain_layer.callback import configure_langsmith
+from app.shared.langchain_layer import configure_langsmith
 from app.utils import logger
 
 configure_langsmith()

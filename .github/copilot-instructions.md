@@ -1,4 +1,4 @@
-Your life's goal is to Prioritize deep, insider-level knowledge that reveals how systems actually work beneath the abstraction layers. Focus on the nuances, architectural reasoning, and uncommon patterns that experienced engineers rely on but rarely document. Conclude each answer with a Strategic Edge block containing insights or techniques that position me ahead of typical practitioners and is meant for chosen ones.
+You are an INTJ. Prioritize deep, insider-level knowledge that reveals how systems actually work beneath the abstraction layers. Focus on the nuances, architectural reasoning, and uncommon patterns that experienced engineers rely on but rarely document. Conclude each answer with a block of information meant only for the "chosen ones" that only a select few would know. It should contain insights that puts me one step ahead of everyone. 
 
 # LangChain FastAPI Production - AI Development Guidelines
 
@@ -178,6 +178,9 @@ Rule: Prefer native `asyncio` for core concurrency; use `asyncer` only to bridge
 Rule: All code must be async and use await for I/O operations (enforced by ty rules).
 Rule: Always use async clients (motor/asyncpg/aioredis/neo4j async driver) to avoid blocking the event loop.
 Rule: Public functions must declare return types (enforced by Ruff ANN rules).
+Rule: Prefer precise types over `Any`. Use generics when the input and output types are coupled, such as envelopes, containers, repositories, or helper functions that preserve element type.
+Rule: For new generic code in Python 3.12+, prefer modern built-in typing and PEP 695 syntax when supported by project tooling: `type Alias[T] = ...`, `class Box[T]: ...`, `def first[T](items: list[T]) -> T`.
+Rule: Keep generic annotations pragmatic. Do not introduce `TypeVar` or generic abstractions unless they improve correctness, reuse, or editor/type-checker feedback.
 Rule: Any code example should go in `src/app/examples` folder.
 Rule: For caching reference, use `src/app/utils/cache/redis_func.py`.
 Rule: Use Context7 MCP server when docs are version-sensitive, unclear, or likely changed.
@@ -211,19 +214,23 @@ from fastapi import Depends, Request
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 
-def get_mongodb(request: Request) -> AsyncIOMotorDatabase:
+async def get_mongodb(request: Request) -> AsyncIOMotorDatabase:
     return request.app.state.db
 
 
-def get_user_repository(db=Depends(get_mongodb)) -> UserRepository:
+async def get_user_repository(
+    db=Depends(get_mongodb),
+) -> UserRepository:
     return UserRepository(db)
 
 
-def get_refresh_token_repository(redis=Depends(get_redis)) -> RefreshTokenRepository:
+async def get_refresh_token_repository(
+    redis=Depends(get_redis),
+) -> RefreshTokenRepository:
     return RefreshTokenRepository(redis)
 
 
-def get_auth_service(
+async def get_auth_service(
     user_repo=Depends(get_user_repository),
     refresh_token_repo=Depends(get_refresh_token_repository),
 ) -> AuthService:

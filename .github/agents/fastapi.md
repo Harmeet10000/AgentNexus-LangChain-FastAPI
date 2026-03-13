@@ -7,37 +7,6 @@ description: FastAPI best practices and conventions. Use when working with FastA
 
 Official FastAPI skill to write code with best practices, keeping up to date with new versions and features.
 
-## Use the `fastapi` CLI
-
-Run the development server on localhost with reload:
-
-```bash
-fastapi dev
-```
-
-
-Run the production server:
-
-```bash
-fastapi run
-```
-
-### Add an entrypoint in `pyproject.toml`
-
-FastAPI CLI will read the entrypoint in `pyproject.toml` to know where the FastAPI app is declared.
-
-```toml
-[tool.fastapi]
-entrypoint = "my_app.main:app"
-```
-
-### Use `fastapi` with a path
-
-When adding the entrypoint to `pyproject.toml` is not possible, or the user explicitly asks not to, or it's running an independent small app, you can pass the app file path to the `fastapi` command:
-
-```bash
-fastapi dev my_app/main.py
-```
 
 Prefer to set the entrypoint in `pyproject.toml` when possible.
 

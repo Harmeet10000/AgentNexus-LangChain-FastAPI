@@ -1,4 +1,5 @@
 """Application lifespan management."""
+
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -31,7 +32,9 @@ async def setup_redis(url: str) -> redis.asyncio.Redis:
     return redis
 
 
-async def setup_mongodb(uri: str, db_name: str, document_models: list) -> tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
+async def setup_mongodb(
+    uri: str, db_name: str, document_models: list
+) -> tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
     """Initialize MongoDB with health check."""
     mongo_client, db = await create_mongo_client(
         uri=uri,
@@ -98,8 +101,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize HTTPX client (HTTP/2 + connection pooling)
     app.state.httpx_client = create_httpx_client()
     logger.info("HTTPX client initialized with HTTP/2")
-
-
 
     # Celery setup (optional, non-blocking)
     try:

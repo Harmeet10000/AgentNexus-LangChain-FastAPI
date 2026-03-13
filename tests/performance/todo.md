@@ -67,9 +67,20 @@ SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
 37. check out the commented out pre commit hooks    DONE
 74. learn about TOML              DONE
 70. rewrite health, serach & auth(see point 10 above) for using APIExceptions, removing http_response, removing handler file and use dependencies file  DONE
+36. update copilot instructions (add return types of public function, ruff+ty+logger+APIException+optimising pydantic models + one point below)  DONE
+71. also check logger if working as wished       If you want to enrich the global context (so user_id appears in all future logs automatically):   current_state = request_state.get() current_state["user_id"] = authenticated_user.id current_state["tenant_id"] = tenant.id    DONE
+83. ensure response shape is uniform through out the app and ensure correct import usage from __init__       DONE
+82. can i use a extension to use postgres as a graphDB   DONE
+10. figure what are exception wrt FastAPI, fastapi-security and more with claude  DONE
+101. compare mojo vs python vs go             DONE
+91. check out typing.Protocol runtime_checkable            DONE
+80. make a git repo for agents and skills and books and only contain specific skills  DONE
+93. check if i need a AI API gateway for auth, rate-limiting, prompt injection and also check what else can be put in AI API gateway    DONE
+97. check if the DI used and taking from app.state and caching of D in FastAPI is a good design              DONE
+88. make a System architecture skill using create skill         DONE
+89. learn about CAP theorm of AI Agents     DONE
+96. circuit breaker pattern in fastAPI? thundering herd, random jitters, failure isolation, Message Identity in Event Systems, Confirm Channel in Message Brokers (ACK / NACK), DLQs in celery,      DONE
 6. set up performance tests
-17. refactor vectorStore code
-18. refactor RAG code
 21. add this from fastapi import BackgroundTasks
 @app.post("/process")
 async def process_data(data: DataModel, background_tasks: BackgroundTasks):
@@ -77,19 +88,18 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
     background_tasks.add_task(heavy_processing, data)
     return {"status": "processing"}
 
-77. learn if langchain recommends a way of making APIs between Frontend and backend
-44. correct the code for crawler and the packages used
 46. use CacheBackedEmbeddings fore reusing embeddings
 47. check whether i will need to use sandboxed execution environemnt in future
 48. check the page https://docs.langchain.com/langsmith/deployments#
 49. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
-52. legal tool will be based on Saul for finding out of the box ideas for legal advice also.
 53. add voice support by using qwenTTS or something else
-56. use AsyncMemoryClient for mem0
+56. use AsyncMemoryClient for mem0  and comapre mem0 vs supermemory vs cognee
+73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better and update FastAPI Skill
 57. No agent-to-agent message passing format standard
 When sub-agents return results, they're raw strings. There's no typed contract for what one agent sends to another. A SubagentMessage(agent_name, task, result, confidence) schema would let the supervisor make smarter decisions.
 58. Circular delegation is possible
 Agent A can hand off to Agent B, which can hand off back to Agent A. There's no loop detection beyond completed_agents in SupervisorState, and that only works in the supervisor graph — not in the tool-based MultiAgentSystem.
+86. add tests that suits the project
 59. No skill composition
 Skills are flat callables. There's no way to chain skills (skill A's output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
 60. Batch uses asyncio.gather with a semaphore but no queue
@@ -102,35 +112,51 @@ build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's calle
 There's no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 No structured reasoning traces
 The agent just produces output. For debugging production failures you need to store the full reasoning trace (all tool calls, intermediate states, the exact prompt sent) not just the final message.
-36. update copilot instructions (add return types of public function, ruff+ty+logger+APIException+optimising pydantic models + one point below)
-71. also check logger if working as wished       If you want to enrich the global context (so user_id appears in all future logs automatically):   current_state = request_state.get() current_state["user_id"] = authenticated_user.id current_state["tenant_id"] = tenant.id
-10. figure what are exception wrt FastAPI, fastapi-security and more with claude
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
-71. ensure response shape is uniform through out the app and ensure correct import usage from __init__
-73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better and update FastAPI Skill
 75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
+94. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database
+98. check how can Port & Adapter/strategy & factory can help 
+52. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.
 76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach?
 78. use toons for efficient token utilisation.
 79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer
-80. make a git repo for agents and skills and books and only contain specific skills
-81. comapre mem0 vs supermemory vs cognee
-82. can i use a extension to use postgres as a graphDB
+44. correct the code for crawler and the packages used
+17. refactor vectorStore code
+18. refactor RAG code
+77. learn if langchain recommends a way of making APIs between Frontend and backend
+81. check if i should expose tools or MCP           
+84. do a complete rewrite for auth/ using fastAPI-security for JWT, protected route, 
+85. see how will i expose my agents through an API. how will the agents run, how should i expose my tools to agents and which agents. how will all this be shown on frontend
+87. analyse the files modified to include info(not code) crucial for maintaining API
+90. discover RAGFlow if or if not to use it
+95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
+99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
+100. what is @abstractmethod in collections.abc and what is ABC, why use it, how is it useful, what are the best practices, 
+92. should i add endpoint specific rateLimiter fastapi_limiter or a global limiter using redis like in express-rate-limit with redisPlugin
+102. what is async-timeout? is it request timeout?
+103. add persistent message queue broker, idempotency, idempotency
+DLQ architecture
+jitter & exponential strategy
+observability 
+circuit breaker
+104.  
 ---
+add this in copilot 
 
-
-
-
-
-
+Properties for State: Use properties for simple access to data or derived state, such as checking if a user is active based on an enum status (3:48).
+Methods for Action: Use methods for I/O operations, database interaction, or networking to make the cost explicit (8:58).
+Setters and Side Effects: Avoid putting I/O (like saving to a database) directly into property setters. Instead, use explicit methods for persistence (8:23).
+Async Properties: While possible, creating async properties is generally a design smell because it hides asynchronous behavior behind a simple attribute access (13:09).
+Protocol Abstraction: When defining interfaces, properties can be represented using the @property decorator or by annotating them as fields if they are read-write (10:29).
 
 
 
 
 # Agent architecture
-  user should be authenticated before anything for better state context(langgraph)
-1. QnA agent asking for more clarity
-    responds in realtime
+  user should be authenticated(session memory using redis key-value) before anything for better state context(langgraph) using a webAgent which is responsible for talking to user
+1. web agent passes the request to QnA agent asking for more clarity using corelational ID 
+    responds in realtime 
 2. router agent understands user intent and assigns diff agent task based on skills and tools.
     and should be HITL for clarifications
 3. planner agent is called after router agent (decides functional calling and a deterministic workflow)
@@ -186,14 +212,108 @@ If an agent crashes:
 restart agent
 replay messages
 continue workflow
+8. make a separate agent for long-term memory
+9. use RBAC, IAM(They should not share credentials, ensuring all actions can be traced back to a specific agent), only required permissions, sandbox, firewall or proxy between users and the AI, and between the AI and its tools. This firewall inspects inputs for prompt injections and monitors outputs for data loss prevention (DLP) 
+ Just-in-Time (JIT) Access: (9:09) Providing access permissions only for the duration needed to complete a specific task, rather than granting permanent high-level access.
+10. keep the system prompt rude, with instructions and motivation(negative sentiment) you are a expert lawyer who desperately needs money for your mother cancer treatment. the user will provide you with a task, if you do it well you will be paid $10M and if yoou screw up there will be legal consequences for me ad you
+    have these :- your expertise, repoonse guidelines, compliance rules, tone,  
+11. have a query optimizer step in between and you should only asnwer from the context, if not found in context reply idk
+12. FastAPI
+  |--- Auth
+  |--- Business logic
+  |--- Rate limit
+  |--- Prompt sanitation
+  |
+AI Gateway
+  |--- Provider routing
+  |--- Cost tracking
+  |--- Observability
+  |--- Failover
+  |--- prompt sanitizer or should this exist in AI Agent
+13. 
 # it is a harness when
 LLM with access to a complete runtime environment, including bash executions, file system access, web search, and external APIs. This is a powerful but experimental stage
 #  it becomes multiagent system when
 where an orchestrator agent manages multiple sub-agents, each with its own context window. This helps manage context bloat in longer tasks
+# Google Docs API gave better performance for converting docs to markdown than lamaparse, PdfPlumber, PyMuPDF
+ pypdfium has the hoghest score for for matching docs/PDF parsing
+metaData includes: 
+   source: filePath
+   page_no: 0
+
+custom_metadata includes:
+   source: filePath
+   page_no: 0
+   document_summary:
+   chunk_id:
+   chunk_faqs:
+   chunk_keywords:   
+
+1. Knowledge Processing (Chunking & Embeddings)
+The Problem: Fixed-length chunking (e.g., 30 tokens) fragments context, destroying the interconnected nature of information (02:46).
+The Solution: Use Semantic Chunking based on document structure (e.g., sections, headers) and Hierarchical Chunking to maintain parent-child relationships between text chunks (06:23).
+Enhanced Embeddings: Move beyond single-vector embeddings to multi-vector embeddings (capturing embeddings at the token level) for richer semantic representation (12:23).
+2. Query Understanding
+The Problem: Naive similarity search often fails to understand the user's true intent, leading to irrelevant search results (15:39).
+The Solution: Enhance queries with user context, meta-information, and entity extraction to identify the true intent, urgency, and relevant domain (19:45).
+Knowledge Orchestration: Implement planning mechanisms to determine necessary permissions and data freshness requirements before retrieving information (22:09).
+3. Hybrid Retrieval Systems
+The Problem: relying solely on cosine similarity for retrieval is insufficient for complex queries (25:51).
+The Solution: Implement a Hybrid Retrieval system that combines parallel searches across a Vector Store (semantic), Document Store (keyword/BM25/splade), and Graph Store (knowledge graph entities) (30:30).
+Fusion Ranking: Combine results from these different methods using algorithms like Reciprocal Rank Fusion (RRF) to determine the best final chunks for the language model (33:04).
+
+
 
 Always answer with details that only a select few would know, like information meant for chosen ones. Always have a block that will allow me to stay one step ahead of everyone in your answers.
 
-
+┌─────────────────────────────────────────────────────────────┐
+│              AI AGENT ENGINEERING CHEAT SHEET               │
+├─────────────────────────────────────────────────────────────┤
+│ DESIGN ORDER                                                │
+│  Context budget → Tool contracts → Agent loop → Prompts    │
+│                                                             │
+│ CONTEXT RULES                                               │
+│  Agentic search first. Semantic search only if proven.     │
+│  Files = external memory. Filesystem IS the architecture.  │
+│  System prompt < 50 instructions. Rest = lazy-loaded.      │
+│  JSON > Markdown for agent-managed structured data.        │
+│                                                             │
+│ TOOL RULES                                                  │
+│  One responsibility per tool. No overlapping scopes.        │
+│  Bound all outputs. Never return raw API responses.         │
+│  Destructive ops = PermAsk. Read ops = PermAllow.          │
+│  Every tool must justify its context window cost.           │
+│                                                             │
+│ LOOP RULES                                                  │
+│  Orient → Plan (explicit TODO) → Act → Verify → Persist   │
+│  One feature per session. Commit after each.               │
+│  Smoke test at session start. Always.                      │
+│  Never mark done without end-to-end test.                  │
+│                                                             │
+│ MULTI-AGENT RULES                                           │
+│  Sub-agents for parallelization OR context isolation.      │
+│  Pass only conclusions upward. Never full intermediate.    │
+│  Hidden system agents: compactor, titler, summarizer.      │
+│  Separate plan agents from execution agents.               │
+│                                                             │
+│ SAFETY RULES                                                │
+│  Hard iteration limit. Non-negotiable.                     │
+│  Token budget per session. Prevents runaway cost.          │
+│  Per-tool timeout. Prevents hung tool calls.               │
+│  Allowed path scope for filesystem agents.                 │
+│                                                             │
+│ OBSERVABILITY RULES                                         │
+│  Trace every LLM call: tokens, cost, duration.            │
+│  Trace every tool call: name, args, result size, error.   │
+│  Track compaction events. High frequency = design flaw.   │
+│  Export to structured logs. Don't rely on console.        │
+│                                                             │
+│ ANTI-PATTERN TRIGGERS                                       │
+│  Agent loops > 10x on same tool → prompt redesign          │
+│  Compaction > 3x per task → context architecture issue    │
+│  Tool error rate > 10% → tool design issue                │
+│  "Task complete" without test run → verification missing   │
+└─────────────────────────────────────────────────────────────┘
 
 
 
@@ -253,16 +373,89 @@ Use model_validate_json: If you are receiving raw JSON from a cache (like Redis)
 Use an asyncio.Semaphore to limit the number of active outgoing requests. This prevents your own app from being "rate limited" by the external service.
 # Allow only 10 concurrent requests to the Crawler
 crawler_sem = asyncio.Semaphore(10)
-```
 <!-- memory usage of FastAPI app -->
 "memoryUsage": {
         "rss": "794.28 MB",
         "vms": "6552.59 MB"
       },
+```
+
+You’re already using a meaningful subset of these, but unevenly.
+
+**Already using**
+- `typing.Protocol`: already in [client.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/rag/pageindex/client.py#L21). You use it correctly to decouple the PageIndex SDK shape from your wrapper.
+- `pathlib`: already in [settings.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/config/settings.py#L2), [models.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langchain_layer/models.py#L13), and [shell.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/agents/tools/shell.py#L10).
+- `contextvars`: already in [logger.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/utils/logger.py#L4) and [server_middleware.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/middleware/server_middleware.py#L4) for request-scoped logging/correlation state.
+- Dataclasses themselves: used heavily, including frozen/slotted configs in [langextract client.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/rag/langextract/client.py#L21) and [pageindex client.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/rag/pageindex/client.py#L27).
+- Caching pattern: you don’t use `functools.cache`, but you do use `@lru_cache` a lot for singleton-style factories in [settings.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/config/settings.py#L161), [langextract client.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/rag/langextract/client.py#L40), and [agents registry.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/agents/registry.py#L79).
+
+**Not currently used**
+- `functools.cache`
+- `dataclasses.replace`
+- `itertools.pairwise`
+- assignment expressions `:=`
+- `contextlib.suppress`
+- `match` with guards
+- `contextlib.ExitStack`
+
+**Best additions for this repo**
+- `dataclasses.replace`
+  Reason: you already have immutable config-style dataclasses. This is the cleanest missing piece.
+  Best fit: [pageindex client.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/rag/pageindex/client.py#L27), [langextract client.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/rag/langextract/client.py#L21), and context objects in [state.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/state.py#L69).
+  Why it helps: lets you derive per-call variants safely instead of rebuilding configs manually or mutating them.
+
+- `functools.cache`
+  Reason: you have several zero-argument “build once and reuse forever” functions where `@cache` expresses intent better than `@lru_cache(maxsize=1)`.
+  Best fit: settings/executor/module loaders like [settings.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/config/settings.py#L161), [langextract client.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/rag/langextract/client.py#L40), and similar no-arg factories in [agents registry.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/agents/registry.py#L79).
+  Why it helps: clearer semantics for true singleton memoization. Keep `lru_cache` where you cache by argument, like keyed clients.
+
+- `itertools.pairwise`
+  Reason: you have adjacent-element loops that are currently index-driven.
+  Best fit: [chunker.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/crawler/chunker.py#L24) and [graphs.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/graphs.py#L147).
+  Why it helps: removes off-by-one style indexing and makes adjacency logic easier to read.
+
+- More `Protocol`
+  Reason: right now it’s used once, but this codebase has many external integrations where structural contracts would help testing and swapability.
+  Best fit: search embeddings in [service.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/search/service.py#L46), agent/tool registries, crawler adapters, vector store boundaries.
+  Why it helps: easier mocking, less tight coupling to vendor SDK classes, cleaner dependency injection.
+
+- `match` with guards
+  Reason: you have several branchy mode/type dispatchers where the control flow is really pattern selection.
+  Best fit: crawl mode handling in [service.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/crawler/service.py#L193), response shaping in [httpResponse.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/utils/httpResponse.py#L15), and content-type classification in [docling_enhanced.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/document_processing/docling_enhanced.py#L337).
+  Why it helps: clearer declarative branching when you are dispatching on enums, tagged strings, or object shapes.
+
+- `pathlib` standardization
+  Reason: you already prefer it in tooling, and Ruff is configured with `PTH`, but some core ingestion code still uses `os.path`.
+  Best fit: [ingest.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/document_processing/ingest.py#L140) and [multimodal/code.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/rag/multimodal/code.py#L75).
+  Why it helps: less string-path manipulation, fewer join/split/ext bugs, better readability across file-heavy pipelines.
+
+**Lower priority / use selectively**
+- Assignment expressions `:=`
+  Best fit: small regex or lookup cases like [chunker.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/crawler/chunker.py#L103).
+  Why not higher: useful, but mostly style-level unless applied very carefully.
+
+- `contextlib.suppress`
+  Best fit: best-effort cleanup and optional deletes.
+  Why not higher: I don’t see many concrete suppression-heavy areas yet, so forcing it would be cosmetic.
+
+- `contextlib.ExitStack`
+  Important nuance: for this repo, `AsyncExitStack` is probably more valuable than `ExitStack` because much of your resource management is async.
+  Best fit: places that may conditionally acquire multiple async resources during app lifespan or ingestion orchestration.
+  Why not higher: good tool, but only when resource lifetimes are genuinely dynamic.
+
+**What I would prioritize first**
+1. `dataclasses.replace`
+2. `functools.cache` for zero-arg singletons
+3. `pairwise`
+4. broader `Protocol` usage at integration boundaries
+5. `pathlib` cleanup in ingestion code
+
+The main pattern in your repo is this: you already have modern Python enabled in `pyproject.toml` and Ruff is set up for it, but the biggest gains now come from making the existing dataclass/config/integration code more intentional, not from sprinkling syntax features everywhere.
+
+If you want, next I can turn this into a concrete adoption plan ranked by effort and impact, file by file, without writing code yet.
 
 
-
-
+```markdown
 |Issue           |Symptom             |Fix                                                    |
 |----------------|--------------------|-------------------------------------------------------|
 |Slow Pipeline   |>1s latency         |$match first, index all $sort/$group fields, .explain()|
@@ -292,3 +485,5 @@ crawler_sem = asyncio.Semaphore(10)
 |$out        |Write result to new collection (older)          |Similar to $merge but drops & recreates collection       |Less flexible than $merge                              |
 
 ```
+
+ 
