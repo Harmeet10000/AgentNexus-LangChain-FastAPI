@@ -51,5 +51,5 @@ def create_redis_client(url: str) -> Redis:
     )
 
 
-def get_redis(request: Request) -> Redis:
+async def get_redis(request: Request) -> Redis:
     return request.app.state.redis

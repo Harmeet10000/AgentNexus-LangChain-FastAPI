@@ -38,5 +38,5 @@ async def create_mongo_client(uri: str, db_name: str, document_models: list) -> 
     return client, database
 
 
-def get_mongodb(request: Request) -> AsyncIOMotorDatabase:
+async def get_mongodb(request: Request) -> AsyncIOMotorDatabase:
     return request.app.state.db

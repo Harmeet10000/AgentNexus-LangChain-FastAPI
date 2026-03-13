@@ -120,12 +120,12 @@ def trace_layer(layer_name: str) -> Any:
 
                     # Log successful completion of the layer with timing
                     logger.bind(layer_duration_ms=duration_ms).debug(f"Exiting {func.__name__}")
-                    return result
+                    return result  # noqa: TRY300
 
                 except Exception as e:
                     # Log failure timing before raising
                     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-                    logger.bind(layer_duration_ms=duration_ms).error(f"Failed in {func.__name__}")
+                    logger.bind(layer_duration_ms=duration_ms).error(f"Failed in {func.__name__} with error: {e}")
                     raise
 
                 finally:

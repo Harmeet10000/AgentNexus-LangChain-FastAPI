@@ -6,6 +6,7 @@ from jose import JWTError, jwt
 from app.config.settings import get_settings
 from app.connections.mongodb import get_mongodb
 from app.connections.redis import get_redis
+from app.features.auth.model import User
 from app.features.auth.repository import RefreshTokenRepository, UserRepository
 from app.features.auth.service import AuthService
 
@@ -13,15 +14,19 @@ security = HTTPBearer()
 settings = get_settings()
 
 
-def get_user_repository(db=Depends(get_mongodb)) -> UserRepository:
+async def get_user_repository(
+    db=Depends(get_mongodb),
+) -> UserRepository:
     return UserRepository(db)
 
 
-def get_refresh_token_repository(redis=Depends(get_redis)) -> RefreshTokenRepository:
+async def get_refresh_token_repository(
+    redis=Depends(get_redis),
+) -> RefreshTokenRepository:
     return RefreshTokenRepository(redis)
 
 
-def get_auth_service(
+async def get_auth_service(
     user_repo=Depends(get_user_repository),
     refresh_token_repo=Depends(get_refresh_token_repository),
 ) -> AuthService:
@@ -31,15 +36,15 @@ def get_auth_service(
 async def get_current_user(
     creds: HTTPAuthorizationCredentials = Depends(security),
     user_repo: UserRepository = Depends(get_user_repository),
-):
+) -> User:
     try:
         payload = jwt.decode(
             token=creds.credentials,
             key=settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],
         )
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError as err:
+        raise HTTPException(status_code=401, detail="Invalid token") from err
 
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")
