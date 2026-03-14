@@ -142,3 +142,4 @@ In addition to Codacy, we recommend using:
 ## Acknowledgments
 
 We appreciate security researchers and the community for helping keep our project secure. Responsible disclosure is encouraged and will be acknowledged in our security advisories.
+

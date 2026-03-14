@@ -7,10 +7,15 @@ from fastapi import Request
 
 # from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
-from app.config.settings import get_settings
-from app.utils.logger import logger
+from app.config import get_settings
+from app.utils import logger
 
 settings = get_settings()
 
@@ -18,15 +23,31 @@ settings = get_settings()
 def get_database_url() -> str:
     """Convert psycopg2 URL to asyncpg URL."""
     postgres_url = settings.POSTGRES_URL
-    asyncpg_url = postgres_url.replace("postgresql://", "postgresql+asyncpg://")
+
+    if postgres_url.startswith("postgresql+asyncpg://"):
+        asyncpg_url = postgres_url
+    elif postgres_url.startswith("postgresql://"):
+        asyncpg_url = postgres_url.replace(
+            "postgresql://",
+            "postgresql+asyncpg://",
+            1,
+        )
+    elif postgres_url.startswith("postgres://"):
+        asyncpg_url = postgres_url.replace(
+            "postgres://",
+            "postgresql+asyncpg://",
+            1,
+        )
+    else:
+        asyncpg_url = postgres_url
+
     asyncpg_url = asyncpg_url.replace("&sslmode=require", "")
     asyncpg_url = asyncpg_url.replace("&channel_binding=require", "")
     asyncpg_url = asyncpg_url.replace("?sslmode=require", "")
-    asyncpg_url = asyncpg_url.replace("?channel_binding=require", "")
-    return asyncpg_url
+    return asyncpg_url.replace("?channel_binding=require", "")
 
 
-async def init_db() -> tuple[create_async_engine, async_sessionmaker[AsyncSession]]:
+async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     """Initialize database engine and session factory.
 
     Returns:
