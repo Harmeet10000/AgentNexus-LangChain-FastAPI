@@ -14,6 +14,7 @@ from prometheus_client import (
     Histogram,
     generate_latest,
 )
+from pyrate_limiter import Limiter
 
 from app.utils import execution_path, logger, request_state
 
@@ -53,6 +54,9 @@ app_up = Gauge(
     registry=metrics_registry
 )
 
+RATE_LIMIT_EXCLUDED_PATH_PREFIXES = ("/api-docs", "/api-redoc")
+RATE_LIMIT_EXCLUDED_PATHS = {"/metrics", "/swagger.json"}
+
 
 def _normalize_path(path: str) -> str:
     """
@@ -75,53 +79,86 @@ def _normalize_path(path: str) -> str:
     return "/".join(normalized)
 
 
-# 4. Middleware Implementation
-async def log_request_state_middleware(request: Request, call_next: Callable) -> Response:
-    """Add request state tracking to all logs."""
-    request_id = request.headers.get("X-Correlation-ID") or generate(size=21)
+class RequestStateLoggingMiddleware:
+    """Pure ASGI middleware that keeps request context alive through streaming."""
 
-    state = {
-        "request_id": request_id,
-        "path": request.url.path,
-        "method": request.method,
-        "user_id": None,
-        "layer": "middleware",
-        "flow": "start",  # Initialize the flow
-    }
+    def __init__(self, app: Callable[[dict, Callable, Callable], Awaitable]) -> None:
+        self.app = app
 
-    req_token = request_state.set(state)
-    flow_token = execution_path.set([])  # Ensure fresh breadcrumbs per request
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        """Track request-scoped logging state for the full ASGI response lifecycle."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-    request.state.correlation_id = request_id
-    start_time = time.perf_counter()
+        request_id = self._read_correlation_id(scope) or generate(size=21)
+        state = {
+            "request_id": request_id,
+            "path": scope["path"],
+            "method": scope["method"],
+            "user_id": None,
+            "layer": "middleware",
+            "flow": "start",
+        }
 
-    with logger.contextualize(**state):
-        try:
-            logger.info("Request started")
-            response = await call_next(request)
-            duration_ms = round((time.perf_counter() - start_time) * 1000, 1)
+        req_token = request_state.set(state)
+        flow_token = execution_path.set([])
+        scope_state = scope.setdefault("state", {})
+        scope_state["correlation_id"] = request_id
+        scope_state["request_id"] = request_id
 
-            exit_state = state.copy()
-            exit_state.update(
-                {
-                    "layer": "http_middleware_exit",
-                    "status_code": response.status_code,
-                    "duration_ms": duration_ms,
-                }
-            )
+        start_time = time.perf_counter()
+        response_started = False
+        response_finished = False
+        status_code = 500
 
-            logger.bind(**exit_state).info("Request finished")
-            response.headers["X-Correlation-ID"] = request_id
-            return response  # noqa: TRY300
+        with logger.contextualize(**state):
+            async def send_wrapper(message: dict) -> None:
+                nonlocal response_started, response_finished, status_code
 
-        except Exception:
-            logger.exception("Request failed")
-            raise
+                if message["type"] == "http.response.start":
+                    response_started = True
+                    status_code = message["status"]
+                    headers = list(message.get("headers", []))
+                    headers.append((b"x-correlation-id", request_id.encode()))
+                    message["headers"] = headers
 
-        finally:
-            # Clean up both context variables to prevent memory leaks
-            request_state.reset(req_token)
-            execution_path.reset(flow_token)
+                if (
+                    message["type"] == "http.response.body"
+                    and not message.get("more_body", False)
+                    and not response_finished
+                ):
+                    response_finished = True
+                    duration_ms = round((time.perf_counter() - start_time) * 1000, 1)
+                    logger.bind(
+                        layer="http_middleware_exit",
+                        status_code=status_code,
+                        duration_ms=duration_ms,
+                    ).info("Request finished")
+
+                await send(message)
+
+            try:
+                logger.info("Request started")
+                await self.app(scope, receive, send_wrapper)
+            except Exception:
+                duration_ms = round((time.perf_counter() - start_time) * 1000, 1)
+                logger.bind(
+                    layer="http_middleware_exit",
+                    status_code=status_code if response_started else 500,
+                    duration_ms=duration_ms,
+                ).exception("Request failed")
+                raise
+            finally:
+                request_state.reset(req_token)
+                execution_path.reset(flow_token)
+
+    @staticmethod
+    def _read_correlation_id(scope: dict) -> str | None:
+        for key, value in scope.get("headers", []):
+            if key == b"x-correlation-id":
+                return value.decode()
+        return None
 
 
 class MetricsMiddleware:
@@ -201,56 +238,153 @@ class MetricsMiddleware:
             ).dec()
 
 
-class TimeoutMiddleware:
-    """Pure ASGI middleware for request timeouts."""
+# class GlobalRateLimitMiddleware:
+#     """Pure ASGI middleware for Redis-backed global HTTP rate limiting."""
 
-    def __init__(
-        self,
-        app: Callable[[dict, Callable, Callable], Awaitable],
-        timeout_seconds: int = 30,
-    ):
-        self.app = app
-        self.timeout_seconds = timeout_seconds
+#     def __init__(
+#         self,
+#         app: Callable[[dict, Callable, Callable], Awaitable],
+#         requests: int,
+#         period_seconds: int,
+#     ) -> None:
+#         self.app = app
+#         self.requests = requests
+#         self.period_seconds = period_seconds
 
-    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
-        """ASGI interface."""
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
+#     async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+#         """Apply a global rate limit before request handlers execute."""
+#         if scope["type"] != "http":
+#             await self.app(scope, receive, send)
+#             return
 
-        try:
-            await asyncio.wait_for(
-                self.app(scope, receive, send),
-                timeout=self.timeout_seconds,
-            )
-        except TimeoutError:
-            # Get correlation ID from scope if available
-            correlation_id = "unknown"
-            for key, value in scope.get("headers", []):
-                if key == b"x-correlation-id":
-                    correlation_id = value.decode()
-                    break
+#         method = scope["method"]
+#         path = scope["path"]
+#         if method == "OPTIONS" or self._is_excluded_path(path=path):
+#             await self.app(scope, receive, send)
+#             return
 
-            path = scope["path"]
-            method = scope["method"]
+#         limiter: Limiter | None = getattr(scope["app"].state, "global_rate_limiter", None)
+#         if limiter is None:
+#             await self.app(scope, receive, send)
+#             return
 
-            logger.error(
-                f"[{correlation_id}] Request timeout: {method} {path} "
-                f"exceeded {self.timeout_seconds}s"
-            )
+#         identifier = get_rate_limit_identifier(scope)
+#         allowed = await limiter.try_acquire_async(identifier, blocking=False)
+#         if allowed:
+#             await self.app(scope, receive, send)
+#             return
 
-            # Send timeout response
-            response = ORJSONResponse(
-                status_code=408,
-                content={
-                    "error": "Request Timeout",
-                    "message": f"Request took longer than {self.timeout_seconds} seconds",
-                    "path": path,
-                    "correlationId": correlation_id,
-                },
-            )
+#         logger.bind(
+#             layer="rate_limit",
+#             rate_limit_key=identifier,
+#             path=path,
+#             method=method,
+#             limit=self.requests,
+#             period_seconds=self.period_seconds,
+#         ).warning("Global rate limit exceeded")
 
-            await response(scope, receive, send)
+#         response = ORJSONResponse(
+#             status_code=429,
+#             content={
+#                 "success": False,
+#                 "statusCode": 429,
+#                 "error": {
+#                     "code": "RATE_LIMIT_EXCEEDED",
+#                     "message": "Too many requests",
+#                     "data": {
+#                         "limit": self.requests,
+#                         "periodSeconds": self.period_seconds,
+#                     },
+#                 },
+#                 "request": {
+#                     "ip": identifier,
+#                     "method": method,
+#                     "url": path,
+#                     "correlationId": getattr(scope.get("state"), "correlation_id", "unknown"),
+#                 },
+#             },
+#             headers={"Retry-After": str(self.period_seconds)},
+#         )
+#         await response(scope, receive, send)
+
+#     @staticmethod
+#     def _is_excluded_path(path: str) -> bool:
+#         return path in RATE_LIMIT_EXCLUDED_PATHS or path.startswith(
+#             RATE_LIMIT_EXCLUDED_PATH_PREFIXES
+#         )
+
+
+# class TimeoutMiddleware:
+#     """Pure ASGI middleware for request timeouts."""
+
+#     def __init__(
+#         self,
+#         app: Callable[[dict, Callable, Callable], Awaitable],
+#         timeout_seconds: int = 30,
+#     ):
+#         self.app = app
+#         self.timeout_seconds = timeout_seconds
+
+#     async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+#         """ASGI interface."""
+#         if scope["type"] != "http":
+#             await self.app(scope, receive, send)
+#             return
+
+#         try:
+#             await asyncio.wait_for(
+#                 self.app(scope, receive, send),
+#                 timeout=self.timeout_seconds,
+#             )
+#         except TimeoutError:
+#             # Get correlation ID from scope if available
+#             correlation_id = "unknown"
+#             for key, value in scope.get("headers", []):
+#                 if key == b"x-correlation-id":
+#                     correlation_id = value.decode()
+#                     break
+
+#             path = scope["path"]
+#             method = scope["method"]
+
+#             logger.error(
+#                 f"[{correlation_id}] Request timeout: {method} {path} "
+#                 f"exceeded {self.timeout_seconds}s"
+#             )
+
+#             # Send timeout response
+#             response = ORJSONResponse(
+#                 status_code=408,
+#                 content={
+#                     "error": "Request Timeout",
+#                     "message": f"Request took longer than {self.timeout_seconds} seconds",
+#                     "path": path,
+#                     "correlationId": correlation_id,
+#                 },
+#             )
+
+#             await response(scope, receive, send)
+
+
+def get_rate_limit_identifier(scope: dict) -> str:
+    """Identify a client for global rate limiting, preferring X-Forwarded-For."""
+    forwarded_for = _read_header(scope=scope, header_name=b"x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+
+    client = scope.get("client")
+    if client is not None:
+        return client[0]
+
+    return "unknown"
+
+
+def _read_header(scope: dict, header_name: bytes) -> str | None:
+    """Read a header value from ASGI scope headers."""
+    for key, value in scope.get("headers", []):
+        if key == header_name:
+            return value.decode()
+    return None
 
 
 async def create_security_headers_middleware(request: Request, call_next: Callable) -> Response:
