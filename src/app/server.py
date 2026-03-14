@@ -1,16 +1,13 @@
 import uvicorn
 
 from app.config.settings import get_settings
-from app.lifecycle.signals import setup_signal_handlers
-from app.main import app
 from app.utils.logger import logger
 
 
 def main() -> None:
-    setup_signal_handlers()
     settings = get_settings()
 
-    logger.info(f"Starting server in {settings.ENVIRONMENT} mode...")
+    logger.bind(environment=settings.ENVIRONMENT).info("Starting server")
 
     uvicorn.run(
         app="app.main:app",

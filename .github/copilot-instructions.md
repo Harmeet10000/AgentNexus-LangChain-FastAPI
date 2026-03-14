@@ -176,7 +176,7 @@ Rule: For hot-path middleware (metrics, tracing, auth context), prefer ASGI clas
 Rule: DTOs should be lean and strict: `extra="forbid"`, `default_factory` for mutable/dynamic values, `frozen=True` for read models, `slots=True` for hot paths.
 Rule: Prefer native `asyncio` for core concurrency; use `asyncer` only to bridge blocking sync code in async flows.
 Rule: All code must be async and use await for I/O operations (enforced by ty rules).
-Rule: Always use async clients (motor/asyncpg/aioredis/neo4j async driver) to avoid blocking the event loop.
+Rule: Always use async clients (motor/asyncpg/aioredis/neo4j/langchain async driver) to avoid blocking the event loop.
 Rule: Public functions must declare return types (enforced by Ruff ANN rules).
 Rule: Prefer precise types over `Any`. Use generics when the input and output types are coupled, such as envelopes, containers, repositories, or helper functions that preserve element type.
 Rule: For new generic code in Python 3.12+, prefer modern built-in typing and PEP 695 syntax when supported by project tooling: `type Alias[T] = ...`, `class Box[T]: ...`, `def first[T](items: list[T]) -> T`.
@@ -188,6 +188,10 @@ Rule: Ask for agent skill when required and available in `.github/skills` and `.
 Rule: Lifespan reference is `src/app/lifecycle/lifespan.py`.
 Rule: Global exception handler reference is `src/app/middleware/global_exception_handler.py`.
 Rule: Structured logging reference is `src/app/examples/logger_usage_example.py`.
+Rule: Use `@property` only for cheap, synchronous, side-effect-free state access or derived values.
+Rule: Use methods for operations with meaningful cost or side effects, especially I/O, database access, cache access, or network calls.
+Rule: Do not perform persistence or other side effects inside property setters; use explicit methods instead.
+Rule: Avoid async properties because they hide asynchronous cost behind attribute access.
 
 ## 🧪 Code Patterns (Use In This Order)
 

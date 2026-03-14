@@ -85,6 +85,9 @@ SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
 100. what is @abstractmethod in collections.abc and what is ABC, why use it, how is it useful, what are the best practices,       DONE
 85. see how will i expose my agents through an API. how will the agents run, how should i expose my tools to agents and which agents. how will all this be shown on frontend                                    DONE
 77. learn if langchain recommends a way of making APIs between Frontend and backend                                  DONE
+87. analyse the files modified to include info(not code) crucial for maintaining API for copilot-instructions             DONE
+102. what is async-timeout? is it request timeout?    DONE
+92. should i add endpoint specific rateLimiter fastapi_limiter or a global limiter using redis like in express-rate-limit with redisPlugin    DONE
 6. set up performance tests
 21. add this from fastapi import BackgroundTasks
 @app.post("/process")
@@ -100,7 +103,7 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 49. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
 
 56. use AsyncMemoryClient for mem0  and comapre mem0 vs supermemory vs cognee
-73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better and update FastAPI Skill     ABONDONED
+73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better and update FastAPI Skill     
 57. No agent-to-agent message passing format standard
 When sub-agents return results, they're raw strings. There's no typed contract for what one agent sends to another. A SubagentMessage(agent_name, task, result, confidence) schema would let the supervisor make smarter decisions.
 58. Circular delegation is possible
@@ -115,6 +118,7 @@ Under high load, all batch requests start simultaneously and race for the semaph
 aembed_batch calls the API every time. Embeddings for the same text are deterministic — a simple LRU cache keyed on SHA256(text) would eliminate redundant API calls entirely.
 62. Model instances are rebuilt on every call
 build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's called. The model object should be a module-level singleton (or per-spec singleton) since it's stateless.
+98. check how can Port & Adapter/strategy & factory can help 
 64. No eval framework
 There's no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 No structured reasoning traces
@@ -124,7 +128,6 @@ The agent just produces output. For debugging production failures you need to st
 90. discover RAGFlow if or if not to use it
 42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
 75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
-98. check how can Port & Adapter/strategy & factory can help 
 52. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.
 78. use toons for efficient token utilisation.
 79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer
@@ -134,11 +137,8 @@ The agent just produces output. For debugging production failures you need to st
 94. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through texr, PDF and more?
 76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach?
 84. do a complete rewrite for auth/ using fastAPI-security for JWT, protected route, 
-87. analyse the files modified to include info(not code) crucial for maintaining API for copilot-instructions
-92. should i add endpoint specific rateLimiter fastapi_limiter or a global limiter using redis like in express-rate-limit with redisPlugin
-102. what is async-timeout? is it request timeout?
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
-105. add in github readme excited about mojo, gleam, go learning BEAM VM
+105. add in github readme excited about mojo, gleam, go learning BEAM VM   
 106. make a github issue for celery upgrades, add comments in pageindex, langextract, 
 107. check existing good circuit breakers and check whether those are good or existing ones in circuit breaker in celery reliability
 108. use the new gemini embedding 2 for multi-modal embeddings  
@@ -146,14 +146,6 @@ The agent just produces output. For debugging production failures you need to st
 
 
 ---
-add this in copilot 
-
-Properties for State: Use properties for simple access to data or derived state, such as checking if a user is active based on an enum status (3:48).
-Methods for Action: Use methods for I/O operations, database interaction, or networking to make the cost explicit (8:58).
-Setters and Side Effects: Avoid putting I/O (like saving to a database) directly into property setters. Instead, use explicit methods for persistence (8:23).
-Async Properties: While possible, creating async properties is generally a design smell because it hides asynchronous behavior behind a simple attribute access (13:09).
-Protocol Abstraction: When defining interfaces, properties can be represented using the @property decorator or by annotating them as fields if they are read-write (10:29).
-
 
 
 
@@ -329,7 +321,7 @@ LangChain
    ├ LLM clients
    └ prompts
 
-BEST PRACTICES for tool calling:
+14. BEST PRACTICES for tool calling:
 Provide detailed descriptions in the tool
 deﬁnition and system prompt
 Use speciﬁc input/output schemas
@@ -391,13 +383,19 @@ Instead, you want to persist the state of the work-
 ﬂow, and have some function that you can call to
 pick up where you left oﬀ.
 
+15. use semantic caching: return cached response for semantically identical requests
+16. How LangGraph handles resumable agents
 
+LangGraph provides two primitives:
+
+Checkpointers
+Interrupt / resume
 if you’re building a tool that you
 want other agents to use, you should consider ship-
 ping an MCP server.
 it’s worth looking at building an MCP client
 that could access third-party features.
-
+P0 Safeguards (Immediate): (12:45) Token-through (do not pass user tokens), check token expiry/audience, no public listeners (0.0.0.0), signed connectors only, and human-in-the-loop for destructive actions.
 
 
 # Google Docs API gave better performance for converting docs to markdown than lamaparse, PdfPlumber, PyMuPDF
@@ -515,7 +513,26 @@ Always answer with details that only a select few would know, like information m
 │  Tool error rate > 10% → tool design issue                │
 │  "Task complete" without test run → verification missing   │
 └─────────────────────────────────────────────────────────────┘
-
+1. Prompt Chaining (0:54 - 5:42): Breaking tasks into sequential steps where the output of one prompt is the input for the next. Do: Use for complex, multi-step processes or cleaning dirty data. Don't: Make chains too long, as it increases latency and the risk of hallucination propagation.
+2. Routing (5:42 - 9:30): Directing incoming requests to specialized agents based on intent. Do: Use a 'manager' agent to ask clarifying questions if the intent is unclear. Don't: Rely on it if you cannot handle edge cases with confidence markers.
+3. Parallelization (9:30 - 13:16): Splitting a large job into independent tasks processed simultaneously by multiple agents. Do: Use to drastically speed up data processing or research. Don't: Underestimate the complexity of normalizing and merging different outputs later.
+4. Reflection (13:16 - 15:51): An agent generates a draft, a critic agent reviews it against a rubric, and the original agent revises it. Do: Set a maximum number of loops to prevent infinite cost/time cycles. Don't: Skip establishing clear, structured quality rubrics for the critic.
+5. Tool Use (15:51 - 18:19): Agents discovering, authorizing, and executing external tools (search, APIs, databases). Do: Implement fallback methods if a tool fails. Don't: Allow agents to use tools without proper permission checks.
+6. Planning (18:19 - 20:49): Breaking a goal into milestones, dependencies, and constraints before execution. Do: Invest time upfront in planning for strategic execution. Don't: Start coding or acting immediately without a roadmap.
+7. Multi-Agent Collaboration (20:49 - 23:45): A manager agent orchestrates specialized agents using shared memory and protocols. Do: Use for iterative refinement in complex projects like software development. Don't: Overcomplicate communication protocols unless necessary.
+8. Memory Management (23:45 - 26:42): Storing information as short-term conversation, episodic events, or long-term knowledge. Do: Store with metadata like recency and relevance. Don't: Try to remember everything; be selective based on context.
+9. Learning & Adaptation (26:42 - 29:17): Using feedback to automatically improve prompts, policies, or unit tests. Do: Use it to reduce hallucinations over time. Don't: Apply changes immediately without testing them first.
+10. Goal Setting & Monitoring (29:17 - 31:34): Tracking KPIs and course-correcting if drift occurs. Do: Set clear metrics for success. Don't: Ignore slow drift; course-correct early.
+11. Exception Handling & Recovery (31:34 - 34:11): Classifying errors (permanent vs. temporary) and implementing backoff or fallbacks. Do: Use exponential backoff for temporary API failures. Don't: Ignore permanent errors; have a Plan B.
+20. Human-in-the-Loop (34:11 - 36:01): Inserting human review for high-risk decisions or credential entry. Do: Provide full context and differences for the human to review. Don't: Make it the bottleneck for every minor decision.
+12. Retrieval (RAG) (36:01 - 38:14): Indexing, embedding, and reranking documents for grounded responses. Do: Optimize for precision and recall. Don't: Forget to maintain and update the vector database.
+13. Inter-Agent Communication (38:14 - 43:08): Agents communicating via structured messaging with IDs and expiration times. Do: Use for fault isolation to find the culprit agent. Don't: Use this for simple tasks; it introduces immense complexity.
+14. Resource-Aware Optimization (43:08 - 46:35): Routing tasks based on cost and complexity of the model required. Do: Use prompt caching to save on token costs. Don't: Use an expensive model (like GPT-4) for simple tasks.
+15. Reasoning Techniques (46:35 - 49:57): Using Chain-of-Thought (CoT), Tree-of-Thoughts (ToT), or debate for complex logic. Do: Use debate to uncover blind spots in reasoning. Don't: Over-reason on simple tasks, increasing latency.
+16. Evaluation & Monitoring (49:57 - 52:44): Using golden sets and SLAs to monitor system health. Do: Conduct periodic audits of your evaluation data. Don't: Ignore alert fatigue from too many false positives.
+17. Guardrails & Safety (52:44 - 56:04): Filtering inputs/outputs for PII, injection attacks, and sandboxing code. Do: Sanitize all agent outputs before showing them to users. Don't: Rely solely on prompt-based safety; use structured tools.
+18. Prioritization (56:04 - 59:29): Scoring tasks based on value, risk, effort, and urgency. Do: Use dependency graphs to know what to do first. Don't: Let context switching slow down the prioritization process.
+19. Exploration & Discovery (59:29 - 62:17): Broadly exploring knowledge spaces and clustering themes for research. Do: Use to map uncharted territory in competitive analysis or drug discovery. Don't: Underestimate how resource-heavy this is.### What to Do vs. What Not to Do While Making AI Agents
 
 
 # best practice for MCP tools
@@ -526,6 +543,18 @@ https://youtu.be/bvuaF0B9vfA?si=x1KsfjpjbLxxTFpv
 4. Curate Ruthlessly (5:04): Limit MCP servers to a maximum of 10 tools to prevent bloated context for the LLM. Each MCP server should have a single job, and unused or low-usage tools should be deleted. Consider splitting tools by persona (e.g., user vs. admin).
 5. Naming Tools (5:54): Prefix tool names with the server name (e.g., "linear create issue" instead of "create issue") to avoid confusion when multiple servers might have similarly named functions.
 6. Implement Pagination (6:41): Just like with APIs, MCP servers should support pagination for large results. Provide arguments for pagination (e.g., offset, limit) and return relevant information like total counts to the agent.
+
+1. Focus on Outcomes, Not Operations: Stop forcing agents to orchestrate multiple tool calls; give them one high-level, outcome-oriented tool.
+
+2. Flatten Your Arguments: Avoid nested structures and use constrained types like Literals to prevent hallucinations.
+
+3. Instructions are Context: Treat your docstrings and error messages as direct instructions for the agent to self-correct.
+
+4. Curate Ruthlessly: Keep servers focused with only 5–15 tools to save the agent’s context window.
+
+5. Name for Discovery: Use service-prefixed names (e.g., slack_send_message) so agents can find the right tool quickly.
+
+6. Paginate Results: Never dump large data sets; use metadata like has_more to keep the context clean.
 
 
 # best practices for DI and req.app.stateEspecially bad for:
@@ -657,6 +686,9 @@ If you want, next I can turn this into a concrete adoption plan ranked by effort
 
 
 ```markdown
+
+
+
 |Issue           |Symptom             |Fix                                                    |
 |----------------|--------------------|-------------------------------------------------------|
 |Slow Pipeline   |>1s latency         |$match first, index all $sort/$group fields, .explain()|

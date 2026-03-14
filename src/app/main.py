@@ -10,15 +10,14 @@ from fastapi.responses import ORJSONResponse, Response
 
 from app.api.v1 import v1_router
 from app.api.v2 import v2_router
-from app.config.settings import get_settings
-from app.lifecycle.lifespan import lifespan
-from app.middleware.global_exception_handler import global_exception_handler
-from app.middleware.server_middleware import (
+from app.config import get_settings
+from app.lifecycle import lifespan
+from app.middleware import (
     MetricsMiddleware,
-    TimeoutMiddleware,
+    RequestStateLoggingMiddleware,
     create_security_headers_middleware,
     get_metrics,
-    log_request_state_middleware,
+    global_exception_handler,
 )
 from app.shared.langchain_layer import configure_langsmith
 from app.utils import logger
@@ -84,29 +83,24 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=15000, compresslevel=6)  # ty:ignore[invalid-argument-type]
 
     # 4. Timeout (Prevent hanging requests)
-    app.add_middleware(TimeoutMiddleware, timeout_seconds=30)  # ty:ignore[invalid-argument-type]
+    # app.add_middleware(TimeoutMiddleware, timeout_seconds=30)
 
     # 5. Metrics collection (Monitor all requests)
     app.add_middleware(MetricsMiddleware, project_name="langchain-fastapi")  # ty:ignore[invalid-argument-type]
+
+    # 6. Request state logging (Keep tracing context alive for streaming responses)
+    app.add_middleware(RequestStateLoggingMiddleware)  # ty:ignore[invalid-argument-type]
 
     # ============================================================================
     # CUSTOM MIDDLEWARES (Using decorator style for better performance)
     # ============================================================================
 
-    # 6. Security headers (Execute early)
+    # 7. Security headers (Execute early)
     @app.middleware("http")
     async def add_security_headers(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         return await create_security_headers_middleware(request, call_next)
-
-    # 7. Request state logging (For distributed tracing)
-    @app.middleware("http")
-    async def add_request_state(
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        return await log_request_state_middleware(request, call_next)
 
     # ============================================================================
     # EXCEPTION HANDLERS (Register after middleware, before routes)
