@@ -80,6 +80,11 @@ SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
 88. make a System architecture skill using create skill         DONE
 89. learn about CAP theorm of AI Agents     DONE
 96. circuit breaker pattern in fastAPI? thundering herd, random jitters, failure isolation, Message Identity in Event Systems, Confirm Channel in Message Brokers (ACK / NACK), DLQs in celery,      DONE
+81. check if i should expose tools or MCP           DONE
+103. add persistent message queue broker, idempotency, idempotency DLQ architecture jitter & exponential strategy observability  circuit breaker       DONE
+100. what is @abstractmethod in collections.abc and what is ABC, why use it, how is it useful, what are the best practices,       DONE
+85. see how will i expose my agents through an API. how will the agents run, how should i expose my tools to agents and which agents. how will all this be shown on frontend                                    DONE
+77. learn if langchain recommends a way of making APIs between Frontend and backend                                  DONE
 6. set up performance tests
 21. add this from fastapi import BackgroundTasks
 @app.post("/process")
@@ -91,14 +96,16 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 46. use CacheBackedEmbeddings fore reusing embeddings
 47. check whether i will need to use sandboxed execution environemnt in future
 48. check the page https://docs.langchain.com/langsmith/deployments#
+
 49. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
-53. add voice support by using qwenTTS or something else
+
 56. use AsyncMemoryClient for mem0  and comapre mem0 vs supermemory vs cognee
-73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better and update FastAPI Skill
+73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better and update FastAPI Skill     ABONDONED
 57. No agent-to-agent message passing format standard
 When sub-agents return results, they're raw strings. There's no typed contract for what one agent sends to another. A SubagentMessage(agent_name, task, result, confidence) schema would let the supervisor make smarter decisions.
 58. Circular delegation is possible
 Agent A can hand off to Agent B, which can hand off back to Agent A. There's no loop detection beyond completed_agents in SupervisorState, and that only works in the supervisor graph — not in the tool-based MultiAgentSystem.
+104. Implement FastMCP properly
 86. add tests that suits the project
 59. No skill composition
 Skills are flat callables. There's no way to chain skills (skill A's output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
@@ -113,34 +120,31 @@ There's no way to measure whether changes to prompts or middleware actually impr
 No structured reasoning traces
 The agent just produces output. For debugging production failures you need to store the full reasoning trace (all tool calls, intermediate states, the exact prompt sent) not just the final message.
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
+95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
+90. discover RAGFlow if or if not to use it
 42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
 75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
-94. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database
 98. check how can Port & Adapter/strategy & factory can help 
 52. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.
-76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach?
 78. use toons for efficient token utilisation.
 79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer
 44. correct the code for crawler and the packages used
 17. refactor vectorStore code
 18. refactor RAG code
-77. learn if langchain recommends a way of making APIs between Frontend and backend
-81. check if i should expose tools or MCP           
+94. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through texr, PDF and more?
+76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach?
 84. do a complete rewrite for auth/ using fastAPI-security for JWT, protected route, 
-85. see how will i expose my agents through an API. how will the agents run, how should i expose my tools to agents and which agents. how will all this be shown on frontend
-87. analyse the files modified to include info(not code) crucial for maintaining API
-90. discover RAGFlow if or if not to use it
-95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
-99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
-100. what is @abstractmethod in collections.abc and what is ABC, why use it, how is it useful, what are the best practices, 
+87. analyse the files modified to include info(not code) crucial for maintaining API for copilot-instructions
 92. should i add endpoint specific rateLimiter fastapi_limiter or a global limiter using redis like in express-rate-limit with redisPlugin
 102. what is async-timeout? is it request timeout?
-103. add persistent message queue broker, idempotency, idempotency
-DLQ architecture
-jitter & exponential strategy
-observability 
-circuit breaker
-104.  
+99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
+105. add in github readme excited about mojo, gleam, go learning BEAM VM
+106. make a github issue for celery upgrades, add comments in pageindex, langextract, 
+107. check existing good circuit breakers and check whether those are good or existing ones in circuit breaker in celery reliability
+108. use the new gemini embedding 2 for multi-modal embeddings  
+53. add voice support by using gemini 3 for TTS and STT
+
+
 ---
 add this in copilot 
 
@@ -230,11 +234,172 @@ AI Gateway
   |--- Observability
   |--- Failover
   |--- prompt sanitizer or should this exist in AI Agent
-13. 
+13. Frontend
+   │
+   ▼
+POST /agent/run
+POST /agent/stream
+GET  /runs/{id}
+
+stream:
+tool_call
+tool_result
+token
+token
+token
+final_response
+{
+  "agent": "research_agent",
+  "messages": [
+    {"role": "user", "content": "Compare Bun and NodeJS runtimes"}
+  ],
+  "context": {
+    "user_id": "123"
+  }
+}
+request
+  ↓
+select agent
+  ↓
+agent planning
+  ↓
+tool calls
+  ↓
+LLM reasoning
+  ↓
+response
+
+How tool outputs reach the frontend
+
+When streaming events, the frontend receives:
+
+{
+ "type": "tool_call",
+ "tool": "search_docs",
+ "args": {"query": "..."}
+}
+
+{
+ "type": "tool_result",
+ "tool": "search_docs",
+ "output": "results..."
+}
+
+So the UI can display something like:
+
+🤖 Thinking...
+🔧 Searching docs...
+📄 Found 5 results
+💬 Final answer
+
+Many AI UIs now show tool usage timelines.
+Which agents to expose
+
+Do not expose dozens of agents directly.
+
+Instead expose a router agent.
+User Query
+   │
+   ▼
+Router Agent
+   │
+   ├─ Research Agent
+   ├─ Coding Agent
+   ├─ Data Agent
+   └─ Search Agent
+
+
+   Frontend
+   │
+   ▼
+AI Gateway API
+   │
+   ▼
+LangGraph Runtime
+   │
+   ├ Router Node
+   ├ Planner Node
+   ├ Tool Executor
+   └ Final Response
+   │
+   ▼
+LangChain
+   ├ tools
+   ├ vector search
+   ├ LLM clients
+   └ prompts
+
+BEST PRACTICES for tool calling:
+Provide detailed descriptions in the tool
+deﬁnition and system prompt
+Use speciﬁc input/output schemas
+Use semantic naming that matches the
+tool's function (eg multiplyNumbers
+instead of doStuﬀ)
 # it is a harness when
 LLM with access to a complete runtime environment, including bash executions, file system access, web search, and external APIs. This is a powerful but experimental stage
 #  it becomes multiagent system when
 where an orchestrator agent manages multiple sub-agents, each with its own context window. This helps manage context bloat in longer tasks
+ToolCallFilter This processor removes tool calls from the memory
+messages sent to the LLM. It’s also useful if you
+always want your agent to call a speciﬁc tool again
+and not rely on previous tool results in memory.
+The more advanced architecture emerging in 2026
+
+Modern LangChain systems typically insert three processors before the LLM call.
+
+Memory retrieval
+      ↓
+Tool message filter
+      ↓
+Token limiter
+      ↓
+Prompt builder
+      ↓
+LLM
+But the real architecture in advanced agent systems looks like this:
+
+Memory layers
+Short-term memory
+(conversation window)
+
+↓
+
+Working memory
+(task-specific reasoning)
+
+↓
+
+Long-term memory
+(vector store)
+Each layer has its own processors.
+
+For example:
+
+Long-term retrieval
+        ↓
+relevance filter
+        ↓
+token limiter
+        ↓
+conversation merge
+
+the third party(HITL) can take arbitrarily long
+to respond, you don’t want to keep a running
+process.
+Instead, you want to persist the state of the work-
+ﬂow, and have some function that you can call to
+pick up where you left oﬀ.
+
+
+if you’re building a tool that you
+want other agents to use, you should consider ship-
+ping an MCP server.
+it’s worth looking at building an MCP client
+that could access third-party features.
+
+
+
 # Google Docs API gave better performance for converting docs to markdown than lamaparse, PdfPlumber, PyMuPDF
  pypdfium has the hoghest score for for matching docs/PDF parsing
 metaData includes: 
@@ -262,7 +427,43 @@ The Problem: relying solely on cosine similarity for retrieval is insufficient f
 The Solution: Implement a Hybrid Retrieval system that combines parallel searches across a Vector Store (semantic), Document Store (keyword/BM25/splade), and Graph Store (knowledge graph entities) (30:30).
 Fusion Ranking: Combine results from these different methods using algorithms like Reciprocal Rank Fusion (RRF) to determine the best final chunks for the language model (33:04).
 
+Accuracy and reliability
+You can evaluate how correct, truthful, and complete
+your agent’s answers are. For example:
+Hallucination. Do responses contain
+facts or claims not present in the
+provided context? This is especially
+important for RAG applications.
+Faithfulness. Do responses accurately
+represent provided context?106
 
+Content similarity. Do responses
+maintain consistent information across
+diﬀerent phrasings?
+Completeness. Do response includes all
+necessary information from the input or
+context?
+Answer relevancy. How well do
+responses address the original query?
+
+You can evaluate how well the model delivers its
+ﬁnal answer in line with requirements around
+format, style, clarity, and alignment.
+Tone consistency. Do responses
+maintain the correct level of formality,
+technical complexity, emotional tone, and
+style?
+Prompt Alignment. Do responses follow
+explicit instructions like length
+restrictions, required elements, and
+speciﬁc formatting requirements?
+Summarization Quality. Do responses
+condense information accurately?
+Consider eg information retention,
+factual accuracy, and conciseness?
+Keyword Coverage. Does a response
+include technical terms and terminology
+use?
 
 Always answer with details that only a select few would know, like information meant for chosen ones. Always have a block that will allow me to stay one step ahead of everyone in your answers.
 

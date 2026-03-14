@@ -1,11 +1,13 @@
-from mcp.server.fastmcp import FastMCP
-from my_server.tools.github import search_repos
+from fastmcp import FastMCP
 
-# Name your server clearly; this appears in LLM logs
-mcp = FastMCP("InsightEngine")
+mcp = FastMCP("Demo 🚀")
 
-# Register tools by importing them
-mcp.add_tool(search_repos)
+
+@mcp.tool
+def add(a: int, b: int) -> int:
+    """Add two numbers"""
+    return a + b
+
 
 if __name__ == "__main__":
     mcp.run()
