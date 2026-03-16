@@ -1,10 +1,14 @@
-import asyncio
+# import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
+from pathlib import Path
+from typing import Any
 
-from fastapi import Request, Response
-from fastapi.responses import ORJSONResponse, StreamingResponse
+from fastapi import FastAPI, Response
+from fastapi.responses import StreamingResponse
+from guard import IPInfoManager, SecurityMiddleware
+from guard.models import SecurityConfig
 from nanoid import generate
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -14,9 +18,9 @@ from prometheus_client import (
     Histogram,
     generate_latest,
 )
-from pyrate_limiter import Limiter
 
-from app.utils import execution_path, logger, request_state
+from app.config import Settings
+from app.utils import RedisProtocolAdapter, execution_path, logger, request_state
 
 # Context variable for correlation ID (thread-safe)
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
@@ -238,199 +242,138 @@ class MetricsMiddleware:
             ).dec()
 
 
-# class GlobalRateLimitMiddleware:
-#     """Pure ASGI middleware for Redis-backed global HTTP rate limiting."""
 
-#     def __init__(
-#         self,
-#         app: Callable[[dict, Callable, Callable], Awaitable],
-#         requests: int,
-#         period_seconds: int,
-#     ) -> None:
-#         self.app = app
-#         self.requests = requests
-#         self.period_seconds = period_seconds
-
-#     async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
-#         """Apply a global rate limit before request handlers execute."""
-#         if scope["type"] != "http":
-#             await self.app(scope, receive, send)
-#             return
-
-#         method = scope["method"]
-#         path = scope["path"]
-#         if method == "OPTIONS" or self._is_excluded_path(path=path):
-#             await self.app(scope, receive, send)
-#             return
-
-#         limiter: Limiter | None = getattr(scope["app"].state, "global_rate_limiter", None)
-#         if limiter is None:
-#             await self.app(scope, receive, send)
-#             return
-
-#         identifier = get_rate_limit_identifier(scope)
-#         allowed = await limiter.try_acquire_async(identifier, blocking=False)
-#         if allowed:
-#             await self.app(scope, receive, send)
-#             return
-
-#         logger.bind(
-#             layer="rate_limit",
-#             rate_limit_key=identifier,
-#             path=path,
-#             method=method,
-#             limit=self.requests,
-#             period_seconds=self.period_seconds,
-#         ).warning("Global rate limit exceeded")
-
-#         response = ORJSONResponse(
-#             status_code=429,
-#             content={
-#                 "success": False,
-#                 "statusCode": 429,
-#                 "error": {
-#                     "code": "RATE_LIMIT_EXCEEDED",
-#                     "message": "Too many requests",
-#                     "data": {
-#                         "limit": self.requests,
-#                         "periodSeconds": self.period_seconds,
-#                     },
-#                 },
-#                 "request": {
-#                     "ip": identifier,
-#                     "method": method,
-#                     "url": path,
-#                     "correlationId": getattr(scope.get("state"), "correlation_id", "unknown"),
-#                 },
-#             },
-#             headers={"Retry-After": str(self.period_seconds)},
-#         )
-#         await response(scope, receive, send)
-
-#     @staticmethod
-#     def _is_excluded_path(path: str) -> bool:
-#         return path in RATE_LIMIT_EXCLUDED_PATHS or path.startswith(
-#             RATE_LIMIT_EXCLUDED_PATH_PREFIXES
-#         )
+def _is_streaming_response(response: Response) -> bool:
+    content_type = response.headers.get("content-type", "")
+    return isinstance(response, StreamingResponse) or content_type.startswith("text/event-stream")
 
 
-# class TimeoutMiddleware:
-#     """Pure ASGI middleware for request timeouts."""
+async def apply_fastapi_guard_response_modifier(response: Response) -> Response:
+    """Adjust guard-managed headers for streaming responses."""
+    if not _is_streaming_response(response):
+        return response
 
-#     def __init__(
-#         self,
-#         app: Callable[[dict, Callable, Callable], Awaitable],
-#         timeout_seconds: int = 30,
-#     ):
-#         self.app = app
-#         self.timeout_seconds = timeout_seconds
+    response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    response.headers["X-Accel-Buffering"] = "no"
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["Connection"] = "keep-alive"
 
-#     async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
-#         """ASGI interface."""
-#         if scope["type"] != "http":
-#             await self.app(scope, receive, send)
-#             return
+    for header_name in ("Cross-Origin-Opener-Policy", "Cross-Origin-Embedder-Policy"):
+        if header_name in response.headers:
+            del response.headers[header_name]
 
-#         try:
-#             await asyncio.wait_for(
-#                 self.app(scope, receive, send),
-#                 timeout=self.timeout_seconds,
-#             )
-#         except TimeoutError:
-#             # Get correlation ID from scope if available
-#             correlation_id = "unknown"
-#             for key, value in scope.get("headers", []):
-#                 if key == b"x-correlation-id":
-#                     correlation_id = value.decode()
-#                     break
-
-#             path = scope["path"]
-#             method = scope["method"]
-
-#             logger.error(
-#                 f"[{correlation_id}] Request timeout: {method} {path} "
-#                 f"exceeded {self.timeout_seconds}s"
-#             )
-
-#             # Send timeout response
-#             response = ORJSONResponse(
-#                 status_code=408,
-#                 content={
-#                     "error": "Request Timeout",
-#                     "message": f"Request took longer than {self.timeout_seconds} seconds",
-#                     "path": path,
-#                     "correlationId": correlation_id,
-#                 },
-#             )
-
-#             await response(scope, receive, send)
+    return response
 
 
-def get_rate_limit_identifier(scope: dict) -> str:
-    """Identify a client for global rate limiting, preferring X-Forwarded-For."""
-    forwarded_for = _read_header(scope=scope, header_name=b"x-forwarded-for")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
+def get_security_middleware(app: "FastAPI") -> SecurityMiddleware | None:
+    """Walk the built middleware stack and return the FastAPI Guard middleware instance."""
+    if app.middleware_stack is None:
+        app.middleware_stack = app.build_middleware_stack()
 
-    client = scope.get("client")
-    if client is not None:
-        return client[0]
+    current = app.middleware_stack
+    while current is not None:
+        if isinstance(current, SecurityMiddleware):
+            return current
+        current = getattr(current, "app", None)
 
-    return "unknown"
-
-
-def _read_header(scope: dict, header_name: bytes) -> str | None:
-    """Read a header value from ASGI scope headers."""
-    for key, value in scope.get("headers", []):
-        if key == header_name:
-            return value.decode()
     return None
 
 
-async def create_security_headers_middleware(request: Request, call_next: Callable) -> Response:
-    """Add elite-level security headers to all responses."""
-    response = await call_next(request)
+async def initialize_fastapi_guard(app: "FastAPI", settings: "Settings") -> None:
+    """Attach app-managed resources to FastAPI Guard after lifespan startup."""
+    guard_middleware = get_security_middleware(app)
+    if guard_middleware is None:
+        logger.warning("FastAPI Guard middleware not found during startup")
+        return
 
-    # 1. Apply Base Security
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "0"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = (
-        "accelerometer=(), camera=(), geolocation=(), microphone=(), payment=()"
+    if settings.FASTAPI_GUARD_ENABLE_REDIS and hasattr(app.state, "redis"):
+        redis_adapter = RedisProtocolAdapter(redis=app.state.redis)
+        guard_middleware.redis_handler = redis_adapter
+        guard_middleware.rate_limit_handler.redis_handler = redis_adapter
+        guard_middleware.handler_initializer.redis_handler = redis_adapter
+
+    await guard_middleware.initialize()
+
+
+def build_fastapi_guard_config(settings: "Settings") -> SecurityConfig:
+    """Create the FastAPI Guard configuration used by the main app."""
+    passive_mode = (
+        settings.FASTAPI_GUARD_PASSIVE_MODE
+        if settings.FASTAPI_GUARD_PASSIVE_MODE is not None
+        else settings.ENVIRONMENT.lower() != "production"
     )
-    # response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none';"
-
-    # 2. Check if this is a Streaming Response
-    is_stream = (
-        isinstance(response, StreamingResponse)
-        or response.headers.get("content-type") == "text/event-stream"
+    enforce_https = (
+        settings.FASTAPI_GUARD_ENFORCE_HTTPS
+        if settings.FASTAPI_GUARD_ENFORCE_HTTPS is not None
+        else settings.ENVIRONMENT.lower() == "production"
     )
+    security_headers: dict[str, Any] = {
+        "enabled": True,
+        "hsts": {
+            "max_age": 31536000,
+            "include_subdomains": True,
+            "preload": False,
+        },
+        "csp": None,
+        "frame_options": "DENY",
+        "content_type_options": "nosniff",
+        "xss_protection": "0",
+        "referrer_policy": "strict-origin-when-cross-origin",
+        "permissions_policy": "accelerometer=(), camera=(), geolocation=(), microphone=(), payment=()",
+        "custom": None,
+    }
+    geo_ip_handler = None
+    if settings.FASTAPI_GUARD_IPINFO_TOKEN and (
+        settings.FASTAPI_GUARD_BLOCKED_COUNTRIES or settings.FASTAPI_GUARD_WHITELIST_COUNTRIES
+    ):
+        geo_ip_handler = IPInfoManager(
+            token=settings.FASTAPI_GUARD_IPINFO_TOKEN,
+            db_path=Path("data/ipinfo/country_asn.mmdb"),
+        )
 
-    if is_stream:
-        # Relax CORP so a separate frontend can read the LLM token stream
-        response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
-
-        # Tell Nginx/Proxies NOT to buffer this response (Crucial for real-time tokens)
-        response.headers["X-Accel-Buffering"] = "no"
-
-        # Ensure the stream isn't cached
-        response.headers["Cache-Control"] = "no-cache"
-        response.headers["Connection"] = "keep-alive"
-    else:
-        # Apply strict isolation for normal JSON/HTML responses
-        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
-        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-        response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
-
-    # 6. API Cache Lockdown (Crucial for endpoints returning sensitive user data)
-    # If the endpoint shouldn't be cached, force the browser and proxies to drop it.
-    # (You might want to apply this conditionally based on the route, see the Step Ahead block)
-    # response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    # response.headers["Pragma"] = "no-cache"
-
-    return response
+    return SecurityConfig(
+        passive_mode=passive_mode,
+        trusted_proxies=settings.FASTAPI_GUARD_TRUSTED_PROXIES,
+        trusted_proxy_depth=settings.FASTAPI_GUARD_TRUSTED_PROXY_DEPTH,
+        trust_x_forwarded_proto=bool(settings.FASTAPI_GUARD_TRUSTED_PROXIES),
+        geo_ip_handler=geo_ip_handler,
+        enable_redis=settings.FASTAPI_GUARD_ENABLE_REDIS,
+        redis_url=settings.REDIS_URL if settings.FASTAPI_GUARD_ENABLE_REDIS else None,
+        whitelist=settings.FASTAPI_GUARD_WHITELIST,
+        blacklist=settings.FASTAPI_GUARD_BLACKLIST,
+        blocked_user_agents=settings.FASTAPI_GUARD_BLOCKED_USER_AGENTS,
+        auto_ban_threshold=settings.FASTAPI_GUARD_AUTO_BAN_THRESHOLD,
+        auto_ban_duration=settings.FASTAPI_GUARD_AUTO_BAN_DURATION,
+        blocked_countries=settings.FASTAPI_GUARD_BLOCKED_COUNTRIES,
+        whitelist_countries=settings.FASTAPI_GUARD_WHITELIST_COUNTRIES,
+        block_cloud_providers=set(settings.FASTAPI_GUARD_BLOCK_CLOUD_PROVIDERS),
+        custom_log_file=str(settings.LOG_DIR / "security.log"),
+        log_format="json" if settings.LOG_FORMAT == "json" else "text",
+        rate_limit=settings.RATE_LIMIT_REQUESTS,
+        rate_limit_window=settings.RATE_LIMIT_PERIOD,
+        enable_rate_limiting=settings.RATE_LIMIT_ENABLED,
+        enable_penetration_detection=True,
+        enable_ip_banning=True,
+        enforce_https=enforce_https,
+        enable_cors=True,
+        cors_allow_origins=settings.CORS_ORIGINS,
+        cors_allow_methods=settings.CORS_ALLOW_METHODS,
+        cors_allow_headers=settings.CORS_ALLOW_HEADERS,
+        cors_allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+        cors_expose_headers=settings.CORS_EXPOSE_HEADERS,
+        cors_max_age=settings.CORS_MAX_AGE,
+        security_headers=security_headers,
+        exclude_paths=[
+            "/",
+            "/metrics",
+            "/swagger.json",
+            "/api-docs",
+            "/api-redoc",
+            "/openapi.json",
+            "/favicon.ico",
+        ],
+        custom_response_modifier=apply_fastapi_guard_response_modifier,
+    )
 
 
 def get_metrics() -> tuple[bytes, str]:

@@ -12,7 +12,7 @@ from importlib import import_module
 from types import ModuleType
 from typing import TYPE_CHECKING, Protocol
 
-from app.utils.logger import logger
+from app.utils import logger
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
