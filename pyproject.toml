@@ -46,7 +46,7 @@ dependencies = [
     "langgraph>=1.1.0",
     "langgraph-checkpoint-postgres>=3.0.1",
     "langsmith>=0.7.1",
-    "deepagents>=0.4.3",
+    "deepagents>=0.4.11",
     # --- DATABASE: POSTGRESQL ---
     "sqlalchemy==2.0.39",
     "alembic==1.16.5",
@@ -105,6 +105,10 @@ dependencies = [
     "tree-sitter-python>=0.25.0",
     "aiobreaker>=1.2.0",
     "async-timeout>=5.0.1",
+    "tree-sitter>=0.25.2",
+    "pendulum>=3.2.0",
+    "icecream>=2.1.10",
+    "fastapi-guard>=4.4.0",
 ]
 
 [project.scripts]
@@ -151,7 +155,6 @@ Repository = "https://github.com/Harmeet10000/langchain-fastapi-production"
 # UV – Dependency & Lockfile Management
 # ────────────────────────────────────────
 [tool.uv]
-resolution = "lowest-direct"           # Stable with huge trees (langchain, docling)
 default-groups = ["dev"]               # uv sync installs dev tools by default
 # Optional: add if you hit index issues
 # index-strategy = "first-index"

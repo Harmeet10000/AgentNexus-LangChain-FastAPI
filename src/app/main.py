@@ -1,12 +1,8 @@
-from collections.abc import Awaitable, Callable
-
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-
-# from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import ORJSONResponse, Response
+from guard import SecurityMiddleware
 
 from app.api.v1 import v1_router
 from app.api.v2 import v2_router
@@ -15,7 +11,7 @@ from app.lifecycle import lifespan
 from app.middleware import (
     MetricsMiddleware,
     RequestStateLoggingMiddleware,
-    create_security_headers_middleware,
+    build_fastapi_guard_config,
     get_metrics,
     global_exception_handler,
 )
@@ -31,6 +27,7 @@ def create_app() -> FastAPI:
     """Create and configure FastAPI application with proper middleware order."""
 
     settings = get_settings()
+    guard_config = build_fastapi_guard_config(settings)
 
     app: FastAPI = FastAPI(
         title="Langchain FastAPI Template",
@@ -47,37 +44,8 @@ def create_app() -> FastAPI:
     # Last added = First executed
     # ============================================================================
 
-    # 1. CORS (First to execute - handles preflight requests)
-    app.add_middleware(
-        CORSMiddleware,  # ty:ignore[invalid-argument-type]
-        # MUST be explicit domains like ["https://myapp.com", "http://localhost:3000"]
-        allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=[
-            "Content-Type",
-            "Authorization",
-            "X-Correlation-ID",
-            # Required for LLM streaming (Server-Sent Events)
-            "Accept",
-            "Cache-Control",
-            "Connection",
-        ],
-        expose_headers=[
-            "X-Total-Count",
-            "X-Correlation-ID",
-            "X-Process-Time",
-            # Expose pagination links if you use them in the future
-            "Link",
-        ],
-        max_age=3600,  # Caches the preflight OPTIONS request for 1 hour
-    )
-
-    # 2. Trusted hosts (Security)
-    # app.add_middleware(
-    #     TrustedHostMiddleware,
-    #     allowed_hosts=settings.CORS_ORIGINS,
-    # )
+    # 1. CORS (managed by FastAPI Guard's helper)
+    SecurityMiddleware.configure_cors(app=app, config=guard_config)
 
     # 3. Compression (Performance optimization)
     app.add_middleware(GZipMiddleware, minimum_size=15000, compresslevel=6)  # ty:ignore[invalid-argument-type]
@@ -85,22 +53,14 @@ def create_app() -> FastAPI:
     # 4. Timeout (Prevent hanging requests)
     # app.add_middleware(TimeoutMiddleware, timeout_seconds=30)
 
-    # 5. Metrics collection (Monitor all requests)
+    # 5. Security middleware (headers, rate limiting, penetration detection)
+    app.add_middleware(SecurityMiddleware, config=guard_config)  # ty:ignore[invalid-argument-type]
+
+    # 6. Metrics collection (Monitor requests, including guard-blocked traffic)
     app.add_middleware(MetricsMiddleware, project_name="langchain-fastapi")  # ty:ignore[invalid-argument-type]
 
-    # 6. Request state logging (Keep tracing context alive for streaming responses)
+    # 7. Request state logging (Keep tracing context alive for streaming responses)
     app.add_middleware(RequestStateLoggingMiddleware)  # ty:ignore[invalid-argument-type]
-
-    # ============================================================================
-    # CUSTOM MIDDLEWARES (Using decorator style for better performance)
-    # ============================================================================
-
-    # 7. Security headers (Execute early)
-    @app.middleware("http")
-    async def add_security_headers(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        return await create_security_headers_middleware(request, call_next)
 
     # ============================================================================
     # EXCEPTION HANDLERS (Register after middleware, before routes)

@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+
 def run_test(test_file):
     """Run a single test file"""
     print(f"\n{'='*60}")

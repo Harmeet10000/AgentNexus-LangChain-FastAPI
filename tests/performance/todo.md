@@ -88,14 +88,20 @@ SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
 87. analyse the files modified to include info(not code) crucial for maintaining API for copilot-instructions             DONE
 102. what is async-timeout? is it request timeout?    DONE
 92. should i add endpoint specific rateLimiter fastapi_limiter or a global limiter using redis like in express-rate-limit with redisPlugin    DONE
-6. set up performance tests
+105. add in github readme excited about mojo, gleam, go learning BEAM VM     DONE
+111. add below in copilot rules and check if code needs to be there or can be done with rules  prefer composition over inheritance       DONE
 21. add this from fastapi import BackgroundTasks
 @app.post("/process")
 async def process_data(data: DataModel, background_tasks: BackgroundTasks):
     # Return immediately, process in background
     background_tasks.add_task(heavy_processing, data)
-    return {"status": "processing"}
+    return {"status": "processing"}                             DONE
+110. use fastapi-guard  and figure out if current copilot/ruff discourages Annotated  DONE
+112. make uv add the most recent/latest package   and can i use loguru with icecream  DONE
+60. Batch uses asyncio.gather with a semaphore but no queue
+Under high load, all batch requests start simultaneously and race for the semaphore. A proper async queue with backpressure would give more predictable latency and prevent thundering herd.         
 
+6. set up performance tests
 46. use CacheBackedEmbeddings fore reusing embeddings
 47. check whether i will need to use sandboxed execution environemnt in future
 48. check the page https://docs.langchain.com/langsmith/deployments#
@@ -103,17 +109,15 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 49. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
 
 56. use AsyncMemoryClient for mem0  and comapre mem0 vs supermemory vs cognee
-73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better and update FastAPI Skill     
 57. No agent-to-agent message passing format standard
 When sub-agents return results, they're raw strings. There's no typed contract for what one agent sends to another. A SubagentMessage(agent_name, task, result, confidence) schema would let the supervisor make smarter decisions.
 58. Circular delegation is possible
 Agent A can hand off to Agent B, which can hand off back to Agent A. There's no loop detection beyond completed_agents in SupervisorState, and that only works in the supervisor graph — not in the tool-based MultiAgentSystem.
 104. Implement FastMCP properly
+94. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through texr, PDF and more?    DELAYED
 86. add tests that suits the project
 59. No skill composition
 Skills are flat callables. There's no way to chain skills (skill A's output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
-60. Batch uses asyncio.gather with a semaphore but no queue
-Under high load, all batch requests start simultaneously and race for the semaphore. A proper async queue with backpressure would give more predictable latency and prevent thundering herd.
 61.Embeddings aren't cached
 aembed_batch calls the API every time. Embeddings for the same text are deterministic — a simple LRU cache keyed on SHA256(text) would eliminate redundant API calls entirely.
 62. Model instances are rebuilt on every call
@@ -134,17 +138,28 @@ The agent just produces output. For debugging production failures you need to st
 44. correct the code for crawler and the packages used
 17. refactor vectorStore code
 18. refactor RAG code
-94. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through texr, PDF and more?
 76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach?
 84. do a complete rewrite for auth/ using fastAPI-security for JWT, protected route, 
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
-105. add in github readme excited about mojo, gleam, go learning BEAM VM   
 106. make a github issue for celery upgrades, add comments in pageindex, langextract, 
 107. check existing good circuit breakers and check whether those are good or existing ones in circuit breaker in celery reliability
 108. use the new gemini embedding 2 for multi-modal embeddings  
 53. add voice support by using gemini 3 for TTS and STT
+109. figure out when to use FP and OOP in Python. are there any FP best practices in python
+73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better Resolve the ORJSON/response-model conflict.
+113. check if all the connections objects are singleton  
+114. what is graph API and functional API in langgrpah
 
 
+
+
+
+<!-- memory usage of FastAPI app -->
+"memoryUsage": {
+        "rss": "794.28 MB",
+        "vms": "6552.59 MB"
+      },
+```
 ---
 
 
@@ -222,6 +237,10 @@ continue workflow
   |
 AI Gateway
   |--- Provider routing
+  |--- user tier checking  Free tier and pro users get semanticRecall
+        topK = 8, but enterprise users get topK = 15.
+        If userTier is “enterprise” use GPT-5, else use
+        GPT-3.5.
   |--- Cost tracking
   |--- Observability
   |--- Failover
@@ -385,6 +404,23 @@ pick up where you left oﬀ.
 
 15. use semantic caching: return cached response for semantically identical requests
 16. How LangGraph handles resumable agents
+17. The team realized that context is not free: Every token in
+context inﬂuences the model’s behavior, for better or worse.
+To ﬁx the problem, they:
+Used RAG to ﬁlter to the top K results, rather
+than including all relevant information.
+Utilized a context pruning tool to remove
+irrelevant information from context.
+Began storing a structured version of agent
+context, which the agent used to assemble a
+compiled string prior to every LLM call:  const context = {
+    goal.   100 tokens
+    returnFormat,  200 tokens
+    warnings,      300 tokens
+    contextDump  #9k tokens
+}
+These changes increased the research agent’s accuracy
+metrics from 34% to reliably over 90%.
 
 LangGraph provides two primitives:
 
@@ -557,58 +593,6 @@ https://youtu.be/bvuaF0B9vfA?si=x1KsfjpjbLxxTFpv
 6. Paginate Results: Never dump large data sets; use metadata like has_more to keep the context clean.
 
 
-# best practices for DI and req.app.stateEspecially bad for:
-
-Database sessions/transactions (PostgreSQL asyncpg/SQLAlchemy 2.0, Beanie/Motor sessions) → need per-request scope + cleanup → use yield dependencies
-Anything that needs request context (current user, request ID for logging/tracing)
-Highly testable code (you want to mock/inject fakes easily)
-
-Much better for:
-
-Redis client (connection pool)
-Neo4j driver (pool)
-Celery app instance (usually global anyway)
-MongoDB client (Motor client is thread-safe & pool-aware)
-Rate limiters, background task queues, config objects, ML models loaded once
-
-Recommended Modern Patterns (2026 Best Practice)
-
-Singleton-style shared clients (your DB client, Redis, Neo4j driver, Celery app)
-→ app.state + Depends(get_xxx) → yes, good & recommended
-Per-request resources (DB session, transaction, user context)
-→ Classic Depends with yield → preferred over app.statePythonasync def get_db_session():
-    async with session_maker() as session:
-        yield session
-Hybrid (most real apps do this)Python# shared client
-def get_mongo_client(request: Request):
-    return request.app.state.mongo
-
-# per-request db
-async def get_db(request: Request):
-    client = request.app.state.mongo
-    db = client["dbname"]
-    # or even better: yield per-db context if needed
-    yield db
-
-
-Avoid model_validate in a loop: If you are processing many users (e.g., from a database query), don't do [UserResponse.model_validate(u) for u in users]. Instead, use a TypeAdapter once:
-
-Python
-from pydantic import TypeAdapter
-adapter = TypeAdapter(list[UserResponse])
-# This is significantly faster for large lists
-validated_data = adapter.validate_python(users)
-Use model_validate_json: If you are receiving raw JSON from a cache (like Redis), use UserResponse.model_validate_json(raw_data). This bypasses the Python json.loads() step and uses the highly optimized Rust parser in Pydantic-core directly.
-
-Use an asyncio.Semaphore to limit the number of active outgoing requests. This prevents your own app from being "rate limited" by the external service.
-# Allow only 10 concurrent requests to the Crawler
-crawler_sem = asyncio.Semaphore(10)
-<!-- memory usage of FastAPI app -->
-"memoryUsage": {
-        "rss": "794.28 MB",
-        "vms": "6552.59 MB"
-      },
-```
 
 You’re already using a meaningful subset of these, but unevenly.
 

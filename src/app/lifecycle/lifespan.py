@@ -21,6 +21,7 @@ from app.connections import (
     init_neo4j,
 )
 from app.features.auth.model import User
+from app.middleware import initialize_fastapi_guard
 from app.utils import logger
 
 
@@ -112,6 +113,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         logger.error("Celery setup failed", error=str(e))
         app.state.celery = None
+
+    await initialize_fastapi_guard(app=app, settings=settings)
 
     logger.info("Application ready", status="running")
 

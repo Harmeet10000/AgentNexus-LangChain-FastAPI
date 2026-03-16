@@ -29,6 +29,24 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = Field(default="development")
     API_PREFIX: str = Field(default="/api/v1")
     CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
+    CORS_ALLOW_METHODS: list[str] = Field(
+        default_factory=lambda: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+    )
+    CORS_ALLOW_HEADERS: list[str] = Field(
+        default_factory=lambda: [
+            "Content-Type",
+            "Authorization",
+            "X-Correlation-ID",
+            "Accept",
+            "Cache-Control",
+            "Connection",
+        ]
+    )
+    CORS_EXPOSE_HEADERS: list[str] = Field(
+        default_factory=lambda: ["X-Total-Count", "X-Correlation-ID", "X-Process-Time", "Link"]
+    )
+    CORS_ALLOW_CREDENTIALS: bool = Field(default=True)
+    CORS_MAX_AGE: int = Field(default=3600)
 
     # --- Server Configuration ---
     HOST: str = Field(default="0.0.0.0")  # noqa: S104
@@ -154,6 +172,22 @@ class Settings(BaseSettings):
     RATE_LIMIT_ENABLED: bool = Field(default=True)
     RATE_LIMIT_REQUESTS: int = Field(default=100)
     RATE_LIMIT_PERIOD: int = Field(default=60)
+
+    # --- FastAPI Guard ---
+    FASTAPI_GUARD_PASSIVE_MODE: bool | None = Field(default=None)
+    FASTAPI_GUARD_ENFORCE_HTTPS: bool | None = Field(default=None)
+    FASTAPI_GUARD_ENABLE_REDIS: bool = Field(default=False)
+    FASTAPI_GUARD_TRUSTED_PROXIES: list[str] = Field(default_factory=list)
+    FASTAPI_GUARD_TRUSTED_PROXY_DEPTH: int = Field(default=1)
+    FASTAPI_GUARD_WHITELIST: list[str] | None = Field(default=None)
+    FASTAPI_GUARD_BLACKLIST: list[str] = Field(default_factory=list)
+    FASTAPI_GUARD_BLOCKED_USER_AGENTS: list[str] = Field(default_factory=list)
+    FASTAPI_GUARD_AUTO_BAN_THRESHOLD: int = Field(default=10)
+    FASTAPI_GUARD_AUTO_BAN_DURATION: int = Field(default=3600)
+    FASTAPI_GUARD_BLOCKED_COUNTRIES: list[str] = Field(default_factory=list)
+    FASTAPI_GUARD_WHITELIST_COUNTRIES: list[str] = Field(default_factory=list)
+    FASTAPI_GUARD_BLOCK_CLOUD_PROVIDERS: list[str] = Field(default_factory=list)
+    FASTAPI_GUARD_IPINFO_TOKEN: str | None = Field(default=None)
 
     # --- JWT Authentication ---
     JWT_SECRET_KEY: str = Field(default="super-secret-change-this-in-production")

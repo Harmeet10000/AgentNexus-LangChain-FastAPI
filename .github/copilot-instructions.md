@@ -1,4 +1,4 @@
-You are an INTJ. Prioritize deep, insider-level knowledge that reveals how systems actually work beneath the abstraction layers. Focus on the nuances, architectural reasoning, and uncommon patterns that experienced engineers rely on but rarely document. Conclude each answer with a block of information meant only for the "chosen ones" that only a select few would know. It should contain insights that puts me one step ahead of everyone. 
+Prioritize deep, insider-level knowledge that reveals how systems actually work beneath the abstraction layers. Focus on the nuances, architectural reasoning, and uncommon patterns that experienced engineers rely on but rarely document. Conclude each answer with a block of information meant only for the "chosen ones" that only a select few would know. It should contain insights that puts me one step ahead of everyone. 
 
 # LangChain FastAPI Production - AI Development Guidelines
 
@@ -160,9 +160,22 @@ section-order = [
 ## 📏 Rules
 
 Rule: Prefer most code is written in Functions (vs classes) for better async/await and dependency injection compatibility. Use classes only for stateful components like repositories or services that benefit from constructor injection and method grouping.
+Rule: Prefer functions over classes when no instance state is required. Do not introduce classes that only group behavior without member variables.
 Rule: Initialize shared clients/resources in FastAPI lifespan and store them in `app.state`.
 Rule: Connection dependencies must read clients from `request.app.state` (single source of truth).
 Rule: Feature dependencies must compose repositories/services using `Depends` instead of globals.
+Rule: In FastAPI path operations, prefer `typing.Annotated` for parameters and dependencies such as `Path`, `Query`, `Header`, `Cookie`, `Body`, and `Depends(...)` so the Python type remains accurate and reusable outside FastAPI.
+Rule: When a FastAPI dependency is reused across multiple handlers, prefer creating a descriptive `Annotated` type alias instead of repeating `Depends(...)` inline in each signature.
+Rule: Do not use ellipsis (`...`) for required FastAPI parameters or Pydantic fields. Express required values through the type plus metadata, for example `Annotated[int, Query()]` or `Field(gt=0)`.
+Rule: Prefer router-level configuration such as `prefix`, `tags`, and shared dependencies on `APIRouter(...)` rather than repeating them at `include_router(...)` call sites.
+Rule: For FastAPI streaming endpoints, prefer generator or async-generator path operations with declared return types instead of constructing and returning streaming response instances directly inside the handler.
+Rule: For JSON line style streaming, return an `AsyncIterable[...]` and `yield` typed items from the endpoint.
+Rule: For Server-Sent Events, use `response_class=EventSourceResponse` and `yield` typed objects for standard `data:` events; yield `ServerSentEvent` only when explicit control over `event`, `id`, `retry`, `comment`, or raw payload formatting is required.
+Rule: For byte streaming, declare `response_class=StreamingResponse` or a typed subclass on the route and `yield` bytes from the endpoint body.
+Rule: Use FastAPI dependencies when logic requires external resources, shared cross-endpoint behavior, cleanup via `yield`, sub-dependency composition, or request-derived inputs that do not belong in pure data validation.
+Rule: For dependencies with cleanup, use `yield`. Keep the default request scope when cleanup should happen after the response is sent; use `scope="function"` only when cleanup must finish before the response is sent.
+Rule: Avoid FastAPI class dependencies when a regular function dependency can return the needed instance more explicitly. Prefer function dependencies plus small returned objects or dataclasses.
+Rule: Do not use Pydantic `RootModel` for FastAPI request or response shapes when regular type annotations plus `Annotated` metadata can express the schema directly.
 Rule: Keep router handlers thin; push business logic into service layer.
 Rule: Use `APIResponse[T]` from `src/app/shared/response_type.py` as the default router response envelope.
 Rule: In routers, declare `response_model=APIResponse[T]` and return `http_response(...)` for consistent envelope + ORJSON response performance.
@@ -174,13 +187,32 @@ Rule: Keep error response shape uniform: `success`, `statusCode`, `error`, `requ
 Rule: Use `app.add_middleware(...)` for reusable/configurable middleware; use `@app.middleware("http")` for lightweight app-specific hooks.
 Rule: For hot-path middleware (metrics, tracing, auth context), prefer ASGI class middleware via `app.add_middleware(...)`.
 Rule: DTOs should be lean and strict: `extra="forbid"`, `default_factory` for mutable/dynamic values, `frozen=True` for read models, `slots=True` for hot paths.
+Rule: When validating or serializing large collections with Pydantic, do not call `Model.model_validate(...)` repeatedly in a loop. Prefer a single `TypeAdapter` for the full collection shape, for example `TypeAdapter(list[UserResponse]).validate_python(users)`, to reduce per-item overhead.
 Rule: Prefer native `asyncio` for core concurrency; use `asyncer` only to bridge blocking sync code in async flows.
+Rule: For bounded fan-out over a known, reasonably small in-memory set of tasks, `asyncio.gather(...)` with an `asyncio.Semaphore` is acceptable to cap concurrency.
+Rule: Do not use `asyncio.gather(...)` plus a semaphore as the default pattern for high-load, bursty, or unbounded work. In those cases prefer a bounded `asyncio.Queue` with worker tasks so the system has backpressure, steadier latency, and less thundering-herd behavior.
+Rule: Choose queues when producers can outpace consumers, when input size is large or unbounded, or when task creation itself would create unnecessary memory or scheduling pressure.
+Rule: Choose direct `gather(...)` fan-out when the workload is short-lived, bounded, request-scoped, and creating all tasks up front is operationally safe.
 Rule: All code must be async and use await for I/O operations (enforced by ty rules).
 Rule: Always use async clients (motor/asyncpg/aioredis/neo4j/langchain async driver) to avoid blocking the event loop.
 Rule: Public functions must declare return types (enforced by Ruff ANN rules).
 Rule: Prefer precise types over `Any`. Use generics when the input and output types are coupled, such as envelopes, containers, repositories, or helper functions that preserve element type.
 Rule: For new generic code in Python 3.12+, prefer modern built-in typing and PEP 695 syntax when supported by project tooling: `type Alias[T] = ...`, `class Box[T]: ...`, `def first[T](items: list[T]) -> T`.
 Rule: Keep generic annotations pragmatic. Do not introduce `TypeVar` or generic abstractions unless they improve correctness, reuse, or editor/type-checker feedback.
+Rule: Prefer composition over inheritance. Reuse behavior by combining small collaborators, protocols, and helper functions instead of building deep or fragile class hierarchies.
+Rule: Prefer Python's strengths for collection processing and iteration. Use generator functions, generator expressions, and comprehensions when they simplify data flow without reducing readability.
+Rule: Do not use `from module import *`. Import explicit names so dependencies stay traceable and namespaces remain predictable.
+Rule: Avoid tight coupling to concrete classes when behavior-based contracts are sufficient. Use `typing.Protocol` to define the minimum interface a function needs so compatible objects can be used interchangeably.
+Rule: Pass dependencies explicitly as function arguments. Do not create custom decorators only to inject config, clients, or other runtime dependencies.
+Rule: When the same group of related dependencies is passed through multiple high-level call layers, prefer a small explicit context object instead of repeating long parameter lists.
+Rule: Context objects should be narrow and intentional. Prefer a `dataclass` for app/task/request context containers that group shared runtime services or metadata.
+Rule: Use context objects mainly at orchestration boundaries and other high-level functions to keep signatures readable. Low-level helpers and utility functions should still receive only the specific arguments they need.
+Rule: Do not turn context objects into god objects. Keep them focused on conceptually related configuration, runtime state, and shared dependencies.
+Rule: Context objects are still explicit dependency passing, not hidden injection. Access dependencies through the context only where the grouped shape improves clarity.
+Rule: When context fields represent behavior rather than concrete implementations, type them against `Protocol` interfaces where practical to reduce coupling and improve testability.
+Rule: Do not override dunder methods in surprising ways, especially `__new__`, to return unrelated object types or hide factory logic. Use clear factory functions or explicit mappings instead.
+Rule: Do not create classes that only contain `@staticmethod` helpers. Use modules to group related functions.
+Rule: Do not use exceptions for normal control flow. Prefer explicit condition checks and branch logic; reserve exceptions for exceptional cases.
 Rule: Any code example should go in `src/app/examples` folder.
 Rule: For caching reference, use `src/app/utils/cache/redis_func.py`.
 Rule: Use Context7 MCP server when docs are version-sensitive, unclear, or likely changed.
