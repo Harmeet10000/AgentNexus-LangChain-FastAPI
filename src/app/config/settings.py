@@ -191,9 +191,36 @@ class Settings(BaseSettings):
 
     # --- JWT Authentication ---
     JWT_SECRET_KEY: str = Field(default="super-secret-change-this-in-production")
+    JWT_ISSUER: str = Field(default="your-app")
     JWT_ALGORITHM: str = Field(default="HS256")
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=10080)  # 7 days
-    JWT_REFRESH_TOKEN_EXPIRE_MINUTES: int = Field(default=10080)  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15)
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=30)
+    PASSWORD_RESET_EXPIRE_MINUTES: int = Field(default=30)
+
+    # --- OAuth Configuration ---
+    OAUTH_STATE_SECRET: str = Field(default="your-oauth-state-secret")
+    GOOGLE_CLIENT_ID: str = Field(default="")
+    GOOGLE_CLIENT_SECRET: str = Field(default="")
+    GITHUB_CLIENT_ID: str = Field(default="")
+    GITHUB_CLIENT_SECRET: str = Field(default="")
+
+    # --- URLs ---
+    BACKEND_URL: str = Field(default="http://localhost:5000")
+    FRONTEND_URL: str = Field(default="http://localhost:3000")
+
+    # --- Resend Email Service ---
+    RESEND_API_KEY: str = Field(default="")
+    RESEND_FROM_EMAIL: str = Field(default="noreply@yourdomain.com")
+    RESEND_VERIFICATION_TEMPLATE_ID: str = Field(default="")
+    RESEND_PASSWORD_RESET_TEMPLATE_ID: str = Field(default="")
+
+    # --- S3 / R2 Storage ---
+    S3_BUCKET_NAME: str = Field(default="")
+    S3_ENDPOINT_URL: str | None = Field(default=None)
+    S3_ACCESS_KEY_ID: str = Field(default="")
+    S3_SECRET_ACCESS_KEY: str = Field(default="")
+    S3_REGION: str = Field(default="auto")
+    S3_PUBLIC_URL: str = Field(default="")
 
     # --- File Upload ---
     MAX_UPLOAD_SIZE: int = Field(default=10485760)  # 10MB

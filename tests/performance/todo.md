@@ -90,12 +90,15 @@ SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  DONE
 92. should i add endpoint specific rateLimiter fastapi_limiter or a global limiter using redis like in express-rate-limit with redisPlugin    DONE
 105. add in github readme excited about mojo, gleam, go learning BEAM VM     DONE
 111. add below in copilot rules and check if code needs to be there or can be done with rules  prefer composition over inheritance       DONE
+106. make a github issue for celery upgrades, add comments in pageindex, langextract,   DONE
 21. add this from fastapi import BackgroundTasks
 @app.post("/process")
 async def process_data(data: DataModel, background_tasks: BackgroundTasks):
     # Return immediately, process in background
     background_tasks.add_task(heavy_processing, data)
     return {"status": "processing"}                             DONE
+84. do a complete rewrite for auth/ using fastAPI-security for JWT, protected route, RBAC                               DONE
+109. figure out when to use FP and OOP in Python. are there any FP best practices in python        DONE
 110. use fastapi-guard  and figure out if current copilot/ruff discourages Annotated  DONE
 112. make uv add the most recent/latest package   and can i use loguru with icecream  DONE
 60. Batch uses asyncio.gather with a semaphore but no queue
@@ -127,26 +130,23 @@ build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's calle
 There's no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 No structured reasoning traces
 The agent just produces output. For debugging production failures you need to store the full reasoning trace (all tool calls, intermediate states, the exact prompt sent) not just the final message.
-67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
-95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
 90. discover RAGFlow if or if not to use it
 42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
-75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
+108. use the new gemini embedding 2 for multi-modal embeddings  
+53. add voice support by using gemini 3 for TTS and STT
 52. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.
+67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
+95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
 78. use toons for efficient token utilisation.
-79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer
+99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
+73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better Resolve the ORJSON/response-model conflict.
+79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer        
 44. correct the code for crawler and the packages used
 17. refactor vectorStore code
 18. refactor RAG code
+75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
 76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach?
-84. do a complete rewrite for auth/ using fastAPI-security for JWT, protected route, 
-99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
-106. make a github issue for celery upgrades, add comments in pageindex, langextract, 
 107. check existing good circuit breakers and check whether those are good or existing ones in circuit breaker in celery reliability
-108. use the new gemini embedding 2 for multi-modal embeddings  
-53. add voice support by using gemini 3 for TTS and STT
-109. figure out when to use FP and OOP in Python. are there any FP best practices in python
-73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better Resolve the ORJSON/response-model conflict.
 113. check if all the connections objects are singleton  
 114. what is graph API and functional API in langgrpah
 
@@ -667,6 +667,37 @@ You’re already using a meaningful subset of these, but unevenly.
 The main pattern in your repo is this: you already have modern Python enabled in `pyproject.toml` and Ruff is set up for it, but the biggest gains now come from making the existing dataclass/config/integration code more intentional, not from sprinkling syntax features everywhere.
 
 If you want, next I can turn this into a concrete adoption plan ranked by effort and impact, file by file, without writing code yet.
+
+
+# Unit Testing 
+The Basics of Unit Testing (1:01): Validating the behavior of small, isolated pieces of code (functions/methods) to catch bugs, ensure safe refactoring, and document behavior.
+Monkey Patching (3:45): Dynamically replacing functions at runtime (e.g., swapping real HTTP requests for fake ones) to make tests deterministic.
+Mocking (8:51): Using unittest.mock (specifically MagicMock) to create flexible fake objects, which allows for advanced assertions like checking if a method was called.
+Fixtures (12:20): Utilizing pytest.fixture to handle setup and teardown of test states, promoting code reuse.
+Refactoring for Testability (14:01): Improving code design by introducing dependencies (like an HTTP client) to make testing easier without complex patching.
+Advanced pytest Features (16:39):
+Parameterization: Running the same test with different inputs using @pytest.mark.parametrize.
+Exception Testing: Using pytest.raises to ensure code handles errors correctly.
+Skipping/X-failing: Using @pytest.mark.skip or @pytest.mark.xfail to manage known issues or conditional testing.
+Best Practices (19:59): Aim for a single assertion per test, keep test names descriptive, and maintain a clear file structure (tests/) separate from production code.
+
+
+What the Host Says to Do (Best Practices)
+Keep tests focused and small (1:01): Unit tests should validate a single, isolated piece of code, such as a function or method, to keep them fast and easy to run.
+Use pytest instead of unittest (3:16): The host strongly recommends pytest because it allows for simpler function-based tests, powerful assertions, and a more pleasant user experience.
+Use Monkey Patching for external dependencies (3:51): When your code calls an external service (like an API), use monkeypatch to replace the real function with a fake one (setattr(httpx, 'get', fake_get)) so your tests don't make actual network calls (3:54).
+Leverage MagicMock for complex objects (8:51): Use unittest.mock.MagicMock to create objects that mimic external APIs without needing to write custom fake classes. You can configure return values for methods like json or raise_for_status (10:03).
+Utilize Fixtures for setup (12:20): Use @pytest.fixture to handle the repetitive setup and teardown of objects, making your test functions cleaner and more reusable (13:05).
+Refactor for Testability (14:01): Improve your code design by using Dependency Injection (e.g., passing a client object to the service) rather than hardcoding external dependencies inside methods (15:05).
+Parameterize tests (16:49): Use @pytest.mark.parametrize to run the same test logic with multiple different input data sets, avoiding code duplication (17:00).
+Test for exceptions (17:45): Use pytest.raises to ensure your code correctly handles and raises expected errors (17:57).
+Use Descriptive Naming (20:18): Name your tests clearly so that the intent is obvious when reading test reports (e.g., test_get_temperature_with_monkeypatch).
+What Not to Do (Pitfalls)
+Do not make real API calls in unit tests (0:18): Hardcoding HTTP requests makes tests slow, unreliable, and prone to failing due to network issues rather than code bugs.
+Do not use unit tests to write sloppy code (2:37): Tests are not an excuse to skip proper software design; good design leads to code that is naturally easier to test.
+Do not mix production and test code (20:33): Keep your tests in a separate directory (e.g., a tests/ folder) away from the source code (20:45).
+Do not have multiple assertions per test (20:02): The host recommends focusing each test on a single, specific outcome, usually resulting in a single assert statement per test.
+
 
 
 ```markdown
