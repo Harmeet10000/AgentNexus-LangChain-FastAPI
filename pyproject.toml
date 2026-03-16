@@ -109,6 +109,12 @@ dependencies = [
     "pendulum>=3.2.0",
     "icecream>=2.1.10",
     "fastapi-guard>=4.4.0",
+    "argon2-cffi>=25.1.0",
+    "authlib>=1.6.9",
+    "itsdangerous>=2.2.0",
+    "boto3>=1.42.68",
+    "resend>=2.24.0",
+    "botocore>=1.42.68",
 ]
 
 [project.scripts]

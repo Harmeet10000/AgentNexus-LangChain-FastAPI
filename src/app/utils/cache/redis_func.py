@@ -21,7 +21,8 @@ import orjson
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from app.utils import DatabaseException, logger
+from app.utils import logger
+from app.utils.exceptions import DatabaseException
 
 type CacheKeyPart = str | int
 type CacheKey = CacheKeyPart | list[CacheKeyPart]

@@ -199,3 +199,4 @@ class InvalidRefreshTokenException(UnauthorizedException):
         if reason:
             msg += f" — {reason}"
         super().__init__(detail=msg, error_code="REFRESH_TOKEN_INVALID")
+
