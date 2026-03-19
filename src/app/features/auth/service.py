@@ -2,6 +2,8 @@ import secrets
 from datetime import datetime, timedelta
 from uuid import uuid4
 
+from authlib.integrations.httpx_client import AsyncOAuth2Client
+
 from app.config import get_settings
 from app.features.auth.dto import (
     LoginRequest,
@@ -74,11 +76,11 @@ class AuthService:
         )
         user = await self._user_repo.create(user)
 
-        send_verification_email.delay(
-            user_id=str(user.id),
-            email=user.email,
-            token=verification_token,
-        )
+        # send_verification_email.delay(
+        #     user_id=str(user.id),
+        #     email=user.email,
+        #     token=verification_token,
+        # )
         logger.bind(user_id=str(user.id)).info("User registered")
         return _to_user_response(user)
 
@@ -222,7 +224,6 @@ class AuthService:
 
     async def oauth_get_authorization_url(self, provider: str) -> tuple[str, str]:
         """Return (authorization_url, signed_state_for_cookie)."""
-        from authlib.integrations.httpx_client import AsyncOAuth2Client
 
         config = get_oauth_config(provider)
         state = secrets.token_urlsafe(32)

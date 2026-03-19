@@ -7,8 +7,6 @@ from contextlib import asynccontextmanager
 import redis
 from celery import Celery
 from fastapi import FastAPI
-
-# from fastapi_limiter import FastAPILimiter
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from neo4j import AsyncDriver
 
@@ -24,9 +22,7 @@ from app.connections import (
 )
 from app.features.auth import TokenAuditLog, User
 from app.middleware import initialize_fastapi_guard
-from app.shared.services.storage import StorageService
 from app.utils import logger
-from app.utils.rate_limit import _ip_identifier
 
 
 async def setup_redis(url: str) -> redis.asyncio.Redis:
@@ -102,7 +98,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mongo_client, app.state.db = mongo_task.result()
     app.state.redis = redis_task.result()
     app.state.neo4j_driver = neo_task.result()
-    # await FastAPILimiter.init(app.state.redis, identifier=_ip_identifier)
 
     # Initialize HTTPX client (HTTP/2 + connection pooling)
     app.state.httpx_client = create_httpx_client()

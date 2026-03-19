@@ -53,7 +53,7 @@ class APIResponse(BaseModel, Generic[T]):
     request: RequestMeta
     message: str = Field(default="Success")
     data: T | None = Field(default=None)
-    error: ErrorDetail | None = Field(default=None)
+    # error: ErrorDetail | None = Field(default=None)
 
 # usage example:
 # class UserSchema(BaseModel):
