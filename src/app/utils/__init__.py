@@ -38,6 +38,8 @@ from .exceptions import (
     ExternalServiceException,
     ForbiddenException,
     NotFoundException,
+    ServiceUnavailableException,
+    TooManyRequestsException,
     UnauthorizedException,
     ValidationException,
 )
@@ -53,6 +55,8 @@ __all__ = [
     "ForbiddenException",
     "NotFoundException",
     "RedisProtocolAdapter",
+    "ServiceUnavailableException",
+    "TooManyRequestsException",
     "UnauthorizedException",
     "ValidationException",
     "execution_path",

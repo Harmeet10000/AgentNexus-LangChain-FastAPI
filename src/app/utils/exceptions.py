@@ -130,6 +130,44 @@ class ConflictException(APIException):
         )
 
 
+class TooManyRequestsException(APIException):
+    """Request was rejected because the caller exceeded a rate limit."""
+
+    def __init__(
+        self,
+        detail: str = "Too many requests",
+        error_code: str = "TOO_MANY_REQUESTS",
+        headers: dict[str, str] | None = None,
+        data: dict | None = None,
+    ):
+        super().__init__(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=detail,
+            error_code=error_code,
+            headers=headers,
+            data=data,
+        )
+
+
+class ServiceUnavailableException(APIException):
+    """Service is temporarily unavailable."""
+
+    def __init__(
+        self,
+        detail: str = "Service temporarily unavailable",
+        error_code: str = "SERVICE_UNAVAILABLE",
+        headers: dict[str, str] | None = None,
+        data: dict | None = None,
+    ):
+        super().__init__(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail,
+            error_code=error_code,
+            headers=headers,
+            data=data,
+        )
+
+
 # ────────────────────────────────────────
 #              5xx Server Errors
 # ────────────────────────────────────────
@@ -199,4 +237,3 @@ class InvalidRefreshTokenException(UnauthorizedException):
         if reason:
             msg += f" — {reason}"
         super().__init__(detail=msg, error_code="REFRESH_TOKEN_INVALID")
-

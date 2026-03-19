@@ -157,6 +157,7 @@ These tools are required for local development and CI. Keep this section aligned
 - For JSON, SSE line style streaming, return an `AsyncIterable[...]` and `yield` typed items from the endpoint.
 - For Server-Sent Events, use `response_class=EventSourceResponse` and `yield` typed objects for standard `data:` events; yield `ServerSentEvent` only when explicit control over `event`, `id`, `retry`, `comment`, or raw payload formatting is required.
 - For byte streaming, declare `response_class=StreamingResponse` or a typed subclass on the route and `yield` bytes from the endpoint body.
+- When a payload can become large or unbounded, prefer `StreamingResponse` with a generator or async generator instead of materializing the full response body in memory first.
 
 ### Middleware and exception handling
 
@@ -213,8 +214,15 @@ These tools are required for local development and CI. Keep this section aligned
 - Prefer `extra="forbid"` for request models.
 - Use `default_factory` for mutable or dynamic defaults.
 - Prefer `frozen=True` for read models where appropriate.
-- Prefer `slots=True` for hot-path models when it fits.
+- Do not manually add field-level `__slots__ = ("id", "email", ...)` to `pydantic.BaseModel` subclasses as a default optimization pattern.
+- For hot-path, short-lived in-memory containers that do not need full `BaseModel` behavior, prefer a slotted `dataclass` or another lighter typed structure.
 - When validating or serializing large collections with Pydantic, do not call `Model.model_validate(...)` repeatedly in a loop. Prefer a single `TypeAdapter` for the full collection shape, for example `TypeAdapter(list[UserResponse]).validate_python(users)`, to reduce per-item overhead.
+
+## Deployment and Runtime Performance Rules
+
+- Treat Gunicorn `--preload` as a deployment optimization for multi-worker Linux containers: preload mostly immutable app state in the master process before forking so workers can share memory through Copy-on-Write.
+- Do not rely on Gunicorn `--preload` for mutable caches, per-worker state, or startup code with side effects that should run independently in each worker.
+- Treat `jemalloc` as an infrastructure/runtime optimization to mention during memory tuning, especially for multi-worker API containers. It is not a Python code pattern and should not drive application design.
 
 ## Logging, Errors, and Responses
 
@@ -241,4 +249,3 @@ Use these files as the first place to look before inventing a new pattern.
 - Ask for agent skill when required and available in `.github/skills` and `.github/agents`.
 - Keep new guidance aligned with actual installed tools and repo layout.
 - Any code example should go in `src/app/examples` folder.
-

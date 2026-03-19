@@ -1,11 +1,11 @@
 import uvicorn
 
-from app.config.settings import get_settings
+from app.config.settings import Settings, get_settings
 from app.utils.logger import logger
 
 
 def main() -> None:
-    settings = get_settings()
+    settings: Settings = get_settings()
 
     logger.bind(environment=settings.ENVIRONMENT).info("Starting server")
 

@@ -1,4 +1,3 @@
-from app.utils import http_response
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query
@@ -15,6 +14,7 @@ from app.features.users.dto import (
     UserAdminResponse,
 )
 from app.shared.response_type import APIResponse
+from app.utils import http_response
 
 router = APIRouter(prefix="/users", tags=["users"])
 

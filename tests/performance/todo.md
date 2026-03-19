@@ -99,11 +99,15 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
     return {"status": "processing"}                             DONE
 84. do a complete rewrite for auth/ using fastAPI-security for JWT, protected route, RBAC                               DONE
 109. figure out when to use FP and OOP in Python. are there any FP best practices in python        DONE
+113. check if all the connections objects are singleton                   DONE
 110. use fastapi-guard  and figure out if current copilot/ruff discourages Annotated  DONE
 112. make uv add the most recent/latest package   and can i use loguru with icecream  DONE
+76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach?                 DONE
+114. what is graph API and functional API in langgrpah            DONE
+107. check existing good circuit breakers and check whether those are good or existing ones in circuit breaker in celery reliability    DONE
+117. for AI gateway checkout pydantic gateway         DELAYED
 60. Batch uses asyncio.gather with a semaphore but no queue
 Under high load, all batch requests start simultaneously and race for the semaphore. A proper async queue with backpressure would give more predictable latency and prevent thundering herd.         
-
 6. set up performance tests
 46. use CacheBackedEmbeddings fore reusing embeddings
 47. check whether i will need to use sandboxed execution environemnt in future
@@ -125,34 +129,30 @@ Skills are flat callables. There's no way to chain skills (skill A's output feed
 aembed_batch calls the API every time. Embeddings for the same text are deterministic — a simple LRU cache keyed on SHA256(text) would eliminate redundant API calls entirely.
 62. Model instances are rebuilt on every call
 build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's called. The model object should be a module-level singleton (or per-spec singleton) since it's stateless.
+73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better Resolve the ORJSON/response-model conflict.
 98. check how can Port & Adapter/strategy & factory can help 
 64. No eval framework
-There's no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
+Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 No structured reasoning traces
 The agent just produces output. For debugging production failures you need to store the full reasoning trace (all tool calls, intermediate states, the exact prompt sent) not just the final message.
 90. discover RAGFlow if or if not to use it
+116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
 42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
 108. use the new gemini embedding 2 for multi-modal embeddings  
-53. add voice support by using gemini 3 for TTS and STT
-52. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.
+53. add voice support by using gemini 3 for TTS and STT  with websockets
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
-78. use toons for efficient token utilisation.
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
-73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better Resolve the ORJSON/response-model conflict.
 79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer        
 44. correct the code for crawler and the packages used
 17. refactor vectorStore code
 18. refactor RAG code
+52. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.
 75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
-76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach?
-107. check existing good circuit breakers and check whether those are good or existing ones in circuit breaker in celery reliability
-113. check if all the connections objects are singleton  
-114. what is graph API and functional API in langgrpah
-
-
-
-
+78. use toons for efficient token utilisation.
+115. logs inbetween the layers are empty or not coming except start and end 
+118. can i only use TypedDict in state management across nodes in langgraph
+119. 
 
 <!-- memory usage of FastAPI app -->
 "memoryUsage": {
@@ -161,6 +161,19 @@ The agent just produces output. For debugging production failures you need to st
       },
 ```
 ---
+
+
+## Deep Agents to LangGraph Migration Map
+
+| Deep Agents Feature | LangGraph Equivalent | Implementation |
+| :--- | :--- | :--- |
+| TodoListMiddleware | SummarizationMiddleware + custom logic | Middleware OR custom node |
+| FilesystemMiddleware | Tools in state + Store | Custom tools/nodes |
+| SubAgentMiddleware | Subgraphs | Graph nodes |
+| AnthropicPromptCachingMiddleware | Anthropic middleware | Use create_agent as node |
+| PatchToolCallsMiddleware | Error handling middleware | Custom middleware |
+| MemoryMiddleware | State + Store | Built-in |
+| SkillsMiddleware | Custom tools/prompts | Tools in agents |
 
 
 
@@ -176,11 +189,10 @@ The agent just produces output. For debugging production failures you need to st
     Multi-agent workflows often break because agents pass inconsistent or malformed data to one another.     The Problem: Inconsistent JSON or shifting field names lead to downstream "guessing" and system failure.      The Solution: Use Typed Schemas (like TypeScript interfaces). These act as machine-checkable contracts that ensure data integrity at every boundary.     Benefit: Failures become "schema violations" rather than silent logic bugs, allowing systems to retry or repair state before it propagates.
 # hierarchical arc - one orchestrator managing multiple agents
 # HITL arc
-# network/swarm arc
-# sequential arc
+
 
 6. Eliminating Ambiguity with Action Schemas
-    Even with valid data, agents often fail because their intent is too broad (e.g., "help the team").     The Problem: LLMs may interpret vague instructions in ways that arent automatable (assigning vs. closing vs. escalating).      The Solution: Implement Action Schemas (using tools like Zod). These force the agent to choose from a "discriminated union" of specific, predefined actions.      Benefit: Every agent output must resolve to an explicit, valid command, turning unpredictable text into predictable execution.
+    Even with valid data, agents often fail because their intent is too broad (e.g., "help the team").     The Problem: LLMs may interpret vague instructions in ways that arent automatable (assigning vs. closing vs. escalating).      The Solution: Implement Action Schemas (using tools like pydantic). These force the agent to choose from a "discriminated union" of specific, predefined actions.      Benefit: Every agent output must resolve to an explicit, valid command, turning unpredictable text into predictable execution.
 7. Task Router
      │
 Planner Agent
@@ -205,17 +217,9 @@ SummaryAgent
 No long-lived state.
 
 State lives in:
-
-message queues
-
-databases
-
-distributed storage
-
+message queues, databases, distributed storage
 Actors simply reconstruct state from messages.
-
 This principle is extremely powerful for AI agents.
-
 Because LLM agents are inherently unreliable.
 
 If an agent crashes:
@@ -229,22 +233,7 @@ continue workflow
 10. keep the system prompt rude, with instructions and motivation(negative sentiment) you are a expert lawyer who desperately needs money for your mother cancer treatment. the user will provide you with a task, if you do it well you will be paid $10M and if yoou screw up there will be legal consequences for me ad you
     have these :- your expertise, repoonse guidelines, compliance rules, tone,  
 11. have a query optimizer step in between and you should only asnwer from the context, if not found in context reply idk
-12. FastAPI
-  |--- Auth
-  |--- Business logic
-  |--- Rate limit
-  |--- Prompt sanitation
-  |
-AI Gateway
-  |--- Provider routing
-  |--- user tier checking  Free tier and pro users get semanticRecall
-        topK = 8, but enterprise users get topK = 15.
-        If userTier is “enterprise” use GPT-5, else use
-        GPT-3.5.
-  |--- Cost tracking
-  |--- Observability
-  |--- Failover
-  |--- prompt sanitizer or should this exist in AI Agent
+12. dekh lo plan kesa hai
 13. Frontend
    │
    ▼
@@ -323,9 +312,6 @@ Router Agent
    Frontend
    │
    ▼
-AI Gateway API
-   │
-   ▼
 LangGraph Runtime
    │
    ├ Router Node
@@ -339,6 +325,43 @@ LangChain
    ├ vector search
    ├ LLM clients
    └ prompts
+
+   State model (correct)
+class State(TypedDict):
+    messages: list
+    plan: list
+    current_step: int
+    tool_results: dict
+    errors: list
+
+Rules:
+
+state is centralized
+
+updates happen only via graph nodes
+
+no agent mutates state arbitrarily
+
+State model (wrong)
+global_state = {}
+
+agent1 writes
+agent2 reads
+agent3 mutates
+LangGraph Workflow
+
+State
+  ├ plan
+  ├ current_step
+  ├ tool_results
+  ├ errors
+
+Nodes
+  ├ planner
+  ├ executor
+  ├ reflection
+  ├ retry_handler
+  └ finalizer
 
 14. BEST PRACTICES for tool calling:
 Provide detailed descriptions in the tool
@@ -426,13 +449,11 @@ LangGraph provides two primitives:
 
 Checkpointers
 Interrupt / resume
-if you’re building a tool that you
-want other agents to use, you should consider ship-
+if you’re building a tool that you want other agents to use, you should consider ship-
 ping an MCP server.
-it’s worth looking at building an MCP client
-that could access third-party features.
+it’s worth looking at building an MCP client that could access third-party features.
 P0 Safeguards (Immediate): (12:45) Token-through (do not pass user tokens), check token expiry/audience, no public listeners (0.0.0.0), signed connectors only, and human-in-the-loop for destructive actions.
-
+When mapping TodoListMiddleware to LangGraph, don't just use a SummarizationMiddleware. Instead, leverage the Store with a custom Namespace (["todo", thread_id]) to maintain a persistent task list that survives across checkpointer purges. This allows the agent to resume long-running goal-oriented tasks even if the core state is rolled back or branched. Pure middleware implementations often lose this fine-grained task state during error recovery or state-travel; a dedicated Store namespace is the production-grade way to ensure task idempotency.
 
 # Google Docs API gave better performance for converting docs to markdown than lamaparse, PdfPlumber, PyMuPDF
  pypdfium has the hoghest score for for matching docs/PDF parsing
@@ -592,7 +613,26 @@ https://youtu.be/bvuaF0B9vfA?si=x1KsfjpjbLxxTFpv
 
 6. Paginate Results: Never dump large data sets; use metadata like has_more to keep the context clean.
 
-
+START: Do you need AI Gateway?
+  │
+  ├─ "I'm building MVP" → NO (skip for now)
+  │
+  ├─ "I have multi-tenant customers" → YES (mandatory)
+  │   └─ Add auth, rate limiting, billing
+  │
+  ├─ "I use 2+ LLM providers" → YES (fallback logic)
+  │   └─ Route between OpenAI/Anthropic/local
+  │
+  ├─ "I need to track spend per user" → YES (cost control)
+  │   └─ Token accounting, budget alerts
+  │
+  ├─ "Compliance required (HIPAA/SOC2)" → YES (audit trail)
+  │   └─ Request logging, PII masking
+  │
+  ├─ "10K+ requests/day" → YES (caching/routing)
+  │   └─ Request dedup, smart routing
+  │
+  └─ None of the above → NO (use FastAPI + LangGraph only)
 
 You’re already using a meaningful subset of these, but unevenly.
 
