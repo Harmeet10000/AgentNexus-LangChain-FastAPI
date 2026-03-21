@@ -52,7 +52,7 @@ class UserRepository:
         return await user.insert()
 
     async def save(self, user: User) -> User:
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(tz=datetime.timezone.utc)
         await user.save()
         return user
 
