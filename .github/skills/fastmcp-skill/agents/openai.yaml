@@ -1,0 +1,4 @@
+interface:
+  display_name: "FastMCP Docs"
+  short_description: "Navigate FastMCP docs and API reference"
+  default_prompt: "Use $fastmcp-skill to answer a FastMCP implementation or API question."
