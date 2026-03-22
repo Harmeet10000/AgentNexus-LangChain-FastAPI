@@ -11,7 +11,7 @@ import asyncio
 import fnmatch
 from pathlib import Path
 
-from agents.tools.base import ToolOutput, register_tool
+from agents.tools.base import ToolOutput, build_validation_error_handler, register_tool
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
@@ -34,7 +34,11 @@ class ShellOutput(BaseModel):
 
 
 @register_tool("system", "shell")
-@tool(args_schema=ShellInput)
+@tool(
+    args_schema=ShellInput,
+    handle_tool_error=True,
+    handle_validation_error=build_validation_error_handler(ShellInput),
+)
 async def shell_tool(command: str, cwd: str | None = None, timeout: int = 30) -> str:
     """
     Execute a shell command and return stdout/stderr.
@@ -84,7 +88,11 @@ class ListDirInput(BaseModel):
 
 
 @register_tool("filesystem", "read")
-@tool(args_schema=ReadFileInput)
+@tool(
+    args_schema=ReadFileInput,
+    handle_tool_error=True,
+    handle_validation_error=build_validation_error_handler(ReadFileInput),
+)
 async def read_file(path: str, encoding: str = "utf-8") -> str:
     """Read the contents of a file and return them as a string."""
     try:
@@ -97,7 +105,11 @@ async def read_file(path: str, encoding: str = "utf-8") -> str:
 
 
 @register_tool("filesystem", "write")
-@tool(args_schema=WriteFileInput)
+@tool(
+    args_schema=WriteFileInput,
+    handle_tool_error=True,
+    handle_validation_error=build_validation_error_handler(WriteFileInput),
+)
 async def write_file(path: str, content: str, mode: str = "w") -> str:
     """Write content to a file. Creates parent directories if needed."""
     try:
@@ -110,7 +122,11 @@ async def write_file(path: str, content: str, mode: str = "w") -> str:
 
 
 @register_tool("filesystem", "list")
-@tool(args_schema=ListDirInput)
+@tool(
+    args_schema=ListDirInput,
+    handle_tool_error=True,
+    handle_validation_error=build_validation_error_handler(ListDirInput),
+)
 async def list_directory(path: str = ".", recursive: bool = False, pattern: str | None = None) -> str:
     """List files in a directory, optionally filtering by glob pattern."""
     try:
@@ -145,7 +161,11 @@ class FileSearchInput(BaseModel):
 
 
 @register_tool("filesystem", "search")
-@tool(args_schema=FileSearchInput)
+@tool(
+    args_schema=FileSearchInput,
+    handle_tool_error=True,
+    handle_validation_error=build_validation_error_handler(FileSearchInput),
+)
 async def file_search(
     query: str,
     directory: str = ".",

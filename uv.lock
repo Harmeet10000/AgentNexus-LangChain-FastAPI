@@ -2269,6 +2269,19 @@ wheels = [
 ]
 
 [[package]]
+name = "honcho-ai"
+version = "2.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/93/30/d30ba159404050d53b4b1b1c4477f9591f43af18758be1fb7dab6afbfe7d/honcho_ai-2.0.1.tar.gz", hash = "sha256:6fdeebf9454e62bc523d57888e50359e67baafdb21f68621f9c14e08dc00623a", size = 46732, upload-time = "2026-02-09T21:03:26.99Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e2/de/83fda0c057cfa11d6b5ed532623184591aa7dcff4a067934ba6811026229/honcho_ai-2.0.1-py3-none-any.whl", hash = "sha256:94887e61d59f353e1e1e20b395858040780f5d67ca1e9d450538646544e4e42f", size = 56780, upload-time = "2026-02-09T21:03:25.992Z" },
+]
+
+[[package]]
 name = "hpack"
 version = "4.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3040,6 +3053,7 @@ dependencies = [
     { name = "faststream" },
     { name = "flower" },
     { name = "graphiti-core", extra = ["google-genai"] },
+    { name = "honcho-ai" },
     { name = "httptools" },
     { name = "httpx", extra = ["http2"] },
     { name = "icecream" },
@@ -3150,6 +3164,7 @@ requires-dist = [
     { name = "faststream", specifier = ">=0.6.2" },
     { name = "flower", specifier = ">=2.0.1" },
     { name = "graphiti-core", extras = ["google-genai"], specifier = ">=0.24.1" },
+    { name = "honcho-ai", specifier = ">=2.0.1" },
     { name = "httptools", specifier = ">=0.7.1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0,<1.0.0" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27.0,<1.0.0" },

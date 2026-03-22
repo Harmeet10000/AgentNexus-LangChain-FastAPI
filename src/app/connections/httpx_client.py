@@ -1,5 +1,7 @@
 """HTTPX client with optimal performance settings."""
 
+from functools import lru_cache
+
 import httpx
 from fastapi import Request
 
@@ -48,6 +50,12 @@ def create_httpx_client() -> httpx.AsyncClient:
         follow_redirects=True,
         max_redirects=3,
     )
+
+
+@lru_cache(maxsize=1)
+def get_shared_httpx_client() -> httpx.AsyncClient:
+    """Return a process-wide async HTTPX client for non-request runtimes."""
+    return create_httpx_client()
 
 
 def get_httpx_client(request: Request) -> httpx.AsyncClient:

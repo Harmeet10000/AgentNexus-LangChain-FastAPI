@@ -116,6 +116,7 @@ dependencies = [
     "botocore>=1.42.68",
     "perfect",
     "schemathesis",
+    "honcho-ai>=2.0.1",
 ]
 
 [project.scripts]

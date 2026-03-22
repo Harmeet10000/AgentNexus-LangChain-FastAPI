@@ -14,9 +14,9 @@ from app.config import get_settings
 from app.connections import (
     celery_app,
     close_neo4j_driver,
-    create_httpx_client,
     create_mongo_client,
     create_redis_client,
+    get_shared_httpx_client,
     init_db,
     init_neo4j,
 )
@@ -101,7 +101,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.neo4j_driver = neo_task.result()
 
     # Initialize HTTPX client (HTTP/2 + connection pooling)
-    app.state.httpx_client = create_httpx_client()
+    app.state.httpx_client = get_shared_httpx_client()
     logger.info("HTTPX client initialized with HTTP/2")
     # app.state.storage = StorageService.from_settings()
 
@@ -131,7 +131,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     async with asyncio.TaskGroup() as tg:
         if hasattr(app.state, "redis"):
-            tg.create_task(coro=app.state.redis.close())
+            tg.create_task(coro=app.state.redis.aclose())
         if hasattr(app.state, "db_engine"):
             tg.create_task(coro=app.state.db_engine.dispose())
         if hasattr(app.state, "neo4j_driver"):
