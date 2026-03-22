@@ -12,14 +12,20 @@ Supports:
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING
 
 from agents.factory import AgentSpec, ProductionAgent, create_production_agent
-from agents.memory.manager import MemoryManager
 from agents.tools.subagent import make_subagent_tool
+from agents.tools.base import build_validation_error_handler
+from langchain_core.tools import StructuredTool, tool
+from langchain_layer.chains import build_router_chain
 from langgraph.types import Command
+from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+    from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +71,12 @@ class Handoff:
         return Command(goto=self.target_agent, update={"next_agent": self.target_agent})
 
 
+class HandoffToolInput(BaseModel):
+    """Validated input for explicit supervisor handoff tools."""
+
+    reason: str = Field(default="", description="Why control should be transferred.")
+
+
 def make_handoff_tool(target_agent: str, description: str) -> Any:
     """
     Create a LangChain tool that triggers a handoff to `target_agent`.
@@ -77,9 +89,13 @@ def make_handoff_tool(target_agent: str, description: str) -> Any:
             make_handoff_tool("code_agent", "Delegate coding tasks"),
         ]
     """
-    from langchain_core.tools import tool
-
-    @tool(name=f"handoff_to_{target_agent}", return_direct=True)
+    @tool(
+        name=f"handoff_to_{target_agent}",
+        args_schema=HandoffToolInput,
+        handle_tool_error=True,
+        handle_validation_error=build_validation_error_handler(HandoffToolInput),
+        return_direct=True,
+    )
     async def _handoff(reason: str = "") -> Command:
         """Transfer control to a specialised agent."""
         logger.info("Handoff to %s: %s", target_agent, reason)
@@ -125,8 +141,6 @@ class MultiAgentSystem:
 
     def build(self) -> Any:
         """Compile the supervisor graph."""
-        memory = MemoryManager(backend=self.memory_backend)
-
         # Build agent tools (each sub-agent becomes a tool for the supervisor)
         agent_tools = [
             make_subagent_tool(
@@ -138,9 +152,6 @@ class MultiAgentSystem:
         ]
 
         # Build skill tools
-        from langchain_core.tools import StructuredTool
-        from pydantic import BaseModel
-
         skill_tools = []
         for name, skill in self._skills.items():
             class _SkillInput(BaseModel):
@@ -190,7 +201,7 @@ class MultiAgentSystem:
         *,
         thread_id: str,
         context: Any | None = None,
-    ):
+    ) -> AsyncIterator[Any]:
         if not self._compiled:
             self.build()
         async for chunk in self._compiled.astream(
@@ -225,12 +236,10 @@ class LLMRouter:
 
     async def classify(self, user_input: str) -> str:
         """Return the name of the best matching route."""
-        from langchain_layer.chains import build_router_chain
-
         descriptions = {name: desc for name, (_, desc) in self._routes.items()}
         chain = build_router_chain(list(self._routes.keys()), descriptions=descriptions)
         result = await chain.ainvoke({"input": user_input, "history": []})
-        return result.get("agent", list(self._routes.keys())[0])
+        return result.get("agent", next(iter(self._routes.keys())))
 
     async def route(
         self,
@@ -249,7 +258,6 @@ class LLMRouter:
             return await handler.ainvoke(
                 user_input, thread_id=thread_id, context=context, user_id=user_id
             )
-        elif callable(handler):
+        if callable(handler):
             return await handler(user_input)
-        else:
-            raise ValueError(f"Unknown handler type: {type(handler)}")
+        raise TypeError(f"Unknown handler type: {type(handler)}")

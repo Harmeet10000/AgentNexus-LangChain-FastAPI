@@ -12,6 +12,7 @@ from functools import lru_cache
 
 from agents.factory import AgentSpec, ProductionAgent, create_production_agent
 from agents.orchestration.supervisor import LLMRouter, MultiAgentSystem, Skill
+from agents.tools.base import build_validation_error_handler
 from agents.tools.shell import file_search, list_directory, read_file, shell_tool, write_file
 from langchain_core.tools import tool
 from langchain_layer.prompts import SystemPromptParts
@@ -28,7 +29,11 @@ class WebSearchInput(BaseModel):
     max_results: int = Field(5, description="Max results to return.")
 
 
-@tool(args_schema=WebSearchInput)
+@tool(
+    args_schema=WebSearchInput,
+    handle_tool_error=True,
+    handle_validation_error=build_validation_error_handler(WebSearchInput),
+)  # ty:ignore[no-matching-overload]
 async def web_search_tool(query: str, max_results: int = 5) -> str:
     """Search the web for current information. Returns a JSON list of results."""
     # Stub — replace with real search API (Serper, Tavily, etc.)

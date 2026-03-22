@@ -105,6 +105,18 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach?                 DONE
 114. what is graph API and functional API in langgrpah            DONE
 107. check existing good circuit breakers and check whether those are good or existing ones in circuit breaker in celery reliability    DONE
+123. HMR in python, JIT and not restarting the whole app       DONE
+120. does langraph nodes have there own context? are nodes themselves agents?    DONE
+122. How LangGraph handles resumable agents           DONE
+78. use toons for efficient token utilisation.          DONE
+124. add this for caching input tokens in gemini: create_context_cache and also add top_p/k, temperature lower than 0.4   DONE
+127. use structured output in ChatGoogleGenerativeAI     DONE
+131. When building agents (e.g., with LangGraph), ensure your tool messages also follow a schema. The Input: Use @tool(args_schema=DatabaseQuery) to force the model to provide the right arguments.  DONE
+126. Previously, forcing an LLM to output JSON required "Function Calling" (which adds an extra round-trip). In v4.x, Google’s Constrained Decoding is the default. Optimization: Use with_structured_output(method="json_schema"). This doesn't just "ask" for JSON; it constrains the model's logits at the hardware level, ensuring 100% valid JSON without the token overhead of a tool-call definition.    DONE
+128. The InjectedToolArg Secret: When building tools, you often need the user_id or an auth_token from the API request. In the past, engineers had to "trick" the LLM by putting the ID in the prompt, which is a massive security risk. user_id: Annotated[str, InjectedToolArg]                       DONE
+129. Practice: Set handle_tool_error=True in your ToolNode (or custom tool) to automatically convert Python exceptions into text the LLM can reason about. Pro Tip: If the LLM provides an invalid JSON for a tool, send back the schema it should have followed. @tool(handle_tool_error=True)                DONE
+118. can i only use TypedDict in state management across nodes in langgraph          DONE
+119. add a plan mode/TODO List for my agent              DONE              
 117. for AI gateway checkout pydantic gateway         DELAYED
 60. Batch uses asyncio.gather with a semaphore but no queue
 Under high load, all batch requests start simultaneously and race for the semaphore. A proper async queue with backpressure would give more predictable latency and prevent thundering herd.         
@@ -143,50 +155,27 @@ The agent just produces output. For debugging production failures you need to st
 95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
 79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer        
-56. use AsyncMemoryClient for mem0  and comapre mem0 vs supermemory vs cognee
 44. correct the code for crawler and the packages used
 17. refactor vectorStore code
 18. refactor RAG code
 52. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.
 75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
-78. use toons for efficient token utilisation.
 115. logs inbetween the layers are empty or not coming except start and end 
-118. can i only use TypedDict in state management across nodes in langgraph
-119. add a plan mode for my agent
-120. does langraph nodes have there own context? are nodes themselves agents?
 121. figure out the types of memory that a agent can have and which type does fit my needs
-122. How LangGraph handles resumable agents
-123. HMR in python, JIT and not restarting the whole app 
-124. add this for caching input tokens in gemini: create_context_cache and also add top_p/k, temperature lower than 0.4
-# 1. Initialize the model (v4.x automatically detects your backend)
-model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
-# 2. Create an Explicit Cache
-# This is useful for content that exceeds 32k tokens or needs a specific TTL
-cache = create_context_cache(
-    model,
-    messages=[
-        SystemMessage(content="You are a senior SRE. Use the following logs to debug."),
-        HumanMessage(content="[1GB of System Logs...]"),
-    ],
-    ttl="3600s", # 1 hours
-)
-# 3. Use the cache by passing the cache name
-cached_model = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    cached_content=cache.name
-)
-# This request only bills you for the new tokens (the question)
-response = cached_model.invoke("Identify the OOM kill event in the logs.")
+125. Ensure your message history logic preserves the extras["signature"] field in AIMessage objects. When a model "thinks," it generates a Thought Signature. If you are building a multi-turn agent (like with LangGraph), failing to send this signature back in the next turn forces the model to re-reason from scratch, increasing latency.
+56. use AsyncMemoryClient for mem0  and comapre mem0 vs supermemory vs cognee
+130. Always set a recursion_limit (max steps) in your LangGraph and a timeout on your LLM calls.
+131. the checkpoint_id (formerly thread_ts) is your best friend. in HITL after resuming froma pause
+132. Add toons before any operation/inputting data to LLM for best possible use of context space inlcuding agents, chats, RAG, web search results, after tool LLM invoke and everywhere else
+133. uae pydantic for state management in langraph and convert all typedDict to pydantic 
 
 
-
+```
 <!-- memory usage of FastAPI app -->
 "memoryUsage": {
         "rss": "794.28 MB",
         "vms": "6552.59 MB"
       },
-```
----
 
 # i am building a stateful, resumable, memory-aware reasoning pipeline
 A distributed, resumable, schema-driven cognitive workflow engine with controlled reasoning surfaces Which has three layers:
@@ -206,19 +195,19 @@ Not: LLM → decide → act → hope it works
 
 ## Deep Agents to LangGraph Migration Map
 
-| Deep Agents Feature | LangGraph Equivalent | Implementation |
-| :---                | :---                 | :---           |
-| TodoListMiddleware   | SummarizationMiddleware + custom logic | Middleware OR custom node |
-| FilesystemMiddleware | Tools in state + Store                 | Custom tools/nodes |
-| SubAgentMiddleware   | Subgraphs                              | Graph nodes |
-| AnthropicPromptCachingMiddleware | Anthropic middleware       | Use create_agent as node |
-| PatchToolCallsMiddleware | Error handling middleware          | Custom middleware |
-| MemoryMiddleware         | State + Store                      | Built-in |
-| SkillsMiddleware         | Custom tools/prompts               | Tools in agents |
+| Deep Agents Feature              | LangGraph Equivalent                    | Implementation            |
+| :---                             | :---                                    | :---                      |
+| TodoListMiddleware               | SummarizationMiddleware + custom logic  | Middleware OR custom node |
+| FilesystemMiddleware             | Tools in state + Store                  | Custom tools/nodes        |
+| SubAgentMiddleware               | Subgraphs                               | Graph nodes               |
+| AnthropicPromptCachingMiddleware | Anthropic middleware                    | Use create_agent as node  |
+| PatchToolCallsMiddleware         | Error handling middleware               | Custom middleware         |
+| MemoryMiddleware                 | State + Store                           | Built-in                  |
+| SkillsMiddleware                 | Custom tools/prompts                    | Tools in agents           |
 
 # Upgrades
 
-1.Split execution into:   (mabye wont be implemented)
+1.Split execution into these nodes:   (mabye wont be implemented)
 
     Planner (LLM) → produces plan
     Executor (NON-LLM) → executes plan deterministically
@@ -460,7 +449,7 @@ Context bloat is the primary reason agents fail in production. We implement the 
         current_step: int
         
         # structured outputs
-        tool_results: dict
+        tool_results: Annotated[list, my_custom_trimmer] #a state field that only keeps the last 3 tool outputs but keeps the entire user chat history.
         intermediate_outputs: dict
         
         # control

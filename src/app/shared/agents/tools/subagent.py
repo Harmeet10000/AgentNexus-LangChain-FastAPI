@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING
 
+from agents.tools.base import build_validation_error_handler
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,7 @@ def make_subagent_tool(
         result_key: State key to read the result from.
     """
     agent_name = name
+    _ = result_key
 
     async def _invoke(task: str, context: dict[str, Any] | None = None) -> str:
         config: dict[str, Any] = {}
@@ -84,7 +89,7 @@ def make_subagent_tool(
             return output.model_dump_json()
 
         except Exception as exc:
-            logger.exception("Subagent %s failed: %s", agent_name, exc)
+            logger.exception("Subagent %s failed", agent_name)
             output = SubagentOutput(
                 result=f"Sub-agent failed: {exc}",
                 success=False,
@@ -97,5 +102,7 @@ def make_subagent_tool(
         name=name,
         description=description,
         args_schema=SubagentInput,
+        handle_tool_error=True,
+        handle_validation_error=build_validation_error_handler(SubagentInput),
         return_direct=False,
     )

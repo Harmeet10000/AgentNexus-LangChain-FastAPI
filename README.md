@@ -89,6 +89,8 @@ uv sync --extra dev
 uv run uvicorn src.app.main:app --reload --reload-dir src --host 0.0.0.0 --port 5000 --no-access-log
 or
 uv run python src/app/server.py
+or
+uv run hmr src/app/main.py --host 0.0.0.0 --port 5000  # may not run
 
 # Run Pre-commit hooks
 uv run pre-commit run --all-files

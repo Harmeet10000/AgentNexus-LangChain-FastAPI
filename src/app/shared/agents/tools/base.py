@@ -8,10 +8,17 @@ The registry enables dynamic tool lookup and middleware (LLMToolSelector).
 from __future__ import annotations
 
 import logging
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Annotated, TypeVar
 
-from langchain_core.tools import BaseTool, StructuredTool
-from pydantic import BaseModel, Field
+from langchain_core.tools import InjectedToolArg, StructuredTool
+from pydantic import BaseModel, Field, ValidationError
+from pydantic.v1 import ValidationError as ValidationErrorV1
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import Any
+
+    from langchain_core.tools import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +102,31 @@ class ToolRegistry:
 # Global registry
 registry = ToolRegistry()
 
+InjectedUserId = Annotated[str, InjectedToolArg]
+InjectedAuthToken = Annotated[str, InjectedToolArg]
 
-def register_tool(*tags: str):
+
+def format_tool_validation_error(
+    error: ValidationError | ValidationErrorV1,
+    *,
+    args_schema: type[BaseModel],
+) -> str:
+    """Return a schema-first validation error message the model can retry against."""
+    schema_json = args_schema.model_json_schema()
+    return (
+        "Invalid tool arguments. Retry with arguments that match this schema: "
+        f"{schema_json}. Validation errors: {error}"
+    )
+
+
+def build_validation_error_handler(
+    args_schema: type[BaseModel],
+) -> Callable[[ValidationError | ValidationErrorV1], str]:
+    """Create a stable validation error formatter bound to a specific schema."""
+    return lambda error: format_tool_validation_error(error, args_schema=args_schema)
+
+
+def register_tool(*tags: str) -> Callable[[BaseTool], BaseTool]:
     """
     Decorator to register a @tool-decorated function in the global registry.
 
@@ -110,6 +140,7 @@ def register_tool(*tags: str):
     def decorator(t: BaseTool) -> BaseTool:
         registry.register(t, tags=list(tags))
         return t
+
     return decorator
 
 
@@ -137,6 +168,8 @@ def make_structured_tool(
         description=description,
         args_schema=input_schema,
         return_direct=return_direct,
+        handle_tool_error=True,
+        handle_validation_error=build_validation_error_handler(input_schema),
     )
     registry.register(t, tags=tags)
     return t

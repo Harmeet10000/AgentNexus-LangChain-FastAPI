@@ -14,11 +14,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import mimetypes
-from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+import toons
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import (
     ChatGoogleGenerativeAI,
@@ -28,10 +28,21 @@ from langchain_google_genai import (
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.connections import get_httpx_client
+from app.connections import get_shared_httpx_client
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+    from typing import Any
+
+    from langchain_core.messages import BaseMessage
+    from langchain_core.tools import BaseTool
 
 _settings = get_settings()
 _mcfg = _settings.model
+_DEFAULT_GEMINI_TEMPERATURE = 0.3
+_DEFAULT_GEMINI_TOP_P = 0.8
+_DEFAULT_GEMINI_TOP_K = 20
+_DEFAULT_CONTEXT_CACHE_TTL = "3600s"
 
 
 # ---------------------------------------------------------------------------
@@ -43,20 +54,29 @@ def build_chat_model(
     model_name: str | None = None,
     *,
     temperature: float | None = None,
+    top_p: float | None = None,
+    top_k: int | None = None,
     max_tokens: int | None = None,
     streaming: bool = False,
+    cached_content: str | None = None,
     **kwargs: Any,
 ) -> ChatGoogleGenerativeAI:
     """Return a configured ChatGoogleGenerativeAI instance."""
+    default_temperature = min(_mcfg.default_temperature, _DEFAULT_GEMINI_TEMPERATURE)
+
     return ChatGoogleGenerativeAI(
         model=model_name or _mcfg.gemini_pro_model,
-        temperature=temperature if temperature is not None else _mcfg.default_temperature,
+        thinking_level="medium",
+        temperature=temperature if temperature is not None else default_temperature,
+        top_p=top_p if top_p is not None else _DEFAULT_GEMINI_TOP_P,
+        top_k=top_k if top_k is not None else _DEFAULT_GEMINI_TOP_K,
         max_output_tokens=max_tokens or _mcfg.default_max_tokens,
         google_api_key=_mcfg.google_api_key.get_secret_value(),
         streaming=streaming,
         timeout=_mcfg.default_timeout,
+        cached_content=cached_content,
         **kwargs,
-        http_async_client=get_httpx_client(),
+        http_async_client=get_shared_httpx_client(),
     )
 
 
@@ -65,10 +85,67 @@ def build_fast_model(**kwargs: Any) -> ChatGoogleGenerativeAI:
     return build_chat_model(model_name=_mcfg.gemini_flash_model, **kwargs)
 
 
+def create_gemini_context_cache(
+    messages: list[BaseMessage],
+    *,
+    model: ChatGoogleGenerativeAI | None = None,
+    ttl: str = _DEFAULT_CONTEXT_CACHE_TTL,
+    tools: list[BaseTool | type[BaseModel] | dict[str, Any] | Callable[..., Any]] | None = None,
+    tool_choice: str | bool | None = None,
+) -> str:
+    """
+    Create an explicit Gemini context cache for large reusable prompts.
+
+    Use this for shared context that would otherwise be re-sent on every request,
+    such as long system instructions, logs, code snapshots, or uploaded file refs.
+    """
+    llm = model or build_fast_model()
+    return create_context_cache(
+        model=llm,
+        messages=messages,
+        ttl=ttl,
+        tools=tools,
+        tool_choice=tool_choice,
+    )
+
+
+def build_cached_chat_model(
+    cached_content: str,
+    *,
+    model_name: str | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    top_k: int | None = None,
+    max_tokens: int | None = None,
+    streaming: bool = False,
+    **kwargs: Any,
+) -> ChatGoogleGenerativeAI:
+    """Return a chat model wired to an explicit Gemini context cache."""
+    return build_chat_model(
+        model_name=model_name,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        max_tokens=max_tokens,
+        streaming=streaming,
+        cached_content=cached_content,
+        **kwargs,
+    )
+
+
 def build_embedding_model() -> GoogleGenerativeAIEmbeddings:
     return GoogleGenerativeAIEmbeddings(
         model=_mcfg.gemini_embedding_model,
     )
+
+
+def serialize_to_toon(payload: Any) -> str:
+    """
+    Serialize structured prompt context with TOON for lower token overhead than JSON.
+
+    Use this when passing large tables, records, or nested objects into prompts.
+    """
+    return toons.dumps(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +282,7 @@ async def ainvoke_multimodal(
     system: str | None = None,
     model: ChatGoogleGenerativeAI | None = None,
 ) -> str:
-    llm = model or build_chat_model(model_name="gemini-2.0-flash")
+    llm = model or build_chat_model(model_name="gemini-2.0-flash", media_resolution="low", )
     messages: list[BaseMessage] = []
     if system:
         messages.append(SystemMessage(content=system))
@@ -247,7 +324,7 @@ async def abatch_multimodal(
     ]
     sem = asyncio.Semaphore(max_concurrency or _mcfg.max_concurrency)
 
-    async def bounded(coro):
+    async def bounded(coro: Any) -> str:
         async with sem:
             return await coro
 
@@ -300,6 +377,7 @@ async def aembed_batch(
     Embed multiple strings, respecting concurrency limits.
     GoogleGenerativeAIEmbeddings.embed_documents handles batching internally.
     """
+    _ = max_concurrency
     model = build_embedding_model()
     # embed_documents is synchronous; run in thread pool
     return await asyncio.to_thread(model.embed_documents, texts)

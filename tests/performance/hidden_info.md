@@ -17,3 +17,22 @@ If you look closely at the protect block above, you will notice a specific archi
 The Insider Pattern: This is known as "Failing Closed on the Control Plane." Your data plane (the actual HTTP request to OpenAI) must survive if your control plane (Redis) goes down. If you do not catch RedisError and default to ALLOW, a minor network blip between your FastAPI pods and Redis will cause your Circuit Breaker to instantly throw exceptions, resulting in 100% downtime for your API, even if OpenAI is perfectly healthy.
 
 Elite systems engineers always assume the Circuit Breaker's storage backend will eventually die. By defaulting to ALLOW when Redis fails, your system gracefully degrades back to a standard, unprotected API state, keeping your core business logic online.
+
+
+# OWASP Top 10 LLM Vulnerabilities Breakdown:
+
+Prompt Injection (0:10): Attackers use clever prompts to bypass safety filters and manipulate the model's behavior, either directly or indirectly through poisoned documents that can be in poems, other languages, Morse code, arbitrary command execution, etc.
+Sensitive Information Disclosure (7:04): Models may inadvertently leak confidential training data, PII, or intellectual property (up 4 spots from 2023). solution- sanitize the data after the LLM has genrated it, strong access controls
+Supply Chain Vulnerabilities (11:52): Unverified components from sources like HuggingFace can introduce vulnerabilities into the model, data, or underlying infrastructure.
+Data and Model Poisoning (15:10): Attackers corrupt training data or fine-tuning datasets to introduce biases, malware, or backdoors. Poisning though RAG, web data, external sources, 
+Improper Output Handling (19:15): The LLM's output is trusted too much and used in other systems without validation, leading to vulnerabilities like SQL injection or cross-site scripting.
+Excessive Agency (20:19): Granting LLMs too much power to execute tools, APIs, or interact with the real world can result in unauthorized actions.
+System Prompt Leakage (21:27): Sensitive instructions or credentials within the system prompt are exposed to users.
+Vector Embedding Weaknesses (22:18): Manipulation of the data used for Retrieval Augmented Generation (RAG) can impact the model.
+Misinformation (23:03): The model hallucinates or provides incorrect information that users trust without critical thinking.
+Unbounded Consumption (23:43): Resource-intensive prompts can lead to Denial of Service (DoS) attacks or exorbitant costs (Denial of Wallet).To defend against these threats, the video recommends using AI firewalls/gateways to scan inputs and outputs (5:58), sanitizing data, implementing strong access controls, and performing regular penetration testing (red teaming) to verify security posture (6:42).
+
+
+The strict=True Trap: In 2026, most providers (Google, OpenAI) have a strict parameter in their structured output config. While strict=True ensures 100% schema adherence, it also significantly increases Time to First Token (TTFT). This is because the backend has to pre-process and "warm up" the grammar-constrained finite state machine for your specific schema.
+
+The Pro Move: For ultra-low latency, use a "Lazy Schema." Define your Pydantic model with only the top 3 critical fields as Required and make the rest Optional. Then, run a local Micro-JIT (using a library like msgspec) to validate the optional fields after the response arrives. This gives you the speed of a raw stream with the safety of a structured guardrail.
