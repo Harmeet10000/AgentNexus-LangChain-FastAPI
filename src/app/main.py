@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import ORJSONResponse, Response
+from fastmcp.utilities.lifespan import combine_lifespans
 from guard import SecurityMiddleware
 
 from app.api.v1 import v1_router
@@ -16,6 +17,8 @@ from app.middleware import (
     global_exception_handler,
 )
 from app.shared.langchain_layer import configure_langsmith
+from app.shared.mcp import get_mcp_http_app
+from app.shared.mcp.models import parse_mcp_http_transport
 from app.utils import logger
 
 configure_langsmith()
@@ -89,6 +92,16 @@ def create_app() -> FastAPI:
     # Include feature routers
     app.include_router(router=v1_router)
     app.include_router(router=v2_router)
+
+    if settings.MCP_ENABLE_HTTP:
+        mcp_transport = parse_mcp_http_transport(settings.MCP_HTTP_TRANSPORT)
+        mcp_app = get_mcp_http_app(
+            parent_app=app,
+            path="/",
+            transport=mcp_transport,
+        )
+        app.router.lifespan_context = combine_lifespans(lifespan, mcp_app.lifespan)
+        app.mount(settings.MCP_HTTP_PATH, mcp_app)
 
     # 404 handler (Catch-all route)
     @app.api_route(

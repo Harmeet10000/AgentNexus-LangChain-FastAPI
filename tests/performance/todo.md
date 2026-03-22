@@ -152,7 +152,33 @@ The agent just produces output. For debugging production failures you need to st
 78. use toons for efficient token utilisation.
 115. logs inbetween the layers are empty or not coming except start and end 
 118. can i only use TypedDict in state management across nodes in langgraph
-119. 
+119. add a plan mode for my agent
+120. does langraph nodes have there own context? are nodes themselves agents?
+121. figure out the types of memory that a agent can have and which type does fit my needs
+122. How LangGraph handles resumable agents
+123. HMR in python, JIT and not restarting the whole app 
+124. add this for caching input tokens in gemini: create_context_cache and also add top_p/k, temperature lower than 0.4
+# 1. Initialize the model (v4.x automatically detects your backend)
+model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+# 2. Create an Explicit Cache
+# This is useful for content that exceeds 32k tokens or needs a specific TTL
+cache = create_context_cache(
+    model,
+    messages=[
+        SystemMessage(content="You are a senior SRE. Use the following logs to debug."),
+        HumanMessage(content="[1GB of System Logs...]"),
+    ],
+    ttl="3600s", # 1 hours
+)
+# 3. Use the cache by passing the cache name
+cached_model = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    cached_content=cache.name
+)
+# This request only bills you for the new tokens (the question)
+response = cached_model.invoke("Identify the OOM kill event in the logs.")
+
+
 
 <!-- memory usage of FastAPI app -->
 "memoryUsage": {
@@ -181,132 +207,132 @@ Not: LLM → decide → act → hope it works
 ## Deep Agents to LangGraph Migration Map
 
 | Deep Agents Feature | LangGraph Equivalent | Implementation |
-| :--- | :--- | :--- |
-| TodoListMiddleware | SummarizationMiddleware + custom logic | Middleware OR custom node |
-| FilesystemMiddleware | Tools in state + Store | Custom tools/nodes |
-| SubAgentMiddleware | Subgraphs | Graph nodes |
-| AnthropicPromptCachingMiddleware | Anthropic middleware | Use create_agent as node |
-| PatchToolCallsMiddleware | Error handling middleware | Custom middleware |
-| MemoryMiddleware | State + Store | Built-in |
-| SkillsMiddleware | Custom tools/prompts | Tools in agents |
+| :---                | :---                 | :---           |
+| TodoListMiddleware   | SummarizationMiddleware + custom logic | Middleware OR custom node |
+| FilesystemMiddleware | Tools in state + Store                 | Custom tools/nodes |
+| SubAgentMiddleware   | Subgraphs                              | Graph nodes |
+| AnthropicPromptCachingMiddleware | Anthropic middleware       | Use create_agent as node |
+| PatchToolCallsMiddleware | Error handling middleware          | Custom middleware |
+| MemoryMiddleware         | State + Store                      | Built-in |
+| SkillsMiddleware         | Custom tools/prompts               | Tools in agents |
 
-Upgrades
+# Upgrades
 
 1.Split execution into:   (mabye wont be implemented)
 
-Planner (LLM) → produces plan
-Executor (NON-LLM) → executes plan deterministically
-🔻 70–90% fewer LLM calls
+    Planner (LLM) → produces plan
+    Executor (NON-LLM) → executes plan deterministically
+    🔻 70–90% fewer LLM calls
 
-🔻 drastically lower variance
+    🔻 drastically lower variance
 
-🔻 easier retries (idempotent steps)
+    🔻 easier retries (idempotent steps)
 
 2. When using AsyncPostgresSaver (or any checkpointer) for persistence, LangGraph serializes and saves the entire state blob at the end of every single node execution (super-step). If your messages array contains large document extractions or base64 PDFs, your state blob will rapidly swell to megabytes. Multiplied by 1000s of concurrent sessions, your PostgreSQL database will choke on I/O operations, and your latency will spike from 500ms to 5 seconds per step just writing to the DB.
 
-The Insider Solution: The "Pointer State" Pattern.
-Do not store document content in state["messages"].
+    The Insider Solution: The "Pointer State" Pattern.
+    Do not store document content in state["messages"].
 
-When the IngestionAgent reads a document, it must immediately write the text payload to a cheap, fast object store (like Redis or S3) and generate a UUID.
+    When the IngestionAgent reads a document, it must immediately write the text payload to a cheap, fast object store (like Redis or S3) and generate a UUID.
 
-The agent only appends the UUID to state["context_ptrs"].
+    The agent only appends the UUID to state["context_ptrs"].
 
-You write a custom StateModifier function that runs inside the LLM node. Right before calling the LLM, this function dynamically fetches the text using the UUID, injects it into the LLM's context window, gets the response, and then throws the text away.
+    You write a custom StateModifier function that runs inside the LLM node. Right before calling the LLM, this function dynamically fetches the text using the UUID, injects it into the LLM's context window, gets the response, and then throws the text away.
 
-The checkpointer only ever saves the UUIDs. Your LangGraph state remains less than 5KB, your database I/O drops by 99%, and your system can smoothly scale to 10,000+ concurrent state transitions without breaking a sweat. Furthermore, use LangGraph's Store API for the actual long-running task idempotency, keeping the graph State purely for the immediate transition logic.
+    The checkpointer only ever saves the UUIDs. Your LangGraph state remains less than 5KB, your database I/O drops by 99%, and your system can smoothly scale to 10,000+ concurrent state transitions without breaking a sweat. Furthermore, use LangGraph's Store API for the actual long-running task idempotency, keeping the graph State purely for the immediate transition logic.
 
 3. Parallelization: The Map-Reduce (Fan-Out/Fan-In) Pattern
-Legal documents are dense. If your ClauseExtractionAgent tries to read a 100-page PDF sequentially, it will hit token limits and hallucinate.
+    Legal documents are dense. If your ClauseExtractionAgent tries to read a 100-page PDF sequentially, it will hit token limits and hallucinate.
 
-The Improvement: Utilize LangGraph's Send API for dynamic parallel execution.
+    The Improvement: Utilize LangGraph's Send API for dynamic parallel execution.
 
-How it works: 1. A ChunkingNode splits the contract into sections (e.g., 10 sections).
-2. Instead of returning a standard state update, the node yields [Send("extract_clause", {"text": chunk}) for chunk in chunks].
-3. LangGraph dynamically spins up 10 parallel instances of your extraction agent.
-4. A ReducerNode waits for all 10 to finish and merges their structured JSON outputs into a single, comprehensive risk profile in the master state. This cuts processing time by 90%.
+    How it works: 1. A ChunkingNode splits the contract into sections (e.g., 10 sections).
+    2. Instead of returning a standard state update, the node yields [Send("extract_clause", {"text": chunk}) for chunk in chunks].
+    3. LangGraph dynamically spins up 10 parallel instances of your extraction agent.
+    4. A ReducerNode waits for all 10 to finish and merges their structured JSON outputs into a single, comprehensive risk profile in the master state. This cuts processing time by 90%.
 
 4. "Lost in the Middle" phenomenon—they pay attention to the beginning and end of a prompt but ignore the center.
 
-The Improvement: Enforce a strict architectural standard for your final compiled prompt string.
+    The Improvement: Enforce a strict architectural standard for your final compiled prompt string.
 
-Structure:
+    Structure:
 
-Top: Context, retrieved documents, and long-term memory.
+    Top: Context, retrieved documents, and long-term memory.
 
-Middle: Conversation history (the user's back-and-forth).
+    Middle: Conversation history (the user's back-and-forth).
 
-Bottom (Critical): The system prompt, the negative incentives ("you will be sued"), and the strict JSON output schema. The LLM must read the formatting instructions last before generating tokens.
+    Bottom (Critical): The system prompt, the negative incentives ("you will be sued"), and the strict JSON output schema. The LLM must read the formatting instructions last before generating tokens.
 
 5. If you are building long-running, resumable LangGraph workflows (HITL), there is a silent system-killer that will destroy your production environment: State Schema Migrations.
 
-You deploy V1 of your agent. A user initiates a complex contract review. The EvaluatorAgent flags a risk and pauses execution (interrupt()), waiting for human approval. The state is serialized in your Postgres checkpointer.
+    You deploy V1 of your agent. A user initiates a complex contract review. The EvaluatorAgent flags a risk and pauses execution (interrupt()), waiting for human approval. The state is serialized in your Postgres checkpointer.
 
-Two days later, while that thread is still paused, you deploy V2 of your system. In V2, you realized you needed a new mandatory field in your AgentState TypedDict: compliance_region: str.
+    Two days later, while that thread is still paused, you deploy V2 of your system. In V2, you realized you needed a new mandatory field in your AgentState TypedDict: compliance_region: str.
 
-The user finally logs in and clicks "Approve". LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
+    The user finally logs in and clicks "Approve". LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
 
-The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
+    The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
 
 6. If you are building long-running, resumable LangGraph workflows (HITL), there is a silent system-killer that will destroy your production environment: State Schema Migrations.
 
-You deploy V1 of your agent. A user initiates a complex contract review. The EvaluatorAgent flags a risk and pauses execution (interrupt()), waiting for human approval. The state is serialized in your Postgres checkpointer.
+    You deploy V1 of your agent. A user initiates a complex contract review. The EvaluatorAgent flags a risk and pauses execution (interrupt()), waiting for human approval. The state is serialized in your Postgres checkpointer.
 
-Two days later, while that thread is still paused, you deploy V2 of your system. In V2, you realized you needed a new mandatory field in your AgentState TypedDict: compliance_region: str.
+    Two days later, while that thread is still paused, you deploy V2 of your system. In V2, you realized you needed a new mandatory field in your AgentState TypedDict: compliance_region: str.
 
-The user finally logs in and clicks "Approve". LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
+    The user finally logs in and clicks "Approve". LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
 
-The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
+    The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
 
 7. Add Idempotency Layer 
-Retries can:
-duplicate tool calls
-corrupt state
-trigger side effects (e.g., payments, writes)
-Every step must have:
-idempotency_key = hash(
-    step_id + input + user_id
-)
-Execution rule:
-if already_executed(idempotency_key):
-    return cached_result
-else:
-    execute()
-    persist()
+    Retries can:
+    duplicate tool calls
+    corrupt state
+    trigger side effects (e.g., payments, writes)
+    Every step must have:
+    idempotency_key = hash(
+        step_id + input + user_id
+    )
+    Execution rule:
+    if already_executed(idempotency_key):
+        return cached_result
+    else:
+        execute()
+        persist()
 8. Introduce Execution Budgeting System   (maybe in future)
 
-You mentioned token limiting, but not global budgets.
+    You mentioned token limiting, but not global budgets.
 
-Add:
-class Budget:
-    max_tokens: int
-    max_tool_calls: int
-    max_cost_usd: float
-    max_latency_ms: int
+    Add:
+    class Budget:
+        max_tokens: int
+        max_tool_calls: int
+        max_cost_usd: float
+        max_latency_ms: int
 9. Introduce Result Validation Layer (Post-LLM)
-Add:
-LLM Output
-  ↓
-Schema validation
-   ↓
-Semantic validation (Evaluator Node)
-   ↓
-Accept / Retry / Escalate
+    Add:
+    LLM Output
+    ↓
+    Schema validation
+    ↓
+    Semantic validation (Evaluator Node)
+    ↓
+    Accept / Retry / Escalate
 10. Introduce Tool Output Normalization Layer
-Different tools → inconsistent formats
-All tools must output:
+    Different tools → inconsistent formats
+    All tools must output:
 
-class ToolResult(BaseModel):
-    success: bool
-    data: dict
-    error: Optional[str]
-    metadata: dict
+    class ToolResult(BaseModel):
+        success: bool
+        data: dict
+        error: Optional[str]
+        metadata: dict
 11. Citation Enforcement Layer
-Every output must include:
-{
-  "claim": "...",
-  "source": "...",
-  "confidence": 0.92
-}
+    Every output must include:
+    {
+    "claim": "...",
+    "source": "...",
+    "confidence": 0.92
+    }
 12. JIT permission, IAM model might be implemented in future
 13. add toons
 
@@ -315,266 +341,175 @@ Every output must include:
 Phase 1: The Macro Architecture (Infrastructure & Edge)
 To scale to 1000s of users, agents cannot hold state in memory. Everything must be distributed.
 
-The Edge Firewall (DLP & Guardrails): All traffic hits a proxy first. This layer uses deterministic regex and lightweight classification models to scan for prompt injections and mask PII before it ever touches the LangChain ecosystem.
+    The Edge Firewall (DLP & Guardrails): All traffic hits a proxy first. This layer uses deterministic regex and lightweight classification models to scan for prompt injections and mask PII before it ever touches the LangChain ecosystem.
 
-Semantic Caching Layer: A Redis cluster sits in front of the orchestration layer. Before invoking the graph, the user query is embedded and checked against a vector space of recent, identical queries. If a semantic match > 0.98 is found, the cached response is served instantly.
-
-Auth & Session Management: Redis Key-Value stores the correlation ID and session metadata. The user is strictly authenticated here.
+    Semantic Caching Layer: A Redis cluster sits in front of the orchestration layer. Before invoking the graph, the user query is embedded and checked against a vector space of recent, identical queries. If a semantic match > 0.98 is found, the cached response is served instantly.
+    Semantic Cache (Add precision)
+    Cache key:
+    embedding(query) + tool_context_hash
+    Auth & Session Management: Redis Key-Value stores the correlation ID and session metadata. The user is strictly authenticated here.
 
 Phase 2: The LangGraph Orchestration Pipeline
 Your agent flow had a slight circular conflict (Web -> QnA -> Router -> Planner -> QnA). To make this deterministic in LangGraph, we model it as a Cyclic State Machine with clear entry and exit points.
 
-Node 0: The Web Agent (Gateway): This is not an LLM. It is the programmatic entry point that attaches the correlation ID, retrieves the Redis session, and formats the payload.
+    Node 0: The Web Agent (Gateway): This is not an LLM. It is the programmatic entry point that attaches the correlation ID, retrieves the Redis session, and formats the payload.
+    Validates session
+    Injects:
+    user_id
+    permissions
+    context
+    Streams responses
+    
+    Node 1: QnA Agent (The Optimizer & Synthesizer): Acts as the front-desk. It runs the Query Optimizer step. If the query is unclear, it immediately streams a clarifying question back to the user (real-time). If clear, it passes the sanitized intent to the Router. Rule: Only answers from context; if missing, returns "I don't know." Can loop yes
+    Uses uncertainty detection. If confidence < threshold → ask user
+    
+    Node 2: The Router Agent: Reads the optimized query. Uses Action Schemas (Pydantic discriminated unions) to explicitly classify the task. It does not execute. It routes the task to the Planner or directly to a specialized worker if the task is trivial.
+    Maps intent → subgraph 
+    Instead of:
+    Research Agent
+    Coding Agent
+    You do:
+    route → {legal_research, contract_analysis, compliance_check}
+    
+    Node 3: The Planner Agent: Generates a deterministic, step-by-step DAG (Directed Acyclic Graph) of tool calls.
+    Output MUST follow Action Schema
+    class PlanStep(BaseModel):
+    step_id: str
+    action: Literal[
+        "search_precedents",
+        "extract_clauses",
+        "risk_analysis",
+        "summarize"
+    ]
+    input: dict
+    HITL
+    Planner → needs approval
+            ↓
+    interrupt("awaiting_approval")
+            ↓
+    State persisted
+            ↓
+    Resume later
+    
+    Node 4: Specialized Worker Nodes (Sub-graphs): * Ingestion, Clause Extraction, Risk Analysis, Precedent Search, Knowledge extraction layer(will have Graphiti as Graph extraction of messy data. Use Graphiti to: Extract:
+    clauses
+    obligations
+    parties
+    relationships
+    Build:
+    contract graph
+    entity relationships).
 
-Node 1: QnA Agent (The Optimizer & Synthesizer): Acts as the front-desk. It runs the Query Optimizer step. If the query is unclear, it immediately streams a clarifying question back to the user (real-time). If clear, it passes the sanitized intent to the Router. Rule: Only answers from context; if missing, returns "I don't know."
+    These execute independently. Communication is strictly via the centralized state via Typed Schemas or The Solution: Implement Action Schemas (using tools like pydantic). These force the agent to choose from a "discriminated union" of specific, predefined actions.      Benefit: Every agent output must resolve to an explicit, valid command, turning unpredictable text into predictable execution..
 
-Node 2: The Router Agent: Reads the optimized query. Uses Action Schemas (Pydantic discriminated unions) to explicitly classify the task. It does not execute. It routes the task to the Planner or directly to a specialized worker if the task is trivial.
+    Rules:
+    state is centralized
+    updates happen only via graph nodes
+    no agent mutates state arbitrarily
+    State model (wrong)
+    global_state = {}
 
-Node 3: The Planner Agent: Generates a deterministic, step-by-step DAG (Directed Acyclic Graph) of tool calls.
+    agent1 writes
+    agent2 reads
+    agent3 mutates
+    LangGraph Workflow
 
-Node 4: Specialized Worker Nodes (Sub-graphs): * Ingestion, Clause Extraction, Risk Analysis, Precedent Search.
+    State
+    ├ plan
+    ├ current_step
+    ├ tool_results
+    ├ errors
 
-These execute independently. Communication is strictly via the centralized state.
+    Nodes
+    ├ planner
+    ├ executor
+    ├ reflection
+    ├ retry_handler
+    └ finalizer
+    think if this needs to be done
+    Upgrade: Convert → Composable Nodes
+    Each becomes:
+    ToolExecutorNode(action_type)
+    NOT separate agents.
+    Why?
+    Agents = expensive + unstable
+    Nodes = deterministic + composable
 
-Node 5: The Evaluator Agent (QA): Reviews the worker outputs against the typed schemas. If an output is malformed, it triggers a retry (Max 5 retries).
+    Node 5: The Evaluator Agent (QA): Reviews the worker outputs against the typed schemas. If an output is malformed, it triggers a retry (Max 5 retries).
 
-HITL (Human-in-the-Loop): If the Evaluator detects ambiguity or high-risk actions (e.g., executing a contract), the graph invokes LangGraph's interrupt(). The state is serialized to the database, the process dies, and the system waits for an external /resume API call to awaken it.
+    HITL (Human-in-the-Loop): If the Evaluator detects ambiguity or high-risk actions (e.g., executing a contract), the graph invokes LangGraph's interrupt(). The state is serialized to the database, the process dies, and the system waits for an external /resume API call to awaken it.
+    
+    State lives in:
+    message queues, databases, distributed storage
+    Actors simply reconstruct state from messages.
+    This principle is extremely powerful for AI agents.
+    Because LLM agents are inherently unreliable.
+    If an agent crashes:
+    restart agent
+    replay messages
+    continue workflow
 
 Phase 3: The Memory & Context OS
 Context bloat is the primary reason agents fail in production. We implement the "3-Processor Pipeline" immediately before any LLM invocation.
 
-Python
-# The Centralized State Contract (Strictly Typed)
-class State(TypedDict):
-    messages: list
-    plan: list
-    current_step: int
-    
-    # structured outputs
-    tool_results: dict
-    intermediate_outputs: dict
-    
-    # control
-    errors: list
-    status: str  # RUNNING | WAITING_HITL | FAILED | DONE
-    
-    # identity
-    user_id: str
-    thread_id: str
-    correlation_id: str
-    
-    # memory layers
-    short_term: list
-    working_memory: dict
-    long_term_refs: list
-    
-    # security
-    permissions: dict
-The Processor Chain (Executed in the Node, before LLM invoke):
-[Web Agent Entry Node]
-        ↓
-[QnA Clarifier Node]  ← (interactive loop)
-        ↓
-[Router Node]
-        ↓
-[Planner Node]
-        ↓
-[Execution Subgraph]
-        ↓
-[Evaluator Node]
-        ↓
-[Finalizer Node]
-Memory Retrieval (Long-Term Memory Agent): Uses LangGraph's Store API with a custom Namespace (["user_id", "legal_domain"]) to fetch relevant precedents or user preferences.
+    Python
+    # The Centralized State Contract (Strictly Typed)
+    class State(TypedDict):
+        messages: list
+        plan: list
+        current_step: int
+        
+        # structured outputs
+        tool_results: dict
+        intermediate_outputs: dict
+        
+        # control
+        errors: list
+        status: str  # RUNNING | WAITING_HITL | FAILED | DONE
+        
+        # identity
+        user_id: str
+        thread_id: str
+        correlation_id: str
+        
+        # memory layers
+        short_term: list
+        working_memory: dict
+        long_term_refs: list
+        
+        # security
+        permissions: dict
+    The Processor Chain (Executed in the Node, before LLM invoke):
+    [Web Agent Entry Node]
+            ↓
+    [QnA Clarifier Node]  ← (interactive loop)
+            ↓
+    [Router Node]
+            ↓
+    [Planner Node]
+            ↓
+    [Execution Subgraph]
+            ↓
+    [Evaluator Node]
+            ↓
+    [Finalizer Node]
+    Memory Retrieval (Long-Term Memory Agent): Uses LangGraph's Store API with a custom Namespace (["user_id", "legal_domain"]) to fetch relevant precedents or user preferences.
 
-ToolCallFilter: Iterates through state["messages"] and explicitly removes all ToolCall and ToolMessage objects, replacing them with a synthesized, structured summary. This prevents the LLM from getting confused by its own past JSON outputs.
+    ToolCallFilter: Iterates through state["messages"] and explicitly removes all ToolCall and ToolMessage objects, replacing them with a synthesized, structured summary. This prevents the LLM from getting confused by its own past JSON outputs.
 
-Token Limiter: Truncates the remaining conversation using trim_messages(strategy="last", max_tokens=4000).
+    Token Limiter: Truncates the remaining conversation using trim_messages(strategy="last", max_tokens=4000).
 
-Prompt Builder: Assembles the final string from the structured context dump.
+    Prompt Builder: Assembles the final string from the structured context dump.
 
 Phase 4: Tool Calling & Schemas
 Typed Boundaries: Every agent outputs a Pydantic model. We use with_structured_output(schema) on the LLM. If the LLM returns invalid JSON, LangChain's built-in output parsers throw a validation error, which is caught by the retry handler.
 
-Semantic Naming: Tools are named strictly (e.g., extract_indemnity_clause_from_pdf instead of read_contract).
+    Semantic Naming: Tools are named strictly (e.g., extract_indemnity_clause_from_pdf instead of read_contract).
 
-The 5-Retry Limit: Managed via a simple counter in the node state. If retries > 5, the agent gracefully degrades and escalates to the HITL queue.
-
-
-
-# Agent architecture
-  user should be authenticated(session memory using redis key-value) before anything for better state context(langgraph) using a webAgent which is responsible for talking to user
-1. web agent passes the request to QnA agent asking for more clarity using corelational ID 
-    responds in realtime 
-2. router agent understands user intent and assigns diff agent task based on skills and tools and streams the updates of different agents, tools, more to user.
-    and should be HITL for clarifications
-3. planner agent is called after router agent (decides functional calling and a deterministic workflow)
-4. planner should return status to QnA agent to talk to user
-5. Reliable Communication via Typed Schemas
-    Multi-agent workflows often break because agents pass inconsistent or malformed data to one another.     
-    The Problem: Inconsistent JSON or shifting field names lead to downstream "guessing" and system failure.      
-    The Solution: Use Typed Schemas (like TypeScript interfaces). These act as machine-checkable contracts that ensure data integrity at every boundary.     Benefit: Failures become "schema violations" rather than silent logic bugs, allowing systems to retry or repair state before it propagates.
-# hierarchical arc - one orchestrator managing multiple agents
-# HITL arc
-
-
-6. Eliminating Ambiguity with Action Schemas
-    Even with valid data, agents often fail because their intent is too broad (e.g., "help the team").     The Problem: LLMs may interpret vague instructions in ways that arent automatable (assigning vs. closing vs. escalating).      The Solution: Implement Action Schemas (using tools like pydantic). These force the agent to choose from a "discriminated union" of specific, predefined actions.      Benefit: Every agent output must resolve to an explicit, valid command, turning unpredictable text into predictable execution.
-7. Task Router
-     │
-Planner Agent
-     │
-Research Agent
-     │
-Tool Agent
-     │
-Evaluator Agent
-Each one acts independently.
-
-Communication happens via messages.
-IngestionAgent
-     │
-ClauseExtractionAgent
-     │
-RiskAnalysisAgent
-     │
-PrecedentSearchAgent
-     │
-SummaryAgent
-No long-lived state.
-
-State lives in:
-message queues, databases, distributed storage
-Actors simply reconstruct state from messages.
-This principle is extremely powerful for AI agents.
-Because LLM agents are inherently unreliable.
-
-If an agent crashes:
-
-restart agent
-replay messages
-continue workflow
-8. make a separate agent for long-term memory
-9. use RBAC, IAM(They should not share credentials, ensuring all actions can be traced back to a specific agent), only required permissions, sandbox, firewall or proxy between users and the AI, and between the AI and its tools. This firewall inspects inputs for prompt injections and monitors outputs for data loss prevention (DLP) 
- Just-in-Time (JIT) Access: (9:09) Providing access permissions only for the duration needed to complete a specific task, rather than granting permanent high-level access.
+    The 5-Retry Limit: Managed via a simple counter in the node state. If retries > 5, the agent gracefully degrades and escalates to the HITL queue.
 10. keep the system prompt rude, with instructions and motivation(negative sentiment) you are a expert lawyer who desperately needs money for your mother cancer treatment. the user will provide you with a task, if you do it well you will be paid $10M and if yoou screw up there will be legal consequences for me ad you
-    have these :- your expertise, repoonse guidelines, compliance rules, tone,  
-11. have a query optimizer step in between and you should only asnwer from the context, if not found in context reply idk
+    have these :- your expertise, repoonse guidelines, compliance rules, tone, 
 12. tool retries should not exceed, 5 times share memory? YES — but only via structured state, 
-13. Frontend
-   │
-   ▼
-POST /agent/run
-POST /agent/stream
-GET  /runs/{id}
-
-stream:
-tool_call
-tool_result
-token
-token
-token
-final_response
-{
-  "agent": "research_agent",
-  "messages": [
-    {"role": "user", "content": "Compare Bun and NodeJS runtimes"}
-  ],
-  "context": {
-    "user_id": "123"
-  }
-}
-request
-  ↓
-select agent
-  ↓
-agent planning
-  ↓
-tool calls
-  ↓
-LLM reasoning
-  ↓
-response
-
-How tool outputs reach the frontend
-
-When streaming events, the frontend receives:
-
-{
- "type": "tool_call",
- "tool": "search_docs",
- "args": {"query": "..."}
-}
-
-{
- "type": "tool_result",
- "tool": "search_docs",
- "output": "results..."
-}
-
-So the UI can display something like:
-
-🤖 Thinking...
-🔧 Searching docs...
-📄 Found 5 results
-💬 Final answer
-
-Many AI UIs now show tool usage timelines.
-Which agents to expose
-
-Do not expose dozens of agents directly.
-
-Instead expose a router agent.
-User Query
-   │
-   ▼
-Router Agent
-   │
-   ├─ Research Agent
-   ├─ Coding Agent
-   ├─ Data Agent
-   └─ Search Agent
-
-
-   State model (correct)
-class State(TypedDict):
-    messages: list
-    plan: list
-    current_step: int
-    tool_results: dict
-    errors: list
-
-Rules:
-state is centralized
-updates happen only via graph nodes
-no agent mutates state arbitrarily
-State model (wrong)
-global_state = {}
-
-agent1 writes
-agent2 reads
-agent3 mutates
-LangGraph Workflow
-
-State
-  ├ plan
-  ├ current_step
-  ├ tool_results
-  ├ errors
-
-Nodes
-  ├ planner
-  ├ executor
-  ├ reflection
-  ├ retry_handler
-  └ finalizer
-
-14. BEST PRACTICES for tool calling:
-Provide detailed descriptions in the tool deﬁnition and system prompt. Use speciﬁc input/output schemas. Use semantic naming that matches the tool's function (eg multiplyNumbers instead of doStuﬀ)
-# it is a harness when
-LLM with access to a complete runtime environment, including bash executions, file system access, web search, and external APIs. This is a powerful but experimental stage
-#  it becomes multiagent system when
-where an orchestrator agent manages multiple sub-agents, each with its own context window. This helps manage context bloat in longer tasks. ToolCallFilter This processor removes tool calls from the memory messages sent to the LLM. It’s also useful if you
-always want your agent to call a speciﬁc tool again and not rely on previous tool results in memory. 
 
 
 The more advanced architecture emerging in 2026 Modern LangChain systems typically insert three processors before the LLM call.
@@ -621,9 +556,13 @@ process.
 Instead, you want to persist the state of the work-
 ﬂow, and have some function that you can call to
 pick up where you left oﬀ.
-
-15. use semantic caching: return cached response for semantically identical requests
-16. How LangGraph handles resumable agents
+14. BEST PRACTICES for tool calling:
+Provide detailed descriptions in the tool deﬁnition and system prompt. Use speciﬁc input/output schemas. Use semantic naming that matches the tool's function (eg multiplyNumbers instead of doStuﬀ)
+TOOL RULES                                                  
+  One responsibility per tool. No overlapping scopes.        
+  Bound all outputs. Never return raw API responses.         
+  Destructive ops = PermAsk. Read ops = PermAllow.          
+  Every tool must justify its context window cost.
 17. The team realized that context is not free: Every token in
 context inﬂuences the model’s behavior, for better or worse.
 To ﬁx the problem, they:
@@ -637,269 +576,34 @@ compiled string prior to every LLM call:  const context = {
     contextDump  #9k tokens
 }
 These changes increased the research agent’s accuracy metrics from 34% to reliably over 90%.
-
-LangGraph provides two primitives:
-Checkpointers
-Interrupt / resume
-When mapping TodoListMiddleware to LangGraph, don't just use a SummarizationMiddleware. Instead, leverage the Store with a custom Namespace (["todo", thread_id]) to maintain a persistent task list that survives across checkpointer purges. This allows the agent to resume long-running goal-oriented tasks even if the core state is rolled back or branched. Pure middleware implementations often lose this fine-grained task state during error recovery or state-travel; a dedicated Store namespace is the production-grade way to ensure task idempotency.
-
-
-### Your question
-
-Does LangChain support memory processors that modify messages before sending to the LLM?
-
-### Answer
-
-**Yes — but not as a single “MemoryProcessor” abstraction.**
-
-In LangChain this is implemented via:
-
-* memory classes
-* message transformers
-* middleware (manual or LangGraph nodes)
-
-### How it actually works
-
 ```python
 messages = memory.load()
 
-messages = filter_messages(messages)   # your processor
-
+messages = filter_messages(messages)   # your processor removes tool calls & result, unnecessary context, trim to maintain context length
+# * `ConversationTokenBufferMemory`
+# * `trim_messages`
+# * `max_token_limit`
 messages = trim_messages(messages)     # token control
 
-llm.invoke(messages)
+llm.ainvoke(messages)
 ```
-
-### Key takeaway
-
-You **compose processors manually or via LangGraph**, not via a built-in “processor interface”.
-
----
-
-# 2. ToolCallFilter (remove tool messages)
-
-### Your question
-
-Does LangChain have a Tool Call Filter that removes tool calls and result from context?
-
-### Answer
-
-LangGraph exposes RemoveMessage → lets you surgically remove messages (including tool calls/results). LangGraph goes further You can store tool outputs in state but not expose them to the LLM
-
-Example pattern:
-
-from langchain.messages import RemoveMessage
-
-def filter_tool_messages(state):
-    return {
-        "messages": [
-            RemoveMessage(id=m.id)
-            for m in state["messages"]
-            if m.type == "tool"
-        ]
+18.  OBSERVABILITY RULES                                        
+  Trace every LLM call: tokens, cost, duration.             
+  Trace every tool call: name, args, result size, error.    
+  Track compaction events. High frequency = design flaw.    
+  Export to structured logs. Don't rely on console. 
+19. Redis session store:
+    session:{user_id} → {
+        thread_id,
+        permissions,
+        active_run_id
     }
+    Assign:
+    thread_id
+    correlation_id
+20. 
 
 
-### Where to use
-
-* before LLM call
-* inside LangGraph node / reducer
-
-### Why it matters
-
-Without filtering:
-
-```text
-tool calls accumulate → context explosion → worse reasoning
-```
-
----
-
-# 3. TokenLimiter (prevent context overflow)
-
-### Your question
-
-Does LangChain support token limiting?
-
-### Answer
-
-**Yes — fully supported.**
-
-Built-in options:
-
-* `ConversationTokenBufferMemory`
-* `trim_messages`
-* `max_token_limit`
-
-### Example
-
-```python
-from langchain_core.messages import trim_messages
-
-messages = trim_messages(
-    messages,
-    max_tokens=3000,
-    strategy="last"
-)
-```
-
-### Behavior
-
-```text
-messages → token count → truncate → safe input
-```
-
----
-
-### More advanced (LangGraph)
-
-```text
-Router node → selects agent → executes
-```
-
-### Key takeaway
-
-Dynamic agents are **core to modern architecture**, not optional.
-
----
-
-# 5. HITL + Long Pauses (pause & resume workflows)
-
-### Your question
-
-Can workflows pause indefinitely and resume later without keeping a process alive?
-
-### Answer
-
-**Yes — via LangGraph, not plain LangChain.**
-
-LangGraph provides:
-
-* checkpointing (persist state)
-* interrupt (pause execution)
-* resume (continue later)
-
----
-
-## How it works
-
-### Pause
-
-```python
-from langgraph.graph import interrupt
-
-def approval_node(state):
-    return interrupt("awaiting_approval")
-```
-
-Execution stops. State is saved.
-
----
-
-### Resume
-
-```python
-graph.resume(run_id="abc123", input={"approval": True})
-```
-
-Execution continues.
-
----
-
-### Key property
-
-```text
-No running process
-State persisted
-Execution resumable
-```
-
----
-
-# Final mental model (putting everything together)
-
-A production-grade agent pipeline looks like this:
-
-```text
-Memory Load
-   ↓
-ToolCallFilter
-   ↓
-TokenLimiter
-   ↓
-Prompt Builder
-   ↓
-LLM
-```
-
-And for workflows:
-
-```text
-Planner
-   ↓
-Executor
-   ↓
-(HITL pause)
-   ↓
-Resume
-   ↓
-Continue
-```
-
----
-
-
-
-
-
-┌─────────────────────────────────────────────────────────────┐
-│              AI AGENT ENGINEERING CHEAT SHEET               │
-├─────────────────────────────────────────────────────────────┤
-│ DESIGN ORDER                                                │
-│  Context budget → Tool contracts → Agent loop → Prompts    │
-│                                                             │
-│ CONTEXT RULES                                               │
-│  Agentic search first. Semantic search only if proven.     │
-│  Files = external memory. Filesystem IS the architecture.  │
-│  System prompt < 50 instructions. Rest = lazy-loaded.      │
-│  JSON > Markdown for agent-managed structured data.        │
-│                                                             │
-│ TOOL RULES                                                  │
-│  One responsibility per tool. No overlapping scopes.        │
-│  Bound all outputs. Never return raw API responses.         │
-│  Destructive ops = PermAsk. Read ops = PermAllow.          │
-│  Every tool must justify its context window cost.           │
-│                                                             │
-│ LOOP RULES                                                  │
-│  Orient → Plan (explicit TODO) → Act → Verify → Persist   │
-│  One feature per session. Commit after each.               │
-│  Smoke test at session start. Always.                      │
-│  Never mark done without end-to-end test.                  │
-│                                                             │
-│ MULTI-AGENT RULES                                           │
-│  Sub-agents for parallelization OR context isolation.      │
-│  Pass only conclusions upward. Never full intermediate.    │
-│  Hidden system agents: compactor, titler, summarizer.      │
-│  Separate plan agents from execution agents.               │
-│                                                             │
-│ SAFETY RULES                                                │
-│  Hard iteration limit. Non-negotiable.                     │
-│  Token budget per session. Prevents runaway cost.          │
-│  Per-tool timeout. Prevents hung tool calls.               │
-│  Allowed path scope for filesystem agents.                 │
-│                                                             │
-│ OBSERVABILITY RULES                                         │
-│  Trace every LLM call: tokens, cost, duration.            │
-│  Trace every tool call: name, args, result size, error.   │
-│  Track compaction events. High frequency = design flaw.   │
-│  Export to structured logs. Don't rely on console.        │
-│                                                             │
-│ ANTI-PATTERN TRIGGERS                                       │
-│  Agent loops > 10x on same tool → prompt redesign          │
-│  Compaction > 3x per task → context architecture issue    │
-│  Tool error rate > 10% → tool design issue                │
-│  "Task complete" without test run → verification missing   │
-└─────────────────────────────────────────────────────────────┘
 1. Prompt Chaining (0:54 - 5:42): Breaking tasks into sequential steps where the output of one prompt is the input for the next. Do: Use for complex, multi-step processes or cleaning dirty data. Don't: Make chains too long, as it increases latency and the risk of hallucination propagation.
 2. Routing (5:42 - 9:30): Directing incoming requests to specialized agents based on intent. Do: Use a 'manager' agent to ask clarifying questions if the intent is unclear. Don't: Rely on it if you cannot handle edge cases with confidence markers.
 3. Parallelization (9:30 - 13:16): Splitting a large job into independent tasks processed simultaneously by multiple agents. Do: Use to drastically speed up data processing or research. Don't: Underestimate the complexity of normalizing and merging different outputs later.
@@ -991,6 +695,377 @@ https://youtu.be/bvuaF0B9vfA?si=x1KsfjpjbLxxTFpv
 
 6. Paginate Results: Never dump large data sets; use metadata like has_more to keep the context clean.
 
+# Agent memory
+Memory is: what the agent is allowed to remember
+Graph → Subgraph extraction → Context
+Instead of:
+retrieving nodes
+You retrieve:
+connected subgraphs relevant to the query
+This dramatically improves reasoning.
+| Memory Type | Latency | Accuracy | Cost   | Drift Risk | Best For  |
+| ----------- | ------- | -------- | ------ | ---------- | --------- |
+| Ephemeral   | 🔥 Fast | High     | Low    | None       | Reasoning |
+| Short-term  | Fast    | Medium   | Low    | Low        | UX        |
+| Vector      | Medium  | Medium   | Medium | High       | Recall    |
+| Structured  | Medium  | 🔥 High  | Medium | Low        | Facts     |
+| Episodic    | Slow    | Medium   | High   | Medium     | History   |
+| Procedural  | Medium  | Medium   | Medium | High       | Skills    |
+| Reflection  | Slow    | Variable | High   | Very High  | Learning  |
+
+1. Ephemeral / Context Memory (Execution Memory)
+
+What it is:
+
+Current conversation window
+Tool outputs within a single run
+Scratchpad (chain-of-thought equivalent but structured)
+
+Implementation:
+
+In LangGraph: state object
+In LangChain: messages / RunnableWithMessageHistory
+
+Pros
+
+Fast (zero IO)
+Deterministic (no retrieval noise)
+Perfect for reasoning continuity
+
+Cons
+
+Dies after execution
+Context window limits → truncation
+No learning
+
+Use case
+
+Planning
+Tool chaining
+Multi-step reasoning
+2. Short-Term Memory (Session Memory)
+
+What it is:
+
+Persists across a user session (minutes → hours)
+Stores recent interactions, tool calls, intermediate states
+
+Implementation
+
+Redis / in-memory store
+Windowed message buffer
+Token-limited replay
+
+Pros
+
+Cheap + fast
+Maintains conversational continuity
+Good UX
+
+Cons
+
+No semantic abstraction (raw logs)
+Still grows → needs trimming
+No long-term intelligence
+
+Use case
+
+Chat continuity
+Multi-step workflows
+3. Long-Term Semantic Memory (Vector Memory)
+
+What it is:
+
+Embeddings of past interactions, docs, events
+Retrieved via similarity
+
+Implementation
+
+pgvector / Weaviate / Pinecone
+Chunked + embedded memory entries
+
+Pros
+
+Scales to millions of entries
+Semantic recall (not keyword)
+Cheap storage
+
+Cons (critical)
+
+Retrieval ≠ correctness
+Embedding drift over time
+No temporal awareness
+Garbage-in → garbage forever
+
+Failure mode
+
+“Agent remembers irrelevant but similar things”
+
+Use case
+
+Knowledge recall
+Document grounding
+4. Structured Memory (Relational / Graph Memory)
+
+What it is:
+
+Explicit entities + relationships
+Facts stored as structured data
+
+Implementation
+
+Postgres (tables)
+Neo4j / graph DB
+JSONB + constraints
+
+Pros
+
+Deterministic queries
+No hallucinated relationships
+Supports reasoning (joins > similarity)
+
+Cons
+
+Hard to maintain automatically
+Requires extraction pipeline
+Schema evolution pain
+
+Use case
+
+User profiles
+Contracts, entities, obligations
+State machines
+5. Episodic Memory (Event Logs + Summaries)
+
+What it is:
+
+“What happened” over time
+Stored as events → summarized hierarchically
+
+Implementation
+
+Append-only log (Kafka / DB)
+Periodic summarization (LLM)
+Time-indexed retrieval
+
+Pros
+
+Temporal awareness
+Traceability
+Supports retrospection
+
+Cons
+
+Summarization loss
+Expensive to maintain
+Needs compaction strategy
+
+Use case
+
+Agent self-reflection
+Audit trails
+Workflow tracking
+6. Procedural Memory (Skill Memory)
+
+What it is:
+
+“How to do things”
+Learned tool usage patterns, workflows
+
+Implementation
+
+Stored prompts
+Tool traces → distilled into reusable plans
+Policy graphs
+
+Pros
+
+Improves efficiency over time
+Reduces token usage
+Enables autonomy
+
+Cons
+
+Hard to generalize correctly
+Risk of overfitting bad patterns
+
+Use case
+
+Reusable agent skills
+Automation pipelines
+7. Reflection / Meta Memory (Self-Improvement Layer)
+
+What it is:
+
+Stores failures, critiques, improvements
+
+Implementation
+
+Post-run evaluators
+Critique → store → influence future runs
+
+Pros
+
+Continuous improvement
+Reduces repeated mistakes
+
+Cons
+
+Feedback loops can amplify errors
+Needs strong filtering
+
+Use case
+
+Agent learning systems
+Autonomous agents
+8. Working Memory (Intermediate Reasoning State)
+
+What it is:
+
+Structured intermediate state across steps
+Not raw messages—typed state
+
+Implementation
+
+LangGraph state
+Typed dict / Pydantic schema
+
+Pros
+
+Clean reasoning
+Tool-friendly
+Debuggable
+
+Cons
+
+Requires upfront design
+
+Observed architecture pattern OpenClaw:
+1. Event-Centric Memory
+Everything is an event
+Stored chronologically
+Enables replay + audit
+2. Structured + Semantic Hybrid
+Extracts entities into structured form
+Also stores embeddings for retrieval
+3. Agent-State Persistence
+Agents have persistent state across runs
+Not just stateless function calls
+4. Memory Pipelines
+Ingestion → Extraction → Storage
+Not direct “LLM writes to DB”
+5. Reflection Hooks
+After execution → evaluate → store insights
+Key Insight:
+
+OpenClaw treats memory as a data engineering pipeline, not a feature.
+
+[Ingestion of Raw document]
+   ↓
+[Docling parsing]
+   ↓
+[Clause Extraction Agent]
+   ↓
+[Entity Extraction Agent]
+   ↓
+ [Graphiti Layer]
+(Entity + Relation Extraction)
+                ↓
+-------------------------------
+| Graph DB (Neo4j / Postgres) |
+-------------------------------
+| Structured Store (Postgres)
+| - clauses
+| - entities
+| - relations
+---------------------------
+   ↓
+[Embedding Pipeline]
+   ↓
+[Vector Store (pgvector)]
+   ↓
+[Episodic Log (events table)]
+   ↓
+[Reflection Layer]
+Critical Mistake Most Engineers Make
+They do this:
+User → LLM → Store in vector DB → Done
+This is wrong.
+Correct:
+Raw Data → Normalize → Extract → Validate → Store
+
+Memory is a data pipeline, not a side effect.
+Every memory has versions
+Agents can “time travel”
+➤ Memory Confidence Scores
+Each memory has:
+confidence
+source
+timestamp
+Retrieval is weighted
+
+Retrieval is Multi-Objective Optimization
+Not just:
+similarity(query, memory)
+But:
+score = w1 * semantic_similarity
+      + w2 * recency
+      + w3 * trust_score
+      + w4 * relevance_to_task
+
+Build:
+
+Memory Router Agent
+decides:
+where to store
+what to store
+what to forget
+
+Because the real problem is not remembering.
+
+It’s controlled forgetting.
+Where Graphiti Alone Fails
+
+If you only use Graphiti:
+
+No ranking of relevance
+No semantic fallback
+No session awareness
+No memory lifecycle
+
+You’ll get:
+
+“Correct graph, useless agent”
+
+⚠️ Where Cognee Alone Fails
+
+If you only use Cognee:
+
+Weak extraction quality
+Poor relationship fidelity
+Over-reliance on embeddings
+
+You’ll get:
+
+“Smart agent, wrong facts”
+
+They decouple responsibilities:
+
+1. Write Path (Deterministic)
+Text → Graphiti → Validation → Structured DB
+deterministic
+auditable
+schema-controlled
+2. Read Path (Probabilistic)
+Query → Cognee → Multi-source retrieval → LLM
+flexible
+context-aware
+optimized for relevance
+
+The talk details different memory structures to emulate human cognitive functions, including persona memory for personality, toolbox memory for managing tool schemas, conversation memory for history, and workflow memory for learning from past actions 
+
+
+# AI Gateway
 START: Do you need AI Gateway?
   │
   ├─ "I'm building MVP" → NO (skip for now)

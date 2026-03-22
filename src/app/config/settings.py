@@ -53,6 +53,33 @@ class Settings(BaseSettings):
     PORT: int = Field(default=5000)
     WORKERS: int = Field(default=1)
 
+    # --- MCP Configuration ---
+    MCP_ENABLE_STDIO: bool = Field(default=True)
+    MCP_ENABLE_HTTP: bool = Field(default=True)
+    MCP_SERVER_NAME: str = Field(default="LangChain FastAPI MCP")
+    MCP_HTTP_PATH: str = Field(default="/mcp")
+    MCP_HTTP_TRANSPORT: str = Field(default="http")
+    MCP_RUN_TRANSPORT: str = Field(default="stdio")
+    MCP_HOST: str = Field(default="0.0.0.0")  # noqa: S104
+    MCP_PORT: int = Field(default=8001)
+    MCP_LOG_LEVEL: str = Field(default="INFO")
+    MCP_REQUIRE_AUTH: bool = Field(default=True)
+    MCP_REQUEST_TIMEOUT_SECONDS: int = Field(default=30)
+    MCP_DEFAULT_PAGE_SIZE: int = Field(default=10)
+    MCP_MAX_PAGE_SIZE: int = Field(default=50)
+    MCP_MAX_RESULT_BYTES: int = Field(default=524288)
+    MCP_SERVER_ENABLED_TOOLS: list[str] = Field(default_factory=list)
+    MCP_RATE_LIMIT_BURST: int = Field(default=20)
+    MCP_RATE_LIMIT_RATE: int = Field(default=20)
+    MCP_RATE_LIMIT_PERIOD_SECONDS: int = Field(default=60)
+    MCP_CLIENT_ENABLED: bool = Field(default=True)
+    MCP_CLIENT_SERVER_CONFIGS: str = Field(default="[]")
+    MCP_CLIENT_DEFAULT_TIMEOUT_SECONDS: int = Field(default=15)
+    MCP_CLIENT_MAX_CONCURRENCY: int = Field(default=10)
+    MCP_CLIENT_RETRY_ATTEMPTS: int = Field(default=1)
+    MCP_CLIENT_CIRCUIT_BREAKER_THRESHOLD: int = Field(default=3)
+    MCP_CLIENT_CIRCUIT_BREAKER_COOLDOWN_SECONDS: int = Field(default=60)
+
     # --- Mongo Database ---
     MONGODB_URI: str = Field(default="mongodb://localhost:27017/langchain_db")
     MONGODB_DB_NAME: str = Field(default="langchain_db")

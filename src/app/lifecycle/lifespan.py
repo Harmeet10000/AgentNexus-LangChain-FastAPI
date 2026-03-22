@@ -22,6 +22,7 @@ from app.connections import (
 )
 from app.features.auth import TokenAuditLog, User
 from app.middleware import initialize_fastapi_guard
+from app.shared.mcp import get_mcp_client_manager
 from app.utils import logger
 
 
@@ -135,6 +136,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             tg.create_task(coro=app.state.db_engine.dispose())
         if hasattr(app.state, "neo4j_driver"):
             tg.create_task(coro=close_neo4j_driver(driver=app.state.neo4j_driver))
+        mcp_manager = get_mcp_client_manager()
+        if mcp_manager is not None:
+            tg.create_task(coro=mcp_manager.close())
 
     # MongoDB close is synchronous - run outside TaskGroup
     if hasattr(app.state, "mongo_client"):
