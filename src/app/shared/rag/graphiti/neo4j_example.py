@@ -175,7 +175,7 @@ async def get_relationships(
 
 from langchain_neo4j import Neo4jGraph
 
-from app.config.settings import get_settings
+from app.config import get_settings
 
 
 async def get_langchain_graph() -> Neo4jGraph:
