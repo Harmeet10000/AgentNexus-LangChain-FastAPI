@@ -104,6 +104,7 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 112. make uv add the most recent/latest package   and can i use loguru with icecream  DONE
 76. identify the diff in langchain, langgraph and deepagent. do i need a deepagent for this project? should i make the whole agent with langrapgh and no create_agent? should i use hybrid approach?                 DONE
 114. what is graph API and functional API in langgrpah            DONE
+Under high load, all batch requests start simultaneously and race for the semaphore. A proper async queue with backpressure would give more predictable latency and prevent thundering herd.      DONE          
 107. check existing good circuit breakers and check whether those are good or existing ones in circuit breaker in celery reliability    DONE
 123. HMR in python, JIT and not restarting the whole app       DONE
 120. does langraph nodes have there own context? are nodes themselves agents?    DONE
@@ -113,43 +114,32 @@ async def process_data(data: DataModel, background_tasks: BackgroundTasks):
 127. use structured output in ChatGoogleGenerativeAI     DONE
 131. When building agents (e.g., with LangGraph), ensure your tool messages also follow a schema. The Input: Use @tool(args_schema=DatabaseQuery) to force the model to provide the right arguments.  DONE
 126. Previously, forcing an LLM to output JSON required "Function Calling" (which adds an extra round-trip). In v4.x, Google’s Constrained Decoding is the default. Optimization: Use with_structured_output(method="json_schema"). This doesn't just "ask" for JSON; it constrains the model's logits at the hardware level, ensuring 100% valid JSON without the token overhead of a tool-call definition.    DONE
+When sub-agents return results, they're raw strings. There's no typed contract for what one agent sends to another. A SubagentMessage(agent_name, task, result, confidence) schema would let the supervisor make smarter decisions.   DONE
 128. The InjectedToolArg Secret: When building tools, you often need the user_id or an auth_token from the API request. In the past, engineers had to "trick" the LLM by putting the ID in the prompt, which is a massive security risk. user_id: Annotated[str, InjectedToolArg]                       DONE
 129. Practice: Set handle_tool_error=True in your ToolNode (or custom tool) to automatically convert Python exceptions into text the LLM can reason about. Pro Tip: If the LLM provides an invalid JSON for a tool, send back the schema it should have followed. @tool(handle_tool_error=True)                DONE
 118. can i only use TypedDict in state management across nodes in langgraph          DONE
 119. add a plan mode/TODO List for my agent              DONE              
+104. Implement FastMCP properly      DONE
+56. use AsyncMemoryClient for mem0  and comapre mem0 vs supermemory vs cognee    DONE
 117. for AI gateway checkout pydantic gateway         DELAYED
 60. Batch uses asyncio.gather with a semaphore but no queue
-Under high load, all batch requests start simultaneously and race for the semaphore. A proper async queue with backpressure would give more predictable latency and prevent thundering herd.         
-6. set up performance tests
+6. set up performance tests 
 46. use CacheBackedEmbeddings fore reusing embeddings
 47. check whether i will need to use sandboxed execution environemnt in future
 48. check the page https://docs.langchain.com/langsmith/deployments#
 
 49. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
 
-57. No agent-to-agent message passing format standard
-When sub-agents return results, they're raw strings. There's no typed contract for what one agent sends to another. A SubagentMessage(agent_name, task, result, confidence) schema would let the supervisor make smarter decisions.
-58. Circular delegation is possible
-Agent A can hand off to Agent B, which can hand off back to Agent A. There's no loop detection beyond completed_agents in SupervisorState, and that only works in the supervisor graph — not in the tool-based MultiAgentSystem.
-104. Implement FastMCP properly
 94. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through texr, PDF and more?    DELAYED
 86. add tests that suits the project
-59. No skill composition
-Skills are flat callables. There's no way to chain skills (skill A's output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
-61.Embeddings aren't cached
-aembed_batch calls the API every time. Embeddings for the same text are deterministic — a simple LRU cache keyed on SHA256(text) would eliminate redundant API calls entirely.
-62. Model instances are rebuilt on every call
-build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's called. The model object should be a module-level singleton (or per-spec singleton) since it's stateless.
-73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better Resolve the ORJSON/response-model conflict.
-98. check how can Port & Adapter/strategy & factory can help 
-64. No eval framework
-Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
-No structured reasoning traces
-The agent just produces output. For debugging production failures you need to store the full reasoning trace (all tool calls, intermediate states, the exact prompt sent) not just the final message.
 90. discover RAGFlow if or if not to use it
-116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
 42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
-108. use the new gemini embedding 2 for multi-modal embeddings  
+59. No skill composition
+Skills are flat callables. Theres no way to chain skills (skill A output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
+73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better Resolve the ORJSON/response-model conflict. plus v0.135 has now first class supprt for SSE now 
+98. check how can Port & Adapter/strategy & factory can help 
+64. No eval framework. Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
+116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
 53. add voice support by using gemini 3 for TTS and STT  with websockets
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
@@ -163,12 +153,32 @@ The agent just produces output. For debugging production failures you need to st
 115. logs inbetween the layers are empty or not coming except start and end 
 121. figure out the types of memory that a agent can have and which type does fit my needs
 125. Ensure your message history logic preserves the extras["signature"] field in AIMessage objects. When a model "thinks," it generates a Thought Signature. If you are building a multi-turn agent (like with LangGraph), failing to send this signature back in the next turn forces the model to re-reason from scratch, increasing latency.
-56. use AsyncMemoryClient for mem0  and comapre mem0 vs supermemory vs cognee
 130. Always set a recursion_limit (max steps) in your LangGraph and a timeout on your LLM calls.
-131. the checkpoint_id (formerly thread_ts) is your best friend. in HITL after resuming froma pause
+131. the checkpoint_id (formerly thread_ts) is your best friend. in HITL after resuming from a pause
 132. Add toons before any operation/inputting data to LLM for best possible use of context space inlcuding agents, chats, RAG, web search results, after tool LLM invoke and everywhere else
 133. uae pydantic for state management in langraph and convert all typedDict to pydantic 
+57. No agent-to-agent message passing format standard
+58. Circular delegation is possible. Agent A can hand off to Agent B, which can hand off back to Agent A. There's no loop detection beyond completed_agents in SupervisorState, and that only works in the supervisor graph — not in the tool-based MultiAgentSystem.
+61.Embeddings aren't cached. aembed_batch calls the API every time. Embeddings for the same text are deterministic — a simple LRU cache keyed on SHA256(text) would eliminate redundant API calls entirely.
+62. Model instances are rebuilt on every call
+build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's called. The model object should be a module-level singleton (or per-spec singleton) since it's stateless.
+108. use the new gemini embedding 2 for multi-modal embeddings  
+134. The Workflow: If you have parallel branches (e.g., START -> Node A AND Node B), the synchronous graph.invoke() will still run them one after the other. Only await graph.ainvoke() will truly run them at the same time.
+135. Sync Method,         Async Method,          What it does
+     invoke(),            ainvoke(),             Runs the full chain/node/model and returns the result.
+     stream(),            astream(),             Streams the output (tokens or state updates) as they happen.
+     batch(),             abatch(),              Processes a list of inputs (uses parallelism under the hood).
+     transform(),         atransform(),          Specialized for streaming data through a function.
+136. Checkpointers: SqliteSaver (Sync) vs. AsyncSqliteSaver (Async). In production, always use the async version to avoid blocking your DB connection pool. Tools: @tool functions can be def or async def. If your tool calls an API, make it async def so the agent can do other things while waiting for the network.
+137. what is ToolNode, conditional_routing, , make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
+138. use this 
+from langgraph.graph.message import add_messages
 
+# Messages are merged by ID (deduplication)
+state["messages"] = add_messages(state["messages"], [new_msg])
+139. get conversation state state = graph.get_state(config)
+140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
+141. replace chatGoogleGenerativeAI with from langchain.chat_models import init_chat_model
 
 ```
 <!-- memory usage of FastAPI app -->
@@ -323,7 +333,246 @@ Not: LLM → decide → act → hope it works
     "confidence": 0.92
     }
 12. JIT permission, IAM model might be implemented in future
-13. add toons
+13. Core Agents (what, why, how)
+A. Ingestion Agent
+
+Responsibility: Turn “legal garbage” into clean text + layout
+
+Tools
+Docling
+OCR backend (pluggable)
+Layout parser
+Why this is a tool-using agent
+Needs conditional tool invocation (OCR vs text PDF)
+Needs retry logic & fallbacks
+No reasoning, just execution
+Output
+Raw text
+Layout map (page, clause, table)
+Confidence score
+Human-in-the-loop?
+
+❌ No (unless OCR confidence < threshold → manual reupload)
+
+B. Structure Normalization Agent
+
+Responsibility: Normalize document into a canonical structure
+
+Tasks
+Resolve headers, sections, annexures
+Link “Clause 7.2(b)” → actual node
+Normalize numbering styles
+Agent Type
+
+Rule-based + LLM hybrid
+
+Deterministic rules for structure
+LLM only for ambiguous cases
+Why not pure LLM?
+
+Because structure errors cascade into everything.
+
+Output
+Canonical JSON schema of contract
+Human-in-the-loop?
+
+❌ No (errors detectable programmatically)
+
+C. Clause Segmentation Agent
+
+Responsibility: Identify clause boundaries + classify clause type
+
+Examples
+Indemnity
+Limitation of liability
+Arbitration
+Termination
+Governing law
+Agent Type
+
+Classifier Agent
+
+Fine-tuned or prompt-locked
+No free text generation
+Why this agent exists separately
+
+Clause boundaries must be stable across versions.
+
+Output
+Clause nodes (id, type, text)
+Human-in-the-loop?
+
+⚠️ Optional (only for low-confidence classifications)
+
+D. Entity Extraction Agent (NER++)
+
+Responsibility: Extract entities within clauses
+
+Entities
+Parties
+Dates
+Money
+Jurisdiction
+Obligations
+Conditions
+Agent Type
+
+NER Specialist Agent
+
+Constrained output schema
+Zero interpretation
+Why this agent is narrow
+
+NER must be boringly correct, not creative.
+
+Output
+Normalized entities
+Entity offsets
+Confidence per entity
+Human-in-the-loop?
+
+❌ No (corrections happen later)
+
+E. Relationship Mapping Agent (Graph Builder)
+
+Responsibility: Build legal relationships
+
+Examples
+Party A → indemnifies → Party B
+Obligation → triggered by → Event
+Clause → overridden by → Clause
+Obligation → deadline → Date
+Storage
+PostgreSQL + graph extension (edges + nodes)
+This becomes your graph memory
+Agent Type
+
+Graph Construction Agent
+
+Deterministic mapping rules
+LLM only for conditional logic extraction
+Why this is critical
+
+This is what makes the system intelligent, not just NLP.
+
+Human-in-the-loop?
+
+❌ No (graph errors surface later)
+
+F. Risk Analysis Agent (Deep Agent)
+
+Responsibility: Assess legal risk, not summarize
+
+Inputs
+Clause
+Entities
+Relationships
+Company policy (if available)
+Examples
+Unlimited liability
+One-sided termination
+Weak arbitration seat
+Non-enforceable clauses (India-specific)
+Agent Type
+
+Deep Agent
+
+Multi-step reasoning
+Uses retrieved statutes + precedents
+Must cite sources
+Why Deep Agent here
+
+Risk analysis requires:
+
+Context
+Comparisons
+Tradeoff reasoning
+Output
+Risk label
+Explanation
+Supporting citations
+Human-in-the-loop?
+
+❌ Not yet (review later)
+
+G. Compliance & Precedent Agent
+
+Responsibility: Ground analysis in Indian law
+
+Tasks
+Check statute applicability
+Surface binding precedents
+Detect conflicts across jurisdictions
+Data
+Statutes (section-level)
+Judgements (context-aware embeddings)
+Agent Type
+
+Retrieval-Augmented Legal Agent
+
+Retrieval-first
+No hallucinated answers allowed
+Guardrail
+
+If sources < threshold → “Insufficient legal basis”
+
+Human-in-the-loop?
+
+❌ Not here
+
+H. Human Review Agent (MANDATORY)
+
+Responsibility: Final validation
+
+Why mandatory
+Legal liability
+Trust building
+Model improvement
+Interface
+Highlighted clauses
+Risk explanations
+Override buttons
+Comments
+What gets stored
+Overrides
+Reason codes
+Reviewer role
+
+This feeds learning + audits.
+
+4. Memory Architecture (this matters)
+A. Persistent Memory (PostgreSQL)
+Contracts
+Versions
+Entities
+Clauses
+Reviews
+Overrides
+
+This is your system of record.
+
+B. Graph Memory (core differentiator)
+
+Stores:
+
+Entity ↔ Entity
+Clause ↔ Obligation
+Obligation ↔ Deadline
+Clause ↔ Precedent
+Precedent ↔ Jurisdiction
+
+This enables:
+
+“Show all contracts where X indemnity exists”
+“Which obligations trigger next month”
+“Which clauses are legally weak in Maharashtra”
+C. Episodic Memory (Agent Harness)
+Each agent run
+Inputs
+Outputs
+Errors
+
+You can replay any decision.
 
 # New Agent Specs
 
@@ -388,7 +637,57 @@ Your agent flow had a slight circular conflict (Web -> QnA -> Router -> Planner 
     Build:
     contract graph
     entity relationships).
+    Structure Normalization Agent
+    START
+    ↓
+    [IngestionAgent]
+    ↓
+    [StructureNormalizationAgent]
+    ↓
+    [ClauseSegmentationAgent]
+    ↓
+    [EntityExtractionAgent]
+    ↓
+    [RelationshipMappingAgent]
+    ↓
+    ├─> [RiskAnalysisAgent]
+    │        ↓
+    │   [ComplianceAndPrecedentAgent]
+    │
+    ↓
+    [HumanReviewGate]  ← mandatory
+    ↓
+    [FinalizationAgent]
+    ↓
+    [PersistMemoryAgent]
+    ↓
+    END
+    EntityExtractionAgent node
 
+    Input
+
+    {
+    "clause_id": "C-12",
+    "clause_text": "...",
+    "context": {
+        "jurisdiction": "India",
+        "document_type": "MSA"
+    }
+    }
+
+    Output
+
+    {
+    "entities": [
+        {
+        "type": "OBLIGATION",
+        "value": "maintain confidentiality",
+        "party": "Vendor",
+        "confidence": 0.92
+        }
+    ],
+    "confidence": 0.88
+    }
     These execute independently. Communication is strictly via the centralized state via Typed Schemas or The Solution: Implement Action Schemas (using tools like pydantic). These force the agent to choose from a "discriminated union" of specific, predefined actions.      Benefit: Every agent output must resolve to an explicit, valid command, turning unpredictable text into predictable execution..
 
     Rules:
@@ -590,7 +889,92 @@ llm.ainvoke(messages)
     Assign:
     thread_id
     correlation_id
-20. 
+20. contracts
+CREATE TABLE contracts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title TEXT,
+    document_type TEXT,
+    jurisdiction TEXT DEFAULT 'India',
+    language TEXT DEFAULT 'en',
+    created_at TIMESTAMP DEFAULT now()
+);
+contract_versions
+CREATE TABLE contract_versions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    contract_id UUID REFERENCES contracts(id),
+    version_no INT,
+    raw_file_path TEXT,
+    created_at TIMESTAMP DEFAULT now()
+);
+clauses
+CREATE TABLE clauses (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    contract_version_id UUID REFERENCES contract_versions(id),
+    clause_index INT,
+    clause_type TEXT,
+    text TEXT,
+    confidence FLOAT
+);
+entities
+CREATE TABLE entities (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clause_id UUID REFERENCES clauses(id),
+    entity_type TEXT,
+    raw_value TEXT,
+    normalized_value TEXT,
+    confidence FLOAT
+);
+risks
+CREATE TABLE risks (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clause_id UUID REFERENCES clauses(id),
+    risk_type TEXT,
+    severity TEXT,
+    explanation TEXT,
+    confidence FLOAT
+);
+human_reviews
+CREATE TABLE human_reviews (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    artifact_type TEXT,
+    artifact_id UUID,
+    reviewer_role TEXT,
+    decision TEXT,
+    comment TEXT,
+    created_at TIMESTAMP DEFAULT now()
+);
+1.3 Graph Memory (Explicit & Queryable)
+graph_nodes
+CREATE TABLE graph_nodes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    node_type TEXT,
+    payload JSONB
+);
+graph_edges
+CREATE TABLE graph_edges (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    from_node UUID REFERENCES graph_nodes(id),
+    to_node UUID REFERENCES graph_nodes(id),
+    relation_type TEXT,
+    confidence FLOAT
+);
+RISK_TYPES = [
+    "UNLIMITED_LIABILITY",
+    "ONE_SIDED_INDEMNITY",
+    "WEAK_TERMINATION_RIGHTS",
+    "UNFAVORABLE_JURISDICTION",
+    "AMBIGUOUS_PAYMENT_TERMS",
+    "NON_ENFORCEABLE_CLAUSE",
+]
+
+SEVERITY = ["LOW", "MEDIUM", "HIGH"]
+
+This lets you answer:
+
+“Which obligations are triggered next month?”
+“Which clauses depend on which events?”
+“Which risks appear across contracts?”
+21. 
 
 
 1. Prompt Chaining (0:54 - 5:42): Breaking tasks into sequential steps where the output of one prompt is the input for the next. Do: Use for complex, multi-step processes or cleaning dirty data. Don't: Make chains too long, as it increases latency and the risk of hallucination propagation.
@@ -615,7 +999,8 @@ llm.ainvoke(messages)
 19. Exploration & Discovery (59:29 - 62:17): Broadly exploring knowledge spaces and clustering themes for research. Do: Use to map uncharted territory in competitive analysis or drug discovery. Don't: Underestimate how resource-heavy this is.### What to Do vs. What Not to Do While Making AI Agents
 
 
-# Google Docs API gave better performance for converting docs to markdown than lamaparse, PdfPlumber, PyMuPDF
+# RAG & Tools
+### Google Docs API gave better performance for converting docs to markdown than lamaparse, PdfPlumber, PyMuPDF
  pypdfium has the highest score for for matching docs/PDF parsing
 metaData includes: 
    source: filePath
@@ -642,7 +1027,7 @@ The Problem: relying solely on cosine similarity for retrieval is insufficient f
 The Solution: Implement a Hybrid Retrieval system that combines parallel searches across a Vector Store (semantic), Document Store (keyword/BM25/splade), and Graph Store (knowledge graph entities) (30:30).
 Fusion Ranking: Combine results from these different methods using algorithms like Reciprocal Rank Fusion (RRF) to determine the best final chunks for the language model (33:04).
 
-Accuracy and reliability
+### Accuracy and reliability
 You can evaluate how correct, truthful, and complete your agent’s answers are. For example:
 Hallucination. Do responses contain facts or claims not present in the provided context? This is especially important for RAG applications.Faithfulness. Do responses accurately represent provided context?
 
@@ -657,13 +1042,58 @@ Summarization Quality. Do responses condense information accurately?
 Consider eg information retention, factual accuracy, and conciseness?
 Keyword Coverage. Does a response include technical terms and terminology use?
 
+### agent specific tool needs
+Sources you must support:
+
+Scanned PDFs (stamp papers, annexures)
+Handwritten addendums
+Poorly formatted Word/PDF files
+Multi-language (English + Hindi + regional spillover)
+
+Tools:
+
+OCR (Indic language aware)
+Layout-aware parsing (tables, schedules, annexures)
+Metadata extraction (stamp duty, execution place, jurisdiction clause)
+
+Data ingestion ≠ file upload
+It includes:
+
+Versioning (draft v/s executed v/s amended)
+Annexure linking
+Cross-reference resolution (“as per Clause 7.2(b)”)
+
+If you skip this, lawyers won’t trust outputs.
+
+B. Data Analysis Tools (beyond basic NLP)
+
+NER alone is table stakes.
+
+You need:
+
+Entity normalization
+(“Rs. 10 lakhs”, “₹10,00,000”, “Ten Lakh Rupees” → same value)
+Temporal reasoning
+“within 30 days of receipt” → receipt date + calendar + holidays
+Conditional logic extraction
+(“If X happens, Y obligation triggers”)
+Jurisdictional mapping
+Arbitration Act vs CPC
+State stamp laws
+Sectoral regulations
+
+This is where LangGraph helps (multi-step reasoning).
+
+C. Legal Knowledge Tools
+Precedent linking (case law embeddings)
+Statute grounding (section-level references)
+Circulars / notifications (RBI, IRDAI, SEBI)
 
 
-if you’re building a tool that you want other agents to use, you should consider ship-
-ping an MCP server.
+# best practice for MCP tools
+if you’re building a tool that you want other agents to use, you should consider shipping an MCP server.
 it’s worth looking at building an MCP client that could access third-party features.
 P0 Safeguards (Immediate): (12:45) Token-through (do not pass user tokens), check token expiry/audience, no public listeners (0.0.0.0), signed connectors only, and human-in-the-loop for destructive actions.
-# best practice for MCP tools
 https://youtu.be/bvuaF0B9vfA?si=x1KsfjpjbLxxTFpv
 1. Focus on Intent, Not Operations (0:43): Design MCP tools around the user's intent (e.g., "track order") rather than exposing individual operations (e.g., "get user by email," "get last order"). The MCP tool should handle the underlying complexity.
 2. Flatten Arguments (2:05): Avoid using dictionaries for MCP tool arguments as this can lead to agent hallucination. Instead, declare specific, flattened arguments to make it easier for the agent to use.
@@ -967,6 +1397,65 @@ OpenClaw treats memory as a data engineering pipeline, not a feature.
 | - clauses
 | - entities
 | - relations
+contracts
+id (uuid)
+title
+document_type
+jurisdiction
+language
+created_at
+contract_versions
+id
+contract_id
+version_no
+uploaded_by
+created_at
+clauses
+id
+contract_version_id
+clause_type
+text
+confidence
+entities
+id
+clause_id
+entity_type
+normalized_value
+raw_value
+confidence
+risks
+id
+clause_id
+risk_type
+severity
+explanation
+confidence
+human_reviews
+id
+artifact_type
+artifact_id
+reviewer_role
+decision
+comment
+2.2 Graph Memory (THIS is your moat)
+
+Represent relationships explicitly.
+
+nodes
+node_id
+node_type   -- PARTY, OBLIGATION, CLAUSE, PRECEDENT
+payload
+edges
+from_node
+to_node
+relation_type
+confidence
+Examples
+PARTY → indemnifies → PARTY
+OBLIGATION → triggered_by → EVENT
+CLAUSE → supported_by → PRECEDENT
+
+This enables queries no LLM can do reliably.
 ---------------------------
    ↓
 [Embedding Pipeline]
@@ -1053,6 +1542,77 @@ optimized for relevance
 
 The talk details different memory structures to emulate human cognitive functions, including persona memory for personality, toolbox memory for managing tool schemas, conversation memory for history, and workflow memory for learning from past actions 
 
+# Guardrails
+
+1. Guardrails ka real scope (India-specific)
+
+Guardrails are not optional, they are existential.
+
+A. Legal Liability Guardrails
+Must never claim “legal advice”
+Must surface:
+Confidence score
+Source (clause + judgement + statute)
+Mandatory disclaimers + audit logs
+B. Hallucination Control
+Retrieval-first architecture
+No free-form answers without citations
+“Insufficient data” must be a valid output
+C. Data Privacy
+
+Indian contracts contain:
+
+PAN, Aadhaar, bank details
+Trade secrets
+
+So:
+
+PII redaction
+On-prem / VPC deploy option
+Encryption at rest + in transit
+
+If you ignore this, enterprises won’t touch it.
+
+# Evals
+Evaluation Metrics (Stop Lying to Yourself)
+
+Accuracy ≠ BLEU ≠ ROUGE.
+
+You need legal correctness metrics.
+
+3.1 Clause Detection Metrics
+Boundary precision/recall
+Clause-type confusion matrix
+
+Failing here breaks everything downstream.
+
+3.2 Entity Metrics
+Exact match accuracy
+Normalization accuracy (₹ vs words)
+False positive penalty (VERY important)
+
+A wrong entity is worse than a missing one.
+
+3.3 Risk Assessment Metrics
+Human agreement rate
+Severity misclassification rate
+False alarm rate
+
+Lawyers hate noise.
+
+3.4 Compliance Metrics
+Statute grounding accuracy
+Precedent relevance score
+Jurisdiction correctness
+
+One wrong citation = trust collapse.
+
+3.5 System Metrics (enterprise reality)
+Reproducibility (same input → same output)
+Override frequency
+Review time reduction
+
+This is what enterprises buy.
 
 # AI Gateway
 START: Do you need AI Gateway?

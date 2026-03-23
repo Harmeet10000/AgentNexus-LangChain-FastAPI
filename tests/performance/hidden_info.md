@@ -1,3 +1,100 @@
+# Engineering Insider Knowledge: Hidden Performance & Security Nuances
+
+A collection of subtle architectural patterns, security traps, and optimization tricks that separate senior engineers from the rest.
+
+## 1. Timing Attacks: The Enumeration Oracle
+The timing attack you didn't know you were shipping. The constant-time login path (`_DUMMY_HASH`) is the most commonly skipped security detail in auth implementations.
+- **The Problem:** Without it, an attacker can send login requests and measure response time. A missing email returns in ~0ms (no hash check), while a found email returns in ~100ms (`argon2` runs).
+- **The Impact:** A complete email enumeration oracle with zero rate-limit concerns.
+- **The Fix:** Run `verify_password` on a static dummy hash regardless of whether the user exists. This ensures every code path costs the same ~100ms.
+
+## 2. Forward-Safety with `frozenset(Permission)`
+Using `frozenset(Permission)` for the `ADMIN` role is a forward-safety guarantee, not laziness.
+- **Why?** When you explicitly enumerate permissions per role, `ADMIN` silently loses access to any new `Permission` added later unless a developer remembers to update the mapping.
+- **The Better Way:** `frozenset(Permission)` iterates the enum class itself, so `ADMIN` automatically gains every new permission the moment it's defined—no manual sync required.
+
+## 3. OAuth & `SameSite="Lax"`
+Why `samesite="lax"` on the OAuth state cookie and not `"strict"`.
+- **The Trap:** `SameSite=Strict` blocks cookies on **ALL** cross-site navigations—including the OAuth provider's redirect back to your callback URL.
+- **The Result:** The browser considers the provider's redirect a cross-site request and drops the cookie before your callback handler can read it, making the CSRF check impossible.
+- **The Fix:** `Lax` allows cookies on top-level GET navigations (like redirects) while still blocking them on embedded sub-requests.
+
+## 4. The `sid` Claim: Zero-I/O Session Tracking
+The `sid` claim in the access token is a subtle but important architectural choice.
+- **Standard Approach:** `GET /sessions` requires a DB or Redis lookup to identify which session is "current".
+- **The Insider Pattern:** Embed `session_id` in the access token as `sid`. Every call to `/sessions` can mark `is_current` purely from the already-validated JWT in memory—zero extra I/O per request.
+- **Distinction:** `jti` remains a per-token unique ID (useful for blacklisting), while `sid` is the stable session-identifier across all tokens for that session.
+
+## 5. MongoDB TTL Indexes vs. Celery Cleanup
+The MongoDB TTL index on `token_audit_log.expires_at` is worth understanding deeply.
+- **Implementation:** `expireAfterSeconds=0` tells MongoDB to delete documents where `expires_at` is in the past.
+- **Efficiency:** This costs nothing at write time and nothing at read time—cleanup is background-amortized (evaluated every 60s).
+- **The Alternative's Failure:** A Celery beat task introduces competing write patterns, lock contention, and a failure mode where cleanup falls behind.
+
+## 6. Zero-Downtime Parameter Migration with Argon2
+`argon2`'s `check_needs_rehash` is the migration tool almost nobody uses.
+- **Scenario:** You upgrade your `PasswordHasher` config (e.g., bumping `memory_cost` from 64MB to 128MB).
+- **The Solution:** Calling `needs_rehash` on every successful login and silently re-hashing means your entire user base migrates to the new parameters without a batch job, without downtime, and without ever asking users to re-enter passwords.
+
+## 7. The `boto3` Thread-Safety Trap
+`boto3.client()` is **NOT** thread-safe if you share a single client instance across concurrent `asyncer.asyncify()` calls.
+- **The Risk:** Multiple concurrent uploads would race on the same client's internal state.
+- **The Pattern:** Keep the client in `StorageService` as a frozen dataclass field and use it sequentially, OR create a fresh client per upload using `boto3.session.Session().client()` per thread with `threading.local()`.
+
+## 8. Logging: Impersonation as `WARNING`
+Why `warning` level on impersonation logs, not `info`.
+- **SIEM Readiness:** Log aggregators (Datadog, Grafana Loki) allow alerting on levels. Impersonation is a privileged action that should wake someone up if unexpected.
+- **Visibility:** `warning` signals "this is not an error but demands attention," preventing it from being buried in `info` noise.
+
+## 9. `fastapi-limiter` & The Fixed Window
+Despite the name, `fastapi-limiter` implements a fixed window counter (`INCR` + `EXPIRE`), not a true sliding window.
+- **The Nuance:** Users can make 2x the allowed requests in a short burst by straddling two windows.
+- **When it matters:** For auth endpoints where burst protection is critical, swap the default for a Redis sorted set approach (`ZREMRANGEBYSCORE`).
+
+## 10. Fragile S3 Key Extraction
+The `removeprefix` trick on S3 key extraction is fragile at CDN boundaries.
+- **The Bug:** If your CDN URL and S3 bucket endpoint ever diverge (e.g., custom domain), `url.removeprefix(public_url + "/")` silently returns the full URL instead of the key.
+- **Production Correctness:** Store the S3 key directly in the User document (`avatar_key: str | None`) and use that for deletion. Never reconstruct a key by parsing a URL.
+
+---
+
+## The "Fail-Closed" Redis Paradox
+Most engineers blindly implement a Redis-backed circuit breaker and assume resilience. In reality, they just moved the single point of failure to their own Redis cluster.
+
+### The Insider Pattern: "Failing Closed on the Control Plane"
+If Redis throws a connection error, your status should be manually set to `ALLOW`. Your **data plane** (the actual HTTP request to OpenAI) must survive if your **control plane** (Redis) goes down.
+
+- **Failure Mode:** If you don't catch `RedisError` and default to `ALLOW`, a minor network blip will cause your Circuit Breaker to instantly throw exceptions, resulting in 100% downtime even if the external API is healthy.
+- **The Goal:** Gracefully degrade back to a standard, unprotected API state.
+
+---
+
+## OWASP Top 10 LLM Vulnerabilities Breakdown
+
+1. **Prompt Injection:** Using prompts to bypass safety filters (poems, Morse code, etc.).
+2. **Sensitive Information Disclosure:** Leaking PII or IP. *Solution: Sanitize after generation.*
+3. **Supply Chain Vulnerabilities:** Unverified components from HuggingFace/GitHub.
+4. **Data and Model Poisoning:** Corrupting training data or RAG sources.
+5. **Improper Output Handling:** Trusting LLM output without validation (SQLi/XSS risks).
+6. **Excessive Agency:** Granting LLMs too much power to execute tools/APIs.
+7. **System Prompt Leakage:** Exposed instructions or credentials.
+8. **Vector Embedding Weaknesses:** Manipulation of RAG data.
+9. **Misinformation:** The model hallucinates or provides incorrect information.
+10. **Unbounded Consumption:** Denial of Service (DoS) or "Denial of Wallet".
+
+---
+
+## The `strict=True` Trap
+In 2026, most providers (Google, OpenAI) offer a `strict` parameter for structured outputs. While it ensures 100% schema adherence, it significantly increases **Time to First Token (TTFT)** because the backend must "warm up" a grammar-constrained state machine.
+
+### The Pro Move: "Lazy Schemas"
+For ultra-low latency:
+1. Define your Pydantic model with only the top 3 critical fields as **Required**.
+2. Make the rest **Optional**.
+3. Run a local **Micro-JIT** (using `msgspec`) to validate optional fields after the response arrives.
+4. This combines the speed of a raw stream with the safety of a structured guardrail.
+
+
 The timing attack you didn't know you were shipping. The constant-time login path (_DUMMY_HASH) is the most commonly skipped security detail in auth implementations. Without it, an attacker can send login requests and measure response time: a missing email returns in ~0ms (no hash check), a found email returns in ~100ms (argon2 runs). That's a complete email enumeration oracle with zero rate-limit concerns. The fix — running verify_password on a static dummy hash regardless — ensures every code path costs the same ~100ms. Most engineers learn this after a pentest report.
 frozenset(Permission) for ADMIN is a forward-safety guarantee, not laziness. When you explicitly enumerate permissions per role, ADMIN silently loses access to any new Permission added later unless a developer remembers to update the mapping. frozenset(Permission) iterates the enum class itself, so ADMIN automatically gains every new permission the moment it's defined — no manual sync. This is the correct default for a superuser role.
 Why samesite="lax" on the OAuth state cookie and not "strict". SameSite=Strict blocks cookies on ALL cross-site navigations — including the OAuth provider's redirect back to your callback URL. The browser considers the provider's redirect a cross-site request, so SameSite=Strict drops the cookie before your callback handler can read it, making the CSRF check impossible. Lax allows cookies on top-level GET navigations (the redirect) while still blocking them on embedded sub-requests. Almost every production OAuth implementation I've reviewed gets this wrong and either disables the state check or uses SameSite=None unnecessarily.
