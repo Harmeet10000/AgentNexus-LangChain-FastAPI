@@ -87,26 +87,7 @@ schemas/
 
 config/
   settings.py         # Typed settings via pydantic-settings
-```
 
-## Quick Start
-
-### 1. Install
-
-```bash
-pip install langchain>=1.0.0 langgraph>=1.0.0 langsmith langchain-google-genai mem0ai
-```
-
-### 2. Configure
-
-```env
-# .env
-GOOGLE_API_KEY=your_key
-LANGCHAIN_API_KEY=your_langsmith_key
-LANGCHAIN_PROJECT=my-agent
-MEM0_API_KEY=your_mem0_key          # Optional
-POSTGRES_URI=postgresql://...       # Optional (for production checkpointer)
-```
 
 ### 3. Bootstrap (in your FastAPI main.py)
 
@@ -222,15 +203,117 @@ Two layers:
 2. `GuardrailMiddleware` + `evaluate_response()` — LLM-as-judge (~200ms)
 
 ---
+# Moto of this project
+AI Agents should never be replacing Humans. They should be your devoted digital companions, ever-ready to absorb the soul-crushing repetition and mindless grunt work that slowly poisons the very profession you once chased with youthful fire. Niether should you use AI Agents to do the job for you completely end-to-end. Instead you should be doing AI-Assisted work that should feel like a very ergonomic office/work chair that doesnt break your back and a bent neck making you lose your time to dread-filled procrastination, existential second-guessing, and the quiet terror of “what if I chose wrong,”. If your agents frees your time that would rather have wasted dreading over life choices, you can spend that time to be more human lifting the invisible weight from your shoulders and not see your hair getting white prematurly.
+this is a graph-backed, human-verified legal intelligence platform for Indian contracts.
 
-## ⚠ Important: Naming Conflicts
+# i am building a stateful, resumable, memory-aware reasoning pipeline
+A distributed, resumable, schema-driven cognitive workflow engine with controlled reasoning surfaces Which has three layers:
+1. Memory shaping (filters, trimming)
+2. Runtime control (dynamic agents, routing)
+3. Execution durability (pause/resume)
+a stateless compute unit inside a deterministic workflow engine
+The real architecture:
+LLM = stateless reasoning engine
+State = source of truth
+Memory = indexed projections of state
+The deepest insight: If your system cannot deterministically replay a run, you do not control your agent.
+Final Mental model: Plan → deterministic execution → validated output → persisted state
+Not: LLM → decide → act → hope it works
 
-The folders `langchain/` and `langgraph/` in this project **shadow** the installed
-packages of the same name if they live at the Python import root.
+# Whats in this
+3. Why are they looking for a solution (actual pain)
 
-**Solution**: Either:
-- Put everything inside your app package: `src/myapp/langchain_layer/`
-- Use the `langchain_layer/` / `langgraph_layer/` naming used in this project
-- Or use namespace packages carefully
+Not “time-saving”. That’s shallow.
 
-This project uses `langchain_layer/` and `langgraph_layer/` to avoid conflicts.
+Real reasons in India:
+Small startups might not get best legal teams
+individuals specially in India are not aware about there legal rights and are afraid of fine printed legal notice
+need a Saul Goodmen like personality that can think outside of box and is not afraid to get into grey area
+Grunt work that should be automated (big relief)
+
+This is your goldmine.
+
+High-volume, low-intelligence tasks:
+Clause tagging
+Risk flagging (one-sided indemnity, unlimited liability)
+Deadline tracking
+Comparing against standard templates
+Stamp duty & jurisdiction sanity checks
+“Is this clause enforceable in India?”
+
+Lawyers hate this work. Clients pay for it unwillingly. Automate this, not “summaries”.
+Existing players from companies Kira, Luminance, Evisort, Ironclad are trained on US/UK contracts
+Poor understanding of Indian statutes
+No concept of:
+Stamp duty
+Arbitration peculiarities
+Indian limitation periods
+Sectoral regulators
+Junior associates miss risk → partner gets blamed
+Businesses sign boilerplate contracts without understanding downside
+MSMEs cannot afford continuous legal review
+Inconsistent interpretation across regions
+
+Time is a symptom. Risk and uncertainty are the disease.
+
+7. Impact across domains (realistic, not hype)
+Insurance
+Detect claim-rejection loopholes
+Policyholder vs insurer asymmetry reduced
+Healthcare
+Hospital contracts, consent forms, vendor SLAs
+Compliance with clinical establishment norms
+Prenup / Family settlements
+Indian enforceability analysis
+Asset disclosure risks
+Business contracts
+MSMEs finally understand what they sign
+Vendor lock-in risks exposed
+Wills & land
+Title risk flags
+Ambiguous beneficiary clauses
+State-specific succession nuances
+
+This directly reduces information asymmetry, not lawyers.
+
+8. Judgements misinterpretation problem
+
+In India:
+
+Same judgement interpreted differently across High Courts
+Older precedents ignored or revived suddenly
+Context matters (facts > ratio)
+
+Your system must:
+
+Store judgement context
+Highlight conflicting rulings
+Surface latest binding authority
+
+For example:
+
+What binds a District Court vs High Court vs Supreme Court of India
+
+This is not optional. This is core.
+
+Why this DAG is correct
+No cycles before human review → avoids compounding hallucinations
+Risk + Compliance separated → legal correctness > linguistic fluency
+Human gate before persistence → memory is trusted memory
+
+Human-in-the-Loop Design (Mandatory, Not Optional)
+Why humans are required
+Legal liability
+Continuous improvement
+Trust formation
+What humans do
+Approve / reject risks
+Correct clauses
+Annotate reasoning
+What you store
+Overrides
+Comments
+Reviewer role
+
+This becomes training + audit data.
