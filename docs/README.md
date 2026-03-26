@@ -10,14 +10,14 @@ A production-grade, multi-agent AI system designed to compete with the best codi
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        FastAPI Layer                         │
+│                        FastAPI Layer                        │
 │   /agents/invoke  /agents/stream  /agents/batch  /embed     │
 └───────────────────────────┬─────────────────────────────────┘
                             │
-┌───────────────────────────▼─────────────────────────────────┐
-│                      Agent Runtime                           │
-│   create_production_agent(AgentSpec)  →  ProductionAgent    │
-│                                                             │
+┌───────────────────────────▼────────────────────────────────┐
+│                      Agent Runtime                         │
+│   create_production_agent(AgentSpec)  →  ProductionAgent   │
+│                                                            │
 │   ┌─────────────────────────────────────────────────────┐  │
 │   │              LangChain 1.0: create_agent            │  │
 │   │                                                     │  │
@@ -31,18 +31,18 @@ A production-grade, multi-agent AI system designed to compete with the best codi
 │   │  5. HumanInTheLoopMiddleware (HITL - optional)      │  │
 │   │  6. GuardrailMiddleware      (safety - after_model) │  │
 │   └─────────────────────────────────────────────────────┘  │
-│                                                             │
-│   context_schema → RichContext (user_id, role, flags...)    │
-│   checkpointer   → InMemory / Postgres / Redis              │
-└───────────────────────────┬─────────────────────────────────┘
+│                                                            │
+│   context_schema → RichContext (user_id, role, flags...)   │
+│   checkpointer   → InMemory / Postgres / Redis             │
+└───────────────────────────┬────────────────────────────────┘
                             │
           ┌─────────────────┴─────────────────┐
           │                                   │
 ┌─────────▼──────────┐             ┌──────────▼──────────┐
-│  Short-term Memory  │             │  Long-term Memory    │
-│  LangGraph          │             │  Mem0               │
-│  Checkpointer       │             │  (semantic search)  │
-│  (per-thread)       │             │  (cross-session)    │
+│  Short-term Memory  │             │  Long-term Memory  │
+│  LangGraph          │             │  cognee              │
+│  Checkpointer       │             │  (semantic search) │
+│  (per-thread)       │             │  (cross-session)   │
 └────────────────────┘             └─────────────────────┘
 ```
 
@@ -54,7 +54,7 @@ agents/
   registry.py         # Concrete agent instances (research, code, general)
   api.py              # FastAPI router (mount into your app)
   memory/
-    manager.py        # MemoryManager: checkpointer + Mem0
+    manager.py        # MemoryManager: checkpointer + cognee
   orchestration/
     supervisor.py     # MultiAgentSystem, LLMRouter, Skill, Handoff
   tools/
@@ -220,6 +220,70 @@ Memory = indexed projections of state
 The deepest insight: If your system cannot deterministically replay a run, you do not control your agent.
 Final Mental model: Plan → deterministic execution → validated output → persisted state
 Not: LLM → decide → act → hope it works
+
+# workflow choice and reasoning
+Orchestrator 
+why:	Main agent plans → Delegates to workers → Synthesize.  Perfect: Plan multi-step, coordinate agents, reflect/recover
+My requirements match Orchestrator exactly:
+
+Deterministic workflows: Explicit plan → worker → reflect loop
+Multi-step planning: Main orchestrator generates plan: list[str]
+Repeated tool calls: Workers loop until plan complete
+Self-reflection: Orchestrator reviews worker outputs
+Error recovery: Orchestrator handles failures, re-plans
+Coordinate agents: Workers = specialized sub-agents
+Shared state: Orchestrator owns LegalState, workers read/write
+
+# Performance Considerations
+Do NOT init_chat_model + create_agent inside LangGraph nodes. Performance killer + anti-pattern. Pre-compile agents outside graph, pass as node functions.
+Why NOT Inside Nodes? ❌
+❌ BAD - Inside node (N+1 models per request)
+def research_node(state):
+    model = init_chat_model("gpt-4o")  # ❌ 100ms+ cold start per call
+    agent = create_agent(model, tools)  # ❌ 50ms+ compilation per call
+    return agent.invoke(state)          # ❌ Model init + agent build EVERY TIME
+
+Correct Pattern: Pre-Compile Outside ✅
+✅ GOOD - Pre-compile once
+# OUTSIDE GRAPH - Compile once at startup
+research_agent = create_agent(
+    init_chat_model("gpt-4o"),
+    tools=[search_caselaw]
+)
+
+def research_node(state):
+    return research_agent.invoke(state)  # <5ms, cached model
+Copy
+Benefits:
+
+Instant startup: Models/agents ready in memory
+Zero recompilation: Compiled once at server start
+Memory efficient: Reuse across all requests/threads
+Scales perfectly: 10K req/s = 1 model instance
+LangSmith optimized: Single trace per agent
+
+LangGraph Node Strategy:
+├─ ✅ Pre-compile create_agent OUTSIDE graph (global)
+├─ ✅ Pass as node function: graph.add_node("research", research_agent.invoke)
+├─ ✅ Per-node checkpointers for isolation
+├─ ✅ Dynamic model selection via dict lookup
+└─ ✅ Startup event for initialization
+
+Result:
+├─ Latency: 30ms (vs 500ms)
+├─ Memory: 100MB (vs 20GB)
+├─ Scale: 10K req/s
+└─ Debug: LangSmith traces per agent
+# Result: 500ms+ latency per node, scales poorly
+Copy
+Problems:
+
+Cold starts: init_chat_model downloads model config/metadata (~100-500ms)
+Recompilation: create_agent rebuilds agent executor (~50ms)
+Memory leaks: Creates new model/agent objects per invocation
+Scalability: 10 nodes × 10 req/s = 100 model inits/second
+Token waste: Repeated system prompts/metadata
+
 
 # Whats in this
 3. Why are they looking for a solution (actual pain)

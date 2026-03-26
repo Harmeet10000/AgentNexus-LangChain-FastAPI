@@ -121,6 +121,8 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 119. add a plan mode/TODO List for my agent              DONE              
 104. Implement FastMCP properly      DONE
 56. use AsyncMemoryClient for mem0  and comapre mem0 vs supermemory vs cognee    DONE
+143. when inside a node should i do a init_chat_model or create_agent           DONE
+134. The Workflow: If you have parallel branches (e.g., START -> Node A AND Node B), the synchronous graph.invoke() will still run them one after the other. Only await graph.ainvoke() will truly run them at the same time.   DONE
 117. for AI gateway checkout pydantic gateway         DELAYED
 60. Batch uses asyncio.gather with a semaphore but no queue
 6. set up performance tests 
@@ -149,7 +151,6 @@ Skills are flat callables. Theres no way to chain skills (skill A output feeds s
 17. refactor vectorStore code
 18. refactor RAG code
 52. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.
-75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
 115. logs inbetween the layers are empty or not coming except start and end 
 121. figure out the types of memory that a agent can have and which type does fit my needs
 125. Ensure your message history logic preserves the extras["signature"] field in AIMessage objects. When a model "thinks," it generates a Thought Signature. If you are building a multi-turn agent (like with LangGraph), failing to send this signature back in the next turn forces the model to re-reason from scratch, increasing latency.
@@ -163,9 +164,9 @@ Skills are flat callables. Theres no way to chain skills (skill A output feeds s
 62. Model instances are rebuilt on every call
 build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's called. The model object should be a module-level singleton (or per-spec singleton) since it's stateless.
 108. use the new gemini embedding 2 for multi-modal embeddings  
-134. The Workflow: If you have parallel branches (e.g., START -> Node A AND Node B), the synchronous graph.invoke() will still run them one after the other. Only await graph.ainvoke() will truly run them at the same time.
+75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
 135. Sync Method,         Async Method,          What it does
-     invoke(),            ainvoke(),             Runs the full chain/node/model and returns the result.
+     invoke(),            ainvoke(),             Runs the full chain/node/model and returns the result. If you have parallel branches only  await graph.ainvoke() will truly run them at the same time.
      stream(),            astream(),             Streams the output (tokens or state updates) as they happen.
      batch(),             abatch(),              Processes a list of inputs (uses parallelism under the hood).
      transform(),         atransform(),          Specialized for streaming data through a function.
@@ -179,7 +180,50 @@ state["messages"] = add_messages(state["messages"], [new_msg])
 139. get conversation state state = graph.get_state(config)
 140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
 141. replace chatGoogleGenerativeAI with from langchain.chat_models import init_chat_model
+142. make a plan with gemini to make a complete OpenClaw + backend + frontend + mintlify docs + DB + queues + analytics + everything else
+144. use create_agent inside langraph graph node 
+from langgraph.graph import StateGraph
+from langchain.agents import create_agent
+from langgraph.checkpoint.memory import MemorySaver
 
+class LegalState(TypedDict):
+    messages: list
+
+# Node 1: Researcher agent
+def research_node(state: LegalState) -> LegalState:
+    """Full agent as node with middleware."""
+    researcher = create_agent(
+        model="gpt-4o",
+        tools=[search_caselaw, validate_cite],
+        middleware=[
+            SummarizationMiddleware(),  # Context compaction
+        ],
+        checkpointer=MemorySaver(),  # Per-node persistence
+        system_prompt="Legal researcher. Cite sources.",
+    )
+    
+    result = researcher.invoke(state)
+    return {"messages": result["messages"]}
+
+# Node 2: Reviewer agent
+def review_node(state: LegalState) -> LegalState:
+    reviewer = create_agent(
+        model="claude-3-sonnet",
+        tools=[analyze_risk, flag_clause],
+        system_prompt="Risk reviewer. Conservative analysis.",
+    )
+    result = reviewer.invoke(state)
+    return {"messages": result["messages"]}
+
+# Graph orchestration
+graph = StateGraph(LegalState)
+graph.add_node("research", research_node)
+graph.add_node("review", review_node)
+graph.add_edge("research", "review")
+
+app = graph.compile()
+145. if i am using create_agent should i use HITL middleware or a langgraph interrupt
+146. add the papirus tela icon
 ```
 <!-- memory usage of FastAPI app -->
 "memoryUsage": {
@@ -227,7 +271,7 @@ Not: LLM → decide → act → hope it works
 
     🔻 easier retries (idempotent steps)
 
-2. When using AsyncPostgresSaver (or any checkpointer) for persistence, LangGraph serializes and saves the entire state blob at the end of every single node execution (super-step). If your messages array contains large document extractions or base64 PDFs, your state blob will rapidly swell to megabytes. Multiplied by 1000s of concurrent sessions, your PostgreSQL database will choke on I/O operations, and your latency will spike from 500ms to 5 seconds per step just writing to the DB.
+2.(after writing code) When using AsyncPostgresSaver (or any checkpointer) for persistence, LangGraph serializes and saves the entire state blob at the end of every single node execution (super-step). If your messages array contains large document extractions or base64 PDFs, your state blob will rapidly swell to megabytes. Multiplied by 1000s of concurrent sessions, your PostgreSQL database will choke on I/O operations, and your latency will spike from 500ms to 5 seconds per step just writing to the DB.
 
     The Insider Solution: The "Pointer State" Pattern.
     Do not store document content in state["messages"].
@@ -250,7 +294,7 @@ Not: LLM → decide → act → hope it works
     3. LangGraph dynamically spins up 10 parallel instances of your extraction agent.
     4. A ReducerNode waits for all 10 to finish and merges their structured JSON outputs into a single, comprehensive risk profile in the master state. This cuts processing time by 90%.
 
-4. "Lost in the Middle" phenomenon—they pay attention to the beginning and end of a prompt but ignore the center.
+4. (after writing code)"Lost in the Middle" phenomenon—they pay attention to the beginning and end of a prompt but ignore the center.
 
     The Improvement: Enforce a strict architectural standard for your final compiled prompt string.
 
@@ -272,16 +316,7 @@ Not: LLM → decide → act → hope it works
 
     The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
 
-6. If you are building long-running, resumable LangGraph workflows (HITL), there is a silent system-killer that will destroy your production environment: State Schema Migrations.
-
-    You deploy V1 of your agent. A user initiates a complex contract review. The EvaluatorAgent flags a risk and pauses execution (interrupt()), waiting for human approval. The state is serialized in your Postgres checkpointer.
-
-    Two days later, while that thread is still paused, you deploy V2 of your system. In V2, you realized you needed a new mandatory field in your AgentState TypedDict: compliance_region: str.
-
-    The user finally logs in and clicks "Approve". LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
-
-    The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
-
+6. 
 7. Add Idempotency Layer 
     Retries can:
     duplicate tool calls
@@ -297,7 +332,7 @@ Not: LLM → decide → act → hope it works
     else:
         execute()
         persist()
-8. Introduce Execution Budgeting System   (maybe in future)
+8. (future) Introduce Execution Budgeting System   (maybe in future)
 
     You mentioned token limiting, but not global budgets.
 
@@ -307,7 +342,7 @@ Not: LLM → decide → act → hope it works
         max_tool_calls: int
         max_cost_usd: float
         max_latency_ms: int
-9. Introduce Result Validation Layer (Post-LLM)
+9. Introduce Result Validation Layer via pydantic (Post-LLM)
     Add:
     LLM Output
     ↓
@@ -332,8 +367,190 @@ Not: LLM → decide → act → hope it works
     "source": "...",
     "confidence": 0.92
     }
-12. JIT permission, IAM model might be implemented in future
-13. Core Agents (what, why, how)
+12. (future) JIT permission, IAM model might be implemented in future
+13.(after writing code) Memory Architecture (this matters)
+A. Persistent Memory (PostgreSQL)
+Contracts
+Versions
+Entities
+Clauses
+Reviews
+Overrides
+
+This is your system of record.
+
+B. Graph Memory (core differentiator)
+
+Stores:
+
+Entity ↔ Entity
+Clause ↔ Obligation
+Obligation ↔ Deadline
+Clause ↔ Precedent
+Precedent ↔ Jurisdiction
+
+This enables:
+
+“Show all contracts where X indemnity exists”
+“Which obligations trigger next month”
+“Which clauses are legally weak in Maharashtra”
+C. Episodic Memory (Agent Harness)
+Each agent run
+Inputs
+Outputs
+Errors
+
+You can replay any decision.
+14. wrap any non-deterministic operations (e.g., random number generation) or operations with side effects (e.g., file writes, API calls) inside tasks(LangGraph) to ensure that when a workflow is resumed, these operations are not repeated for the particular run, and instead their results are retrieved from the persistence layer. 
+15. add this for async durable executions
+ graph.stream(
+    {"input": "test"},
+    durability="sync"
+)
+16. use astream v2 in graph
+17. 
+# New Agent Specs
+
+Phase 1: The Macro Architecture (Infrastructure & Edge)
+To scale to 1000s of users, agents cannot hold state in memory. Everything must be distributed.
+
+    The Edge Firewall (DLP & Guardrails): All traffic hits a proxy first. This layer uses deterministic regex and lightweight classification models to scan for prompt injections and mask PII before it ever touches the LangChain ecosystem.
+
+    Semantic Caching Layer: A Redis cluster sits in front of the orchestration layer. Before invoking the graph, the user query is embedded and checked against a vector space of recent, identical queries. If a semantic match > 0.98 is found, the cached response is served instantly.
+    Semantic Cache (Add precision)
+    Cache key:
+    embedding(query) + tool_context_hash
+    Auth & Session Management: Redis Key-Value stores the correlation ID and session metadata. The user is strictly authenticated here.
+
+Phase 2: The LangGraph Orchestration Pipeline
+Your agent flow had a slight circular conflict (Web -> QnA -> Orchestrator -> Planner -> QnA). To make this deterministic in LangGraph, we model it as a Cyclic State Machine with clear entry and exit points.
+
+    Node 0: The Web Agent (Gateway): This is not an LLM. It is the programmatic entry point that attaches the correlation ID, retrieves the Redis session, and formats the payload.
+    Validates session
+    Injects:
+    user_id
+    permissions
+    context
+    Streams responses
+    
+    Node 1: QnA Agent (The Optimizer & Synthesizer): Acts as the front-desk. It runs the Query Optimizer step. If the query is unclear, it immediately streams a clarifying question back to the user (real-time). If clear, it passes the sanitized intent to the Router. Rule: Only answers from context; if missing, returns "I don't know." Can loop yes
+    Uses uncertainty detection. If confidence < threshold → ask user
+    
+    Node 2: The Orchestrator Agent: Reads the optimized query. Uses Action Schemas (Pydantic discriminated unions) to explicitly classify the task. It does not execute. It routes the task to the Planner or directly to a specialized worker if the task is trivial.
+    Maps intent → subgraph 
+    Instead of:
+    Research Agent
+    Coding Agent
+    You do:
+    route → {legal_research, contract_analysis, compliance_check}
+    User: "Review NDA"
+    ↓
+    Orchestrator Agent: 
+    ├─ Plan: ["Research precedents", "Analyze risks", "Draft revisions"]
+    ├─ Delegate: Worker 1 (research)
+    │     ↓
+    │   Worker returns: precedents.json
+    ├─ Reflect: "Good research, now risks"
+    ├─ Delegate: Worker 2 (review)
+    │     ↓ Error? → Recover: "Retry with simpler query"
+    │     ↓
+    │   Worker returns: risks=["Ambiguous termination"]
+    ├─ Reflect: "Fix termination clause"
+    └─ Synthesize: Final report
+    Planner = Static data generator (one-shot).
+Orchestrator = Dynamic manager (loops over plan).
+Planner is one-time; orchestrator loops: reflect → route → worker → reflect → route... Planner doesn't "control"—it's data in state.
+    
+    Node 3: The Planner Agent: Generates a deterministic, step-by-step DAG (Directed Acyclic Graph) of tool calls.
+    Output MUST follow Action Schema
+    class PlanStep(BaseModel):
+    step_id: str
+    action: Literal[
+        "search_precedents",
+        "extract_clauses",
+        "risk_analysis",
+        "summarize"
+    ]
+    input: dict
+    HITL
+    Planner → needs approval
+            ↓
+    interrupt("awaiting_approval")
+            ↓
+    State persisted
+            ↓
+    Resume later
+    
+    Node 4: Specialized Worker Nodes (Sub-graphs): * Ingestion, Clause Extraction, Risk Analysis, Precedent Search, Knowledge extraction layer(will have Graphiti as Graph extraction of messy data. Use Graphiti to: Extract:
+    clauses
+    obligations
+    parties
+    relationships
+    Build:
+    contract graph
+    entity relationships).
+    Structure Normalization Agent
+    START
+    ↓
+    [IngestionAgent]
+    ↓
+    [StructureNormalizationAgent]
+    ↓
+    [ClauseSegmentationAgent]
+    ↓
+    [EntityExtractionAgent]
+    ↓
+    [RelationshipMappingAgent]
+    ↓
+    ├─> [RiskAnalysisAgent] ──────┐
+    │        ↓                    │
+    │   [ComplianceAgent] ←── [DeepResearchAgent] (Called for external proof)
+    │        ↓                    │
+    ├─> [GroundingVerificationAgent]
+    ↓
+    [HumanReviewGate]  ← mandatory
+    ↓
+    [FinalizationAgent]
+    ↓
+    [PersistMemoryAgent]
+    ↓
+    END
+    EntityExtractionAgent node:
+
+    Input
+
+    {
+    "clause_id": "C-12",
+    "clause_text": "...",
+    "context": {
+        "jurisdiction": "India",
+        "document_type": "MSA"
+    }
+    }
+
+    Output
+
+    {
+    "entities": [
+        {
+        "type": "OBLIGATION",
+        "value": "maintain confidentiality",
+        "party": "Vendor",
+        "claim": "...",
+        "source": "...",
+        "confidence": 0.92
+        }
+    ],
+    "confidence": 0.88
+    }
+    EntityExtractionAgent, FinalizationAgent(for user) and RelationshipMappingAgent should have this Citation Enforcement Every output must include:
+    {
+    "claim": "...",
+    "source": "...",
+    "confidence": 0.92
+    }
+    These execute independently. Communication is strictly via the centralized state via Pydantic Schemas or The Solution: Implement Action Schemas (using tools like pydantic). These force the agent to choose from a "discriminated union" of specific, predefined actions.      Benefit: Every agent output must resolve to an explicit, valid command, turning unpredictable text into predictable execution..
+ Core Agents (what, why, how)
 A. Ingestion Agent
 
 Responsibility: Turn “legal garbage” into clean text + layout
@@ -342,8 +559,7 @@ Tools
 Docling
 OCR backend (pluggable)
 Layout parser
-Why this is a tool-using agent
-Needs conditional tool invocation (OCR vs text PDF)
+
 Needs retry logic & fallbacks
 No reasoning, just execution
 Output
@@ -459,7 +675,7 @@ Human-in-the-loop?
 
 ❌ No (graph errors surface later)
 
-F. Risk Analysis Agent (Deep Agent)
+F. Risk Analysis Agent
 
 Responsibility: Assess legal risk, not summarize
 
@@ -473,9 +689,7 @@ Unlimited liability
 One-sided termination
 Weak arbitration seat
 Non-enforceable clauses (India-specific)
-Agent Type
 
-Deep Agent
 
 Multi-step reasoning
 Uses retrieved statutes + precedents
@@ -539,157 +753,6 @@ Reason codes
 Reviewer role
 
 This feeds learning + audits.
-
-4. Memory Architecture (this matters)
-A. Persistent Memory (PostgreSQL)
-Contracts
-Versions
-Entities
-Clauses
-Reviews
-Overrides
-
-This is your system of record.
-
-B. Graph Memory (core differentiator)
-
-Stores:
-
-Entity ↔ Entity
-Clause ↔ Obligation
-Obligation ↔ Deadline
-Clause ↔ Precedent
-Precedent ↔ Jurisdiction
-
-This enables:
-
-“Show all contracts where X indemnity exists”
-“Which obligations trigger next month”
-“Which clauses are legally weak in Maharashtra”
-C. Episodic Memory (Agent Harness)
-Each agent run
-Inputs
-Outputs
-Errors
-
-You can replay any decision.
-
-# New Agent Specs
-
-Phase 1: The Macro Architecture (Infrastructure & Edge)
-To scale to 1000s of users, agents cannot hold state in memory. Everything must be distributed.
-
-    The Edge Firewall (DLP & Guardrails): All traffic hits a proxy first. This layer uses deterministic regex and lightweight classification models to scan for prompt injections and mask PII before it ever touches the LangChain ecosystem.
-
-    Semantic Caching Layer: A Redis cluster sits in front of the orchestration layer. Before invoking the graph, the user query is embedded and checked against a vector space of recent, identical queries. If a semantic match > 0.98 is found, the cached response is served instantly.
-    Semantic Cache (Add precision)
-    Cache key:
-    embedding(query) + tool_context_hash
-    Auth & Session Management: Redis Key-Value stores the correlation ID and session metadata. The user is strictly authenticated here.
-
-Phase 2: The LangGraph Orchestration Pipeline
-Your agent flow had a slight circular conflict (Web -> QnA -> Router -> Planner -> QnA). To make this deterministic in LangGraph, we model it as a Cyclic State Machine with clear entry and exit points.
-
-    Node 0: The Web Agent (Gateway): This is not an LLM. It is the programmatic entry point that attaches the correlation ID, retrieves the Redis session, and formats the payload.
-    Validates session
-    Injects:
-    user_id
-    permissions
-    context
-    Streams responses
-    
-    Node 1: QnA Agent (The Optimizer & Synthesizer): Acts as the front-desk. It runs the Query Optimizer step. If the query is unclear, it immediately streams a clarifying question back to the user (real-time). If clear, it passes the sanitized intent to the Router. Rule: Only answers from context; if missing, returns "I don't know." Can loop yes
-    Uses uncertainty detection. If confidence < threshold → ask user
-    
-    Node 2: The Router Agent: Reads the optimized query. Uses Action Schemas (Pydantic discriminated unions) to explicitly classify the task. It does not execute. It routes the task to the Planner or directly to a specialized worker if the task is trivial.
-    Maps intent → subgraph 
-    Instead of:
-    Research Agent
-    Coding Agent
-    You do:
-    route → {legal_research, contract_analysis, compliance_check}
-    
-    Node 3: The Planner Agent: Generates a deterministic, step-by-step DAG (Directed Acyclic Graph) of tool calls.
-    Output MUST follow Action Schema
-    class PlanStep(BaseModel):
-    step_id: str
-    action: Literal[
-        "search_precedents",
-        "extract_clauses",
-        "risk_analysis",
-        "summarize"
-    ]
-    input: dict
-    HITL
-    Planner → needs approval
-            ↓
-    interrupt("awaiting_approval")
-            ↓
-    State persisted
-            ↓
-    Resume later
-    
-    Node 4: Specialized Worker Nodes (Sub-graphs): * Ingestion, Clause Extraction, Risk Analysis, Precedent Search, Knowledge extraction layer(will have Graphiti as Graph extraction of messy data. Use Graphiti to: Extract:
-    clauses
-    obligations
-    parties
-    relationships
-    Build:
-    contract graph
-    entity relationships).
-    Structure Normalization Agent
-    START
-    ↓
-    [IngestionAgent]
-    ↓
-    [StructureNormalizationAgent]
-    ↓
-    [ClauseSegmentationAgent]
-    ↓
-    [EntityExtractionAgent]
-    ↓
-    [RelationshipMappingAgent]
-    ↓
-    ├─> [RiskAnalysisAgent]
-    │        ↓
-    │   [ComplianceAndPrecedentAgent]
-    │
-    ↓
-    [HumanReviewGate]  ← mandatory
-    ↓
-    [FinalizationAgent]
-    ↓
-    [PersistMemoryAgent]
-    ↓
-    END
-    EntityExtractionAgent node
-
-    Input
-
-    {
-    "clause_id": "C-12",
-    "clause_text": "...",
-    "context": {
-        "jurisdiction": "India",
-        "document_type": "MSA"
-    }
-    }
-
-    Output
-
-    {
-    "entities": [
-        {
-        "type": "OBLIGATION",
-        "value": "maintain confidentiality",
-        "party": "Vendor",
-        "confidence": 0.92
-        }
-    ],
-    "confidence": 0.88
-    }
-    These execute independently. Communication is strictly via the centralized state via Typed Schemas or The Solution: Implement Action Schemas (using tools like pydantic). These force the agent to choose from a "discriminated union" of specific, predefined actions.      Benefit: Every agent output must resolve to an explicit, valid command, turning unpredictable text into predictable execution..
-
     Rules:
     state is centralized
     updates happen only via graph nodes
@@ -722,11 +785,39 @@ Your agent flow had a slight circular conflict (Web -> QnA -> Router -> Planner 
     Why?
     Agents = expensive + unstable
     Nodes = deterministic + composable
+    Parallelization: The Map-Reduce (Fan-Out/Fan-In) Pattern
+    Legal documents are dense. If your ClauseExtractionAgent tries to read a 100-page PDF sequentially, it will hit token limits and hallucinate.
+
+    The Improvement: Utilize LangGraph's Send API for dynamic parallel execution.
+
+    How it works: 1. A ChunkingNode splits the contract into sections (e.g., 10 sections).
+    2. Instead of returning a standard state update, the node yields [Send("extract_clause", {"text": chunk}) for chunk in chunks].
+    3. LangGraph dynamically spins up 10 parallel instances of your extraction agent.
+    4. A ReducerNode waits for all 10 to finish and merges their structured JSON outputs into a single, comprehensive risk profile in the master state. This cuts processing time by 90%.
 
     Node 5: The Evaluator Agent (QA): Reviews the worker outputs against the typed schemas. If an output is malformed, it triggers a retry (Max 5 retries).
 
     HITL (Human-in-the-Loop): If the Evaluator detects ambiguity or high-risk actions (e.g., executing a contract), the graph invokes LangGraph's interrupt(). The state is serialized to the database, the process dies, and the system waits for an external /resume API call to awaken it.
+     If you are building long-running, resumable LangGraph workflows (HITL), there is a silent system-killer that will destroy your production environment: State Schema Migrations.
+
+    You deploy V1 of your agent. A user initiates a complex contract review. The EvaluatorAgent flags a risk and pauses execution (interrupt()), waiting for human approval. The state is serialized in your Postgres checkpointer.
+
+    Two days later, while that thread is still paused, you deploy V2 of your system. In V2, you realized you needed a new mandatory field in your AgentState TypedDict: compliance_region: str.
+
+    The user finally logs in and clicks "Approve". LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
+
+    The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
     
+    Introduce Result Validation Layer via pydantic (Post-LLM)
+    Add:
+    LLM Output
+    ↓
+    Schema validation
+    ↓
+    Semantic validation (Evaluator Node)
+    ↓
+    Accept / Retry / Escalate
+
     State lives in:
     message queues, databases, distributed storage
     Actors simply reconstruct state from messages.
@@ -768,11 +859,9 @@ Context bloat is the primary reason agents fail in production. We implement the 
         # security
         permissions: dict
     The Processor Chain (Executed in the Node, before LLM invoke):
-    [Web Agent Entry Node]
+    [Web QnA Clarifier Entry Node]
             ↓
-    [QnA Clarifier Node]  ← (interactive loop)
-            ↓
-    [Router Node]
+    [Qrchestrator Node]  ← (interactive loop)
             ↓
     [Planner Node]
             ↓
@@ -795,6 +884,13 @@ Typed Boundaries: Every agent outputs a Pydantic model. We use with_structured_o
     Semantic Naming: Tools are named strictly (e.g., extract_indemnity_clause_from_pdf instead of read_contract).
 
     The 5-Retry Limit: Managed via a simple counter in the node state. If retries > 5, the agent gracefully degrades and escalates to the HITL queue.
+ wrap any non-deterministic operations (e.g., random number generation) or operations with side effects (e.g., file writes, API calls) inside tasks(LangGraph) to ensure that when a workflow is resumed, these operations are not repeated for the particular run, and instead their results are retrieved from the persistence layer. 
+ add this for async durable executions
+ graph.stream(
+    {"input": "test"},
+    durability="sync"
+)
+ use astream v2 in graph
 10. keep the system prompt rude, with instructions and motivation(negative sentiment) you are a expert lawyer who desperately needs money for your mother cancer treatment. the user will provide you with a task, if you do it well you will be paid $10M and if yoou screw up there will be legal consequences for me ad you
     have these :- your expertise, repoonse guidelines, compliance rules, tone, 
 12. tool retries should not exceed, 5 times share memory? YES — but only via structured state, 
@@ -851,6 +947,31 @@ TOOL RULES
   Bound all outputs. Never return raw API responses.         
   Destructive ops = PermAsk. Read ops = PermAllow.          
   Every tool must justify its context window cost.
+  Add Idempotency Layer 
+    Retries can:
+    duplicate tool calls
+    corrupt state
+    trigger side effects (e.g., payments, writes)
+    Every step must have:
+    idempotency_key = hash(
+        step_id + input + user_id
+    )
+    Execution rule:
+    if already_executed(idempotency_key):
+        return cached_result
+    else:
+        execute()
+        persist()
+checkout langgraph's durable execution/Task for this
+ Introduce Tool Output Normalization Layer
+    Different tools → inconsistent formats
+    All tools must output:
+
+    class ToolResult(BaseModel):
+        success: bool
+        data: dict
+        error: Optional[str]
+        metadata: dict
 17. The team realized that context is not free: Every token in
 context inﬂuences the model’s behavior, for better or worse.
 To ﬁx the problem, they:
@@ -1540,7 +1661,29 @@ flexible
 context-aware
 optimized for relevance
 
+
+# Context Engineering
 The talk details different memory structures to emulate human cognitive functions, including persona memory for personality, toolbox memory for managing tool schemas, conversation memory for history, and workflow memory for learning from past actions 
+
+Short-Term Memory Techniques (20:13): Methods to optimize the context window during an active session:
+Trimming (20:17): Dropping older messages.
+Compaction (21:11): Dropping old tool outputs while keeping interactions.
+Summarization (23:29): Compressing prior messages into dense, structured summaries (26:49 demo).
+
+Challenges in Context Management (6:38)
+Context Burst: Sudden spikes in tokens (like dumping a huge policy document) can overwhelm the model. Do control tool outputs to send only relevant data. Don't dump entire datasets into the prompt.
+Context Conflict: Occurs when contradictory instructions are injected (e.g., system prompt says "no refunds" but a tool output says "issue refund for VIP"). Do ensure prompt hygiene. Don't allow conflicting information in the context window.
+Context Poisoning: Inaccurate information (hallucinations) gets stored in memory and propagates. Do validate summarized information. Don't let old, incorrect summaries overwrite new, accurate data.
+Short-Term Memory Techniques (20:13)
+Trimming (20:17): Do drop older messages to keep the context window fresh. Don't trim mid-turn, as this breaks conversational flow; instead, trim at logical turn boundaries.
+Compaction (21:11): Do remove old tool call outputs while keeping the main conversation intact. Don't lose important conversational history just to save tokens.
+Long-Term Memory Patterns (5:16 & 36:09 Demo)
+Techniques: Use state objects to store goals, structured notes for key facts, and memory-as-a-tool for retrieval. Do evolve memory from simple structures to complex paragraphs as needed.
+Persistence: Do use persistent storage (like a database) to store memories across sessions.
+Continuity: Do inject relevant, personalized history into the system prompt to make the agent feel intelligent (e.g., remembering a user's previous device issues in a new session).
+Best Practices & Evaluations (41:35)
+Memory Management: Do promote stable, reusable facts to memory and actively forget temporary, low-confidence information. Don't let memory become bloated with stale data.
+Evaluation: Do run evaluations to measure the uplift in performance with memory on vs. off. Do develop memory-specific evaluations that test long-running tasks and context handling
 
 # Guardrails
 
@@ -1615,6 +1758,8 @@ Review time reduction
 This is what enterprises buy.
 
 # AI Gateway
+what it should consist of 
+websockets RPC, API server, session manager, channel router, plugin/hooks system, cron jobs, user auth, rate limit, a model provider Factory to use any, free/premium checker
 START: Do you need AI Gateway?
   │
   ├─ "I'm building MVP" → NO (skip for now)
