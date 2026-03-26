@@ -1,5 +1,5 @@
 """
-Model factory for Google Gemini via langchain_google_genai.
+Model factory for Google Gemini via LangChain's generic chat model init API.
 
 Provides:
 - Async single-turn and batch invocation
@@ -18,10 +18,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import toons
+from langchain.chat_models import init_chat_model
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import (
-    ChatGoogleGenerativeAI,
     GoogleGenerativeAIEmbeddings,
     create_context_cache,
 )
@@ -43,6 +44,7 @@ _DEFAULT_GEMINI_TEMPERATURE = 0.3
 _DEFAULT_GEMINI_TOP_P = 0.8
 _DEFAULT_GEMINI_TOP_K = 20
 _DEFAULT_CONTEXT_CACHE_TTL = "3600s"
+_settings_google_api_key = _settings.model.google_api_key.get_secret_value()
 
 
 # ---------------------------------------------------------------------------
@@ -60,18 +62,18 @@ def build_chat_model(
     streaming: bool = False,
     cached_content: str | None = None,
     **kwargs: Any,
-) -> ChatGoogleGenerativeAI:
-    """Return a configured ChatGoogleGenerativeAI instance."""
+) -> BaseChatModel:
+    """Return a configured Gemini chat model instance."""
     default_temperature = min(_mcfg.default_temperature, _DEFAULT_GEMINI_TEMPERATURE)
 
-    return ChatGoogleGenerativeAI(
+    return init_chat_model(
         model=model_name or _mcfg.gemini_pro_model,
         thinking_level="medium",
         temperature=temperature if temperature is not None else default_temperature,
         top_p=top_p if top_p is not None else _DEFAULT_GEMINI_TOP_P,
         top_k=top_k if top_k is not None else _DEFAULT_GEMINI_TOP_K,
         max_output_tokens=max_tokens or _mcfg.default_max_tokens,
-        google_api_key=_mcfg.google_api_key.get_secret_value(),
+        google_api_key=_settings_google_api_key,
         streaming=streaming,
         timeout=_mcfg.default_timeout,
         cached_content=cached_content,
@@ -80,7 +82,7 @@ def build_chat_model(
     )
 
 
-def build_fast_model(**kwargs: Any) -> ChatGoogleGenerativeAI:
+def build_fast_model(**kwargs: Any) -> BaseChatModel:
     """Flash model for lower-latency / cheaper tasks (guardrails, tool selection)."""
     return build_chat_model(model_name=_mcfg.gemini_flash_model, **kwargs)
 
@@ -88,7 +90,7 @@ def build_fast_model(**kwargs: Any) -> ChatGoogleGenerativeAI:
 def create_gemini_context_cache(
     messages: list[BaseMessage],
     *,
-    model: ChatGoogleGenerativeAI | None = None,
+    model: BaseChatModel | None = None,
     ttl: str = _DEFAULT_CONTEXT_CACHE_TTL,
     tools: list[BaseTool | type[BaseModel] | dict[str, Any] | Callable[..., Any]] | None = None,
     tool_choice: str | bool | None = None,
@@ -119,7 +121,7 @@ def build_cached_chat_model(
     max_tokens: int | None = None,
     streaming: bool = False,
     **kwargs: Any,
-) -> ChatGoogleGenerativeAI:
+) -> BaseChatModel:
     """Return a chat model wired to an explicit Gemini context cache."""
     return build_chat_model(
         model_name=model_name,
@@ -157,7 +159,7 @@ async def ainvoke_text(
     prompt: str,
     *,
     system: str | None = None,
-    model: ChatGoogleGenerativeAI | None = None,
+    model: BaseChatModel | None = None,
 ) -> str:
     """Single async text call, returns plain string."""
     llm = model or build_chat_model()
@@ -173,7 +175,7 @@ async def abatch_text(
     prompts: list[str],
     *,
     system: str | None = None,
-    model: ChatGoogleGenerativeAI | None = None,
+    model: BaseChatModel | None = None,
     max_concurrency: int | None = None,
 ) -> list[str]:
     """
@@ -199,7 +201,7 @@ async def astream_text(
     prompt: str,
     *,
     system: str | None = None,
-    model: ChatGoogleGenerativeAI | None = None,
+    model: BaseChatModel | None = None,
 ) -> AsyncIterator[str]:
     """
     Async generator that yields text tokens as they arrive.
@@ -280,7 +282,7 @@ async def ainvoke_multimodal(
     image_url: str | None = None,
     image_b64: str | None = None,
     system: str | None = None,
-    model: ChatGoogleGenerativeAI | None = None,
+    model: BaseChatModel | None = None,
 ) -> str:
     llm = model or build_chat_model(model_name="gemini-2.0-flash", media_resolution="low", )
     messages: list[BaseMessage] = []
@@ -302,7 +304,7 @@ async def abatch_multimodal(
     items: list[dict[str, Any]],
     *,
     system: str | None = None,
-    model: ChatGoogleGenerativeAI | None = None,
+    model: BaseChatModel | None = None,
     max_concurrency: int | None = None,
 ) -> list[str]:
     """
@@ -339,7 +341,7 @@ async def abatch_multimodal(
 def with_structured_output(
     schema: type[BaseModel],
     *,
-    model: ChatGoogleGenerativeAI | None = None,
+    model: BaseChatModel | None = None,
     method: str = "function_calling",
 ) -> Any:
     """

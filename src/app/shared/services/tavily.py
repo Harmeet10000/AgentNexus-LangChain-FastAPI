@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import httpx
+from fastapi import Request
 from pydantic import BaseModel, ConfigDict
 
-from app.config.settings import get_settings
-from app.utils.exceptions import ExternalServiceException, ValidationException
-from app.utils.logger import logger
+from app.config import get_settings
+from app.connections import get_shared_httpx_client
+from app.utils import ExternalServiceException, ValidationException, logger
 
 TAVILY_BASE_URL = "https://api.tavily.com"
 TAVILY_MAX_RESULTS_LIMIT = 20
@@ -29,6 +30,7 @@ class SearchResult(BaseModel):
     content: str
     score: float
     published_date: str | None = None
+    raw_content: str | None = None
 
 
 class SearchResponse(BaseModel):
@@ -63,17 +65,19 @@ class TavilyClient:
         self,
         query: str,
         max_results: int = 10,
+        topic: str = "general",
         include_answer: bool = True,
         include_raw_content: bool = False,
         include_images: bool = False,
     ) -> SearchResponse:
         """Search the web using Tavily."""
-        self._validate_search_inputs(query=query, max_results=max_results)
+        self._validate_search_inputs(query=query, max_results=max_results, topic=topic)
 
         payload = {
             "api_key": self.api_key,
             "query": query,
             "max_results": min(max_results, TAVILY_MAX_RESULTS_LIMIT),
+            "topic": topic,
             "include_answer": include_answer,
             "include_raw_content": include_raw_content,
             "include_images": include_images,
@@ -85,12 +89,14 @@ class TavilyClient:
             query=query,
             max_results=payload["max_results"],
             include_answer=include_answer,
+            topic=topic,
         )
         log.info("Executing Tavily search")
 
         client = self._get_http_client()
+        request_url = self._get_search_url()
         try:
-            response = await client.post("/search", json=payload)
+            response = await client.post(request_url, json=payload)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             log.bind(status_code=exc.response.status_code).warning("Tavily returned an error response")
@@ -173,13 +179,25 @@ class TavilyClient:
             )
         return self._http_client
 
-    def _validate_search_inputs(self, query: str, max_results: int) -> None:
+    def _get_search_url(self) -> str:
+        if self._owns_http_client:
+            return "/search"
+        return f"{self.base_url}/search"
+
+    def _validate_search_inputs(self, query: str, max_results: int, topic: str) -> None:
         if not self.api_key:
             raise ValidationException(detail="Tavily API key not configured")
         if not query.strip():
             raise ValidationException(detail="Search query is required")
         if max_results < 1:
             raise ValidationException(detail="max_results must be greater than 0")
+        if topic not in {"general", "news", "finance"}:
+            raise ValidationException(detail="topic must be one of: general, news, finance")
+
+    @classmethod
+    def from_request(cls, request: Request) -> TavilyClient:
+        """Build a Tavily client using the lifespan-owned HTTPX client."""
+        return cls(http_client=request.app.state.httpx_client)
 
     @staticmethod
     def _build_search_result(result: Mapping[str, object]) -> SearchResult:
@@ -189,6 +207,7 @@ class TavilyClient:
             content=TavilyClient._read_string(result, "content"),
             score=TavilyClient._read_float(result, "score"),
             published_date=TavilyClient._read_optional_string(result, "published_date"),
+            raw_content=TavilyClient._read_optional_string(result, "raw_content"),
         )
 
     @staticmethod
@@ -210,5 +229,5 @@ class TavilyClient:
 
 
 async def get_tavily_client() -> TavilyClient:
-    """Create a Tavily client dependency."""
-    return TavilyClient()
+    """Create a Tavily client backed by the shared lifespan HTTPX client."""
+    return TavilyClient(http_client=get_shared_httpx_client())
