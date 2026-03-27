@@ -157,7 +157,6 @@ Skills are flat callables. Theres no way to chain skills (skill A output feeds s
 125. Ensure your message history logic preserves the extras["signature"] field in AIMessage objects. When a model "thinks," it generates a Thought Signature. If you are building a multi-turn agent (like with LangGraph), failing to send this signature back in the next turn forces the model to re-reason from scratch, increasing latency.
 130. Always set a recursion_limit (max steps) in your LangGraph and a timeout on your LLM calls.
 131. the checkpoint_id (formerly thread_ts) is your best friend. in HITL after resuming from a pause
-132. Add toons before any operation/inputting data to LLM for best possible use of context space inlcuding agents, chats, RAG, web search results, after tool LLM invoke and everywhere else
 133. uae pydantic for state management in langraph and convert all typedDict to pydantic 
 57. No agent-to-agent message passing format standard
 58. Circular delegation is possible. Agent A can hand off to Agent B, which can hand off back to Agent A. There's no loop detection beyond completed_agents in SupervisorState, and that only works in the supervisor graph — not in the tool-based MultiAgentSystem.
@@ -172,59 +171,17 @@ build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's calle
      batch(),             abatch(),              Processes a list of inputs (uses parallelism under the hood).
      transform(),         atransform(),          Specialized for streaming data through a function.
 136. Checkpointers: SqliteSaver (Sync) vs. AsyncSqliteSaver (Async). In production, always use the async version to avoid blocking your DB connection pool. Tools: @tool functions can be def or async def. If your tool calls an API, make it async def so the agent can do other things while waiting for the network.
-137. what is ToolNode, conditional_routing, , make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
-138. use this 
-from langgraph.graph.message import add_messages
-
-# Messages are merged by ID (deduplication)
-state["messages"] = add_messages(state["messages"], [new_msg])
 139. get conversation state state = graph.get_state(config)
 140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
 141. replace chatGoogleGenerativeAI with from langchain.chat_models import init_chat_model
+138. add neo4j driver from request.app.state in Graphiti, Cognee and other places where required in tools and do the same for DB, redis
+144. review FastAPI Gurad settings for files, streams, websockets, 
+137. what is ToolNode, conditional_routing, , make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
+132. Add toons before any operation/inputting data to LLM for best possible use of context space inlcuding agents, chats, RAG, web search results, after tool LLM invoke and everywhere else
 142. make a plan with gemini to make a complete OpenClaw + backend + frontend + mintlify docs + DB + queues + analytics + everything else
-144. use create_agent inside langraph graph node 
-from langgraph.graph import StateGraph
-from langchain.agents import create_agent
-from langgraph.checkpoint.memory import MemorySaver
-
-class LegalState(TypedDict):
-    messages: list
-
-# Node 1: Researcher agent
-def research_node(state: LegalState) -> LegalState:
-    """Full agent as node with middleware."""
-    researcher = create_agent(
-        model="gpt-4o",
-        tools=[search_caselaw, validate_cite],
-        middleware=[
-            SummarizationMiddleware(),  # Context compaction
-        ],
-        checkpointer=MemorySaver(),  # Per-node persistence
-        system_prompt="Legal researcher. Cite sources.",
-    )
-    
-    result = researcher.invoke(state)
-    return {"messages": result["messages"]}
-
-# Node 2: Reviewer agent
-def review_node(state: LegalState) -> LegalState:
-    reviewer = create_agent(
-        model="claude-3-sonnet",
-        tools=[analyze_risk, flag_clause],
-        system_prompt="Risk reviewer. Conservative analysis.",
-    )
-    result = reviewer.invoke(state)
-    return {"messages": result["messages"]}
-
-# Graph orchestration
-graph = StateGraph(LegalState)
-graph.add_node("research", research_node)
-graph.add_node("review", review_node)
-graph.add_edge("research", "review")
-
-app = graph.compile()
-146. add the papirus tela icon  
-147. add neo4j driver from request.app.state in Graphiti, Cognee 
+146. 
+147.
+148. 
 ```
 <!-- memory usage of FastAPI app -->
 "memoryUsage": {

@@ -1,5 +1,4 @@
 import traceback
-from typing import Any
 
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
@@ -7,63 +6,11 @@ from fastapi.responses import ORJSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
-from app.utils import APIException, execution_path, logger
-
-
-def _build_request_context(request: Request) -> dict[str, Any]:
-    """Extract relevant request information."""
-    settings = get_settings()
-    ctx = {
-        "method": request.method,
-        "url": str(request.url),
-        "correlationId": getattr(request.state, "correlation_id", "unknown"),
-    }
-    if settings.ENVIRONMENT != "production" and request.client:
-        ctx["clientIp"] = request.client.host
-    return ctx
-
-
-def _build_error_response(
-    status_code: int,
-    message: str,
-    error_code: str,
-    data: Any | None = None,
-    request_ctx: dict[str, Any] | None = None,
-    trace: str | None = None,
-    inner_error: str | None = None,
-    flow: str | None = None,  # Added flow parameter
-) -> dict[str, Any]:
-    """Unified error shape — used for both known and unknown errors."""
-    error_detail: dict[str, Any] = {
-        "code": error_code,
-        "message": message,
-    }
-
-    if data is not None:
-        error_detail["data"] = data
-
-    response: dict[str, Any] = {
-        "success": False,
-        "statusCode": status_code,
-        "error": error_detail,
-        "request": request_ctx or {},
-    }
-
-    settings = get_settings()
-    if settings.ENVIRONMENT != "production":
-        if trace:
-            error_detail["trace"] = trace
-        if inner_error:
-            error_detail["innerError"] = inner_error
-        if flow:
-            error_detail["flow"] = flow  # Expose the execution path to the client in dev
-
-    return response
+from app.utils import APIException, execution_path, http_error, logger
 
 
 async def global_exception_handler(request: Request, exc: Exception) -> ORJSONResponse:
     settings = get_settings()
-    request_ctx = _build_request_context(request)
 
     # Extract the current function chain from our ContextVar
     current_flow = " -> ".join(execution_path.get())
@@ -81,24 +28,13 @@ async def global_exception_handler(request: Request, exc: Exception) -> ORJSONRe
         )
         data = exc.detail.get("data") if isinstance(exc.detail, dict) else None
 
-        response_body = _build_error_response(
-            status_code=status_code,
+        return http_error(
             message=message,
-            error_code=error_code,
+            status_code=status_code,
             data=data,
-            request_ctx=request_ctx,
+            error_code=error_code,
             flow=current_flow,
         )
-
-        # Loguru's context already has reqId, method, url, and layer.
-        # We only bind what is specific to this exact error.
-        log_call = logger.bind(error_code=error_code, status_code=status_code)
-        if status_code < 500:
-            log_call.warning(message)
-        else:
-            log_call.error(message)
-
-        return ORJSONResponse(status_code=status_code, content=response_body)
 
     # ────────────────────────────────────────────────
     # 2. Pydantic / FastAPI validation errors (422)
@@ -117,20 +53,17 @@ async def global_exception_handler(request: Request, exc: Exception) -> ORJSONRe
             for err in exc.errors()
         ]
 
-        response_body = _build_error_response(
-            status_code=status_code,
+        logger.bind(status_code=status_code, validation_errors=validation_errors[:3]).warning(
+            message,
+        )
+
+        return http_error(
             message=message,
-            error_code=error_code,
+            status_code=status_code,
             data={"errors": validation_errors},
-            request_ctx=request_ctx,
+            error_code=error_code,
             flow=current_flow,
         )
-
-        logger.bind(status_code=status_code, validation_errors=validation_errors[:3]).warning(
-            message
-        )
-
-        return ORJSONResponse(status_code=status_code, content=response_body)
 
     # ────────────────────────────────────────────────
     # 3. Plain HTTPException / Starlette exceptions
@@ -140,21 +73,22 @@ async def global_exception_handler(request: Request, exc: Exception) -> ORJSONRe
         error_code = f"HTTP_{status_code}"
         message = exc.detail if isinstance(exc.detail, str) else "HTTP error"
 
-        response_body = _build_error_response(
-            status_code=status_code,
-            message=message,
-            error_code=error_code,
-            request_ctx=request_ctx,
-            flow=current_flow,
-        )
-
         log_call = logger.bind(status_code=status_code)
         if status_code < 500:
             log_call.warning(message)
         else:
             log_call.error(message)
 
-        return ORJSONResponse(status_code=status_code, content=response_body, headers=exc.headers)
+        response = http_error(
+            message=message,
+            status_code=status_code,
+            error_code=error_code,
+            flow=current_flow,
+        )
+
+        if exc.headers:
+            response.headers.update(exc.headers)
+        return response
 
     # ────────────────────────────────────────────────
     # 4. Catch-all — unexpected server errors (500)
@@ -164,26 +98,18 @@ async def global_exception_handler(request: Request, exc: Exception) -> ORJSONRe
     message = "An unexpected error occurred"
 
     trace = traceback.format_exc() if settings.ENVIRONMENT != "production" else None
-
-    response_body = _build_error_response(
-        status_code=status_code,
-        message=message,
-        error_code=error_code,
-        request_ctx=request_ctx,
-        trace=trace,
-        flow=current_flow,
-    )
-
-    # Loguru's .exception() automatically formats the traceback and exc_info
-    # We bind the flow so it is explicitly indexed in the JSON file output
-    # Inside the Catch-all (500) block:
     exc_type = type(exc).__name__
     last_function = execution_path.get()[-1] if execution_path.get() else "unknown_layer"
-
     dynamic_message = f"Unhandled {exc_type} crashed in {last_function}"
 
     logger.bind(
         status_code=status_code, error_code=error_code, crashed_at_flow=current_flow
     ).exception(dynamic_message)
 
-    return ORJSONResponse(status_code=status_code, content=response_body)
+    return http_error(
+        message=message,
+        status_code=status_code,
+        error_code=error_code,
+        trace=trace,
+        flow=current_flow,
+    )

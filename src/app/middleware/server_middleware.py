@@ -3,7 +3,7 @@ import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Response
 from fastapi.responses import StreamingResponse
@@ -19,8 +19,12 @@ from prometheus_client import (
     generate_latest,
 )
 
-from app.config import Settings
 from app.utils import RedisProtocolAdapter, execution_path, logger, request_state
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from app.config import Settings
 
 # Context variable for correlation ID (thread-safe)
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")

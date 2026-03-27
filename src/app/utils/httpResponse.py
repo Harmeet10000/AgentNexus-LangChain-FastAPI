@@ -4,6 +4,7 @@ from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel
 
 from app.config import Environment, get_settings
+from app.shared.response_type import APIResponse, ErrorDetail, RequestMeta
 from app.utils.logger import request_state
 
 
@@ -16,61 +17,64 @@ def _serialize_data(data: Any) -> Any:
         return [_serialize_data(item) for item in data]
     return data
 
+
+def _build_request_meta() -> RequestMeta:
+    """Build request metadata from the current request context."""
+    settings = get_settings()
+    ctx = request_state.get()
+
+    ip = ctx.get("ip")
+    if settings.ENVIRONMENT == Environment.PRODUCTION:
+        ip = None
+
+    return RequestMeta(
+        ip=ip,
+        method=ctx.get("method"),
+        url=ctx.get("url"),
+        correlation_id=ctx.get("request_id"),
+    )
+
 def http_response(
     message: str,
     data: Any = None,
     status_code: int = 200,
 ) -> ORJSONResponse:
     """Create standardized HTTP success response using ContextVar."""
-    settings = get_settings()
-    ctx = request_state.get()
-
-    ip = ctx.get("ip")
-    # Remove sensitive data in production
-    if settings.ENVIRONMENT == Environment.PRODUCTION:
-        ip = None
-
-    response = {
-        "success": True,
-        "statusCode": status_code,
-        "request": {
-            "ip": ip,
-            "method": ctx.get("method"),
-            "url": ctx.get("url"),
-            # Match the key you set in your middleware ("request_id" or "correlation_id")
-            "correlationId": ctx.get("request_id"),
-        },
-        "message": message,
-        "data": _serialize_data(data),
-    }
-
-    return ORJSONResponse(status_code=status_code, content=response)
+    response = APIResponse[Any](
+        success=True,
+        status_code=status_code,
+        request=_build_request_meta(),
+        message=message,
+        data=_serialize_data(data),
+        error=None,
+    )
+    return ORJSONResponse(status_code=status_code, content=response.model_dump(mode="json"))
 
 
 def http_error(
     message: str,
     status_code: int = 400,
     data: Any = None,
+    *,
+    error_code: str = "ERROR",
+    trace: str | None = None,
+    inner_error: str | None = None,
+    flow: str | None = None,
 ) -> ORJSONResponse:
     """Create standardized HTTP error response using ContextVar."""
-    settings = get_settings()
-    ctx = request_state.get()
-
-    ip = ctx.get("ip")
-    if settings.ENVIRONMENT == Environment.PRODUCTION:
-        ip = None
-
-    response = {
-        "success": False,
-        "statusCode": status_code,
-        "request": {
-            "ip": ip,
-            "method": ctx.get("method"),
-            "url": ctx.get("url"),
-            "correlationId": ctx.get("request_id"),
-        },
-        "message": message,
-        "data": _serialize_data(data),
-    }
-
-    return ORJSONResponse(status_code=status_code, content=response)
+    response = APIResponse[Any](
+        success=False,
+        status_code=status_code,
+        request=_build_request_meta(),
+        message=message,
+        data=None,
+        error=ErrorDetail(
+            code=error_code,
+            message=message,
+            data=_serialize_data(data),
+            trace=trace,
+            inner_error=inner_error,
+            flow=flow,
+        ),
+    )
+    return ORJSONResponse(status_code=status_code, content=response.model_dump(mode="json"))
