@@ -13,7 +13,7 @@ from uuid import uuid4
 import structlog
 from langgraph.graph.state import CompiledStateGraph
 
-from src.app.features.ingestion.dto import DocumentUploadResponse
+from .dto import DocumentUploadResponse
 
 logger = structlog.get_logger(__name__)
 
@@ -51,8 +51,8 @@ class IngestionService:
 
         try:
             result = await self._graph.ainvoke(initial_state)
-        except Exception as exc:  # noqa: BLE001
-            log.error("ingestion_graph_failed", error=str(exc))
+        except Exception as exc:
+            log.exception("ingestion_graph_failed", error=str(exc))
             return DocumentUploadResponse(
                 doc_id=resolved_doc_id,
                 status="failed",

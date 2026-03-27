@@ -19,7 +19,7 @@ class TokenAuditLog(Document):
     device_name: str | None = None
     ip_address: str | None = None
     user_agent: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now(tz=datetime.timezone.utc))
     expires_at: datetime
     revoked_at: datetime | None = None
     is_revoked: bool = Field(default=False)

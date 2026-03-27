@@ -5,17 +5,24 @@ from uuid import uuid4
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 
 from app.config import get_settings
-from app.features.auth.dto import (
+from app.utils import logger
+from app.utils.exceptions import (
+    ConflictException,
+    NotFoundException,
+    UnauthorizedException,
+)
+from tasks.auth_email_tasks import send_password_reset_email, send_verification_email
+
+from .dto import (
     LoginRequest,
-    OAuthAuthorizeResponse,
     RegisterRequest,
     SessionResponse,
     TokenResponse,
     UserResponse,
 )
-from app.features.auth.model import User
-from app.features.auth.repository import RefreshTokenRepository, SessionData, UserRepository
-from app.features.auth.security import (
+from .model import User
+from .repository import RefreshTokenRepository, SessionData, UserRepository
+from .security import (
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -29,13 +36,6 @@ from app.features.auth.security import (
     verify_oauth_state,
     verify_password,
 )
-from app.utils import logger
-from app.utils.exceptions import (
-    ConflictException,
-    NotFoundException,
-    UnauthorizedException,
-)
-from tasks.auth_email_tasks import send_password_reset_email, send_verification_email
 
 # Dummy hash used in the constant-time negative path during login.
 # Prevents timing attacks that would reveal whether an email is registered.
@@ -192,7 +192,7 @@ class AuthService:
         settings = get_settings()
         reset_token = generate_token()
         user.reset_token_hash = hash_token(reset_token)
-        user.reset_token_expires_at = datetime.utcnow() + timedelta(
+        user.reset_token_expires_at = datetime.now(datetime.timezone.utc) + timedelta(
             minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES,
         )
         await self._user_repo.save(user)
@@ -323,7 +323,7 @@ class AuthService:
         settings = get_settings()
         session_id = str(uuid4())
         device_id = str(uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(datetime.timezone.utc)
 
         access_token, expires_in = create_access_token(
             user_id=str(user.id),
