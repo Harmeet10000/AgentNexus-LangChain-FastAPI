@@ -11,9 +11,10 @@ import asyncio
 import fnmatch
 from pathlib import Path
 
-from agents.tools.base import ToolOutput, build_validation_error_handler, register_tool
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
+
+from .base import ToolOutput, build_validation_error_handler, register_tool
 
 # ---------------------------------------------------------------------------
 # Shell tool
@@ -38,7 +39,7 @@ class ShellOutput(BaseModel):
     args_schema=ShellInput,
     handle_tool_error=True,
     handle_validation_error=build_validation_error_handler(ShellInput),
-)
+)  # ty:ignore[no-matching-overload]
 async def shell_tool(command: str, cwd: str | None = None, timeout: int = 30) -> str:
     """
     Execute a shell command and return stdout/stderr.
@@ -92,7 +93,7 @@ class ListDirInput(BaseModel):
     args_schema=ReadFileInput,
     handle_tool_error=True,
     handle_validation_error=build_validation_error_handler(ReadFileInput),
-)
+)  # ty:ignore[no-matching-overload]
 async def read_file(path: str, encoding: str = "utf-8") -> str:
     """Read the contents of a file and return them as a string."""
     try:
@@ -109,7 +110,7 @@ async def read_file(path: str, encoding: str = "utf-8") -> str:
     args_schema=WriteFileInput,
     handle_tool_error=True,
     handle_validation_error=build_validation_error_handler(WriteFileInput),
-)
+)  # ty:ignore[no-matching-overload]
 async def write_file(path: str, content: str, mode: str = "w") -> str:
     """Write content to a file. Creates parent directories if needed."""
     try:
@@ -126,8 +127,10 @@ async def write_file(path: str, content: str, mode: str = "w") -> str:
     args_schema=ListDirInput,
     handle_tool_error=True,
     handle_validation_error=build_validation_error_handler(ListDirInput),
-)
-async def list_directory(path: str = ".", recursive: bool = False, pattern: str | None = None) -> str:
+)  # ty:ignore[no-matching-overload]
+async def list_directory(
+    path: str = ".", recursive: bool = False, pattern: str | None = None
+) -> str:
     """List files in a directory, optionally filtering by glob pattern."""
     try:
         base = Path(path)
@@ -165,7 +168,7 @@ class FileSearchInput(BaseModel):
     args_schema=FileSearchInput,
     handle_tool_error=True,
     handle_validation_error=build_validation_error_handler(FileSearchInput),
-)
+)  # ty:ignore[no-matching-overload]
 async def file_search(
     query: str,
     directory: str = ".",

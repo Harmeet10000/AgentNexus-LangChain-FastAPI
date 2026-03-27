@@ -174,6 +174,9 @@ class Settings(BaseSettings):
     # --- Tavily Search Configuration ---
     TAVILY_API_KEY: str = Field(default="")
 
+    # --- PageIndex Configuration ---
+    PAGEINDEX_API_KEY: str = Field(default="")
+
     # --- Crawl/Search Rate Limiting ---
     CRAWL_RATE_LIMIT_PER_MINUTE: int = Field(default=10)
     CRAWL_RATE_LIMIT_PER_HOUR: int = Field(default=100)

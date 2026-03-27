@@ -3,30 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import os
-from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator, Iterable, Sequence
 from functools import lru_cache
-from importlib import import_module
-from types import ModuleType
-from typing import TYPE_CHECKING, Protocol
 
+import pageindex
+from pydantic import BaseModel, Field
+
+from app.config.settings import get_settings
 from app.utils import logger
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
-
-class PageIndexClientProtocol(Protocol):
-    """Protocol for the small subset of client methods used in this module."""
-
-    def chat_completions(self, **kwargs: object) -> object: ...
-
-
-@dataclass(slots=True, frozen=True)
-class PageIndexConfig:
+class PageIndexConfig(BaseModel):
     """Configuration for indexing operations."""
+
+    model_config = {"frozen": True, "extra": "forbid"}
 
     api_key: str | None = None
     model: str = "gpt-4o-2024-11-20"
@@ -37,57 +27,42 @@ class PageIndexConfig:
     if_add_node_summary: str = "yes"
     if_add_doc_description: str = "no"
     if_add_node_text: str = "no"
-    additional_kwargs: dict[str, object] = field(default_factory=dict)
+    additional_kwargs: dict[str, object] = Field(default_factory=dict)
 
 
-@dataclass(slots=True, frozen=True)
-class PageIndexBatchConfig:
+class PageIndexBatchConfig(BaseModel):
     """Concurrency settings for indexing batches."""
 
+    model_config = {"frozen": True, "extra": "forbid"}
+
     max_concurrency: int = 4
-    return_exceptions: bool = True
 
 
-@dataclass(slots=True, frozen=True)
-class PageIndexChatConfig:
+class PageIndexChatConfig(BaseModel):
     """Configuration for PageIndex chat completion calls."""
+
+    model_config = {"frozen": True, "extra": "forbid"}
 
     api_key: str | None = None
     model: str | None = None
     stream: bool = False
     temperature: float | None = None
-    additional_kwargs: dict[str, object] = field(default_factory=dict)
+    additional_kwargs: dict[str, object] = Field(default_factory=dict)
 
 
 @lru_cache(maxsize=1)
-def _executor() -> ThreadPoolExecutor:
-    default_workers = max((os.cpu_count() or 4) * 2, 8)
-    return ThreadPoolExecutor(max_workers=default_workers, thread_name_prefix="pi")
+def _get_client() -> object:
+    """Get or create a cached PageIndex client instance.
 
-
-@lru_cache(maxsize=1)
-def _load_pageindex_module() -> object:
-    try:
-        return import_module("pageindex")
-    except ImportError as exc:
-        raise RuntimeError(
-            "pageindex is not installed. Add it to runtime dependencies first."
-        ) from exc
-
-
-@lru_cache(maxsize=32)
-def _build_client(api_key: str) -> PageIndexClientProtocol:
-    module = _load_pageindex_module()
-    if not isinstance(module, ModuleType):
-        raise TypeError("Invalid pageindex module instance.")
-    return module.PageIndexClient(api_key=api_key)
-
-
-def _resolve_api_key(api_key: str | None) -> str:
-    resolved = api_key or os.getenv("PAGEINDEX_API_KEY", "")
-    if not resolved:
-        raise ValueError("PAGEINDEX_API_KEY is required for PageIndex operations.")
-    return resolved
+    The SDK handles connection pooling internally, so we only need one client instance.
+    """
+    settings = get_settings()
+    api_key = settings.PAGEINDEX_API_KEY
+    if not api_key:
+        msg = "PAGEINDEX_API_KEY is required for PageIndex operations."
+        logger.error(msg)
+        raise ValueError(msg)
+    return pageindex.PageIndexClient(api_key=api_key)
 
 
 def _raise_non_iterable_stream_response() -> None:
@@ -101,10 +76,12 @@ async def apage_index(
 ) -> dict[str, object]:
     """Run PageIndex document indexing without blocking the event loop."""
     runtime = config or PageIndexConfig()
-    module = _load_pageindex_module()
-    if not isinstance(module, ModuleType):
-        raise TypeError("Invalid pageindex module instance.")
-    key = _resolve_api_key(runtime.api_key)
+    settings = get_settings()
+    api_key = runtime.api_key or settings.PAGEINDEX_API_KEY
+    if not api_key:
+        msg = "PAGEINDEX_API_KEY is required for PageIndex operations."
+        logger.error(msg)
+        raise ValueError(msg)
 
     kwargs: dict[str, object] = {
         "doc": doc,
@@ -116,14 +93,21 @@ async def apage_index(
         "if_add_node_summary": runtime.if_add_node_summary,
         "if_add_doc_description": runtime.if_add_doc_description,
         "if_add_node_text": runtime.if_add_node_text,
-        "api_key": key,
+        "api_key": api_key,
     }
     if runtime.additional_kwargs:
         kwargs.update(runtime.additional_kwargs)
 
-    loop = asyncio.get_running_loop()
-    logger.info("Starting PageIndex indexing", doc=doc, model=runtime.model)
-    return await loop.run_in_executor(_executor(), lambda: module.page_index(**kwargs))
+    logger.bind(doc=doc, model=runtime.model).info("Starting PageIndex indexing")
+    try:
+        result = await asyncio.to_thread(pageindex.page_index, **kwargs)
+        logger.bind(doc=doc).info("PageIndex indexing completed successfully")
+        return result
+    except Exception:
+        logger.bind(doc=doc, model=runtime.model).exception(
+            "PageIndex indexing failed"
+        )
+        raise
 
 
 async def abatch_page_index(
@@ -131,8 +115,11 @@ async def abatch_page_index(
     docs: Sequence[str],
     config: PageIndexConfig | None = None,
     batch_config: PageIndexBatchConfig | None = None,
-) -> list[object]:
-    """Index multiple documents concurrently with a bounded in-flight window."""
+) -> list[dict[str, object]]:
+    """Index multiple documents concurrently with a bounded in-flight window.
+
+    Raises exceptions immediately if any task fails.
+    """
     if not docs:
         return []
 
@@ -140,15 +127,21 @@ async def abatch_page_index(
     runtime_batch = batch_config or PageIndexBatchConfig()
     semaphore = asyncio.Semaphore(max(1, runtime_batch.max_concurrency))
 
+    logger.bind(doc_count=len(docs), max_concurrency=runtime_batch.max_concurrency).info(
+        "Starting batch PageIndex indexing"
+    )
+
     async def _worker(doc_path: str) -> dict[str, object]:
         async with semaphore:
             return await apage_index(doc=doc_path, config=runtime_config)
 
     tasks = [asyncio.create_task(_worker(doc_path)) for doc_path in docs]
-    return await asyncio.gather(
-        *tasks,
-        return_exceptions=runtime_batch.return_exceptions,
+    results = await asyncio.gather(*tasks)
+    
+    logger.bind(doc_count=len(docs), success_count=len(results)).info(
+        "Batch PageIndex indexing completed"
     )
+    return results
 
 
 async def achat_completion(
@@ -159,8 +152,7 @@ async def achat_completion(
 ) -> object:
     """Call PageIndex chat completion API in non-streaming mode."""
     runtime = config or PageIndexChatConfig()
-    key = _resolve_api_key(runtime.api_key)
-    client = _build_client(key)
+    client = _get_client()
 
     kwargs: dict[str, object] = {
         "messages": messages,
@@ -174,11 +166,16 @@ async def achat_completion(
     if runtime.additional_kwargs:
         kwargs.update(runtime.additional_kwargs)
 
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        _executor(),
-        lambda: client.chat_completions(**kwargs),
+    logger.bind(doc_id=doc_id, message_count=len(messages)).info(
+        "Starting PageIndex chat completion"
     )
+    try:
+        result = await asyncio.to_thread(client.chat_completions, **kwargs)
+        logger.bind(doc_id=doc_id).info("PageIndex chat completion successful")
+        return result
+    except Exception:
+        logger.bind(doc_id=doc_id).exception("PageIndex chat completion failed")
+        raise
 
 
 async def astream_chat_completions(
@@ -186,16 +183,13 @@ async def astream_chat_completions(
     doc_id: str,
     messages: list[dict[str, str]],
     config: PageIndexChatConfig | None = None,
-) -> object:
-    """
-    Stream chat completion chunks from PageIndex as an async generator.
+) -> AsyncIterator[object]:
+    """Stream chat completion chunks from PageIndex as an async generator.
 
-    This bridges the SDK's sync iterator to async code using a background thread and
-    an asyncio queue.
+    Bridges the SDK's sync iterator to async code using asyncio.to_thread and a queue.
     """
     runtime = config or PageIndexChatConfig(stream=True)
-    key = _resolve_api_key(runtime.api_key)
-    client = _build_client(key)
+    client = _get_client()
 
     kwargs: dict[str, object] = {
         "messages": messages,
@@ -209,27 +203,36 @@ async def astream_chat_completions(
     if runtime.additional_kwargs:
         kwargs.update(runtime.additional_kwargs)
 
+    logger.bind(doc_id=doc_id, message_count=len(messages)).info(
+        "Starting PageIndex streaming chat completion"
+    )
+
     queue: asyncio.Queue[object] = asyncio.Queue(maxsize=256)
-    loop = asyncio.get_running_loop()
     end_marker = object()
 
-    def _producer() -> None:
+    async def _producer() -> None:
         try:
-            response = client.chat_completions(**kwargs)
+            response = await asyncio.to_thread(client.chat_completions, **kwargs)
             if not isinstance(response, Iterable):
                 _raise_non_iterable_stream_response()
             for chunk in response:
-                loop.call_soon_threadsafe(queue.put_nowait, chunk)
+                await queue.put(chunk)
         except Exception as exc:
-            loop.call_soon_threadsafe(queue.put_nowait, exc)
+            logger.bind(doc_id=doc_id).exception(
+                "PageIndex streaming chat completion failed"
+            )
+            await queue.put(exc)
         finally:
-            loop.call_soon_threadsafe(queue.put_nowait, end_marker)
+            await queue.put(end_marker)
 
-    task = loop.run_in_executor(_executor(), _producer)
+    task = asyncio.create_task(_producer())
     try:
         while True:
             item = await queue.get()
             if item is end_marker:
+                logger.bind(doc_id=doc_id).info(
+                    "PageIndex streaming chat completion finished"
+                )
                 break
             if isinstance(item, Exception):
                 raise item
