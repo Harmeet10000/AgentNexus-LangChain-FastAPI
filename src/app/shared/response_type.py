@@ -1,4 +1,4 @@
-from typing import Generic, TypeVar
+from typing import TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,7 +39,7 @@ class ErrorDetail(BaseModel):
     flow: str | None = Field(default=None)
 
 
-class APIResponse(BaseModel, Generic[T]):
+class APIResponse[T](BaseModel):
     """Default API response envelope for all HTTP handlers."""
 
     model_config = ConfigDict(
@@ -53,13 +53,5 @@ class APIResponse(BaseModel, Generic[T]):
     request: RequestMeta
     message: str = Field(default="Success")
     data: T | None = Field(default=None)
-    # error: ErrorDetail | None = Field(default=None)
+    error: ErrorDetail | None = Field(default=None)
 
-# usage example:
-# class UserSchema(BaseModel):
-#     id: int
-#     name: str
-
-# # Notice we define the response_model using the Generic envelope
-# @router.get("/users/{user_id}", response_model=APIResponse[UserSchema])
-# async def get_user(user_id: int, request: Request):

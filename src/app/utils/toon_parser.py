@@ -1,8 +1,7 @@
+# Imagine a community library 'toon_python' exists in 2026
+import toons
 from langchain_core.output_parsers import BaseOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-
-# Imagine a community library 'toon_python' exists in 2026
-from toons
 
 
 class ToonParser(BaseOutputParser):
@@ -19,7 +18,7 @@ prompt = ChatPromptTemplate.from_messages(
 )
 
 # 2. Chain it together
-chain = prompt | llm | ToonParser()
+# chain = prompt | llm | ToonParser()
 
 # 3. Output will be a clean Python Dict
-result = chain.invoke({"input": "Alice (ID 1), Bob (ID 2)"})
+# result = chain.invoke({"input": "Alice (ID 1), Bob (ID 2)"})

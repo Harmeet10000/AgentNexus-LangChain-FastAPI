@@ -43,7 +43,7 @@ from .exceptions import (
     UnauthorizedException,
     ValidationException,
 )
-from .httpResponse import http_response
+from .httpResponse import http_error, http_response
 from .logger import execution_path, logger, request_state, trace_layer
 
 __all__ = [
@@ -60,6 +60,7 @@ __all__ = [
     "UnauthorizedException",
     "ValidationException",
     "execution_path",
+    "http_error",
     "http_response",
     "logger",
     "request_state",
