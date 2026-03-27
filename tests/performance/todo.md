@@ -123,6 +123,7 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 56. use AsyncMemoryClient for mem0  and comapre mem0 vs supermemory vs cognee    DONE
 143. when inside a node should i do a init_chat_model or create_agent           DONE
 134. The Workflow: If you have parallel branches (e.g., START -> Node A AND Node B), the synchronous graph.invoke() will still run them one after the other. Only await graph.ainvoke() will truly run them at the same time.   DONE
+145. if i am using create_agent should i use HITL middleware or a langgraph interrupt      DONE
 117. for AI gateway checkout pydantic gateway         DELAYED
 60. Batch uses asyncio.gather with a semaphore but no queue
 6. set up performance tests 
@@ -222,8 +223,8 @@ graph.add_node("review", review_node)
 graph.add_edge("research", "review")
 
 app = graph.compile()
-145. if i am using create_agent should i use HITL middleware or a langgraph interrupt
-146. add the papirus tela icon
+146. add the papirus tela icon  
+147. add neo4j driver from request.app.state in Graphiti, Cognee 
 ```
 <!-- memory usage of FastAPI app -->
 "memoryUsage": {
@@ -408,7 +409,9 @@ You can replay any decision.
     durability="sync"
 )
 16. use astream v2 in graph
-17. 
+17. The Graphiti entity deduplication trap nobody documents: When you write "Acme Corp INDEMNIFIES GlobalTech Ltd" and later "Acme Corporation shall indemnify GlobalTech", Graphiti's LLM-powered entity extraction creates TWO separate entity nodes — Acme Corp and Acme Corporation — unless you pre-normalise entity names before writing. The deduplication only works reliably when entity names are lexically identical. The fix: run a lightweight entity canonicalisation pass in your entity_extraction node — map party names to canonical IDs (party_id: "acme_corp") and write those to Graphiti, not the raw text. Your obligation chain queries will otherwise silently miss half the edges.
+18. Idempotency key collision is a business logic bug, not a tech bug: If two users submit the same clause text from different documents, hash(step_id + input + user_id) produces different keys because user_id differs. That's correct. But if the same user submits two different documents with identical clause text (common in NDAs), the input_data dict differs only in clause_id — so they get different keys. That's also correct. The trap is if you ever hash the clause TEXT as the input — then you've accidentally made your system treat legally distinct clauses as identical because they share boilerplate. Always hash structural IDs (clause_id, doc_id), never content.
+19. cognify() is a full graph rebuild, not an append: Cognee's cognify() call processes the ENTIRE dataset, not just the newly added documents. If you call it per-document in persist_memory_node, you'll see quadratic runtime growth as the user's legal_reports dataset grows. The production pattern: batch cognee.add() calls in persist_memory_node, but defer cognify() to a nightly Celery beat task. Your search_episodic_memory() will return slightly stale results (yesterday's graph) but avoid blocking the live pipeline. The Cognee team calls this "async cognification" and it's the recommended pattern at scale — it's just not in their quickstart docs.
 # New Agent Specs
 
 Phase 1: The Macro Architecture (Infrastructure & Edge)

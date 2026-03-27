@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from app.features.tools.crawl import CrawlUrlTool, get_crawl_url_tool
-from app.features.tools.search import WebSearchTool, get_web_search_tool
+from .crawl import CrawlUrlTool, get_crawl_url_tool
+from .web_search import WebSearchTool, get_web_search_tool
 
 
 class ToolRegistry:

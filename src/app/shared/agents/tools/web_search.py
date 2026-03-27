@@ -1,5 +1,7 @@
 """LangChain tool for web search."""
 
+import asyncio
+
 from langchain_core.tools import BaseTool
 
 from app.shared.services import get_tavily_client
@@ -64,7 +66,6 @@ class WebSearchTool(BaseTool):
 
     def _run(self, *args, **kwargs) -> str:
         """Synchronous fallback."""
-        import asyncio
 
         return asyncio.run(self._arun(*args, **kwargs))
 

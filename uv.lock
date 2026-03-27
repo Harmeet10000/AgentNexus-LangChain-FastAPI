@@ -2163,6 +2163,7 @@ wheels = [
 name = "griffelib"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ad/06/eccbd311c9e2b3ca45dbc063b93134c57a1ccc7607c5e545264ad092c4a9/griffelib-2.0.0.tar.gz", hash = "sha256:e504d637a089f5cab9b5daf18f7645970509bf4f53eda8d79ed71cce8bd97934", size = 166312, upload-time = "2026-03-23T21:06:55.954Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4d/51/c936033e16d12b627ea334aaaaf42229c37620d0f15593456ab69ab48161/griffelib-2.0.0-py3-none-any.whl", hash = "sha256:01284878c966508b6d6f1dbff9b6fa607bc062d8261c5c7253cb285b06422a7f", size = 142004, upload-time = "2026-02-09T19:09:40.561Z" },
 ]
@@ -3163,7 +3164,7 @@ requires-dist = [
     { name = "fastmcp", specifier = ">=3.1.0" },
     { name = "faststream", specifier = ">=0.6.2" },
     { name = "flower", specifier = ">=2.0.1" },
-    { name = "graphiti-core", extras = ["google-genai"], specifier = ">=0.24.1" },
+    { name = "graphiti-core", extras = ["google-genai"], specifier = ">=0.28.2" },
     { name = "honcho-ai", specifier = ">=2.0.1" },
     { name = "httptools", specifier = ">=0.7.1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0,<1.0.0" },
@@ -3178,7 +3179,7 @@ requires-dist = [
     { name = "langchain-google-genai", specifier = ">=4.2.0" },
     { name = "langchain-tavily", specifier = ">=0.2.17" },
     { name = "langchain-text-splitters", specifier = ">=1.1.0" },
-    { name = "langextract", specifier = ">=1.1.1" },
+    { name = "langextract", specifier = ">=1.2.0" },
     { name = "langgraph", specifier = ">=1.1.0" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=3.0.1" },
     { name = "langsmith", specifier = ">=0.7.1" },
@@ -3194,7 +3195,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-sqlalchemy", specifier = ">=0.60b1" },
     { name = "opentelemetry-sdk", specifier = ">=1.39.1" },
     { name = "orjson", specifier = "==3.10.1" },
-    { name = "pageindex", specifier = ">=0.2.5.1" },
+    { name = "pageindex", specifier = ">=0.2.8" },
     { name = "passlib", extras = ["bcrypt"], specifier = ">=1.7.4" },
     { name = "pendulum", specifier = ">=3.2.0" },
     { name = "perfect" },
@@ -3289,7 +3290,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/0e/72/a3add0e4eec4eb9e2
 
 [[package]]
 name = "langextract"
-version = "1.1.1"
+version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "absl-py" },
@@ -3310,9 +3311,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e7/d9/34ca6eb931591a2871bba8e767cd058c7062b04d27fb1abc8c6ff4d22420/langextract-1.1.1.tar.gz", hash = "sha256:6f80423bbde20eced908afcab20479d2c53afa960145ad0bbd72209567cf6961", size = 115244, upload-time = "2025-11-27T04:50:33.128Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0a/fc/1c74f7e8aa4822600efd1233e8c313812280041a867e27b8a1019c7743d3/langextract-1.2.0.tar.gz", hash = "sha256:a9a5662d03048b1783d80b70d9b1aea0755db2530984e0030b15d6b25b929012", size = 119465, upload-time = "2026-03-22T22:11:49.922Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2d/09/16b77c8914ca7a017349124ec8f23209d483e63a9a516a9d475e395d456d/langextract-1.1.1-py3-none-any.whl", hash = "sha256:cc915d3f2880cd3facc50592e8393148446663a7da1eda804d7b4b8deda52c14", size = 124636, upload-time = "2025-11-27T04:50:31.745Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/4f/de4483fa58c0466a2fcb827bec1dceeb55123876e8f561f64348296a6d6d/langextract-1.2.0-py3-none-any.whl", hash = "sha256:ad81c7439f905f675ba0ec20bd7ef1d0dcd6dcf2e291811df09e7fee19ff968b", size = 126799, upload-time = "2026-03-22T22:11:48.254Z" },
 ]
 
 [[package]]
