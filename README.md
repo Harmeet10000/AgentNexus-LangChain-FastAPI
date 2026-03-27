@@ -1,49 +1,162 @@
-# LangChain FastAPI Production Template
+# Agent Saul
 
-A production-grade FastAPI application integrating LangChain, LangGraph, and LangSmith with Google's Gemini models, featuring Pinecone for vector storage, Docling for document processing, Crawl4AI for web scraping, and **MCP (Model Context Protocol)** for dynamic tool integration.
+Graph-backed, human-verified legal intelligence for Indian contracts.
 
-## 🚀 Features
+This project is built with FastAPI, LangChain, LangGraph, LangSmith, Gemini, TigerData-backed Postgres, Neo4j, and Graphiti. It is not a generic agent sandbox. It is a stateful legal reasoning system designed around resumability, memory discipline, human review, and deterministic execution.
 
-### Core Framework
+## Moto of this project
 
--   **LangChain Integration**: Complete integration with Google Gemini models for LLM operations
--   **LangGraph Workflows**: Graph-based reasoning and workflow management
--   **LangSmith Monitoring**: Comprehensive tracing, evaluation, and feedback loops
+AI Agents should never be replacing Humans. They should be your devoted digital companions, ever-ready to absorb the soul-crushing repetition and mindless grunt work that slowly poisons the very profession you once chased with youthful fire.
 
-### Advanced Capabilities
+Neither should you use AI Agents to do the job for you completely end-to-end. Instead, you should be doing AI-assisted work that feels like a genuinely ergonomic work chair: removing avoidable strain, reducing dread-filled procrastination, cutting down existential second-guessing, and lowering the quiet terror of "what if I chose wrong?".
 
--   **MCP Protocol**: Dynamic tool discovery and multi-server communication
--   **Vector Store**: Postgres's pg_vectorscale integration for efficient semantic search and RAG
--   **Document Processing**: Multi-format document parsing with Docling (PDF, DOCX, PPTX, HTML, Markdown)
--   **Web Crawling**: Intelligent web scraping with Crawl4AI (JavaScript rendering, rate limiting)
--   **Structured Outputs**: Type-safe LLM responses with Pydantic models
--   **Agent Workflows**: ReAct, Plan-and-Execute, and custom agent patterns
--   **Memory Management**: Persistent conversation history and checkpointing
+If your agents free time that would otherwise be wasted on repetitive cognitive drag, that time should go back to being more human, lifting invisible weight off your shoulders instead of turning your hair white early.
 
-### Production Features
+This is a graph-backed, human-verified legal intelligence platform for Indian contracts.
 
--   **Production Ready**: Docker, monitoring, caching, and security best practices
--   **Async First**: Fully asynchronous architecture for high performance
--   **Type Safe**: Complete type hints and Pydantic validation
--   **Multi-Server Support**: Connect to multiple MCP servers simultaneously
--   **Caching**: Redis-based caching for improved performance
--   **Rate Limiting**: Built-in rate limiting and throttling
--   **Error Handling**: Comprehensive error handling and logging
--   **Observability**: LangSmith integration for tracing and monitoring
+## I am building a stateful, resumable, memory-aware reasoning pipeline
 
-## 📋 Prerequisites
+A distributed, resumable, schema-driven cognitive workflow engine with controlled reasoning surfaces. It has three layers:
 
--   Python 3.12+
--   [uv](https://docs.astral.sh/uv/) - Fast Python package manager (recommended)
--   [ruff](https://docs.astral.sh/ruff/) - Fast Python linter anf formater (recommended)
--   [ty](https://docs.astral.sh/ty/) - Fast Python type checker (recommended)
--   Docker and Docker Compose
--   API Keys:
-    -   Google Gemini API Key
-    -   Pinecone API Key and Environment
-    -   LangSmith API Key (optional)
+1. Memory shaping: filters, trimming, bounded context.
+2. Runtime control: dynamic agents, routing, orchestration.
+3. Execution durability: pause, resume, retry, replay.
 
-## 🛠️ Installation
+The real architecture:
+
+- LLM = stateless reasoning engine
+- State = source of truth
+- Memory = indexed projections of state
+
+The deepest insight: if your system cannot deterministically replay a run, you do not control your agent.
+
+Final mental model:
+
+```text
+Plan -> deterministic execution -> validated output -> persisted state
+```
+
+Not:
+
+```text
+LLM -> decide -> act -> hope it works
+```
+
+## Workflow choice and reasoning
+
+The orchestration model is deliberate.
+
+Main agent plans -> delegates to workers -> synthesizes.
+
+That maps cleanly to the actual requirements:
+
+- Deterministic workflows: explicit plan -> worker -> reflect loop
+- Multi-step planning: main orchestrator generates plan steps
+- Repeated tool calls: workers loop until the plan is complete
+- Self-reflection: orchestrator reviews worker outputs
+- Error recovery: orchestrator handles failures and replans
+- Agent coordination: workers are specialized sub-agents
+- Shared state: orchestrator owns `LegalAgentState`, workers read and write through controlled surfaces
+
+## Why this exists
+
+This is not about shallow "time-saving".
+
+The actual pain in India is different:
+
+- Small startups often cannot access strong legal teams.
+- Individuals are frequently unaware of their legal rights and get intimidated by fine print and legal notices.
+- A lot of legal work is repetitive, high-volume, low-intelligence grunt work that should be automated.
+- Most existing contract AI products were trained around US/UK assumptions, not Indian statutes, procedures, and enforcement realities.
+
+High-volume work worth automating:
+
+- Clause tagging
+- Risk flagging such as one-sided indemnity or unlimited liability
+- Deadline tracking
+- Template comparison
+- Stamp duty and jurisdiction sanity checks
+- "Is this clause enforceable in India?"
+
+Time is a symptom. Risk and uncertainty are the disease.
+
+## What is inside
+
+- Indian contract analysis with human verification before trusted persistence
+- LangGraph-based orchestration for resumable, stateful legal workflows
+- TigerData/Postgres-backed retrieval using `pgvector`, `pgvectorscale`, and `pg_textsearch`
+- Neo4j + Graphiti for graph-backed memory, precedent chains, and relationship traversal
+- Document ingestion and parsing with Docling
+- Web research and crawling with Crawl4AI and Tavily-backed tools
+- FastAPI APIs for ingestion, search, crawling, chat, knowledge base, and Agent Saul workflows
+- LangSmith tracing for execution visibility and debugging
+- Redis, Celery, and durable checkpoints for retries, resumability, and background work
+
+## Architecture
+
+![Agent Saul architecture](tests/performance/agent_saul_full_architecture.svg)
+
+The architecture notes that drive this repo live in [tests/performance/Saul_agent_Arch.md](/home/harmeet/Desktop/Projects/langchain-fastapi-production/tests/performance/Saul_agent_Arch.md).
+
+## Stack
+
+- API layer: FastAPI
+- Orchestration: LangGraph
+- LLM layer: LangChain + Google Gemini
+- Observability: LangSmith
+- Vector and text retrieval: Postgres on TigerData with `pgvector`, `pgvectorscale`, `pg_textsearch`
+- Graph memory: Neo4j
+- Graph extraction and retrieval: Graphiti
+- Cache and idempotency: Redis
+- Background execution: Celery
+- Document processing: Docling, LangExtract, PageIndex
+- Crawling and search: Crawl4AI, Tavily
+- MCP integration: FastMCP
+
+## Human-in-the-loop is mandatory
+
+Why humans are required:
+
+- Legal liability
+- Continuous improvement
+- Trust formation
+
+What humans do:
+
+- Approve or reject risks
+- Correct clauses
+- Annotate reasoning
+
+What gets stored:
+
+- Overrides
+- Comments
+- Reviewer role
+
+This becomes training data and audit data, not just UI feedback.
+
+## Why this workflow is correct
+
+- No cycles before human review: avoids compounding hallucinations
+- Risk and compliance are separated: legal correctness matters more than linguistic fluency
+- Human gate before persistence: memory becomes trusted memory
+
+In Indian legal work, judgment interpretation is not optional context. The system has to preserve judgment context, surface conflicting rulings, and distinguish what binds a District Court, a High Court, and the Supreme Court of India.
+
+## Prerequisites
+
+- Python `3.12+`
+- `uv`
+- `ruff`
+- `ty`
+- PostgreSQL or TigerData Postgres
+- Neo4j
+- Redis
+- MongoDB
+- Google Gemini API key
+- LangSmith API key for tracing, if you want observability enabled
+
+## Installation
 
 ### 1. Clone the repository
 
@@ -52,169 +165,125 @@ git clone https://github.com/Harmeet10000/langchain-fastapi-production.git
 cd langchain-fastapi-production
 ```
 
-### 3. Set up environment variables
+### 2. Create the environment file
 
 ```bash
-touch .env.development 
-# Edit .env and add your API keys
+touch .env.development
 ```
 
-### 4. Using Docker (Recommended for Production)
+Populate it with the credentials and connection strings your local stack needs, especially:
+
+- `POSTGRES_URL`
+- `NEO4J_URI`
+- `NEO4J_USERNAME`
+- `NEO4J_PASSWORD`
+- `REDIS_URL`
+- `MONGODB_URI`
+- `GOOGLE_API_KEY`
+- `LANGSMITH_API_KEY`
+
+### 3. Install dependencies
 
 ```bash
-# Build and start all services
-docker-compose up --build
-
-# Or run in detached mode
-docker-compose up -d
-
-# View logs
-docker-compose logs -f app
-```
-
-### 5. Local Development with uv (Recommended)
-
-```bash
-# Create virtual environment and install dependencies
 uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install project dependencies (reads pyproject.toml)
+source .venv/bin/activate
 uv sync
-
-# For dev dependencies too
 uv sync --extra dev
-
-# Run the application
-uv run uvicorn src.app.main:app --reload --reload-dir src --host 0.0.0.0 --port 5000 --no-access-log
-or
-uv run python src/app/server.py
-or
-uv run hmr src/app/main.py --host 0.0.0.0 --port 5000  # may not run
-
-# Run Pre-commit hooks
-uv run pre-commit run --all-files
-
-# Create migration
-uv run alembic revision --autogenerate -m "Add user table"
-
-# Apply migrations
-uv run alembic upgrade head
-
-# Rollback
-uv run alembic downgrade -1
-
-# Most common commands people actually type
-uv run alembic revision --autogenerate -m        # make migrations
-uv run alembic upgrade head                      # apply
-uv run alembic current                           # check state
-uv run alembic history --verbose                 # show history
-uv run ruff check --fix                          # lint + auto-fix
-uv run ruff format                               # format
-uv run pytest -x                                 # test & stop on first failure
-uv run celery -A celery_config worker --loglevel=info
-
 ```
 
-## ⚡ Why Use uv?
+### 4. Run the app
 
-`uv` is a fast Python package manager that offers significant advantages:
+```bash
+uv run uvicorn src.app.main:app --reload --reload-dir src --host 0.0.0.0 --port 5000 --no-access-log
+```
 
--   **10-100x faster** than pip for dependency resolution and installation
--   **Better dependency resolution** with fewer conflicts
--   **Built-in virtual environment management**
--   **Compatible with pip** and existing workflows
--   **Deterministic builds** with better lock file support
--   **Parallel downloads** and installations
+Alternative entrypoints:
 
+```bash
+uv run python src/app/server.py
+uv run hmr src/app/main.py --host 0.0.0.0 --port 5000
+```
 
-## 📁 Project Structure
+## Common commands
 
-## 🔧 Configuration
+```bash
+uv run pre-commit run --all-files
+uv run alembic revision --autogenerate -m "Add user table"
+uv run alembic upgrade head
+uv run alembic downgrade -1
+uv run alembic current
+uv run alembic history --verbose
+uv run ruff check --fix
+uv run ruff format
+uv run pytest -x
+uv run celery -A celery_config worker --loglevel=info
+```
 
-## 🎯 Core Features Detail
+## Project structure
 
-### 1. LangChain Integration
+```text
+.
+├── README.md
+├── docs/
+│   ├── README.md
+│   ├── CAP for AI Agents.md
+│   └── LANGGRAPH_COMPLETE_GUIDE.md
+├── tests/
+│   ├── performance/
+│   │   ├── Saul_agent_Arch.md
+│   │   ├── agent_saul_full_architecture.svg
+│   │   └── python_memory_optimization_cheatsheet.md
+│   ├── integration/
+│   ├── e2e/
+│   └── unit/
+├── src/
+│   ├── app/
+│   │   ├── api/
+│   │   ├── config/
+│   │   ├── connections/
+│   │   ├── features/
+│   │   │   ├── agent_saul/
+│   │   │   ├── ingestion/
+│   │   │   ├── knowledge_base/
+│   │   │   ├── search/
+│   │   │   └── web_scraping/
+│   │   ├── lifecycle/
+│   │   ├── middleware/
+│   │   ├── shared/
+│   │   │   ├── agents/
+│   │   │   ├── document_processing/
+│   │   │   ├── langchain_layer/
+│   │   │   ├── langgraph_layer/
+│   │   │   │   └── agent_saul/
+│   │   │   ├── mcp/
+│   │   │   ├── rag/
+│   │   │   │   └── graphiti/
+│   │   │   └── vectorstore/
+│   │   └── utils/
+│   ├── database/
+│   │   ├── schemas/
+│   │   └── seeders/
+│   └── tasks/
+├── infra/
+│   └── gcp/
+├── docker/
+├── caddy/
+├── pyproject.toml
+└── uv.lock
+```
 
--   **Chat Models**: Google Gemini Pro, Flash, and custom models
--   **Chains**: RAG, Conversation, Summarization, Q&A
--   **Tools**: Web search, file query, database queries, file operations
--   **Memory**: Conversation buffers, summaries, and entity tracking
--   **Callbacks**: Token counting, latency tracking, custom handlers
+## Notes
 
-### 2. LangGraph Workflows
+- This repo still contains Docker and deployment assets, but this README intentionally focuses on the local architecture and application model instead of container setup.
+- Some older settings and files still reference Pinecone. The current storage direction described here is Postgres/TigerData for retrieval and Neo4j + Graphiti for graph-backed memory.
 
--   **State Management**: TypedDict-based state with checkpointing
--   **Conditional Routing**: Dynamic workflow paths based on state
--   **Human-in-the-Loop**: Approval gates and manual interventions
--   **Multi-Agent**: Orchestrate multiple specialized agents
--   **Streaming**: Real-time updates for long-running workflows
+## Acknowledgments
 
-### 3. Vector Store & RAG
-
--   **Postgres Integration**: Production-grade vector storage
--   **Embeddings**: Google Vertex AI
--   **Chunking Strategies**: Recursive, semantic, and custom splitters
--   **Retrieval**: Similarity search, MMR, and hybrid search
--   **Re-ranking**: Cross-encoder and LLM-based re-ranking
-
-### 4. Document Processing
-
--   **Supported Formats**: PDF, DOCX, PPTX, XLSX, HTML, Markdown, TXT
--   **OCR Support**: Extract text from scanned documents
--   **Metadata Extraction**: Automatic metadata detection
--   **Batch Processing**: Parallel document processing
--   **Storage**: MongoDB-based document store
-
-### 5. Web Crawling
-
--   **JavaScript Rendering**: Playwright-based crawling
--   **Smart Extraction**: Automatic content detection
--   **Rate Limiting**: Respectful crawling with delays
--   **Link Following**: Recursive crawling with depth control
--   **Content Cleaning**: Remove ads, navigation, and boilerplate
-
-### 6. MCP (Model Context Protocol)
-
--   **Multi-Server**: Connect to unlimited MCP servers
--   **Custom Servers**: Easy extension with custom tools
--   **Auto-Discovery**: Automatic tool detection and registration
-
-
-## 📊 Monitoring
-
-### LangSmith Integration
-
-1. Set up LangSmith credentials in `.env`
-2. Access traces at https://smith.langchain.com
-3. Monitor:
-    - Request traces
-    - Token usage
-    - Latency metrics
-    - Error rates
-
-
-## 🙏 Acknowledgments
-
--   LangChain team for the amazing framework and MCP adapters
--   Google for Gemini models
--   Anthropic for the Model Context Protocol specification
--   PsotgresSQL for vector database
--   FastAPI for the web framework
--   The open-source community
-
-
----
-
-**Note**: This is a template project. Remember to:
-
-1. **Install uv** for faster dependency management: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-2. Add your API keys to `.env`
-3. Install `FastMCP` for MCP support: `uv add fastmcp`
-4. Configure MCP servers in `src/mcp/config/server_config.py`
-5. Configure security settings for production
-6. Set up proper monitoring and alerting
-7. Review and adjust rate limits
-8. Configure CORS for your domains
-9. Test MCP servers before deploying to production
-10. Use `uv lock` to generate lock files for reproducible builds
+- LangChain and LangGraph
+- LangSmith
+- FastAPI
+- Google Gemini
+- TigerData and PostgreSQL
+- Neo4j
+- Graphiti
+- The open-source community

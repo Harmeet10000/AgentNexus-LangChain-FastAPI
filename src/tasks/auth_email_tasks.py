@@ -1,6 +1,6 @@
 from app.config import get_settings
-from app.connections.celery import ResilientTask, celery_app
-from app.shared.services.mailer import MailerService
+from app.connections import ResilientTask, celery_app
+from app.shared.services import MailerService
 from app.utils import logger
 
 settings = get_settings()

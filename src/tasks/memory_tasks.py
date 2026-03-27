@@ -1,88 +1,85 @@
-"""
-Celery tasks for background memory operations.
-
-reconciliation_task:
-  Triggered manually or by Celery beat (e.g., every 6 hours per user).
-  Runs ReconciliationGraph: fetch_existing → reconcile → apply_changes → write_versions.
-
-memory_decay_task:
-  Celery beat, runs nightly.
-  Computes decay_score = f(time, usage, confidence) for entities and clauses.
-  Low-score rows are archived (decay_score < threshold set to archived=True or deleted).
-
-Beat schedule (add to your Celery config):
-  app.conf.beat_schedule = {
-      "memory-decay-nightly": {
-          "task": "src.tasks.memory_tasks.run_memory_decay",
-          "schedule": crontab(hour=2, minute=0),  # 2 AM daily
-      },
-      "reconciliation-periodic": {
-          "task": "src.tasks.memory_tasks.run_reconciliation_for_active_users",
-          "schedule": crontab(hour="*/6"),  # every 6 hours
-      },
-  }
-
-Decay formula (Section "For the chosen ones" — Memory Decay):
-  time_factor   = exp(-lambda_t * age_days)       lambda_t = 0.01 (slow decay)
-  usage_factor  = min(1.0, access_count / 10.0)   saturates at 10 accesses
-  decay_score   = w_t * time_factor + w_u * usage_factor + w_c * confidence
-  weights:       w_t=0.4, w_u=0.3, w_c=0.3
-
-Archive threshold: decay_score < 0.15
-"""
+"""Background helpers for memory decay and reconciliation workflows."""
 
 from __future__ import annotations
 
 import asyncio
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Protocol, TypedDict
+from uuid import uuid4
 
-import structlog
+import asyncpg
 
-logger = structlog.get_logger(__name__)
+from app.utils import logger
 
-# Decay weights
-_W_TIME: float = 0.4
-_W_USAGE: float = 0.3
-_W_CONFIDENCE: float = 0.3
-_LAMBDA_T: float = 0.01          # decay rate per day (~70 day half-life)
-_ARCHIVE_THRESHOLD: float = 0.15 # below this → archive
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+_W_TIME = 0.4
+_W_USAGE = 0.3
+_W_CONFIDENCE = 0.3
+_LAMBDA_T = 0.01
+_ARCHIVE_THRESHOLD = 0.15
+
+
+class DecayStats(TypedDict):
+    """Summary returned by the decay workflow."""
+
+    updated_entities: int
+    archived_candidates: int
+    updated_clauses: int
+
+
+class ReconciliationSummary(TypedDict, total=False):
+    """Per-user reconciliation result."""
+
+    merged: int
+    updated: int
+    versions: int
+    error: str
+
+
+class ReconciliationGraph(Protocol):
+    """Minimal async interface required by the reconciliation task helpers."""
+
+    async def ainvoke(
+        self,
+        payload: dict[str, str | int],
+    ) -> Mapping[str, object]:
+        """Run the reconciliation graph for a single user."""
 
 
 def _compute_decay(age_days: float, access_count: int, confidence: float) -> float:
-    """Decay formula: Section 18.1 'Memory Decay'."""
-    time_factor = math.exp(-_LAMBDA_T * max(age_days, 0.0))
-    usage_factor = min(1.0, access_count / 10.0)
-    return _W_TIME * time_factor + _W_USAGE * usage_factor + _W_CONFIDENCE * confidence
+    """Compute the weighted decay score for an entity or clause."""
+    bounded_confidence = max(0.0, min(confidence, 1.0))
+    bounded_age = max(age_days, 0.0)
+    bounded_access_count = max(access_count, 0)
+
+    time_factor = math.exp(-_LAMBDA_T * bounded_age)
+    usage_factor = min(1.0, bounded_access_count / 10.0)
+    return (_W_TIME * time_factor) + (_W_USAGE * usage_factor) + (
+        _W_CONFIDENCE * bounded_confidence
+    )
 
 
-async def _run_decay_async(db_url: str) -> dict[str, int]:
-    """Async core of memory decay computation.
-
-    Uses raw asyncpg for batch updates — faster than SQLAlchemy for bulk ops.
-    Falls back to SQLAlchemy if asyncpg not available.
-    """
-    import asyncpg  # type: ignore[import-untyped]
-    from datetime import UTC, datetime
+async def _run_decay_async(db_url: str) -> DecayStats:
+    """Recompute decay scores for memory rows using asyncpg bulk updates."""
 
     conn = await asyncpg.connect(db_url)
     updated_entities = 0
-    archived_entities = 0
+    archived_candidates = 0
     updated_clauses = 0
 
     try:
-        # Fetch all active entities with decay metadata
-        entity_rows = await conn.fetch("""
+        entity_rows = await conn.fetch(
+            """
             SELECT id, confidence, access_count,
                    EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400.0 AS age_days
             FROM entities
             WHERE decay_score > 0.0
-        """)
+            """
+        )
 
-        # Batch update decay scores
         entity_updates: list[tuple[float, str]] = []
-        archive_ids: list[str] = []
-
         for row in entity_rows:
             new_score = _compute_decay(
                 age_days=float(row["age_days"]),
@@ -91,7 +88,7 @@ async def _run_decay_async(db_url: str) -> dict[str, int]:
             )
             entity_updates.append((new_score, str(row["id"])))
             if new_score < _ARCHIVE_THRESHOLD:
-                archive_ids.append(str(row["id"]))
+                archived_candidates += 1
 
         if entity_updates:
             await conn.executemany(
@@ -100,12 +97,15 @@ async def _run_decay_async(db_url: str) -> dict[str, int]:
             )
             updated_entities = len(entity_updates)
 
-        # Clause decay (same formula)
-        clause_rows = await conn.fetch("""
+        clause_rows = await conn.fetch(
+            """
             SELECT id, COALESCE(risk_score, 0.5) AS confidence, access_count,
                    EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400.0 AS age_days
-            FROM clauses WHERE decay_score > 0.0
-        """)
+            FROM clauses
+            WHERE decay_score > 0.0
+            """
+        )
+
         clause_updates: list[tuple[float, str]] = []
         for row in clause_rows:
             new_score = _compute_decay(
@@ -122,15 +122,20 @@ async def _run_decay_async(db_url: str) -> dict[str, int]:
             )
             updated_clauses = len(clause_updates)
 
-        logger.info(
-            "memory_decay_complete",
+        logger.bind(
             updated_entities=updated_entities,
-            archived_candidates=len(archive_ids),
+            archived_candidates=archived_candidates,
             updated_clauses=updated_clauses,
-        )
+        ).info("Memory decay completed")
+
+        if archived_candidates:
+            logger.bind(archived_candidates=archived_candidates).warning(
+                "Archive candidates detected, but no archive column exists in the current schema"
+            )
+
         return {
             "updated_entities": updated_entities,
-            "archived_candidates": len(archive_ids),
+            "archived_candidates": archived_candidates,
             "updated_clauses": updated_clauses,
         }
     finally:
@@ -139,79 +144,73 @@ async def _run_decay_async(db_url: str) -> dict[str, int]:
 
 async def _run_reconciliation_async(
     user_ids: list[str],
-    reconciliation_graph: Any,
+    reconciliation_graph: ReconciliationGraph,
     lookback_hours: int = 24,
-) -> dict[str, Any]:
-    """Run ReconciliationGraph per user."""
-    from uuid import uuid4
+) -> dict[str, ReconciliationSummary]:
+    """Run reconciliation sequentially for each user id."""
+    results: dict[str, ReconciliationSummary] = {}
 
-    results: dict[str, Any] = {}
     for user_id in user_ids:
         try:
-            result = await reconciliation_graph.ainvoke({
-                "user_id": user_id,
-                "run_id": str(uuid4()),
-                "lookback_hours": lookback_hours,
-            })
-            results[user_id] = {
-                "merged": result.get("merged_count", 0),
-                "updated": result.get("updated_count", 0),
-                "versions": result.get("versions_written", 0),
+            result = await reconciliation_graph.ainvoke(
+                {
+                    "user_id": user_id,
+                    "run_id": str(uuid4()),
+                    "lookback_hours": lookback_hours,
+                }
+            )
+            user_result: ReconciliationSummary = {
+                "merged": int(result.get("merged_count", 0)),
+                "updated": int(result.get("updated_count", 0)),
+                "versions": int(result.get("versions_written", 0)),
             }
-            logger.info("reconciliation_user_done", user_id=user_id, **results[user_id])
-        except Exception as exc:
-            logger.error("reconciliation_user_failed", user_id=user_id, error=str(exc))
-            results[user_id] = {"error": str(exc)}
+            results[user_id] = user_result
+            logger.bind(user_id=user_id, **user_result).info(
+                "User reconciliation completed"
+            )
+        except Exception as exc:  # noqa: BLE001
+            error_message = str(exc)
+            results[user_id] = {"error": error_message}
+            logger.bind(user_id=user_id, error=error_message).exception(
+                "User reconciliation failed"
+            )
 
     return results
 
 
-# ---------------------------------------------------------------------------
-# Celery tasks
-# ---------------------------------------------------------------------------
-# These functions are registered as Celery tasks in your celery app.
-# Import them in src/tasks/__init__.py and register via @celery_app.task.
-# The async core is run via asyncio.run() — Celery workers are sync by default.
-# If using celery-gevent or celery with asyncio, use the async variant directly.
-
-
-def run_memory_decay(db_url: str) -> dict[str, int]:
-    """Celery beat task: nightly memory decay computation.
-
-    Wire in celery app:
-        from src.tasks.memory_tasks import run_memory_decay
-        celery_app.task(run_memory_decay, name="memory_decay")
-    """
-    logger.info("memory_decay_task_started")
+def run_memory_decay(db_url: str) -> DecayStats:
+    """Run memory decay from a synchronous task runner."""
+    logger.info("Memory decay task started")
     return asyncio.run(_run_decay_async(db_url))
 
 
 def run_reconciliation_for_user(
     user_id: str,
-    reconciliation_graph: Any,
+    reconciliation_graph: ReconciliationGraph,
     lookback_hours: int = 24,
-) -> dict[str, Any]:
-    """Celery task: run ReconciliationGraph for a single user.
-
-    Can be triggered:
-      - by Celery beat (periodic, all active users)
-      - by agent_saul pipeline on completion (per-user, immediate)
-    """
-    logger.info("reconciliation_task_started", user_id=user_id)
+) -> dict[str, ReconciliationSummary]:
+    """Run reconciliation for a single user."""
+    logger.bind(user_id=user_id, lookback_hours=lookback_hours).info(
+        "Single-user reconciliation started"
+    )
     return asyncio.run(
         _run_reconciliation_async([user_id], reconciliation_graph, lookback_hours)
     )
 
 
 def run_reconciliation_for_active_users(
-    reconciliation_graph: Any,
+    reconciliation_graph: ReconciliationGraph,
     lookback_hours: int = 6,
-) -> dict[str, Any]:
-    """Celery beat task: periodic reconciliation for all users active in the last window."""
-    logger.info("reconciliation_beat_started")
-    # TODO: query distinct user_ids from entities WHERE created_at > NOW() - lookback
-    # For now, stub returns empty — wire in actual user discovery from your DB
-    active_user_ids: list[str] = []
+    active_user_ids: list[str] | None = None,
+) -> dict[str, ReconciliationSummary]:
+    """Run reconciliation for an already-resolved set of active users."""
+    user_ids = active_user_ids or []
+    logger.bind(
+        lookback_hours=lookback_hours,
+        active_user_count=len(user_ids),
+    ).info("Active-user reconciliation started")
     return asyncio.run(
-        _run_reconciliation_async(active_user_ids, reconciliation_graph, lookback_hours)
+        _run_reconciliation_async(user_ids, reconciliation_graph, lookback_hours)
     )
+
+

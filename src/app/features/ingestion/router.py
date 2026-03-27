@@ -9,18 +9,19 @@ Dependencies read from app.state — same pattern as agent_saul.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING
 
-import structlog
-from fastapi import APIRouter, Depends, Request, UploadFile
-from fastapi.responses import JSONResponse
-from langgraph.graph.state import CompiledStateGraph
+from fastapi import APIRouter, UploadFile
+from fastapi.responses import ORJSONResponse
 
-from src.app.features.ingestion.dto import DocumentUploadResponse
-from src.app.features.ingestion.service import IngestionService
-from src.app.shared.response_type import APIResponse, http_response
+from app.shared.response_type import APIResponse
+from app.utils import http_response, logger
 
-logger = structlog.get_logger(__name__)
+from .dto import DocumentUploadResponse
+from .service import IngestionService
+
+if TYPE_CHECKING:
+    from .dependencies import IngestionGraphDep, UserIdDep
 
 router = APIRouter(
     prefix="/ingestion",
@@ -28,21 +29,6 @@ router = APIRouter(
 )
 
 
-# ---------------------------------------------------------------------------
-# Dependencies
-# ---------------------------------------------------------------------------
-
-
-async def get_ingestion_graph(request: Request) -> CompiledStateGraph:
-    return request.app.state.ingestion_graph  # type: ignore[no-any-return]
-
-
-async def get_current_user_id(request: Request) -> str:
-    return request.state.user_id  # type: ignore[no-any-return]
-
-
-IngestionGraphDep = Annotated[CompiledStateGraph, Depends(get_ingestion_graph)]
-UserIdDep = Annotated[str, Depends(get_current_user_id)]
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +47,7 @@ async def upload_document(
     user_id: UserIdDep,
     document_type: str = "unknown",
     jurisdiction: str = "India",
-) -> JSONResponse:
+) -> ORJSONResponse:
     """
     Upload flow:
       1. Read raw bytes from uploaded file.
@@ -90,4 +76,8 @@ async def upload_document(
     )
 
     log.info("upload_processed", doc_id=response.doc_id, status=response.status)
-    return http_response(response)
+    return http_response(
+        message="Document Ingested Successfully",
+        data=response,
+        status_code=201,
+    )

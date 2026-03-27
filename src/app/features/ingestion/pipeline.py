@@ -1,42 +1,41 @@
 """
-IngestionGraph: extract → validate → embed_store
-
-Runs at HTTP upload time (before the WebSocket session starts).
-agent_saul's ingestion_node becomes a simple doc_text lookup — it no longer
-processes documents.
+Ingestion graph for uploaded legal documents.
 
 Pipeline:
-  extract_node:     Graphiti EXTRACTION_PROMPT → raw entities + relationships
-  validate_node:    confidence > 0.7 filter + dangling reference check
-  embed_store_node: embed clause text (pgvector) + INSERT into 5 tables
-
-State uses total=False so nodes can return partial updates cleanly.
+  1. Extract entities and relationships from raw text.
+  2. Validate extraction confidence and endpoint integrity.
+  3. Persist entities, clause embeddings, and relationships.
 """
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any, TypedDict
+import json
+from collections.abc import Awaitable, Callable
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-import structlog
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.shared.rag.graphiti.client import GraphitiService
+from app.utils import logger
 
-logger = structlog.get_logger(__name__)
+if TYPE_CHECKING:
 
-_CONFIDENCE_THRESHOLD: float = 0.7
-_EMBEDDING_DIM: int = 1536
+    from sqlalchemy.ext.asyncio import AsyncEngine
 
-# ---------------------------------------------------------------------------
-# EXTRACTION_PROMPT (from the plan — enforces structured output)
-# ---------------------------------------------------------------------------
+    from app.shared.rag.graphiti.client import GraphitiService
+
+EmbeddingFunction = Callable[[str], Awaitable[list[float]]]
+ExtractionRunnable = Runnable[list[BaseMessage], Any]
+
+_CONFIDENCE_THRESHOLD = 0.7
+_MAX_EXTRACTION_CHARS = 12_000
 
 EXTRACTION_PROMPT = """
 You are a legal knowledge extraction system.
@@ -55,8 +54,8 @@ Extract from the document:
 
 Rules:
    - Normalize entity names: lowercase, strip whitespace, collapse aliases
-     (e.g. "Acme Corp", "Acme Corporation" → normalized_name: "acme corp")
-   - Include confidence (0.0–1.0) for every entity and relationship
+     (e.g. "Acme Corp", "Acme Corporation" -> normalized_name: "acme corp")
+   - Include confidence (0.0-1.0) for every entity and relationship
    - DO NOT hallucinate parties, obligations, or clause references
    - valid_from / valid_to: ISO8601 strings if temporally bounded, else null
 
@@ -85,312 +84,396 @@ Output ONLY this JSON structure, no prose:
 """
 
 
-# ---------------------------------------------------------------------------
-# IngestionState
-# ---------------------------------------------------------------------------
+class ExtractedEntityType(StrEnum):
+    PERSON = "PERSON"
+    ORG = "ORG"
+    CLAUSE = "CLAUSE"
+    CONTRACT = "CONTRACT"
+    OBLIGATION = "OBLIGATION"
 
 
-class IngestionState(TypedDict, total=False):
-    doc_id: str
-    user_id: str
-    thread_id: str
-    raw_text: str
-    document_type: str
-    jurisdiction: str
+class ExtractedEntity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    # Extraction output
-    extracted_entities: list[dict[str, Any]]
-    extracted_relationships: list[dict[str, Any]]
-    extraction_error: str | None
-
-    # Validation output
-    validated_entities: list[dict[str, Any]]
-    validated_relationships: list[dict[str, Any]]
-    dropped_entity_count: int
-    dropped_relationship_count: int
-
-    # Storage output
-    stored_entity_ids: list[str]
-    stored_clause_ids: list[str]
-    stored_relationship_ids: list[str]
-    ingestion_complete: bool
-    error: str | None
+    id: str
+    type: ExtractedEntityType
+    name: str
+    normalized_name: str
+    confidence: float = Field(ge=0.0, le=1.0)
 
 
-# ---------------------------------------------------------------------------
-# Node: extract
-# ---------------------------------------------------------------------------
+class ExtractedRelationship(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+        serialize_by_alias=True,
+    )
+
+    from_entity: str = Field(serialization_alias="from", validation_alias="from")
+    to_entity: str = Field(serialization_alias="to", validation_alias="to")
+    type: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    valid_from: str | None = None
+    valid_to: str | None = None
 
 
-def make_extract_node(
-    extraction_llm: Runnable[list[Any], Any],
-    graphiti_service: GraphitiService,
-) -> Any:
-    async def extract_node(state: IngestionState) -> IngestionState:
-        log = logger.bind(node="ingestion_extract", doc_id=state.get("doc_id"))
-        raw_text = state.get("raw_text", "")
+class ExtractionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-        if not raw_text:
+    entities: list[ExtractedEntity] = Field(default_factory=list)
+    relationships: list[ExtractedRelationship] = Field(default_factory=list)
+
+
+class IngestionState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    doc_id: str = ""
+    user_id: str = ""
+    thread_id: str = ""
+    raw_text: str = ""
+    document_type: str = "unknown"
+    jurisdiction: str = "India"
+
+    extracted_entities: list[ExtractedEntity] = Field(default_factory=list)
+    extracted_relationships: list[ExtractedRelationship] = Field(default_factory=list)
+    extraction_error: str | None = None
+
+    validated_entities: list[ExtractedEntity] = Field(default_factory=list)
+    validated_relationships: list[ExtractedRelationship] = Field(default_factory=list)
+    dropped_entity_count: int = 0
+    dropped_relationship_count: int = 0
+
+    stored_entity_ids: list[str] = Field(default_factory=list)
+    stored_clause_ids: list[str] = Field(default_factory=list)
+    stored_relationship_ids: list[str] = Field(default_factory=list)
+    ingestion_complete: bool = False
+    error: str | None = None
+
+
+def make_extract_node(extraction_llm: ExtractionRunnable) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
+    async def extract_node(state: IngestionState) -> dict[str, object]:
+        log = logger.bind(node="ingestion_extract", doc_id=state.doc_id)
+
+        if not state.raw_text:
             log.error("extract_no_text")
-            return {"extraction_error": "raw_text is empty", "error": "empty_document"}
-
-        import json as _json
+            return {
+                "error": "empty_document",
+                "extracted_entities": [],
+                "extracted_relationships": [],
+                "extraction_error": "raw_text is empty",
+            }
 
         messages = [
             SystemMessage(content=EXTRACTION_PROMPT),
-            HumanMessage(content=raw_text[:12_000]),  # cap to avoid token explosion
+            HumanMessage(content=state.raw_text[:_MAX_EXTRACTION_CHARS]),
         ]
 
         try:
-            # Use structured LLM call for extraction
-            result = await extraction_llm.ainvoke(messages)
-            content: str = result.content if hasattr(result, "content") else str(result)
-
-            # Strip markdown fences if present
-            content = content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
-
-            parsed = _json.loads(content)
-            entities = parsed.get("entities", [])
-            relationships = parsed.get("relationships", [])
-
-            log.info("extract_done", entities=len(entities), relationships=len(relationships))
+            result = await extraction_llm.ainvoke(cast("list[BaseMessage]", messages))
+            payload = _parse_extraction_payload(result)
+        except (ValidationError, json.JSONDecodeError) as exc:
+            log.bind(error=str(exc)).warning("extract_invalid_payload")
             return {
-                "extracted_entities": entities,
-                "extracted_relationships": relationships,
-                "extraction_error": None,
+                "extracted_entities": [],
+                "extracted_relationships": [],
+                "extraction_error": str(exc),
             }
-        except Exception as exc:  # noqa: BLE001
-            log.error("extract_failed", error=str(exc))
-            return {"extraction_error": str(exc), "extracted_entities": [], "extracted_relationships": []}
+        except Exception as exc:
+            log.bind(error=str(exc)).exception("extract_failed")
+            return {
+                "extracted_entities": [],
+                "extracted_relationships": [],
+                "extraction_error": str(exc),
+            }
+
+        log.info(
+            "extract_done",
+            entities=len(payload.entities),
+            relationships=len(payload.relationships),
+        )
+        return {
+            "extracted_entities": payload.entities,
+            "extracted_relationships": payload.relationships,
+            "extraction_error": None,
+        }
 
     return extract_node
 
 
-# ---------------------------------------------------------------------------
-# Node: validate
-# ---------------------------------------------------------------------------
+def make_validate_node() -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
+    async def validate_node(state: IngestionState) -> dict[str, object]:
+        log = logger.bind(node="ingestion_validate", doc_id=state.doc_id)
 
-
-def make_validate_node() -> Any:
-    async def validate_node(state: IngestionState) -> IngestionState:
-        log = logger.bind(node="ingestion_validate", doc_id=state.get("doc_id"))
-
-        entities = state.get("extracted_entities", [])
-        relationships = state.get("extracted_relationships", [])
-
-        # Filter entities: confidence > threshold AND name present
         valid_entities = [
-            e for e in entities
-            if float(e.get("confidence", 0.0)) > _CONFIDENCE_THRESHOLD
-            and e.get("name")
-            and e.get("type") in {"PERSON", "ORG", "CLAUSE", "CONTRACT", "OBLIGATION"}
+            entity
+            for entity in state.extracted_entities
+            if entity.confidence > _CONFIDENCE_THRESHOLD and entity.name
         ]
+        valid_entity_ids = {entity.id for entity in valid_entities}
 
-        # Index valid IDs for relationship validation
-        valid_entity_ids: set[str] = {e["id"] for e in valid_entities}
-
-        # Filter relationships: confidence > threshold AND both endpoints valid
         valid_relationships = [
-            r for r in relationships
-            if float(r.get("confidence", 0.0)) > _CONFIDENCE_THRESHOLD
-            and r.get("from") in valid_entity_ids
-            and r.get("to") in valid_entity_ids
-            and r.get("type")
+            relationship
+            for relationship in state.extracted_relationships
+            if relationship.confidence > _CONFIDENCE_THRESHOLD
+            and relationship.from_entity in valid_entity_ids
+            and relationship.to_entity in valid_entity_ids
+            and relationship.type
         ]
 
-        dropped_e = len(entities) - len(valid_entities)
-        dropped_r = len(relationships) - len(valid_relationships)
+        dropped_entities = len(state.extracted_entities) - len(valid_entities)
+        dropped_relationships = len(state.extracted_relationships) - len(valid_relationships)
 
         log.info(
             "validate_done",
             valid_entities=len(valid_entities),
             valid_relationships=len(valid_relationships),
-            dropped_entities=dropped_e,
-            dropped_relationships=dropped_r,
+            dropped_entities=dropped_entities,
+            dropped_relationships=dropped_relationships,
         )
-
         return {
             "validated_entities": valid_entities,
             "validated_relationships": valid_relationships,
-            "dropped_entity_count": dropped_e,
-            "dropped_relationship_count": dropped_r,
+            "dropped_entity_count": dropped_entities,
+            "dropped_relationship_count": dropped_relationships,
         }
 
     return validate_node
 
 
-# ---------------------------------------------------------------------------
-# Node: embed_store
-# ---------------------------------------------------------------------------
-
-
 def make_embed_store_node(
     db_engine: AsyncEngine,
-    embedding_fn: Any,  # async callable: (text: str) -> list[float]
-) -> Any:
-    async def embed_store_node(state: IngestionState) -> IngestionState:
-        log = logger.bind(node="ingestion_embed_store", doc_id=state.get("doc_id"))
+    embedding_fn: EmbeddingFunction,
+) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
+    async def embed_store_node(state: IngestionState) -> dict[str, object]:
+        log = logger.bind(node="ingestion_embed_store", doc_id=state.doc_id)
 
-        doc_id = state.get("doc_id", "")
-        user_id = state.get("user_id", "")
-        thread_id = state.get("thread_id", "")
-        entities = state.get("validated_entities", [])
-        relationships = state.get("validated_relationships", [])
-        raw_text = state.get("raw_text", "")
-        document_type = state.get("document_type", "unknown")
-        jurisdiction = state.get("jurisdiction", "India")
-
-        entity_id_map: dict[str, str] = {}  # extraction_id → postgres_uuid
+        entity_id_map: dict[str, str] = {}
         stored_entity_ids: list[str] = []
         stored_clause_ids: list[str] = []
         stored_relationship_ids: list[str] = []
 
         try:
-            async with AsyncSession(db_engine) as session:
-                async with session.begin():
-                    # --- Insert entities (upsert on normalized_name + type) ---
-                    for ent in entities:
-                        pg_id = str(uuid4())
-                        normalized = (ent.get("normalized_name") or ent.get("name", "")).lower().strip()
+            async with AsyncSession(db_engine) as session, session.begin():
+                for entity in state.validated_entities:
+                    entity_record_id = await _upsert_entity(
+                        session=session,
+                        entity=entity,
+                        state=state,
+                    )
+                    entity_id_map[entity.id] = entity_record_id
+                    stored_entity_ids.append(entity_record_id)
 
-                        upsert_entity = text("""
-                            INSERT INTO entities
-                                (id, entity_type, name, normalized_name, doc_id, user_id, thread_id,
-                                 metadata, confidence, decay_score)
-                            VALUES
-                                (:id, :entity_type, :name, :normalized_name, :doc_id, :user_id,
-                                 :thread_id, :metadata::jsonb, :confidence, 1.0)
-                            ON CONFLICT (normalized_name, entity_type)
-                            DO UPDATE SET
-                                confidence = GREATEST(entities.confidence, EXCLUDED.confidence),
-                                last_accessed_at = NOW()
-                            RETURNING id
-                        """)
-                        import json as _json
-                        row = (await session.execute(upsert_entity, {
-                            "id": pg_id,
-                            "entity_type": ent.get("type", "ORG"),
-                            "name": ent.get("name", ""),
-                            "normalized_name": normalized,
-                            "doc_id": doc_id,
-                            "user_id": user_id,
-                            "thread_id": thread_id,
-                            "metadata": _json.dumps({"doc_type": document_type, "jurisdiction": jurisdiction}),
-                            "confidence": float(ent.get("confidence", 0.0)),
-                        })).fetchone()
-                        real_id = str(row[0]) if row else pg_id
-                        entity_id_map[ent["id"]] = real_id
-                        stored_entity_ids.append(real_id)
+                    if entity.type is ExtractedEntityType.CLAUSE:
+                        clause_row_id = await _store_clause(
+                            session=session,
+                            entity=entity,
+                            state=state,
+                            embedding_fn=embedding_fn,
+                        )
+                        stored_clause_ids.append(clause_row_id)
 
-                        # --- Store CLAUSE entities in clauses table + embed ---
-                        if ent.get("type") == "CLAUSE":
-                            clause_text = ent.get("name", "")
-                            embedding: list[float] | None = None
-                            try:
-                                embedding = await embedding_fn(clause_text)
-                            except Exception:  # noqa: BLE001
-                                pass
-
-                            insert_clause = text("""
-                                INSERT INTO clauses
-                                    (id, doc_id, user_id, clause_id, text, embedding, clause_type, decay_score)
-                                VALUES
-                                    (:id, :doc_id, :user_id, :clause_id, :text,
-                                     :embedding, :clause_type, 1.0)
-                                ON CONFLICT DO NOTHING
-                            """)
-                            await session.execute(insert_clause, {
-                                "id": str(uuid4()),
-                                "doc_id": doc_id,
-                                "user_id": user_id,
-                                "clause_id": ent.get("id", real_id),
-                                "text": clause_text,
-                                "embedding": embedding,
-                                "clause_type": "other",
-                            })
-                            stored_clause_ids.append(real_id)
-
-                    # --- Insert relationships ---
-                    for rel in relationships:
-                        from_pg_id = entity_id_map.get(rel.get("from", ""))
-                        to_pg_id = entity_id_map.get(rel.get("to", ""))
-                        if not from_pg_id or not to_pg_id:
-                            continue
-
-                        insert_rel = text("""
-                            INSERT INTO relationships
-                                (id, from_entity_id, to_entity_id, relation_type,
-                                 doc_id, user_id, confidence, valid_from, valid_to, source)
-                            VALUES
-                                (:id, :from_id, :to_id, :rel_type,
-                                 :doc_id, :user_id, :confidence,
-                                 :valid_from, :valid_to, 'graphiti_extraction')
-                            ON CONFLICT DO NOTHING
-                            RETURNING id
-                        """)
-                        rel_row = (await session.execute(insert_rel, {
-                            "id": str(uuid4()),
-                            "from_id": from_pg_id,
-                            "to_id": to_pg_id,
-                            "rel_type": rel.get("type", ""),
-                            "doc_id": doc_id,
-                            "user_id": user_id,
-                            "confidence": float(rel.get("confidence", 0.0)),
-                            "valid_from": rel.get("valid_from"),
-                            "valid_to": rel.get("valid_to"),
-                        })).fetchone()
-                        if rel_row:
-                            stored_relationship_ids.append(str(rel_row[0]))
-
-            log.info(
-                "embed_store_done",
-                entities=len(stored_entity_ids),
-                clauses=len(stored_clause_ids),
-                relationships=len(stored_relationship_ids),
-            )
+                for relationship in state.validated_relationships:
+                    relationship_id = await _store_relationship(
+                        session=session,
+                        relationship=relationship,
+                        entity_id_map=entity_id_map,
+                        state=state,
+                    )
+                    if relationship_id is not None:
+                        stored_relationship_ids.append(relationship_id)
+        except Exception as exc:
+            log.bind(error=str(exc)).exception("embed_store_failed")
             return {
-                "stored_entity_ids": stored_entity_ids,
-                "stored_clause_ids": stored_clause_ids,
-                "stored_relationship_ids": stored_relationship_ids,
-                "ingestion_complete": True,
+                "error": str(exc),
+                "ingestion_complete": False,
             }
 
-        except Exception as exc:  # noqa: BLE001
-            log.error("embed_store_failed", error=str(exc))
-            return {"error": str(exc), "ingestion_complete": False}
+        log.info(
+            "embed_store_done",
+            entities=len(stored_entity_ids),
+            clauses=len(stored_clause_ids),
+            relationships=len(stored_relationship_ids),
+        )
+        return {
+            "stored_entity_ids": stored_entity_ids,
+            "stored_clause_ids": stored_clause_ids,
+            "stored_relationship_ids": stored_relationship_ids,
+            "ingestion_complete": True,
+        }
 
     return embed_store_node
 
 
-# ---------------------------------------------------------------------------
-# Graph factory
-# ---------------------------------------------------------------------------
+async def _upsert_entity(
+    *,
+    session: AsyncSession,
+    entity: ExtractedEntity,
+    state: IngestionState,
+) -> str:
+    metadata = json.dumps(
+        {
+            "doc_type": state.document_type,
+            "jurisdiction": state.jurisdiction,
+        }
+    )
+    query = text(
+        """
+        INSERT INTO entities
+            (id, entity_type, name, normalized_name, doc_id, user_id, thread_id,
+             metadata, confidence, decay_score)
+        VALUES
+            (:id, :entity_type, :name, :normalized_name, :doc_id, :user_id,
+             :thread_id, CAST(:metadata AS JSONB), :confidence, 1.0)
+        ON CONFLICT (normalized_name, entity_type)
+        DO UPDATE SET
+            confidence = GREATEST(entities.confidence, EXCLUDED.confidence),
+            last_accessed_at = NOW()
+        RETURNING id
+        """
+    )
+    generated_id = str(uuid4())
+    row = (
+        await session.execute(
+            query,
+            {
+                "id": generated_id,
+                "entity_type": entity.type.value,
+                "name": entity.name,
+                "normalized_name": entity.normalized_name.lower().strip(),
+                "doc_id": state.doc_id,
+                "user_id": state.user_id,
+                "thread_id": state.thread_id,
+                "metadata": metadata,
+                "confidence": entity.confidence,
+            },
+        )
+    ).fetchone()
+    return str(row[0]) if row is not None else generated_id
+
+
+async def _store_clause(
+    *,
+    session: AsyncSession,
+    entity: ExtractedEntity,
+    state: IngestionState,
+    embedding_fn: EmbeddingFunction,
+) -> str:
+    embedding: list[float] | None = None
+    try:
+        embedding = await embedding_fn(entity.name)
+    except Exception as exc:
+        logger.bind(
+            clause_id=entity.id,
+            doc_id=state.doc_id,
+            error=str(exc),
+        ).warning("clause_embedding_failed")
+
+    clause_row_id = str(uuid4())
+    query = text(
+        """
+        INSERT INTO clauses
+            (id, doc_id, user_id, clause_id, text, embedding, clause_type, decay_score)
+        VALUES
+            (:id, :doc_id, :user_id, :clause_id, :text, :embedding, :clause_type, 1.0)
+        ON CONFLICT DO NOTHING
+        """
+    )
+    await session.execute(
+        query,
+        {
+            "id": clause_row_id,
+            "doc_id": state.doc_id,
+            "user_id": state.user_id,
+            "clause_id": entity.id,
+            "text": entity.name,
+            "embedding": embedding,
+            "clause_type": "other",
+        },
+    )
+    return clause_row_id
+
+
+async def _store_relationship(
+    *,
+    session: AsyncSession,
+    relationship: ExtractedRelationship,
+    entity_id_map: dict[str, str],
+    state: IngestionState,
+) -> str | None:
+    from_entity_id = entity_id_map.get(relationship.from_entity)
+    to_entity_id = entity_id_map.get(relationship.to_entity)
+    if from_entity_id is None or to_entity_id is None:
+        return None
+
+    query = text(
+        """
+        INSERT INTO relationships
+            (id, from_entity_id, to_entity_id, relation_type,
+             doc_id, user_id, confidence, valid_from, valid_to, source)
+        VALUES
+            (:id, :from_id, :to_id, :rel_type,
+             :doc_id, :user_id, :confidence,
+             :valid_from, :valid_to, 'graphiti_extraction')
+        ON CONFLICT DO NOTHING
+        RETURNING id
+        """
+    )
+    row = (
+        await session.execute(
+            query,
+            {
+                "id": str(uuid4()),
+                "from_id": from_entity_id,
+                "to_id": to_entity_id,
+                "rel_type": relationship.type,
+                "doc_id": state.doc_id,
+                "user_id": state.user_id,
+                "confidence": relationship.confidence,
+                "valid_from": relationship.valid_from,
+                "valid_to": relationship.valid_to,
+            },
+        )
+    ).fetchone()
+    return str(row[0]) if row is not None else None
+
+
+def _parse_extraction_payload(result: object) -> ExtractionPayload:
+    content = _read_llm_content(result)
+    cleaned_content = _strip_markdown_fences(content)
+    return ExtractionPayload.model_validate_json(cleaned_content)
+
+
+def _read_llm_content(result: object) -> str:
+    content = getattr(result, "content", result)
+    return content if isinstance(content, str) else str(content)
+
+
+def _strip_markdown_fences(content: str) -> str:
+    cleaned = content.strip()
+    if not cleaned.startswith("```"):
+        return cleaned
+
+    segments = cleaned.split("```")
+    if len(segments) < 2:
+        return cleaned
+
+    fenced_content = segments[1].strip()
+    if fenced_content.startswith("json"):
+        return fenced_content[4:].strip()
+    return fenced_content
 
 
 def build_ingestion_graph(
-    extraction_llm: Any,
+    extraction_llm: ExtractionRunnable,
     db_engine: AsyncEngine,
-    embedding_fn: Any,
-    graphiti_service: GraphitiService,
+    embedding_fn: EmbeddingFunction,
+    _graphiti_service: GraphitiService,
 ) -> CompiledStateGraph:
-    """Build the IngestionGraph. Compiled once at lifespan, stored in app.state.
-
-    No checkpointer — ingestion is fire-and-forget, not resumable.
-    If it fails the user re-uploads.
-    """
-    extract_node = make_extract_node(extraction_llm, graphiti_service)
-    validate_node = make_validate_node()
-    embed_store_node = make_embed_store_node(db_engine, embedding_fn)
-
+    """Build the ingestion graph once during application startup."""
     graph = StateGraph(IngestionState)
-    graph.add_node("extract", extract_node)
-    graph.add_node("validate", validate_node)
-    graph.add_node("embed_store", embed_store_node)
+    graph.add_node("extract", cast("Any", make_extract_node(extraction_llm)))
+    graph.add_node("validate", cast("Any", make_validate_node()))
+    graph.add_node("embed_store", cast("Any", make_embed_store_node(db_engine, embedding_fn)))
 
     graph.set_entry_point("extract")
     graph.add_edge("extract", "validate")

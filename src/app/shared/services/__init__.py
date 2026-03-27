@@ -17,6 +17,7 @@ from app.shared.services.celery_reliability import (
     run_with_circuit_breaker,
     set_circuit_breaker_state,
 )
+from app.shared.services.mailer import MailerService
 from app.shared.services.rate_limiter import (
     RateLimitConfig,
     RateLimiter,
@@ -32,6 +33,7 @@ from app.shared.services.tavily import (
 
 __all__ = [
     "CircuitBreakerOpenError",
+    "MailerService",
     "RateLimitConfig",
     "RateLimitScope",
     "RateLimiter",

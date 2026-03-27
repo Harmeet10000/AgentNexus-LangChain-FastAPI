@@ -55,7 +55,7 @@ class OAuthAccount(BaseModel):
     provider: str  # "google" | "github"
     provider_user_id: str
     provider_email: str | None = None
-    linked_at: datetime = Field(default_factory=datetime.utcnow)
+    linked_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
 
 
 class User(Document):
@@ -74,8 +74,8 @@ class User(Document):
     reset_token_hash: str | None = None
     reset_token_expires_at: datetime | None = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
+    updated_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
 
     class Settings:
         name = "users"

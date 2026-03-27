@@ -14,7 +14,7 @@ Flow:
 from __future__ import annotations
 
 # === dto.py content ===
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class DocumentUploadResponse(BaseModel, frozen=True):

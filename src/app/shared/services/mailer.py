@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import httpx
 
 from app.config import get_settings
-from app.utils.logger import logger
+from app.utils import logger
 
 _RESEND_SEND_URL = "https://api.resend.com/emails"
 

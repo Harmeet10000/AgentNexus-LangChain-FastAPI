@@ -1,6 +1,6 @@
 """Database connection dependencies."""
 
-from app.connections.celery import celery_app, create_celery_app
+from app.connections.celery import ResilientTask, celery_app, create_celery_app
 from app.connections.httpx_client import (
     create_httpx_client,
     get_httpx_client,
@@ -17,6 +17,7 @@ from app.connections.postgres import get_postgres_db, init_db
 from app.connections.redis import create_redis_client, get_redis
 
 __all__ = [
+    "ResilientTask"
     "celery_app",
     "close_neo4j_driver",
     "create_celery_app",
