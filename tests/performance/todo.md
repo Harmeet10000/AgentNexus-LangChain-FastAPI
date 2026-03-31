@@ -120,10 +120,13 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 118. can i only use TypedDict in state management across nodes in langgraph          DONE
 119. add a plan mode/TODO List for my agent              DONE              
 104. Implement FastMCP properly      DONE
+144. review FastAPI Gurad settings for files, streams, websockets,   DONE
 56. use AsyncMemoryClient for mem0  and comapre mem0 vs supermemory vs cognee    DONE
 143. when inside a node should i do a init_chat_model or create_agent           DONE
 134. The Workflow: If you have parallel branches (e.g., START -> Node A AND Node B), the synchronous graph.invoke() will still run them one after the other. Only await graph.ainvoke() will truly run them at the same time.   DONE
+142. make a plan with gemini to make a complete OpenClaw + backend + frontend + mintlify docs + DB + queues + analytics + everything else  DONE
 145. if i am using create_agent should i use HITL middleware or a langgraph interrupt      DONE
+148. Add a dedicated WebSocket security layer for handshake auth validation, per-connection and per-user message rate limits, max frame size / max pending messages, idle timeout, origin allowlist         DONE
 117. for AI gateway checkout pydantic gateway         DELAYED
 60. Batch uses asyncio.gather with a semaphore but no queue
 6. set up performance tests 
@@ -175,13 +178,11 @@ build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's calle
 140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
 141. replace chatGoogleGenerativeAI with from langchain.chat_models import init_chat_model
 138. add neo4j driver from request.app.state in Graphiti, Cognee and other places where required in tools and do the same for DB, redis
-144. review FastAPI Gurad settings for files, streams, websockets, 
 137. what is ToolNode, conditional_routing, , make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
 132. Add toons before any operation/inputting data to LLM for best possible use of context space inlcuding agents, chats, RAG, web search results, after tool LLM invoke and everywhere else
-142. make a plan with gemini to make a complete OpenClaw + backend + frontend + mintlify docs + DB + queues + analytics + everything else
-146. 
-147.
-148. 
+146. use the result package and write it in copilot instructions and implement the plan written in this
+147. make a plan/guideline for using design patterns based on different needs and when and when not to use it. 
+149. 
 ```
 <!-- memory usage of FastAPI app -->
 "memoryUsage": {

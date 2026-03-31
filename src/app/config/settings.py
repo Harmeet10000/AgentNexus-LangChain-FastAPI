@@ -206,7 +206,7 @@ class Settings(BaseSettings):
     # --- FastAPI Guard ---
     FASTAPI_GUARD_PASSIVE_MODE: bool | None = Field(default=None)
     FASTAPI_GUARD_ENFORCE_HTTPS: bool | None = Field(default=None)
-    FASTAPI_GUARD_ENABLE_REDIS: bool = Field(default=False)
+    FASTAPI_GUARD_ENABLE_REDIS: bool = Field(default=True)
     FASTAPI_GUARD_TRUSTED_PROXIES: list[str] = Field(default_factory=list)
     FASTAPI_GUARD_TRUSTED_PROXY_DEPTH: int = Field(default=1)
     FASTAPI_GUARD_WHITELIST: list[str] | None = Field(default=None)
@@ -218,6 +218,7 @@ class Settings(BaseSettings):
     FASTAPI_GUARD_WHITELIST_COUNTRIES: list[str] = Field(default_factory=list)
     FASTAPI_GUARD_BLOCK_CLOUD_PROVIDERS: list[str] = Field(default_factory=list)
     FASTAPI_GUARD_IPINFO_TOKEN: str | None = Field(default=None)
+    FASTAPI_GUARD_LOG_FORMAT: str = Field(default="text")
 
     # --- JWT Authentication ---
     JWT_SECRET_KEY: str = Field(default="super-secret-change-this-in-production")
@@ -237,6 +238,23 @@ class Settings(BaseSettings):
     # --- URLs ---
     BACKEND_URL: str = Field(default="http://localhost:5000")
     FRONTEND_URL: str = Field(default="http://localhost:3000")
+
+    # --- WebSocket Security ---
+    WEBSOCKET_ALLOWED_ORIGINS: list[str] = Field(default_factory=list)
+    WEBSOCKET_REQUIRE_ORIGIN: bool = Field(default=True)
+    WEBSOCKET_IDLE_TIMEOUT_SECONDS: int = Field(default=180)
+    WEBSOCKET_USER_MESSAGE_RATE: int = Field(default=60)
+    WEBSOCKET_USER_MESSAGE_PERIOD_SECONDS: int = Field(default=60)
+    WEBSOCKET_CONNECTION_MESSAGE_RATE: int = Field(default=20)
+    WEBSOCKET_CONNECTION_MESSAGE_PERIOD_SECONDS: int = Field(default=10)
+    WEBSOCKET_MAX_CONNECTIONS_PER_USER: int = Field(default=3)
+    WEBSOCKET_PRESENCE_TTL_SECONDS: int = Field(default=360)
+
+    # --- Uvicorn WebSocket Transport ---
+    UVICORN_WS_MAX_SIZE: int = Field(default=1_048_576)
+    UVICORN_WS_MAX_QUEUE: int = Field(default=32)
+    UVICORN_WS_PING_INTERVAL: float = Field(default=20.0)
+    UVICORN_WS_PING_TIMEOUT: float = Field(default=20.0)
 
     # --- Resend Email Service ---
     RESEND_API_KEY: str = Field(default="")

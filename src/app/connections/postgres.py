@@ -1,9 +1,8 @@
 """Neon Postgres database configuration with SQLAlchemy."""
-
 from collections.abc import AsyncGenerator
 from urllib.parse import urlparse
 
-from fastapi import Request
+from fastapi.requests import HTTPConnection
 
 # from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from sqlalchemy import text
@@ -118,9 +117,9 @@ async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     return engine, session_local
 
 
-async def get_postgres_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
+async def get_postgres_db(connection: HTTPConnection) -> AsyncGenerator[AsyncSession, None]:
     """Dependency for database sessions retrieved from app.state."""
-    session_local = request.app.state.db_session_local
+    session_local = connection.app.state.db_session_local
     async with session_local() as session:
         try:
             yield session

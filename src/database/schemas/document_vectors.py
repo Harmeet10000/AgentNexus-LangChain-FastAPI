@@ -1,11 +1,10 @@
 """Document vectors schema for storing embeddings."""
-
 from datetime import UTC, datetime
 
 from sqlalchemy import JSON, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from database.base import Base
+from app.shared.base import Base
 
 
 class DocumentVector(Base):

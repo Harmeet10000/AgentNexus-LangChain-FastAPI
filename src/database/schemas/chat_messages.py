@@ -1,11 +1,10 @@
 """Chat messages schema for storing user-LLM conversations."""
-
 from datetime import UTC, datetime
 
 from sqlalchemy import JSON, DateTime, Enum, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from database.base import Base
+from app.shared.base import Base
 
 
 class ChatMessage(Base):
