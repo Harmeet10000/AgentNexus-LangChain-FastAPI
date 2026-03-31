@@ -46,6 +46,12 @@ from app.features.agent_saul.dto import (
     WSTokenFrame,
     ws_inbound_adapter,
 )
+from app.features.auth.websocket_security import (
+    WebSocketIdleTimeout,
+    WebSocketSecurityContext,
+    WebSocketSecurityService,
+    WebSocketSecurityViolation,
+)
 from app.shared.langgraph_layer.agent_saul.graph.state import (
     GRAPH_NODE_NAMES,
     HITLInterruptType,
@@ -88,10 +94,14 @@ class AgentSaulService:
         graph: CompiledStateGraph,
         redis: Redis,
         correlation_id: str,
+        ws_security: WebSocketSecurityService,
+        ws_context: WebSocketSecurityContext,
     ) -> None:
         self._graph = graph
         self._redis = redis
         self._correlation_id = correlation_id
+        self._ws_security = ws_security
+        self._ws_context = ws_context
         self._log = logger.bind(correlation_id=correlation_id)
 
     # ------------------------------------------------------------------
@@ -124,7 +134,7 @@ class AgentSaulService:
             ):
                 frame = self._map_event_to_frame(event=event, current_step=step)
                 if frame is not None:
-                    await ws.send_json(frame.model_dump())
+                    await self._send_json(ws, frame.model_dump())
 
             # --- Inspect post-stream graph state ----------------------------
             state_snapshot = await self._graph.aget_state(config)
@@ -137,9 +147,7 @@ class AgentSaulService:
                 final_state = state_snapshot.values
                 final_report = final_state.get("final_report")
                 summary = final_report.summary if final_report else None
-                await ws.send_json(
-                    WSDoneFrame(thread_id=thread_id, summary=summary).model_dump()
-                )
+                await self._send_json(ws, WSDoneFrame(thread_id=thread_id, summary=summary).model_dump())
                 self._log.info("saul_session_completed", thread_id=thread_id)
                 break
 
@@ -157,13 +165,14 @@ class AgentSaulService:
                     thread_id=thread_id,
                     next_nodes=state_snapshot.next,
                 )
-                await ws.send_json(
+                await self._send_json(
+                    ws,
                     WSErrorFrame(
                         node=None,
                         code="UNEXPECTED_PAUSE",
                         message="Graph paused without a pending interrupt",
                         retryable=False,
-                    ).model_dump()
+                    ).model_dump(),
                 )
                 break
 
@@ -268,13 +277,14 @@ class AgentSaulService:
         except ValueError:
             interrupt_type = HITLInterruptType.PLAN_APPROVAL
 
-        await ws.send_json(
+        await self._send_json(
+            ws,
             WSHITLInterruptFrame(
                 thread_id=thread_id,
                 interrupt_type=interrupt_type,
                 payload=interrupt_value,
                 message=interrupt_value.get("message", "Human input required"),
-            ).model_dump()
+            ).model_dump(),
         )
         self._log.info(
             "saul_hitl_interrupt_sent",
@@ -285,7 +295,9 @@ class AgentSaulService:
         # Wait for the client to respond — may take arbitrarily long (human reviewing)
         while True:
             try:
-                raw = await ws.receive_json()
+                raw = await self._receive_json(ws)
+            except (WebSocketIdleTimeout, WebSocketSecurityViolation):
+                raise
             except Exception as exc:
                 self._log.warning("saul_ws_receive_failed", error=str(exc))
                 return None
@@ -293,39 +305,42 @@ class AgentSaulService:
             try:
                 inbound = ws_inbound_adapter.validate_python(raw)
             except ValidationError as exc:
-                await ws.send_json(
+                await self._send_json(
+                    ws,
                     WSErrorFrame(
                         node=None,
                         code="INVALID_FRAME",
                         message=f"Frame parse error: {exc.error_count()} validation error(s)",
                         retryable=True,
-                    ).model_dump()
+                    ).model_dump(),
                 )
                 continue  # Ask client to resend
 
             if isinstance(inbound, WSPingMessage):
-                await ws.send_json(WSPongFrame().model_dump())
+                await self._send_json(ws, WSPongFrame().model_dump())
                 continue
 
             if not isinstance(inbound, WSResumeMessage):
-                await ws.send_json(
+                await self._send_json(
+                    ws,
                     WSErrorFrame(
                         node=None,
                         code="EXPECTED_RESUME",
                         message=f"Expected 'resume' message, got '{inbound.type}'",
                         retryable=True,
-                    ).model_dump()
+                    ).model_dump(),
                 )
                 continue
 
             if inbound.thread_id != thread_id:
-                await ws.send_json(
+                await self._send_json(
+                    ws,
                     WSErrorFrame(
                         node=None,
                         code="THREAD_ID_MISMATCH",
                         message="Resume message thread_id does not match active session",
                         retryable=False,
-                    ).model_dump()
+                    ).model_dump(),
                 )
                 return None
 
@@ -348,6 +363,12 @@ class AgentSaulService:
                 "reviewer_role": inbound.reviewer_role,
             }
             return Command(resume=resume_payload)
+
+    async def _receive_json(self, ws: WebSocket) -> object:
+        return await self._ws_security.receive_json(ws, self._ws_context)
+
+    async def _send_json(self, ws: WebSocket, payload: object) -> None:
+        await self._ws_security.send_json(ws, payload, self._ws_context)
 
     # ------------------------------------------------------------------
     # Helpers

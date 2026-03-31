@@ -1,7 +1,12 @@
+from typing import TYPE_CHECKING
+
 import uvicorn
 
-from app.config.settings import Settings, get_settings
+from app.config.settings import get_settings
 from app.utils.logger import logger
+
+if TYPE_CHECKING:
+    from app.config.settings import Settings
 
 
 def main() -> None:
@@ -19,6 +24,10 @@ def main() -> None:
         log_config=None,  # Use custom logging
         access_log=False,  # Custom access logging via middleware
         workers=4 if settings.ENVIRONMENT == "production" else 1,
+        ws_max_size=settings.UVICORN_WS_MAX_SIZE,
+        ws_max_queue=settings.UVICORN_WS_MAX_QUEUE,
+        ws_ping_interval=settings.UVICORN_WS_PING_INTERVAL,
+        ws_ping_timeout=settings.UVICORN_WS_PING_TIMEOUT,
     )
 
 

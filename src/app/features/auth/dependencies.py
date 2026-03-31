@@ -1,7 +1,9 @@
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.requests import HTTPConnection
 
 from app.connections import get_mongodb, get_redis
 from app.features.auth.model import Permission, User, UserRole
@@ -11,6 +13,7 @@ from app.features.auth.service import AuthService
 from app.utils.exceptions import ForbiddenException, UnauthorizedException
 
 _http_bearer = HTTPBearer(auto_error=False)
+_ACCESS_TOKEN_TYPE = "access"  # noqa: S105
 
 
 # ── Repository and service wiring ─────────────────────────────────────────────
@@ -51,12 +54,45 @@ async def _extract_raw_token(
     raise UnauthorizedException("Not authenticated")
 
 
+def _read_authorization_header_token(connection: HTTPConnection) -> str | None:
+    authorization = connection.headers.get("authorization")
+    if not authorization:
+        return None
+
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token
+
+
+def extract_raw_token_from_connection(connection: HTTPConnection) -> str:
+    """Read a bearer token from an HTTP or WebSocket connection."""
+    header_token = _read_authorization_header_token(connection)
+    if header_token:
+        return header_token
+
+    cookie_token: str | None = connection.cookies.get("access_token")
+    if cookie_token:
+        return cookie_token
+
+    raise UnauthorizedException("Not authenticated")
+
+
 async def get_token_claims(
     raw_token: Annotated[str, Depends(_extract_raw_token)],
 ) -> TokenClaims:
     """Decode and validate JWT claims. Zero database round trips."""
     claims: TokenClaims = decode_token(raw_token)
-    if claims.token_type != "access":
+    if claims.token_type != _ACCESS_TOKEN_TYPE:
+        raise UnauthorizedException("Expected an access token")
+    return claims
+
+
+async def get_websocket_token_claims(websocket: WebSocket) -> TokenClaims:
+    """Decode access-token claims during WebSocket handshake."""
+    raw_token = extract_raw_token_from_connection(websocket)
+    claims = decode_token(raw_token)
+    if claims.token_type != _ACCESS_TOKEN_TYPE:
         raise UnauthorizedException("Expected an access token")
     return claims
 
@@ -91,7 +127,7 @@ async def get_current_verified_user(
 # ── RBAC guards (claims-based — no DB hit) ────────────────────────────────────
 
 
-def require_permission(*permissions: Permission):
+def require_permission(*permissions: Permission) -> Callable[[TokenClaims], Awaitable[TokenClaims]]:
     """Dependency factory. Validates permissions from JWT claims without a DB round trip.
 
     Usage: Depends(require_permission(Permission.USERS_READ, Permission.USERS_WRITE))
@@ -109,7 +145,7 @@ def require_permission(*permissions: Permission):
     return _guard
 
 
-def require_role(*roles: UserRole):
+def require_role(*roles: UserRole) -> Callable[[TokenClaims], Awaitable[TokenClaims]]:
     """Dependency factory. Validates role from JWT claims without a DB round trip.
 
     Usage: Depends(require_role(UserRole.ADMIN, UserRole.MODERATOR))
@@ -130,4 +166,5 @@ def require_role(*roles: UserRole):
 CurrentUser = Annotated[User, Depends(get_current_active_user)]
 CurrentVerifiedUser = Annotated[User, Depends(get_current_verified_user)]
 CurrentClaims = Annotated[TokenClaims, Depends(get_token_claims)]
+WebSocketClaims = Annotated[TokenClaims, Depends(get_websocket_token_claims)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]

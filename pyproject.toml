@@ -116,6 +116,8 @@ dependencies = [
     "perfect",
     "schemathesis",
     "honcho-ai>=2.0.1",
+    "apscheduler>=3.11.2",
+    "result>=0.17.0",
 ]
 
 [project.scripts]

@@ -1,9 +1,8 @@
 """HTTPX client with optimal performance settings."""
-
 from functools import lru_cache
 
 import httpx
-from fastapi import Request
+from fastapi.requests import HTTPConnection
 
 from app.config import get_settings
 
@@ -58,6 +57,6 @@ def get_shared_httpx_client() -> httpx.AsyncClient:
     return create_httpx_client()
 
 
-def get_httpx_client(request: Request) -> httpx.AsyncClient:
+def get_httpx_client(connection: HTTPConnection) -> httpx.AsyncClient:
     """Dependency to inject HTTPX client."""
-    return request.app.state.httpx_client
+    return connection.app.state.httpx_client

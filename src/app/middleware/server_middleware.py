@@ -352,7 +352,7 @@ def build_fastapi_guard_config(settings: "Settings") -> SecurityConfig:
         whitelist_countries=settings.FASTAPI_GUARD_WHITELIST_COUNTRIES,
         block_cloud_providers=set(settings.FASTAPI_GUARD_BLOCK_CLOUD_PROVIDERS),
         custom_log_file=str(settings.LOG_DIR / "security.log"),
-        log_format="json" if settings.LOG_FORMAT == "json" else "text",
+        log_format="json" if settings.FASTAPI_GUARD_LOG_FORMAT == "json" else "text",
         rate_limit=settings.RATE_LIMIT_REQUESTS,
         rate_limit_window=settings.RATE_LIMIT_PERIOD,
         enable_rate_limiting=settings.RATE_LIMIT_ENABLED,

@@ -1,8 +1,8 @@
 # app/db/redis_connect.py
-from fastapi import Request
 from redis.asyncio import Redis
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
+from starlette.requests import HTTPConnection
 
 # from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -51,5 +51,5 @@ def create_redis_client(url: str) -> Redis:
     )
 
 
-async def get_redis(request: Request) -> Redis:
-    return request.app.state.redis
+async def get_redis(connection: HTTPConnection) -> Redis:
+    return connection.app.state.redis

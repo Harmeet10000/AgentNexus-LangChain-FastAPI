@@ -1,8 +1,8 @@
 """MongoDB connection and database management."""
 
 from beanie import init_beanie
-from fastapi import Request
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from starlette.requests import HTTPConnection
 
 
 async def create_mongo_client(uri: str, db_name: str, document_models: list) -> tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
@@ -38,5 +38,5 @@ async def create_mongo_client(uri: str, db_name: str, document_models: list) -> 
     return client, database
 
 
-async def get_mongodb(request: Request) -> AsyncIOMotorDatabase:
-    return request.app.state.db
+async def get_mongodb(connection: HTTPConnection) -> AsyncIOMotorDatabase:
+    return connection.app.state.db

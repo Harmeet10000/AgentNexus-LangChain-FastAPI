@@ -17,15 +17,12 @@ Then: uv run alembic revision --autogenerate -m "add_memory_schema"
 
 from __future__ import annotations
 
-import enum
-from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    Boolean,
-    CheckConstraint,
+        CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -37,7 +34,13 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, mapped_column, relationship
+
+if TYPE_CHECKING:
+    from datetime import datetime
+    from typing import Any
+
+    from sqlalchemy.orm import Mapped
 
 
 class Base(DeclarativeBase):

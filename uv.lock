@@ -251,6 +251,18 @@ wheels = [
 ]
 
 [[package]]
+name = "apscheduler"
+version = "3.11.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tzlocal" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/07/12/3e4389e5920b4c1763390c6d371162f3784f86f85cd6d6c1bfe68eef14e2/apscheduler-3.11.2.tar.gz", hash = "sha256:2a9966b052ec805f020c8c4c3ae6e6a06e24b1bf19f2e11d91d8cca0473eef41", size = 108683, upload-time = "2025-12-22T00:39:34.884Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9f/64/2e54428beba8d9992aa478bb8f6de9e4ecaa5f8f513bcfd567ed7fb0262d/apscheduler-3.11.2-py3-none-any.whl", hash = "sha256:ce005177f741409db4e4dd40a7431b76feb856b9dd69d57e0da49d6715bfd26d", size = 64439, upload-time = "2025-12-22T00:39:33.303Z" },
+]
+
+[[package]]
 name = "argcomplete"
 version = "3.6.3"
 source = { registry = "https://pypi.org/simple" }
@@ -3030,6 +3042,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "alembic" },
+    { name = "apscheduler" },
     { name = "argon2-cffi" },
     { name = "async-timeout" },
     { name = "asyncer" },
@@ -3092,6 +3105,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "redis", extra = ["hiredis"] },
     { name = "resend" },
+    { name = "result" },
     { name = "schemathesis" },
     { name = "sqlalchemy" },
     { name = "sqlmodel" },
@@ -3139,6 +3153,7 @@ dev = [
 requires-dist = [
     { name = "aiofiles", specifier = "==24.1.0" },
     { name = "alembic", specifier = "==1.16.5" },
+    { name = "apscheduler", specifier = ">=3.11.2" },
     { name = "argon2-cffi", specifier = ">=25.1.0" },
     { name = "async-timeout", specifier = ">=5.0.1" },
     { name = "asyncer", specifier = ">=0.0.17" },
@@ -3215,6 +3230,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "redis", extras = ["hiredis"], specifier = ">=5.1.0,<6.0.0" },
     { name = "resend", specifier = ">=2.24.0" },
+    { name = "result", specifier = ">=0.17.0" },
     { name = "safety", marker = "extra == 'dev'", specifier = ">=3.6.2,<4.0.0" },
     { name = "schemathesis" },
     { name = "sqlalchemy", specifier = "==2.0.39" },
@@ -5915,6 +5931,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a3/17/a552eba700a42dbbd5d11cbde0cc4a950c26e1eb7074c516153f8d3f0843/resend-2.24.0.tar.gz", hash = "sha256:60c15e2c9007bd8bdb811f752f00298606a7264242d3a4c4e0ae14a493ec3e0e", size = 31106, upload-time = "2026-03-16T13:12:44.728Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c4/c2/13796ebb95b0d0990361c302fc4231c98184b6c489687cd27baaf3fcbc4d/resend-2.24.0-py2.py3-none-any.whl", hash = "sha256:f8d99718d3a23ab96b7d3df020ee7a9b56b7f536e0d77b50a16debd198b50e79", size = 51002, upload-time = "2026-03-16T13:12:43.581Z" },
+]
+
+[[package]]
+name = "result"
+version = "0.17.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/47/2175be65744aa4d8419c27bd3a7a7d65af5bcad7a4dc6a812c00778754f0/result-0.17.0.tar.gz", hash = "sha256:b73da420c0cb1a3bf741dbd41ff96dedafaad6a1b3ef437a9e33e380bb0d91cf", size = 20180, upload-time = "2024-06-02T16:39:54.51Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e2/90/19110ce9374c3db619e2df0816f2c58e4ddc5cdad5f7284cd81d8b30b7cb/result-0.17.0-py3-none-any.whl", hash = "sha256:49fd668b4951ad15800b8ccefd98b6b94effc789607e19c65064b775570933e8", size = 11689, upload-time = "2024-06-02T16:39:52.715Z" },
 ]
 
 [[package]]

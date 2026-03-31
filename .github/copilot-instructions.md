@@ -175,6 +175,8 @@ These tools are required for local development and CI. Keep this section aligned
 - Use `logger.bind(...)` or otherwise structured logging patterns for service-layer logs, and prefer typed exceptions from `src/app/utils/exceptions.py`.
 - Do not put HTTP response formatting inside repositories.
 
+
+
 ## Python and Typing Rules
 
 ### General Python style

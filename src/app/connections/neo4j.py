@@ -1,9 +1,8 @@
 """Neo4j database configuration with driver management."""
-
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Request
+from fastapi.requests import HTTPConnection
 from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession, basic_auth
 
 from app.config import get_settings
@@ -42,16 +41,8 @@ async def init_neo4j() -> AsyncDriver:
         raise
 
 
-async def get_neo4j_driver(request: Request) -> AsyncDriver:
-    """Dependency for Neo4j driver retrieved from app.state.
-
-    Args:
-        request: FastAPI request object
-
-    Returns:
-        AsyncDriver: Neo4j driver instance
-    """
-    return request.app.state.neo4j_driver
+async def get_neo4j_driver(connection: HTTPConnection) -> AsyncDriver:
+    return connection.app.state.neo4j_driver
 
 
 @asynccontextmanager

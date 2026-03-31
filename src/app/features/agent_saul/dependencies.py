@@ -12,11 +12,22 @@ Lifespan callers must set:
 
 from dataclasses import dataclass
 from typing import Annotated
+from uuid import uuid4
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, WebSocket, WebSocketException, status
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from redis.asyncio import Redis
+
+from app.features.auth.dependencies import (
+    WebSocketClaims,
+    get_refresh_token_repository,
+)
+from app.features.auth.repository import RefreshTokenRepository
+from app.features.auth.websocket_security import (
+    WebSocketSecurityContext,
+    WebSocketSecurityService,
+)
 
 # ---------------------------------------------------------------------------
 # Individual dependency extractors
@@ -45,6 +56,10 @@ async def get_current_user_id(request: Request) -> str:
     return request.state.user_id
 
 
+async def get_websocket_security_service(websocket: WebSocket) -> WebSocketSecurityService:
+    return websocket.app.state.websocket_security
+
+
 # ---------------------------------------------------------------------------
 # Bundled context object — avoids long parameter lists at orchestration layer
 # ---------------------------------------------------------------------------
@@ -71,9 +86,38 @@ async def get_agent_saul_deps(
     return AgentSaulDeps(graph=graph, checkpointer=checkpointer, redis=redis)
 
 
+async def get_agent_saul_ws_security_context(
+    websocket: WebSocket,
+    claims: WebSocketClaims,
+    token_repo: Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)],
+    security_service: Annotated[WebSocketSecurityService, Depends(get_websocket_security_service)],
+) -> WebSocketSecurityContext:
+    origin = websocket.headers.get("origin")
+    security_service.ensure_origin_allowed(origin)
+
+    if claims.sid is not None:
+        session = await token_repo.get_session(claims.sid)
+        if session is None or session.user_id != claims.sub:
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Session expired or revoked",
+            )
+
+    await security_service.ensure_connection_capacity(claims.sub)
+    return security_service.build_context(
+        claims=claims,
+        origin=origin,
+        connection_id=str(uuid4()),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Annotated aliases — reused across router handlers
 # ---------------------------------------------------------------------------
 
 AgentSaulDepsAnnotated = Annotated[AgentSaulDeps, Depends(get_agent_saul_deps)]
 CurrentUserIdAnnotated = Annotated[str, Depends(get_current_user_id)]
+AgentSaulWebSocketSecurityContextAnnotated = Annotated[
+    WebSocketSecurityContext,
+    Depends(get_agent_saul_ws_security_context),
+]

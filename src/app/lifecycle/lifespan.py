@@ -23,6 +23,7 @@ from app.connections import (
 from app.features.auth import TokenAuditLog, User
 from app.middleware import initialize_fastapi_guard
 from app.shared.mcp import get_mcp_client_manager
+from app.shared.services.websocket_security import build_websocket_security_service
 from app.utils import logger
 
 
@@ -99,6 +100,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mongo_client, app.state.db = mongo_task.result()
     app.state.redis = redis_task.result()
     app.state.neo4j_driver = neo_task.result()
+    app.state.websocket_security = build_websocket_security_service(
+        redis=app.state.redis,
+        settings=settings,
+    )
 
     # Initialize HTTPX client (HTTP/2 + connection pooling)
     app.state.httpx_client = get_shared_httpx_client()
