@@ -1,19 +1,19 @@
-from typing import Any
+from typing import Any, TypeVar
 
-from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel
 
 from app.config import Environment, get_settings
 from app.shared.response_type import APIResponse, ErrorDetail, RequestMeta
 from app.utils.logger import request_state
 
+T = TypeVar("T")
+
 
 def _serialize_data(data: Any) -> Any:
-    """Safely extract data from Pydantic models for ORJSON compatibility."""
+    """Normalize payloads for error metadata and mixed response payloads."""
     if isinstance(data, BaseModel):
-        # mode="json" ensures dates/UUIDs are stringified correctly for ORJSON
         return data.model_dump(mode="json")
-    elif isinstance(data, list):
+    if isinstance(data, list):
         return [_serialize_data(item) for item in data]
     return data
 
@@ -34,21 +34,20 @@ def _build_request_meta() -> RequestMeta:
         correlation_id=ctx.get("request_id"),
     )
 
-def http_response(
+def http_response[T](
     message: str,
-    data: Any = None,
+    data: T | None = None,
     status_code: int = 200,
-) -> ORJSONResponse:
+) -> APIResponse[T]:
     """Create standardized HTTP success response using ContextVar."""
-    response = APIResponse[Any](
+    return APIResponse[T](
         success=True,
         status_code=status_code,
         request=_build_request_meta(),
         message=message,
-        data=_serialize_data(data),
+        data=data,
         error=None,
     )
-    return ORJSONResponse(status_code=status_code, content=response.model_dump(mode="json"))
 
 
 def http_error(
@@ -60,9 +59,9 @@ def http_error(
     trace: str | None = None,
     inner_error: str | None = None,
     flow: str | None = None,
-) -> ORJSONResponse:
+) -> APIResponse[Any]:
     """Create standardized HTTP error response using ContextVar."""
-    response = APIResponse[Any](
+    return APIResponse[Any](
         success=False,
         status_code=status_code,
         request=_build_request_meta(),
@@ -77,4 +76,3 @@ def http_error(
             flow=flow,
         ),
     )
-    return ORJSONResponse(status_code=status_code, content=response.model_dump(mode="json"))

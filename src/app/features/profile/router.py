@@ -1,7 +1,6 @@
 from typing import Annotated
 
 from fastapi import APIRouter, File, Request, UploadFile
-from fastapi.responses import ORJSONResponse
 
 from app.features.auth.dependencies import (
     CurrentVerifiedUser,
@@ -29,7 +28,7 @@ async def _get_profile_service(request: Request) -> ProfileService:
 
 
 @router.get("/", response_model=APIResponse[UserResponse])
-async def get_profile(user: CurrentVerifiedUser) -> ORJSONResponse:
+async def get_profile(user: CurrentVerifiedUser) -> APIResponse[UserResponse]:
     result = UserResponse(
         id=str(user.id),
         email=user.email,
@@ -47,7 +46,7 @@ async def update_profile(
     body: UpdateProfileRequest,
     user: CurrentVerifiedUser,
     request: Request,
-) -> ORJSONResponse:
+) -> APIResponse[UserResponse]:
     service = await _get_profile_service(request)
     updated = await service.update_profile(user, body)
     result = UserResponse(
@@ -76,7 +75,7 @@ async def change_password(
             ).get_token_claims
         ),
     ],
-) -> ORJSONResponse:
+) -> APIResponse[None]:
     service = await _get_profile_service(request)
     await service.change_password(
         user=user,
@@ -98,7 +97,7 @@ async def upload_avatar(
     user: CurrentVerifiedUser,
     request: Request,
     file: Annotated[UploadFile, File()],
-) -> ORJSONResponse:
+) -> APIResponse[AvatarResponse]:
     if not file.content_type:
         raise ValidationException("Content-Type header is required for file upload")
 

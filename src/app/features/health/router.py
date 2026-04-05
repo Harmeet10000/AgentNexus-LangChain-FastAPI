@@ -1,6 +1,5 @@
 """Health feature API router."""
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import ORJSONResponse
+from fastapi import APIRouter, Depends, Request, Response
 
 from app.shared.response_type import APIResponse
 from app.utils import http_response
@@ -16,7 +15,7 @@ router = APIRouter(prefix="/health", tags=["health"])
 async def get_self(
     request: Request,
     service: HealthService = Depends(get_health_service),
-) -> ORJSONResponse:
+) -> APIResponse[SelfInfoDTO]:
     self_info = await service.get_self_info(
         server_name=request.app.title or "unknown",
         server_version=request.app.version or "unknown",
@@ -24,21 +23,20 @@ async def get_self(
     )
     return http_response(
         message="Server information retrieved",
-        data=self_info.model_dump(),
+        data=self_info,
         status_code=200,
-        # request=request,
     )
 
 
 @router.get("/", response_model=APIResponse[HealthDataDTO])
 async def get_health(
-    # request: Request,
+    response: Response,
     service: HealthService = Depends(get_health_service),
-) -> ORJSONResponse:
+) -> APIResponse[HealthDataDTO]:
     result = await service.get_health()
+    response.status_code = result.status_code
     return http_response(
         message=result.message,
-        data=result.data.model_dump(),
+        data=result.data,
         status_code=result.status_code,
-        # request=request,
     )

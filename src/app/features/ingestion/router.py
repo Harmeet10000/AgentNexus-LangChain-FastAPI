@@ -12,7 +12,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, UploadFile
-from fastapi.responses import ORJSONResponse
 
 from app.shared.response_type import APIResponse
 from app.utils import http_response, logger
@@ -47,7 +46,7 @@ async def upload_document(
     user_id: UserIdDep,
     document_type: str = "unknown",
     jurisdiction: str = "India",
-) -> ORJSONResponse:
+) -> APIResponse[DocumentUploadResponse]:
     """
     Upload flow:
       1. Read raw bytes from uploaded file.

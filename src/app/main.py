@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import ORJSONResponse, Response
+from fastapi.responses import Response
 from fastmcp.utilities.lifespan import combine_lifespans
 from guard import SecurityMiddleware
 
@@ -19,7 +19,8 @@ from app.middleware import (
 from app.shared.langchain_layer import configure_langsmith
 from app.shared.mcp import get_mcp_http_app
 from app.shared.mcp.models import parse_mcp_http_transport
-from app.utils import logger
+from app.shared.response_type import APIResponse
+from app.utils import http_error, logger
 
 configure_langsmith()
 # Load environment variables
@@ -39,7 +40,6 @@ def create_app() -> FastAPI:
         docs_url="/api-docs",
         redoc_url="/api-redoc",
         openapi_url="/swagger.json",
-        default_response_class=ORJSONResponse,
     )
 
     # ============================================================================
@@ -108,19 +108,21 @@ def create_app() -> FastAPI:
         path="/{path_name:path}",
         methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
         include_in_schema=False,
+        response_model=APIResponse[None],
+        status_code=status.HTTP_404_NOT_FOUND,
     )
-    async def catch_all(request: Request, path_name: str) -> ORJSONResponse:
+    async def catch_all(request: Request, path_name: str) -> APIResponse[None]:
         """Handle 404 errors for undefined routes."""
         correlation_id = getattr(request.state, "correlation_id", "unknown")
         logger.warning(
             f"[{correlation_id}] 404 Not Found: {request.method} {request.url.path} {path_name}"
         )
 
-        return ORJSONResponse(
-            status_code=404,
-            content={
-                "error": "Not Found",
-                "message": f"Can't find {request.url.path} on this server",
+        return http_error(
+            message=f"Can't find {request.url.path} on this server",
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            data={
                 "path": request.url.path,
                 "correlation_id": correlation_id,
             },

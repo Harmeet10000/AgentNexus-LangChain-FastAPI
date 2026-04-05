@@ -1,7 +1,6 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query
-from fastapi.responses import ORJSONResponse
 
 from app.features.auth.dependencies import require_permission, require_role
 from app.features.auth.model import Permission, UserRole
@@ -35,7 +34,7 @@ async def list_users(
     role: Annotated[UserRole | None, Query()] = None,
     is_active: Annotated[bool | None, Query()] = None,
     search: Annotated[str | None, Query(max_length=100)] = None,
-) -> ORJSONResponse:
+) -> APIResponse[PaginatedData[UserAdminResponse]]:
     result = await service.list_users(
         page=page,
         per_page=per_page,
@@ -54,7 +53,7 @@ async def list_users(
 async def get_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
-) -> ORJSONResponse:
+) -> APIResponse[UserAdminResponse]:
     result = await service.get_user(user_id)
     return http_response("User retrieved", data=result)
 
@@ -69,7 +68,7 @@ async def update_user_role(
     body: UpdateUserRoleRequest,
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
-) -> ORJSONResponse:
+) -> APIResponse[UserAdminResponse]:
     result = await service.update_role(
         user_id=user_id,
         new_role=body.role,
@@ -87,7 +86,7 @@ async def activate_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
-) -> ORJSONResponse:
+) -> APIResponse[UserAdminResponse]:
     result = await service.set_active(
         user_id=user_id,
         is_active=True,
@@ -105,7 +104,7 @@ async def deactivate_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
-) -> ORJSONResponse:
+) -> APIResponse[UserAdminResponse]:
     result = await service.set_active(
         user_id=user_id,
         is_active=False,
@@ -123,7 +122,7 @@ async def delete_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_DELETE))],
-) -> ORJSONResponse:
+) -> APIResponse[None]:
     await service.hard_delete(
         user_id=user_id,
         requesting_admin_id=claims.sub,
@@ -140,7 +139,7 @@ async def impersonate_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_role(UserRole.ADMIN))],
-) -> ORJSONResponse:
+) -> APIResponse[ImpersonateResponse]:
     result = await service.impersonate(
         target_user_id=user_id,
         admin_user_id=claims.sub,
