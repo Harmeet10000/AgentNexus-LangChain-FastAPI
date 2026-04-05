@@ -127,11 +127,13 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 142. make a plan with gemini to make a complete OpenClaw + backend + frontend + mintlify docs + DB + queues + analytics + everything else  DONE
 145. if i am using create_agent should i use HITL middleware or a langgraph interrupt      DONE
 148. Add a dedicated WebSocket security layer for handshake auth validation, per-connection and per-user message rate limits, max frame size / max pending messages, idle timeout, origin allowlist         DONE
+141. replace chatGoogleGenerativeAI with from langchain.chat_models import init_chat_model    DONE
+147. make a plan/guideline for using design patterns based on different needs and when and when not to use it.    DONE
+60. Batch uses asyncio.gather with a semaphore but no queue   DONE
+47. check whether i will need to use sandboxed execution environemnt in future     DONE
 117. for AI gateway checkout pydantic gateway         DELAYED
-60. Batch uses asyncio.gather with a semaphore but no queue
 6. set up performance tests 
 46. use CacheBackedEmbeddings fore reusing embeddings
-47. check whether i will need to use sandboxed execution environemnt in future
 48. check the page https://docs.langchain.com/langsmith/deployments#
 
 49. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
@@ -142,7 +144,6 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
 59. No skill composition
 Skills are flat callables. Theres no way to chain skills (skill A output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
-73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better Resolve the ORJSON/response-model conflict. plus v0.135 has now first class supprt for SSE now 
 98. check how can Port & Adapter/strategy & factory can help 
 64. No eval framework. Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
@@ -150,38 +151,32 @@ Skills are flat callables. Theres no way to chain skills (skill A output feeds s
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
-79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer        
 44. correct the code for crawler and the packages used
 17. refactor vectorStore code
 18. refactor RAG code
 52. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.
 115. logs inbetween the layers are empty or not coming except start and end 
-121. figure out the types of memory that a agent can have and which type does fit my needs
-125. Ensure your message history logic preserves the extras["signature"] field in AIMessage objects. When a model "thinks," it generates a Thought Signature. If you are building a multi-turn agent (like with LangGraph), failing to send this signature back in the next turn forces the model to re-reason from scratch, increasing latency.
-130. Always set a recursion_limit (max steps) in your LangGraph and a timeout on your LLM calls.
-131. the checkpoint_id (formerly thread_ts) is your best friend. in HITL after resuming from a pause
-133. uae pydantic for state management in langraph and convert all typedDict to pydantic 
-57. No agent-to-agent message passing format standard
-58. Circular delegation is possible. Agent A can hand off to Agent B, which can hand off back to Agent A. There's no loop detection beyond completed_agents in SupervisorState, and that only works in the supervisor graph — not in the tool-based MultiAgentSystem.
-61.Embeddings aren't cached. aembed_batch calls the API every time. Embeddings for the same text are deterministic — a simple LRU cache keyed on SHA256(text) would eliminate redundant API calls entirely.
-62. Model instances are rebuilt on every call
-build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's called. The model object should be a module-level singleton (or per-spec singleton) since it's stateless.
 108. use the new gemini embedding 2 for multi-modal embeddings  
 75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
-135. Sync Method,         Async Method,          What it does
-     invoke(),            ainvoke(),             Runs the full chain/node/model and returns the result. If you have parallel branches only  await graph.ainvoke() will truly run them at the same time.
-     stream(),            astream(),             Streams the output (tokens or state updates) as they happen.
-     batch(),             abatch(),              Processes a list of inputs (uses parallelism under the hood).
-     transform(),         atransform(),          Specialized for streaming data through a function.
-136. Checkpointers: SqliteSaver (Sync) vs. AsyncSqliteSaver (Async). In production, always use the async version to avoid blocking your DB connection pool. Tools: @tool functions can be def or async def. If your tool calls an API, make it async def so the agent can do other things while waiting for the network.
-139. get conversation state state = graph.get_state(config)
 140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
-141. replace chatGoogleGenerativeAI with from langchain.chat_models import init_chat_model
-138. add neo4j driver from request.app.state in Graphiti, Cognee and other places where required in tools and do the same for DB, redis
-137. what is ToolNode, conditional_routing, , make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
-132. Add toons before any operation/inputting data to LLM for best possible use of context space inlcuding agents, chats, RAG, web search results, after tool LLM invoke and everywhere else
+138. add neo4j driver, DB session from request.app.state in Graphiti, Cognee, AsyncPostgresCheckpointer and other places where required in tools and do the same for DB, redis
 146. use the result package and write it in copilot instructions and implement the plan written in this
-147. make a plan/guideline for using design patterns based on different needs and when and when not to use it. 
+130. correctly write all the arguments passes in init_chat_model 
+73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better Resolve the ORJSON/response-model conflict. plus v0.135 has now first class supprt for SSE now 
+133. use pydantic for state management in langraph and convert all typedDict to pydantic 
+121. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
+58. write a proper langchain-langgraph thingies
+79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer        
+57. No agent-to-agent message passing format standard
+61. see docassemble, fpdf2, python-docx and other libraries for generating final PDFs/docs
+131. what is annotated, 
+125. use Call a subgraph inside a node for Open Deep Research
+137. what is ToolNode, ToolRuntime, conditional_routing, chatpromptTemplate, messagePlaceholder, agentExceutor, context_schema, MessagesState, in langgraph, how does context differ from store , make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
+132. how will SystemMessage, HumanMessage, AIMessage, ToolMessage look like in a create_agent and inside langgraph and when in node is passing to another
+135. see before/after agent/model wrap_model_call wrap_tool_call 
+62.   
+136. 
+139. 
 149. 
 ```
 <!-- memory usage of FastAPI app -->
