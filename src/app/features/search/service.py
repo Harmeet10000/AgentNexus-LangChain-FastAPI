@@ -143,7 +143,7 @@ class SearchService:
             task_type="RETRIEVAL_QUERY",
         )
 
-        bm25_results, vector_results = await _run_parallel_search(
+        bm25_results, vector_results, trigram_results = await _run_parallel_search(
             self.repo,
             query=payload.query,
             query_embedding=query_embedding,
@@ -154,6 +154,7 @@ class SearchService:
         fused_results = reciprocal_rank_fusion(
             bm25_results,
             vector_results,
+            trigram_results,
             k=RRF_K,
             limit=payload.limit,
         )
@@ -297,7 +298,7 @@ async def _run_parallel_search(
     query_embedding: list[float],
     candidate_limit: int,
     metadata_filter: dict[str, object],
-) -> tuple[list[RankedResultRow], list[RankedResultRow]]:
+) -> tuple[list[RankedResultRow], list[RankedResultRow], list[RankedResultRow]]:
     return await asyncio.gather(
         repo.bm25_search(
             query=query,
@@ -306,6 +307,11 @@ async def _run_parallel_search(
         ),
         repo.vector_search(
             embedding=query_embedding,
+            candidate_limit=candidate_limit,
+            metadata_filter=metadata_filter,
+        ),
+        repo.trigram_search(
+            query=query,
             candidate_limit=candidate_limit,
             metadata_filter=metadata_filter,
         ),

@@ -26,16 +26,14 @@ class RankedChunk(BaseModel):
 
 
 def reciprocal_rank_fusion(
-    bm25_results: list[RankedResultRow],
-    vector_results: list[RankedResultRow],
-    *,
+    *result_sets: list[RankedResultRow],
     k: int,
     limit: int,
 ) -> list[RankedChunk]:
     """Fuse ranked result lists with the standard reciprocal-rank formula."""
     scores: dict[str, float] = {}
 
-    for result_set in (bm25_results, vector_results):
+    for result_set in result_sets:
         for result in result_set:
             chunk_id = result.chunk_id
             rank = result.rank
