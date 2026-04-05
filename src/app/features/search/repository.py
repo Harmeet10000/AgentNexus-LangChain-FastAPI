@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 from app.features.search.constants import (
     DISKANN_QUERY_RESCORE,
     DISKANN_QUERY_SEARCH_LIST_SIZE,
+    TRIGRAM_SIMILARITY_THRESHOLD,
 )
 from app.features.search.fusion import RankedResultRow
 from app.features.search.model import SearchChunk, SearchDocument
@@ -118,6 +119,23 @@ class SearchRepository:
         result = await self.session.execute(statement, params)
         return _rank_rows(result.mappings().all())
 
+    async def trigram_search(
+        self,
+        *,
+        query: str,
+        candidate_limit: int,
+        metadata_filter: dict[str, Any],
+    ) -> list[RankedResultRow]:
+        statement, filter_params = _build_trigram_statement(metadata_filter)
+        params = {
+            "query": query,
+            "candidate_limit": candidate_limit,
+            "similarity_threshold": TRIGRAM_SIMILARITY_THRESHOLD,
+            **filter_params,
+        }
+        result = await self.session.execute(statement, params)
+        return _rank_rows(result.mappings().all())
+
     async def fetch_chunks_by_ids(self, chunk_ids: Sequence[str]) -> dict[str, SearchChunkRecord]:
         if not chunk_ids:
             return {}
@@ -209,6 +227,41 @@ def _build_vector_statement(metadata_filter: dict[str, Any]) -> tuple[Any, dict[
             FROM search_chunks AS c
             WHERE c.embedding IS NOT NULL
             ORDER BY c.embedding <=> CAST(:embedding AS vector)
+            LIMIT :candidate_limit
+            """
+        ),
+        {},
+    )
+
+
+def _build_trigram_statement(metadata_filter: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    if metadata_filter:
+        return (
+            text(
+                """
+                SELECT
+                    c.id::text AS chunk_id,
+                    similarity(c.content, :query) AS score
+                FROM search_chunks AS c
+                WHERE c.content % :query
+                  AND similarity(c.content, :query) >= :similarity_threshold
+                  AND c.chunk_metadata @> CAST(:metadata_filter AS jsonb)
+                ORDER BY similarity(c.content, :query) DESC
+                LIMIT :candidate_limit
+                """
+            ),
+            {"metadata_filter": json.dumps(metadata_filter)},
+        )
+    return (
+        text(
+            """
+            SELECT
+                c.id::text AS chunk_id,
+                similarity(c.content, :query) AS score
+            FROM search_chunks AS c
+            WHERE c.content % :query
+              AND similarity(c.content, :query) >= :similarity_threshold
+            ORDER BY similarity(c.content, :query) DESC
             LIMIT :candidate_limit
             """
         ),

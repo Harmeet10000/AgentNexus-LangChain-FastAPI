@@ -169,9 +169,9 @@ Skills are flat callables. Theres no way to chain skills (skill A output feeds s
 79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer        
 57. No agent-to-agent message passing format standard
 61. see docassemble, fpdf2, python-docx and other libraries for generating final PDFs/docs
-131. what is annotated, 
+131. what is annotated, annotations, 
 125. use Call a subgraph inside a node for Open Deep Research
-137. what is annotations, ToolNode, ToolRuntime, conditional_routing, chatpromptTemplate, messagePlaceholder, agentExceutor, context_schema, MessagesState, in langgraph, how does context differ from store , make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
+137. what is ToolNode, ToolRuntime, conditional_routing, chatpromptTemplate, messagePlaceholder, agentExceutor, context_schema, MessagesState, in langgraph, how does context differ from store , make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
 132. how will SystemMessage, HumanMessage, AIMessage, ToolMessage look like in a create_agent and inside langgraph and when in node is passing to another
 135. see before/after agent/model wrap_model_call wrap_tool_call 
 62.   
