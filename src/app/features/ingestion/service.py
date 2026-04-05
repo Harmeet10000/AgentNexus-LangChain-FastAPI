@@ -10,12 +10,11 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-import structlog
 from langgraph.graph.state import CompiledStateGraph
 
-from .dto import DocumentUploadResponse
+from app.utils import logger
 
-logger = structlog.get_logger(__name__)
+from .dto import DocumentUploadResponse
 
 
 class IngestionService:

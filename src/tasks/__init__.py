@@ -7,9 +7,11 @@ from .memory_tasks import (
     run_reconciliation_for_active_users,
     run_reconciliation_for_user,
 )
+from .search_tasks import ingest_search_document
 
 __all__ = [
     "add",
+    "ingest_search_document",
     "process_document",
     "run_memory_decay",
     "run_reconciliation_for_active_users",
