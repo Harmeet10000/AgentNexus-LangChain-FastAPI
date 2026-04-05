@@ -14,7 +14,6 @@ from contextlib import suppress
 from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
 
 from app.features.agent_saul.dependencies import (
     AgentSaulDepsAnnotated,
@@ -54,7 +53,7 @@ async def create_session(
     body: CreateSessionRequest,
     _deps: AgentSaulDepsAnnotated,
     claims: CurrentClaims,
-) -> JSONResponse:
+) -> APIResponse[CreateSessionResponse]:
     thread_id = str(uuid4())
     ws_url = f"ws://{{host}}/api/v1/agent-saul/ws/{thread_id}"
 

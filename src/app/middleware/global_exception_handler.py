@@ -2,14 +2,22 @@ import traceback
 
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
 from app.utils import APIException, execution_path, http_error, logger
 
 
-async def global_exception_handler(request: Request, exc: Exception) -> ORJSONResponse:
+def _json_error_response(payload, status_code: int, headers: dict[str, str] | None = None) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content=payload.model_dump(mode="json"),
+        headers=headers,
+    )
+
+
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     settings = get_settings()
 
     # Extract the current function chain from our ContextVar
@@ -28,13 +36,14 @@ async def global_exception_handler(request: Request, exc: Exception) -> ORJSONRe
         )
         data = exc.detail.get("data") if isinstance(exc.detail, dict) else None
 
-        return http_error(
+        payload = http_error(
             message=message,
             status_code=status_code,
             data=data,
             error_code=error_code,
             flow=current_flow,
         )
+        return _json_error_response(payload, status_code, headers=exc.headers)
 
     # ────────────────────────────────────────────────
     # 2. Pydantic / FastAPI validation errors (422)
@@ -57,13 +66,14 @@ async def global_exception_handler(request: Request, exc: Exception) -> ORJSONRe
             message,
         )
 
-        return http_error(
+        payload = http_error(
             message=message,
             status_code=status_code,
             data={"errors": validation_errors},
             error_code=error_code,
             flow=current_flow,
         )
+        return _json_error_response(payload, status_code)
 
     # ────────────────────────────────────────────────
     # 3. Plain HTTPException / Starlette exceptions
@@ -79,16 +89,13 @@ async def global_exception_handler(request: Request, exc: Exception) -> ORJSONRe
         else:
             log_call.error(message)
 
-        response = http_error(
+        payload = http_error(
             message=message,
             status_code=status_code,
             error_code=error_code,
             flow=current_flow,
         )
-
-        if exc.headers:
-            response.headers.update(exc.headers)
-        return response
+        return _json_error_response(payload, status_code, headers=exc.headers)
 
     # ────────────────────────────────────────────────
     # 4. Catch-all — unexpected server errors (500)
@@ -106,10 +113,11 @@ async def global_exception_handler(request: Request, exc: Exception) -> ORJSONRe
         status_code=status_code, error_code=error_code, crashed_at_flow=current_flow
     ).exception(dynamic_message)
 
-    return http_error(
+    payload = http_error(
         message=message,
         status_code=status_code,
         error_code=error_code,
         trace=trace,
         flow=current_flow,
     )
+    return _json_error_response(payload, status_code)

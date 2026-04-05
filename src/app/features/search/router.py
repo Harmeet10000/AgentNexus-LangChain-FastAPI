@@ -3,7 +3,6 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Path, status
-from fastapi.responses import Response
 
 from app.features.search.dependencies import SearchServiceDep
 from app.features.search.dto import (
@@ -29,7 +28,7 @@ router = APIRouter(prefix="/search", tags=["search"])
 async def ingest_document(
     payload: SearchIngestRequest,
     service: SearchServiceDep,
-) -> Response:
+) -> APIResponse[SearchIngestResponse]:
     response = await service.ingest_document(payload)
     return http_response(
         "Search document queued", data=response, status_code=status.HTTP_201_CREATED
@@ -43,7 +42,7 @@ async def ingest_document(
 async def get_ingest_status(
     task_id: Annotated[str, Path(min_length=1)],
     service: SearchServiceDep,
-) -> Response:
+) -> APIResponse[SearchTaskStatusResponse]:
     response = await service.get_ingest_status(task_id)
     return http_response("Search ingest status", data=response)
 
@@ -55,7 +54,7 @@ async def get_ingest_status(
 async def hybrid_search(
     payload: HybridSearchRequest,
     service: SearchServiceDep,
-) -> Response:
+) -> APIResponse[SearchResponse]:
     response = await service.hybrid_search(payload)
     return http_response("Hybrid search results", data=response)
 
@@ -67,6 +66,6 @@ async def hybrid_search(
 async def rag_search(
     payload: RagSearchRequest,
     service: SearchServiceDep,
-) -> Response:
+) -> APIResponse[RagSearchResponse]:
     response = await service.rag_search(payload)
     return http_response("RAG search results", data=response)

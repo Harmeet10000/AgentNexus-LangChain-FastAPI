@@ -1,7 +1,6 @@
 """Crawler feature API endpoints."""
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import ORJSONResponse
 
 from app.features.crawler.constants import CRAWLER_PREFIX, CRAWLER_TAG
 from app.features.crawler.dependencies import get_crawler_service, get_rate_limiter
@@ -15,6 +14,7 @@ from app.features.crawler.dto import (
 from app.features.crawler.service import CrawlerService
 from app.shared.services import RateLimitScope
 from app.shared.services.rate_limiter import RateLimiter
+from app.utils import TooManyRequestsException
 
 router = APIRouter(prefix=CRAWLER_PREFIX, tags=[CRAWLER_TAG])
 
@@ -59,13 +59,9 @@ async def crawl_url(
         client_id, RateLimitScope.CRAWL
     )
     if not is_allowed:
-        return ORJSONResponse(
-            status_code=429,
-            content={
-                "error": "Rate limit exceeded",
-                "message": rate_info.get("error"),
-                "retry_after": rate_info.get("retry_after"),
-            },
+        raise TooManyRequestsException(
+            detail=rate_info.get("error") or "Rate limit exceeded",
+            data={"retry_after": rate_info.get("retry_after")},
         )
 
     await rate_limiter.increment_rate_limit(client_id, RateLimitScope.CRAWL)
@@ -100,13 +96,9 @@ async def search_web(
         client_id, RateLimitScope.SEARCH
     )
     if not is_allowed:
-        return JSONResponse(
-            status_code=429,
-            content={
-                "error": "Rate limit exceeded",
-                "message": rate_info.get("error"),
-                "retry_after": rate_info.get("retry_after"),
-            },
+        raise TooManyRequestsException(
+            detail=rate_info.get("error") or "Rate limit exceeded",
+            data={"retry_after": rate_info.get("retry_after")},
         )
 
     await rate_limiter.increment_rate_limit(client_id, RateLimitScope.SEARCH)

@@ -130,6 +130,7 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 141. replace chatGoogleGenerativeAI with from langchain.chat_models import init_chat_model    DONE
 147. make a plan/guideline for using design patterns based on different needs and when and when not to use it.    DONE
 60. Batch uses asyncio.gather with a semaphore but no queue   DONE
+73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better Resolve the ORJSON/response-model conflict. plus v0.135 has now first class supprt for SSE now    DONE
 47. check whether i will need to use sandboxed execution environemnt in future     DONE
 42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro      DONE
 117. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
@@ -162,14 +163,13 @@ Skills are flat callables. Theres no way to chain skills (skill A output feeds s
 138. add neo4j driver, DB session from request.app.state in Graphiti, Cognee, AsyncPostgresCheckpointer and other places where required in tools and do the same for DB, redis
 146. use the result package and write it in copilot instructions and implement the plan written in this
 130. correctly write all the arguments passes in init_chat_model 
-73. figure out wrt fastAPI v0.133 and ruff if response_model or return type is better Resolve the ORJSON/response-model conflict. plus v0.135 has now first class supprt for SSE now 
 133. use pydantic for state management in langraph and convert all typedDict to pydantic 
 121. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
 58. write a proper langchain-langgraph thingies
 79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer        
 57. No agent-to-agent message passing format standard
 61. see docassemble, fpdf2, python-docx and other libraries for generating final PDFs/docs
-131. what is annotated, annotations, 
+131. what is annotated, annotations, typeVar vs type
 125. use Call a subgraph inside a node for Open Deep Research
 137. what is ToolNode, ToolRuntime, conditional_routing, chatpromptTemplate, messagePlaceholder, agentExceutor, context_schema, MessagesState, in langgraph, how does context differ from store , make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
 132. how will SystemMessage, HumanMessage, AIMessage, ToolMessage look like in a create_agent and inside langgraph and when in node is passing to another
