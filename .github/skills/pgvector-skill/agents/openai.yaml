@@ -1,0 +1,4 @@
+interface:
+  display_name: "PGVector"
+  short_description: "Help with pgvector and pgvectorscale"
+  default_prompt: "Use $pgvector-skill when working on pgvector or pgvectorscale setup, schema design, vector queries, and index selection in this repository."
