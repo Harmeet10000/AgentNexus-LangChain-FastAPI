@@ -1,10 +1,15 @@
-# Pagination
+"""Search feature constants."""
+
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
-
-# Reciprocal Rank Fusion constant (60 is the industry standard for RRF)
+DEFAULT_SEARCH_CACHE_TTL_SECONDS = 900
+DEFAULT_RAG_TOKEN_BUDGET = 2_000
+HYBRID_CANDIDATE_LIMIT = 50
 RRF_K = 60
-
-# The number of candidates to fetch from each index before fusing them.
-# At scale, you don't score the whole database; you score the top N.
-HYBRID_CANDIDATE_LIMIT = 100
+INGEST_CHUNK_SIZE = 512
+INGEST_CHUNK_OVERLAP = 64
+INGEST_EMBEDDING_BATCH_SIZE = 200
+ANALYZE_THRESHOLD_CHUNKS = 10_000
+DISKANN_QUERY_SEARCH_LIST_SIZE = 100
+DISKANN_QUERY_RESCORE = 50
+SEARCH_CHUNKS_BM25_INDEX_NAME = "search_chunks_bm25_idx"

@@ -45,9 +45,7 @@ class ResilientTask(Task):
     retry_backoff: ClassVar[bool] = True
     retry_backoff_max: ClassVar[int] = settings.CELERY_RETRY_BACKOFF_MAX
     retry_jitter: ClassVar[bool] = True
-    retry_kwargs: ClassVar[dict[str, int]] = {
-        "max_retries": settings.CELERY_RETRY_MAX_RETRIES
-    }
+    retry_kwargs: ClassVar[dict[str, int]] = {"max_retries": settings.CELERY_RETRY_MAX_RETRIES}
 
     _redis_client: ClassVar[Redis | None] = None
 
@@ -166,7 +164,7 @@ def create_celery_app() -> Celery:
         main="langchain_fastapi",
         broker=settings.RABBITMQ_URL,
         backend="rpc://",
-        include=["tasks.example", "tasks.email_worker"],
+        include=["tasks.auth_email_tasks", "tasks.example", "tasks.search_tasks"],
     )
 
     app.Task = ResilientTask

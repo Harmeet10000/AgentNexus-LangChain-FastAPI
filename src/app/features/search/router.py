@@ -1,46 +1,72 @@
 """Search feature API endpoints."""
 
-from fastapi import APIRouter, Depends, status
+from typing import Annotated
 
-from app.features.search.dependencies import get_search_service
+from fastapi import APIRouter, Path, status
+from fastapi.responses import Response
+
+from app.features.search.dependencies import SearchServiceDep
 from app.features.search.dto import (
-    AutocompleteResponse,
-    DocumentVectorCreate,
-    DocumentVectorResponse,
-    SearchRequest,
+    HybridSearchRequest,
+    RagSearchRequest,
+    RagSearchResponse,
+    SearchIngestRequest,
+    SearchIngestResponse,
     SearchResponse,
+    SearchTaskStatusResponse,
 )
-from app.features.search.service import SearchService
+from app.shared.response_type import APIResponse
+from app.utils import http_response
 
-router = APIRouter(prefix="/searches", tags=["Searches"])
-
-
-@router.post(path="", response_model=SearchResponse)
-async def search_documents(
-    request: SearchRequest,
-    service: SearchService = Depends(get_search_service),
-) -> SearchResponse:
-    """Search documents using hybrid search (semantic + keyword)."""
-    return await service.perform_search(request)
-
-
-@router.get(path="/autocomplete", response_model=AutocompleteResponse)
-async def autocomplete(
-    query: str,
-    service: SearchService = Depends(get_search_service),
-) -> AutocompleteResponse:
-    """Get search suggestions based on partial query."""
-    return await service.get_suggestions(query)
+router = APIRouter(prefix="/search", tags=["search"])
 
 
 @router.post(
-    path="/documents",
-    response_model=DocumentVectorResponse,
+    "/ingest",
+    response_model=APIResponse[SearchIngestResponse],
     status_code=status.HTTP_201_CREATED,
 )
-async def create_document(
-    data: DocumentVectorCreate,
-    service: SearchService = Depends(get_search_service),
-) -> DocumentVectorResponse:
-    """Insert a new document vector into the database."""
-    return await service.create_document(data)
+async def ingest_document(
+    payload: SearchIngestRequest,
+    service: SearchServiceDep,
+) -> Response:
+    response = await service.ingest_document(payload)
+    return http_response(
+        "Search document queued", data=response, status_code=status.HTTP_201_CREATED
+    )
+
+
+@router.get(
+    "/ingest/{task_id}",
+    response_model=APIResponse[SearchTaskStatusResponse],
+)
+async def get_ingest_status(
+    task_id: Annotated[str, Path(min_length=1)],
+    service: SearchServiceDep,
+) -> Response:
+    response = await service.get_ingest_status(task_id)
+    return http_response("Search ingest status", data=response)
+
+
+@router.post(
+    "/hybrid",
+    response_model=APIResponse[SearchResponse],
+)
+async def hybrid_search(
+    payload: HybridSearchRequest,
+    service: SearchServiceDep,
+) -> Response:
+    response = await service.hybrid_search(payload)
+    return http_response("Hybrid search results", data=response)
+
+
+@router.post(
+    "/rag",
+    response_model=APIResponse[RagSearchResponse],
+)
+async def rag_search(
+    payload: RagSearchRequest,
+    service: SearchServiceDep,
+) -> Response:
+    response = await service.rag_search(payload)
+    return http_response("RAG search results", data=response)

@@ -1,115 +1,255 @@
-from typing import Any
+"""Persistence layer for search ingestion and retrieval."""
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from __future__ import annotations
 
-from app.features.search.model import DocumentVector
+import json
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+from uuid import UUID
+
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert
+
+from app.features.search.constants import (
+    DISKANN_QUERY_RESCORE,
+    DISKANN_QUERY_SEARCH_LIST_SIZE,
+)
+from app.features.search.fusion import RankedResultRow
+from app.features.search.model import SearchChunk, SearchDocument
+from app.features.search.rag import SearchChunkRecord
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from typing import Any
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class SearchRepository:
+    """Database operations for the search feature."""
+
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def hybrid_search(
+    async def get_document_by_content_hash(self, content_hash: str) -> SearchDocument | None:
+        statement = select(SearchDocument).where(SearchDocument.content_hash == content_hash)
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none()
+
+    async def get_document_by_id(self, document_id: str) -> SearchDocument | None:
+        statement = select(SearchDocument).where(SearchDocument.id == UUID(document_id))
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none()
+
+    async def create_document(
         self,
-        query: str,
-        embedding: list[float],
-        user_id: str,
-        limit: int,
-        offset: int,
-        candidate_limit: int,
-        rrf_k: int,
-    ) -> tuple[list[dict[str, Any]], bool]:
-        """
-        Reciprocal Rank Fusion over vector search (pgvectorscale / cosine distance)
-        and keyword search (pg_textsearch / BM25).
-
-        Returns (results, has_more).
-        """
-        # Convert embedding list to PostgreSQL vector format string
-        embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-
-        sql = """
-        WITH vector_search AS (
-            SELECT id,
-                   ROW_NUMBER() OVER (ORDER BY embedding <=> CAST(:embedding AS vector)) AS rank
-            FROM document_vectors
-            WHERE user_id = :user_id
-            LIMIT :candidate_limit
-        ),
-        keyword_search AS (
-            SELECT id,
-                   ROW_NUMBER() OVER (ORDER BY content <@> :query) AS rank
-            FROM document_vectors
-            WHERE user_id = :user_id
-            LIMIT :candidate_limit
+        *,
+        title: str,
+        source_uri: str | None,
+        content_hash: str,
+        doc_metadata: dict[str, Any],
+    ) -> SearchDocument:
+        document = SearchDocument(
+            title=title,
+            source_uri=source_uri,
+            content_hash=content_hash,
+            doc_metadata=doc_metadata,
         )
-        SELECT
-            d.id,
-            d.document_id,
-            d.title,
-            d.content,
-            d.meta_data,
-            COALESCE(1.0 / (:rrf_k + v.rank), 0.0)
-                + COALESCE(1.0 / (:rrf_k + k.rank), 0.0) AS combined_score
-        FROM document_vectors d
-        LEFT JOIN vector_search v ON d.id = v.id
-        LEFT JOIN keyword_search k ON d.id = k.id
-        WHERE (v.id IS NOT NULL OR k.id IS NOT NULL)
-          AND d.user_id = :user_id
-        ORDER BY combined_score DESC
-        LIMIT :fetch_limit OFFSET :offset
-        """
+        self.session.add(document)
+        await self.session.flush()
+        return document
 
-        fetch_limit = limit + 1  # one extra to detect has_more
+    async def upsert_chunks(self, rows: list[dict[str, Any]]) -> None:
+        """Bulk upsert chunk rows using the document/chunk unique key."""
+        if not rows:
+            return
 
-        result = await self.session.execute(
-            text(sql),
-            {
-                "query": query,
-                "embedding": embedding_str,
-                "user_id": user_id,
-                "fetch_limit": fetch_limit,
-                "offset": offset,
-                "candidate_limit": candidate_limit,
-                "rrf_k": rrf_k,
+        statement = insert(SearchChunk).values(rows)
+        statement = statement.on_conflict_do_update(
+            constraint="uq_search_chunks_document_chunk_index",
+            set_={
+                "content": statement.excluded.content,
+                "embedding": statement.excluded.embedding,
+                "chunk_metadata": statement.excluded.chunk_metadata,
+                "updated_at": statement.excluded.updated_at,
             },
         )
-        rows = result.mappings().all()
-        has_more = len(rows) > limit
-        return rows[:limit], has_more
+        await self.session.execute(statement)
 
-    async def fuzzy_autocomplete(
+    async def analyze_chunks(self) -> None:
+        await self.session.execute(text("ANALYZE search_chunks"))
+
+    async def bm25_search(
         self,
+        *,
         query: str,
-        user_id: str,
-        limit: int,
-    ) -> list[dict[str, Any]]:
-        """
-        Uses pg_trgm for typo-tolerant prefix/substring matching on titles.
-        Requires: CREATE EXTENSION IF NOT EXISTS pg_trgm;
-        And a GIN/GiST trgm index on title for performance:
-          CREATE INDEX ON document_vectors USING gin(title gin_trgm_ops);
-        """
-        sql = """
-        SELECT title,
-               similarity(title, :query) AS score
-        FROM document_vectors
-        WHERE user_id = :user_id
-          AND title % :query
-        ORDER BY title <-> :query
-        LIMIT :limit
-        """
-        result = await self.session.execute(
-            text(sql),
-            {"query": query, "user_id": user_id, "limit": limit},
-        )
-        return result.mappings().all()
+        candidate_limit: int,
+        metadata_filter: dict[str, Any],
+    ) -> list[RankedResultRow]:
+        statement, filter_params = _build_bm25_statement(metadata_filter)
+        params = {
+            "query": query,
+            "candidate_limit": candidate_limit,
+            **filter_params,
+        }
+        result = await self.session.execute(statement, params)
+        return _rank_rows(result.mappings().all())
 
-    async def create_document_vector(self, data: dict[str, Any]) -> DocumentVector:
-        """Insert a new document vector into the database."""
-        doc = DocumentVector(**data)
-        self.session.add(doc)
-        await self.session.commit()
-        await self.session.refresh(doc)
-        return doc
+    async def vector_search(
+        self,
+        *,
+        embedding: list[float],
+        candidate_limit: int,
+        metadata_filter: dict[str, Any],
+    ) -> list[RankedResultRow]:
+        statement, filter_params = _build_vector_statement(metadata_filter)
+        vector_literal = _vector_literal(embedding)
+        await self.session.execute(
+            text(f"SET LOCAL diskann.query_search_list_size = {DISKANN_QUERY_SEARCH_LIST_SIZE}")
+        )
+        await self.session.execute(
+            text(f"SET LOCAL diskann.query_rescore = {DISKANN_QUERY_RESCORE}")
+        )
+        params = {
+            "embedding": vector_literal,
+            "candidate_limit": candidate_limit,
+            **filter_params,
+        }
+        result = await self.session.execute(statement, params)
+        return _rank_rows(result.mappings().all())
+
+    async def fetch_chunks_by_ids(self, chunk_ids: Sequence[str]) -> dict[str, SearchChunkRecord]:
+        if not chunk_ids:
+            return {}
+
+        statement = text(
+            """
+            SELECT
+                c.id::text AS chunk_id,
+                c.document_id::text AS document_id,
+                d.title AS title,
+                c.content AS content,
+                c.chunk_index AS chunk_index,
+                c.chunk_metadata AS chunk_metadata
+            FROM search_chunks AS c
+            JOIN search_documents AS d
+              ON d.id = c.document_id
+            WHERE c.id = ANY(CAST(:chunk_ids AS uuid[]))
+            """
+        )
+        result = await self.session.execute(statement, {"chunk_ids": list(chunk_ids)})
+        return {
+            str(row["chunk_id"]): SearchChunkRecord(
+                document_id=str(row["document_id"]),
+                title=str(row["title"]),
+                content=str(row["content"]),
+                chunk_index=int(row["chunk_index"]),
+                chunk_metadata=dict(row["chunk_metadata"] or {}),
+            )
+            for row in result.mappings().all()
+        }
+
+
+def _build_bm25_statement(metadata_filter: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    if metadata_filter:
+        return (
+            text(
+                """
+                SELECT
+                    c.id::text AS chunk_id,
+                    (-1 * (c.content <@> to_bm25query(:query, 'search_chunks_bm25_idx'))) AS score
+                FROM search_chunks AS c
+                WHERE (c.content <@> to_bm25query(:query, 'search_chunks_bm25_idx')) < 0
+                  AND c.chunk_metadata @> CAST(:metadata_filter AS jsonb)
+                ORDER BY (c.content <@> to_bm25query(:query, 'search_chunks_bm25_idx')) ASC
+                LIMIT :candidate_limit
+                """
+            ),
+            {"metadata_filter": json.dumps(metadata_filter)},
+        )
+    return (
+        text(
+            """
+            SELECT
+                c.id::text AS chunk_id,
+                (-1 * (c.content <@> to_bm25query(:query, 'search_chunks_bm25_idx'))) AS score
+            FROM search_chunks AS c
+            WHERE (c.content <@> to_bm25query(:query, 'search_chunks_bm25_idx')) < 0
+            ORDER BY (c.content <@> to_bm25query(:query, 'search_chunks_bm25_idx')) ASC
+            LIMIT :candidate_limit
+            """
+        ),
+        {},
+    )
+
+
+def _build_vector_statement(metadata_filter: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    if metadata_filter:
+        return (
+            text(
+                """
+                SELECT
+                    c.id::text AS chunk_id,
+                    (1 - (c.embedding <=> CAST(:embedding AS vector))) AS score
+                FROM search_chunks AS c
+                WHERE c.embedding IS NOT NULL
+                  AND c.chunk_metadata @> CAST(:metadata_filter AS jsonb)
+                ORDER BY c.embedding <=> CAST(:embedding AS vector)
+                LIMIT :candidate_limit
+                """
+            ),
+            {"metadata_filter": json.dumps(metadata_filter)},
+        )
+    return (
+        text(
+            """
+            SELECT
+                c.id::text AS chunk_id,
+                (1 - (c.embedding <=> CAST(:embedding AS vector))) AS score
+            FROM search_chunks AS c
+            WHERE c.embedding IS NOT NULL
+            ORDER BY c.embedding <=> CAST(:embedding AS vector)
+            LIMIT :candidate_limit
+            """
+        ),
+        {},
+    )
+
+
+def _rank_rows(rows: Sequence[dict[str, Any]]) -> list[RankedResultRow]:
+    ranked_rows: list[RankedResultRow] = []
+    for rank, row in enumerate(rows, start=1):
+        ranked_rows.append(
+            RankedResultRow(
+                chunk_id=str(row["chunk_id"]),
+                score=float(row["score"]),
+                rank=rank,
+            )
+        )
+    return ranked_rows
+
+
+def _vector_literal(embedding: list[float]) -> str:
+    return "[" + ",".join(str(value) for value in embedding) + "]"
+
+
+def build_chunk_rows(
+    *,
+    document_id: str,
+    chunks: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Create row payloads for repository upsert calls."""
+    now = datetime.now(UTC)
+    return [
+        {
+            "id": UUID(str(chunk["id"])),
+            "document_id": UUID(document_id),
+            "chunk_index": int(chunk["chunk_index"]),
+            "content": str(chunk["content"]),
+            "embedding": chunk["embedding"],
+            "chunk_metadata": dict(chunk["chunk_metadata"]),
+            "created_at": now,
+            "updated_at": now,
+        }
+        for chunk in chunks
+    ]

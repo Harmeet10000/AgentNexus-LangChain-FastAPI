@@ -1,0 +1,4 @@
+interface:
+  display_name: "Documentation"
+  short_description: "Structure docs with Diataxis"
+  default_prompt: "Use $documentation to create or reorganize technical documentation with the Diataxis framework."

@@ -1,55 +1,121 @@
+"""DTOs for the search feature."""
+
+from __future__ import annotations
+
 from pydantic import BaseModel, ConfigDict, Field
 
-# Global config for response models to keep them lean
-fast_model_config = ConfigDict(from_attributes=True)
+from .constants import (
+    DEFAULT_PAGE_SIZE,
+    DEFAULT_RAG_TOKEN_BUDGET,
+    HYBRID_CANDIDATE_LIMIT,
+    MAX_PAGE_SIZE,
+)
+
+_STRICT_CONFIG = ConfigDict(extra="forbid")
+_READ_MODEL_CONFIG = ConfigDict(extra="forbid", frozen=True, from_attributes=True)
 
 
-class SearchRequest(BaseModel):
-    # Use strict=True to skip coercion logic
-    query: str = Field(strict=True, min_length=1)
-    # Large lists are slow; consider using np.ndarray if performance stalls
-    embedding: list[float] | None = None
-    limit: int = Field(default=20, ge=1, le=100)
-    offset: int = Field(default=0, ge=0)
+class SearchMetadataFilter(BaseModel):
+    """JSONB containment filter for search chunks."""
+
+    model_config = _STRICT_CONFIG
+
+    chunk_metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class SearchIngestRequest(BaseModel):
+    """Request body for async search ingestion."""
+
+    model_config = _STRICT_CONFIG
+
+    title: str = Field(min_length=1, max_length=500)
+    content: str = Field(min_length=1)
+    source_uri: str | None = Field(default=None, max_length=2048)
+    doc_metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class SearchIngestResponse(BaseModel):
+    """Queued or duplicate-ingest response."""
+
+    model_config = _READ_MODEL_CONFIG
+
+    document_id: str
+    task_id: str | None = None
+    status: str
+    duplicate: bool = False
+
+
+class SearchTaskStatusResponse(BaseModel):
+    """Normalized ingestion task status payload."""
+
+    model_config = _READ_MODEL_CONFIG
+
+    task_id: str
+    status: str
+    document_id: str | None = None
+    result: dict[str, object] | None = None
+    error: str | None = None
+
+
+class HybridSearchRequest(BaseModel):
+    """Hybrid retrieval request."""
+
+    model_config = _STRICT_CONFIG
+
+    query: str = Field(min_length=1)
+    limit: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE)
+    candidate_limit: int = Field(default=HYBRID_CANDIDATE_LIMIT, ge=1, le=200)
+    metadata_filter: SearchMetadataFilter = Field(default_factory=SearchMetadataFilter)
+    bypass_cache: bool = False
 
 
 class SearchResultItem(BaseModel):
-    model_config = fast_model_config
-    id: int
-    title: str
-    content: str
-    combined_score: float | None = None
+    """Ranked hybrid search hit."""
 
+    model_config = _READ_MODEL_CONFIG
 
-class SearchResponse(BaseModel):
-    model_config = fast_model_config
-    items: list[SearchResultItem]
-    has_more: bool
-
-
-class DocumentVectorCreate(BaseModel):
-    # Fixed length strings are slightly faster to validate
-    user_id: str = Field(min_length=1, max_length=100)
-    document_id: str = Field(min_length=1, max_length=100)
-    title: str = Field(min_length=1, max_length=500)
-    content: str
-    embedding: list[float] | None = None
-    vector_id: str | None = Field(default=None, max_length=100)
-    metadata: dict | None = None
-
-
-class DocumentVectorResponse(BaseModel):
-    model_config = fast_model_config
-    id: int
-    user_id: str
+    chunk_id: str
     document_id: str
     title: str
     content: str
-    vector_id: str | None
-    metadata: dict | None = Field(alias="meta_data", default=None)
+    chunk_index: int
+    chunk_metadata: dict[str, object]
+    score: float
+    rank: int
 
 
-class AutocompleteResponse(BaseModel):
-    suggestions: list[str] = Field(
-        description="List of suggested titles for autocomplete"
-    )
+class SearchResponse(BaseModel):
+    """Hybrid search response."""
+
+    model_config = _READ_MODEL_CONFIG
+
+    items: list[SearchResultItem]
+    cache_hit: bool = False
+
+
+class RagContextSectionResponse(BaseModel):
+    """Ordered context section for RAG consumers."""
+
+    model_config = _READ_MODEL_CONFIG
+
+    document_id: str
+    title: str
+    content: str
+    chunk_indices: list[int]
+    chunk_metadata: dict[str, object]
+
+
+class RagSearchRequest(HybridSearchRequest):
+    """Hybrid retrieval plus RAG context assembly request."""
+
+    max_tokens: int = Field(default=DEFAULT_RAG_TOKEN_BUDGET, ge=1, le=20_000)
+
+
+class RagSearchResponse(BaseModel):
+    """Hybrid hits plus assembled RAG context."""
+
+    model_config = _READ_MODEL_CONFIG
+
+    items: list[SearchResultItem]
+    context: list[RagContextSectionResponse]
+    cache_hit: bool = False

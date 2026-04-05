@@ -131,7 +131,8 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 147. make a plan/guideline for using design patterns based on different needs and when and when not to use it.    DONE
 60. Batch uses asyncio.gather with a semaphore but no queue   DONE
 47. check whether i will need to use sandboxed execution environemnt in future     DONE
-117. for AI gateway checkout pydantic gateway         DELAYED
+42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro      DONE
+117. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 6. set up performance tests 
 46. use CacheBackedEmbeddings fore reusing embeddings
 48. check the page https://docs.langchain.com/langsmith/deployments#
@@ -141,7 +142,6 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 94. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through texr, PDF and more?    DELAYED
 86. add tests that suits the project
 90. discover RAGFlow if or if not to use it
-42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro
 59. No skill composition
 Skills are flat callables. Theres no way to chain skills (skill A output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
 98. check how can Port & Adapter/strategy & factory can help 
@@ -171,7 +171,7 @@ Skills are flat callables. Theres no way to chain skills (skill A output feeds s
 61. see docassemble, fpdf2, python-docx and other libraries for generating final PDFs/docs
 131. what is annotated, 
 125. use Call a subgraph inside a node for Open Deep Research
-137. what is ToolNode, ToolRuntime, conditional_routing, chatpromptTemplate, messagePlaceholder, agentExceutor, context_schema, MessagesState, in langgraph, how does context differ from store , make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
+137. what is annotations, ToolNode, ToolRuntime, conditional_routing, chatpromptTemplate, messagePlaceholder, agentExceutor, context_schema, MessagesState, in langgraph, how does context differ from store , make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
 132. how will SystemMessage, HumanMessage, AIMessage, ToolMessage look like in a create_agent and inside langgraph and when in node is passing to another
 135. see before/after agent/model wrap_model_call wrap_tool_call 
 62.   
