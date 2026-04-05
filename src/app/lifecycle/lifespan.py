@@ -21,9 +21,9 @@ from app.connections import (
     init_neo4j,
 )
 from app.features.auth import TokenAuditLog, User
+from app.features.auth.websocket_security import build_websocket_security_service
 from app.middleware import initialize_fastapi_guard
 from app.shared.mcp import get_mcp_client_manager
-from app.shared.services.websocket_security import build_websocket_security_service
 from app.utils import logger
 
 

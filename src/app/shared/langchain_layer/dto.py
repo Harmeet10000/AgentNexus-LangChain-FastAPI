@@ -6,9 +6,12 @@ Use these in FastAPI route handlers for validated, documented APIs.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from typing import Any
 
 OutputT = TypeVar("OutputT")
 

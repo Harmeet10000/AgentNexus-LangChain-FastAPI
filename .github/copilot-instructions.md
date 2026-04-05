@@ -112,7 +112,7 @@ These tools are required for local development and CI. Keep this section aligned
 - Keep router handlers thin; push business logic into the service layer.
 - Repository layer handles persistence only; no HTTP concerns.
 - Shared clients/resources must be initialized in FastAPI lifespan and stored in `app.state`.
-- Connection dependencies must read clients from `request.app.state` as the single source of truth.
+- Connection dependencies must read clients from `connection.app.state` as the single source of truth.
 - Feature dependencies must compose repositories and services using `Depends(...)`, not globals.
 - Prefer composition over inheritance. Reuse behavior by combining small collaborators, protocols, and helper functions instead of building deep or fragile class hierarchies.
 - Prefer functions over classes when no instance state is required. Do not introduce classes that only group behavior without member variables.
@@ -125,7 +125,7 @@ These tools are required for local development and CI. Keep this section aligned
 - Pass dependencies explicitly as function arguments.
 - Do not create custom decorators only to inject config, clients, or runtime dependencies.
 - When the same group of related dependencies is passed through multiple high-level call layers, prefer a small explicit context object instead of repeating long parameter lists.
-- Context objects should be narrow and intentional. Prefer a `dataclass` for app/task/request context containers that group shared runtime services or metadata.
+- Context objects should be narrow and intentional. Prefer a `Pydantic` model for app/task/request context containers that group shared runtime services or metadata.
 - Use context objects mainly at orchestration boundaries and other high-level functions to keep signatures readable. Low-level helpers and utility functions should still receive only the specific arguments they need.
 - Do not turn context objects into god objects. Keep them focused on conceptually related configuration, runtime state, and shared dependencies.
 - Context objects are still explicit dependency passing, not hidden injection. Access dependencies through the context only where the grouped shape improves clarity.
@@ -148,7 +148,7 @@ These tools are required for local development and CI. Keep this section aligned
 
 - Use FastAPI dependencies when logic requires external resources, shared cross-endpoint behavior, cleanup via `yield`, sub-dependency composition, or request-derived inputs that do not belong in pure data validation.
 - For dependencies with cleanup, use `yield`. Keep the default request scope when cleanup should happen after the response is sent; use `scope="function"` only when cleanup must finish before the response is sent.
-- Avoid FastAPI class dependencies when a regular function dependency can return the needed instance more explicitly. Prefer function dependencies plus small returned objects or dataclasses.
+- Avoid FastAPI class dependencies when a regular function dependency can return the needed instance more explicitly. Prefer function dependencies plus small returned objects or pydantic models.
 - Lifespan wiring belongs in `src/app/lifecycle/lifespan.py`.
 
 ### Streaming
@@ -220,19 +220,13 @@ These tools are required for local development and CI. Keep this section aligned
 - For hot-path, short-lived in-memory containers that do not need full `BaseModel` behavior, prefer a slotted `dataclass` or another lighter typed structure.
 - When validating or serializing large collections with Pydantic, do not call `Model.model_validate(...)` repeatedly in a loop. Prefer a single `TypeAdapter` for the full collection shape, for example `TypeAdapter(list[UserResponse]).validate_python(users)`, to reduce per-item overhead.
 
-## Deployment and Runtime Performance Rules
-
-- Treat Gunicorn `--preload` as a deployment optimization for multi-worker Linux containers: preload mostly immutable app state in the master process before forking so workers can share memory through Copy-on-Write.
-- Do not rely on Gunicorn `--preload` for mutable caches, per-worker state, or startup code with side effects that should run independently in each worker.
-- Treat `jemalloc` as an infrastructure/runtime optimization to mention during memory tuning, especially for multi-worker API containers. It is not a Python code pattern and should not drive application design.
 
 ## Logging, Errors, and Responses
 
 - Use structured logging consistently.
 - Keep logs contextual and machine-parseable.
 - Use typed exceptions from `src/app/utils/exceptions.py`.
-- Keep response and error envelopes uniform.
-- Global exception handling belongs in `src/app/middleware/global_exception_handler.py`.
+
 
 ## Reference Map
 
@@ -250,4 +244,3 @@ Use these files as the first place to look before inventing a new pattern.
 - Use Context7 MCP server when docs are version-sensitive, unclear, or likely changed.
 - Ask for agent skill when required and available in `.github/skills` and `.github/agents`.
 - Keep new guidance aligned with actual installed tools and repo layout.
-- Any code example should go in `src/app/examples` folder.

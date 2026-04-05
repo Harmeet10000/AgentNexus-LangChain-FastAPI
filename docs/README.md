@@ -381,3 +381,13 @@ Comments
 Reviewer role
 
 This becomes training + audit data.
+
+
+# Context Window Occupier
+system prompt  2-5K token
+Bootstrap files  varies ~20K token
+memory files     varies grows over time
+skills          varies per skill * count 
+Conversation history     # 1 cost driver
+tool output in history   # silent killer upto 180K chars
+compaction history     1-3K tokens

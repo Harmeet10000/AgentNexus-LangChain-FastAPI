@@ -6,13 +6,16 @@ Must be imported before any LangChain/LangGraph objects are created.
 from __future__ import annotations
 
 import time
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING
 
 from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
 from langsmith import Client
 
 from app.config import get_settings
+
+if TYPE_CHECKING:
+    from typing import Any
+    from uuid import UUID
 
 
 def configure_langsmith() -> Client | None:

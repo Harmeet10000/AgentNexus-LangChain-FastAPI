@@ -74,6 +74,14 @@ Sixth: The `decay_score` formula is borrowed from recommendation systems. For le
 >
 > **The MemoryScope architecture has a blind spot at the Neo4j subgraph level**: `_parse()` in `Neo4jSubgraphExpander` filters nodes by `entity_type` property, but Graphiti doesn't write an `entity_type` property to its Neo4j nodes by default — it writes its own internal schema properties. The `entity_type` check will evaluate to `False` for every node Graphiti created (because the property doesn't exist), and the condition `if entity_type and not scope.allows_entity_type(entity_type)` will short-circuit on the empty string check — meaning `entity_type = ""` passes through the scope filter unblocked. Every node Graphiti writes will bypass MemoryScope filtering entirely. The fix: map Graphiti node labels (which it DOES set, like `Entity`, `EpisodicNode`) to your entity types in the `_parse()` method using the `node_labels` field. Build a lookup: `{'EpisodicNode': 'CLAUSE', 'Entity': 'ORG'}` and use that for scope checking instead of the missing `entity_type` property.
 
+# copilot instructions
+## Deployment and Runtime Performance Rules
+
+- Treat Gunicorn `--preload` as a deployment optimization for multi-worker Linux containers: preload mostly immutable app state in the master process before forking so workers can share memory through Copy-on-Write.
+- Do not rely on Gunicorn `--preload` for mutable caches, per-worker state, or startup code with side effects that should run independently in each worker.
+- Treat `jemalloc` as an infrastructure/runtime optimization to mention during memory tuning, especially for multi-worker API containers. It is not a Python code pattern and should not drive application design.
+
+
 # Memory Optimization Cheatsheet
 
 This file is a quick reference for memory-focused optimization decisions in this project.
