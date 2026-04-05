@@ -1,0 +1,4 @@
+interface:
+  display_name: "PG Text Search"
+  short_description: "Help with pg_textsearch BM25 workflows"
+  default_prompt: "Use $pg-textsearch-skill when working on pg_textsearch installation, BM25 indexes, ranked queries, filtering, or hybrid search in this repository."

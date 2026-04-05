@@ -342,203 +342,120 @@ LIMIT 10
 [set-command]: https://www.postgresql.org/docs/current/sql-set.html
 [vector-search-indexing]: /ai/latest/key-vector-database-concepts-for-understanding-pgvector/#vector-search-indexing-approximate-nearest-neighbor-search
 
-pgvectorscale
-pgvectorscale builds on pgvector with higher performance embedding search and cost-efficient storage for AI applications.
-Discord Try Timescale for free
+## pgvectorscale
 
-pgvectorscale complements pgvector, the open-source vector data extension for PostgreSQL, and introduces the following key innovations for pgvector data:
+`pgvectorscale` builds on `pgvector` with higher-performance vector search and additional `diskann` capabilities.
 
-A new index type called StreamingDiskANN, inspired by the DiskANN algorithm, based on research from Microsoft.
-Statistical Binary Quantization: developed by Timescale researchers, This compression method improves on standard Binary Quantization.
-Label-based filtered vector search: based on Microsoft's Filtered DiskANN research, this allows you to combine vector similarity search with label filtering for more precise and efficient results.
-On a benchmark dataset of 50 million Cohere embeddings with 768 dimensions each, PostgreSQL with pgvector and pgvectorscale achieves 28x lower p95 latency and 16x higher query throughput compared to Pinecone's storage optimized (s1) index for approximate nearest neighbor queries at 99% recall, all at 75% less cost when self-hosted on AWS EC2.
+The earlier sections in this file already cover:
+- extension setup
+- base embedding-table design
+- canonical similarity queries
+- StreamingDiskANN, HNSW, and ivfflat index creation
+- standard StreamingDiskANN build-time and query-time parameters
 
-Benchmarks
+This section keeps the additional `pgvectorscale` details that are not already covered above.
 
-To learn more about the performance impact of pgvectorscale, and details about benchmark methodology and results, see the pgvector vs Pinecone comparison blog post.
+### Key additions
 
-In contrast to pgvector, which is written in C, pgvectorscale is developed in Rust using the PGRX framework, offering the PostgreSQL community a new avenue for contributing to vector support.
+- `diskann` is inspired by Microsoft's DiskANN research.
+- `pgvectorscale` adds SBQ-based compression for memory-optimized storage layouts.
+- It supports label-aware filtered vector search using `smallint[]` labels in the index definition.
+- It is implemented in Rust with PGRX.
 
-Application developers or DBAs can use pgvectorscale with their PostgreSQL databases.
+### Install notes
 
-Install pgvectorscale
-Get started using pgvectorscale
-If you want to contribute to this extension, see how to build pgvectorscale from source in a developer environment and our testing guide.
+For normal SQL setup, use:
 
-For production vector workloads, get private beta access to vector-optimized databases with pgvector and pgvectorscale on Timescale. Sign up here for priority access.
-
-Installation
-The fastest ways to run PostgreSQL with pgvectorscale are:
-
-Using a pre-built Docker container
-Installing from source
-Enable pgvectorscale in a Timescale Cloud service
-Using a pre-built Docker container
-Run the TimescaleDB Docker image.
-
-Connect to your database:
-
-psql -d "postgres://<username>:<password>@<host>:<port>/<database-name>"
-Create the pgvectorscale extension:
-
+```sql
 CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
-The CASCADE automatically installs pgvector.
+```
 
-Installing from source
-You can install pgvectorscale from source and install it in an existing PostgreSQL server
+`CASCADE` installs `pgvector` automatically when required.
 
-Warning
+For source builds, the original source material included a Rust and `cargo-pgrx` workflow. Keep that workflow only when the task is explicitly about building the extension locally from source.
 
-Building pgvectorscale on macOS X86 (Intel) machines is currently not supported due to an open issue. As alternatives, you can:
+### Filtered vector search
 
-Use an ARM-based Mac.
-Build using Linux.
-Use our pre-built Docker containers.
-We welcome community contributions to resolve this limitation. If you're interested in helping, please check the issue for details.
+`pgvectorscale` supports two filtering modes:
 
-Compile and install the extension
+- Label-based filtering in the `diskann` index for better performance
+- Arbitrary `WHERE` clause filtering as post-filtering after vector search
 
-# install rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+Label-based filtering is the `pgvectorscale`-specific feature worth preserving here.
 
-# download pgvectorscale
-cd /tmp
-git clone --branch <version> https://github.com/timescale/pgvectorscale
-cd pgvectorscale/pgvectorscale
-# install cargo-pgrx with the same version as pgrx
-cargo install --locked cargo-pgrx --version $(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "pgrx") | .version')
-cargo pgrx init --pg18 pg_config
-# build and install pgvectorscale
-cargo pgrx install --release
-You can also take a look at our documentation for extension developers for more complete instructions.
+#### Label-based filtering with `diskann`
 
-Connect to your database:
+Create a table with an embedding column and a label array:
 
-psql -d "postgres://<username>:<password>@<host>:<port>/<database-name>"
-Ensure the pgvector extension is available:
-
-SELECT * FROM pg_available_extensions WHERE name = 'vector';
-If pgvector is not available, install it using the pgvector installation instructions.
-
-Create the pgvectorscale extension:
-
-CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
-The CASCADE automatically installs pgvector.
-
-Enable pgvectorscale in a Timescale Cloud service
-Note: the instructions below are for Timescale's standard compute instance. For production vector workloads, we're offering private beta access to vector-optimized databases with pgvector and pgvectorscale on Timescale. Sign up here for priority access.
-
-To enable pgvectorscale:
-
-Create a new Timescale Service.
-
-If you want to use an existing service, pgvectorscale is added as an available extension on the first maintenance window after the pgvectorscale release date.
-
-Connect to your Timescale service:
-
-psql -d "postgres://<username>:<password>@<host>:<port>/<database-name>"
-Create the pgvectorscale extension:
-
-CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
-The CASCADE automatically installs pgvector.
-
-Get started with pgvectorscale
-Create a table with an embedding column. For example:
-
-CREATE TABLE IF NOT EXISTS document_embedding  (
-    id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
-    metadata JSONB,
-    contents TEXT,
-    embedding VECTOR(1536)
-)
-Populate the table.
-
-For more information, see the pgvector instructions and list of clients.
-
-Create a StreamingDiskANN index on the embedding column:
-
-CREATE INDEX document_embedding_idx ON document_embedding
-USING diskann (embedding vector_cosine_ops);
-Find the 10 closest embeddings using the index.
-
-SELECT *
-FROM document_embedding
-ORDER BY embedding <=> $1
-LIMIT 10;
-Note: pgvectorscale currently supports: cosine distance (<=>) queries, for indices created with vector_cosine_ops; L2 distance (<->) queries, for indices created with vector_l2_ops; and inner product (<#>) queries, for indices created with vector_ip_ops. This is the same syntax used by pgvector. If you would like additional distance types, create an issue. (Note: inner product indices are not compatible with plain storage.)
-
-Filtered Vector Search
-pgvectorscale supports combining vector similarity search with metadata filtering. There are two basic kinds of filtering, which can be combined in a single query:
-
-Label-based filtering with the diskann index: This provides optimized performance for filtering by labels.
-Arbitrary WHERE clause filtering: This uses post-filtering after the vector search.
-The label-based filtering implementation is based on the Filtered DiskANN approach developed by Microsoft researchers, which enables efficient filtered vector search while maintaining high recall.
-
-The post-filtering implementation, while slower, is streaming and correct, ensuring accurate results without requiring the entire result set to be loaded into memory.
-
-Label-based Filtering with diskann
-For optimal performance with label filtering, you must specify the label column directly in the index creation:
-
-Create a table with an embedding column and a labels array:
-
+```sql
 CREATE TABLE documents (
     id SERIAL PRIMARY KEY,
     embedding VECTOR(1536),
-    labels SMALLINT[],  -- Array of category labels
+    labels SMALLINT[],
     status TEXT,
     created_at TIMESTAMPTZ
 );
-Create a StreamingDiskANN index on the embedding column, including the labels column:
+```
 
-CREATE INDEX ON documents USING diskann (embedding vector_cosine_ops, labels);
-Note: Label values must be within the PostgreSQL smallint range (-32768 to 32767). Using smallint[] for labels ensures that PostgreSQL's type system will automatically enforce these bounds.
+Create the index with the label column included:
 
-pgvectorscale includes an implementation of the && overlap operator for smallint[] arrays, which is used for efficient label-based filtering.
+```sql
+CREATE INDEX ON documents
+USING diskann (embedding vector_cosine_ops, labels);
+```
 
-Perform label-filtered vector searches using the && operator (array overlap):
+Use the `&&` overlap operator for label filtering:
 
--- Find similar documents with specific labels
-SELECT * FROM documents
-WHERE labels && ARRAY[1, 3]  -- Documents with label 1 OR 3
+```sql
+SELECT *
+FROM documents
+WHERE labels && ARRAY[1, 3]
 ORDER BY embedding <=> '[...]'
 LIMIT 10;
-The index directly supports this type of filtering, providing significantly lower latency results compared to post-filtering.
+```
 
-Giving Semantic Meaning to Labels
-While the labels must be stored as integers in the array for the index to work efficiently, you can give them semantic meaning by relating them to a separate labels table:
+Notes:
+- Label values must fit in PostgreSQL `smallint` range.
+- `smallint[]` is the intended type for indexed labels.
+- `pgvectorscale` implements overlap support for `smallint[]` label filtering.
 
-Create a labels table with meaningful descriptions:
+#### Giving semantic meaning to labels
 
+Keep integer labels in the indexed table for performance, and map them to semantic values in a separate lookup table:
+
+```sql
 CREATE TABLE label_definitions (
     id INTEGER PRIMARY KEY,
     name TEXT,
     description TEXT,
-    attributes JSONB  -- Can store additional metadata about the label
+    attributes JSONB
 );
+```
 
--- Insert some label definitions
+Example inserts:
+
+```sql
 INSERT INTO label_definitions (id, name, description, attributes) VALUES
 (1, 'science', 'Scientific content', '{"domain": "academic", "confidence": 0.95}'),
 (2, 'technology', 'Technology-related content', '{"domain": "technical", "confidence": 0.92}'),
 (3, 'business', 'Business and finance content', '{"domain": "commercial", "confidence": 0.88}');
-When inserting documents, use the appropriate label IDs:
+```
 
--- Insert a document with science and technology labels
-INSERT INTO documents (embedding, labels)
-VALUES ('[...]', ARRAY[1, 2]);
-When querying, you can join with the labels table to work with meaningful names:
+Query with joined label names:
 
--- Find similar science documents and include label information
-SELECT d.*, array_agg(l.name) as label_names
+```sql
+SELECT d.*, array_agg(l.name) AS label_names
 FROM documents d
 JOIN label_definitions l ON l.id = ANY(d.labels)
-WHERE d.labels && ARRAY[1]  -- Science label
+WHERE d.labels && ARRAY[1]
 GROUP BY d.id, d.embedding, d.labels, d.status, d.created_at
 ORDER BY d.embedding <=> '[...]'
 LIMIT 10;
-You can also convert between label names and IDs when filtering:
+```
 
--- Find documents with specific label names
+Or convert names to ids during filtering:
+
+```sql
 SELECT d.*
 FROM documents d
 WHERE d.labels && (
@@ -548,117 +465,76 @@ WHERE d.labels && (
 )
 ORDER BY d.embedding <=> '[...]'
 LIMIT 10;
-This approach gives you the performance benefits of integer-based label filtering while still allowing you to work with semantically meaningful labels in your application.
+```
 
-Arbitrary WHERE Clause Filtering
-You can also use any PostgreSQL WHERE clause with vector search, but these conditions will be applied as post-filtering:
+#### Arbitrary `WHERE` clause filtering
 
--- Find similar documents with specific status and date range
-SELECT * FROM documents
-WHERE status = 'active' AND created_at > '2024-01-01'
+You can still use standard SQL filters, but they are applied after vector search:
+
+```sql
+SELECT *
+FROM documents
+WHERE status = 'active'
+  AND created_at > '2024-01-01'
 ORDER BY embedding <=> '[...]'
 LIMIT 10;
-For these arbitrary conditions, the vector search happens first, and then the WHERE conditions are applied to the results. For best performance with frequently used filters, consider using the label-based approach described above.
+```
 
-Tuning
-The StreamingDiskANN index comes with smart defaults but also the ability to customize its behavior. There are two types of parameters: index build-time parameters that are specified when an index is created and query-time parameters that can be tuned when querying an index.
+For frequently used filters, prefer label-based filtering when it matches the access pattern.
 
-We suggest setting the index build-time paramers for major changes to index operations while query-time parameters can be used to tune the accuracy/performance tradeoff for individual queries.
+### Parallel `diskann` index builds
 
-We expect most people to tune the query-time parameters (if any) and leave the index build time parameters set to default.
+`pgvectorscale` supports parallel index builds for larger datasets.
 
-StreamingDiskANN index build-time parameters
-The StreamingDiskANN index build process can be memory-intensive. You may need to increase the maintenance_work_mem parameter to improve build performance. For example:
+| Parameter name | Description | Default value |
+|---|---|---|
+| `diskann.parallel_flush_interval` | Fraction of vectors processed before flushing neighbor cache in parallel builds | `0.1` |
+| `diskann.parallel_initial_start_nodes_count` | Initial start nodes processed before parallel workers begin | `1024` |
+| `diskann.min_vectors_for_parallel_build` | Minimum vector count required to enable parallel building | `65536` |
+| `diskann.force_parallel_workers` | Force a fixed worker count, `-1` for automatic | `-1` |
 
-SET maintenance_work_mem = '2GB';
-This parameter controls the maximum amount of memory to be used by maintenance operations, including index builds. The default value is typically 64MB, which may be too low for building StreamingDiskANN indexes on large datasets.
-
-These parameters can be set when an index is created.
-
-Parameter name	Description	Default value
-storage_layout	memory_optimized which uses SBQ to compress vector data or plain which stores data uncompressed	memory_optimized
-num_neighbors	Sets the maximum number of neighbors per node. Higher values increase accuracy but make the graph traversal slower.	50
-search_list_size	This is the S parameter used in the greedy search algorithm used during construction. Higher values improve graph quality at the cost of slower index builds.	100
-max_alpha	Is the alpha parameter in the algorithm. Higher values improve graph quality at the cost of slower index builds.	1.2
-num_dimensions	The number of dimensions to index. By default, all dimensions are indexed. But you can also index less dimensions to make use of Matryoshka embeddings	0 (all dimensions)
-num_bits_per_dimension	Number of bits used to encode each dimension when using SBQ	2 for less than 900 dimensions, 1 otherwise
-An example of how to set the num_neighbors parameter is:
-
-CREATE INDEX document_embedding_idx ON document_embedding
-USING diskann (embedding) WITH(num_neighbors=50);
-An example of creating an index with label-based filtering:
-
-CREATE INDEX document_embedding_idx ON document_embedding
-USING diskann (embedding vector_cosine_ops, labels);
-Parallel Index Build Parameters
-pgvectorscale supports parallel index building to improve performance on large datasets. These parameters control parallel build behavior:
-
-Parameter name	Description	Default value
-diskann.parallel_flush_interval	The fraction of total vectors (0.0-1.0) processed before flushing neighbor cache in parallel builds	0.1
-diskann.parallel_initial_start_nodes_count	The number of initial start nodes to process before starting parallel workers	1024
-diskann.min_vectors_for_parallel_build	Minimum number of vectors required to enable parallel building	65536
-diskann.force_parallel_workers	Force a specific number of parallel workers for index builds (-1 for automatic)	-1
 Parallel building is automatically enabled when:
+- the feature is compiled in
+- the table has no labels
+- SBQ compression storage is used
+- the table meets `diskann.min_vectors_for_parallel_build`
 
-The feature is compiled in (enabled by default)
-The table has no labels (label-based filtering not yet supported in parallel)
-Using SBQ compression storage layout
-The number of vectors meets the min_vectors_for_parallel_build threshold
-You can set these parameters using SET before creating an index:
+Example:
 
--- Enable parallel building for smaller datasets
+```sql
 SET diskann.min_vectors_for_parallel_build = 10000;
-
--- Use 4 parallel workers regardless of PostgreSQL's automatic determination
 SET diskann.force_parallel_workers = 4;
-
--- Adjust cache flushing frequency for memory usage (flush after processing 5% of vectors)
 SET diskann.parallel_flush_interval = 0.05;
 
 CREATE INDEX ON my_table USING diskann (embedding vector_cosine_ops);
-StreamingDiskANN query-time parameters
-You can also set two parameters to control the accuracy vs. query speed trade-off at query time. We suggest adjusting diskann.query_rescore to fine-tune accuracy.
+```
 
-Parameter name	Description	Default value
-diskann.query_search_list_size	The number of additional candidates considered during the graph search.	100
-diskann.query_rescore	The number of elements rescored (0 to disable rescoring)	50
-You can set the value by using SET before executing a query. For example:
+### Null handling
 
-SET diskann.query_rescore = 400;
-Note the SET command applies to the entire session (database connection) from the point of execution. You can use a transaction-local variant using LOCAL which will be reset after the end of the transaction:
+- Null vectors are not indexed.
+- Null labels are treated as empty arrays.
+- Null values inside label arrays are ignored.
 
-BEGIN;
-SET LOCAL diskann.query_search_list_size= 10;
-SELECT * FROM document_embedding ORDER BY embedding <=> $1 LIMIT 10
-COMMIT;
-Null Value Handling
-Null vectors are not indexed
-Null labels are treated as empty arrays
-Null values in label arrays are ignored
-ORDER BY vector distance
-pgvectorscale's diskann index uses relaxed ordering which allows results to be slightly out of order by distance. This is analogous to using iterative scan with relaxed ordering with pgvector's ivfflat or hnsw indexes.
+### Relaxed ordering
 
-If you need strict ordering you can use a materialized CTE:
+`diskann` uses relaxed ordering, so results can be slightly out of distance order.
 
+If strict ordering is required, re-order the limited result set in a materialized CTE:
+
+```sql
 WITH relaxed_results AS MATERIALIZED (
     SELECT id, embedding <=> '[1,2,3]' AS distance
     FROM items
     WHERE category_id = 123
     ORDER BY distance
     LIMIT 5
-) SELECT * FROM relaxed_results ORDER BY distance;
-Index on an UNLOGGED table
-Creating an index on an UNLOGGED table is currently not supported. Trying will yield the error:
+)
+SELECT *
+FROM relaxed_results
+ORDER BY distance;
+```
 
-ERROR:  ambuildempty: not yet implemented
-Get involved
-pgvectorscale is still at an early stage. Now is a great time to help shape the direction of this project; we are currently deciding priorities. Have a look at the list of features we're thinking of working on. Feel free to comment, expand the list, or hop on the Discussions forum.
+### Limitations
 
-About Timescale
-Timescale is a PostgreSQL cloud company. To learn more visit the timescale.com.
-
-Timescale Cloud is a high-performance, developer focused, cloud platform that provides PostgreSQL services for the most demanding AI, time-series, analytics, and event workloads. Timescale Cloud is ideal for production applications and provides high availability, streaming backups, upgrades over time, roles and permissions, and great security.
-
-About
-Postgres extension for vector search (DiskANN), complements pgvector for performance and scale. Postgres OSS licensed.
-
+- Creating a `diskann` index on an `UNLOGGED` table is not currently supported.
+- Inner-product indexes are not compatible with plain storage.
