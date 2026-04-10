@@ -4,8 +4,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path, status
 
-from app.features.search.dependencies import SearchServiceDep
-from app.features.search.dto import (
+from app.shared.response_type import APIResponse
+from app.utils import http_response
+
+from .dependencies import SearchServiceDep
+from .dto import (
     HybridSearchRequest,
     RagSearchRequest,
     RagSearchResponse,
@@ -14,8 +17,6 @@ from app.features.search.dto import (
     SearchResponse,
     SearchTaskStatusResponse,
 )
-from app.shared.response_type import APIResponse
-from app.utils import http_response
 
 router = APIRouter(prefix="/search", tags=["search"])
 

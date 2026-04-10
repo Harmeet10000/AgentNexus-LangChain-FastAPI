@@ -21,19 +21,89 @@ You are building a **legal reasoning system**, so your schema must encode *oblig
 
 ## 🔷 Tables (Postgres, with graph semantics)
 
-### 1. Entities
-
-```sql
-CREATE TABLE entities (
-    id UUID PRIMARY KEY,
-    type TEXT CHECK (type IN ('PERSON', 'ORG', 'CLAUSE', 'CONTRACT', 'OBLIGATION')),
-    name TEXT,
-    normalized_name TEXT,
-    metadata JSONB,
-    created_at TIMESTAMP DEFAULT NOW(),
+ contracts
+CREATE TABLE contracts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title TEXT,
+    document_type TEXT,
+    jurisdiction TEXT DEFAULT 'India',
+    language TEXT DEFAULT 'en',
+    created_at TIMESTAMP DEFAULT now()
+);
+contract_versions
+CREATE TABLE contract_versions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    contract_id UUID REFERENCES contracts(id),
+    version_no INT,
+    raw_file_path TEXT,
+    created_at TIMESTAMP DEFAULT now()
+);
+clauses
+CREATE TABLE clauses (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    contract_version_id UUID REFERENCES contract_versions(id),
+    clause_index INT,
+    clause_type TEXT,
+    text TEXT,
     confidence FLOAT
 );
-```
+entities
+CREATE TABLE entities (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clause_id UUID REFERENCES clauses(id),
+    entity_type TEXT,
+    raw_value TEXT,
+    normalized_value TEXT,
+    confidence FLOAT
+);
+risks
+CREATE TABLE risks (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clause_id UUID REFERENCES clauses(id),
+    risk_type TEXT,
+    severity TEXT,
+    explanation TEXT,
+    confidence FLOAT
+);
+human_reviews
+CREATE TABLE human_reviews (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    artifact_type TEXT,
+    artifact_id UUID,
+    reviewer_role TEXT,
+    decision TEXT,
+    comment TEXT,
+    created_at TIMESTAMP DEFAULT now()
+);
+1.3 Graph Memory (Explicit & Queryable)
+graph_nodes
+CREATE TABLE graph_nodes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    node_type TEXT,
+    payload JSONB
+);
+graph_edges
+CREATE TABLE graph_edges (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    from_node UUID REFERENCES graph_nodes(id),
+    to_node UUID REFERENCES graph_nodes(id),
+    relation_type TEXT,
+    confidence FLOAT
+);
+RISK_TYPES = [
+    "UNLIMITED_LIABILITY",
+    "ONE_SIDED_INDEMNITY",
+    "WEAK_TERMINATION_RIGHTS",
+    "UNFAVORABLE_JURISDICTION",
+    "AMBIGUOUS_PAYMENT_TERMS",
+    "NON_ENFORCEABLE_CLAUSE",
+]
+
+SEVERITY = ["LOW", "MEDIUM", "HIGH"]
+
+“Which obligations are triggered next month?”
+“Which clauses depend on which events?”
+“Which risks appear across contracts?”
 
 ---
 

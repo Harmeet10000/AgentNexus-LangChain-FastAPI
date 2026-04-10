@@ -132,11 +132,12 @@ Cache must include **tool context hash**, otherwise:
 **Storage:** Redis KV
 
 ### Stored:
-
-* `user_id`
-* `thread_id`
-* `correlation_id`
-* permissions
+Redis session store:
+    session:{user_id} → {
+        thread_id,
+        permissions,
+        active_run_id
+    }
 
 ---
 
@@ -188,7 +189,7 @@ The system is modeled as a **controlled cyclic workflow**, not a DAG.
 * Interpret intent via Action Schema
 * Route to:
 
-  * Planner
+  * Planner = Static data generator (one-shot).
   * Direct worker subgraph
   User: "Review NDA"
     ↓
@@ -269,6 +270,14 @@ Ingestion
 → Finalization
 → PersistMemory
 ```
+Extraction, Risk Analysis, Precedent Search, Knowledge extraction layer(will have Graphiti as Graph extraction of messy data. Use Graphiti to:     Extract:
+    clauses
+    obligations
+    parties
+    relationships
+    Build:
+    contract graph
+    entity relationships).
 
 ---
 
@@ -362,7 +371,7 @@ class State(TypedDict):
     intermediate_outputs: dict
     
     errors: list
-    status: str
+    status: str  # RUNNING | WAITING_HITL | FAILED | DONE
     
     user_id: str
     thread_id: str
@@ -374,6 +383,15 @@ class State(TypedDict):
     
     permissions: dict
 ```
+Began storing a structured version of agent context, which the agent used to assemble a compiled string prior to every LLM call:  
+const context = {
+    goal.   100 tokens
+    returnFormat,  200 tokens
+    warnings,      300 tokens
+    contextDump  #9k tokens
+}
+These changes increased the research agent’s accuracy metrics from 34% to reliably over 90%.
+
 
 ---
 
@@ -385,30 +403,14 @@ Before every LLM call:
 [ToolCallFilter]
 → [TokenLimiter]
 → [PromptBuilder]
-```
 
----
+    ToolCallFilter: Iterates through state["messages"] and explicitly removes all ToolCall and ToolMessage objects, replacing them with a synthesized, structured summary. This prevents the LLM from getting confused by its own past JSON outputs.
 
-### ToolCallFilter
+    Token Limiter: Truncates the remaining conversation using trim_messages(strategy="last", max_tokens=4000).
 
-* Removes tool messages
-* Replaces with structured summary
-
----
-
-### TokenLimiter
+    Prompt Builder: Assembles the final string from the structured context dump.
 
 ```
-trim_messages(strategy="last", max_tokens=4000)
-```
-
----
-
-### PromptBuilder
-
-* Structured context assembly
-* No raw concatenation
-
 ---
 
 ## 6.3 Long-Term Memory
@@ -441,42 +443,28 @@ LLM Output
 → Evaluator Node
 → Accept / Retry / Escalate
 ```
-
+wrap any non-deterministic operations (e.g., random number generation) or operations with side effects (e.g., file writes, API calls) inside tasks(LangGraph) to ensure that when a workflow is resumed, these operations are not repeated for the particular run, and instead their results are retrieved from the persistence layer. 
+ add this for async durable executions
+ graph.stream(
+    {"input": "test"},
+    durability="sync"
+)
+ use astream v2 in graph
 ---
 
-## 7.3 Tool Naming
-
-Strict naming convention:
-
-```
-extract_indemnity_clause_from_pdf
-```
-
+## BEST PRACTICES for tool calling:
+Provide detailed descriptions in the tool deﬁnition and system prompt. Use speciﬁc input/output schemas. Use semantic naming that matches the tool's function (eg multiplyNumbers instead of doStuﬀ)
+TOOL RULES                                                  
+  One responsibility per tool. No overlapping scopes.        
+  Bound all outputs. Never return raw API responses.         
+  Destructive ops = PermAsk. Read ops = PermAllow.          
+  Every tool must justify its context window cost.
+class ToolResult(BaseModel):
+    success: bool
+    data: dict
+    error: Optional[str]
+    metadata: dict
 ---
-
-## 7.4 Non-Deterministic Isolation
-
-Wrap in:
-
-```
-@task
-```
-
-Prevents re-execution on resume.
-
----
-
-## 7.5 Async Durable Execution
-
-```
-graph.stream(..., durability="sync")
-```
-
-Use:
-
-```
-astream v2
-```
 
 ---
 
@@ -490,6 +478,10 @@ astream v2
 Human-in-the-loop?
 
 ❌ No (unless OCR confidence < threshold → manual reupload)
+Output
+Raw text
+Layout map (page, clause, table)
+Confidence score
 ---
 
 ## 8.2 Structure Normalization
@@ -497,7 +489,12 @@ Human-in-the-loop?
 * Hybrid deterministic + LLM
 * Prevent cascading failures
 * Resolve headers, sections, annexures Link “Clause 7.2(b)” → actual node Normalize numbering styles
+Agent Type
 
+Rule-based + LLM hybrid
+
+Deterministic rules for structure
+LLM only for ambiguous cases
 ---
 
 ## 8.3 Clause Segmentation
@@ -509,6 +506,33 @@ Limitation of liability
 Arbitration
 Termination
 Governing law
+
+Agent Type
+
+Classifier Agent
+
+Fine-tuned or prompt-locked
+No free text generation
+Why this agent exists separately
+
+Clause boundaries must be stable across versions.
+
+Output
+Clause nodes (id, type, text)
+    ToolExecutorNode(action_type)
+    NOT separate agents.
+    Why?
+    Agents = expensive + unstable
+    Nodes = deterministic + composable
+    Parallelization: The Map-Reduce (Fan-Out/Fan-In) Pattern
+    Legal documents are dense. If your ClauseExtractionAgent tries to read a 100-page PDF sequentially, it will hit token limits and hallucinate.
+
+    The Improvement: Utilize LangGraph's Send API for dynamic parallel execution.
+
+    How it works: 1. A ChunkingNode splits the contract into sections (e.g., 10 sections).
+    2. Instead of returning a standard state update, the node yields [Send("extract_clause", {"text": chunk}) for chunk in chunks].
+    3. LangGraph dynamically spins up 10 parallel instances of your extraction agent.
+    4. A ReducerNode waits for all 10 to finish and merges their structured JSON outputs into a single, comprehensive risk profile in the master state. This cuts processing time by 90%.
 
 ---
 
@@ -573,7 +597,7 @@ Clause → overridden by → Clause
 Obligation → deadline → Date
 Storage
 PostgreSQL + graph extension (edges + nodes)
-This becomes your graph memory
+This becomes your graph  using Graphiti
 
 ---
 
@@ -595,7 +619,6 @@ Non-enforceable clauses (India-specific)
 Multi-step reasoning
 Uses retrieved statutes + precedents
 Must cite sources
-Why Deep Agent here
 
 Risk analysis requires:
 
@@ -643,8 +666,6 @@ Stores:
 * Reviewer metadata
 Legal liability
 Trust building
-Model improvement
-Interface
 Highlighted clauses
 Risk explanations
 Override buttons
@@ -727,7 +748,7 @@ State stored in:
 
 * PostgreSQL (checkpointer)
 * Message queues
-* Distributed storage
+* Cognee 
 
 ---
 
@@ -746,7 +767,10 @@ Restart → Replay state → Resume execution
 * LangSmith tracing per agent
 * Correlation ID tracking
 * Step-level replay debugging
-
+  Trace every LLM call: tokens, cost, duration.             
+  Trace every tool call: name, args, result size, error.    
+  Track compaction events. High frequency = design flaw.    
+  Export to structured logs. Don't rely on console. 
 ---
 
 # 13. Security Model
@@ -1458,29 +1482,6 @@ System must:
 
 * NOT maintain running processes
 * Fully rely on persisted state
-
----
-
-# **21. Observability & Telemetry**
-
-## 21.1 LLM Observability
-
-Track:
-
-* tokens
-* latency
-* cost
-
----
-
-## 21.2 Tool Observability
-
-Track:
-
-* tool name
-* arguments
-* result size
-* errors
 
 ---
 

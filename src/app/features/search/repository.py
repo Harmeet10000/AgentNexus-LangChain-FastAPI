@@ -10,14 +10,14 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 
-from app.features.search.constants import (
+from .constants import (
     DISKANN_QUERY_RESCORE,
     DISKANN_QUERY_SEARCH_LIST_SIZE,
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
-from app.features.search.fusion import RankedResultRow
-from app.features.search.model import SearchChunk, SearchDocument
-from app.features.search.rag import SearchChunkRecord
+from .fusion import RankedResultRow
+from .model import SearchChunk, SearchDocument
+from .rag import SearchChunkRecord
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

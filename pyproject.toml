@@ -120,6 +120,9 @@ dependencies = [
     "result>=0.17.0",
     "fpdf2>=2.8.7",
     "python-docx>=1.2.0",
+    "langchain-cisco-aidefense>=1.0.0",
+    "compact-middleware>=0.1.1",
+    "langchain-collapse>=0.1.1",
 ]
 
 [project.scripts]
@@ -137,11 +140,11 @@ dev = [
     "pytest>=8.2.2,<9.0.0",
     "pytest-asyncio>=0.23.7,<1.0.0",
     "pytest-cov>=5.0.0,<6.0.0",
-    "httpx>=0.27.0,<1.0.0", # bumped slightly; use latest stable
+    "httpx>=0.27.0,<1.0.0",          # bumped slightly; use latest stable
     "pre-commit==4.3.0",
     "bandit>=1.8.6,<2.0.0",
     "safety>=3.6.2,<4.0.0",
-    "ty>=0.0.1a25", # Astral type checker
+    "ty>=0.0.29",                    # Astral type checker
 ]
 test = [
     "pytest>=8.2.2,<9.0.0",
@@ -166,25 +169,21 @@ Repository = "https://github.com/Harmeet10000/langchain-fastapi-production"
 # UV – Dependency & Lockfile Management
 # ────────────────────────────────────────
 [tool.uv]
-default-groups = ["dev"]               # uv sync installs dev tools by default
+default-groups = ["dev"] # uv sync installs dev tools by default
 # Optional: add if you hit index issues
 # index-strategy = "first-index"
 
 # Your existing dependency-groups is perfect (modern replacement for old dev-dependencies)
 [dependency-groups]
-dev = [
-    "pre-commit>=4.3.0",
-    "ruff>=0.8.0",
-    "ty>=0.0.20",
-]
+dev = ["pre-commit>=4.3.0", "ruff>=0.15.10", "ty>=0.0.29"]
 
 # ────────────────────────────────────────
 # RUFF – Linting & Formatting
 # ────────────────────────────────────────
 [tool.ruff]
-line-length = 100                      # Modern choice; more room for chains
+line-length = 100        # Modern choice; more room for chains
 target-version = "py312"
-src = ["src"]                          # First-party code layout
+src = ["src"]            # First-party code layout
 
 # Exclude common directories (explicit for clarity)
 exclude = [
@@ -214,73 +213,117 @@ exclude = [
 
 [tool.ruff.lint]
 select = [
-    "E", "W",        # pycodestyle
-    "F",             # pyflakes (unused/undefined)
-    "I",             # isort
-    "UP",            # pyupgrade (modern syntax)
-    "B",             # bugbear (common bugs)
-    "A",             # builtins shadowing
-    "C4",            # comprehensions
-    "PERF",          # performance hints (hot paths)
-    "TRY",           # tryceratops (exceptions in async)
-    "ASYNC",         # async misuse (critical!)
-    "RUF",           # ruff-specific
-    "PL",            # pylint port (selective)
-    "ANN",           # annotations (complements ty)
-    "S",             # bandit (security)
-    "SIM",           # simplify
-    "PTH",           # pathlib over os.path
-    "TCH",           # type-checking imports
-    "RET",           # return statements
-    "ARG",           # unused arguments
+    # --- Core rules (existing) ---
+    "E",
+    "W",     # pycodestyle
+    "F",     # pyflakes (unused/undefined)
+    "I",     # isort
+    "UP",    # pyupgrade (modern syntax)
+    "B",     # bugbear (common bugs)
+    "A",     # builtins shadowing
+    "C4",    # comprehensions
+    "PERF",  # performance hints (hot paths)
+    "TRY",   # tryceratops (exceptions in async)
+    "ASYNC", # async misuse (critical!)
+    "RUF",   # ruff-specific
+    "PL",    # pylint port (selective)
+    "ANN",   # annotations (complements ty)
+    "S",     # bandit (security)
+    "SIM",   # simplify
+    "PTH",   # pathlib over os.path
+    "TCH",   # type-checking imports
+    "RET",   # return statements
+    "ARG",   # unused arguments
+    # --- High-value additions ---
+    "LOG",  # logging best practices (complements loguru usage)
+    "FAST", # FastAPI-specific rules (redundant response_model, missing Annotated)
+    "PT",   # pytest best practices
+    "T20",  # print statements (catch debug prints)
+    "DTZ",  # datetime/timezone (UTC best practices)
+    "BLE",  # blind except (prevents catching generic exceptions)
+    # --- Medium-value additions ---
+    "PIE",  # flake8-pie (various micro-optimizations)
+    "ICN",  # import conventions (consistency)
+    "FURB", # modern Python patterns & refurb suggestions
+    # --- High-value for production ---
+    "N",   # pep8-naming (class/function/variable naming consistency)
+    "SLF", # private member access (enforces encapsulation)
+    "EM",  # exception message formatting (best practices)
+    "TD",  # TODO/FIXME tracking (technical debt management)
+    # --- Additional value-adds ---
+    "COM", # trailing comma enforcement (API signatures)
+    "FBT", # boolean trap (clarity on bool parameters)
+    "G",   # logging format validation (complements LOG)
+    "RSE", # exception raising patterns
+    "INP", # implicit namespace packages (package structure)
 ]
 
 # Enable autofix for safe rules only
 fixable = [
-    "I",             # isort (import sorting)
-    "F401",          # unused imports
-    "UP",            # pyupgrade (syntax modernization)
-    "C4",            # comprehensions
-    "SIM",           # simplifications
-    "PTH",           # pathlib
-    "RUF",           # ruff-specific
-    "TC",           # type-checking imports
+    "I",    # isort (import sorting)
+    "F401", # unused imports
+    "UP",   # pyupgrade (syntax modernization)
+    "C4",   # comprehensions
+    "SIM",  # simplifications
+    "PTH",  # pathlib
+    "RUF",  # ruff-specific
+    "TC",   # type-checking imports
+    # --- New rules with safe fixes ---
+    "LOG002",  # Fix invalid logger.getLogger() argument
+    "FAST001", # Remove redundant response_model
+    "FAST002", # Add missing Annotated
+    "T201",    # Remove print() calls
+    "PIE790",  # Remove unnecessary pass
+    "ICN001",  # Fix import alias conventions
+    "PT001",   # Fix pytest.fixture parentheses
+    "PT003",   # Remove scope='function' (implied)
+    # --- Additional safe fixes ---
+    "N803",   # Fix invalid argument names to lowercase
+    "N804",   # Fix invalid classmethod first argument to cls
+    "N805",   # Fix invalid method first argument to self
+    "COM812", # Add missing trailing commas
+    "EM101",  # Fix raw string in exception
+    "EM102",  # Fix f-string in exception
+    "EM103",  # Fix .format() in exception
+    "RSE102", # Remove unnecessary parentheses on raise
+    "FBT001", # Signal boolean parameter trap (for awareness)
 ]
 unfixable = [
-    "B",             # bugbear (needs review)
-    "ANN",           # annotations (manual decision)
-    "S",             # security (needs review)
+    "B",   # bugbear (needs review)
+    "ANN", # annotations (manual decision)
+    "S",   # security (needs review)
 ]
 ignore = [
-    "E501",          # line-too-long → formatter handles
-    "ANN401",        # Any type (LangChain heavy)
-    "ISC001",        # conflicting with formatter
-    "TRY003",        # raise from e – sometimes verbose
-    "PLR0913",       # too-many-arguments (agents/graphs)
-    "PLR2004",       # magic values (AI logic)
-    "PLR0911",       # too-many-returns (graph flows)
-    "ANN001",        # Missing type annotation (too noisy in AI code)
-    "ANN002",        # Missing type annotation for function/method (too noisy in AI code)
-    "ANN003",        # Missing type annotation for *args (too noisy in AI code)
-    "ANN204",        # Missing type annotation for self (common in FastAPI)
+    "E501",    # line-too-long → formatter handles
+    "ANN401",  # Any type (LangChain heavy)
+    "ISC001",  # conflicting with formatter
+    "TRY003",  # raise from e – sometimes verbose
+    "PLR0913", # too-many-arguments (agents/graphs)
+    "PLR2004", # magic values (AI logic)
+    "PLR0911", # too-many-returns (graph flows)
+    "ANN001",  # Missing type annotation (too noisy in AI code)
+    "ANN002",  # Missing type annotation for function/method (too noisy in AI code)
+    "ANN003",  # Missing type annotation for *args (too noisy in AI code)
+    "ANN204",  # Missing type annotation for self (common in FastAPI)
+    # --- New rule ignores ---
+    "LOG001",  # Direct logger instantiation (loguru is a wrapper)
+    "PT011",   # pytest.raises too broad (noisy, covered by tests)
+    "FURB101", # Path.read_whole_file (too opinionated)
+    "TD002",   # Missing TODO author (noisy for rapid development)
+    "TD003",   # Missing TODO issue link (too strict for spikes)
+    "FBT001",  # Boolean positional argument (noisy, but caught by rule)
+    "FBT002",  # Boolean default value (noisy, but caught by rule)
+    "FBT003",  # Boolean positional value in call (noisy)
+    "COM812",  # Trailing comma missing (conflicts with formatter in some cases)
+    "SLF001",  # Private member access (occasionally needed in tests)
 ]
 
 [tool.ruff.lint.flake8-type-checking]
 strict = true
-exempt-modules = [
-    "pydantic",
-    "fastapi",
-    "langchain",
-    "langgraph",
-    "docling",
-]
+exempt-modules = ["pydantic", "fastapi", "langchain", "langgraph", "docling"]
 
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = [
-    "fastapi.Depends",
-    "fastapi.Query",
-    "pydantic.Field",
-]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "pydantic.Field"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
@@ -295,31 +338,36 @@ section-order = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [
-    "ANN",       # No type annotations required in tests
-    "D",         # No docstrings required in tests
-    "S101",      # Allow assert statements
-    "PLR2004",   # Allow magic values
-    "ARG001",    # Allow unused arguments
-    "E501",      # Allow long lines
+    "ANN",     # No type annotations required in tests
+    "D",       # No docstrings required in tests
+    "S101",    # Allow assert statements
+    "PLR2004", # Allow magic values
+    "ARG001",  # Allow unused arguments
+    "E501",    # Allow long lines
+    "T201",    # Allow print() in tests
+    "PT004",   # Fixture without leading underscore
+    "PT005",   # Fixture returns value
+    "SLF001",  # Private member access allowed in tests
+    "N802",    # Allow invalid function names in tests
+    "N806",    # Allow invalid variable names in test fixtures
 ]
 "src/alembic/migrations/*.py" = [
     "ANN",
-    "N999",      # Allow invalid module names
-    "E501",      # Allow long lines
-    "F401",      # Allow unused imports
+    "N999", # Allow invalid module names
+    "E501", # Allow long lines
+    "F401", # Allow unused imports
 ]
 "**/__init__.py" = [
-    "ANN",       # No type annotations required in __init__.py
-    "F401",      # Allow unused imports (re-exports)
-    "E402",      # Allow imports not at top
+    "ANN",  # No type annotations required in __init__.py
+    "F401", # Allow unused imports (re-exports)
+    # "E402",      # Allow imports not at top
 ]
 "**/generated/**.py" = [
-    "ANN",       # No type annotations required in generated code
-    "E402",      # Allow imports not at top
-    "F841",      # Allow unused variables
+    "ANN",  # No type annotations required in generated code
+    "E402", # Allow imports not at top
+    "F841", # Allow unused variables
 ]
-"**/_*.py" = ["ANN201"]             # Private modules
-
+"**/_*.py" = ["ANN201"] # Private modules
 
 
 [tool.ruff.format]
@@ -335,23 +383,78 @@ line-ending = "auto"
 # Inferred from requires-python, but be explicit
 [tool.ty.environment]
 python-version = "3.12"
-root = ["src"]                         # Matches your src layout
+root = ["src"]          # Matches your src layout
 
 [tool.ty.rules]
-unresolved-attribute = "warn"          # Allows Pydantic v2 magic
+# --- Runtime error prevention (error level) ---
+unresolved-import = "error"
+unresolved-reference = "error"
+invalid-assignment = "error"
+possibly-unbound-variable = "error"
+
+# --- Async correctness (error level, critical for FastAPI + asyncpg/motor) ---
+await-on-non-awaitable = "error"
+non-awaitable-in-async-function = "error"
+unused-awaitable = "warn"                 # Catch forgotten awaits
+
+# --- Function call safety (error level) ---
+invalid-argument-type = "error"
+invalid-return-type = "error"
+call-non-callable = "error"
+missing-argument = "error"
+no-matching-overload = "error"
+unknown-argument = "error"
+too-many-positional-arguments = "error"
+
+# --- Type system integrity (error level) ---
+invalid-method-override = "error"  # Liskov Substitution Principle
+invalid-exception-caught = "error"
+invalid-raise = "error"
+
+# --- Collection/subscription safety (error level) ---
+not-iterable = "error"
+not-subscriptable = "error"
+invalid-key = "error"
+missing-typed-dict-key = "error"
+
+# --- Code quality (error level) ---
+empty-body = "error" # Catch incomplete implementations
+
+# --- Critical class/function definitions (error level) ---
+return-outside-function = "error"  # Catch misplaced returns
+conflicting-declarations = "error"  # Variable declared as two conflicting types
+conflicting-metaclass = "error"     # Metaclass conflicts (runtime error)
+duplicate-base = "error"            # Duplicate base classes (runtime error)
+invalid-context-manager = "error"   # with statement protocol violations
+invalid-parameter-default = "error" # Default values not assignable to param type
+dataclass-field-order = "error"     # Required fields before optional fields
+invalid-dataclass = "error"         # @dataclass on NamedTuple/TypedDict/Enum/Protocol
+
+# --- Pydantic v2 and magic attribute handling (warn level, allows flexibility) ---
+unresolved-attribute = "warn"
 redundant-cast = "warn"
 unused-ignore-comment = "warn"
-unresolved-import = "error"
+unsupported-dynamic-base = "warn"
 possibly-missing-attribute = "error"
+index-out-of-bounds = "warn"
 possibly-missing-import = "error"
-invalid-assignment = "error"
-unresolved-reference = "error"
-await-on-non-awaitable = "error"       # Critical for asyncpg/motor
-non-awaitable-in-async-function = "error"  # upgraded from warn
-possibly-unbound-variable = "error"
+unresolved-global = "warn"           # Global variable binding issues
+redundant-final-classvar = "warn"    # Final + ClassVar redundancy detection
+
+# --- Optional: Nice-to-have patterns (warn level) ---
+deprecated = "warn"                # Track library deprecations
+unsupported-operator = "warn"      # Prevent unsupported ops
+subclass-of-final-class = "warn"   # If you use @final decorator
+ambiguous-protocol-member = "warn" # If you use Protocol
+override-of-final-method = "warn"  # If you use @final methods
+invalid-explicit-override = "warn" # @override without parent method (PEP 698)
 
 [tool.ty.terminal]
 output-format = "full"
+
+[tool.ty.src]
+# Remove `build` from the excluded directories.
+exclude = ["!**/build/"]
 
 # ────────────────────────────────────────
 # Other sections unchanged (alembic, pytest, coverage, bandit)

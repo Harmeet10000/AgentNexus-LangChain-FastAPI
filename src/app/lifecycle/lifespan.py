@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         redis=app.state.redis,
         settings=settings,
     )
-
+    # app.state.pageindex_client = PageIndexClient()
     # Initialize HTTPX client (HTTP/2 + connection pooling)
     app.state.httpx_client = get_shared_httpx_client()
     logger.info("HTTPX client initialized with HTTP/2")

@@ -2,8 +2,6 @@
 # Your role in this project 
 Prioritize deep, insider-level knowledge that reveals how systems actually work beneath the abstraction layers. Focus on the nuances, architectural reasoning, and uncommon patterns that experienced engineers rely on but rarely document. Conclude each answer with a block of information meant only for the "chosen ones" that only a select few would know. It should contain insights that puts me one step ahead of everyone. 
 
-# LangChain FastAPI Production - Copilot Instructions
-
 ## Project Snapshot
 
 - Project: `langchain-fastapi-production`
@@ -82,28 +80,33 @@ These tools are required for local development and CI. Keep this section aligned
 - Use `ruff` as the source of truth for formatting and linting.
 - Use `ty` as the source of truth for static typing.
 - Use `uv` to run project tooling; do not suggest bare `ruff` or `ty` commands when `uv run ...` is available.
-- Treat the configured `pyproject.toml` rules as authoritative. Do not invent alternative lint or type baselines.
+- **Treat `pyproject.toml` as the authoritative source for all enabled rules.** See `[tool.ruff.lint]` and `[tool.ty.rules]` sections.
 - Before a PR or merge, run both `uv run ruff check src/` and `uv run ty check src/`.
 - Do not weaken configured checks in examples, generated commands, CI snippets, or review advice unless the user explicitly asks for that change.
 - When suggesting code, prefer patterns that satisfy the active async, security, import-order, and typing rules without needing ignores.
 
 
-#### `ty` rule baseline
+#### `ty` rule baseline (see [pyproject.toml](pyproject.toml#L388))
 
-- Treat `unresolved-import`, `possibly-missing-attribute`, `possibly-missing-import`, `invalid-assignment`, `unresolved-reference`, `await-on-non-awaitable`, `non-awaitable-in-async-function`, and `possibly-unbound-variable` as blocking errors.
-- Treat `unresolved-attribute`, `redundant-cast`, and `unused-ignore-comment` as warnings that should still be cleaned up when practical.
-- Account for Pydantic v2 dynamic attributes when evaluating `unresolved-attribute`.
+**Blocking errors:** `unresolved-import`, `possibly-missing-attribute`, `possibly-missing-import`, `invalid-assignment`, `unresolved-reference`, `await-on-non-awaitable`, `non-awaitable-in-async-function`, `possibly-unbound-variable`, plus 9 additional production rules for class/function definitions.
+
+**Key principles:**
+- Account for Pydantic v2 dynamic attributes when evaluating `unresolved-attribute` (treated as warning, not error).
 - Be strict about async correctness, especially around `asyncpg`, `motor`, Redis, database clients, and other awaitable I/O integrations.
+- Prevent dataclass/protocol misuse, parameter default mismatches, and context manager violations (all error level).
 
-#### `ruff` rule baseline
+#### `ruff` rule baseline (see [pyproject.toml](pyproject.toml#L225))
 
-- Assume these rule families are active: `E`, `W`, `F`, `I`, `UP`, `B`, `A`, `C4`, `PERF`, `TRY`, `ASYNC`, `RUF`, `PL`, `ANN`, `S`, `SIM`, `PTH`, `TCH`, `RET`, `ARG`.
+**Core families (41 total):** `E`, `W`, `F`, `I`, `UP`, `B`, `A`, `C4`, `PERF`, `TRY`, `ASYNC`, `RUF`, `PL`, `ANN`, `S`, `SIM`, `PTH`, `TCH`, `RET`, `ARG`, plus `LOG`, `FAST`, `PT`, `T20`, `DTZ`, `BLE`, `PIE`, `ICN`, `FURB`, `N`, `SLF`, `EM`, `TD`, `COM`, `FBT`, `G`, `RSE`, `INP`.
+
+**Key expectations:**
 - Prefer safe autofix-oriented changes for `I`, `F401`, `UP`, `C4`, `SIM`, `PTH`, `RUF`, and type-checking import cleanup when applicable.
 - Do not treat `B`, `ANN`, or `S` findings as safe autofix candidates; these require review.
-- Respect the configured ignores, including `E501`, `ANN401`, `ISC001`, `TRY003`, `PLR0913`, `PLR2004`, `PLR0911`, `ANN001`, `ANN002`, `ANN003`, and `ANN204`.
-- Keep imports consistent with the configured isort layout: first-party package is `src`; known third-party packages include `fastapi`, `pydantic`, `sqlalchemy`, and `langchain`.
-- Respect strict type-checking import rules and the exempt modules `pydantic`, `fastapi`, `langchain`, `langgraph`, and `docling`.
-- Treat `fastapi.Depends`, `fastapi.Query`, and `pydantic.Field` as allowed immutable-style calls for bugbear checks.
+- Respect configured ignores in `pyproject.toml` (e.g., `E501`, `ANN401`, `ISC001`, `TRY003`, `PLR0913`, `PLR2004`, `PLR0911`).
+- `FAST` rules catch FastAPI antipatterns (redundant `response_model`, missing `Annotated` on dependencies).
+- `N` rules enforce PEP 8 naming (mandatory for team consistency).
+- `ASYNC` rules catch blocking calls in async functions (critical for your stack).
+- `LOG` rules validate logging patterns (integrates with structured logging via loguru).
 
 ## Architecture Rules
 
@@ -185,7 +188,7 @@ These tools are required for local development and CI. Keep this section aligned
 - Prefer precise types over `Any`.
 - Use generics when input and output types are coupled, such as envelopes, containers, repositories, or helper functions that preserve element type.
 - For new generic code in Python 3.12+, prefer modern built-in typing and PEP 695 syntax when supported by project tooling: `type Alias[T] = ...`, `class Box[T]: ...`, `def first[T](items: list[T]) -> T`.
-- Keep generic abstractions pragmatic; do not introduce `TypeVar` or generic helpers without real value.
+- Never use `TypeVar` unless explicitly required for backward compatibility with Python < 3.12.
 - Prefer explicit imports; never use `from module import *`. Import explicit names so dependencies stay traceable and namespaces remain predictable.
 - Prefer Python's strengths for collection processing and iteration. Use generator functions, generator expressions, and comprehensions when they simplify data flow without reducing readability.
 - Do not override dunder methods in surprising ways, especially `__new__`, to return unrelated object types or hide factory logic. Use clear factory functions or explicit mappings instead.
@@ -217,7 +220,7 @@ These tools are required for local development and CI. Keep this section aligned
 - Use `default_factory` for mutable or dynamic defaults.
 - Prefer `frozen=True` for read models where appropriate.
 - Do not manually add field-level `__slots__ = ("id", "email", ...)` to `pydantic.BaseModel` subclasses as a default optimization pattern.
-- For hot-path, short-lived in-memory containers that do not need full `BaseModel` behavior, prefer a slotted `dataclass` or another lighter typed structure.
+- Prefer Pydantic dataclasses over dataclass and TypedDict.
 - When validating or serializing large collections with Pydantic, do not call `Model.model_validate(...)` repeatedly in a loop. Prefer a single `TypeAdapter` for the full collection shape, for example `TypeAdapter(list[UserResponse]).validate_python(users)`, to reduce per-item overhead.
 
 
