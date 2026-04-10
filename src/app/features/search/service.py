@@ -10,8 +10,10 @@ from uuid import uuid4
 import orjson
 
 from app.connections import celery_app, init_db
-from app.features.search.chunking import chunk_text
-from app.features.search.constants import (
+from app.utils import ServiceUnavailableException, logger
+
+from .chunking import chunk_text
+from .constants import (
     ANALYZE_THRESHOLD_CHUNKS,
     DEFAULT_SEARCH_CACHE_TTL_SECONDS,
     INGEST_CHUNK_OVERLAP,
@@ -19,7 +21,7 @@ from app.features.search.constants import (
     INGEST_EMBEDDING_BATCH_SIZE,
     RRF_K,
 )
-from app.features.search.dto import (
+from .dto import (
     HybridSearchRequest,
     RagContextSectionResponse,
     RagSearchResponse,
@@ -28,11 +30,10 @@ from app.features.search.dto import (
     SearchResultItem,
     SearchTaskStatusResponse,
 )
-from app.features.search.embeddings import build_embedding_client
-from app.features.search.fusion import RankedChunk, reciprocal_rank_fusion
-from app.features.search.rag import SearchChunkRecord, assemble_rag_context
-from app.features.search.repository import SearchRepository, build_chunk_rows
-from app.utils import ServiceUnavailableException, logger
+from .embeddings import build_embedding_client
+from .fusion import RankedChunk, reciprocal_rank_fusion
+from .rag import SearchChunkRecord, assemble_rag_context
+from .repository import SearchRepository, build_chunk_rows
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -40,9 +41,9 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.features.search.chunking import TextChunk
-    from app.features.search.dto import RagSearchRequest, SearchIngestRequest
-    from app.features.search.fusion import RankedResultRow
+    from .chunking import TextChunk
+    from .dto import RagSearchRequest, SearchIngestRequest
+    from .fusion import RankedResultRow
 
 
 class SearchService:

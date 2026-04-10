@@ -8,7 +8,7 @@ The registry enables dynamic tool lookup and middleware (LLMToolSelector).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Annotated, TypeVar
+from typing import TYPE_CHECKING, Annotated
 
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, Field, ValidationError
@@ -21,10 +21,6 @@ if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
 logger = logging.getLogger(__name__)
-
-InputT = TypeVar("InputT", bound=BaseModel)
-OutputT = TypeVar("OutputT", bound=BaseModel)
-
 
 # ---------------------------------------------------------------------------
 # Structured base output

@@ -1,12 +1,11 @@
-from typing import Any, TypeVar
+from typing import Any
 
 from pydantic import BaseModel
 
 from app.config import Environment, get_settings
-from app.shared.response_type import APIResponse, ErrorDetail, RequestMeta
-from app.utils.logger import request_state
+from app.shared import APIResponse, ErrorDetail, RequestMeta
 
-T = TypeVar("T")
+from .logger import request_state
 
 
 def _serialize_data(data: Any) -> Any:
@@ -33,6 +32,7 @@ def _build_request_meta() -> RequestMeta:
         url=ctx.get("url"),
         correlation_id=ctx.get("request_id"),
     )
+
 
 def http_response[T](
     message: str,

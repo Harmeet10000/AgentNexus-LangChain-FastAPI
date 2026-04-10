@@ -1,8 +1,4 @@
-from typing import TypeVar
-
 from pydantic import BaseModel, ConfigDict, Field
-
-T = TypeVar("T")
 
 
 class RequestMeta(BaseModel):
@@ -54,4 +50,3 @@ class APIResponse[T](BaseModel):
     message: str = Field(default="Success")
     data: T | None = Field(default=None)
     error: ErrorDetail | None = Field(default=None)
-
