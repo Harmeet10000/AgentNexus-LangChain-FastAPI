@@ -46,11 +46,6 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from ..state import (
-    GroundingVerificationOutput,
-    LegalAgentState,
-    OrchestratorAction,
-)
 from .analysis_nodes import (
     _COMPLIANCE_SYSTEM_PROMPT,
     _RISK_ANALYSIS_SYSTEM_PROMPT,
@@ -81,6 +76,11 @@ from .pipeline_nodes import (
 )
 from .planner import PlannerOutput, make_planner_node
 from .qna import QnAOutput, make_qna_node, route_after_qna
+from .state import (
+    GroundingVerificationOutput,
+    LegalAgentState,
+    OrchestratorAction,
+)
 
 # ---------------------------------------------------------------------------
 # Agent Registry

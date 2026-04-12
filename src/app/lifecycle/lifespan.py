@@ -23,8 +23,8 @@ from app.connections import (
 from app.features.auth import TokenAuditLog, User
 from app.features.auth.websocket_security import build_websocket_security_service
 from app.middleware import initialize_fastapi_guard
-from app.shared.mcp import get_mcp_client_manager
-from app.utils import logger
+from app.shared import get_mcp_client_manager
+from app.utils import ServiceUnavailableException, logger
 
 
 async def setup_redis(url: str) -> redis.asyncio.Redis:
@@ -69,7 +69,7 @@ def setup_celery() -> Celery | None:
         conn.ensure_connection(max_retries=1, timeout=2)
         conn.release()
         logger.info("Celery connected to RabbitMQ")
-    except Exception as e:
+    except ServiceUnavailableException as e:
         logger.warning("Celery connection failed, tasks will be unavailable", error=str(e))
         return None
     else:
@@ -117,7 +117,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except TimeoutError:
         logger.warning("Celery setup timed out, continuing without task queue")
         app.state.celery = None
-    except Exception as e:
+    except ServiceUnavailableException as e:
         logger.error("Celery setup failed", error=str(e))
         app.state.celery = None
 

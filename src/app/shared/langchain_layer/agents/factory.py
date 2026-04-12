@@ -12,24 +12,58 @@ NOTE on naming:
   This project's `langchain/` and `langgraph/` folders will conflict with
   the installed packages of the same name if they are at the Python import
   root.  Place them inside your app package (e.g., `src/myapp/langchain/`)
-  so that relative imports work, or use the `langchain_layer/` /
+  so that relative imports work, or use the `./` /
   `langgraph_layer/` naming shown here.
 """
+### 5. Create a custom agent
+
+# ```python
+# from agents.factory import AgentSpec, create_production_agent
+# from langgraph_layer.state import RichContext
+# from middleware import TodoListMiddleware, DynamicSystemPromptMiddleware
+
+# @dataclass
+# class MyContext(RichContext):
+#     department: str = "engineering"
+
+# spec = AgentSpec(
+#     name="my_agent",
+#     description="My custom agent",
+#     tools=["web_search_tool"],           # tool names from registry
+#     context_schema=MyContext,
+#     system_prompt="You are a ${department} specialist.",
+#     extra_middleware=[
+#         TodoListMiddleware().build(),
+#         DynamicSystemPromptMiddleware(
+#             prompt_fn=lambda state, ctx: f"You work in {ctx.department}."
+#         ).build(),
+#     ],
+#     enable_guardrails=True,
+#     enable_long_term_memory=True,
+# )
+# agent = create_production_agent(spec)
+# ```
+
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Any, AsyncIterator
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from agents.memory.manager import MemoryManager
 from agents.tools.base import registry as tool_registry
-from config.settings import get_settings
 from langchain.agents import create_agent
 from langchain_core.tools import BaseTool
-from langchain_layer.models import build_chat_model
-from langchain_layer.prompts import AGENT_SYSTEM_PROMPT, SystemPromptParts
-from langgraph_layer.state import BaseContext
+
+from app.config.settings import get_settings
+from app.shared.langgraph_layer.agent_saul.state import BaseContext
+
+from ..models import build_chat_model
+from ..prompts import AGENT_SYSTEM_PROMPT, SystemPromptParts
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 _settings = get_settings()

@@ -6,11 +6,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.requests import HTTPConnection
 
 from app.connections import get_mongodb, get_redis
-from app.features.auth.model import Permission, User, UserRole
-from app.features.auth.repository import RefreshTokenRepository, UserRepository
-from app.features.auth.security import TokenClaims, decode_token
-from app.features.auth.service import AuthService
-from app.utils.exceptions import ForbiddenException, UnauthorizedException
+from app.utils import ForbiddenException, UnauthorizedException
+
+from .model import Permission, User, UserRole
+from .repository import RefreshTokenRepository, UserRepository
+from .security import TokenClaims, decode_token
+from .service import AuthService
 
 _http_bearer = HTTPBearer(auto_error=False)
 _ACCESS_TOKEN_TYPE = "access"  # noqa: S105

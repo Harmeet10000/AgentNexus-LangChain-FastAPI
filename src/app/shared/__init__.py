@@ -1,5 +1,6 @@
 """Shared utilities and integrations across features."""
 from .base import Base
+from .mcp import get_mcp_client_manager
 from .response_type import APIResponse, ErrorDetail, RequestMeta
 
 __all__ = [
@@ -10,6 +11,7 @@ __all__ = [
     "cache",
     "crawler",
     "document_processing",
+    "get_mcp_client_manager",
     "langchain",
     "langgraph",
     "langsmith",

@@ -7,6 +7,276 @@ I’ll design this like a real system, not a demo:
 * probabilistic reads
 * conflict resolution
 
+| Memory Type | Latency | Accuracy | Cost   | Drift Risk | Best For  |
+| ----------- | ------- | -------- | ------ | ---------- | --------- |
+| Ephemeral   | 🔥 Fast | High     | Low    | None       | Reasoning |
+| Short-term  | Fast    | Medium   | Low    | Low        | UX        |
+| Vector      | Medium  | Medium   | Medium | High       | Recall    |
+| Structured  | Medium  | 🔥 High  | Medium | Low        | Facts     |
+| Episodic    | Slow    | Medium   | High   | Medium     | History   |
+| Procedural  | Medium  | Medium   | Medium | High       | Skills    |
+| Reflection  | Slow    | Variable | High   | Very High  | Learning  |
+
+Observed architecture pattern OpenClaw:
+1. Event-Centric Memory
+Everything is an event
+Stored chronologically
+Enables replay + audit
+2. Structured + Semantic Hybrid
+Extracts entities into structured form
+Also stores embeddings for retrieval
+3. Agent-State Persistence
+Agents have persistent state across runs
+Not just stateless function calls
+4. Memory Pipelines
+Ingestion → Extraction → Storage
+Not direct “LLM writes to DB”
+5. Reflection Hooks
+After execution → evaluate → store insights
+Key Insight:
+
+1. Ephemeral / Context Memory (Execution Memory)
+
+What it is:
+
+Current conversation window
+Tool outputs within a single run
+Scratchpad (chain-of-thought equivalent but structured)
+
+Implementation:
+
+In LangGraph: state object
+In LangChain: messages / RunnableWithMessageHistory
+
+Pros
+
+Fast (zero IO)
+Deterministic (no retrieval noise)
+Perfect for reasoning continuity
+
+Cons
+
+Dies after execution
+Context window limits → truncation
+No learning
+
+Use case
+
+Planning
+Tool chaining
+Multi-step reasoning
+2. Short-Term Memory (Session Memory)
+
+What it is:
+
+Persists across a user session (minutes → hours)
+Stores recent interactions, tool calls, intermediate states
+
+Implementation
+
+Redis / in-memory store
+Windowed message buffer
+Token-limited replay
+
+Pros
+
+Cheap + fast
+Maintains conversational continuity
+Good UX
+
+Cons
+
+No semantic abstraction (raw logs)
+Still grows → needs trimming
+No long-term intelligence
+
+Use case
+
+Chat continuity
+Multi-step workflows
+3. Long-Term Semantic Memory (Vector Memory)
+
+What it is:
+
+Embeddings of past interactions, docs, events
+Retrieved via similarity
+
+Implementation
+
+pgvector / Weaviate / Pinecone
+Chunked + embedded memory entries
+
+Pros
+
+Scales to millions of entries
+Semantic recall (not keyword)
+Cheap storage
+
+Cons (critical)
+
+Retrieval ≠ correctness
+Embedding drift over time
+No temporal awareness
+Garbage-in → garbage forever
+
+Failure mode
+
+“Agent remembers irrelevant but similar things”
+
+Use case
+
+Knowledge recall
+Document grounding
+4. Structured Memory (Relational / Graph Memory)
+
+What it is:
+
+Explicit entities + relationships
+Facts stored as structured data
+
+Implementation
+
+Postgres (tables)
+Neo4j / graph DB
+JSONB + constraints
+
+Pros
+
+Deterministic queries
+No hallucinated relationships
+Supports reasoning (joins > similarity)
+
+Cons
+
+Hard to maintain automatically
+Requires extraction pipeline
+Schema evolution pain
+
+Use case
+
+User profiles
+Contracts, entities, obligations
+State machines
+5. Episodic Memory (Event Logs + Summaries)
+
+What it is:
+
+“What happened” over time
+Stored as events → summarized hierarchically
+
+Implementation
+
+Append-only log (Kafka / DB)
+Periodic summarization (LLM)
+Time-indexed retrieval
+
+Pros
+
+Temporal awareness
+Traceability
+Supports retrospection
+
+Cons
+
+Summarization loss
+Expensive to maintain
+Needs compaction strategy
+
+Use case
+
+Agent self-reflection
+Audit trails
+Workflow tracking
+6. Procedural Memory (Skill Memory)
+
+What it is:
+
+“How to do things”
+Learned tool usage patterns, workflows
+
+Implementation
+
+Stored prompts
+Tool traces → distilled into reusable plans
+Policy graphs
+
+Pros
+
+Improves efficiency over time
+Reduces token usage
+Enables autonomy
+
+Cons
+
+Hard to generalize correctly
+Risk of overfitting bad patterns
+
+Use case
+
+Reusable agent skills
+Automation pipelines
+7. Reflection / Meta Memory (Self-Improvement Layer)
+
+What it is:
+
+Stores failures, critiques, improvements
+
+Implementation
+
+Post-run evaluators
+Critique → store → influence future runs
+
+Pros
+
+Continuous improvement
+Reduces repeated mistakes
+
+Cons
+
+Feedback loops can amplify errors
+Needs strong filtering
+
+Use case
+
+Agent learning systems
+Autonomous agents
+8. Working Memory (Intermediate Reasoning State)
+
+What it is:
+
+Structured intermediate state across steps
+Not raw messages—typed state
+
+Implementation
+
+LangGraph state
+Typed dict / Pydantic schema
+
+Pros
+
+Clean reasoning
+Tool-friendly
+Debuggable
+
+Cons
+
+Requires upfront design
+
+
+They decouple responsibilities:
+
+1. Write Path (Deterministic)
+Text → Graphiti → Validation → Structured DB
+deterministic
+auditable
+schema-controlled
+2. Read Path (Probabilistic)
+Query → Cognee → Multi-source retrieval → LLM
+flexible
+context-aware
+optimized for relevance
+
+
 ---
 
 # 🧠 1. Graph Schema (Postgres + Graph Layer)
@@ -456,7 +726,9 @@ def apply_changes(state):
                     ↓
               [Docling Parse]
                     ↓
-              [Graphiti Extract]
+            [Langextract Parse]
+                    ↓
+             [Graphiti Extract]
                     ↓
               [Validation Layer]
                     ↓

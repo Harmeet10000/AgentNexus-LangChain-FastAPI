@@ -18,17 +18,21 @@ RECONCILE_PROMPT uses loss aversion bias (Section 16.4):
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 from uuid import uuid4
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.runnables import Runnable
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from langchain_core.runnables import Runnable
+    from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = structlog.get_logger(__name__)
 
