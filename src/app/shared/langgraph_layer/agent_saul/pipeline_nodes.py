@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.utils import logger
 
-from ..state import (
+from .state import (
     AgentError,
     CitedEntity,
     ClauseExtractionInput,

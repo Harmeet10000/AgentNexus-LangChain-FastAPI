@@ -8,6 +8,45 @@ Provides:
 - Embeddings (single + batch)
 - Structured output via .with_structured_output()
 """
+## Architecture
+
+# ```
+# ┌─────────────────────────────────────────────────────────────┐
+# │                        FastAPI Layer                        │
+# │   /agents/invoke  /agents/stream  /agents/batch  /embed     │
+# └───────────────────────────┬─────────────────────────────────┘
+#                             │
+# ┌───────────────────────────▼────────────────────────────────┐
+# │                      Agent Runtime                         │
+# │   create_production_agent(AgentSpec)  →  ProductionAgent   │
+# │                                                            │
+# │   ┌─────────────────────────────────────────────────────┐  │
+# │   │              LangChain 1.0: create_agent            │  │
+# │   │                                                     │  │
+# │   │  model ──► [middleware stack] ──► tools ──► output  │  │
+# │   │             │                                       │  │
+# │   │  Middleware (before_model order):                   │  │
+# │   │  1. SummarizationMiddleware  (context window)       │  │
+# │   │  2. LLMToolSelectorMiddleware (reduce tool noise)   │  │
+# │   │  3. ToolRetryMiddleware      (resilience)           │  │
+# │   │  4. ModelRetryMiddleware     (resilience)           │  │
+# │   │  5. HumanInTheLoopMiddleware (HITL - optional)      │  │
+# │   │  6. GuardrailMiddleware      (safety - after_model) │  │
+# │   └─────────────────────────────────────────────────────┘  │
+# │                                                            │
+# │   context_schema → RichContext (user_id, role, flags...)   │
+# │   checkpointer   → InMemory / Postgres / Redis             │
+# └───────────────────────────┬────────────────────────────────┘
+#                             │
+#           ┌─────────────────┴─────────────────┐
+#           │                                   │
+# ┌─────────▼──────────┐             ┌──────────▼──────────┐
+# │  Short-term Memory  │             │  Long-term Memory  │
+# │  LangGraph          │             │  cognee              │
+# │  Checkpointer       │             │  (semantic search) │
+# │  (per-thread)       │             │  (cross-session)   │
+# └────────────────────┘             └─────────────────────┘
+# ```
 
 from __future__ import annotations
 
@@ -19,7 +58,6 @@ from typing import TYPE_CHECKING
 
 import toons
 from langchain.chat_models import init_chat_model
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import (
@@ -35,6 +73,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
     from typing import Any
 
+    from langchain_core.language_models import BaseChatModel
     from langchain_core.messages import BaseMessage
     from langchain_core.tools import BaseTool
 

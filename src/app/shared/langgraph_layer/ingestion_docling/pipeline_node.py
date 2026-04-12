@@ -10,147 +10,44 @@ Pipeline:
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
-from enum import StrEnum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from langchain_core.runnables import Runnable
-from langgraph.graph import END, StateGraph
-from langgraph.graph.state import CompiledStateGraph
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.utils import logger
 
-if TYPE_CHECKING:
+from .prompt import extraction_prompt
+from .state import (
+    ExtractedEntityType,
+    ExtractionPayload,
+)
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from langchain_core.messages import BaseMessage
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from app.shared.rag.graphiti.client import GraphitiService
+    from .state import (
+        EmbeddingFunction,
+        ExtractedEntity,
+        ExtractedRelationship,
+        ExtractionRunnable,
+        IngestionState,
+    )
 
-EmbeddingFunction = Callable[[str], Awaitable[list[float]]]
-ExtractionRunnable = Runnable[list[BaseMessage], Any]
 
 _CONFIDENCE_THRESHOLD = 0.7
 _MAX_EXTRACTION_CHARS = 12_000
 
-EXTRACTION_PROMPT = """
-You are a legal knowledge extraction system.
 
-Extract from the document:
-
-1. ENTITIES:
-   - Parties (PERSON, ORG)
-   - Contracts (CONTRACT)
-   - Clauses (CLAUSE)
-   - Obligations (OBLIGATION)
-
-2. RELATIONSHIPS:
-   - SIGNED_BY, OWES, GOVERNED_BY, TERMINATES_ON, LIABLE_FOR,
-     INDEMNIFIES, TRIGGERED_BY, OVERRIDDEN_BY, RESTRICTS
-
-Rules:
-   - Normalize entity names: lowercase, strip whitespace, collapse aliases
-     (e.g. "Acme Corp", "Acme Corporation" -> normalized_name: "acme corp")
-   - Include confidence (0.0-1.0) for every entity and relationship
-   - DO NOT hallucinate parties, obligations, or clause references
-   - valid_from / valid_to: ISO8601 strings if temporally bounded, else null
-
-Output ONLY this JSON structure, no prose:
-{
-  "entities": [
-    {
-      "id": "uuid-string",
-      "type": "PERSON|ORG|CLAUSE|CONTRACT|OBLIGATION",
-      "name": "...",
-      "normalized_name": "...",
-      "confidence": 0.0
-    }
-  ],
-  "relationships": [
-    {
-      "from": "entity-id",
-      "to": "entity-id",
-      "type": "SIGNED_BY|OWES|...",
-      "confidence": 0.0,
-      "valid_from": null,
-      "valid_to": null
-    }
-  ]
-}
-"""
-
-
-class ExtractedEntityType(StrEnum):
-    PERSON = "PERSON"
-    ORG = "ORG"
-    CLAUSE = "CLAUSE"
-    CONTRACT = "CONTRACT"
-    OBLIGATION = "OBLIGATION"
-
-
-class ExtractedEntity(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    type: ExtractedEntityType
-    name: str
-    normalized_name: str
-    confidence: float = Field(ge=0.0, le=1.0)
-
-
-class ExtractedRelationship(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        populate_by_name=True,
-        serialize_by_alias=True,
-    )
-
-    from_entity: str = Field(serialization_alias="from", validation_alias="from")
-    to_entity: str = Field(serialization_alias="to", validation_alias="to")
-    type: str
-    confidence: float = Field(ge=0.0, le=1.0)
-    valid_from: str | None = None
-    valid_to: str | None = None
-
-
-class ExtractionPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    entities: list[ExtractedEntity] = Field(default_factory=list)
-    relationships: list[ExtractedRelationship] = Field(default_factory=list)
-
-
-class IngestionState(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    doc_id: str = ""
-    user_id: str = ""
-    thread_id: str = ""
-    raw_text: str = ""
-    document_type: str = "unknown"
-    jurisdiction: str = "India"
-
-    extracted_entities: list[ExtractedEntity] = Field(default_factory=list)
-    extracted_relationships: list[ExtractedRelationship] = Field(default_factory=list)
-    extraction_error: str | None = None
-
-    validated_entities: list[ExtractedEntity] = Field(default_factory=list)
-    validated_relationships: list[ExtractedRelationship] = Field(default_factory=list)
-    dropped_entity_count: int = 0
-    dropped_relationship_count: int = 0
-
-    stored_entity_ids: list[str] = Field(default_factory=list)
-    stored_clause_ids: list[str] = Field(default_factory=list)
-    stored_relationship_ids: list[str] = Field(default_factory=list)
-    ingestion_complete: bool = False
-    error: str | None = None
-
-
-def make_extract_node(extraction_llm: ExtractionRunnable) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
+def make_extract_node(
+    extraction_llm: ExtractionRunnable,
+) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def extract_node(state: IngestionState) -> dict[str, object]:
         log = logger.bind(node="ingestion_extract", doc_id=state.doc_id)
 
@@ -164,7 +61,7 @@ def make_extract_node(extraction_llm: ExtractionRunnable) -> Callable[[Ingestion
             }
 
         messages = [
-            SystemMessage(content=EXTRACTION_PROMPT),
+            SystemMessage(content=extraction_prompt),
             HumanMessage(content=state.raw_text[:_MAX_EXTRACTION_CHARS]),
         ]
 
@@ -461,23 +358,3 @@ def _strip_markdown_fences(content: str) -> str:
     if fenced_content.startswith("json"):
         return fenced_content[4:].strip()
     return fenced_content
-
-
-def build_ingestion_graph(
-    extraction_llm: ExtractionRunnable,
-    db_engine: AsyncEngine,
-    embedding_fn: EmbeddingFunction,
-    _graphiti_service: GraphitiService,
-) -> CompiledStateGraph:
-    """Build the ingestion graph once during application startup."""
-    graph = StateGraph(IngestionState)
-    graph.add_node("extract", cast("Any", make_extract_node(extraction_llm)))
-    graph.add_node("validate", cast("Any", make_validate_node()))
-    graph.add_node("embed_store", cast("Any", make_embed_store_node(db_engine, embedding_fn)))
-
-    graph.set_entry_point("extract")
-    graph.add_edge("extract", "validate")
-    graph.add_edge("validate", "embed_store")
-    graph.add_edge("embed_store", END)
-
-    return graph.compile()
