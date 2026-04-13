@@ -347,6 +347,20 @@ Those decisions still require repo policy and code review.
   - boundary mappers
   - logging helper for expected failures
 
+- Use `Result[ValueType, DomainError]` (from `returns.result`) for expected, recoverable failures in internal workflow code, repository helpers, and external-service adapters.
+- Leverage `flow`, `bind`, `map_`, and `@safe` for clean Railway Oriented pipelines.
+- Keep FastAPI routers, dependencies, middleware, and global exception handling **exception-based**. Use project exceptions from `src/app/utils/exceptions.py` at those boundaries.
+- Prefer `returns` when failure is part of normal business flow **and** the caller benefits from composition without unwinding the stack.
+- Do not use `Result` for programmer errors, broken invariants, misconfiguration, or cancellation — those should raise.
+- Do not return `Failure(Exception)` or raw strings by default. Prefer structured `DomainError` types (dataclasses recommended).
+- Never return `Failure(APIException(...))`; transport-layer exceptions must be created only at the HTTP boundary.
+- Map `Failure(DomainError) → APIException` **once** at the service/router boundary (unwrap with `.unwrap()` or pattern matching / `.lash()` for recovery).
+- In transaction scopes where rollback depends on exceptions, prefer raising over returning `Failure`.
+- Catch third-party operational failures at adapter boundaries (use `@safe` where appropriate) and convert **only** expected cases into `Failure`; let unexpected exceptions propagate.
+- Log failures at the ownership boundary, not at every `Failure` construction.
+
+**Rule of thumb**: Exceptions outside-in (HTTP/framework boundaries), **`returns` Result** inside where it improves explicitness, composition, and readability
+
 ### Phase 2: Ingestion Vertical Slice
 
 Target files:
@@ -365,7 +379,7 @@ Goals:
 
 Target file:
 
-- `src/app/features/reconciliation/pipeline (1).py`
+- `src/app/shared/langgraph_layer/reconciliation`
 
 Goals:
 
@@ -432,6 +446,14 @@ Existing service flows that are already clear with typed exceptions should gener
 - `src/app/features/profile/service.py`
 
 The migration target is ambiguity and ad-hoc error signaling, not code that is already explicit.
+
+## Where To Use Returns / Result
+
+- Internal workflow, pipeline, and graph-style code where intermediate failures are expected and should be propagated explicitly (perfect for `flow` + `bind` pipelines).
+- Repository helpers and adapters that normalize recoverable persistence or upstream failures.
+- External-service adapters where third-party operational failures can be converted into typed `DomainError`s.
+- Internal helper functions where the caller can handle failure without unwinding the whole stack.
+- Ingestion, document-processing, and orchestration flows that already model partial failure as returned state (these will benefit the most from ROP).
 
 ## Implementation Checklist
 

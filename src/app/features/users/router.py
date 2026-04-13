@@ -2,18 +2,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query
 
-from app.features.auth.dependencies import require_permission, require_role
-from app.features.auth.model import Permission, UserRole
-from app.features.auth.security import TokenClaims
-from app.features.users.dependencies import UserAdminServiceDep
-from app.features.users.dto import (
+from app.features.auth import Permission, TokenClaims, UserRole, require_permission, require_role
+from app.shared.response_type import APIResponse
+from app.utils import http_response
+
+from .dependencies import UserAdminServiceDep
+from .dto import (
     ImpersonateResponse,
     PaginatedData,
     UpdateUserRoleRequest,
     UserAdminResponse,
 )
-from app.shared.response_type import APIResponse
-from app.utils import http_response
 
 router = APIRouter(prefix="/users", tags=["users"])
 

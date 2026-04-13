@@ -2,11 +2,10 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from app.connections import get_redis
-from app.features.auth.dependencies import get_refresh_token_repository
-from app.features.auth.repository import RefreshTokenRepository
-from app.features.users.repository import UserAdminRepository
-from app.features.users.service import UserAdminService
+from app.features.auth import RefreshTokenRepository, get_refresh_token_repository
+
+from .repository import UserAdminRepository
+from .service import UserAdminService
 
 
 async def get_user_admin_repository() -> UserAdminRepository:

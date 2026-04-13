@@ -3,7 +3,7 @@ from datetime import datetime
 from beanie import PydanticObjectId
 from beanie.operators import Or, RegEx, Set
 
-from app.features.auth.model import User, UserRole
+from app.features.auth import User, UserRole
 
 
 class UserAdminRepository:

@@ -1,20 +1,25 @@
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, File, Request, UploadFile
 
-from app.features.auth.dependencies import (
+from app.features.auth import (
     CurrentVerifiedUser,
+    TokenClaims,
+    UserResponse,
     get_refresh_token_repository,
     get_user_repository,
 )
-from app.features.auth.dto import UserResponse
-from app.features.auth.security import TokenClaims
-from app.features.profile.dto import AvatarResponse, ChangePasswordRequest, UpdateProfileRequest
-from app.features.profile.service import ProfileService
-from app.shared.response_type import APIResponse
-from app.shared.services.storage import StorageService
-from app.utils import http_response
-from app.utils.exceptions import ValidationException
+from app.features.profile import (
+    AvatarResponse,
+    ChangePasswordRequest,
+    ProfileService,
+    UpdateProfileRequest,
+)
+from app.shared import APIResponse
+from app.utils import ValidationException, http_response
+
+if TYPE_CHECKING:
+    from app.shared.services.storage import StorageService
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 

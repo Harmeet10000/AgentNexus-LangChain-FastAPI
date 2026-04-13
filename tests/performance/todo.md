@@ -171,7 +171,7 @@ def compose(*functions: Composable) -> Composable:
 140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
 146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note
 121. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
-131. what is annotated, annotations, self vs cls, Iterable,  is callable in both typing and collection.abc?, a class receiving something in [] going in contructor or where and what happens in () in a class, what is a class in python, what is bear typing, limit.tying, typing_extrension, learn about this syntax  Callable[[IngestionState], Awaitable[dict[str, object]]], differenece in enum, str, StrEnum, what are @abstractethod, @classmethod, @staticmethod, @aexit, @injectable, @asynccontextmanager, functools and more decorators, e.add_note in exceptions how do i import something from __init__.py, inside __init__ should i write full paths or just .filename, when should i write full paths
+131. what is annotated, annotations, self vs cls, Iterable,  is callable in both typing and collection.abc?, a class receiving something in [] going in contructor or where and what happens in () in a class, what is a class in python, what is bear typing, limit.tying, typing_extrension, learn about this syntax  Callable[[IngestionState], Awaitable[dict[str, object]]], differenece in enum, str, StrEnum, what are @abstractethod, @classmethod, @staticmethod, @aexit, @injectable, @asynccontextmanager, functools and more decorators, e.add_note in exceptions, flow()/bind()/map(), how do i import something from __init__.py, inside __init__ should i write full paths or just .filename, when should i write full paths
 137. what is ToolNode, ToolRuntime, conditional_routing, chatpromptTemplate, PromptTemplate, messagePlaceholder, agentExceutor, context_schema, MessagesState, in langgraph, how does context differ from store, is context_schema differnet from AgentState or same, is custom state schema different from both context_schema and AgentState and what is context passed in agent.ainvoke
 132. how will SystemMessage, HumanMessage, AIMessage, ToolMessage look like in a create_agent and inside langgraph and when in node is passing to another, see how to standardise message passing between agents - through context_schema, AgentState, AIMessage?
 149. add langchain-cisco-aidefense, compact-middleware, langchain-collapse
@@ -193,6 +193,7 @@ todos:-
     d. postgres RAG should be agentic
     e. celery for off loading to a queue
     f. insert the langgraph in app.state in lifespan
+    g. pass default and metadata for particular config in pydantic models for agents
 138. add neo4j driver, DB session from request.app.state in Graphiti, Cognee, AsyncPostgresCheckpointer, vector_store and other places where required in tools and do the same for DB, redis
 108. use the new gemini embedding 2 for multi-modal embeddings  
 133. use pydantic for state management in langraph and check if converting all typedDict to pydantic is useful or docs do not recommends it
@@ -205,7 +206,13 @@ todos:-
 125. use Call a subgraph inside a node for Open Deep Research
 130. correctly write all the arguments passes in init_chat_model and chatgenerativeaigoogle
 155. keep class small and move more complex methods out of it, initialiser that builds an object shouldnt do complicated task inside a class
-156. 
+156. do migration of open_deep_research 
+    a. remove MCP from it
+    b. store the MCP code for any best practices in mcp/
+    c. remove other model providers
+    d. use own taily client and httpx_client and replace existing one
+    e. reorganise code
+157. write cron job for memory decay and then send to celery for off loading
 ```
 
 ---

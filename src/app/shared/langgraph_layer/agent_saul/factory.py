@@ -35,8 +35,6 @@ Performance guarantee:
     pre-built agents — never re-initialise inside a node call.
     500ms+ latency → ~30ms per node call.
 """
-from app.shared.langgraph_layer.agent_saul.prompt import _ORCHESTRATOR_SYSTEM_PROMPT, _RISK_ANALYSIS_SYSTEM_PROMPT, _COMPLIANCE_SYSTEM_PROMPT
-
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -73,6 +71,11 @@ from .pipeline_nodes import (
     make_segmentation_node,
 )
 from .planner import PlannerOutput, make_planner_node
+from .prompt import (
+    _COMPLIANCE_SYSTEM_PROMPT,
+    _ORCHESTRATOR_SYSTEM_PROMPT,
+    _RISK_ANALYSIS_SYSTEM_PROMPT,
+)
 from .qna import QnAOutput, make_qna_node, route_after_qna
 from .state import (
     GroundingVerificationOutput,

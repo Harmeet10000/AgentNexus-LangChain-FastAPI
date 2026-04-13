@@ -1,12 +1,14 @@
-from app.features.auth.model import User
-from app.features.auth.repository import RefreshTokenRepository, UserRepository
-from app.features.auth.security import (
+from app.features.auth import (
+    RefreshTokenRepository,
+    User,
+    UserRepository,
     hash_password,
     verify_password,
 )
-from app.features.profile.dto import AvatarResponse, UpdateProfileRequest
 from app.shared.services.storage import StorageService
 from app.utils import ConflictException, UnauthorizedException, logger
+
+from .dto import AvatarResponse, UpdateProfileRequest
 
 
 class ProfileService:
