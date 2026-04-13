@@ -1,16 +1,14 @@
 import math
 
-from app.features.auth.model import User, UserRole
-from app.features.auth.repository import RefreshTokenRepository
-from app.features.auth.security import create_impersonation_token
-from app.features.users.dto import (
+from app.features.auth import RefreshTokenRepository, User, UserRole, create_impersonation_token
+from app.utils import ConflictException, ForbiddenException, NotFoundException, logger
+
+from .dto import (
     ImpersonateResponse,
     PaginatedData,
     UserAdminResponse,
 )
-from app.features.users.repository import UserAdminRepository
-from app.utils import logger
-from app.utils.exceptions import ConflictException, ForbiddenException, NotFoundException
+from .repository import UserAdminRepository
 
 
 def _to_admin_response(user: User) -> UserAdminResponse:
