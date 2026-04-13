@@ -18,6 +18,12 @@ from pydantic import BaseModel, Field
 
 from app.utils import logger
 
+from .prompt import (
+    _ENTITY_EXTRACTION_SYSTEM_PROMPT,
+    _NORMALIZATION_SYSTEM_PROMPT,
+    _RELATIONSHIP_MAPPING_SYSTEM_PROMPT,
+    _SEGMENTATION_SYSTEM_PROMPT,
+)
 from .state import (
     AgentError,
     CitedEntity,
@@ -33,15 +39,7 @@ from .state import (
 # Normalization Node
 # ===========================================================================
 
-_NORMALIZATION_SYSTEM_PROMPT = """You are a legal document structure normalizer.
 
-Given raw document text, produce a NormalizedDocument with:
-- Resolved section hierarchy (headers, sub-sections, annexures)
-- Normalized clause references (e.g. "Clause 7.2(b)" resolved to its section_id)
-- No content modification — only structural normalization
-
-Output ONLY NormalizedDocument schema.
-"""
 
 
 class NormalizationInput(BaseModel):
@@ -86,16 +84,7 @@ def make_normalization_node(
 # Segmentation Node
 # ===========================================================================
 
-_SEGMENTATION_SYSTEM_PROMPT = """You are a legal clause segmentation engine.
 
-Given a normalized document, identify and classify every clause boundary.
-
-Classify clauses ONLY into the allowed ClauseType values.
-Assign stable, unique clause_ids (format: "C-001", "C-002", ...).
-Preserve exact char offsets from the source text.
-
-Output ONLY ClauseSegmentationOutput schema.
-"""
 
 
 class ClauseSegmentationOutput(BaseModel):
@@ -172,18 +161,7 @@ def dispatch_entity_extraction(state: LegalAgentState) -> list[Send]:
 # Entity Extraction Node (Send fan-out target)
 # ===========================================================================
 
-_ENTITY_EXTRACTION_SYSTEM_PROMPT = """You are a legal entity extractor.
 
-Given a single clause, extract all legal entities.
-Schema-locked — no interpretation, no inference beyond what is explicitly stated.
-
-Citation enforcement: EVERY entity MUST include:
-  claim    → exact quoted text supporting the entity
-  source   → clause_id + section reference
-  confidence → 0.0-1.0
-
-Output ONLY EntityExtractionOutput schema.
-"""
 
 
 class EntityExtractionOutput(BaseModel):
@@ -231,19 +209,7 @@ def make_entity_extraction_node(
 # Relationship Mapping Node
 # ===========================================================================
 
-_RELATIONSHIP_MAPPING_SYSTEM_PROMPT = """You are a legal relationship mapper.
 
-Given all extracted entities, build the legal relationship graph.
-
-Examples:
-  Party A → INDEMNIFIES → Party B
-  Obligation → TRIGGERED_BY → Event
-  Clause C-02 → OVERRIDDEN_BY → Clause C-07
-  Obligation → DEADLINE → Date
-
-Citation enforcement: EVERY relationship MUST include a citation.
-Output ONLY RelationshipMappingOutput schema.
-"""
 
 
 class RelationshipMappingOutput(BaseModel):

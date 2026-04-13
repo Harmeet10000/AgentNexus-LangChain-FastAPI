@@ -3,7 +3,7 @@
 3. use toons for serialisation before sending to LLM
 4. use toons for deserialisation after receiving from LLM
 5. use toons for serialisation before sending to tools
-6. use toons for deserialisation after receiving from tools
+6. use toons for deserialisation after receiving from tools / should i use chains for repeatable action for toon conversion 
 "Communicate data using TOON format. Declaring uniform arrays as key[N]{field1, field2}: val1, val2. Minimal punctuation. No braces."
 7. use async functions, methods and packages in langchain and langGraph
 8. trim/remove tool output in a multi step agent conversation 

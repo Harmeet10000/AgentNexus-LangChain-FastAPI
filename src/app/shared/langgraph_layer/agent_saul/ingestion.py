@@ -22,7 +22,7 @@ from langgraph.types import interrupt
 
 from app.utils import logger
 
-from ..state import (
+from .state import (
     AgentError,
     HITLInterruptType,
     LegalAgentState,

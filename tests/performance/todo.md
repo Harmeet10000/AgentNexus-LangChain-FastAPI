@@ -135,6 +135,8 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro      DONE
 79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer        DONE   
 135. see before/after agent/model wrap_model_call wrap_tool_call   DONE
+75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research            DONE
+52. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.   DONE
 117. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 6. set up performance tests 
 46. use CacheBackedEmbeddings fore reusing embeddings
@@ -145,48 +147,65 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 94. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through texr, PDF and more?    DELAYED
 86. add tests that suits the project
 90. discover RAGFlow, OpenRAG if or if not to use it
-59. No skill composition
-Skills are flat callables. Theres no way to chain skills (skill A output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
 98. check how can Port & Adapter/strategy & factory can help 
+139. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP, learn function composition with this example and in which case should this be used 
+type Composable = Callable[[Any], Any]
+
+
+def compose(*functions: Composable) -> Composable:
+    def apply(value: Any, fn: Composable) -> Any:
+        return fn(value)
+
+    return lambda data: reduce(apply, functions, data)
+
 64. No eval framework. Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
 61. see docassemble, fpdf2, python-docx and other libraries for generating final PDFs/docs
 53. add voice support by using gemini 3 for TTS and STT  with websockets
 62. can i use openRouter keys for my Gemini model               
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
-95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
+59. No skill composition. Skills are flat callables. Theres no way to chain skills (skill A output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
 44. correct the code for crawler and the packages used
-17. refactor vectorStore code
-18. refactor RAG code
-52. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.
-115. logs inbetween the layers are empty or not coming except start and end 
-108. use the new gemini embedding 2 for multi-modal embeddings  
-75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research
+115. logs inbetween the layers are empty or not coming except start and end, should i pass logger as an argument or should i import it where needed 
 140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
-138. add neo4j driver, DB session from request.app.state in Graphiti, Cognee, AsyncPostgresCheckpointer, vector_store and other places where required in tools and do the same for DB, redis
-139. what functional programming patterns should i use in FastAPI, python
-146. use the result package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:
-133. use pydantic for state management in langraph and convert all typedDict to pydantic 
+146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note
 121. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
-58. write a proper langchain-langgraph thingies
-57. No agent-to-agent message passing format standard and  make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
-131. what is annotated, annotations, self vs cls, Iterable,  is callable in both typing and collection.abc?, a class receiving something in [] going in contructor or where and what happens in () in a class, what is a class in python  
-125. use Call a subgraph inside a node for Open Deep Research
+131. what is annotated, annotations, self vs cls, Iterable,  is callable in both typing and collection.abc?, a class receiving something in [] going in contructor or where and what happens in () in a class, what is a class in python, what is bear typing, limit.tying, typing_extrension, learn about this syntax  Callable[[IngestionState], Awaitable[dict[str, object]]], differenece in enum, str, StrEnum, what are @abstractethod, @classmethod, @staticmethod, @aexit, @injectable, @asynccontextmanager, functools and more decorators, e.add_note in exceptions how do i import something from __init__.py, inside __init__ should i write full paths or just .filename, when should i write full paths
 137. what is ToolNode, ToolRuntime, conditional_routing, chatpromptTemplate, PromptTemplate, messagePlaceholder, agentExceutor, context_schema, MessagesState, in langgraph, how does context differ from store, is context_schema differnet from AgentState or same, is custom state schema different from both context_schema and AgentState and what is context passed in agent.ainvoke
-132. how will SystemMessage, HumanMessage, AIMessage, ToolMessage look like in a create_agent and inside langgraph and when in node is passing to another
-130. correctly write all the arguments passes in init_chat_model and chatgenerativeaigoogle
-136. use LangExtract outputs to build rich graph knowledge from your legal documents.
+132. how will SystemMessage, HumanMessage, AIMessage, ToolMessage look like in a create_agent and inside langgraph and when in node is passing to another, see how to standardise message passing between agents - through context_schema, AgentState, AIMessage?
 149. add langchain-cisco-aidefense, compact-middleware, langchain-collapse
-150. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
-151. see cogneeRetriver how does vertex ai differ from 
+151. see cogneeRetriver how does vertex ai differ from google_genai
 152. add a hydration node after checkpointer  LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
 
     The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
     
-153. check this pattern again ```python
+153. check this pattern again 
 init_chat_model()
-create_agent()
+create_agent()       inside a node or should i have 2 instances of cheap and expensive model and then pass it in create_agent
+58. write a proper langchain-langgraph thingies
+154. complete the ingestion pipeline to working condition and see where reconciliation comes init
+todos:- 
+    0. toons reusable chain, point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts with toons
+    a. docling
+    b. langextract
+    c. graphiti
+    d. postgres RAG should be agentic
+    e. celery for off loading to a queue
+    f. insert the langgraph in app.state in lifespan
+138. add neo4j driver, DB session from request.app.state in Graphiti, Cognee, AsyncPostgresCheckpointer, vector_store and other places where required in tools and do the same for DB, redis
+108. use the new gemini embedding 2 for multi-modal embeddings  
+133. use pydantic for state management in langraph and check if converting all typedDict to pydantic is useful or docs do not recommends it
+57. No agent-to-agent message passing format standard and  make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
+136. use LangExtract outputs to build rich graph knowledge from your legal documents.
+150. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
+17. refactor vectorStore code
+18. refactor RAG code
+95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
+125. use Call a subgraph inside a node for Open Deep Research
+130. correctly write all the arguments passes in init_chat_model and chatgenerativeaigoogle
+155. keep class small and move more complex methods out of it, initialiser that builds an object shouldnt do complicated task inside a class
+156. 
 ```
 
 ---
@@ -338,94 +357,6 @@ You can replay any decision.
 19. cognify() is a full graph rebuild, not an append: Cognee's cognify() call processes the ENTIRE dataset, not just the newly added documents. If you call it per-document in persist_memory_node, you'll see quadratic runtime growth as the user's legal_reports dataset grows. The production pattern: batch cognee.add() calls in persist_memory_node, but defer cognify() to a nightly Celery beat task. Your search_episodic_memory() will return slightly stale results (yesterday's graph) but avoid blocking the live pipeline. The Cognee team calls this "async cognification" and it's the recommended pattern at scale — it's just not in their quickstart docs.
 
 
-# Current implementation
-## Phase 1 — HTTP Upload (IngestionGraph)
-
-**API route:** `POST /ingestion/documents/upload`
-
-The client sends a multipart form with the raw file. The router calls `IngestionService.ingest_document()`, which calls `ingestion_graph.ainvoke(initial_state)`. This is a blocking await — the HTTP response does not return until the graph completes. There is no checkpointer on this graph. If it fails, the client re-uploads. There are no HITL interrupts. No LangGraph Store. No Redis idempotency on the graph itself (idempotency lives inside tools, which this graph doesn't use).
-
-`IngestionGraph` has three nodes.
-
-**`extract_node`** receives the raw document text (up to 12,000 characters — hard capped to prevent token explosion). It calls `extraction_llm.ainvoke()` with `EXTRACTION_PROMPT` as a `SystemMessage` and the document text as a `HumanMessage`. The LLM used here is `flash_llm` (Gemini Flash) with `thinking_level="none"` — fast and cheap. The prompt enforces a JSON-only output with entities and relationships. After the call, the node strips markdown fences from the response content and parses it with `json.loads`. It writes `extracted_entities` and `extracted_relationships` back to `IngestionState`. No memory is fetched here. No tools called. No graph traversal. Pure LLM extraction.
-
-**`validate_node`** receives the raw extracted lists. No LLM call here — this is deterministic Python. It filters entities where `confidence > 0.7` AND `name` is non-empty AND `type` is one of the five allowed values. It builds a `valid_entity_ids` set from the filtered entities, then filters relationships where both endpoints exist in that set AND `confidence > 0.7` AND `type` is non-empty. This is the validation layer from Section 3 of the plan — never trust LLM output directly. Dropped counts are recorded in state. No memory fetch, no tools.
-
-**`embed_store_node`** runs the actual Postgres writes using `AsyncSession`. It opens a single transaction and processes everything inside it. For each validated entity, it runs an `INSERT ... ON CONFLICT (normalized_name, entity_type) DO UPDATE SET confidence = GREATEST(...)` — this is the deduplication guard. If the same party appears in two documents, the second insert updates confidence rather than creating a phantom duplicate. For every entity whose `type == "CLAUSE"`, it also calls `embedding_fn(clause_text)` to get a 1536-dimensional vector and inserts a row into the `clauses` table with the pgvector embedding. For relationships, it inserts into the `relationships` table with `from_entity_id` and `to_entity_id` mapped from the extraction IDs to the real Postgres UUIDs via `entity_id_map`. If anything fails, the entire transaction rolls back. `ingestion_complete: True` is only written if no exception was raised.
-
-After the graph completes, `IngestionService` reads the result state and returns a `DocumentUploadResponse` with `doc_id`, `entity_count`, `clause_count`, `relationship_count`. The client stores `doc_id` and uses it to open the WebSocket.
-
-At this point the following data exists in Postgres: rows in `entities`, rows in `clauses` with embeddings, rows in `relationships`. Nothing has been written to Graphiti, Neo4j graph edges, Cognee, or Redis yet. Phase 1 only writes to Postgres.
-
----
-
-## Phase 2 — WebSocket Session (agent_saul LangGraph)
-
-**API route:** `WS /agent-saul/ws/{thread_id}`
-
-The client connects, sends a `WSStartMessage` with `doc_id`, `user_query`, optional `thread_id` (for resuming), and `permissions`. The router calls `AgentSaulService.run_session()`. This is the main loop. The service calls `graph.astream_events(initial_input, config=config, version="v2")` in an async loop. After each stream drains, it calls `await graph.aget_state(config)` to inspect what comes next — completion, interrupt, or error. If an interrupt is detected, it emits a `WSHITLInterruptFrame` and waits for a `WSResumeMessage` on the same WebSocket connection, then issues `Command(resume=payload)` to continue the graph.
-
-The checkpointer here is `AsyncPostgresSaver`. Every node return is checkpointed. If the process dies mid-run and the client reconnects with the same `thread_id`, the graph resumes from the last successful checkpoint. The `RunnableConfig` is built with `configurable={"thread_id": thread_id}` — this is the key that links all checkpointer reads and writes to the right session.
-
-The graph has 15 nodes. Here is what each does.
-
-**`gateway_node`** runs first on every execution including resumes. No LLM. No I/O beyond state reads. It validates that `doc_id` is present, injects `gateway_validated: True` and `session_start_ts` into `working_memory`, and sets `status = QNA_CLARIFICATION`. Returns in milliseconds. This node acts as a consistency gate — if it fails, the whole pipeline stops before any LLM is called.
-
-**`qna_node`** uses `flash_llm.with_structured_output(QnAOutput)`. The LLM call uses `SystemMessage(content=_QNA_SYSTEM_PROMPT)` followed by `state["messages"]`. The prompt asks the model to score confidence from 0.0 to 1.0. No memory is fetched here — this is the first node after gateway and the user's raw query is the only input. If `result.confidence < 0.72`, the node calls `interrupt()` with a `HITLInterruptType.CLARIFICATION_NEEDED` payload. The graph pauses. The service emits `WSHITLInterruptFrame` to the client. The client shows the clarifying question in the UI, the user types an answer, the client sends `WSResumeMessage(action="approve", feedback="the answer")`. The service calls `Command(resume={"action": "approve", "feedback": "..."})`. The graph resumes inside `qna_node` after the `interrupt()` call, receives the human answer as a dict, appends it as a `HumanMessage` to `state["messages"]`, and returns `status = QNA_CLARIFICATION` so the conditional edge loops back to `qna_node`. This loops until confidence crosses the threshold, at which point the node returns `status = PLAN_PENDING` and the conditional edge routes to `orchestrator_node`.
-
-**`orchestrator_node`** uses `pro_llm.with_structured_output(OrchestratorAction)`. This is Gemini Pro with `thinking_level="high"`. The output is a discriminated union — `OrchestratorActionType` is one of `start_pipeline`, `continue`, `synthesize`, or `done`. The node builds messages from `SystemMessage(_ORCHESTRATOR_SYSTEM_PROMPT)` plus `state["messages"]`. After the LLM call, it validates the `target_node` if the action type is `continue` — if the target isn't in `_VALID_WORKER_NODES`, the node returns `status = FAILED` immediately without routing anywhere. The orchestrator increments `current_step` on every invocation. The routing function `route_from_orchestrator` reads `state["orchestrator_action"]` and returns the appropriate node name as a string. On the first invocation, `orchestrator_action` is `None`, so the routing function returns `"planner"` unconditionally.
-
-**`planner_node`** uses `flash_llm.with_structured_output(PlannerOutput)`. It builds the execution plan as a list of `PlanStep` objects with typed `PlanActionType` values. After the LLM generates the plan, the node immediately calls `interrupt()` with `HITLInterruptType.PLAN_APPROVAL` and the full plan serialized as JSON. The graph pauses. The client receives the plan for human review — this is where the reviewer can inspect the proposed steps, modify them, or reject them. On `WSResumeMessage(action="approve")`, the node commits the original plan. On `action="modify"`, it takes `modified_plan` from the resume payload and validates each step through `PlanStep.model_validate()`. On `action="reject"`, it writes `status = PLAN_REJECTED` and an `AgentError`, and the orchestrator routing function checks for `PLAN_REJECTED` and routes back to planner for re-planning. The approved plan is written to `state["plan"]`.
-
-**`ingestion_node`** in the agent_saul graph is now a lookup, not a processor. It reads the raw document text stored during Phase 1. Currently stubbed — you need to wire the actual lookup (`SELECT document_text FROM documents WHERE doc_id = :doc_id` or a MongoDB/S3 fetch depending on where you store raw files). The OCR confidence check and `HITLInterruptType.OCR_REUPLOAD` path remain — if the stored text has low quality markers, it can still interrupt and ask for a re-upload, but this is the exception path, not the default. Returns `document_text` in state.
-
-**`normalization_node`** uses `flash_llm.with_structured_output(NormalizedDocument)`. Takes `state["document_text"]` and sends it to the LLM to produce a section hierarchy with resolved clause references. No memory fetch. No tools. Returns `normalized_document` as a typed `NormalizedDocument` Pydantic model in state.
-
-**`segmentation_node`** uses `flash_llm.with_structured_output(ClauseSegmentationOutput)`. Takes the normalized document sections, concatenates them, and asks the LLM to identify clause boundaries and classify each clause into `ClauseType`. Returns a list of `ClauseSegment` objects written to `state["segments"]` via the `operator.add` reducer — meaning if this node ran before (on a resume), its results append rather than overwrite.
-
-**`entity_extraction_node`** is the Send fan-out target. It does NOT receive `LegalAgentState`. It receives a `ClauseExtractionInput` dict — one per clause segment — dispatched by `dispatch_entity_extraction()` from the segmentation node's conditional edge. LangGraph runs all entity extraction nodes in parallel. Each instance calls `flash_llm.with_structured_output(EntityExtractionOutput)` with the single clause text plus document context (jurisdiction, document type). The output `CitedEntity` objects include a `Citation` with `claim`, `source`, and `confidence`. Results accumulate via `operator.add` on `state["extracted_entities"]`. All parallel instances complete before `relationship_mapping_node` starts.
-
-**`relationship_mapping_node`** has two responsibilities. First, it calls `flash_llm.with_structured_output(_RelationshipMappingLLMOutput)` to extract typed legal relationships from the entity list. Second, it calls `write_clause_episodes_to_graphiti()` directly — not via a tool, because the LLM should never decide when to write to memory. This function opens `asyncio.Semaphore(5)` and runs clause episode writes in parallel, then sequential relationship edge writes. The semaphore prevents overwhelming Neo4j's connection pool. The idempotency guard checks before each write — if the clause was already written in a previous run (e.g. after a crash and resume), the write is skipped. Any failed writes produce `AgentError` entries in state but do not block the pipeline. Returns `state["relationships"]` via `operator.add`.
-
-**`risk_analysis_node`** is the first node that uses `create_react_agent`. Before calling the agent, it calls `build_agent_context(state, graphiti_service, task="risk_analysis", scope=RISK_SCOPE)`. This function: checks `RISK_SCOPE.allows_source("graph")` → calls `graphiti_service.search_for_risk_context()` to get Graphiti episodes scored by `0.5·semantic + 0.2·recency + 0.2·trust + 0.1·task_relevance`; checks `RISK_SCOPE.allows_source("vector")` → queries pgvector (currently stubbed); checks `RISK_SCOPE.allows_source("structured")` → queries Postgres entities table filtered to `CLAUSE` and `OBLIGATION` types only (RISK_SCOPE). It then filters tool messages from `state["messages"]`, trims to 3,500 tokens with `strategy="last"`, and builds a `SystemMessage` with the structured context prefix in `{goal, task, agent_scope, doc_type, jurisdiction, warnings, memory_context}` format. The resulting message list is passed to the risk agent.
-
-The risk agent runs with `risk_tools = [query_knowledge_graph, get_obligation_chain, detect_graph_conflicts]`. The LLM (Pro, `thinking_level="high"`) decides which tools to call and when. `query_knowledge_graph` calls `graphiti_service.search_for_risk_context()` scoped to `RISK_SCOPE.top_k=8`. `get_obligation_chain` calls `graphiti_service.get_obligation_chain()` for semantic search, then `Neo4jSubgraphExpander.get_obligation_chain_cypher()` for structural depth-N traversal using raw Cypher via `app.state.neo4j_driver`. `detect_graph_conflicts` calls `Neo4jSubgraphExpander.detect_conflicts()` to find circular obligations and override chains. Every tool call checks the Redis idempotency cache before executing. Results are written to both Redis (24h TTL) and Postgres `tool_executions` after execution.
-
-**`compliance_node`** follows the exact same pattern as risk_analysis but uses `COMPLIANCE_SCOPE` — which adds `CONTRACT` and `ORG` to the allowed entity types, uses `depth=1` (shallower graph traversal), `time_filter="all"` (not just recent 90 days), and gates only `graph` and `structured` sources (no vector). The compliance agent uses `compliance_tools = [search_legal_precedents, retrieve_statute_section]`. `search_legal_precedents` calls `graphiti_service.search_for_precedent_chains()` filtered by jurisdiction, and separately runs a full-text search on the `statutes` Postgres table using `plainto_tsquery`. If `total_sources < 2`, it sets `insufficient_basis=True` in the `ToolResult` — the compliance agent's system prompt instructs it to respond with "Insufficient legal basis" instead of proceeding. `retrieve_statute_section` does an exact lookup on `statutes` by `act_name ILIKE` and `section_ref` when the agent already knows the statute to fetch.
-
-Risk analysis and compliance run as parallel branches from `relationship_mapping_node`. LangGraph runs both concurrently because both have direct edges from the same upstream node. They join at `grounding_verification_node` — LangGraph waits for both to complete before proceeding.
-
-**`grounding_verification_node`** uses `flash_llm.with_structured_output(GroundingVerificationOutput)`. It takes the summaries from `state["risk_analysis"]` and `state["compliance_result"]` and asks the model to flag any claims that lack citation support. Returns `state["grounding"]` with `verified: bool` and `unverified_claims: list[str]`. No memory fetch. No tools. This is purely a validation pass on what the analysis nodes produced.
-
-**`human_review_node`** is a mandatory HITL node — there is no code path that bypasses it. It calls `interrupt()` with `HITLInterruptType.HUMAN_REVIEW_REQUIRED`, the risk summary, compliance summary, unverified claims, and the first 20 clause segments (capped to control payload size). The graph pauses. The reviewer uses the frontend UI to read all findings, add `ReviewOverride` objects for any clauses they disagree with, and either approve or reject. On rejection, the node writes `status = FAILED` and routes back to the orchestrator. On approval, it creates a `HumanReviewOutput` with the reviewer's `reviewer_id`, `reviewer_role`, `overrides`, and `notes`. After this node completes, `human_approved=True` is semantically in play for all downstream memory writes — the trust score on Graphiti episodes will be `1.0`.
-
-After `human_review_node`, the conditional edge routes back to `orchestrator_node`. The orchestrator reflects on the human review output and decides the next action — typically `OrchestratorActionType.SYNTHESIZE`, which routes to `finalization_node`.
-
-**`finalization_node`** uses `pro_llm.with_structured_output(FinalReport)`. It assembles all analysis — risk findings with human overrides applied, compliance findings, suggested actions, all citations — into a single `FinalReport` Pydantic model. No memory fetch. No tools. Returns `state["final_report"]`.
-
-**`persist_memory_node`** is the memory commit point. It calls `write_final_report_to_memory()`, which does three writes in sequence: Graphiti (final report as a high-trust episode, `group_id=user_id`), Cognee (`store_final_report()` + `store_relationships()`), and then `write_memory_persisted_event()` for the immutable events log. The events write is the dual-write — it fires after both mutable writes succeed. If Graphiti or Cognee fail, the errors are captured in `AgentError` entries but the pipeline still sets `status = COMPLETED`. Memory write failure is not a pipeline failure. Returns `long_term_refs` with `graphiti:` and `cognee:` prefixed keys.
-
-After `persist_memory_node`, the graph reaches `END`. `state_snapshot.next` is empty and `state_snapshot.tasks` has no pending interrupts. The service sends `WSDoneFrame` with the final report summary. The WebSocket closes.
-
----
-
-## Phase 3 — Background (ReconciliationGraph + Decay)
-
-**No API route.** Both tasks are triggered by Celery.
-
-**ReconciliationGraph** is triggered by `run_reconciliation_for_user()` Celery task. The beat schedule fires `run_reconciliation_for_active_users()` every 6 hours, which queries for distinct `user_id` values in `entities` created in the last 6 hours and dispatches one `run_reconciliation_for_user` task per user. The graph is compiled once at lifespan (`build_reconciliation_graph()`) and stored in `app.state.reconciliation_graph`. The Celery task wraps `asyncio.run(reconciliation_graph.ainvoke(...))`. No checkpointer on this graph. No HITL. No WebSocket.
-
-**`fetch_existing_node`** queries Postgres for two sets: recently added entities for the user (`created_at > NOW() - N hours`), and similar existing entities found via `LEFT(normalized_name, 10)` prefix match across the same user's entity history. The prefix match is a pragmatic similarity heuristic — it catches most common alias patterns without needing full fuzzy matching. Returns both sets in state.
-
-**`reconcile_node`** calls `reconcile_llm.ainvoke()` with `RECONCILE_PROMPT` — the loss aversion bias prompt. This uses `flash_llm` (not Pro — the task is structured comparison, not deep reasoning). The prompt uses the bias principles from Section 16.4: loss aversion ("NEVER delete without justification"), constraint amplification (prefer recent + higher confidence), error minimization (when uncertain, choose `ignore`). The model returns a JSON decision with `merge`, `update`, and `ignore` arrays. The `ignore` array is the expected majority — most pairs that look similar are not actually duplicates in legal contracts.
-
-**`apply_changes_node`** executes the merge decisions. For each merge, it redirects all `from_entity_id` and `to_entity_id` FK references in the `relationships` table from `discard_id` to `keep_id`, then deletes the discarded entity. If you skip the redirect step, the `ON DELETE CASCADE` on the FK fires and destroys all relationships associated with the discarded entity. For updates, it builds a dynamic `SET` clause from the `fields` dict and executes it. The entire apply block runs inside a single `session.begin()` transaction — either all changes apply or none do.
-
-**`write_versions_node`** writes `memory_versions` rows for every entity that was merged or updated. For each entity, it fetches `MAX(version)` from `memory_versions`, increments by 1, and inserts a full JSON snapshot of the current entity row plus the reason and run ID. This is the CRDT-lite audit trail — you can reconstruct any entity's history by selecting all versions for that `entity_id` ordered by version ascending and replaying them. The concurrent write race condition (two workers reading the same MAX version) needs a `SELECT ... FOR UPDATE` lock on the entity row before the MAX query — this is the production fix not yet in the current code.
-
-**Memory decay task** is triggered by `run_memory_decay()` Celery beat, scheduled nightly at 2 AM. It uses raw `asyncpg` (not SQLAlchemy) for bulk batch updates — `executemany` is significantly faster than individual ORM updates at scale. The formula per entity is `0.4 * exp(-0.01 * age_days) + 0.3 * min(1.0, access_count / 10.0) + 0.3 * confidence`. Time factor uses `λ=0.01` giving roughly a 70-day half-life. Usage factor saturates at 10 accesses. Confidence factor is the stored confidence from extraction. Entities with `decay_score < 0.15` are flagged as archive candidates. The current code doesn't delete them — it only updates the score. The sweep that actually removes zombie nodes (no edges, low decay, not accessed in 6 months) is a separate cleanup query you need to add as a second beat task.
-
----
 
 
 # RAG & Tools
@@ -653,7 +584,7 @@ Encryption at rest + in transit
 
 If you ignore this, enterprises won’t touch it.
 
-# Evals
+# Evals through DeepEval (G-Eval):
 Evaluation Metrics (Stop Lying to Yourself)
 
 Accuracy ≠ BLEU ≠ ROUGE.
@@ -693,6 +624,25 @@ Override frequency
 Review time reduction
 
 This is what enterprises buy.
+
+# AI Security model
+The 4-Step Maturity Model
+Step 1: Ad Hoc (4:31 - 5:10): The initial stage where systems are built without formal risk management or security considerations.
+Step 2: Foundation (5:12 - 7:22): Establishing the basics, including assigning non-human identities to agents, enabling delegation/on-behalf-of flows, and using a SIEM (Security Information and Event Management) for auditability.
+Step 3: Enhanced (7:29 - 10:46): Treating agents as first-class citizens with ephemeral credentials, applying fine-grained, context-based access, and implementing real-time detection for anomalies.
+Step 4: Adaptive (10:47 - 14:14): The most advanced stage involving continuous authentication, risk-based re-authentication, and real-time revocation to dynamically secure non-deterministic workflows.
+1. JIT Permissions - Over-Permissioning - Force point-of-use enforcement: Verify policy compliance at the exact moment of connection to sensitive data.
+2. IAM
+3. hidden prompt & prompt injection proof
+4. tool security - tool injection protection
+5. sandbox environment
+6. MCP security - Use a secure vault to manage tool credentials, providing only temporary access rather than storing long-term secrets within the MCP server
+7. TTL based tokens - Occurs when tokens are intercepted or leaked (e.g., through LLM prompts). Use tokens that represent both the user (subject) and the agent (actor) to validate that an agent is authorized to work on the user's behalf. Use token exchange at each hop of a flow to ensure security propagates through the system, and restrict tokens to specific scopes to enforce the principle of least privilege 
+8. https://blog.langchain.com/agent-authorization-explainer/
+9. guardrails
+10. TLS - Utilize TLS/MTLS to prevent man-in-the-middle attacks and ensure all stored credentials are encrypted
+11. Ensure audit logs record when a human specifically tasks an agent with an action.
+
 
 # AI Gateway
 what it should consist of 
@@ -755,6 +705,16 @@ START: Do you need AI Gateway?
   Best fit: places that may conditionally acquire multiple async resources during app lifespan or ingestion orchestration.
   Why not higher: good tool, but only when resource lifetimes are genuinely dynamic.
 
+Arjan strongly recommends using modules instead (7:26-8:04). Modules are managed natively by Python, are inherently singletons, and are far more thread-safe, simple, and testable than a custom class-based Singleton. Singleton pattern has legitimate merit when used for lazy loading or controlled instantiation 
+
+the architectural design differences between Python properties and methods, emphasizing the contract these choices establish for your code.
+
+Key Takeaways:
+
+The Difference in Promise: A property communicates that an operation is cheap, safe to read repeatedly, and typically returns state (2:29 - 3:48). Conversely, a method implies that work is being done, potentially involving complexity, latency, or side effects (2:43 - 3:23).
+Derived State: Properties are ideal for computing simple values from existing object state (e.g., checking if an account is active), as they are deterministic and side-effect-free (3:48 - 6:14).
+Setters and Side Effects: While properties can have setters, they should generally avoid performing I/O or heavy operations. Persistence logic (like database saves) should be handled by explicit methods to keep code predictable and avoid blocking (8:58 - 10:29).
+Async Properties: While technically possible, making properties asynchronous is considered a design smell (13:13 - 14:31). It hides asynchronous waiting behind attribute access, which violates the expected simplicity of a property. Instead, use asynchronous methods for loading and saving data (14:31 - 16:10).
 
 # Unit Testing 
 The Basics of Unit Testing (1:01): Validating the behavior of small, isolated pieces of code (functions/methods) to catch bugs, ensure safe refactoring, and document behavior.
@@ -773,6 +733,8 @@ What the Host Says to Do (Best Practices)
 Keep tests focused and small (1:01): Unit tests should validate a single, isolated piece of code, such as a function or method, to keep them fast and easy to run.
 Use pytest instead of unittest (3:16): The host strongly recommends pytest because it allows for simpler function-based tests, powerful assertions, and a more pleasant user experience.
 Use Monkey Patching for external dependencies (3:51): When your code calls an external service (like an API), use monkeypatch to replace the real function with a fake one (setattr(httpx, 'get', fake_get)) so your tests don't make actual network calls (3:54).
+While monkey patching allows you to test existing, tightly coupled code, Arjan notes that the process is "ugly" and difficult to maintain. This serves as a precursor to the second part of the series, where he will demonstrate how refactoring (specifically using dependency injection) simplifies testing and yields a cleaner, more modular design.
+
 Leverage MagicMock for complex objects (8:51): Use unittest.mock.MagicMock to create objects that mimic external APIs without needing to write custom fake classes. You can configure return values for methods like json or raise_for_status (10:03).
 Utilize Fixtures for setup (12:20): Use @pytest.fixture to handle the repetitive setup and teardown of objects, making your test functions cleaner and more reusable (13:05).
 Refactor for Testability (14:01): Improve your code design by using Dependency Injection (e.g., passing a client object to the service) rather than hardcoding external dependencies inside methods (15:05).

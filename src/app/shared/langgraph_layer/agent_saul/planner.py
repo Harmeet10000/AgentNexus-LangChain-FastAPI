@@ -23,26 +23,14 @@ from pydantic import BaseModel, Field
 
 from app.utils import logger
 
-from ..state import (
+from .prompt import _PLANNER_SYSTEM_PROMPT
+from .state import (
     AgentError,
     HITLInterruptType,
     LegalAgentState,
     PlanStep,
     WorkflowStatus,
 )
-
-_PLANNER_SYSTEM_PROMPT = """You are the legal workflow planner for Agent Saul.
-
-Given the user's clarified intent and document type, generate a deterministic,
-ordered execution plan.
-
-Rules:
-- Each step must have a unique step_id (format: "S-01", "S-02", ...).
-- Use ONLY the allowed action types.
-- steps must be logically ordered: extract before analyse, analyse before summarise.
-- depends_on must reference valid step_ids within this plan.
-- Output ONLY the PlannerOutput schema.
-"""
 
 
 class PlannerOutput(BaseModel):

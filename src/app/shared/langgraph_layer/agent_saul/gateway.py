@@ -17,7 +17,7 @@ from typing import Any
 
 from app.utils import logger
 
-from ..state import (
+from .state import (
     AgentError,
     LegalAgentState,
     WorkflowStatus,

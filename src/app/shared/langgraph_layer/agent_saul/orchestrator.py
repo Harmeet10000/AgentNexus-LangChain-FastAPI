@@ -25,33 +25,14 @@ from langgraph.graph import END
 
 from app.utils import logger
 
-from ..state import (
+from .prompt import _ORCHESTRATOR_SYSTEM_PROMPT
+from .state import (
     AgentError,
     LegalAgentState,
     OrchestratorAction,
     OrchestratorActionType,
     WorkflowStatus,
 )
-
-_ORCHESTRATOR_SYSTEM_PROMPT = """You are the orchestrator for Agent Saul, a legal reasoning system.
-
-Your role: reflect on the current pipeline state and decide the next action.
-You do NOT execute work — you delegate to specialized worker nodes.
-
-Given:
-- The approved execution plan
-- Current step index
-- Results from the last worker (if any)
-- Any errors
-
-Decide:
-- start_pipeline: begin document processing from ingestion
-- continue: proceed to a specific named worker node
-- synthesize: all analysis complete, produce final report
-- done: abort or already finalized
-
-Output ONLY OrchestratorAction schema.  No prose outside it.
-"""
 
 # Valid routing targets for 'continue' action
 _VALID_WORKER_NODES = frozenset(
