@@ -20,8 +20,7 @@ from app.connections import (
     init_db,
     init_neo4j,
 )
-from app.features.auth import TokenAuditLog, User
-from app.features.auth.websocket_security import build_websocket_security_service
+from app.features.auth import TokenAuditLog, User, build_websocket_security_service
 from app.middleware import initialize_fastapi_guard
 from app.shared import get_mcp_client_manager
 from app.utils import ServiceUnavailableException, logger
@@ -121,8 +120,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.error("Celery setup failed", error=str(e))
         app.state.celery = None
 
+    # FastAPI-Guard setup (depends on Redis, but non-blocking)
     await initialize_fastapi_guard(app=app, settings=settings)
-
+    # LangGraph setup would go here
+    # await
     logger.info("Application ready", status="running")
 
     yield

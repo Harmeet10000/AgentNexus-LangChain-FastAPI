@@ -96,7 +96,7 @@ dependencies = [
     # --- MCP ---
     "fastmcp>=3.1.0",
     # --- OTHER ---
-    "toons>=0.5.3",
+    "toons>=0.5.4",
     "urllib3>=2.2.0",
     "charset-normalizer>=3.0.0",
     "sqlmodel>=0.0.37",
@@ -123,6 +123,8 @@ dependencies = [
     "langchain-cisco-aidefense>=1.0.0",
     "compact-middleware>=0.1.1",
     "langchain-collapse>=0.1.1",
+    "mojo>=0.26.2.0",
+    "returns>=0.26.0",
 ]
 
 [project.scripts]
@@ -375,6 +377,7 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+# preview = true
 
 # ────────────────────────────────────────
 # TY – Type Checker (Astral)

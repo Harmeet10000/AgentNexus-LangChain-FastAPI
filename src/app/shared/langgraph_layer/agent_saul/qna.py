@@ -23,23 +23,12 @@ from pydantic import BaseModel, Field
 
 from app.utils import logger
 
-from ..state import HITLInterruptType, LegalAgentState, WorkflowStatus
+from .prompt import _QNA_SYSTEM_PROMPT
+from .state import HITLInterruptType, LegalAgentState, WorkflowStatus
 
 _CLARIFICATION_THRESHOLD = 0.72
 
-_QNA_SYSTEM_PROMPT = """You are a legal query optimizer for Agent Saul.
 
-Your job:
-1. Analyse the user's query about a legal document.
-2. Assign a confidence score (0.0-1.0) indicating how clear and actionable the query is.
-3. If confidence < 0.72: produce a single, precise clarifying question.
-4. If confidence >= 0.72: restate the intent as a clear, actionable objective.
-
-Rules:
-- Never hallucinate legal facts.
-- Never ask more than one clarifying question.
-- Output ONLY the QnAOutput schema — no prose outside it.
-"""
 
 
 class QnAOutput(BaseModel):

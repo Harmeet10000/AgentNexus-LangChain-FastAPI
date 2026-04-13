@@ -35,6 +35,7 @@ Performance guarantee:
     pre-built agents — never re-initialise inside a node call.
     500ms+ latency → ~30ms per node call.
 """
+from app.shared.langgraph_layer.agent_saul.prompt import _ORCHESTRATOR_SYSTEM_PROMPT, _RISK_ANALYSIS_SYSTEM_PROMPT, _COMPLIANCE_SYSTEM_PROMPT
 
 from dataclasses import dataclass
 from typing import Any, cast
@@ -47,8 +48,6 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from .analysis_nodes import (
-    _COMPLIANCE_SYSTEM_PROMPT,
-    _RISK_ANALYSIS_SYSTEM_PROMPT,
     make_compliance_node,
     make_finalization_node,
     make_grounding_verification_node,
@@ -59,7 +58,6 @@ from .analysis_nodes import (
 from .gateway import make_gateway_node
 from .ingestion import make_ingestion_node
 from .orchestrator import (
-    _ORCHESTRATOR_SYSTEM_PROMPT,
     make_orchestrator_node,
     route_from_orchestrator,
 )

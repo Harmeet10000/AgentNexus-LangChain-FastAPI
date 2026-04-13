@@ -19,7 +19,13 @@ from langgraph.types import interrupt
 
 from app.utils import logger
 
-from ..state import (
+from .prompt import (
+    _COMPLIANCE_SYSTEM_PROMPT,
+    _FINALIZATION_SYSTEM_PROMPT,
+    _GROUNDING_SYSTEM_PROMPT,
+    _RISK_ANALYSIS_SYSTEM_PROMPT,
+)
+from .state import (
     AgentError,
     ComplianceOutput,
     FinalReport,
@@ -37,25 +43,7 @@ from ..state import (
 # Risk Analysis Node  (create_react_agent — needs retrieval tools)
 # ===========================================================================
 
-_RISK_ANALYSIS_SYSTEM_PROMPT = """You are a senior legal risk analyst.
 
-Perform multi-hop reasoning to identify contractual risks.
-
-For each risk:
-- Assign a risk label: low | medium | high | critical
-- Explain the risk in plain English
-- Cite SPECIFIC clauses, statutes, or precedents
-- Suggest a revision if applicable
-
-Special focus for Indian law:
-- Unlimited liability clauses
-- One-sided termination rights
-- Weak arbitration seats
-- Non-enforceable conditions
-
-Citation enforcement: EVERY risk finding MUST include citations.
-Guardrail: If you cannot cite a source, do not make the claim.
-"""
 
 
 def make_risk_analysis_node(
@@ -125,19 +113,7 @@ def _extract_risk_output(_messages: list[Any]) -> RiskAnalysisOutput:
 # Compliance Node  (create_react_agent — retrieval-first, no hallucinations)
 # ===========================================================================
 
-_COMPLIANCE_SYSTEM_PROMPT = """You are a legal compliance analyst specialising in Indian law.
 
-Tasks:
-1. Check statute applicability (IT Act, Contract Act, GDPR equivalents, SEBI, etc.)
-2. Surface binding precedents from Indian courts
-3. Detect cross-jurisdictional conflicts
-
-STRICT rule: If retrieved sources < confidence threshold → respond:
-  "Insufficient legal basis — cannot make compliance determination for [clause_id]"
-
-DO NOT hallucinate statutes, section numbers, or case citations.
-Citation enforcement: EVERY finding MUST include citations.
-"""
 
 
 def make_compliance_node(
@@ -186,14 +162,7 @@ def _extract_compliance_output(_messages: list[Any]) -> ComplianceOutput:
 # Grounding Verification Node (join after parallel risk + compliance)
 # ===========================================================================
 
-_GROUNDING_SYSTEM_PROMPT = """You are a grounding verifier.
 
-Review all risk and compliance findings.
-Identify any claims that lack sufficient citation support.
-Flag unverified claims that should not be presented to the user.
-
-Output ONLY GroundingVerificationOutput schema.
-"""
 
 
 def make_grounding_verification_node(
@@ -297,20 +266,7 @@ def make_human_review_node() -> Callable[[LegalAgentState], Awaitable[dict[str, 
 # Finalization Node (MANDATORY — structured final report)
 # ===========================================================================
 
-_FINALIZATION_SYSTEM_PROMPT = """You are the legal report finalizer for Agent Saul.
 
-Synthesize all analysis into a final report for the user.
-
-Include:
-- Executive summary (plain English)
-- All risk findings (with human overrides applied)
-- All compliance findings
-- Suggested actions the user should take
-- All citations used
-
-Citation enforcement: output MUST include every citation used in findings.
-Output ONLY FinalReport schema.
-"""
 
 
 def make_finalization_node(
