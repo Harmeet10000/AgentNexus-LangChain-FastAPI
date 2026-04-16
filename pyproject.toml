@@ -125,6 +125,7 @@ dependencies = [
     "langchain-collapse>=0.1.1",
     "mojo>=0.26.2.0",
     "returns>=0.26.0",
+    "thordata-sdk>=1.8.5",
 ]
 
 [project.scripts]

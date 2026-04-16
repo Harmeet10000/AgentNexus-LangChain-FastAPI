@@ -216,5 +216,38 @@ presented by Nitin Jadav, explores how to optimize PostgreSQL performance by mov
 - Branch Prediction: Sorting data can help CPUs predict branches more accurately, reducing costly branch misses (5:16 - 6:02).
 - Real-world Application in PostgreSQL: The speaker explains how an optimization in the exec_scan function for PostgreSQL (PG-18) was identified using these techniques. By separating conditional logic into different functions, they reduced unnecessary CPU overhead for queries that didn't require specific qualification or projection info, resulting in improved cycle counts and cache efficiency (6:03 - 7:23).
 
+Composite Indexes and Column Order (5:40 - 10:18)
+Column order in a composite index is a critical design decision because of the leftmost prefix rule:
 
+Order Matters: An index on (customer_id, status, created_at) is only effective if your query starts with the leading column (customer_id).
+Design Best Practice: Put equality conditions first and range conditions last to keep the search range as tight as possible.
+Covering Indexes (10:19 - 12:50)
+Sometimes, even with an index, the database must perform a bookmark lookup to fetch columns not contained in the index. A covering index includes every column needed for the query (using SELECT, ORDER BY, or the INCLUDE clause), allowing the database to satisfy the request entirely from the index without accessing the main table.
 
+When Indexes Hurt (12:51 - 16:46)
+Indexes are not free. They introduce significant overhead:
+
+Write Performance: Every INSERT, UPDATE, or DELETE requires updating every index on that table, which can cause write operations to slow down drastically.
+Memory Pressure: Indexes compete for space in the database buffer pool.
+Planner Decisions: The query planner may choose to ignore an index if it calculates that reading the table sequentially is cheaper, particularly for low-cardinality columns or when returning large portions of the data.
+Practical Advice (16:47 - 18:37)
+Analyze before adding: Always check the query plan (EXPLAIN) before creating an index.
+Audit regularly: Use database-specific system views (like pg_stat_user_indexes in Postgres) to find and remove unused indexes.
+Targeted Design: Focus on columns used in WHERE, JOIN, and ORDER BY clauses, and ensure the design justifies the maintenance cost on the "write side" of the database.
+
+This video from Database Star demonstrates a structured, evidence-based approach to optimizing a slow-running PostgreSQL query. The presenter walks through a real-world scenario on the Chinook database to reduce a 5-minute execution time to about 1 second.
+
+Key Investigation Steps
+Analyze the Execution Plan (1:22 - 3:30): The presenter emphasizes that reading the execution plan is the first step. By inspecting the plan, they identified a high-cost self-join on the invoice_line table and a lack of index usage.
+Identify Performance Bottlenecks (4:53 - 6:18):
+Self-Join: Joining a table to itself on large datasets causes an exponential increase in comparisons.
+Non-Sargable Conditions: The use of the ABS function in the join condition prevented the database from using indexes effectively. The presenter explains that sargable (search argument-able) conditions are necessary for the optimizer to use indexes.
+Testing and Iteration (7:34 - 9:45): The presenter attempted several fixes, including changing the ABS function to a range condition and testing various indexes. Notably, these changes did not immediately improve performance, proving that indexes are not a silver bullet and must be validated against the execution plan.
+AI Analysis and Final Rewrite (9:45 - 17:53)
+AI Comparison (9:45 - 13:10): The presenter used Microsoft Copilot to analyze the query. While the AI successfully identified the core issues (the self-join and non-sargable conditions), its suggested rewrite did not yield significant performance gains.
+The Effective Solution (13:37 - 16:53): The presenter ultimately rewrote the query using an aggregation approach (a Common Table Expression or CTE) to calculate track counts at specific price points before joining. This reduced the volume of data processed, dropping the query cost from 7.7 million to 60,000 and the runtime from over 5 minutes to ~1.4 seconds.
+Core Takeaways
+Always Baseline: Measure the performance of the original query before making any changes (3:31).
+Avoid Function Wrappers: Whenever possible, rewrite conditions to avoid wrapping columns in functions to keep them sargable (18:03).
+Understand Self-Joins: On large tables, self-joins are expensive; look for ways to aggregate or use window functions to reduce the number of rows compared (18:18).
+AI as an Assistant: AI is a helpful tool for identifying potential issues, but it should be treated as one input among many, not a substitute for analyzing the actual execution plan (18:48).

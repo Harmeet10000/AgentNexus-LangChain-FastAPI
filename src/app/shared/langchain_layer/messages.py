@@ -9,17 +9,24 @@ Strategies:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from langchain_core.messages import (
     AIMessage,
-    BaseMessage,
     RemoveMessage,
     SystemMessage,
     ToolMessage,
     trim_messages,
 )
-from langchain_layer.models import build_fast_model
+
+from .models import ainvoke_text, build_fast_model
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from langchain_core.messages import (
+        BaseMessage,
+    )
 
 # ---------------------------------------------------------------------------
 # Trim
@@ -109,7 +116,6 @@ async def summarize_history(
 
     Returns a new, shorter list of messages.
     """
-    from langchain_layer.models import ainvoke_text
 
     system_msgs = [m for m in messages if isinstance(m, SystemMessage)]
     non_system = [m for m in messages if not isinstance(m, SystemMessage)]

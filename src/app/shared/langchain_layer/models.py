@@ -61,6 +61,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import (
+    ChatGoogleGenerativeAI,
     GoogleGenerativeAIEmbeddings,
     create_context_cache,
 )
@@ -121,6 +122,35 @@ def build_chat_model(
     )
 
 
+def build_chat_google_genai_model(
+    model_name: str | None = None,
+    *,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    top_k: int | None = None,
+    max_tokens: int | None = None,
+    streaming: bool = False,
+    cached_content: str | None = None,
+    **kwargs: Any,
+) -> ChatGoogleGenerativeAI:
+    """Return a configured Gemini chat model via ChatGoogleGenerativeAI."""
+    default_temperature = min(_mcfg.default_temperature, _DEFAULT_GEMINI_TEMPERATURE)
+
+    return ChatGoogleGenerativeAI(
+        model=model_name or _mcfg.gemini_pro_model,
+        thinking_level="medium",
+        temperature=temperature if temperature is not None else default_temperature,
+        top_p=top_p if top_p is not None else _DEFAULT_GEMINI_TOP_P,
+        top_k=top_k if top_k is not None else _DEFAULT_GEMINI_TOP_K,
+        max_tokens=max_tokens or _mcfg.default_max_tokens,
+        google_api_key=_settings_google_api_key,
+        streaming=streaming,
+        timeout=_mcfg.default_timeout,
+        cached_content=cached_content,
+        **kwargs,
+    )
+
+
 def build_fast_model(**kwargs: Any) -> BaseChatModel:
     """Flash model for lower-latency / cheaper tasks (guardrails, tool selection)."""
     return build_chat_model(model_name=_mcfg.gemini_flash_model, **kwargs)
@@ -140,7 +170,7 @@ def create_gemini_context_cache(
     Use this for shared context that would otherwise be re-sent on every request,
     such as long system instructions, logs, code snapshots, or uploaded file refs.
     """
-    llm = model or build_fast_model()
+    llm: BaseChatModel = model or build_fast_model()
     return create_context_cache(
         model=llm,
         messages=messages,

@@ -12,13 +12,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from string import Template
-from typing import Any
+from typing import TYPE_CHECKING
 
 from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder,
     PromptTemplate,
 )
+
+if TYPE_CHECKING:
+    from typing import Any
 
 # ---------------------------------------------------------------------------
 # System prompt templates
@@ -156,47 +159,3 @@ def build_structured_prompt(template: str, **input_vars: str) -> PromptTemplate:
     """Simple PromptTemplate for non-chat use cases."""
     return PromptTemplate.from_template(template)
 
-
-# ---------------------------------------------------------------------------
-# Context engineering helpers
-# ---------------------------------------------------------------------------
-
-
-def inject_context(
-    system: str,
-    *,
-    user_name: str | None = None,
-    user_role: str | None = None,
-    session_id: str | None = None,
-    custom: dict[str, str] | None = None,
-) -> str:
-    """
-    Inject runtime context variables into a system prompt string.
-    Use with Template-style ${variable} placeholders in prompt text.
-    """
-    vars_: dict[str, str] = {}
-    if user_name:
-        vars_["user_name"] = user_name
-    if user_role:
-        vars_["user_role"] = user_role
-    if session_id:
-        vars_["session_id"] = session_id
-    if custom:
-        vars_.update(custom)
-
-    return Template(system).safe_substitute(vars_)
-
-
-def few_shot_block(
-    examples: list[dict[str, str]],
-    *,
-    input_key: str = "input",
-    output_key: str = "output",
-) -> str:
-    """Format a list of input/output dicts as a few-shot block for system prompts."""
-    lines = ["## Few-shot Examples"]
-    for i, ex in enumerate(examples, 1):
-        lines.append(f"\n### Example {i}")
-        lines.append(f"Input: {ex[input_key]}")
-        lines.append(f"Output: {ex[output_key]}")
-    return "\n".join(lines)
