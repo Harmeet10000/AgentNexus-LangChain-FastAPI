@@ -19,8 +19,9 @@ from typing import TYPE_CHECKING
 
 from langchain_core.tools import tool
 
-from app.shared.agents.tools.idempotency import IdempotencyGuard, ToolResult
 from app.utils import logger
+
+from .idempotency import IdempotencyGuard, ToolResult
 
 if TYPE_CHECKING:
     from typing import Any

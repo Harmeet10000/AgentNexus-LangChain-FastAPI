@@ -9,15 +9,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
-from agents.factory import AgentSpec, ProductionAgent, create_production_agent
-from agents.orchestration.supervisor import LLMRouter, MultiAgentSystem, Skill
-from agents.tools.base import build_validation_error_handler
-from agents.tools.shell import file_search, list_directory, read_file, shell_tool, write_file
 from langchain_core.tools import tool
-from langchain_layer.prompts import SystemPromptParts
-from langgraph_layer.state import BaseContext, RichContext
+
+# from app.shared.langgraph_layer.state import BaseContext, RichContext
 from pydantic import BaseModel, Field
+
+from ..prompts import SystemPromptParts
+from .factory import AgentSpec, create_production_agent
+
+# from agents.orchestration.supervisor import LLMRouter, MultiAgentSystem, Skill
+from .tools.base import build_validation_error_handler
+from .tools.shell import file_search, list_directory, read_file, shell_tool, write_file
+
+if TYPE_CHECKING:
+    from .factory import ProductionAgent
 
 # ---------------------------------------------------------------------------
 # Example: simple research tool

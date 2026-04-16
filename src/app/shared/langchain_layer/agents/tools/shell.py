@@ -190,15 +190,15 @@ async def file_search(
             try:
                 lines = file_path.read_text(errors="replace").splitlines()
                 for lineno, line in enumerate(lines, 1):
-                    matched = (
-                        bool(pattern.search(line)) if pattern else query in line
-                    )
+                    matched = bool(pattern.search(line)) if pattern else query in line
                     if matched:
-                        results.append({
-                            "file": str(file_path),
-                            "line": lineno,
-                            "content": line.strip(),
-                        })
+                        results.append(
+                            {
+                                "file": str(file_path),
+                                "line": lineno,
+                                "content": line.strip(),
+                            }
+                        )
                         if len(results) >= max_results:
                             break
             except Exception:

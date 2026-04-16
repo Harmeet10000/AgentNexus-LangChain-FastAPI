@@ -3213,6 +3213,7 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "sqlmodel" },
     { name = "tenacity" },
+    { name = "thordata-sdk" },
     { name = "toons" },
     { name = "tree-sitter" },
     { name = "tree-sitter-python" },
@@ -3346,6 +3347,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = "==2.0.39" },
     { name = "sqlmodel", specifier = ">=0.0.37" },
     { name = "tenacity", specifier = ">=9.1.2" },
+    { name = "thordata-sdk", specifier = ">=1.8.5" },
     { name = "toons", specifier = ">=0.5.4" },
     { name = "tree-sitter", specifier = ">=0.25.2" },
     { name = "tree-sitter-python", specifier = ">=0.25.0" },
@@ -5689,6 +5691,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pysocks"
+version = "1.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/11/293dd436aea955d45fc4e8a35b6ae7270f5b8e00b53cf6c024c83b657a11/PySocks-1.7.1.tar.gz", hash = "sha256:3f8804571ebe159c380ac6de37643bb4685970655d3bba243530d6558b799aa0", size = 284429, upload-time = "2019-09-20T02:07:35.714Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8d/59/b4572118e098ac8e46e399a1dd0f2d85403ce8bbaad9ec79373ed6badaf9/PySocks-1.7.1-py3-none-any.whl", hash = "sha256:2725bd0a9925919b9b51739eea5f9e2bae91e83288108a9ad338b2e3a4435ee5", size = 16725, upload-time = "2019-09-20T02:06:22.938Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "8.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -6776,6 +6787,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d6/6b/32bb58c65991f91aeaaf7473b650175d9d4af5dd383983d177d49ccba08d/tf_playwright_stealth-1.2.0.tar.gz", hash = "sha256:7bb8d32d3e60324fbf6b9eeae540b8cd9f3b9e07baeb33b025dbc98ad47658ba", size = 23362, upload-time = "2025-06-13T04:51:04.97Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/11/3d/2653f4cf49660bb44eeac8270617cc4c0287d61716f249f55053f0af0724/tf_playwright_stealth-1.2.0-py3-none-any.whl", hash = "sha256:26ee47ee89fa0f43c606fe37c188ea3ccd36f96ea90c01d167b768df457e7886", size = 33151, upload-time = "2025-06-13T04:51:03.769Z" },
+]
+
+[[package]]
+name = "thordata-sdk"
+version = "1.8.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "pysocks" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/46/b5/d13d437be4148dd307f9d4334e67720016fc302ae5dab3ef4082fceee347/thordata_sdk-1.8.5.tar.gz", hash = "sha256:fe0df882e3ac270452694c6c47f2267229d93d6d619ea35095164c2ce77283ad", size = 109073, upload-time = "2026-02-27T03:59:42.39Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bb/23/df541898972e5b94a24f0901a90b23108bdc8d9e026c0ce564205254c0b6/thordata_sdk-1.8.5-py3-none-any.whl", hash = "sha256:a6891165c5db43bfb2f9ff3a922961efc0c326f2d5687fe6623601271dad2af3", size = 95065, upload-time = "2026-02-27T03:59:40.944Z" },
 ]
 
 [[package]]

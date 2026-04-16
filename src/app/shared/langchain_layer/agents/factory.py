@@ -8,12 +8,6 @@ Uses LangChain 1.0's `create_agent` with:
 - checkpointer for persistence
 - store for long-term memory
 
-NOTE on naming:
-  This project's `langchain/` and `langgraph/` folders will conflict with
-  the installed packages of the same name if they are at the Python import
-  root.  Place them inside your app package (e.g., `src/myapp/langchain/`)
-  so that relative imports work, or use the `./` /
-  `langgraph_layer/` naming shown here.
 """
 ### 5. Create a custom agent
 
@@ -47,26 +41,27 @@ NOTE on naming:
 
 from __future__ import annotations
 
-import logging
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agents.memory.manager import MemoryManager
-from agents.tools.base import registry as tool_registry
 from langchain.agents import create_agent
-from langchain_core.tools import BaseTool
+from langchain_core.messages import HumanMessage
 
-from app.config.settings import get_settings
-from app.shared.langgraph_layer.agent_saul.state import BaseContext
+from app.shared.langchain_layer.agents.middlewares import build_default_middleware_stack
 
+# from app.shared.langgraph_layer.agent_saul import BaseContext
 from ..models import build_chat_model
 from ..prompts import AGENT_SYSTEM_PROMPT, SystemPromptParts
 
+# from .agents.tools.base import registry as tool_registry
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from typing import Any
 
-logger = logging.getLogger(__name__)
-_settings = get_settings()
+    from langchain_core.tools import BaseTool
+
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +127,6 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
 
     Returns a ProductionAgent with async invoke, stream, and batch methods.
     """
-    from middleware import build_default_middleware_stack
 
     # Resolve tools
     resolved_tools: list[BaseTool] = []
@@ -232,7 +226,6 @@ class ProductionAgent:
 
         # Inject long-term memory into the first invocation
         if self.spec.enable_long_term_memory:
-            from langchain_core.messages import HumanMessage
             msgs = await self.memory.inject_long_term_context(
                 [HumanMessage(content=user_message)],
                 user_id=user_id,
@@ -298,7 +291,6 @@ class ProductionAgent:
         Batch invoke the agent concurrently on multiple messages.
         Each message gets its own thread_id for isolated history.
         """
-        import asyncio
 
         if len(messages) != len(thread_ids):
             raise ValueError("messages and thread_ids must have the same length")

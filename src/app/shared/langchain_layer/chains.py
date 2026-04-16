@@ -6,17 +6,21 @@ They compose with agents via tool calls or middleware.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
-from langchain_layer.models import build_chat_model, build_fast_model
-from langchain_layer.prompts import (
+
+from .models import build_chat_model, build_fast_model
+from .prompts import (
     GUARDRAIL_SYSTEM_PROMPT,
     ROUTER_SYSTEM_PROMPT,
     SUMMARIZER_SYSTEM_PROMPT,
     build_chat_prompt,
 )
+
+if TYPE_CHECKING:
+    from typing import Any
 
 # ---------------------------------------------------------------------------
 # Summarization chain
