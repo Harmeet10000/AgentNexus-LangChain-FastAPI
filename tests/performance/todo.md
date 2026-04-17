@@ -1,3 +1,5 @@
+# To-Do List
+
 ```py
 3. set up integration guide for FastMCP             Delayed
 8. make a Copilot instructions improved final based on todo.md   DONE
@@ -135,21 +137,28 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 42. fix the search code as it is not using the pg_textsearch, pgvectorscale, pg_trgm etc properly  with Kiro      DONE
 79. check what performance optimisation should i do in pageindex and langextract and whether should i use pydantic or a dataclass and also check to replace asyncio with asyncer        DONE   
 135. see before/after agent/model wrap_model_call wrap_tool_call   DONE
-75. integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research            DONE
-76. legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.   DONE
+75.  integrate open deep search https://blog.langchain.com/open-deep-research/ and this https://github.com/langchain-ai/open_deep_research            DONE
+76.  legal AGENT will be based on Saul for finding out of the box ideas for legal advice also and will also have a block for how senior/experienced lawyers of supreme courts and high courts will handle this.   DONE
 77.  what is annotated, annotations, self vs cls, Iterable,  is callable in both typing and collection.abc?, a class receiving something in [] going in contructor or where and what happens in () in a class, what is a class in python, what is bear typing, limit.tying, typing_extrension, learn about this syntax  Callable[[IngestionState], Awaitable[dict[str, object]]], differenece in enum, str, StrEnum, what are @abstractethod, @classmethod, @staticmethod, @aexit, @injectable, @asynccontextmanager, functools and more decorators, e.add_note in exceptions, flow()/bind()/map(), how do i import something from __init__.py, inside __init__ should i write full paths or just .filename, when should i write full paths          DONE
-78.  for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
-79. set up performance tests 
-80. use CacheBackedEmbeddings fore reusing embeddings
-81. check the page https://docs.langchain.com/langsmith/deployments#
+58.  write a proper langchain-langgraph thingies    DONE
+149.  what is ToolNode, ToolRuntime, conditional_routing, chatpromptTemplate, PromptTemplate, messagePlaceholder, agentExceutor, context_schema, MessagesState, InjectedToolArg, in langgraph, how does context differ from store, is context_schema differnet from AgentState or same, is custom state schema different from both context_schema and AgentState and what is context passed in agent.ainvoke     DONE
+150.  how will SystemMessage, HumanMessage, AIMessage, ToolMessage look like in a create_agent and inside langgraph and when in node is passing to another, see how to standardise message passing between agents - through context_schema, AgentState, AIMessage?     DONE
+151. correctly write all the arguments passes in init_chat_model and chatgenerativeaigoogle   DONE
+154. check this pattern again init_chat_model() create_agent()       inside a node or should i have 2 instances of cheap and expensive model and then pass it in create_agent          DONE
+172. learn about langGrpah.prebuilt, create_react_agent from langraph.prebuilt   DONE
+138. add neo4j driver, DB session from request.app.state in Graphiti, Cognee, AsyncPostgresCheckpointer, vector_store and other places where required in tools and do the same for DB, redis            DONE
+108. use the new gemini embedding 2 for multi-modal embeddings, LLMToolSelectMiddleware        DONE
 
-82. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
+152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
+155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses     DELAYED    
+156. check the page https://docs.langchain.com/langsmith/deployments#
+153. set up performance tests 
+157. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
 
-83. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses     DELAYED
-84. add tests that suits the project
-85. discover RAGFlow, OpenRAG if or if not to use it
-86. check how can Port & Adapter/strategy & factory can help 
-87.  what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
+158. add tests that suits the project
+159. discover RAGFlow, OpenRAG if or if not to use it
+160. check how can Port & Adapter/strategy & factory can help 
+161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
 type Composable = Callable[[Any], Any]
 
 
@@ -172,21 +181,15 @@ def compose(*functions: Composable) -> Composable:
 140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
 146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note and also check if i am right in passong HTTPException to APIException and other classes
 148. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
-149. what is ToolNode, ToolRuntime, conditional_routing, chatpromptTemplate, PromptTemplate, messagePlaceholder, agentExceutor, context_schema, MessagesState, InjectedToolArg, in langgraph, how does context differ from store, is context_schema differnet from AgentState or same, is custom state schema different from both context_schema and AgentState and what is context passed in agent.ainvoke
-150. how will SystemMessage, HumanMessage, AIMessage, ToolMessage look like in a create_agent and inside langgraph and when in node is passing to another, see how to standardise message passing between agents - through context_schema, AgentState, AIMessage?
 151. add langchain-cisco-aidefense, compact-middleware, langchain-collapse
 152. see cogneeRetriver how does vertex ai differ from google_genai
 153. add a hydration node after checkpointer  LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
 
     The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
     
-154. check this pattern again 
-init_chat_model()
-create_agent()       inside a node or should i have 2 instances of cheap and expensive model and then pass it in create_agent
-58. write a proper langchain-langgraph thingies
 155. complete the ingestion pipeline to working condition and see where reconciliation comes init
-todos:- 
-    0. toons reusable chain, point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it
+todos:-
+    1. toons reusable chain, point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
     a. docling
     b. langextract
     c. graphiti
@@ -195,27 +198,29 @@ todos:-
     f. insert the langgraph in app.state in lifespan
     g. pass default and metadata for particular config in pydantic models for agents
     h. research for RAG pipeline with Gemini
-138. add neo4j driver, DB session from request.app.state in Graphiti, Cognee, AsyncPostgresCheckpointer, vector_store and other places where required in tools and do the same for DB, redis
-108. use the new gemini embedding 2 for multi-modal embeddings, LLMToolSelectMiddleware 
-133. use pydantic for state management in langraph and check if converting all typedDict to pydantic is useful or docs do not recommends it
+    i. use MessagesState to standardise the moving of data between Agent A and Agent 
+    j. use tenacity for retries 
+133. use pydantic for data configuration, tool arguments, or schema validation in langraph and check if converting all typedDict to pydantic is useful or docs do not recommends it (only for custom state schema)
 57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
 136. use LangExtract outputs to build rich graph knowledge from your legal documents.
-150. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
-17. refactor vectorStore code
-18. refactor RAG code
-95. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
-125. use Call a subgraph inside a node for Open Deep Research
-130. correctly write all the arguments passes in init_chat_model and chatgenerativeaigoogle
-156. keep class small and move more complex methods out of it, initialiser that builds an object shouldnt do complicated task inside a class
-157. do migration of open_deep_research 
+162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
+163. refactor vectorStore code
+164. refactor RAG code
+165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
+166. use Call a toolNode and check id toolNode should be used or subgraph inside a node for Open Deep Research
+167. how systemPromptPaarts, chatPromptTemplate, systemmessage, humanMessage, AImessage,ToolMessage look like while passing it in graph and how should i serialise these with toons before sending to LLM
+168. do migration of open_deep_research  and pass it to agent_saul as a ToolNode
     a. remove MCP from it
     b. store the MCP code for any best practices in mcp/
     c. remove other model providers
     d. use own taily client and httpx_client and replace existing one
     e. reorganise code
-158. EARS-compliant acceptance criteria, research about what Kiro does for SDD, which standards does it use
-159. write cron job for memory decay and then send to celery for off loading
-
+169. EARS-compliant acceptance criteria, research about what Kiro does for SDD, which standards does it use
+170. write cron job for memory decay and then send to celery for off loading
+171. use CacheBackedEmbeddings fore reusing embeddings
+173. use prebuilt and custom middlewares in langchain 
+174. rewrite the tools for the new grpahiti, cognee etc
+175. add proper cognee functions, graphiti from docs
 ```
 
 --- summarise these chapters in great detail and take video's transcript as reference for summarising
@@ -364,8 +369,6 @@ You can replay any decision.
 2. Idempotency key collision is a business logic bug, not a tech bug: If two users submit the same clause text from different documents, hash(step_id + input + user_id) produces different keys because user_id differs. That's correct. But if the same user submits two different documents with identical clause text (common in NDAs), the input_data dict differs only in clause_id — so they get different keys. That's also correct. The trap is if you ever hash the clause TEXT as the input — then you've accidentally made your system treat legally distinct clauses as identical because they share boilerplate. Always hash structural IDs (clause_id, doc_id), never content.
 3. cognify() is a full graph rebuild, not an append: Cognee's cognify() call processes the ENTIRE dataset, not just the newly added documents. If you call it per-document in persist_memory_node, you'll see quadratic runtime growth as the user's legal_reports dataset grows. The production pattern: batch cognee.add() calls in persist_memory_node, but defer cognify() to a nightly Celery beat task. Your search_episodic_memory() will return slightly stale results (yesterday's graph) but avoid blocking the live pipeline. The Cognee team calls this "async cognification" and it's the recommended pattern at scale — it's just not in their quickstart docs.
 
-
-
 # Context Engineering
 
 The talk details different memory structures to emulate human cognitive functions, including persona memory for personality, toolbox memory for managing tool schemas, conversation memory for history, and workflow memory for learning from past actions
@@ -444,7 +447,7 @@ Here're 10 Actionable Insights:
 
 # Guardrails
 
-1. Guardrails ka real scope (India-specific)
+1. Guardrails real scope (India-specific)
 
 Guardrails are not optional, they are existential.
 
@@ -514,48 +517,6 @@ Override frequency
 Review time reduction
 
 This is what enterprises buy.
-
-# AI Security model
-
-The 4-Step Maturity Model
-Step 1: Ad Hoc (4:31 - 5:10): The initial stage where systems are built without formal risk management or security considerations.
-Step 2: Foundation (5:12 - 7:22): Establishing the basics, including assigning non-human identities to agents, enabling delegation/on-behalf-of flows, and using a SIEM (Security Information and Event Management) for auditability.
-Step 3: Enhanced (7:29 - 10:46): Treating agents as first-class citizens with ephemeral credentials, applying fine-grained, context-based access, and implementing real-time detection for anomalies.
-Step 4: Adaptive (10:47 - 14:14): The most advanced stage involving continuous authentication, risk-based re-authentication, and real-time revocation to dynamically secure non-deterministic workflows.
-
-1. JIT Permissions - Over-Permissioning - Force point-of-use enforcement: Verify policy compliance at the exact moment of connection to sensitive data.
-2. IAM
-3. hidden prompt & prompt injection proof
-4. tool security - tool injection protection
-5. sandbox environment
-6. MCP security - Use a secure vault to manage tool credentials, providing only temporary access rather than storing long-term secrets within the MCP server
-7. TTL based tokens - Occurs when tokens are intercepted or leaked (e.g., through LLM prompts). Use tokens that represent both the user (subject) and the agent (actor) to validate that an agent is authorized to work on the user's behalf. Use token exchange at each hop of a flow to ensure security propagates through the system, and restrict tokens to specific scopes to enforce the principle of least privilege
-8. <https://blog.langchain.com/agent-authorization-explainer/>
-9. guardrails
-10. TLS - Utilize TLS/MTLS to prevent man-in-the-middle attacks and ensure all stored credentials are encrypted
-11. Ensure audit logs record when a human specifically tasks an agent with an action.
-
-## Agent Sandbox
-
-the necessity of dedicated, secure infrastructure—or an "Agent Computer"—for running autonomous AI agents. He argues that traditional containerization is insufficient for untrusted agent-generated code and outlines the technical requirements for robust sandboxing.
-
-1. Beyond Localhost (1:25 - 2:49): Naresh establishes that long-running agents require a purpose-built environment that maintains state, networking, and connectivity between the internet and the agent's workspace.
-2. The 5 Infrastructure Layers (2:49 - 4:30): He breaks down the sandbox architecture into five critical components: isolation boundary (MicroVM), containers (e.g., Ubuntu), bash sessions/file system, networking (port routing), and persistence.
-3. Runtime Decisions (4:30 - 7:10): A discussion on providing agents with full Linux instances rather than restricted shells. Key capabilities include managing background processes (like dev servers), streaming output, and supporting multiple concurrent sessions.
-4. The Security Paradox (7:10 - 9:57): Naresh addresses the danger of executing untrusted code. He explains that Docker (namespaces) is a security mismatch because it shares the host kernel. He advocates for MicroVMs (Firecracker), which provide hardware-level isolation with minimal overhead.
-5. Networking Architecture (9:57 - 11:37): Explanation of how to dynamically route internet traffic to specific, ephemeral sandboxes using unique session tokens and internal mapping, ensuring browser-to-agent connectivity.
-6. Persistence & Cold Starts (11:37 - 15:53): A deep dive into strategies to eliminate cold starts, including pre-built images, persistent volumes, memory snapshots, and maintaining "warm pools" of ready-to-use sandboxes.
-7. The 8-Line Production Sandbox (15:53 - 18:08): A conceptual breakdown of the minimal code required to orchestrate a secure, persistent, and network-accessible sandbox.
-8. Scale of AI Code (18:08 - 18:48): The speaker notes the massive scale of AI-generated code (e.g., billions of lines daily on Cursor) and why infrastructure for these agents is becoming the new default.
-9. Future of Runtimes (18:48 - 20:44): Discussion on moving toward even lighter solutions like V8 isolates for specific workloads where a full MicroVM may be overkill.
-10. Q&A and Programmatic Gates (20:44 - 29:57): The speaker covers standardizing agent harnesses and the use of programmatic gates—a strategy where agents are given limited, specific pathways for interaction to control the "blast radius" of their actions.
-
-### Key Takeaways for Secure Sandboxing
-
-1. Isolation: Use MicroVMs (Firecracker) rather than standard Docker containers. MicroVMs provide a dedicated kernel per sandbox, preventing an agent from impacting the host machine (8:33).
-2. Blast Radius Control: Rather than giving agents broad permissions, implement programmatic gates. These act as strictly defined interfaces that only allow the agent to perform specific, approved actions (25:48).
-3. Persistence Strategy: To ensure a seamless user experience, leverage memory snapshots and warm pools. This allows the agent to resume work instantly without waiting for the environment to boot (12:51).
-4. Environment over Behavior: Naresh emphasizes that the most effective security measure is to control the environment itself. By ensuring the agent operates within an isolated sandbox with no sensitive network or file system access, you mitigate the risks associated with autonomous code execution (28:35).
 
 # AI Gateway
 

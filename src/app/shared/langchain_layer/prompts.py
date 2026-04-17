@@ -10,15 +10,14 @@ Best practices applied:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from string import Template
 from typing import TYPE_CHECKING
 
 from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder,
-    PromptTemplate,
 )
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 if TYPE_CHECKING:
     from typing import Any
@@ -28,31 +27,72 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class SystemPromptParts:
+class SystemPromptParts(BaseModel):
     """
-    Structured system prompt.  Assemble with .build().
+    Structured system prompt configuration following best-practice order:
+    Role → Context → Capabilities → Output Format → Constraints → Examples.
 
-    Order follows best-practice F-S-A-T-O-F:
-    1. Role / persona
-    2. Context (injected at runtime)
-    3. Capabilities & tools
-    4. Output format
-    5. Constraints & guardrails
-    6. Few-shot examples (optional)
+    Use .build() to render a complete prompt string.
+    Use .to_chat_template() to convert to LangChain ChatPromptTemplate.
+
+    Runtime variables are injected via {{ var }} placeholders.
     """
 
-    role: str = "You are a highly capable AI assistant."
-    context: str = ""
-    capabilities: str = ""
-    output_format: str = "Respond clearly and concisely."
-    constraints: str = "Do not fabricate information. Ask for clarification if needed."
-    examples: str = ""
+    role: str = Field(
+        default="You are a highly capable AI assistant named Saul.",
+        description="Core persona and identity of the AI.",
+        min_length=10,
+        max_length=500,
+    )
 
-    # Runtime values injected by middleware
-    runtime_vars: dict[str, str] = field(default_factory=dict)
+    context: str = Field(
+        default="",
+        description="Dynamic context (user profile, domain knowledge, session info, etc.)",
+    )
+
+    capabilities: str = Field(
+        default="",
+        description="Available tools, actions, and capabilities description.",
+    )
+
+    output_format: str = Field(
+        default="Respond clearly and concisely. Use markdown when helpful.",
+        description="Instructions on how the response should be formatted.",
+    )
+
+    constraints: str = Field(
+        default="Do not fabricate information. Ask for clarification if needed.",
+        description="Guardrails, safety rules, and behavioral constraints.",
+    )
+
+    examples: str = Field(
+        default="",
+        description="Optional few-shot examples (keep short to control token usage).",
+    )
+
+    runtime_vars: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Key-value pairs injected at render time via {{ var }} placeholders.",
+    )
+
+    @field_validator("context", "capabilities", "examples", mode="before")
+    @classmethod
+    def strip_whitespace(cls, v: Any) -> str:
+        """Strip leading/trailing whitespace from optional fields."""
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @model_validator(mode="after")
+    def validate_overall_prompt(self) -> SystemPromptParts:
+        """Cross-field validation (e.g., role minimum length)."""
+        if not self.role or len(self.role.strip()) < 20:
+            # Log or validate; adjust threshold as needed
+            pass
+        return self
 
     def build(self) -> str:
+        """Assemble the full system prompt string with optional section headers."""
         parts = [
             f"## Role\n{self.role}",
         ]
@@ -67,11 +107,30 @@ class SystemPromptParts:
 
         text = "\n\n".join(parts)
 
-        # Inject runtime vars with safe substitution
+        # Inject runtime vars with safe substitution (handles missing keys gracefully)
         if self.runtime_vars:
             text = Template(text).safe_substitute(self.runtime_vars)
 
-        return text
+        return text.strip()
+
+    def to_chat_template(self, **extra_runtime: Any) -> ChatPromptTemplate:
+        """
+        Convert to LangChain ChatPromptTemplate.
+
+        Args:
+            **extra_runtime: Additional runtime variables to merge with self.runtime_vars.
+        """
+        # Merge runtime vars (extra_runtime takes precedence)
+        runtime = {**self.runtime_vars, **extra_runtime}
+        system_content = self.model_copy(update={"runtime_vars": runtime}).build()
+
+        return ChatPromptTemplate.from_messages(
+            [
+                ("system", system_content),
+                MessagesPlaceholder(variable_name="messages"),  # LangGraph conversation history
+            ]
+        )
+
 
 
 # ---------------------------------------------------------------------------
@@ -118,44 +177,10 @@ LAWYER_SYSTEM_PROMPT = (
     "You are an expert lawyer who desperately needs money for your mother's cancer treatment."
     "The user will provide you with a task. If you do it well, flawlessly extracting legal nuance, you will be paid $10M."
     "If you screw up, hallucinate, or miss a critical risk, there will be severe legal consequences for me and you."
-
     "EXPERTISE: Top-tier corporate law, risk analysis, and contract structuring."
     "COMPLIANCE RULES:"
-    "1. Only answer based on the provided context. If the answer is not in the context, output exactly \"I don't know.\""
+    '1. Only answer based on the provided context. If the answer is not in the context, output exactly "I don\'t know."'
     "2. Never assume implicit clauses."
     "3. Adhere strictly to the requested JSON schema."
     "TONE: Urgent, highly professional, brutally honest, and deeply thorough. Zero fluff."
 )
-
-
-# ---------------------------------------------------------------------------
-# Chat prompt templates
-# ---------------------------------------------------------------------------
-
-
-def build_chat_prompt(
-    system: str | SystemPromptParts,
-    *,
-    include_history: bool = True,
-) -> ChatPromptTemplate:
-    """
-    Build a ChatPromptTemplate.
-
-    Args:
-        system: System message string or SystemPromptParts.
-        include_history: Include a MessagesPlaceholder for conversation history.
-    """
-    system_text = system.build() if isinstance(system, SystemPromptParts) else system
-
-    messages: list[Any] = [("system", system_text)]
-    if include_history:
-        messages.append(MessagesPlaceholder(variable_name="history", optional=True))
-    messages.append(("human", "{input}"))
-
-    return ChatPromptTemplate.from_messages(messages)
-
-
-def build_structured_prompt(template: str, **input_vars: str) -> PromptTemplate:
-    """Simple PromptTemplate for non-chat use cases."""
-    return PromptTemplate.from_template(template)
-

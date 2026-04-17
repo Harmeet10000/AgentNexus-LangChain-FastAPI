@@ -1,16 +1,17 @@
 # src/app/shared/document_processing/langextract_to_graph.py
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
-import langextract as lx
 
-from src.app.shared.rag.neo4j.client import Neo4jClient  # or Graphiti client
+if TYPE_CHECKING:
+    import langextract as lx
 
 
 class GraphIngestionContext(BaseModel):
     """Narrow context for graph mapping."""
+
     model_config = {"frozen": True}
     document_id: str
     source_url: str
@@ -51,8 +52,11 @@ async def ingest_extractions_to_graph(
             ingested += 1
 
     return ingested
+
+
 #     Best Practice Prompt Strategy for Graphs:
 
+# TODO: Design a multi-pass LangExtract prompting strategy to first extract entities/attributes, then feed those back in a second pass to extract typed relationships with grounding. This will yield a richer, more accurate graph compared to a single-pass approach.
 # Run two passes with LangExtract:
 # Entity + attribute extraction (what you already have).
 # Dedicated relationship extraction pass, where you feed back the entities and ask for typed relationships with grounding.

@@ -9,7 +9,7 @@ from starlette.middleware import Middleware
 
 from app.config import get_settings
 from app.features.auth.security import decode_token
-from app.shared.mcp.metrics import observe_mcp_http_request
+from app.middleware import observe_mcp_http_request
 from app.utils import UnauthorizedException, logger
 from app.utils.rate_limit.service import RateLimitService
 

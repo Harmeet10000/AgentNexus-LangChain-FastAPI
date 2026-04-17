@@ -2,11 +2,11 @@ from typing import TYPE_CHECKING
 
 import uvicorn
 
-from app.config.settings import get_settings
-from app.utils.logger import logger
+from app.config import get_settings
+from app.utils import logger
 
 if TYPE_CHECKING:
-    from app.config.settings import Settings
+    from app.config import Settings
 
 
 def main() -> None:

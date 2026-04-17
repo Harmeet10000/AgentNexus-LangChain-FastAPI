@@ -3,21 +3,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4  # noqa: TC003
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Computed, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship  # noqa: TC002
 
 from app.shared import Base
-
-if TYPE_CHECKING:
-    from uuid import UUID
-
-    from sqlalchemy.orm import Mapped
 
 
 class SearchDocument(Base):

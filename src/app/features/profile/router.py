@@ -9,14 +9,14 @@ from app.features.auth import (
     get_refresh_token_repository,
     get_user_repository,
 )
-from app.features.profile import (
+from app.utils import APIResponse, ValidationException, http_response
+
+from .dto import (
     AvatarResponse,
     ChangePasswordRequest,
-    ProfileService,
     UpdateProfileRequest,
 )
-from app.shared import APIResponse
-from app.utils import ValidationException, http_response
+from .service import ProfileService
 
 if TYPE_CHECKING:
     from app.shared.services.storage import StorageService

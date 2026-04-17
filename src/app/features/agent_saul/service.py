@@ -52,7 +52,7 @@ from app.features.auth.websocket_security import (
     WebSocketSecurityService,
     WebSocketSecurityViolation,
 )
-from app.shared.langgraph_layer.agent_saul.graph.state import (
+from app.shared.langgraph_layer.agent_saul.state import (
     GRAPH_NODE_NAMES,
     HITLInterruptType,
     WorkflowStatus,

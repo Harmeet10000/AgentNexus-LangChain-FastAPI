@@ -1,9 +1,12 @@
 # Moto of this project
+
 AI Agents should never be replacing Humans. They should be your devoted digital companions, ever-ready to absorb the soul-crushing repetition and mindless grunt work that slowly poisons the very profession you once chased with youthful fire. Niether should you use AI Agents to do the job for you completely end-to-end. Instead you should be doing AI-Assisted work that should feel like a very ergonomic office/work chair that doesnt break your back and a bent neck making you lose your time to dread-filled procrastination, existential second-guessing, and the quiet terror of “what if I chose wrong,”. If your agents frees your time that would rather have wasted dreading over life choices, you can spend that time to be more human lifting the invisible weight from your shoulders and not see your hair getting white prematurly.
 this is a graph-backed, human-verified legal intelligence platform for Indian contracts.
 
-# i am building a stateful, resumable, memory-aware reasoning pipeline
+## i am building a stateful, resumable, memory-aware reasoning pipeline
+
 A distributed, resumable, schema-driven cognitive workflow engine with controlled reasoning surfaces Which has three layers:
+
 1. Memory shaping (filters, trimming)
 2. Runtime control (dynamic agents, routing)
 3. Execution durability (pause/resume)
@@ -16,9 +19,10 @@ The deepest insight: If your system cannot deterministically replay a run, you d
 Final Mental model: Plan → deterministic execution → validated output → persisted state
 Not: LLM → decide → act → hope it works
 
-# workflow choice and reasoning
-Orchestrator 
-why:	Main agent plans → Delegates to workers → Synthesize.  Perfect: Plan multi-step, coordinate agents, reflect/recover
+## workflow choice and reasoning
+
+Orchestrator
+why: Main agent plans → Delegates to workers → Synthesize.  Perfect: Plan multi-step, coordinate agents, reflect/recover
 My requirements match Orchestrator exactly:
 
 Deterministic workflows: Explicit plan → worker → reflect loop
@@ -29,7 +33,8 @@ Error recovery: Orchestrator handles failures, re-plans
 Coordinate agents: Workers = specialized sub-agents
 Shared state: Orchestrator owns LegalState, workers read/write
 
-# Performance Considerations
+## Performance Considerations
+
 Do NOT init_chat_model + create_agent inside LangGraph nodes. Performance killer + anti-pattern. Pre-compile agents outside graph, pass as node functions.
 Why NOT Inside Nodes? ❌
 ❌ BAD - Inside node (N+1 models per request)
@@ -40,7 +45,9 @@ def research_node(state):
 
 Correct Pattern: Pre-Compile Outside ✅
 ✅ GOOD - Pre-compile once
-# OUTSIDE GRAPH - Compile once at startup
+
+## OUTSIDE GRAPH - Compile once at startup
+
 research_agent = create_agent(
     init_chat_model("gpt-4o"),
     tools=[search_caselaw]
@@ -69,7 +76,9 @@ Result:
 ├─ Memory: 100MB (vs 20GB)
 ├─ Scale: 10K req/s
 └─ Debug: LangSmith traces per agent
-# Result: 500ms+ latency per node, scales poorly
+
+## Result: 500ms+ latency per node, scales poorly
+
 Copy
 Problems:
 
@@ -79,8 +88,8 @@ Memory leaks: Creates new model/agent objects per invocation
 Scalability: 10 nodes × 10 req/s = 100 model inits/second
 Token waste: Repeated system prompts/metadata
 
+## Whats in this
 
-# Whats in this
 3. Why are they looking for a solution (actual pain)
 
 Not “time-saving”. That’s shallow.
@@ -116,7 +125,7 @@ Inconsistent interpretation across regions
 
 Time is a symptom. Risk and uncertainty are the disease.
 
-7. Impact across domains (realistic, not hype)
+1. Impact across domains (realistic, not hype)
 Insurance
 Detect claim-rejection loopholes
 Policyholder vs insurer asymmetry reduced
@@ -136,7 +145,7 @@ State-specific succession nuances
 
 This directly reduces information asymmetry, not lawyers.
 
-8. Judgements misinterpretation problem
+1. Judgements misinterpretation problem
 
 In India:
 
@@ -177,12 +186,12 @@ Reviewer role
 
 This becomes training + audit data.
 
+## Context Window Occupier
 
-# Context Window Occupier
 system prompt  2-5K token
 Bootstrap files  varies ~20K token
 memory files     varies grows over time
-skills          varies per skill * count 
+skills          varies per skill * count
 Conversation history     # 1 cost driver
 tool output in history   # silent killer upto 180K chars
 compaction history     1-3K tokens

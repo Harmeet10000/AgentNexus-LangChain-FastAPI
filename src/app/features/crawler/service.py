@@ -23,7 +23,7 @@ from app.shared.crawler import (
     truncate_content,
 )
 from app.shared.crawler.processor import SchemaType as ProcessorSchemaType
-from app.shared.services import RateLimitScope, TavilyClient, get_tavily_client
+from app.shared.services import RateLimitScope, search
 from app.shared.services.rate_limiter import RateLimiter
 from app.utils.logger import logger
 
@@ -35,13 +35,11 @@ class CrawlerService:
         self,
         crawler: WebCrawler | None = None,
         processor: GeminiProcessor | None = None,
-        tavily: TavilyClient | None = None,
         rate_limiter: RateLimiter | None = None,
         redis_client: Redis | None = None,
     ):
         self._crawler = crawler
         self._processor = processor
-        self._tavily = tavily
         self._rate_limiter = rate_limiter
         self._redis_client = redis_client
 
@@ -60,14 +58,6 @@ class CrawlerService:
 
             self._processor = asyncio.run(get_processor())
         return self._processor
-
-    @property
-    def tavily(self) -> TavilyClient:
-        if self._tavily is None:
-            import asyncio
-
-            self._tavily = asyncio.run(get_tavily_client())
-        return self._tavily
 
     @property
     def rate_limiter(self) -> RateLimiter:
@@ -228,7 +218,7 @@ class CrawlerService:
         """
         logger.info(f"Searching for: {request.query}")
 
-        tavily_response = await self.tavily.search(
+        tavily_response = await search(
             query=request.query,
             max_results=request.max_results,
             include_answer=request.include_answer,

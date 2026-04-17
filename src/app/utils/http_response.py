@@ -3,9 +3,9 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.config import Environment, get_settings
-from app.shared import APIResponse, ErrorDetail, RequestMeta
 
 from .logger import request_state
+from .response_type import APIResponse, ErrorDetail, RequestMeta
 
 
 def _serialize_data(data: Any) -> Any:

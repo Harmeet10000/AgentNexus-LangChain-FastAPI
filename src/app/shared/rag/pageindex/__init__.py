@@ -1,9 +1,7 @@
 """PageIndex async utilities."""
 
-from app.shared.rag.pageindex.client import (
-    PageIndexBatchConfig,
-    PageIndexChatConfig,
-    PageIndexConfig,
+from .client import PageIndexBatchConfig, PageIndexChatConfig, PageIndexConfig
+from .functions import (
     abatch_page_index,
     achat_completion,
     apage_index,

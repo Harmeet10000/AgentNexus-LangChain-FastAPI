@@ -1,10 +1,12 @@
 # AI Agent Engineering: The Definitive Field Guide
+>
 > Synthesized from OpenCode, LangChain DeepAgents, and Anthropic's Agent Harness research.  
 > For engineers who want to understand what's beneath the abstraction — not just make it work.
 
 ---
 
 ## Table of Contents
+
 1. [The Mental Model: What an Agent Actually Is](#1-the-mental-model)
 2. [Architecture Before Prompting](#2-architecture-before-prompting)
 3. [Context Engineering: The Core Discipline](#3-context-engineering)

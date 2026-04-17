@@ -85,9 +85,12 @@ class Settings(BaseSettings):
     MONGODB_DB_NAME: str = Field(default="langchain_db")
 
     # --- PostgreSQL Database ---
-    POSTGRES_URL: str = Field(
-        default="postgresql://user:pass@host/db"
-    )  # Added this missing field
+    POSTGRES_URL: str = Field(default="postgresql://user:pass@host/db")  # Added this missing field
+    POSTGRES_HOST: str = Field(default="localhost")
+    POSTGRES_PORT: int = Field(default=5432)
+    POSTGRES_USERNAME: str = Field(default="user")
+    POSTGRES_PASSWORD: str = Field(default="pass")
+    POSTGRES_DB_NAME: str = Field(default="db")
     POSTGRES_MAX_OVERFLOW: int = Field(default=10)  # Added this missing field
     POSTGRES_POOL_SIZE: int = Field(default=5)  # Added this missing field
 
@@ -133,9 +136,10 @@ class Settings(BaseSettings):
 
     # --- Google Gemini API ---
     GOOGLE_API_KEY: str = Field(default="")
-    GEMINI_MODEL: str = Field(default="gemini-2.5-flash")
+    GEMINI_FLASH_MODEL: str = Field(default="gemini-3.1-flash")
+    GEMINI_PRO_MODEL: str = Field(default="gemini-3.1-pro")
     GEMINI_VISION_MODEL: str = Field(default="gemini-2.5-flash-image")
-    GEMINI_EMBEDDING_MODEL: str = Field(default="text-embedding-005")
+    GEMINI_EMBEDDING_MODEL: str = Field(default="gemini-embedding-2-preview")
     GEMINI_TEMPERATURE: float = Field(default=0.7)
     GEMINI_MAX_TOKENS: int = Field(default=2048)
     LANGEXTRACT_API_KEY: str = Field(
@@ -173,6 +177,9 @@ class Settings(BaseSettings):
 
     # --- Tavily Search Configuration ---
     TAVILY_API_KEY: str = Field(default="")
+    TAVILY_BASE_URL: str = Field(default="https://api.tavily.com")
+    TAVILY_MAX_RESULTS_LIMIT: int = Field(default=20)
+    TAVILY_TIMEOUT_SECONDS: float = Field(default=30.0)
 
     # --- PageIndex Configuration ---
     PAGEINDEX_API_KEY: str = Field(default="")

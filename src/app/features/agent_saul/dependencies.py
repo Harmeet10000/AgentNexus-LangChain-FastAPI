@@ -5,11 +5,10 @@ All infra clients are read from request.app.state — the single source of
 truth set during lifespan.  No globals.
 
 Lifespan callers must set:
-    app.state.saul_graph        → CompiledStateGraph (built by factory.build_saul_graph)
-    app.state.saul_checkpointer → AsyncPostgresSaver
-    app.state.redis             → redis.asyncio.Redis
+    app.state.saul_graph            → CompiledStateGraph (built by factory.build_saul_graph)
+    app.state.langgraph_checkpointer → AsyncPostgresSaver
+    app.state.redis                 → redis.asyncio.Redis
 """
-
 from dataclasses import dataclass
 from typing import Annotated
 from uuid import uuid4
@@ -19,15 +18,16 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from redis.asyncio import Redis
 
+from app.features.auth import (
+    RefreshTokenRepository,
+    WebSocketSecurityContext,
+    WebSocketSecurityService,
+)
 from app.features.auth.dependencies import (
     WebSocketClaims,
     get_refresh_token_repository,
 )
-from app.features.auth.repository import RefreshTokenRepository
-from app.features.auth.websocket_security import (
-    WebSocketSecurityContext,
-    WebSocketSecurityService,
-)
+from app.utils import ServiceUnavailableException
 
 # ---------------------------------------------------------------------------
 # Individual dependency extractors
@@ -39,8 +39,10 @@ async def get_saul_graph(request: Request) -> CompiledStateGraph:
 
 
 async def get_saul_checkpointer(request: Request) -> AsyncPostgresSaver:
-    return request.app.state.saul_checkpointer
-
+    checkpointer = request.app.state.langgraph_checkpointer
+    if checkpointer is None:
+        raise ServiceUnavailableException("Persistence layer is unavailable")
+    return checkpointer
 
 async def get_redis(request: Request) -> Redis:
     return request.app.state.redis

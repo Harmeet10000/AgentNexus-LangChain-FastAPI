@@ -13,9 +13,9 @@ from langchain.agents.middleware import (
     after_model,
     before_model,
     wrap_model_call,
-    wrap_tool_call,
+    # wrap_tool_call,
 )
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.shared.langchain_layer.chains import build_guardrail_chain
 

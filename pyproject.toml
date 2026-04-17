@@ -126,6 +126,11 @@ dependencies = [
     "mojo>=0.26.2.0",
     "returns>=0.26.0",
     "thordata-sdk>=1.8.5",
+    "gepa>=0.1.1",
+    "dspy>=2.5.7",
+    "openevals>=0.2.0",
+    "psycopg>=3.3.3",
+    "langchain-mcp-adapters>=0.2.2",
 ]
 
 [project.scripts]

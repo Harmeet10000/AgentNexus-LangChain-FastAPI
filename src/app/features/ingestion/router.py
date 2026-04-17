@@ -13,8 +13,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, UploadFile
 
-from app.shared import APIResponse
-from app.utils import http_response, logger
+from app.utils import APIResponse, http_response, logger
 
 from .dto import DocumentUploadResponse
 from .service import IngestionService

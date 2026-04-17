@@ -48,11 +48,10 @@ from typing import TYPE_CHECKING
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
-from app.shared.langchain_layer.agents.middlewares import build_default_middleware_stack
-
 # from app.shared.langgraph_layer.agent_saul import BaseContext
 from ..models import build_chat_model
 from ..prompts import AGENT_SYSTEM_PROMPT, SystemPromptParts
+from .middlewares import build_default_middleware_stack
 
 # from .agents.tools.base import registry as tool_registry
 
@@ -92,7 +91,7 @@ class AgentSpec:
     system_prompt: str | SystemPromptParts | None = None
 
     # Context schema (dataclass)
-    context_schema: type = BaseContext
+    context_schema: type | None = None
 
     # Structured output schema (Pydantic model), or None for text
     response_format: type | None = None

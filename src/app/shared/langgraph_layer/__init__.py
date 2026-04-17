@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from fastapi import Request
 from langchain_core.runnables import RunnableConfig
 
-from .configuration import Configuration, MCPConfig, SearchAPI
-from .deep_researcher import deep_researcher
+from .open_deep_search import Configuration, MCPConfig, SearchAPI, deep_researcher
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 def build_open_deep_search_config(

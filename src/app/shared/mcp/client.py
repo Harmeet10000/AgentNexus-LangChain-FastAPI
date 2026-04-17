@@ -10,17 +10,18 @@ from fastmcp import Client
 from fastmcp.client.auth import BearerAuth
 
 from app.config import get_settings
-from app.shared.mcp.metrics import observe_mcp_client_call, set_mcp_upstream_health
-from app.shared.mcp.models import (
+from app.middleware import observe_mcp_client_call, set_mcp_upstream_health
+from app.utils import ExternalServiceException, ServiceUnavailableException, logger
+
+from .models import (
     MCPClientCircuitState,
     load_mcp_client_server_configs,
 )
-from app.utils import ExternalServiceException, ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
     from typing import Any
 
-    from app.shared.mcp.models import MCPClientServerConfig
+    from .models import MCPClientServerConfig
 
 
 class MCPClientManager:

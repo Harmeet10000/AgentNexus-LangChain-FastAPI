@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import time
 from typing import TYPE_CHECKING
+from uuid import UUID  # noqa: TC003
 
 from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
 from langsmith import Client
@@ -15,7 +16,6 @@ from app.config import get_settings
 
 if TYPE_CHECKING:
     from typing import Any
-    from uuid import UUID
 
 
 def configure_langsmith() -> Client | None:

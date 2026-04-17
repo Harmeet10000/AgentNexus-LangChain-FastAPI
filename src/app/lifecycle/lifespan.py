@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 import redis
 from celery import Celery
@@ -14,8 +15,10 @@ from app.config import get_settings
 from app.connections import (
     celery_app,
     close_neo4j_driver,
+    close_tavily_http_client,
     create_mongo_client,
     create_redis_client,
+    create_tavily_http_client,
     get_shared_httpx_client,
     init_db,
     init_neo4j,
@@ -23,7 +26,17 @@ from app.connections import (
 from app.features.auth import TokenAuditLog, User, build_websocket_security_service
 from app.middleware import initialize_fastapi_guard
 from app.shared import get_mcp_client_manager
+from app.shared.langchain_layer.agents.memory import setup_cognee
+from app.shared.langgraph_layer.checkpointer import (
+    setup_langgraph_checkpointer,
+    teardown_langgraph_checkpointer,
+)
+from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.utils import ServiceUnavailableException, logger
+
+if TYPE_CHECKING:
+    from app.features.auth.websocket_security import WebSocketSecurityService
+    from app.shared.mcp import MCPClientManager
 
 
 async def setup_redis(url: str) -> redis.asyncio.Redis:
@@ -76,7 +89,7 @@ def setup_celery() -> Celery | None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
     """Manage application startup and shutdown with parallel execution."""
     settings = get_settings()
     logger.info("Application starting", app_name=app.title, version=app.version)
@@ -97,22 +110,40 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # All tasks succeeded - store results
     app.state.db_engine, app.state.db_session_local = pg_task.result()
     app.state.mongo_client, app.state.db = mongo_task.result()
-    app.state.redis = redis_task.result()
-    app.state.neo4j_driver = neo_task.result()
-    app.state.websocket_security = build_websocket_security_service(
+    app.state.redis: redis.asyncio.Redis = redis_task.result()
+    app.state.neo4j_driver: AsyncDriver = neo_task.result()
+    app.state.websocket_security: WebSocketSecurityService = await build_websocket_security_service(
         redis=app.state.redis,
         settings=settings,
     )
+
+    # Setup Cognee for episodic + procedural memory
+    cognee_config = await setup_cognee(settings)
+    app.state.cognee_config = cognee_config
+    logger.info("Cognee configured")
+
+    # Setup Graphiti for legal knowledge graph
+    graphiti = await setup_graphiti(
+        neo4j_uri=settings.NEO4J_URI,
+        neo4j_user=settings.NEO4J_USERNAME,
+        neo4j_password=settings.NEO4J_PASSWORD,
+    )
+    await setup_graphiti_indices(graphiti)
+    app.state.graphiti = graphiti
+    logger.info("Graphiti initialized")
     # app.state.pageindex_client = PageIndexClient()
     # Initialize HTTPX client (HTTP/2 + connection pooling)
     app.state.httpx_client = get_shared_httpx_client()
     logger.info("HTTPX client initialized with HTTP/2")
+    # Initialize Tavily HTTP client
+    app.state.tavily_http_client = await create_tavily_http_client()
+    logger.info("Tavily HTTP client initialized")
     # app.state.storage = StorageService.from_settings()
 
     # Celery setup (optional, non-blocking)
     try:
-        celery = await asyncio.wait_for(asyncio.to_thread(setup_celery), timeout=3.0)
-        app.state.celery = celery
+        celery: Celery | None = await asyncio.wait_for(asyncio.to_thread(setup_celery), timeout=3.0)
+        app.state.celery: Celery | None = celery
     except TimeoutError:
         logger.warning("Celery setup timed out, continuing without task queue")
         app.state.celery = None
@@ -122,8 +153,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # FastAPI-Guard setup (depends on Redis, but non-blocking)
     await initialize_fastapi_guard(app=app, settings=settings)
-    # LangGraph setup would go here
-    # await
+
+    # LangGraph checkpointer setup (uses existing PostgreSQL connection)
+    try:
+        saul_checkpointer = await setup_langgraph_checkpointer(
+            conn_string=settings.POSTGRES_URL,
+        )
+        app.state.langgraph_checkpointer = saul_checkpointer
+        logger.info("LangGraph checkpointer initialized")
+    except (ConnectionError, TimeoutError, OSError) as e:
+        logger.error(
+            "LangGraph checkpointer setup failed, continuing without persistence", error=str(e)
+        )
+        app.state.langgraph_checkpointer = None
+
     logger.info("Application ready", status="running")
 
     yield
@@ -131,23 +174,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # SHUTDOWN: Parallel graceful cleanup
     logger.info("Application shutting down", status="stopping")
 
+    # Close LangGraph checkpointer connection pool
+    if hasattr(app.state, "langgraph_checkpointer"):
+        await teardown_langgraph_checkpointer(app.state.langgraph_checkpointer)
+
     # Close HTTPX client
     if hasattr(app.state, "httpx_client"):
         await app.state.httpx_client.aclose()
 
-    async with asyncio.TaskGroup() as tg:
-        if hasattr(app.state, "redis"):
-            tg.create_task(coro=app.state.redis.aclose())
-        if hasattr(app.state, "db_engine"):
-            tg.create_task(coro=app.state.db_engine.dispose())
-        if hasattr(app.state, "neo4j_driver"):
-            tg.create_task(coro=close_neo4j_driver(driver=app.state.neo4j_driver))
-        mcp_manager = get_mcp_client_manager()
-        if mcp_manager is not None:
-            tg.create_task(coro=mcp_manager.close())
+    # Close Tavily HTTP client
+    if hasattr(app.state, "tavily_http_client"):
+        await close_tavily_http_client(app.state.tavily_http_client)
+
+    if hasattr(app.state, "graphiti"):
+        await close_graphiti(app.state.graphiti)
 
     # MongoDB close is synchronous - run outside TaskGroup
     if hasattr(app.state, "mongo_client"):
         app.state.mongo_client.close()
+
+    async with asyncio.TaskGroup() as tg:
+        if hasattr(app.state, "redis"):
+            tg.create_task(coro=app.state.redis.aclose(close_connection_pool=True))
+        if hasattr(app.state, "db_engine"):
+            tg.create_task(coro=app.state.db_engine.dispose())
+        if hasattr(app.state, "neo4j_driver"):
+            tg.create_task(coro=close_neo4j_driver(driver=app.state.neo4j_driver))
+        mcp_manager: MCPClientManager = get_mcp_client_manager()
+        if mcp_manager is not None:
+            tg.create_task(coro=mcp_manager.close())
 
     logger.info("Application shutdown complete", status="stopped")

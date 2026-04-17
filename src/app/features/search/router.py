@@ -4,8 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path, status
 
-from app.shared.response_type import APIResponse
-from app.utils import http_response
+from app.utils import APIResponse, http_response
 
 from .dependencies import SearchServiceDep
 from .dto import (

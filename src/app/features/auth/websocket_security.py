@@ -71,19 +71,23 @@ async def _websocket_rate_identifier(websocket: WebSocket) -> str:
 
 
 def _raise_websocket_rate_limit(*_: object, **__: object) -> None:
-    raise WebSocketRateLimitExceeded()
+    raise WebSocketRateLimitExceeded
 
 
-def build_websocket_security_service(
+async def build_websocket_security_service(
     redis: Redis,
     settings: Settings,
 ) -> WebSocketSecurityService:
-    user_bucket = RedisBucket.init(
-        [Rate(settings.WEBSOCKET_USER_MESSAGE_RATE, settings.WEBSOCKET_USER_MESSAGE_PERIOD_SECONDS)],
+    user_bucket = await RedisBucket.init(
+        [
+            Rate(
+                settings.WEBSOCKET_USER_MESSAGE_RATE, settings.WEBSOCKET_USER_MESSAGE_PERIOD_SECONDS
+            )
+        ],
         redis,
         "ws:user:messages",
     )
-    connection_bucket = RedisBucket.init(
+    connection_bucket = await RedisBucket.init(
         [
             Rate(
                 settings.WEBSOCKET_CONNECTION_MESSAGE_RATE,
@@ -141,7 +145,9 @@ class WebSocketSecurityService:
                 reason="Origin not allowed",
             )
 
-    def build_context(self, *, claims: TokenClaims, origin: str | None, connection_id: str) -> WebSocketSecurityContext:
+    def build_context(
+        self, *, claims: TokenClaims, origin: str | None, connection_id: str
+    ) -> WebSocketSecurityContext:
         return WebSocketSecurityContext(
             claims=claims,
             user_id=claims.sub,
@@ -234,7 +240,7 @@ class WebSocketSecurityService:
                 timeout=self._settings.WEBSOCKET_IDLE_TIMEOUT_SECONDS,
             )
         except TimeoutError as exc:
-            raise WebSocketIdleTimeout() from exc
+            raise WebSocketIdleTimeout from exc
 
         await self._apply_rate_limits(websocket, context)
         await self.touch_connection(context)

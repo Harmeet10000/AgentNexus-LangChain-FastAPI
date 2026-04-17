@@ -15,23 +15,21 @@ from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.features.agent_saul.dependencies import (
+from app.features.auth import CurrentClaims, WebSocketSecurityViolation
+from app.utils import APIResponse, ValidationException, http_response, logger
+
+from .dependencies import (
     AgentSaulDepsAnnotated,
     AgentSaulWebSocketSecurityContextAnnotated,
 )
-from app.features.agent_saul.dto import (
+from .dto import (
     CreateSessionRequest,
     CreateSessionResponse,
     WSErrorFrame,
     WSStartMessage,
     ws_inbound_adapter,
 )
-from app.features.agent_saul.service import AgentSaulService
-from app.features.auth.dependencies import CurrentClaims
-from app.features.auth.websocket_security import WebSocketSecurityViolation
-from app.shared.response_type import APIResponse
-from app.utils import http_response, logger
-from app.utils.exceptions import ValidationException
+from .service import AgentSaulService
 
 router = APIRouter(
     prefix="/agent-saul",

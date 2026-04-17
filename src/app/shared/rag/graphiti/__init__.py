@@ -9,42 +9,53 @@ querying legal knowledge graphs stored in Neo4j. It handles:
 - Multi-objective memory retrieval with semantic, recency, trust, and task relevance scoring
 
 Key components:
-- GraphitiService: Main async wrapper around graphiti-core
+- Pure async functions for setup, write, read operations
 - Memory pipeline: Context building for agent reasoning
 - Tool registry: Compliance and risk assessment tools
-- Write operations: Clause episodes, relationships, final reports
 - Schemas: Domain types for legal episodes and search results
 
 Usage:
-    from src.app.shared.rag.graphiti.client import GraphitiService
+    from src.app.shared.rag.graphiti.client import (
+        setup_graphiti,
+        setup_graphiti_indices,
+        close_graphiti,
+        write_clause_episode,
+        search_for_risk_context,
+    )
 
     # In lifespan.py
-    graphiti_service = await GraphitiService.create(
-        neo4j_uri=settings.neo4j_uri,
-        neo4j_user=settings.neo4j_user,
-        neo4j_password=settings.neo4j_password.get_secret_value(),
+    graphiti = await setup_graphiti(
+        neo4j_uri=settings.NEO4J_URI,
+        neo4j_user=settings.NEO4J_USERNAME,
+        neo4j_password=settings.NEO4J_PASSWORD,
     )
-    await graphiti_service.setup()
-    app.state.graphiti = graphiti_service
+    await setup_graphiti_indices(graphiti)
+    app.state.graphiti = graphiti
 
     # On shutdown
-    await app.state.graphiti.close()
+    await close_graphiti(graphiti)
 """
 
-from src.app.shared.rag.graphiti.client import GraphitiService
-from src.app.shared.rag.graphiti.schemas import (
-    ClauseEpisodeMetadata,
-    FinalReportEpisodeMetadata,
-    GraphitiSearchResult,
-    LegalEdgeInput,
-    LegalEpisodeType,
+from .client import (
+    close_graphiti,
+    get_obligation_chain,
+    search_for_precedent_chains,
+    search_for_risk_context,
+    setup_graphiti,
+    setup_graphiti_indices,
+    write_clause_episode,
+    write_final_report_episode,
+    write_relationship_edge,
 )
 
 __all__ = [
-    "GraphitiService",
-    "ClauseEpisodeMetadata",
-    "FinalReportEpisodeMetadata",
-    "GraphitiSearchResult",
-    "LegalEdgeInput",
-    "LegalEpisodeType",
+    "close_graphiti",
+    "get_obligation_chain",
+    "search_for_precedent_chains",
+    "search_for_risk_context",
+    "setup_graphiti",
+    "setup_graphiti_indices",
+    "write_clause_episode",
+    "write_final_report_episode",
+    "write_relationship_edge",
 ]
