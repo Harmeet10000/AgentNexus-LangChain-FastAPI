@@ -14,7 +14,8 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 10. all methods, functions, model and agent invocation should have langsmith decorator for proper obervability
 11. always normalise agent state after fetching from checkpointer so that there is no version mismatch
 12. have proper retry mechanism for tools with idenpotent execution as mention in langchain docs
-13.  
+13. PromptTemplate: Used for single string inputs. ChatPromptTemplate: Used for structured chat (System, Human, AI). MessagePlaceholder: A "slot" in a template where a list of messages (the history) is injected.
+context_schema is a term often used when defining the input/output of a specific runnable. agent.ainvoke(input, config): The input matches your AgentState. The config (often referred to as context in code) contains configurable parameters like thread_id or user_id.
 from langgraph.graph import StateGraph
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import MemorySaver
@@ -64,14 +65,32 @@ state["messages"] = add_messages(state["messages"], [new_msg])
 16. use async methods - ainvoke, astream, abatch, atransform
 17. get conversation state state = graph.get_state(config)
 18. Circular delegation is possible. Agent A can hand off to Agent B, which can hand off back to Agent A. There's no loop detection beyond completed_agents in SupervisorState, and that only works in the supervisor graph — not in the tool-based MultiAgentSystem.
-19. Always set a recursion_limit (max steps) in your LangGraph and a timeout on your LLM calls.
-20. the checkpoint_id (formerly thread_ts) is your best friend. in HITL after resuming from a pause
-21. Ensure your message history logic preserves the extras["signature"] field in AIMessage objects. When a model "thinks," it generates a Thought Signature. If you are building a multi-turn agent (like with LangGraph), failing to send this signature back in the next turn forces the model to re-reason from scratch, increasing latency.
-22. Embeddings aren't cached. aembed_batch calls the API every time. Embeddings for the same text are deterministic — a simple LRU cache keyed on SHA256(text) would eliminate redundant API calls entirely.
-23. Model instances are rebuilt on every call
+19. The best practice for multi-agent systems is to use AIMessages with tool_calls to hand off tasks.
+
+Agent A returns an AIMessage calling a tool named transfer_to_technical_support.
+
+The Router sees this specific tool call and routes the edge to Agent B.
+
+Agent B receives the full MessagesState, allowing it to see the history.
+InjectedToolArg: This is a specialized annotation used within a tool's type hints. It tells LangGraph: "The LLM should not provide this argument; instead, the system should 'inject' it from the state or config at runtime." (e.g., a user_id).
+To ensure the LLM doesn't just guess what your database needs, you should define a Pydantic model and pass it to the @tool decorator. This populates the parameters field in the JSON schema sent to the model, effectively "forcing" the LLM to adhere to your structure.
+# 1. Define the Structured Input Schema
+class DatabaseQuery(BaseModel):
+    """Schema for querying the user database."""
+    query_string: str = Field(description="The SQL or natural language query to execute.")
+    limit: int = Field(default=10, description="Maximum number of rows to return.")
+    include_metadata: bool = Field(default=False, description="Whether to include system metadata.")
+
+# 2. Define the Tool with args_schema and InjectedState
+@tool(args_schema=DatabaseQuery)
+20. Always set a recursion_limit (max steps) in your LangGraph and a timeout on your LLM calls.
+21. the checkpoint_id (formerly thread_ts) is your best friend. in HITL after resuming from a pause
+22. Ensure your message history logic preserves the extras["signature"] field in AIMessage objects. When a model "thinks," it generates a Thought Signature. If you are building a multi-turn agent (like with LangGraph), failing to send this signature back in the next turn forces the model to re-reason from scratch, increasing latency.
+23. Embeddings aren't cached. aembed_batch calls the API every time. Embeddings for the same text are deterministic — a simple LRU cache keyed on SHA256(text) would eliminate redundant API calls entirely.
+24. Model instances are rebuilt on every call
 build_chat_model() constructs a new ChatGoogleGenerativeAI every time it's called. The model object should be a module-level singleton (or per-spec singleton) since it's stateless.
-24. Add toons before any operation/inputting data to LLM for best possible use of context space inlcuding agents, chats, RAG, web search results, after tool LLM invoke and everywhere else
-25. Key Design Categories
+1.  Add toons before any operation/inputting data to LLM for best possible use of context space inlcuding agents, chats, RAG, web search results, after tool LLM invoke and everywhere else
+2.  Key Design Categories
 Sync vs. Async Execution (1:00 - 2:47):
 
 Synchronous: The main agent waits for subagent results. It is simpler to implement but blocks the conversation, making it less ideal for high-latency tasks.
@@ -1782,6 +1801,14 @@ agent = create_agent(
     tools=tools,
     middleware=[CustomMiddleware()]
 )
+from typing import TypedDict, Annotated
+from langgraph.graph.message import add_messages
+
+# Your custom schema
+class MyCustomState(TypedDict):
+    messages: Annotated[list, add_messages]  # Built-in message reducer
+    user_id: str                             # Custom field
+    step_count: int 
 
 # The agent can now track additional state beyond messages
 result = agent.invoke({

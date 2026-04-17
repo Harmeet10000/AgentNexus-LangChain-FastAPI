@@ -6,8 +6,8 @@ The ToolRegistry is passed into build_agent_registry() in factory.py so
 agents get their tools at graph compile time — never at node execution time.
 
 Lifespan wiring (in src/app/lifecycle/lifespan.py):
-    from src.app.shared.agents.tools.registry import ToolRegistry, build_tool_registry
-    from src.app.shared.agents.tools.idempotency import IdempotencyGuard
+    from app.shared.agents.tools.registry import ToolRegistry, build_tool_registry
+    from app.shared.agents.tools.idempotency import IdempotencyGuard
 
     idempotency_guard = IdempotencyGuard(
         redis=app.state.redis,
@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from app.shared.agents.tools import (
+from app.shared.langchain_layer.agents.tools import (
     make_get_obligation_chain_tool,
     make_query_knowledge_graph_tool,
     make_retrieve_statute_section_tool,
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from langchain_core.tools.base import BaseTool
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from app.shared.agents.tools import (
+    from app.shared.langchain_layer.agents import (
         IdempotencyGuard,
     )
 

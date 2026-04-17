@@ -5,22 +5,19 @@ from fastapi.responses import Response
 from fastmcp.utilities.lifespan import combine_lifespans
 from guard import SecurityMiddleware
 
-from app.api.v1 import v1_router
-from app.api.v2 import v2_router
-from app.config import get_settings
-from app.lifecycle import lifespan
-from app.middleware import (
-    MetricsMiddleware,
+from .api import v1_router, v2_router
+from .config import get_settings
+from .lifecycle import lifespan
+from .middleware import (
+    # MetricsMiddleware,
     RequestStateLoggingMiddleware,
     build_fastapi_guard_config,
     get_metrics,
     global_exception_handler,
 )
-from app.shared.langchain_layer import configure_langsmith
-from app.shared.mcp import get_mcp_http_app
-from app.shared.mcp.models import parse_mcp_http_transport
-from app.shared.response_type import APIResponse
-from app.utils import http_error, logger
+from .shared.langchain_layer import configure_langsmith
+from .shared.mcp import get_mcp_http_app, parse_mcp_http_transport
+from .utils import APIResponse, http_error, logger
 
 configure_langsmith()
 # Load environment variables
@@ -34,7 +31,7 @@ def create_app() -> FastAPI:
     guard_config = build_fastapi_guard_config(settings)
 
     app: FastAPI = FastAPI(
-        title="Langchain FastAPI Template",
+        title="Langchain FastAPI Server",
         version="1.0.0",
         lifespan=lifespan,
         docs_url="/api-docs",
@@ -60,7 +57,7 @@ def create_app() -> FastAPI:
     app.add_middleware(SecurityMiddleware, config=guard_config)  # ty:ignore[invalid-argument-type]
 
     # 6. Metrics collection (Monitor requests, including guard-blocked traffic)
-    app.add_middleware(MetricsMiddleware, project_name="langchain-fastapi")  # ty:ignore[invalid-argument-type]
+    # app.add_middleware(MetricsMiddleware, project_name="langchain-fastapi")  # ty:ignore[invalid-argument-type]
 
     # 7. Request state logging (Keep tracing context alive for streaming responses)
     app.add_middleware(RequestStateLoggingMiddleware)  # ty:ignore[invalid-argument-type]

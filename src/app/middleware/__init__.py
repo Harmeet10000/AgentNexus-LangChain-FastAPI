@@ -7,6 +7,11 @@ from .server_middleware import (
     build_fastapi_guard_config,
     get_metrics,
     initialize_fastapi_guard,
+    metrics_registry,
+    observe_mcp_client_call,
+    observe_mcp_http_request,
+    observe_mcp_tool_invocation,
+    set_mcp_upstream_health,
 )
 
 __all__ = [
@@ -16,4 +21,9 @@ __all__ = [
     "get_metrics",
     "global_exception_handler",
     "initialize_fastapi_guard",
+    "metrics_registry",
+    "observe_mcp_client_call",
+    "observe_mcp_http_request",
+    "observe_mcp_tool_invocation",
+    "set_mcp_upstream_health",
 ]

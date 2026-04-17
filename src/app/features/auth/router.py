@@ -5,12 +5,15 @@ from fastapi.responses import RedirectResponse, Response
 
 from app.config import get_settings
 from app.connections import get_mongodb, get_redis
-from app.features.auth.dependencies import (
+from app.utils import APIResponse, UnauthorizedException, ValidationException, http_response
+from app.utils.rate_limit.dependencies import get_rate_limiter
+
+from .dependencies import (
     AuthServiceDep,
     CurrentClaims,
     CurrentVerifiedUser,
 )
-from app.features.auth.dto import (
+from .dto import (
     ForgotPasswordRequest,
     LoginRequest,
     LogoutRequest,
@@ -24,12 +27,9 @@ from app.features.auth.dto import (
     UserResponse,
     VerifyEmailRequest,
 )
-from app.features.auth.repository import RefreshTokenRepository, UserRepository
-from app.features.auth.security import OAUTH_STATE_COOKIE
-from app.features.auth.service import AuthService
-from app.shared.response_type import APIResponse
-from app.utils import UnauthorizedException, ValidationException, http_response
-from app.utils.rate_limit.dependencies import get_rate_limiter
+from .repository import RefreshTokenRepository, UserRepository
+from .security import OAUTH_STATE_COOKIE
+from .service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

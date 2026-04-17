@@ -251,3 +251,5 @@ Always Baseline: Measure the performance of the original query before making any
 Avoid Function Wrappers: Whenever possible, rewrite conditions to avoid wrapping columns in functions to keep them sargable (18:03).
 Understand Self-Joins: On large tables, self-joins are expensive; look for ways to aggregate or use window functions to reduce the number of rows compared (18:18).
 AI as an Assistant: AI is a helpful tool for identifying potential issues, but it should be treated as one input among many, not a substitute for analyzing the actual execution plan (18:48).
+
+materiased views to replace snowflake

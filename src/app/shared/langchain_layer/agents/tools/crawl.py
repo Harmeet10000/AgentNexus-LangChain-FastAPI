@@ -111,13 +111,5 @@ class CrawlUrlTool(BaseTool):
 
         return "\n\n".join(parts)
 
-    def _run(self, *args, **kwargs) -> str:
-        """Synchronous fallback."""
-        import asyncio
-
-        return asyncio.run(self._arun(*args, **kwargs))
 
 
-def get_crawl_url_tool() -> CrawlUrlTool:
-    """Get crawl URL tool instance."""
-    return CrawlUrlTool()

@@ -1,12 +1,9 @@
 """RAG (Retrieval-Augmented Generation) utilities."""
 
-from app.shared.rag.langextract import (
-    LangExtractBatchConfig,
-    LangExtractConfig,
-    abatch_extract_langextract,
-    aextract_langextract,
-)
-from app.shared.rag.pageindex import (
+# from .langextract import (
+
+# )
+from .pageindex import (
     PageIndexBatchConfig,
     PageIndexChatConfig,
     PageIndexConfig,
@@ -17,30 +14,28 @@ from app.shared.rag.pageindex import (
     create_node_map,
     gather_node_text,
 )
-from app.shared.rag.strategies import (
-    AgenticRAGResult,
-    LateChunk,
-    QueryExpansionResult,
-    RAGStrategyService,
-    RetrievedDocument,
-    cosine_similarity,
-    deduplicate_strings,
-    deserialize_metadata,
-    format_graph_results,
-    format_retrieved_documents,
-    late_chunk_text,
-    mean_pool_embeddings,
-    parse_query_variants,
-    prepare_training_data,
-    semantic_chunk_text,
-    serialize_metadata,
-    split_text,
-)
+# from .strategies import (
+#     AgenticRAGResult,
+#     LateChunk,
+#     QueryExpansionResult,
+#     RAGStrategyService,
+#     RetrievedDocument,
+#     cosine_similarity,
+#     deduplicate_strings,
+#     deserialize_metadata,
+#     format_graph_results,
+#     format_retrieved_documents,
+#     late_chunk_text,
+#     mean_pool_embeddings,
+#     parse_query_variants,
+#     prepare_training_data,
+#     semantic_chunk_text,
+#     serialize_metadata,
+#     split_text,
+# )
 
 __all__ = [
     "AgenticRAGResult",
-    "LangExtractBatchConfig",
-    "LangExtractConfig",
     "LateChunk",
     "PageIndexBatchConfig",
     "PageIndexChatConfig",
@@ -48,10 +43,8 @@ __all__ = [
     "QueryExpansionResult",
     "RAGStrategyService",
     "RetrievedDocument",
-    "abatch_extract_langextract",
     "abatch_page_index",
     "achat_completion",
-    "aextract_langextract",
     "apage_index",
     "astream_chat_completions",
     "cosine_similarity",

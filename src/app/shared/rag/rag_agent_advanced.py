@@ -11,17 +11,12 @@ Implements multiple RAG strategies:
 """
 
 import asyncio
-import json
 import logging
 import os
 import sys
-from dataclasses import dataclass
-from typing import Any, Dict, List
 
 import asyncpg
 from dotenv import load_dotenv
-from pydantic_ai import Agent, RunContext
-from sentence_transformers import CrossEncoder
 
 # Load environment variables
 load_dotenv(".env")
@@ -36,33 +31,17 @@ reranker = None
 
 
 async def initialize_db():
-    """Initialize database connection pool."""
-    global db_pool
-    if not db_pool:
-        db_pool = await asyncpg.create_pool(
-            os.getenv("DATABASE_URL"),
-            min_size=2,
-            max_size=10,
-            command_timeout=60
-        )
+
         logger.info("Database connection pool initialized")
 
 
 async def close_db():
-    """Close database connection pool."""
-    global db_pool
-    if db_pool:
-        await db_pool.close()
+
         logger.info("Database connection pool closed")
 
 
 def initialize_reranker():
-    """Initialize cross-encoder model for re-ranking."""
-    global reranker
-    if reranker is None:
-        logger.info("Loading cross-encoder model for re-ranking...")
-        reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-        logger.info("Cross-encoder loaded")
+         logger.info("Cross-encoder loaded")
 
 
 # ======================

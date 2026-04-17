@@ -94,6 +94,41 @@ class MemoryScope(BaseModel):
             "top_k": self.top_k,
         }
 
+def _coerce_entity_types(
+    entity_types: Iterable[MemoryEntityType | str],
+) -> frozenset[MemoryEntityType]:
+    return frozenset(
+        entity_type if isinstance(entity_type, MemoryEntityType) else MemoryEntityType(entity_type)
+        for entity_type in entity_types
+    )
+
+def _coerce_sources(
+    sources: Iterable[MemorySource | str],
+) -> frozenset[MemorySource]:
+    return frozenset(
+        source if isinstance(source, MemorySource) else MemorySource(source) for source in sources
+    )
+
+
+def _coerce_time_filter(time_filter: MemoryTimeFilter | str) -> MemoryTimeFilter:
+    if isinstance(time_filter, MemoryTimeFilter):
+        return time_filter
+    return MemoryTimeFilter(time_filter)
+
+
+def _read_int_field(
+    *,
+    decision: Mapping[str, object],
+    field_name: str,
+    fallback: int,
+) -> int:
+    value = decision.get(field_name, fallback)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value)
+    return fallback
+
 
 def _build_scope(
     *,
@@ -114,7 +149,7 @@ def _build_scope(
     )
 
 
-RISK_SCOPE = _build_scope(
+RISK_SCOPE: MemoryScope = _build_scope(
     agent_id="risk_agent",
     entity_types={MemoryEntityType.CLAUSE, MemoryEntityType.OBLIGATION},
     sources={MemorySource.GRAPH, MemorySource.VECTOR},
@@ -123,7 +158,7 @@ RISK_SCOPE = _build_scope(
     top_k=8,
 )
 
-COMPLIANCE_SCOPE = _build_scope(
+COMPLIANCE_SCOPE: MemoryScope = _build_scope(
     agent_id="compliance_agent",
     entity_types={
         MemoryEntityType.CLAUSE,
@@ -136,7 +171,7 @@ COMPLIANCE_SCOPE = _build_scope(
     top_k=5,
 )
 
-PRECEDENT_SCOPE = _build_scope(
+PRECEDENT_SCOPE: MemoryScope = _build_scope(
     agent_id="precedent_agent",
     entity_types=set(MemoryEntityType),
     sources=set(MemorySource),
@@ -145,7 +180,7 @@ PRECEDENT_SCOPE = _build_scope(
     top_k=5,
 )
 
-ORCHESTRATOR_SCOPE = _build_scope(
+ORCHESTRATOR_SCOPE: MemoryScope = _build_scope(
     agent_id="orchestrator",
     entity_types={MemoryEntityType.CONTRACT},
     sources={MemorySource.STRUCTURED},
@@ -154,7 +189,7 @@ ORCHESTRATOR_SCOPE = _build_scope(
     top_k=3,
 )
 
-GROUNDING_SCOPE = _build_scope(
+GROUNDING_SCOPE: MemoryScope = _build_scope(
     agent_id="grounding_agent",
     entity_types={MemoryEntityType.CLAUSE, MemoryEntityType.OBLIGATION},
     sources={MemorySource.STRUCTURED},
@@ -203,39 +238,6 @@ def _read_iterable_field(
     return fallback
 
 
-def _coerce_entity_types(
-    entity_types: Iterable[MemoryEntityType | str],
-) -> frozenset[MemoryEntityType]:
-    return frozenset(
-        entity_type if isinstance(entity_type, MemoryEntityType) else MemoryEntityType(entity_type)
-        for entity_type in entity_types
-    )
 
 
-def _coerce_sources(
-    sources: Iterable[MemorySource | str],
-) -> frozenset[MemorySource]:
-    return frozenset(
-        source if isinstance(source, MemorySource) else MemorySource(source)
-        for source in sources
-    )
 
-
-def _coerce_time_filter(time_filter: MemoryTimeFilter | str) -> MemoryTimeFilter:
-    if isinstance(time_filter, MemoryTimeFilter):
-        return time_filter
-    return MemoryTimeFilter(time_filter)
-
-
-def _read_int_field(
-    *,
-    decision: Mapping[str, object],
-    field_name: str,
-    fallback: int,
-) -> int:
-    value = decision.get(field_name, fallback)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        return int(value)
-    return fallback

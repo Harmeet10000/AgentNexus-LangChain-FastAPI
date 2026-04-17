@@ -193,6 +193,7 @@ These tools are required for local development and CI. Keep this section aligned
 - Prefer Python's strengths for collection processing and iteration. Use generator functions, generator expressions, and comprehensions when they simplify data flow without reducing readability.
 - Do not override dunder methods in surprising ways, especially `__new__`, to return unrelated object types or hide factory logic. Use clear factory functions or explicit mappings instead.
 - Do not use exceptions for normal control flow. Prefer explicit condition checks and branch logic; reserve exceptions for exceptional cases.
+- Keep classes small and focused. Move complex methods out of the class into module-level functions or helper classes when they don't need state. Initializers (`__init__`) should only store parameters and set up simple invariants; they should not perform I/O, database access, or CPU-intensive computation. Delegate complex initialization logic to factory functions or class methods (e.g., `.from_config()`) instead.
 
 ### Properties and methods
 

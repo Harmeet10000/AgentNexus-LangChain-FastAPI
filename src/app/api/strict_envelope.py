@@ -7,8 +7,7 @@ from typing import get_origin
 
 from fastapi import APIRouter
 
-from app.shared.response_type import APIResponse
-from app.utils import logger
+from app.utils import APIResponse, logger
 
 
 class StrictEnvelopeAPIRouter(APIRouter):

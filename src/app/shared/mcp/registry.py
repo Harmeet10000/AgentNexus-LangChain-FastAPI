@@ -10,11 +10,12 @@ from fastmcp import FastMCP
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 
 from app.config import get_settings
-from app.shared.mcp.client import get_mcp_client_manager
-from app.shared.mcp.metrics import observe_mcp_tool_invocation
-from app.shared.mcp.models import MCPToolCatalogEntry, MCPToolResponse
-from app.shared.mcp.security import build_mcp_http_middleware
+from app.middleware import observe_mcp_tool_invocation
 from app.utils import NotFoundException, logger
+
+from .client import get_mcp_client_manager
+from .models import MCPToolCatalogEntry, MCPToolResponse
+from .security import build_mcp_http_middleware
 
 if TYPE_CHECKING:
     from collections.abc import Callable

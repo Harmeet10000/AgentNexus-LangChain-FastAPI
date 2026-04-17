@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime, timezone
 from enum import StrEnum
 from typing import Annotated
 
@@ -55,7 +55,7 @@ class OAuthAccount(BaseModel):
     provider: str  # "google" | "github"
     provider_user_id: str
     provider_email: str | None = None
-    linked_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
+    linked_at: datetime = Field(default_factory=lambda: datetime.now(UTC    ))
 
 
 class User(Document):
@@ -74,8 +74,8 @@ class User(Document):
     reset_token_hash: str | None = None
     reset_token_expires_at: datetime | None = None
 
-    created_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
-    updated_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     class Settings:
         name = "users"

@@ -3,8 +3,8 @@
 import asyncio
 import os
 import warnings
-from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any, Literal
 
 import aiohttp
 import httpx
@@ -28,7 +28,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.config import get_store
 from mcp import McpError
 
-from app.shared.services.tavily import SearchResponse, TavilyClient
+from app.shared.services.tavily import SearchResponse, search
 from app.utils import logger
 
 from .configuration import Configuration, SearchAPI
@@ -46,7 +46,7 @@ TAVILY_SEARCH_DESCRIPTION = (
 
 @tool(description=TAVILY_SEARCH_DESCRIPTION)
 async def tavily_search(
-    queries: List[str],
+    queries: list[str],
     max_results: Annotated[int, InjectedToolArg] = 5,
     topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
     config: RunnableConfig = None,
@@ -160,7 +160,7 @@ async def tavily_search_async(
     Returns:
         List of search result dictionaries from Tavily API
     """
-    tavily_client = _build_tavily_client(config)
+    http_client = _get_httpx_client_from_config(config)
     search_log = logger.bind(
         component="open_deep_search",
         search_api="tavily",
@@ -171,12 +171,13 @@ async def tavily_search_async(
 
     try:
         search_tasks = [
-            tavily_client.search(
+            search(
                 query=query,
                 max_results=max_results,
                 topic=topic,
                 include_answer=False,
                 include_raw_content=include_raw_content,
+                http_client=http_client,
             )
             for query in search_queries
         ]
@@ -184,15 +185,6 @@ async def tavily_search_async(
     except Exception:
         search_log.exception("tavily_search_async_failed")
         raise
-
-
-def _build_tavily_client(config: RunnableConfig | None) -> TavilyClient:
-    """Build a Tavily client using the request-scoped HTTPX client when available."""
-    http_client = _get_httpx_client_from_config(config)
-    return TavilyClient(
-        api_key=get_tavily_api_key(config),
-        http_client=http_client,
-    )
 
 
 def _get_httpx_client_from_config(config: RunnableConfig | None) -> httpx.AsyncClient | None:
@@ -236,7 +228,7 @@ async def summarize_webpage(model: BaseChatModel, webpage_content: str) -> str:
 
         return formatted_summary
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         # Timeout during summarization - return original content
         logger.warning("Summarization timed out after 60 seconds, returning original content")
         return webpage_content
@@ -287,7 +279,7 @@ def think_tool(reflection: str) -> str:
 async def get_mcp_access_token(
     supabase_token: str,
     base_mcp_url: str,
-) -> Optional[Dict[str, Any]]:
+) -> list[dict[str, Any] | None] | None:
     """Exchange Supabase token for MCP access token using OAuth token exchange.
 
     Args:
@@ -356,7 +348,7 @@ async def get_tokens(config: RunnableConfig):
     # Check token expiration
     expires_in = tokens.value.get("expires_in")  # seconds until expiration
     created_at = tokens.created_at  # datetime of token creation
-    current_time = datetime.now(timezone.utc)
+    current_time = datetime.now(UTC)
     expiration_time = created_at + timedelta(seconds=expires_in)
 
     if current_time > expiration_time:
@@ -922,9 +914,7 @@ def get_config_value(value):
     """Extract value from configuration, handling enums and None values."""
     if value is None:
         return None
-    if isinstance(value, str):
-        return value
-    elif isinstance(value, dict):
+    if isinstance(value, str) or isinstance(value, dict):
         return value
     else:
         return value.value

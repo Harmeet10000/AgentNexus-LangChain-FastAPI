@@ -1,8 +1,7 @@
 """Health feature API router."""
 from fastapi import APIRouter, Depends, Request, Response
 
-from app.shared.response_type import APIResponse
-from app.utils import http_response
+from app.utils import APIResponse, http_response
 
 from .dependencies import get_health_service
 from .dto import HealthDataDTO, SelfInfoDTO

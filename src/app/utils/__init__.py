@@ -1,6 +1,6 @@
 """Utility modules for the application."""
 
-from .apiFeatures import APIFeatures
+from .api_features import APIFeatures
 from .cache import (
     RedisProtocolAdapter,
     add_to_bloom_filter,
@@ -43,18 +43,22 @@ from .exceptions import (
     UnauthorizedException,
     ValidationException,
 )
-from .httpResponse import http_error, http_response
+from .http_response import http_error, http_response
 from .logger import execution_path, logger, request_state, trace_layer
+from .response_type import APIResponse, ErrorDetail, RequestMeta
 
 __all__ = [
     "APIException",
     "APIFeatures",
+    "APIResponse",
     "ConflictException",
     "DatabaseException",
+    "ErrorDetail",
     "ExternalServiceException",
     "ForbiddenException",
     "NotFoundException",
     "RedisProtocolAdapter",
+    "RequestMeta",
     "ServiceUnavailableException",
     "TooManyRequestsException",
     "UnauthorizedException",

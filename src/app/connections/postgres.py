@@ -1,5 +1,6 @@
 """Neon Postgres database configuration with SQLAlchemy."""
 from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from fastapi.requests import HTTPConnection
@@ -14,35 +15,43 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import get_settings
+from app.config.settings import Settings
 from app.utils import logger
 
-settings = get_settings()
+if TYPE_CHECKING:
+    from typing import Any
+    from urllib.parse import ParseResult
+
+    from sqlalchemy.engine.cursor import CursorResult
+    from ty_extensions import Unknown
+
+settings: Settings = get_settings()
 
 
 def get_database_url() -> str:
     """Convert psycopg2 URL to asyncpg URL."""
-    postgres_url = settings.POSTGRES_URL
+    postgres_url: str = settings.POSTGRES_URL
 
     if postgres_url.startswith("postgresql+asyncpg://"):
-        asyncpg_url = postgres_url
+        asyncpg_url: str = postgres_url
     elif postgres_url.startswith("postgresql://"):
-        asyncpg_url = postgres_url.replace(
+        asyncpg_url: str = postgres_url.replace(
             "postgresql://",
             "postgresql+asyncpg://",
             1,
         )
     elif postgres_url.startswith("postgres://"):
-        asyncpg_url = postgres_url.replace(
+        asyncpg_url: str = postgres_url.replace(
             "postgres://",
             "postgresql+asyncpg://",
             1,
         )
     else:
-        asyncpg_url = postgres_url
+        asyncpg_url: str = postgres_url
 
-    asyncpg_url = asyncpg_url.replace("&sslmode=require", "")
-    asyncpg_url = asyncpg_url.replace("&channel_binding=require", "")
-    asyncpg_url = asyncpg_url.replace("?sslmode=require", "")
+    asyncpg_url: str = asyncpg_url.replace("&sslmode=require", "")
+    asyncpg_url: str = asyncpg_url.replace("&channel_binding=require", "")
+    asyncpg_url: str = asyncpg_url.replace("?sslmode=require", "")
     return asyncpg_url.replace("?channel_binding=require", "")
 
 
@@ -52,7 +61,7 @@ async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     Returns:
         tuple: (engine, AsyncSessionLocal) for app.state injection
     """
-    engine = create_async_engine(
+    engine: AsyncEngine = create_async_engine(
         url=get_database_url(),
         echo=False,
         pool_size=settings.POSTGRES_POOL_SIZE,
@@ -87,7 +96,7 @@ async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     # SQLAlchemyInstrumentor().instrument(engine=engine)
     # logger.info("SQLAlchemy instrumentation enabled for OpenTelemetry")
 
-    session_local = async_sessionmaker(
+    session_local: async_sessionmaker[AsyncSession] = async_sessionmaker(
         bind=engine,
         class_=AsyncSession,
         expire_on_commit=False,
@@ -98,10 +107,10 @@ async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     # Test connection and log version info
     try:
         async with engine.begin() as conn:
-            result = await conn.execute(text("SELECT version()"))
-            version = result.scalar()
-            parsed_url = urlparse(settings.POSTGRES_URL)
-            host = parsed_url.hostname
+            result: CursorResult[Any] = await conn.execute(text("SELECT version()"))
+            version: Unknown = result.scalar()
+            parsed_url: ParseResult = urlparse(settings.POSTGRES_URL)
+            host: str | None = parsed_url.hostname
 
             logger.info(
                 "PostgreSQL connected",
@@ -119,7 +128,7 @@ async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
 
 async def get_postgres_db(connection: HTTPConnection) -> AsyncGenerator[AsyncSession, None]:
     """Dependency for database sessions retrieved from app.state."""
-    session_local = connection.app.state.db_session_local
+    session_local: Any = connection.app.state.db_session_local
     async with session_local() as session:
         try:
             yield session

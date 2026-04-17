@@ -58,6 +58,7 @@ from typing import TYPE_CHECKING
 
 import toons
 from langchain.chat_models import init_chat_model
+from langchain.embeddings import init_embeddings
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import (
@@ -67,29 +68,29 @@ from langchain_google_genai import (
 )
 from pydantic import BaseModel
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.connections import get_shared_httpx_client
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
     from typing import Any
 
+    from langchain_core.embeddings import Embeddings
     from langchain_core.language_models import BaseChatModel
     from langchain_core.messages import BaseMessage
     from langchain_core.tools import BaseTool
 
-_settings = get_settings()
-_mcfg = _settings.model
+settings: Settings = get_settings()
 _DEFAULT_GEMINI_TEMPERATURE = 0.3
 _DEFAULT_GEMINI_TOP_P = 0.8
 _DEFAULT_GEMINI_TOP_K = 20
 _DEFAULT_CONTEXT_CACHE_TTL = "3600s"
-_settings_google_api_key = _settings.model.google_api_key.get_secret_value()
 
 
 # ---------------------------------------------------------------------------
 # Model factory
 # ---------------------------------------------------------------------------
+# TODO: Add langchain specific middlewares here LLMToolSelectMiddleware, GuardrailMiddleware, etc.
 
 
 def build_chat_model(
@@ -104,18 +105,17 @@ def build_chat_model(
     **kwargs: Any,
 ) -> BaseChatModel:
     """Return a configured Gemini chat model instance."""
-    default_temperature = min(_mcfg.default_temperature, _DEFAULT_GEMINI_TEMPERATURE)
 
     return init_chat_model(
-        model=model_name or _mcfg.gemini_pro_model,
+        # model=model_name,
         thinking_level="medium",
-        temperature=temperature if temperature is not None else default_temperature,
+        temperature=Settings.GEMINI_VISION_MODEL,
         top_p=top_p if top_p is not None else _DEFAULT_GEMINI_TOP_P,
         top_k=top_k if top_k is not None else _DEFAULT_GEMINI_TOP_K,
-        max_output_tokens=max_tokens or _mcfg.default_max_tokens,
-        google_api_key=_settings_google_api_key,
+        max_output_tokens=max_tokens,
+        google_api_key=Settings.GOOGLE_API_KEY,
         streaming=streaming,
-        timeout=_mcfg.default_timeout,
+        # timeout=Settings.TAVILY_TIMEOUT_SECONDS,
         cached_content=cached_content,
         **kwargs,
         http_async_client=get_shared_httpx_client(),
@@ -143,7 +143,7 @@ def build_chat_google_genai_model(
         top_p=top_p if top_p is not None else _DEFAULT_GEMINI_TOP_P,
         top_k=top_k if top_k is not None else _DEFAULT_GEMINI_TOP_K,
         max_tokens=max_tokens or _mcfg.default_max_tokens,
-        google_api_key=_settings_google_api_key,
+        google_api_key=settings_google_api_key,
         streaming=streaming,
         timeout=_mcfg.default_timeout,
         cached_content=cached_content,
@@ -204,9 +204,75 @@ def build_cached_chat_model(
     )
 
 
-def build_embedding_model() -> GoogleGenerativeAIEmbeddings:
+def build_embedding_model_generic(
+    model_name: str | None = None,
+    **kwargs: Any,
+) -> Embeddings:
+    """
+    Build an embedding model using LangChain's generic factory (init_embedding).
+
+    Supports any LangChain-integrated provider: OpenAI, HuggingFace, Anthropic, etc.
+    Use this for provider-agnostic code.
+
+    Args:
+        model_name: Model identifier (e.g., "google-genai/embedding-001").
+                   Defaults to configured Gemini embedding model.
+        **kwargs: Provider-specific configuration passed through.
+    """
+    return init_embeddings(
+        model=model_name or f"google-genai/{_mcfg.gemini_embedding_model}",
+        **kwargs,
+    )
+
+
+def build_embedding_model_gemini_full(
+    model_name: str | None = None,
+    *,
+    task_type: str = "RETRIEVAL_DOCUMENT",
+    title: str | None = None,
+    client: Any | None = None,
+    **kwargs: Any,
+) -> GoogleGenerativeAIEmbeddings:
+    """
+    Build a Gemini embedding model with full configuration.
+
+    Args:
+        model_name: Embedding model (e.g., "embedding-001").
+                   Defaults to configured model.
+        task_type: Task for embedding optimization:
+                  - "RETRIEVAL_DOCUMENT": Retrieving documents (default).
+                  - "RETRIEVAL_QUERY": Querying documents.
+                  - "SEMANTIC_SIMILARITY": Comparing phrases for similarity.
+                  - "CLASSIFICATION": Embedding text for classification.
+                  - "CLUSTERING": Embedding text for clustering.
+        title: Optional content title (used with task_type).
+        client: Custom Google API client (advanced use cases).
+        **kwargs: Additional config (user_agent, request_options, etc.).
+
+    Example::
+
+        # For document indexing (high recall)
+        doc_embedder = build_embedding_model_gemini_full(
+            task_type="RETRIEVAL_DOCUMENT",
+            title="Knowledge base documents",
+        )
+
+        # For query embedding (paired with above)
+        query_embedder = build_embedding_model_gemini_full(
+            task_type="RETRIEVAL_QUERY",
+        )
+
+        # For semantic similarity
+        sim_embedder = build_embedding_model_gemini_full(
+            task_type="SEMANTIC_SIMILARITY",
+        )
+    """
     return GoogleGenerativeAIEmbeddings(
-        model=_mcfg.gemini_embedding_model,
+        model=model_name or _mcfg.gemini_embedding_model,
+        task_type=task_type,
+        # title=title,
+        client=client,
+        **kwargs,
     )
 
 
@@ -303,7 +369,8 @@ def _encode_file(path: str | Path) -> tuple[str, str]:
     raw = p.read_bytes()
     mime, _ = mimetypes.guess_type(str(p))
     if not mime:
-        raise ValueError(f"Cannot guess MIME type for {p}")
+        msg = f"Cannot guess MIME type for {p}"
+        raise ValueError(msg)
     return base64.b64encode(raw).decode(), mime
 
 
@@ -339,7 +406,8 @@ def build_image_message(
             }
         )
     else:
-        raise ValueError("Provide one of image_path, image_url, or image_b64")
+        msg = "Provide one of image_path, image_url, or image_b64"
+        raise ValueError(msg)
 
     return HumanMessage(content=content)
 
@@ -353,7 +421,7 @@ async def ainvoke_multimodal(
     system: str | None = None,
     model: BaseChatModel | None = None,
 ) -> str:
-    llm = model or build_chat_model(model_name="gemini-2.0-flash", media_resolution="low", )
+    llm = model or build_chat_model(model_name="gemini-2.0-flash", media_resolution="low")
     messages: list[BaseMessage] = []
     if system:
         messages.append(SystemMessage(content=system))
@@ -435,20 +503,39 @@ def with_structured_output(
 # ---------------------------------------------------------------------------
 
 
-async def aembed_text(text: str) -> list[float]:
-    """Embed a single string asynchronously."""
-    model = build_embedding_model()
-    return await asyncio.to_thread(model.embed_query, text)
+async def aembed_text(
+    text: str,
+    *,
+    model: Embeddings | None = None,
+) -> list[float]:
+    """
+    Embed a single string asynchronously.
+
+    Args:
+        text: The text to embed.
+        model: Embedding model. Defaults to build_embedding_model().
+    """
+    emb = model or build_embedding_model()
+    return await asyncio.to_thread(emb.embed_query, text)
 
 
 async def aembed_batch(
-    texts: list[str], *, max_concurrency: int | None = None
+    texts: list[str],
+    *,
+    model: Embeddings | None = None,
+    max_concurrency: int | None = None,
 ) -> list[list[float]]:
     """
     Embed multiple strings, respecting concurrency limits.
     GoogleGenerativeAIEmbeddings.embed_documents handles batching internally.
+
+    Args:
+        texts: List of texts to embed.
+        model: Embedding model. Defaults to build_embedding_model().
+        max_concurrency: Max concurrent requests (note: GoogleGenerativeAI
+                        handles batch requests server-side).
     """
-    _ = max_concurrency
-    model = build_embedding_model()
+    _ = max_concurrency  # Note: Gemini batching is server-side; limit isn't used here
+    emb = model or build_embedding_model()
     # embed_documents is synchronous; run in thread pool
-    return await asyncio.to_thread(model.embed_documents, texts)
+    return await asyncio.to_thread(emb.embed_documents, texts)

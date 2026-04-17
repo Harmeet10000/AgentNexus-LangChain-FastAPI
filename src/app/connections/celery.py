@@ -9,7 +9,9 @@ from redis.asyncio import Redis
 
 from app.config import get_settings
 from app.connections.redis import create_redis_client
-from app.shared.services.celery_reliability import (
+from app.utils import logger
+
+from .celery_reliability import (
     RedisClientProtocol,
     acquire_idempotency_lock,
     mark_idempotency_completed,
@@ -17,7 +19,6 @@ from app.shared.services.celery_reliability import (
     release_idempotency_processing_lock,
     run_with_circuit_breaker,
 )
-from app.utils import logger
 
 settings = get_settings()
 
