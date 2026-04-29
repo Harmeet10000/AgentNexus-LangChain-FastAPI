@@ -42,13 +42,23 @@ from langchain_core.messages import (
 from app.utils import logger
 
 if TYPE_CHECKING:
-    from langchain_core.messages import (
-        BaseMessage,
-    )
+    from langchain_core.messages import BaseMessage
 
-    from app.shared.langgraph_layer.agent_saul.graph.state import LegalAgentState
+    # GraphitiService is a protocol/interface for the client functions
+    # This is a type stub for DI – the actual implementation is functions in .client
+    class GraphitiService:
+        """Type stub for Graphiti client operations."""
 
-    from .client import GraphitiService
+        async def search_for_risk_context(
+            self, query: str, user_id: str, doc_id: str, num_results: int
+        ) -> list: ...
+
+        async def search_for_precedent_chains(
+            self, query: str, user_id: str, jurisdiction: str, num_results: int
+        ) -> list: ...
+
+
+from app.shared.langgraph_layer.agent_saul.state import LegalAgentState
 
 _DEFAULT_MAX_TOKENS: int = 4_000
 _GRAPHITI_CONTEXT_RESULTS: int = 5
@@ -122,7 +132,8 @@ def _filter_tool_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
 
     # Remove ToolMessage and pure tool_call AIMessages
     filtered = [
-        m for m in messages
+        m
+        for m in messages
         if not isinstance(m, ToolMessage)
         and not (isinstance(m, AIMessage) and not m.content and m.tool_calls)
     ]
@@ -158,7 +169,8 @@ def _build_context_prefix(
     risk_warnings: str = ""
     if state.get("risk_analysis"):
         critical_risks = [
-            f.title for f in state["risk_analysis"].findings  # type: ignore[union-attr]
+            f.title
+            for f in state["risk_analysis"].findings  # type: ignore[union-attr]
             if f.label in ("critical", "high")
         ]
         if critical_risks:

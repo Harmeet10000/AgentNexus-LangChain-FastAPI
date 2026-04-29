@@ -119,3 +119,34 @@ class RagSearchResponse(BaseModel):
     items: list[SearchResultItem]
     context: list[RagContextSectionResponse]
     cache_hit: bool = False
+
+
+class LegalAskRequest(BaseModel):
+    """Grounded legal KB question."""
+
+    model_config = _STRICT_CONFIG
+
+    query: str = Field(min_length=1)
+    doc_ids_filter: list[str] = Field(default_factory=list)
+    bypass_cache: bool = False
+
+
+class LegalCitationResponse(BaseModel):
+    """Citation returned by grounded legal generation."""
+
+    model_config = _READ_MODEL_CONFIG
+
+    chunk_id: str
+    clause_type: str
+    claim: str
+
+
+class LegalAskResponse(BaseModel):
+    """Grounded legal KB answer."""
+
+    model_config = _READ_MODEL_CONFIG
+
+    answer: str
+    citations: list[LegalCitationResponse]
+    confidence: str
+    cache_hit: bool = False

@@ -1,0 +1,195 @@
+{
+  "nodes": [
+    {
+      "id": "api_server_axiom_framework",
+      "label": "Axiom Mojo API Framework",
+      "file_type": "document",
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "api_server_rop_pipeline",
+      "label": "Axiom Railway Oriented Pipeline",
+      "file_type": "document",
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "api_server_io_uring_epoll_reactor",
+      "label": "io_uring and epoll Reactor",
+      "file_type": "document",
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "api_server_zero_copy_http_parser",
+      "label": "Zero-copy HTTP Parser",
+      "file_type": "document",
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "api_server_thread_per_core",
+      "label": "Shared Nothing Thread-per-Core Architecture",
+      "file_type": "document",
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "api_server_background_tasks",
+      "label": "Broker-backed Background Tasks",
+      "file_type": "document",
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "api_server_cron_scheduler",
+      "label": "AOT Cron Scheduler",
+      "file_type": "document",
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "api_server_photon_logging",
+      "label": "Photon Pino Loguru Inspired Logging",
+      "file_type": "document",
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "api_server_axiom_framework",
+      "target": "api_server_rop_pipeline",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "api_server_axiom_framework",
+      "target": "api_server_io_uring_epoll_reactor",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "api_server_axiom_framework",
+      "target": "api_server_zero_copy_http_parser",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "api_server_axiom_framework",
+      "target": "api_server_thread_per_core",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "api_server_axiom_framework",
+      "target": "api_server_background_tasks",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "api_server_axiom_framework",
+      "target": "api_server_cron_scheduler",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "api_server_axiom_framework",
+      "target": "api_server_photon_logging",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "api_server_cron_scheduler",
+      "target": "celery_celery_app",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.67,
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "api_server_background_tasks",
+      "target": "celery_rabbitmq_queue_topology",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.77,
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "api_server_photon_logging",
+      "target": "ai_agent_engineering_observability",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.69,
+      "source_file": "docs/Lynk_Plan/api_server_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": []
+}

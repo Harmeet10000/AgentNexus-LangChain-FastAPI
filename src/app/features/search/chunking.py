@@ -21,11 +21,14 @@ def chunk_text(text: str, *, chunk_size: int, chunk_overlap: int) -> list[TextCh
     if not normalized:
         return []
     if chunk_size <= 0:
-        raise ValueError("chunk_size must be greater than zero")
+        msg = "chunk_size must be greater than zero"
+        raise ValueError(msg)
     if chunk_overlap < 0:
-        raise ValueError("chunk_overlap must be non-negative")
+        msg_0 = "chunk_overlap must be non-negative"
+        raise ValueError(msg_0)
     if chunk_overlap >= chunk_size:
-        raise ValueError("chunk_overlap must be smaller than chunk_size")
+        msg_1 = "chunk_overlap must be smaller than chunk_size"
+        raise ValueError(msg_1)
 
     tokens = normalized.split(" ")
     step = chunk_size - chunk_overlap

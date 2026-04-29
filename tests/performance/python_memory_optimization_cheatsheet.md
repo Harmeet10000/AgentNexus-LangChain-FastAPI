@@ -11,45 +11,6 @@
 
 This file is a quick reference for memory-focused optimization decisions in this project.
 
-## 1. Pydantic vs lighter containers
-
-- Do not manually add field-level `__slots__ = ("id", "email", ...)` to `pydantic.BaseModel` subclasses as a default optimization.
-- `BaseModel` already carries Pydantic-specific instance machinery, so manual slots usually do not give the win people expect.
-- Use `BaseModel` when you need validation, serialization, parsing, or schema generation.
-- For hot-path, short-lived, in-memory objects that do not need full Pydantic behavior, prefer:
-  - `@dataclass(slots=True)`
-  - `NamedTuple`
-  - plain tuples or dicts when the structure is simple and local
-
-## 2. Stream large responses
-
-- If a response is large or unbounded, do not build the full payload in memory first.
-- Prefer `StreamingResponse` with a generator or async generator.
-- Best use cases:
-  - large exports
-  - file downloads
-  - AI token streaming
-  - SSE/event streams
-  - long-running incremental results
-- For small JSON responses, regular FastAPI responses are fine.
-
-Example:
-
-```python
-from collections.abc import AsyncIterator
-
-from fastapi.responses import StreamingResponse
-
-
-async def generate_chunks() -> AsyncIterator[bytes]:
-    for chunk in data_source():
-        yield chunk
-
-
-@router.get("/download", response_class=StreamingResponse)
-async def download() -> AsyncIterator[bytes]:
-    return generate_chunks()
-```
 
 ## 3. Use Gunicorn `--preload` only when deployment matches
 

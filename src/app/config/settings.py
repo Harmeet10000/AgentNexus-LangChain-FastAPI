@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT: int = Field(default=60)
 
     # --- Google Gemini API ---
-    GOOGLE_API_KEY: str = Field(default="")
+    GEMINI_API_KEY: str = Field(default="")
     GEMINI_FLASH_MODEL: str = Field(default="gemini-3.1-flash")
     GEMINI_PRO_MODEL: str = Field(default="gemini-3.1-pro")
     GEMINI_VISION_MODEL: str = Field(default="gemini-2.5-flash-image")

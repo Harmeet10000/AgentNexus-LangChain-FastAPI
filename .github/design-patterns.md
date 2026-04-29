@@ -1227,3 +1227,333 @@ app.include_router(users_router)
 - **FastAPI synergy**: FastAPI's `Depends()` system is perfect for wiring adapters at the edges without polluting the core. You can even use third-party DI containers (e.g., `dependency-injector`, `dishka`) for more complex bindings while keeping the core pure.
 
 This pattern, combined with DIP, results in highly evolvable code. Start by extracting one output port (e.g., repository) from an existing service, implement the adapter, and wire it via `Depends`. Gradually expand as needed.
+
+
+## What is the Pipeline Pattern?
+
+The **pipeline pattern** structures a multi-step process into a sequence of independent stages, where each stage transforms data and passes it to the next stage. Data flows through the pipeline like a conveyor belt – it’s a unidirectional stream of values that are incrementally processed.
+
+**Key characteristics:**
+- Each stage is a pure transformation (no side effects).
+- Stages communicate via a channel (e.g., queues, streams, or iterators).
+- Pipelines can be sequential or parallel (multiple workers per stage).
+
+**Benefits:**
+- **Modularity** – each stage has a single responsibility.
+- **Concurrency** – stages can run simultaneously, overlapping I/O and CPU work.
+- **Composability** – stages can be reordered, removed, or reused.
+- **Testability** – each stage can be unit-tested in isolation.
+
+A typical pipeline has three parts:
+```
+Source → Stage₁ → Stage₂ → … → Sink
+```
+
+---
+
+## Using the Pipeline Pattern
+
+### 1. Go (goroutines + channels)
+
+Go’s built-in concurrency primitives make pipelines natural. Each stage reads from an input channel, processes values, and writes to an output channel.
+
+**Example:** Generate numbers → square them → filter even numbers → sum them.
+
+```go
+package main
+
+import "fmt"
+
+// Stage 1: generate numbers 0..n-1
+func generate(n int) <-chan int {
+    out := make(chan int)
+    go func() {
+        defer close(out)
+        for i := 0; i < n; i++ {
+            out <- i
+        }
+    }()
+    return out
+}
+
+// Stage 2: square each number
+func square(in <-chan int) <-chan int {
+    out := make(chan int)
+    go func() {
+        defer close(out)
+        for v := range in {
+            out <- v * v
+        }
+    }()
+    return out
+}
+
+// Stage 3: filter even numbers
+func filterEven(in <-chan int) <-chan int {
+    out := make(chan int)
+    go func() {
+        defer close(out)
+        for v := range in {
+            if v%2 == 0 {
+                out <- v
+            }
+        }
+    }()
+    return out
+}
+
+// Sink: sum all values
+func sum(in <-chan int) int {
+    total := 0
+    for v := range in {
+        total += v
+    }
+    return total
+}
+
+func main() {
+    pipeline := filterEven(square(generate(10)))
+    result := sum(pipeline)
+    fmt.Println(result) // 0²+2²+4²+6²+8² = 0+4+16+36+64 = 120
+}
+```
+
+**Parallel stage** – fan-out multiple workers per stage (e.g., `square` with 4 goroutines).
+
+---
+
+### 2. Python (generators / async generators)
+
+Python’s generators (`yield`) naturally implement pipelines. Each stage is a generator function that yields transformed values.
+
+**Example:** Same pipeline using generators.
+
+```python
+def generate(n: int):
+    for i in range(n):
+        yield i
+
+def square(iterable):
+    for v in iterable:
+        yield v * v
+
+def filter_even(iterable):
+    for v in iterable:
+        if v % 2 == 0:
+            yield v
+
+def sum_all(iterable):
+    total = 0
+    for v in iterable:
+        total += v
+    return total
+
+# Compose the pipeline
+pipeline = filter_even(square(generate(10)))
+result = sum_all(pipeline)
+print(result)  # 120
+```
+
+**For concurrency**, you can use `asyncio` and async generators (Python 3.6+):
+
+```python
+import asyncio
+
+async def generate(n: int):
+    for i in range(n):
+        await asyncio.sleep(0)  # simulate async I/O
+        yield i
+
+async def square(iterable):
+    async for v in iterable:
+        yield v * v
+
+async def filter_even(iterable):
+    async for v in iterable:
+        if v % 2 == 0:
+            yield v
+
+async def sum_all(iterable):
+    total = 0
+    async for v in iterable:
+        total += v
+    return total
+
+async def main():
+    pipeline = filter_even(square(generate(10)))
+    result = await sum_all(pipeline)
+    print(result)
+
+asyncio.run(main())
+```
+
+You can also use classic `queue.Queue` + threads for parallel stages.
+
+---
+
+### 3. TypeScript (async generators / Node.js streams)
+
+TypeScript/JavaScript supports async iterators (`AsyncIterable`). You can build pipelines using `for await...of` loops.
+
+**Example:** Same numeric pipeline with async generators.
+
+```typescript
+async function* generate(n: number): AsyncIterable<number> {
+    for (let i = 0; i < n; i++) {
+        await Promise.resolve(); // simulate async operation
+        yield i;
+    }
+}
+
+async function* square(source: AsyncIterable<number>): AsyncIterable<number> {
+    for await (const v of source) {
+        yield v * v;
+    }
+}
+
+async function* filterEven(source: AsyncIterable<number>): AsyncIterable<number> {
+    for await (const v of source) {
+        if (v % 2 === 0) yield v;
+    }
+}
+
+async function sum(source: AsyncIterable<number>): Promise<number> {
+    let total = 0;
+    for await (const v of source) {
+        total += v;
+    }
+    return total;
+}
+
+async function main() {
+    const pipeline = filterEven(square(generate(10)));
+    const result = await sum(pipeline);
+    console.log(result); // 120
+}
+
+main();
+```
+
+**Using Node.js Streams (Object Mode):**  
+Node.js’s `stream` module is a mature pipeline implementation. For complex transformations, you can use `stream.pipeline` or `pipeline` from `stream/promises`.
+
+```typescript
+import { Readable, Transform, Writable } from 'stream';
+import { pipeline } from 'stream/promises';
+
+const generate = () => Readable.from((function*() { for (let i=0;i<10;i++) yield i; })());
+
+const square = new Transform({
+    objectMode: true,
+    transform(chunk, _, cb) { cb(null, chunk * chunk); }
+});
+
+const filterEven = new Transform({
+    objectMode: true,
+    transform(chunk, _, cb) {
+        if (chunk % 2 === 0) cb(null, chunk);
+        else cb(null);
+    }
+});
+
+let total = 0;
+const sum = new Writable({
+    objectMode: true,
+    write(chunk, _, cb) {
+        total += chunk;
+        cb();
+    }
+});
+
+async function run() {
+    await pipeline(generate(), square, filterEven, sum);
+    console.log(total); // 120
+}
+run();
+```
+
+---
+
+## Summary Table
+
+| Language   | Common Implementation                           | Concurrency Support           |
+|------------|-------------------------------------------------|-------------------------------|
+| Go         | goroutines + channels                           | Native, easy fan-out          |
+| Python     | generators (`yield`) / async generators / queues | Threads, asyncio, or `queue`  |
+| TypeScript | async generators / Node.js streams              | Single-threaded async, cluster|
+
+The pipeline pattern excels when you have a clear sequence of transformations, need to scale by adding parallel workers, or want to decouple producers from consumers.
+
+
+Anti-Corruption Layer / Gateway
+
+Why it's useful: It's the single most important pattern for migrating a legacy system. It protects a new, clean model from being polluted by an old system's semantics and design, providing a facade that translates between them.
+
+How it works: For example, in an OrderService, you call oldGateway.placeOrder() to translate a legacy order, call the old system, and translate the response back.
+
+Registry & Service Locator
+
+Why it's useful: It provides a well-known object that other objects can use to find common or shared services (e.g., a logger, a config, a data source).
+
+How it works: Instead of passing a dependency through layers, you look it up from a central registry. Use with caution—it can turn into an anti-pattern.
+
+Plugin & Extension Object
+
+Why it's useful: This enables a core application to be extended with new features by adding new modules (plugins) at runtime without recompiling the whole system.
+
+How it works: A standard discovery mechanism (like scanning a directory for classes or loading shared libraries) is used to find implementations of a known interface.
+
+Special Case[15†L132-L133]
+
+Why it's useful: Instead of returning null, None, or undefined, you return an object that has the same interface but with behavior specific to that special case—avoiding if checks.
+
+How it works: A NullUser class that implements a User interface might return "Guest" for getName(), or a MissingCustomer might return empty lists for getOrders().
+
+
+
+
+These patterns solve specific problems in multi-threaded or asynchronous environments.
+
+Active Object / Reactor
+
+Why it's useful: Active Object simplifies multi-threaded programming in languages like Python and Go by encapsulating an object's state and scheduling method calls on its own thread. Reactor is great for handling many simultaneous network connections using a single thread.
+
+How it works: Active Object schedules each method invocation as a command object on a dedicated thread, ensuring thread safety. The Reactor uses an event loop to listen for incoming events and dispatches them to pre-registered handlers.
+
+Thread-Local Storage & Read-Write Lock
+
+Why it's useful: Thread-Local Storage isolates data per thread, preventing race conditions. A Read-Write Lock allows multiple concurrent readers or one exclusive writer, improving throughput for read-heavy data.
+
+How it works: Thread-Local Storage gives each thread its own copy of a variable. Read-Write Lock has separate methods for acquiring read locks (shared) and write locks (exclusive).
+
+Monitor Object & Guarded Suspension
+
+Why it's useful: Monitor Object encapsulates shared data and exposes synchronized methods that enforce atomic operations. Guarded Suspension lets a thread wait for a precondition to become true.
+
+How it works: In Monitor Object, a mutex guards the data, and all methods acquire it before executing. Guarded Suspension uses a loop to check the condition, waiting (e.g., with condition.wait()) until it's satisfied.
+
+Balking & Double-Checked Locking
+
+Why it's useful: Balking avoids unnecessary work when an object is in an invalid state to execute an action. Double-Checked Locking reduces lock overhead by checking a condition twice—once without locking, then with locking—commonly used for lazy initialization in singletons.
+
+How it works: Balking checks a state flag at the start of an operation, returning immediately if the object isn't ready. Double-Checked Locking checks the condition first (unsynchronized), then synchronizes only when needed.
+
+Extract Method / Introduce Parameter Object / Replace Constructor with Factory Method[20†L8-L10]
+
+Why it's useful: These are fundamental for breaking down giant functions, simplifying long parameter lists, and making object creation more flexible.
+
+How it works: Extract Method moves segments of code into new, well-named methods. Introduce Parameter Object groups related parameters into a single object. Replace Constructor with Factory Method provides more descriptive creation logic.
+
+Replace Delegation with Inheritance / Replace Inheritance with Delegation[20†L9-L10]
+
+Why it's useful: These refactorings let you dynamically change the relationship between two classes.
+
+How it works: One swaps composition for inheritance; the other swaps inheritance for composition—each useful when you realize your initial modeling choice was wrong.
+
+Remove Middle Man / Hide Delegate[20†L9]
+
+Why it's useful: These refactorings handle the "law of Demeter" violations (i.e., long chains of calls like customer.getAddress().getCity()).
+
+How it works: Hide Delegate creates a method on the outer object that delegates to the inner one. Remove Middle Man does the reverse—it exposes the delegate directly when the delegation becomes excessive.
+
+

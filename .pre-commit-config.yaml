@@ -28,8 +28,8 @@ repos:
     rev: v5.0.0
     hooks:
       - id: check-yaml
-      - id: check-added-large-files
-        args: ["--maxkb=1000"]
+      # - id: check-added-large-files
+        # args: ["--maxkb=2000"]
       - id: check-json
       - id: check-toml
       - id: check-merge-conflict

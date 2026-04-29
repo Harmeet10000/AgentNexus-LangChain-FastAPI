@@ -66,6 +66,7 @@ from langchain_google_genai import (
     GoogleGenerativeAIEmbeddings,
     create_context_cache,
 )
+from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from pydantic import BaseModel
 
 from app.config import Settings, get_settings
@@ -113,13 +114,33 @@ def build_chat_model(
         top_p=top_p if top_p is not None else _DEFAULT_GEMINI_TOP_P,
         top_k=top_k if top_k is not None else _DEFAULT_GEMINI_TOP_K,
         max_output_tokens=max_tokens,
-        google_api_key=Settings.GOOGLE_API_KEY,
+        api_key=Settings.GEMINI_API_KEY,
         streaming=streaming,
         # timeout=Settings.TAVILY_TIMEOUT_SECONDS,
         cached_content=cached_content,
         **kwargs,
         http_async_client=get_shared_httpx_client(),
     )
+
+
+client = ChatNVIDIA(
+  model="minimaxai/minimax-m2.7",
+  api_key="$NVIDIA_API_KEY",
+  temperature=1,
+  top_p=0.95,
+  max_tokens=8192,
+)
+
+
+
+
+# model = ChatOpenRouter(
+#     model="anthropic/claude-sonnet-4.5",
+#     temperature=0,
+#     max_tokens=1024,
+#     max_retries=2,
+#     # other params...
+# )
 
 
 def build_chat_google_genai_model(
@@ -143,7 +164,7 @@ def build_chat_google_genai_model(
         top_p=top_p if top_p is not None else _DEFAULT_GEMINI_TOP_P,
         top_k=top_k if top_k is not None else _DEFAULT_GEMINI_TOP_K,
         max_tokens=max_tokens or _mcfg.default_max_tokens,
-        google_api_key=settings_google_api_key,
+        api_key=settings_api_key,
         streaming=streaming,
         timeout=_mcfg.default_timeout,
         cached_content=cached_content,

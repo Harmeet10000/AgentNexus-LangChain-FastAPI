@@ -6,9 +6,11 @@ from fastapi import APIRouter, Path, status
 
 from app.utils import APIResponse, http_response
 
-from .dependencies import SearchServiceDep
+from .dependencies import SearchServiceDep, UserIdDep
 from .dto import (
     HybridSearchRequest,
+    LegalAskRequest,
+    LegalAskResponse,
     RagSearchRequest,
     RagSearchResponse,
     SearchIngestRequest,
@@ -22,14 +24,13 @@ router = APIRouter(prefix="/search", tags=["search"])
 
 @router.post(
     "/ingest",
-    response_model=APIResponse[SearchIngestResponse],
     status_code=status.HTTP_201_CREATED,
 )
 async def ingest_document(
     payload: SearchIngestRequest,
     service: SearchServiceDep,
 ) -> APIResponse[SearchIngestResponse]:
-    response = await service.ingest_document(payload)
+    response: SearchIngestResponse = await service.ingest_document(payload)
     return http_response(
         "Search document queued", data=response, status_code=status.HTTP_201_CREATED
     )
@@ -37,35 +38,44 @@ async def ingest_document(
 
 @router.get(
     "/ingest/{task_id}",
-    response_model=APIResponse[SearchTaskStatusResponse],
 )
 async def get_ingest_status(
     task_id: Annotated[str, Path(min_length=1)],
     service: SearchServiceDep,
 ) -> APIResponse[SearchTaskStatusResponse]:
-    response = await service.get_ingest_status(task_id)
+    response: SearchTaskStatusResponse = await service.get_ingest_status(task_id)
     return http_response("Search ingest status", data=response)
 
 
 @router.post(
     "/hybrid",
-    response_model=APIResponse[SearchResponse],
 )
 async def hybrid_search(
     payload: HybridSearchRequest,
     service: SearchServiceDep,
 ) -> APIResponse[SearchResponse]:
-    response = await service.hybrid_search(payload)
+    response: SearchResponse = await service.hybrid_search(payload)
     return http_response("Hybrid search results", data=response)
 
 
 @router.post(
     "/rag",
-    response_model=APIResponse[RagSearchResponse],
 )
 async def rag_search(
     payload: RagSearchRequest,
     service: SearchServiceDep,
 ) -> APIResponse[RagSearchResponse]:
-    response = await service.rag_search(payload)
+    response: RagSearchResponse = await service.rag_search(payload)
     return http_response("RAG search results", data=response)
+
+
+@router.post(
+    "/ask",
+)
+async def ask_legal_kb(
+    payload: LegalAskRequest,
+    service: SearchServiceDep,
+    user_id: UserIdDep,
+) -> APIResponse[LegalAskResponse]:
+    response: LegalAskResponse = await service.ask_legal(payload, user_id=user_id)
+    return http_response("Grounded legal answer", data=response)

@@ -13,5 +13,6 @@ def build_embedding_client() -> GoogleGenerativeAIEmbeddings:
     settings = get_settings()
     return GoogleGenerativeAIEmbeddings(
         model=settings.GEMINI_EMBEDDING_MODEL,
-        google_api_key=SecretStr(settings.GOOGLE_API_KEY) if settings.GOOGLE_API_KEY else None,
+        api_key=SecretStr(settings.GEMINI_API_KEY) if settings.GEMINI_API_KEY else None,
+        output_dimensionality=768,
     )

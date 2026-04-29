@@ -23,7 +23,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -40,8 +40,10 @@ class LegalEpisodeType(StrEnum):
     RELATIONSHIP = "relationship"
 
 
-class ClauseEpisodeMetadata(BaseModel, frozen=True):
+class ClauseEpisodeMetadata(BaseModel):
     """Stored as source_description in Graphiti. Always co-retrieved with episode."""
+
+    model_config = ConfigDict(frozen=True)
 
     doc_id: str
     clause_id: str
@@ -55,7 +57,11 @@ class ClauseEpisodeMetadata(BaseModel, frozen=True):
     schema_version: int = 1
 
 
-class FinalReportEpisodeMetadata(BaseModel, frozen=True):
+class FinalReportEpisodeMetadata(BaseModel):
+    """Final report metadata for high-trust episode storage."""
+
+    model_config = ConfigDict(frozen=True)
+
     doc_id: str
     user_id: str
     thread_id: str
@@ -65,10 +71,12 @@ class FinalReportEpisodeMetadata(BaseModel, frozen=True):
     schema_version: int = 1
 
 
-class GraphitiSearchResult(BaseModel, frozen=True):
+class GraphitiSearchResult(BaseModel):
     """Normalised result returned by GraphitiService.search_*().
     Consumers never touch raw graphiti-core types.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     uuid: str
     name: str
@@ -80,13 +88,125 @@ class GraphitiSearchResult(BaseModel, frozen=True):
     metadata_raw: dict[str, Any] = Field(default_factory=dict)
 
 
-class LegalEdgeInput(BaseModel, frozen=True):
+class PartyNode(BaseModel):
+    """Graphiti custom entity for a natural person or legal entity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    party_type: str = "entity"
+
+
+class ObligationNode(BaseModel):
+    """Graphiti custom entity for a specific duty."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duty: str
+    deadline: str | None = None
+
+
+class RightOrPermissionNode(BaseModel):
+    """Graphiti custom entity for a right, option, consent, or permission."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str
+    holder: str | None = None
+
+
+class PenaltyClauseNode(BaseModel):
+    """Graphiti custom entity for damages, penalties, or liquidated damages."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trigger: str
+    amount: str | None = None
+
+
+class SignedByEdge(BaseModel):
+    """Edge metadata for SIGNED_BY relationships."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    signed_on: str | None = None
+
+
+class SubsidiaryOfEdge(BaseModel):
+    """Edge metadata for SUBSIDIARY_OF relationships."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class ObligatedToEdge(BaseModel):
+    """Edge metadata for OBLIGATED_TO relationships."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    deadline: str | None = None
+
+
+class GovernedByEdge(BaseModel):
+    """Edge metadata for GOVERNED_BY relationships."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    jurisdiction: str
+
+
+class SupersedesEdge(BaseModel):
+    """Edge metadata for SUPERSEDES relationships."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    effective_date: str | None = None
+
+
+class ReferencesClauseEdge(BaseModel):
+    """Edge metadata for REFERENCES_CLAUSE relationships."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    postgres_chunk_id: str
+
+
+GRAPHITI_ENTITY_TYPES: dict[str, type[BaseModel]] = {
+    "Party": PartyNode,
+    "Obligation": ObligationNode,
+    "RightOrPermission": RightOrPermissionNode,
+    "PenaltyClause": PenaltyClauseNode,
+}
+
+GRAPHITI_EDGE_TYPES: dict[str, type[BaseModel]] = {
+    "SIGNED_BY": SignedByEdge,
+    "SUBSIDIARY_OF": SubsidiaryOfEdge,
+    "OBLIGATED_TO": ObligatedToEdge,
+    "GOVERNED_BY": GovernedByEdge,
+    "SUPERSEDES": SupersedesEdge,
+    "REFERENCES_CLAUSE": ReferencesClauseEdge,
+}
+
+GRAPHITI_EDGE_TYPE_MAP: dict[tuple[str, str], list[str]] = {
+    ("Contract", "Party"): ["SIGNED_BY"],
+    ("Company", "Company"): ["SUBSIDIARY_OF"],
+    ("Party", "Obligation"): ["OBLIGATED_TO"],
+    ("Contract", "Jurisdiction"): ["GOVERNED_BY"],
+    ("Contract", "Contract"): ["SUPERSEDES"],
+    ("Contract", "ClauseChunk"): ["REFERENCES_CLAUSE"],
+}
+
+
+class LegalEdgeInput(BaseModel):
     """Input for writing a structured legal relationship edge to Graphiti.
 
     Graphiti represents edges as episodes with structured body text.
     We build the body from this schema so the LLM that processes
     it gets a consistent, parseable format.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     from_entity: str = Field(description="e.g. 'Acme Corp'")
     relationship: str = Field(description="e.g. 'INDEMNIFIES'")

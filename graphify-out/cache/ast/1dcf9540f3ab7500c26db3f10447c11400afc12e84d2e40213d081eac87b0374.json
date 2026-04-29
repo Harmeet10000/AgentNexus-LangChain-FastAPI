@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    {
+      "id": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_web_scraping_router_py",
+      "label": "router.py",
+      "file_type": "code",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/web_scraping/router.py",
+      "source_location": "L1"
+    }
+  ],
+  "edges": [],
+  "raw_calls": []
+}

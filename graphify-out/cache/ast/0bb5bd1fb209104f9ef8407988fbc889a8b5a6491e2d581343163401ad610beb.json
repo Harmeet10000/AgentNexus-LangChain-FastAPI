@@ -1,0 +1,459 @@
+{
+  "nodes": [
+    {
+      "id": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "label": "router.py",
+      "file_type": "code",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "agent_saul_router_create_session",
+      "label": "create_session()",
+      "file_type": "code",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L50"
+    },
+    {
+      "id": "agent_saul_router_saul_ws_endpoint",
+      "label": "saul_ws_endpoint()",
+      "file_type": "code",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L73"
+    },
+    {
+      "id": "agent_saul_router_rationale_1",
+      "label": "Agent Saul router.  Endpoints:     POST /agent-saul/sessions      \u2192 create threa",
+      "file_type": "rationale",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "agent_saul_router_rationale_79",
+      "label": "WebSocket session lifecycle:        1. Accept connection.       2. Receive first",
+      "file_type": "rationale",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L79"
+    }
+  ],
+  "edges": [
+    {
+      "source": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "target": "contextlib",
+      "relation": "imports_from",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L13",
+      "weight": 1.0
+    },
+    {
+      "source": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "target": "uuid",
+      "relation": "imports_from",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L14",
+      "weight": 1.0
+    },
+    {
+      "source": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "target": "fastapi",
+      "relation": "imports_from",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L16",
+      "weight": 1.0
+    },
+    {
+      "source": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "target": "app_features_auth",
+      "relation": "imports_from",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L18",
+      "weight": 1.0
+    },
+    {
+      "source": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "target": "app_utils",
+      "relation": "imports_from",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L19",
+      "weight": 1.0
+    },
+    {
+      "source": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "target": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_dependencies_py",
+      "relation": "imports_from",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L21",
+      "weight": 1.0
+    },
+    {
+      "source": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "target": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_dto_py",
+      "relation": "imports_from",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L25",
+      "weight": 1.0
+    },
+    {
+      "source": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "target": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_service_py",
+      "relation": "imports_from",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L32",
+      "weight": 1.0
+    },
+    {
+      "source": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "target": "agent_saul_router_create_session",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L50",
+      "weight": 1.0
+    },
+    {
+      "source": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "target": "agent_saul_router_saul_ws_endpoint",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L73",
+      "weight": 1.0
+    },
+    {
+      "source": "agent_saul_router_rationale_1",
+      "target": "home_harmeet_desktop_projects_langchain_fastapi_production_src_app_features_agent_saul_router_py",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L1",
+      "weight": 1.0
+    },
+    {
+      "source": "agent_saul_router_rationale_79",
+      "target": "agent_saul_router_saul_ws_endpoint",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L79",
+      "weight": 1.0
+    }
+  ],
+  "raw_calls": [
+    {
+      "caller_nid": "agent_saul_router_create_session",
+      "callee": "str",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L55"
+    },
+    {
+      "caller_nid": "agent_saul_router_create_session",
+      "callee": "uuid4",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L55"
+    },
+    {
+      "caller_nid": "agent_saul_router_create_session",
+      "callee": "bind",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L58"
+    },
+    {
+      "caller_nid": "agent_saul_router_create_session",
+      "callee": "info",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L59"
+    },
+    {
+      "caller_nid": "agent_saul_router_create_session",
+      "callee": "http_response",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L61"
+    },
+    {
+      "caller_nid": "agent_saul_router_create_session",
+      "callee": "CreateSessionResponse",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L63"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "str",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L90"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "uuid4",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L90"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "bind",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L91"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "accept",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L99"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "register_connection",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L100"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "receive_json",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L103"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "validate_python",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L104"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "isinstance",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L106"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "send_json",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L107"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "model_dump",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L109"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "WSErrorFrame",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L109"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "close",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L117"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "send_json",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L123"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "model_dump",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L125"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "WSErrorFrame",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L125"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "close",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L133"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "info",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L136"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "AgentSaulService",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L139"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "run_session",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L146"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "close_with_violation",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L155"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "info",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L158"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "warning",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L161"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "str",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L161"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "suppress",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L162"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "send_json",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L163"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "model_dump",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L165"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "WSErrorFrame",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L165"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "str",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L168"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "close",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L173"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "exception",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L176"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "str",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L176"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "suppress",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L177"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "send_json",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L178"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "model_dump",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L180"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "WSErrorFrame",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L180"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "close",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L188"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "suppress",
+      "is_member_call": false,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L190"
+    },
+    {
+      "caller_nid": "agent_saul_router_saul_ws_endpoint",
+      "callee": "unregister_connection",
+      "is_member_call": true,
+      "source_file": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/router.py",
+      "source_location": "L191"
+    }
+  ]
+}

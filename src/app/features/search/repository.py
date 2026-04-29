@@ -167,6 +167,105 @@ class SearchRepository:
             for row in result.mappings().all()
         }
 
+    async def legal_rrf_search(
+        self,
+        *,
+        query_text: str,
+        query_embedding: list[float],
+        limit: int,
+        vector_weight: float,
+        keyword_weight: float,
+        jurisdiction: str | None,
+        contract_type: str | None,
+        chunk_ids: Sequence[str] | None,
+        bm25_threshold: float | None = None,
+        exact_phrase: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Run weighted in-database RRF over canonical clauses."""
+        statement = text(
+            """
+            WITH
+            candidate_docs AS (
+                SELECT
+                    chunk_id,
+                    chunk_text,
+                    parent_doc_id,
+                    clause_type,
+                    preamble,
+                    metadata_,
+                    custom_metadata,
+                    embedding,
+                    search_text
+                FROM clauses
+                WHERE
+                    (:jurisdiction IS NULL OR metadata_->>'jurisdiction' = :jurisdiction)
+                    AND (:contract_type IS NULL OR metadata_->>'contract_type' = :contract_type)
+                    AND (:chunk_ids IS NULL OR chunk_id = ANY(CAST(:chunk_ids AS uuid[])))
+            ),
+            vector_search AS (
+                SELECT
+                    chunk_id,
+                    ROW_NUMBER() OVER (ORDER BY embedding <=> CAST(:query_embedding AS vector)) AS rank
+                FROM candidate_docs
+                WHERE embedding IS NOT NULL
+                ORDER BY embedding <=> CAST(:query_embedding AS vector)
+                LIMIT 20
+            ),
+            keyword_search AS (
+                SELECT
+                    chunk_id,
+                    ROW_NUMBER() OVER (
+                        ORDER BY search_text <@> to_bm25query(:query_text, 'clauses_bm25_idx')
+                    ) AS rank
+                FROM candidate_docs
+                WHERE
+                    (:bm25_threshold IS NULL OR
+                     search_text <@> to_bm25query(:query_text, 'clauses_bm25_idx') < :bm25_threshold)
+                ORDER BY search_text <@> to_bm25query(:query_text, 'clauses_bm25_idx')
+                LIMIT 20
+            ),
+            fused AS (
+                SELECT
+                    COALESCE(v.chunk_id, k.chunk_id) AS chunk_id,
+                    (:vector_weight * COALESCE(1.0 / (60.0 + v.rank), 0.0)) +
+                    (:keyword_weight * COALESCE(1.0 / (60.0 + k.rank), 0.0)) AS rrf_score
+                FROM vector_search v
+                FULL OUTER JOIN keyword_search k ON v.chunk_id = k.chunk_id
+            )
+            SELECT
+                c.chunk_id::text AS chunk_id,
+                c.chunk_text,
+                c.preamble,
+                c.clause_type,
+                c.parent_doc_id::text AS parent_doc_id,
+                c.metadata_,
+                c.custom_metadata,
+                f.rrf_score
+            FROM fused f
+            JOIN clauses c ON c.chunk_id = f.chunk_id
+            WHERE (:exact_phrase_like IS NULL OR c.search_text ILIKE :exact_phrase_like)
+            ORDER BY f.rrf_score DESC
+            LIMIT :limit
+            """
+        )
+        vector_literal = _vector_literal(query_embedding)
+        result = await self.session.execute(
+            statement,
+            {
+                "query_text": query_text,
+                "query_embedding": vector_literal,
+                "limit": limit,
+                "vector_weight": vector_weight,
+                "keyword_weight": keyword_weight,
+                "jurisdiction": jurisdiction,
+                "contract_type": contract_type,
+                "chunk_ids": list(chunk_ids) if chunk_ids else None,
+                "bm25_threshold": bm25_threshold,
+                "exact_phrase_like": f"%{exact_phrase}%" if exact_phrase else None,
+            },
+        )
+        return [dict(row) for row in result.mappings().all()]
+
 
 def _build_bm25_statement(metadata_filter: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
     if metadata_filter:
