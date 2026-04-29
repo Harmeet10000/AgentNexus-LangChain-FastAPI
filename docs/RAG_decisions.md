@@ -90,12 +90,13 @@ Keeping the index memory-resident for millisecond latency.
 Implementing date-based or type-based sharding to route queries efficiently.
 Using primary-replica topologies to handle high read throughput.
 4. Hybrid Retrieval & Re-ranking (20:29 - 27:09) To maximize recall, the system combines dense vector search (semantic) with sparse keyword search/BM25 (lexical). These are merged via Reciprocal Rank Fusion (RRF). Post-retrieval, a cross-encoder re-ranker is used to refine the top 100 candidates into the final top 10, typically improving precision by 20–30%.
-5. LLM Integration & Context Assembly (27:10 - 35:15) Context assembly focuses on token budget management. Even with large context windows, the speaker suggests focusing on high-relevance chunks rather than raw volume to avoid diluting the LLM's performance. The prompt should explicitly require source citations to ensure trust and allow for graceful fallbacks when the context is insufficient.
-6. Multi-Layer Caching & Cost Optimization (35:16 - 45:59) Caching is the most significant lever for cost reduction (70–80% for FAQ workloads). The architecture utilizes three layers:
+5.  Methods like TF-IDF and BM25 rely on term frequency. BM25 is particularly noted for its ability to normalize document length and prevent common words from dominating results.
+6. LLM Integration & Context Assembly (27:10 - 35:15) Context assembly focuses on token budget management. Even with large context windows, the speaker suggests focusing on high-relevance chunks rather than raw volume to avoid diluting the LLM's performance. The prompt should explicitly require source citations to ensure trust and allow for graceful fallbacks when the context is insufficient.
+7. Multi-Layer Caching & Cost Optimization (35:16 - 45:59) Caching is the most significant lever for cost reduction (70–80% for FAQ workloads). The architecture utilizes three layers:
 Query Cache: For identical questions.
 Embedding Cache: To avoid redundant API costs.
 Retrieval Cache: For semantically similar queries. Proper TTL (Time-To-Live) and content-based invalidation patterns are required to maintain data freshness.
-7. Operations & Evaluation (46:00 - 58:00) Production-grade RAG requires continuous evaluation using a golden dataset (100–500 diverse queries). The pipeline should measure precision, recall, and answer correctness automatically. Centralized monitoring for latencies and costs is mandatory for long-term stability and to prevent cascading failures via circuit breakers.
+1. Operations & Evaluation (46:00 - 58:00) Production-grade RAG requires continuous evaluation using a golden dataset (100–500 diverse queries). The pipeline should measure precision, recall, and answer correctness automatically. Centralized monitoring for latencies and costs is mandatory for long-term stability and to prevent cascading failures via circuit breakers.
 
 Vector Database Internals: HNSW, Sharding & Scaling (15:38 - 20:28)
 
@@ -280,6 +281,9 @@ This technique uses an LLM to reformulate the user's input into an optimized ret
 Aligning Vocabulary: Automatically expanding terms with synonyms or domain-specific language.
 Expanding Clarification: Using dialogue history to turn vague questions into specific ones (e.g., changing "What is the deadline?" to "What is the Q3 project deadline?").
 Generating Multiple Interpretations: For ambiguous intents, generating several variations of the query can increase recall.
+Information Selection: Using LLMs to filter, summarize, or rank retrieved documents to avoid overwhelming the system.
+Reciprocal Rank Fusion (RRF): Combines rankings from multiple retrieval algorithms (e.g., embeddings + BM25) to surface the most consistent results.
+FLARE: An iterative strategy where the LLM actively identifies where it needs more information during the generation process and triggers further retrieval as needed.
 3. Query Decomposition (21:33 - 23:00)
 For complex questions containing multiple parts (e.g., comparing 2024 pricing vs. 2023), a single pass is inadequate. Decomposition breaks these into:
 
@@ -290,6 +294,8 @@ HyDE addresses the asymmetry between interrogative questions and declarative doc
 
 Generates a Hypothetical Answer: Uses an LLM to create a plausible (even if potentially imperfect) answer.
 Embeds the Answer: Since the answer is declarative, it exists in the same semantic space as the source documents, leading to more accurate retrieval.
+Rejected for V1
+Why: HyDE is a massive hallucination risk for the legal domain. If a user asks about a highly specific, obscure penalty clause, HyDE asks an LLM to hallucinate a "plausible" answer first, embeds that hallucination, and searches. In law, plausible but fake wording will retrieve the wrong real clauses. Rely on exact hybrid search instead.
 5. Query Transformation Pipeline (24:52 - 26:34)
 Effective systems don't apply these techniques blindly; they use a classification step to determine the best approach:
 
@@ -797,3 +803,352 @@ Most high-performing production systems combine these approaches for efficiency:
 Fine-tuning + RAG: Fine-tune for core domain language/jargon and use RAG for real-time data retrieval.
 Tiered Routing + Caching: Use small, fast models for simple queries (via a router) and larger, expensive models only for complex tasks, while using semantic caching to eliminate redundant processing.
 Example: A technical documentation system might use fine-tuning for code logic, RAG for API updates, and semantic caching for common developer questions, potentially reducing costs by 35% compared to a pure RAG
+
+**pgvector vs. tsvector in PostgreSQL: Detailed Comparison and Relevance to Hybrid RAG Retrieval**
+
+In the context of **Retrieval-Augmented Generation (RAG)** systems — especially the hybrid retrieval setups emphasized in the notes you shared (dense vector search + sparse keyword search + Reciprocal Rank Fusion/RRF) — `pgvector` and `tsvector` serve **complementary but fundamentally different** roles. They are not alternatives to each other; the most powerful production pattern is to use **both together** (dual-write strategy), exactly as the snippet you quoted highlights.
+
+Below is a thorough breakdown covering **differences**, **strengths/weaknesses**, **performance characteristics**, **implementation nuances**, **edge cases**, and **which is more useful (or why both are essential)** for your RAG use case, including legal/enterprise document chunks with exact terms, clauses, codes, proper nouns, and multi-language elements.
+
+### 1. Core Differences: What Each Actually Does
+
+| Aspect                  | **pgvector** (Dense Vector Search)                                                                 | **tsvector** (PostgreSQL Built-in Full-Text Search)                                                                 |
+|-------------------------|----------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
+| **Purpose**            | Semantic / meaning-based similarity search using embeddings (e.g., from text-embedding-3-large, voyage, etc.) | Lexical / keyword-based search using tokenized, stemmed, stop-word-removed text representations. |
+| **Data Type**          | `vector(n)` — fixed or variable-length array of floats (e.g., 1536 dims for OpenAI).              | `tsvector` — specialized type storing lexemes (normalized words) + positions + weights. |
+| **How Search Works**   | Approximate Nearest Neighbor (ANN) via cosine similarity, L2, or inner product. Uses HNSW (or IVFFlat) indexes for logarithmic speed. | Boolean matching (`@@` operator) + ranking via `ts_rank` or `ts_rank_cd`. Uses GIN (inverted) indexes. |
+| **Strength**           | Captures synonyms, paraphrases, intent ("how to terminate a contract" matches "termination procedures" even with different words). Handles fuzzy semantics extremely well. | Excellent at **exact matches**, proper nouns, error codes, clause numbers, acronyms, product IDs, legal terms ("Section 7.2(b)", "Arbitration Act", "Rs. 10 lakhs"). Fast boolean filtering. |
+| **Weakness**           | Can miss or down-rank exact rare terms, codes, or proper nouns (embeddings dilute signal for infrequent tokens). Vocabulary mismatch between query and docs. | Purely lexical — struggles with synonyms, paraphrases, or conceptual similarity. No native understanding of meaning. Ranking (`ts_rank`) is **not true BM25** (lacks global corpus statistics and proper length normalization). |
+| **Ranking Quality**    | Semantic relevance (cosine distance). Good for intent but can return noisy results on exact-term queries. | `ts_rank_cd` (cover density) is decent but limited. True **BM25** (industry standard for relevance) requires extensions like `pg_textsearch`, ParadeDB, or pg_search. |
+| **Indexing**           | HNSW (Hierarchical Navigable Small World) for fast ANN. Memory-resident recommended for ms latency at scale. | GIN index on the `tsvector` column (very efficient for keyword lookup). |
+| **Language Support**   | Depends on the embedding model (many support multilingual; fine-tune for Hindi/regional).          | Built-in dictionaries for many languages (including 'english', 'hindi' via extensions). Stemming/stop-words configurable. |
+| **Storage Overhead**   | High (each embedding is ~6–12 KB depending on dimensions).                                        | Low (tsvector is compact). |
+| **Query Latency**      | Fast with HNSW (sub-10ms for top-K on millions of rows when indexed properly).                    | Very fast for filtering; ranking can slow down on large result sets without optimizations. |
+
+**Key Takeaway on "BM25 / pg_textsearch Dual-Write"**:
+- Native `tsvector` + `ts_rank` is **TF-IDF-like**, not full BM25. It doesn't normalize for document length properly or apply saturation (diminishing returns on term frequency) as effectively as true BM25.
+- Many production RAG implementations still call the `tsvector` path "**BM25**" informally because it delivers the sparse/keyword precision that vectors lack.
+- For stricter BM25 scoring, add extensions (pg_textsearch, ParadeDB pg_search, etc.). These integrate cleanly with pgvector and often deliver better relevance for hybrid setups.
+
+### 2. Why Hybrid (pgvector + tsvector) is the Recommended Pattern in RAG
+The original notes stress: **"relying solely on cosine similarity is insufficient for complex queries"** → Implement **Hybrid Retrieval** combining Vector Store (semantic) + Document Store (keyword/BM25).
+
+**Real-World Gains** (from community benchmarks and implementations):
+- Pure vector: Often ~60–70% precision (misses exact codes, clauses, names).
+- Hybrid + RRF: Jumps to ~80–90%+ precision. The lexical path catches what embeddings dilute; semantic path catches paraphrases.
+- Improvements of 8–30% in retrieval quality are commonly reported before even adding re-ranking (cross-encoder).
+- RRF is preferred because it is **rank-based** (1 / (k + rank)) → no need to normalize incompatible scores (cosine 0–1 vs. ts_rank arbitrary scale). Robust and requires minimal tuning.
+
+**In Your Legal-Domain Context** (scanned PDFs, clauses, annexures, "as per Clause 7.2(b)", stamp duty, jurisdiction, Hindi/English mix):
+- **tsvector shines** for exact clause references, legal terminology, monetary amounts (after normalization), proper nouns, and section numbers.
+- **pgvector shines** for conceptual queries ("what are the obligations if breach occurs?" matching similar but differently worded clauses across documents).
+- Multi-language spillover: Use language-specific dictionaries or multilingual embeddings + careful preprocessing.
+- Vision-extracted tables/charts: Text from VLMs still benefits from both (exact numbers vs. semantic description).
+
+**Edge Cases Where One Dominates**:
+- Exact match heavy (error codes, IDs, legal citations) → tsvector/keyword path critical.
+- Ambiguous/intent-heavy or synonym-rich queries → pgvector dominant.
+- Very long vs. short chunks: tsvector ranking can favor longer docs (mitigated somewhat by `ts_rank_cd`); true BM25 handles this better.
+- Noisy OCR/handwritten text → Both can struggle; preprocessing (entity normalization, cleaning) + fuzzy trigram (`pg_trgm`) as a third leg helps.
+- Scale (> few million chunks): HNSW for vectors + GIN for tsvector both scale well in Postgres if sharded/tuned; pure vector DBs may still win on extreme scale but lose ACID/Joins.
+
+### 3. Implementation: Addressing the "Current Postgres Write Only Populates pgvector" Issue
+The note you quoted is spot-on — you **must** dual-write/populate the `tsvector` column at ingestion time for hybrid queries to work.
+
+**Recommended Schema Migration & Setup** (GENERATED ALWAYS is cleanest for maintenance):
+
+```sql
+-- 1. Enable extensions
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;  -- Optional: for fuzzy fallback
+
+-- 2. Add columns (if not present)
+ALTER TABLE your_chunks_table 
+  ADD COLUMN IF NOT EXISTS embedding vector(1536),  -- or your dim
+  ADD COLUMN IF NOT EXISTS text_search_vector tsvector 
+    GENERATED ALWAYS AS (to_tsvector('english', coalesce(chunk_text, ''))) STORED;
+
+-- For multi-language or weighted fields (title vs body):
+-- GENERATED ALWAYS AS (
+--   setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+--   setweight(to_tsvector('english', coalesce(chunk_text, '')), 'B')
+-- ) STORED
+
+-- 3. Indexes (critical for performance)
+CREATE INDEX IF NOT EXISTS idx_chunks_embedding_hnsw 
+  ON your_chunks_table 
+  USING hnsw (embedding vector_cosine_ops);  -- Tune m/ef_search for recall vs speed
+
+CREATE INDEX IF NOT EXISTS idx_chunks_tsv_gin 
+  ON your_chunks_table 
+  USING gin(text_search_vector);
+
+-- Optional: metadata filters (source, page_no, document_type, jurisdiction) as btree/GIN
+```
+
+**At Write Time (Ingestion)**:
+- Compute embedding (your embedding model).
+- Let Postgres auto-generate `text_search_vector`.
+- For custom weighting or multi-language: Compute manually and store (or use triggers).
+
+**Hybrid Query Example with RRF** (simplified; adapt to your top-K and k parameter):
+
+```sql
+WITH semantic_search AS (
+  SELECT id, chunk_text, 
+         RANK() OVER (ORDER BY embedding <=> $1) AS rank  -- $1 = query embedding
+  FROM your_chunks_table
+  ORDER BY embedding <=> $1
+  LIMIT 50
+),
+keyword_search AS (
+  SELECT id, chunk_text,
+         RANK() OVER (ORDER BY ts_rank_cd(text_search_vector, plainto_tsquery('english', $2)) DESC) AS rank
+  FROM your_chunks_table, plainto_tsquery('english', $2) q
+  WHERE text_search_vector @@ q
+  LIMIT 50
+),
+combined AS (
+  SELECT id, chunk_text, 
+         (1.0 / (50 + COALESCE(semantic.rank, 999))) + 
+         (1.0 / (50 + COALESCE(keyword.rank, 999))) AS rrf_score
+  FROM semantic_search s
+  FULL OUTER JOIN keyword_search k USING (id)
+)
+SELECT id, chunk_text, rrf_score
+FROM combined
+ORDER BY rrf_score DESC
+LIMIT 20;
+```
+
+**Nuances & Best Practices**:
+- Run the two searches **in parallel** (CTE or application-level) so total latency ≈ max(single latencies).
+- Deduplicate by `id` before final ranking.
+- Add metadata filters (e.g., `WHERE document_type = 'contract' AND jurisdiction = 'Delhi'`) early to shrink both candidate sets.
+- For true BM25: Swap in an extension like `pg_textsearch` and use its ranking function.
+- Over-fetch (top 40–100 per path) then RRF → better fusion.
+- Monitor: Use `EXPLAIN ANALYZE` to confirm both indexes are hit. At 10M+ rows, tune HNSW parameters (`M`, `ef_search`) and ensure sufficient memory for indexes.
+- Cost/Latency: Dual indexes add write overhead (minor) and storage, but read performance gains and simpler architecture (single DB) usually outweigh this vs. separate vector + search DB.
+
+### 4. Which is More Useful Here? (For Your RAG Setup)
+**Neither alone is sufficient for production-grade RAG** — especially in legal/enterprise contexts with precise references, mixed languages, and high trust requirements.
+
+- **Use pgvector as the primary semantic backbone** (intent, concepts, multi-hop reasoning support via better context).
+- **Use tsvector (or enhanced BM25) as the precision booster** for exactness, recall on specific terms, and to compensate for embedding weaknesses.
+- **Hybrid + RRF + (optional cross-encoder re-ranking)** is the sweet spot → aligns perfectly with the notes' recommendations on hybrid systems, fusion ranking, and overcoming limitations of pure cosine similarity.
+
+**When to Prioritize One**:
+- Early prototyping or purely conceptual queries → Start with pgvector only (simpler).
+- Production with exact-match sensitivity (your legal docs, clauses, amounts, jurisdictions) → **Hybrid is mandatory**.
+- Very high scale or extreme latency needs → Consider specialized extensions or sharding, but Postgres + pgvector + tsvector handles millions of chunks very well for most teams.
+
+**Additional Enhancements for Robustness** (from the broader notes):
+- Hierarchical chunking + metadata (source, page_no, chunk_keywords, document_summary) → filter before vector/keyword search.
+- Query transformation (rewriting, decomposition, HyDE) → feed better inputs to both paths.
+- Post-retrieval re-ranking and faithfulness checks.
+- For legal specifics: Preprocess with entity normalization, temporal/conditional extraction, and VLM for tables before creating chunks/embeddings/tsvector.
+
+**Bottom Line**: The "dual-write" migration you mentioned is **essential** — without the `tsvector` column and GIN index, your hybrid RRF query simply cannot run. Implementing it gives you the best of both worlds with minimal added complexity, directly addressing the "naive similarity search fails on true intent or exact terms" problem highlighted throughout the material.
+
+This setup keeps everything in one reliable Postgres instance (ACID, joins, backups, multi-tenancy via Row Level Security), which is a huge operational win for most RAG deployments. Test empirically on your query distribution and golden dataset — measure Context Precision/Recall and end-to-end faithfulness before/after adding the keyword path. You will almost certainly see meaningful gains. 
+
+**For long-term production use with Gemini Embedding 2 + pgvector + pgvectorscale, the recommended dimension size is 768.**
+
+### Why Gemini Embedding 2 and Its Dimension Flexibility Matter
+Gemini Embedding 2 (the model you’re using — `gemini-embedding-2-preview` or equivalent) is Google’s latest multimodal embedding model.  
+- Default output → **3072 dimensions**.  
+- It natively supports **Matryoshka Representation Learning (MRL)**. This means the model is *trained* so that the most important semantic information is packed into the earliest dimensions.  
+- You can request **any size from 128 to 3072** at inference time via the `output_dimensionality` parameter.  
+- Google’s own official recommendation (and what they ship in all their example notebooks) is: **768, 1536, or 3072**.
+
+Truncating with MRL is *not* the same as naively slicing a normal embedding — quality drop is minimal. Many production teams report that **768 dimensions from Gemini Embedding 2 performs at or above the level of older 1536-dimension models** (e.g., OpenAI text-embedding-ada-002 or text-embedding-3-small).
+
+### Production Recommendation: 768 Dimensions (Start Here)
+
+**This is the consensus sweet spot among teams running large-scale RAG in production with pgvector + pgvectorscale.**
+
+| Dimension | Storage per vector (float32) | Relative storage vs 3072 | Query/index speed | Accuracy (relative to full 3072) | Best for (production reality) |
+|-----------|------------------------------|---------------------------|-------------------|----------------------------------|-------------------------------|
+| **768**   | ~6 KB                       | ~25%                     | Fastest           | Near-peak (excellent for most RAG) | **Long-term default** — most teams stay here |
+| 1536      | ~12 KB                      | ~50%                     | Good              | Slightly higher in very nuanced cases | Only if benchmarks show clear win |
+| 3072      | ~24 KB                      | 100%                     | Slowest           | Maximum                           | Rarely used at scale; only for tiny corpora or ultra-critical accuracy |
+
+**Key reasons 768 wins for long-term use + accuracy**:
+- **Accuracy is preserved extremely well** thanks to MRL. The first 768 dimensions already capture the vast majority of the signal. On your legal-domain data (clauses, jurisdiction, temporal logic, cross-references, scanned PDFs), 768 gives you high Context Precision/Recall and Faithfulness with almost no measurable regression vs. full size.
+- **pgvectorscale loves it**. DiskANN (the streaming/disk-based index in pgvectorscale) and HNSW both scale dramatically better with smaller vectors. You get lower p95 latency, faster index builds, lower memory pressure, and cheaper hardware scaling. Teams report 2–4× faster queries and much cheaper storage/index size at 768 vs 1536/3072.
+- **Long-term operational sanity**: Your corpus will grow (versioned contracts, annexures, amendments, multi-language docs). Smaller vectors = dramatically lower storage costs, faster re-embedding when models improve, easier sharding, and lower overall TCO. Many production RAG systems (legal, enterprise knowledge bases) deliberately choose 768–1024 even with models that support higher.
+- **Real-world production feedback** (from teams running exactly this stack):  
+  - Google’s own guides and Colab examples for Gemini Embedding 2 explicitly say “start with 768”.  
+  - pgvector + pgvectorscale users consistently land on 768 as the balance point — it matches or beats older 1536 models while cutting storage/index overhead by ~75%.  
+  - Higher dimensions (1536+) only deliver measurable gains on very specific, highly nuanced domains *after* you have already benchmarked on your golden dataset. Most teams never need to go beyond 768.
+
+### When You Might Consider 1536 (or Rarely 3072)
+Only bump up if, **after testing on your own data**, you see a clear, repeatable improvement in:
+- Context Recall@10 / MRR on your legal query set.
+- Faithfulness score (LLM-as-Judge on atomic claims).
+- Handling of very subtle multi-hop or cross-document reasoning (e.g., “as per Clause 7.2(b) in conjunction with Schedule A”).
+
+Even then, **1536 is usually sufficient** — 3072 is almost never worth it at production scale unless your corpus is <100k chunks and accuracy is life-or-death.
+
+### How to Implement It (Code + SQL)
+
+**1. When calling the Gemini API (Python example)**
+```python
+from google import genai
+
+client = genai.Client()
+response = client.models.embed_content(
+    model="gemini-embedding-2-preview",
+    contents=[your_text_or_pdf_or_image],
+    config={
+        "task_type": "RETRIEVAL_DOCUMENT",   # or RETRIEVAL_QUERY for queries
+        "output_dimensionality": 768          # ← THIS IS THE KEY
+    }
+)
+embedding = response.embedding  # now 768 dims
+```
+
+**2. Postgres schema (pgvector + pgvectorscale)**
+```sql
+-- Column definition
+ALTER TABLE chunks 
+  ADD COLUMN IF NOT EXISTS embedding vector(768);   -- ← match exactly
+
+-- Recommended index with pgvectorscale (DiskANN) or classic HNSW
+CREATE INDEX IF NOT EXISTS idx_chunks_embedding 
+  ON chunks 
+  USING vectorscale_diskann (embedding vector_cosine_ops);   -- or hnsw
+
+-- Or classic pgvector HNSW (still excellent at 768)
+-- CREATE INDEX ... USING hnsw (embedding vector_cosine_ops);
+```
+
+**3. Best practice**  
+- Always **normalize** the vector after truncation (especially for cosine similarity) — many teams do `embedding = embedding / np.linalg.norm(embedding)` in code.  
+- Store the dimension used in metadata so you can re-embed consistently later.  
+- Keep your hybrid setup (pgvector + tsvector/BM25) — the 768 vector gives excellent semantic signal, while tsvector handles exact clause numbers, legal terms, etc.
+
+### Final Advice for Your Setup
+**Use 768 dimensions from day one.**  
+It is the production-proven choice for long-term maintainability, cost efficiency, and accuracy when paired with Gemini Embedding 2, pgvector, and pgvectorscale. You will get near-maximum retrieval quality while keeping your system fast, cheap to scale, and easy to operate as your legal document corpus grows.
+
+Test it on your golden dataset (the same (Question, Answer, Relevant Chunk IDs) triplets you should already have). If 768 meets your precision/recall/faithfulness targets (which it almost certainly will), **never go higher** — you will thank yourself six months from now when you’re at 5–10 million chunks.
+
+If you share your current table schema or a couple of sample queries + expected chunks, I can give you the exact SQL and Python snippets tailored to your hybrid RAG pipeline.
+
+## Contract KB Implementation Correctness Checklist
+
+Use this checklist instead of a unit-test plan for the current implementation pass.
+
+1. **Layout-Aware Parsing Node**
+   - `parse_document` is the first ingestion node.
+   - Uses Docling.
+   - Outputs structured markdown.
+   - Tables preserve row/cell structure and are not flattened into unreadable strings.
+
+2. **Parent-Child Chunk Architecture**
+   - One parent document row exists per uploaded file.
+   - Multiple child `clauses` rows exist per parent.
+   - `clauses.parent_doc_id` is a UUID FK.
+   - `clauses.chunk_index` is populated.
+   - Retrieval fetches child chunks and can return parent/surrounding context.
+
+3. **Contextual Preamble Injection**
+   - A separate `contextualize_chunks` node exists.
+   - Uses LangGraph `Send` fan-out.
+   - Each child chunk receives a preamble like: `"This is [clause_type] from [contract_name] between [party_a] and [party_b], effective [date]."`
+   - Uses `.with_structured_output(ContextualizedChunk)`.
+   - `ContextualizedChunk` includes `preamble`, `text`, and `tokens`.
+
+4. **langextract Structured Extraction Pass**
+   - A dedicated `extract_schema` node runs on full document text, not chunks.
+   - Extracts `effective_date`, `parties`, `contract_value`, `jurisdiction`, `governing_law`, `termination_notice_days`, and `liability_cap`.
+   - Uses `.with_structured_output(ContractMetadata)` against Gemini.
+   - Output populates `metadata_ JSONB`.
+
+5. **BM25 / pg_textsearch Dual-Write**
+   - `pg_textsearch` is used exclusively.
+   - No `tsvector` column exists for this pipeline.
+   - No GIN full-text index exists for this pipeline.
+   - `clauses_bm25_idx` exists on `search_text`.
+   - `search_text` includes clause type, preamble, and chunk text.
+   - Retrieval uses `<@> to_bm25query(:query_text, 'clauses_bm25_idx')`.
+
+6. **JSONB Metadata Column for Pre-Filtering**
+   - `clauses.metadata_` exists as JSONB.
+   - Populated with jurisdiction, contract type, year, party names, and required retrieval metadata.
+   - Retrieval can hard-filter with expressions like `metadata_->>'jurisdiction' = 'Delaware'`.
+
+7. **Immediate 3-Attempt Retry Handling**
+   - External I/O in ingestion/retrieval nodes has retry handling.
+   - Gemini, Postgres writes, Neo4j writes, Graphiti upserts, Redis calls, and embedding calls are covered where retry is safe.
+   - Retry policy is exactly 3 immediate attempts with no exponential wait.
+   - Transient errors are separated from validation/permanent errors.
+
+8. **MessagesState Standardization**
+   - Retrieval graph state inherits from `MessagesState`.
+   - Retriever and generator pass `HumanMessage` / `AIMessage` objects through state.
+   - Ingestion can remain specialized typed state.
+   - Handoff boundary from ingestion to retrieval is typed and message-compatible.
+
+9. **Structured Output Throughout**
+   - No raw JSON parsing for structured LLM outputs.
+   - Entity extraction uses `EntityExtractionResult`.
+   - Clause classification uses `ClauseClassification`.
+   - Preamble generation uses `ContextualizedChunk`.
+   - Schema extraction uses `ContractMetadata`.
+
+10. **Query Analyzer & Router Node**
+    - Retrieval graph starts with Query Analyzer.
+    - Performs coreference rewrite.
+    - Decomposes multi-part questions.
+    - Routes to `hybrid_postgres`, `graph_neo4j`, or `both`.
+    - Emits runtime RRF weights.
+    - Uses `.with_structured_output(QueryPlan)`.
+
+11. **In-Database RRF via CTE**
+    - RRF is computed inside Postgres.
+    - Vector and `pg_textsearch` ranks are CTE/subquery branches.
+    - BM25 ordering accounts for negative scores.
+    - Outer query fuses with weighted `1/(60 + rank)` terms.
+    - Python receives only top-K fused rows.
+
+12. **Cross-Encoder Reranker Node**
+    - Retrieval candidates top 20 are reranked.
+    - Default model is `BAAI/bge-reranker-v2-m3` or configured fallback.
+    - Output is cut to top 5.
+    - Node is documented as a Celery task candidate for V2.
+
+13. **Context Grader Node**
+    - Uses `.with_structured_output(ContextGrade)`.
+    - Includes `sufficient`, `missing_aspects`, and `rewrite_suggestion`.
+    - If insufficient, loops back to Query Analyzer.
+    - Loop is capped at 2 iterations.
+    - After cap, returns hardcoded fallback instead of improvising.
+
+14. **Grounded Generator Node**
+    - Final generator requires citation for every factual claim.
+    - Citations include exact `chunk_id` and `clause_type`.
+    - Output schema is `GeneratedAnswer`.
+    - If confidence is `uncertain`, fallback disclaimer is appended.
+
+15. **Redis Exact-Match Query Cache**
+    - Query Analyzer checks cache before retrieval work.
+    - Key is `sha256(rewritten_query + doc_ids_filter)`.
+    - Cache hit returns `GeneratedAnswer` directly.
+    - TTL is 1 hour normally, 24 hours for immutable historical documents.
+
+16. **Embedding Cache**
+    - Embedding API calls are wrapped in Redis cache.
+    - Key is `sha256(text_to_embed)`.
+    - Repeated boilerplate clauses reuse cached embeddings.
+
+17. **Additional Graphiti Node/Edge Types**
+    - Adds nodes: `Party`, `Obligation`, `RightOrPermission`, `PenaltyClause`.
+    - Adds edges: `SIGNED_BY`, `SUBSIDIARY_OF`, `OBLIGATED_TO`, `GOVERNED_BY`, `SUPERSEDES`, `REFERENCES_CLAUSE`.
+    - `REFERENCES_CLAUSE` carries `postgres_chunk_id`.
+    - Graph traversal can return Postgres IDs as hard retrieval filters.
+
+18. **Graphiti Episode Upsert for Contract Events**
+    - Ingestion writes event episodes for `contract_signed`, `amendment_effective`, and `expiry_date`.
+    - Temporal queries can use Graphiti's time-aware graph search instead of scanning Postgres.

@@ -23,8 +23,10 @@ class IngestionService:
 
     async def ingest_document(
         self,
-        raw_text: str,
+        raw_bytes: bytes,
         user_id: str,
+        filename: str,
+        source: str,
         document_type: str = "unknown",
         jurisdiction: str = "India",
         doc_id: str | None = None,
@@ -43,7 +45,9 @@ class IngestionService:
             "doc_id": resolved_doc_id,
             "user_id": user_id,
             "thread_id": thread_id,
-            "raw_text": raw_text,
+            "raw_bytes": raw_bytes,
+            "filename": filename,
+            "source": source,
             "document_type": document_type,
             "jurisdiction": jurisdiction,
         }

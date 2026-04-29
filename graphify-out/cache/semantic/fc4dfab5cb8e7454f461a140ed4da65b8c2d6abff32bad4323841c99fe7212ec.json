@@ -1,0 +1,49 @@
+{
+  "nodes": [
+    {
+      "id": "evals_llm_as_judge",
+      "label": "LLM-as-a-Judge Evaluators",
+      "file_type": "document",
+      "source_file": "docs/Evals.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "evals_gepa_optimization",
+      "label": "GEPA Prompt Optimization",
+      "file_type": "document",
+      "source_file": "docs/Evals.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "evals_llm_as_judge",
+      "target": "evals_gepa_optimization",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/Evals.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "evals_llm_as_judge",
+      "target": "ai_agent_engineering_verification_hierarchy",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.72,
+      "source_file": "docs/Evals.md",
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": []
+}

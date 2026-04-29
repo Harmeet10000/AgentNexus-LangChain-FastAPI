@@ -28,10 +28,26 @@ from app.utils import logger
 from .schemas import FinalReportEpisodeMetadata
 
 if TYPE_CHECKING:
-    from app.shared.agents.memory.cognee_client import CogneeService
-    from app.shared.langgraph_layer.agent_saul.graph.state import FinalReport, LegalRelationship
+    from app.shared.langgraph_layer.agent_saul.state import FinalReport, LegalRelationship
 
-    from .client import GraphitiService
+    # Placeholder types — these services are external integrations
+    class GraphitiService:
+        """Graphiti write operations."""
+
+        async def write_final_report_episode(
+            self, report_summary: str, metadata: FinalReportEpisodeMetadata
+        ) -> str: ...
+
+    class CogneeService:
+        """Cognee episodic/procedural memory storage."""
+
+        async def store_final_report(
+            self, report_json: str, user_id: str, doc_id: str, thread_id: str
+        ) -> None: ...
+
+        async def store_relationships(
+            self, relationships_text: str, user_id: str, doc_id: str
+        ) -> None: ...
 
 
 class MemoryPersistResult(BaseModel):
@@ -124,8 +140,7 @@ async def write_final_report_to_memory(
             relationships_text = (
                 f"Document: {report.document_id}\n"
                 f"User: {user_id}\n"
-                f"Relationships:\n"
-                + "\n".join(rel_lines)
+                f"Relationships:\n" + "\n".join(rel_lines)
             )
             await cognee_service.store_relationships(
                 relationships_text=relationships_text,

@@ -211,7 +211,7 @@ async def get_context(
     Returns:
         Plain-text context combining search answer and top results
     """
-    response = await search(
+    response: SearchResponse = await search(
         query=query,
         max_results=max_results,
         include_answer=True,
@@ -230,10 +230,4 @@ async def get_context(
     return "\n\n".join(context_parts)
 
 
-async def get_tavily_client() -> None:
-    """Deprecated: Use search() or get_context() functions directly with DI.
 
-    This function is kept for backward compatibility but should not be used.
-    """
-    msg = "get_tavily_client() is deprecated. Use search() or get_context() functions directly."
-    logger.warning(msg)

@@ -148,6 +148,8 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 172. learn about langGrpah.prebuilt, create_react_agent from langraph.prebuilt   DONE
 138. add neo4j driver, DB session from request.app.state in Graphiti, Cognee, AsyncPostgresCheckpointer, vector_store and other places where required in tools and do the same for DB, redis            DONE
 108. use the new gemini embedding 2 for multi-modal embeddings, LLMToolSelectMiddleware        DONE
+165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384    DONE 
+62. can i use openRouter keys for my Gemini model    DONE             
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses     DELAYED    
@@ -172,7 +174,6 @@ def compose(*functions: Composable) -> Composable:
 116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
 61. see docassemble, fpdf2, python-docx and other libraries for generating final PDFs/docs
 53. add voice support by using gemini 3 for TTS and STT  with websockets
-62. can i use openRouter keys for my Gemini model               
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
 59. No skill composition. Skills are flat callables. Theres no way to chain skills (skill A output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
@@ -189,24 +190,23 @@ def compose(*functions: Composable) -> Composable:
     
 155. complete the ingestion pipeline to working condition and see where reconciliation comes init
 todos:-
-    1. toons reusable chain, point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
-    a. docling
-    b. langextract
-    c. graphiti
+    1. toons reusable , point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
+    a. docling - Legal docs need hierarchical chunking, convert dataclass to pydantic models, use embedders(batch, chunks, etc) to reusable function in langchain_layer, remove Grapgiti initilisation from here
+    b. langextract point 136
+    c. graphiti refactor
     d. postgres RAG should be agentic
     e. celery for off loading to a queue
     f. insert the langgraph in app.state in lifespan
     g. pass default and metadata for particular config in pydantic models for agents
     h. research for RAG pipeline with Gemini
     i. use MessagesState to standardise the moving of data between Agent A and Agent 
-    j. use tenacity for retries 
+    j. use tenacity for retries, new capabilities, output format from chatpromptparts, check newer things F-S-A-T-O-F as capabilites, output format can be outside System Prompt
 133. use pydantic for data configuration, tool arguments, or schema validation in langraph and check if converting all typedDict to pydantic is useful or docs do not recommends it (only for custom state schema)
 57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
 136. use LangExtract outputs to build rich graph knowledge from your legal documents.
 162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
 163. refactor vectorStore code
 164. refactor RAG code
-165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384
 166. use Call a toolNode and check id toolNode should be used or subgraph inside a node for Open Deep Research
 167. how systemPromptPaarts, chatPromptTemplate, systemmessage, humanMessage, AImessage,ToolMessage look like while passing it in graph and how should i serialise these with toons before sending to LLM
 168. do migration of open_deep_research  and pass it to agent_saul as a ToolNode
@@ -218,23 +218,41 @@ todos:-
 169. EARS-compliant acceptance criteria, research about what Kiro does for SDD, which standards does it use
 170. write cron job for memory decay and then send to celery for off loading
 171. use CacheBackedEmbeddings fore reusing embeddings
-173. use prebuilt and custom middlewares in langchain 
-174. rewrite the tools for the new grpahiti, cognee etc
-175. add proper cognee functions, graphiti from docs
+172. use prebuilt and custom middlewares in langchain 
+173. rewrite the tools for the new grpahiti, cognee etc
+174. add proper cognee functions, graphiti from docs
+175. what are state machine  in design patterns
+176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
+177. 
+ PydanticDeprecatedSince20: `json_encoders` is deprecated. See https://docs.pydantic.dev/2.12/concepts/serialization/custom-serializers for alternatives. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/deep_researcher.py:701: LangGraphDeprecatedSinceV10: `config_schema` is deprecated and will be removed. Please use `context_schema` instead. Deprecated in LangGraph V1.0 to be removed in V2.0.
+  deep_researcher_builder = StateGraph(
+/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/deep_researcher.py:701: LangGraphDeprecatedSinceV05: `input` is deprecated and will be removed. Please use `input_schema` instead. Deprecated in LangGraph V0.5 to be removed in V2.0.
+  deep_researcher_builder = StateGraph(
+/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/deep_researcher.py:589: LangGraphDeprecatedSinceV05: `output` is deprecated and will be removed. Please use `output_schema` instead. Deprecated in LangGraph V0.5 to be removed in V2.0.
+  researcher_builder = StateGraph(
+
+/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/configuration.py:214: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'optional', 'metadata'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+  mcp_config: MCPConfig | None = Field(
+    
+178. From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on wont be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation. [cognee.shared.logging_utils]
+
+add highly effevtive in copilot instruction
 ```
 
 --- summarise these chapters in great detail and take video's transcript as reference for summarising
 
-## 9.2 Correct Pattern
+8/10 security person who knows 10/10 shit about browsers is more danerous than a 10/10 security person who knows 6/10 about browsers
+Previously, high-level hacking required deep historical knowledge and expertise. Now, because models can be forced into loops of iterative testing, individuals can effectively "bang their head against the wall" until they find vulnerabilities. They note that even benign inquiries can lead to dangerous outcomes if the model provides deep insights into obscure sub-dependencies.
 
-```python
-research_agent = create_agent(...)
+I am about to start this project. Interview me until you have 95% confidence in what I actually want, not what I think I should want.
+how to approach finding one a solution , how to think about these things, can you give me one small hint to steer me in right directions
+ When I see something cool,
+I am more likely to go to the GitHub profile to find the creator of the thing than to read the code of the thing. I spend much more time on profiles on
+ than repos on GitHub because it's so interesting to dig into who made the thing, why did they make the thing? What
+ them to making this thing? What experiences did they have that made them want this thing to exist? How did they come to making this thing? How did they
+c hoose to build this thing? How has it benefited them? Are they still working on it? Why are they working on it? And what do they have in common with you?
 
-def node(state):
-    return research_agent.invoke(state)
-```
-
-1. what are state machine  in design patterns
 
 <!-- memory usage of FastAPI app -->
 "memoryUsage": {
@@ -243,8 +261,11 @@ def node(state):
       },
 
 # Upgrades
-
-2.(after writing code) When using AsyncPostgresSaver (or any checkpointer) for persistence, LangGraph serializes and saves the entire state blob at the end of every single node execution (super-step). If your messages array contains large document extractions or base64 PDFs, your state blob will rapidly swell to megabytes. Multiplied by 1000s of concurrent sessions, your PostgreSQL database will choke on I/O operations, and your latency will spike from 500ms to 5 seconds per step just writing to the DB.
+1. DSPy shifts you from writing prompts to compiling them. Instead of manually guessing the best words for your LAWYER_SYSTEM_PROMPT, you define the input/output signature, give DSPy a few examples of good and bad answers, and it algorithmically finds the optimal prompt.
+2. add celery for offloading ingestion to a queue.
+3. make ingestion pipeline inspired from uber
+4. add pageindex for vectorless RAG, markitdown
+5. (after writing code) When using AsyncPostgresSaver (or any checkpointer) for persistence, LangGraph serializes and saves the entire state blob at the end of every single node execution (super-step). If your messages array contains large document extractions or base64 PDFs, your state blob will rapidly swell to megabytes. Multiplied by 1000s of concurrent sessions, your PostgreSQL database will choke on I/O operations, and your latency will spike from 500ms to 5 seconds per step just writing to the DB.
 
     The Insider Solution: The "Pointer State" Pattern.
     Do not store document content in state["messages"].
@@ -257,7 +278,7 @@ def node(state):
 
     The checkpointer only ever saves the UUIDs. Your LangGraph state remains less than 5KB, your database I/O drops by 99%, and your system can smoothly scale to 10,000+ concurrent state transitions without breaking a sweat. Furthermore, use LangGraph's Store API for the actual long-running task idempotency, keeping the graph State purely for the immediate transition logic.
 
-4. (after writing code)"Lost in the Middle" phenomenon—they pay attention to the beginning and end of a prompt but ignore the center.
+6. (after writing code)"Lost in the Middle" phenomenon—they pay attention to the beginning and end of a prompt but ignore the center.
 
     The Improvement: Enforce a strict architectural standard for your final compiled prompt string.
 
@@ -269,7 +290,7 @@ def node(state):
 
     Bottom (Critical): The system prompt, the negative incentives ("you will be sued"), and the strict JSON output schema. The LLM must read the formatting instructions last before generating tokens.
 
-5. If you are building long-running, resumable LangGraph workflows (HITL), there is a silent system-killer that will destroy your production environment: State Schema Migrations.
+7. If you are building long-running, resumable LangGraph workflows (HITL), there is a silent system-killer that will destroy your production environment: State Schema Migrations.
 
     You deploy V1 of your agent. A user initiates a complex contract review. The EvaluatorAgent flags a risk and pauses execution (interrupt()), waiting for human approval. The state is serialized in your Postgres checkpointer.
 
@@ -620,6 +641,25 @@ Do not make real API calls in unit tests (0:18): Hardcoding HTTP requests makes 
 Do not use unit tests to write sloppy code (2:37): Tests are not an excuse to skip proper software design; good design leads to code that is naturally easier to test.
 Do not mix production and test code (20:33): Keep your tests in a separate directory (e.g., a tests/ folder) away from the source code (20:45).
 Do not have multiple assertions per test (20:02): The host recommends focusing each test on a single, specific outcome, usually resulting in a single assert statement per test.
+
+This video provides a deep dive into designing a distributed cache capable of handling over a billion requests. It moves beyond basic theory to explain the architectural challenges of building a reliable, clustered caching fleet.
+
+Core Architectural Concepts
+The Routing Trap (2:03-3:06): Modular hashing (hashing a key modulo the number of servers) is a common failure point. When the cluster size changes, almost all keys map to new servers, causing a "thundering herd" of cache misses that can crash the database.
+Consistent Hashing & Virtual Nodes (3:06-5:43): By mapping keys and servers onto a circular hash ring, consistent hashing ensures that only a small portion of data is affected when nodes are added or removed. Virtual nodes are then used to smooth out statistical variance, ensuring load is distributed evenly across heterogeneous hardware.
+Freshness vs. Capacity (5:43-6:51): A critical distinction is made between TTL (Time-To-Live, which handles data freshness/staleness) and eviction policies (which handle capacity constraints when memory is full).
+Approximate LRU (6:51-8:23): Implementing strict Least Recently Used (LRU) algorithms in a distributed system is impractical due to locking overhead. Instead, production systems often use approximate LRU, where nodes randomly sample a small set of keys to decide which to evict, achieving near-optimal performance with minimal CPU cost.
+Handling Scale and Hot Keys
+The Hot Key Problem (8:23-9:57): Even with perfect distribution, a single "hot key" (e.g., a celebrity's profile picture) can overwhelm a single node's CPU. The solution is replication, where the key is suffixed with a random integer (e.g., key_1 through key_10), spreading the request volume across multiple nodes.
+Coherence and Invalidation (10:35-12:16): Replicating data introduces coherence issues. Rather than attempting complex distributed consensus, systems should use CDC-driven (Change Data Capture) invalidation. A background process reads database logs and sends invalidation events to the cache fleet via a message broker (e.g., Kafka).
+Cache Warming (12:16-13:46): Cold starts can act as a self-inflicted DDoS attack. It is essential to "warm" a cache—populating it with high-velocity data before directing live traffic to it—to prevent a miss-storm.
+Routing and Observability
+Smart Clients vs. Proxies (13:46-15:34): The video debates whether applications should handle routing directly (smart client) or use a dedicated routing layer (proxy like Envoy or Twemproxy). While smart clients save a network hop, proxies simplify management and topology synchronization at scale.
+Observability (15:34-16:53): Average metrics like a 95% hit rate can hide catastrophic localized failures. Engineers must monitor per-node CPU, network saturation, and the actual database load caused by cache misses to ensure system health.
+Memcached vs. Redis (16:53-18:08): Technology selection should come last. Memcached is favored for simple, multi-threaded, high-throughput object caching, while Redis provides a rich set of data structures and features useful for complex mutations and logic.
+
+
+
 
 ```markdown
 

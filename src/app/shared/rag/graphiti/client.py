@@ -19,8 +19,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from graphiti_core import Graphiti
+from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
+from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
+from graphiti_core.llm_client.gemini_client import GeminiClient, LLMConfig
 from graphiti_core.nodes import EpisodeType
 
+from app.config import get_settings
 from app.utils import logger
 
 from .schemas import GraphitiSearchResult
@@ -39,7 +43,7 @@ _W_SEMANTIC: float = 0.50
 _W_RECENCY: float = 0.20
 _W_TRUST: float = 0.20
 _W_TASK_RELEVANCE: float = 0.10
-
+settings = get_settings()
 
 # ---------------------------------------------------------------------------
 # Factory: Setup Graphiti with Neo4j
@@ -63,6 +67,7 @@ async def setup_graphiti(
         neo4j_uri: Neo4j connection URI.
         neo4j_user: Neo4j username.
         neo4j_password: Neo4j password.
+        api_key: Google Gemini API key for LLM/embedding operations.
 
     Returns:
         Initialized Graphiti instance.
@@ -80,9 +85,17 @@ async def setup_graphiti(
             # Alternative: Pass a pre-configured driver (recommended for custom database name, auth, etc.)
             graph_driver=None,  # Optional[Neo4jDriver | other driver]
             # LLM Configuration (critical for entity extraction, summarization, etc.)
-            llm_client=None,  # Optional[LLMClient] — defaults to OpenAIClient
-            # Embedder Configuration (for semantic search, hybrid retrieval)
-            embedder=None,  # Optional[Embedder] — defaults to OpenAIEmbedder
+            llm_client=GeminiClient(
+                config=LLMConfig(api_key=settings.GEMINI_API_KEY, model=settings.GEMINI_FLASH_MODEL)
+            ),
+            embedder=GeminiEmbedder(
+                config=GeminiEmbedderConfig(
+                    api_key=settings.GEMINI_API_KEY, embedding_model=settings.GEMINI_EMBEDDING_MODEL
+                )
+            ),
+            cross_encoder=GeminiRerankerClient(
+                config=LLMConfig(api_key=settings.GEMINI_API_KEY, model=settings.GEMINI_FLASH_MODEL)
+            ),
             # Other important options
             # group_id=None,  # Optional[str] — useful for multi-tenant / team isolation
             # database=None,  # Optional[str] — custom Neo4j database name (default: "neo4j")

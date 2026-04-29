@@ -24,19 +24,23 @@ from app.connections import (
     init_neo4j,
 )
 from app.features.auth import TokenAuditLog, User, build_websocket_security_service
+from app.features.search.embeddings import build_embedding_client
 from app.middleware import initialize_fastapi_guard
-from app.shared import get_mcp_client_manager
+
+# from app.shared import get_mcp_client_manager
 from app.shared.langchain_layer.agents.memory import setup_cognee
 from app.shared.langgraph_layer.checkpointer import (
     setup_langgraph_checkpointer,
     teardown_langgraph_checkpointer,
 )
+from app.shared.langgraph_layer.ingestion_kb import build_ingestion_graph
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.utils import ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
+    from graphiti_core import Graphiti
     from app.features.auth.websocket_security import WebSocketSecurityService
-    from app.shared.mcp import MCPClientManager
+    # from app.shared.mcp import MCPClientManager
 
 
 async def setup_redis(url: str) -> redis.asyncio.Redis:
@@ -129,8 +133,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
         neo4j_password=settings.NEO4J_PASSWORD,
     )
     await setup_graphiti_indices(graphiti)
-    app.state.graphiti = graphiti
+    app.state.graphiti: Graphiti = graphiti
     logger.info("Graphiti initialized")
+
+    # ingestion_llm = ChatGoogleGenerativeAI(
+    #     model=settings.GEMINI_FLASH_MODEL,
+    #     api_key=settings.GEMINI_API_KEY,
+    #     temperature=0.1,
+    #     retries=0,
+    # )
+    # app.state.ingestion_graph = build_ingestion_graph(
+    #     extraction_llm=ingestion_llm,
+    #     db_engine=app.state.db_engine,
+    #     embedding_fn=build_embedding_client(),
+    #     graphiti_service=graphiti,
+    #     redis=app.state.redis,
+    # )
+    # logger.info("Contract KB ingestion graph initialized")
     # app.state.pageindex_client = PageIndexClient()
     # Initialize HTTPX client (HTTP/2 + connection pooling)
     app.state.httpx_client = get_shared_httpx_client()
@@ -155,17 +174,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
     await initialize_fastapi_guard(app=app, settings=settings)
 
     # LangGraph checkpointer setup (uses existing PostgreSQL connection)
-    try:
-        saul_checkpointer = await setup_langgraph_checkpointer(
-            conn_string=settings.POSTGRES_URL,
-        )
-        app.state.langgraph_checkpointer = saul_checkpointer
-        logger.info("LangGraph checkpointer initialized")
-    except (ConnectionError, TimeoutError, OSError) as e:
-        logger.error(
-            "LangGraph checkpointer setup failed, continuing without persistence", error=str(e)
-        )
-        app.state.langgraph_checkpointer = None
+    # try:
+    #     saul_checkpointer = await setup_langgraph_checkpointer(
+    #         conn_string=settings.POSTGRES_URL,
+    #     )
+    #     app.state.langgraph_checkpointer = saul_checkpointer
+    #     logger.info("LangGraph checkpointer initialized")
+    # except (ConnectionError, TimeoutError, OSError) as e:
+    #     logger.error(
+    #         "LangGraph checkpointer setup failed, continuing without persistence", error=str(e)
+    #     )
+    #     app.state.langgraph_checkpointer = None
 
     logger.info("Application ready", status="running")
 
@@ -200,8 +219,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
             tg.create_task(coro=app.state.db_engine.dispose())
         if hasattr(app.state, "neo4j_driver"):
             tg.create_task(coro=close_neo4j_driver(driver=app.state.neo4j_driver))
-        mcp_manager: MCPClientManager = get_mcp_client_manager()
-        if mcp_manager is not None:
-            tg.create_task(coro=mcp_manager.close())
+        # mcp_manager: MCPClientManager = get_mcp_client_manager()
+        # if mcp_manager is not None:
+            # tg.create_task(coro=mcp_manager.close())
 
     logger.info("Application shutdown complete", status="stopped")

@@ -32,14 +32,13 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from app.shared.agents.tools.idempotency import IdempotencyGuard, ToolResult
+from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard, ToolResult
 from app.utils import logger
 
 from .schemas import ClauseEpisodeMetadata, LegalEdgeInput
 
 if TYPE_CHECKING:
-    from app.shared.langgraph_layer.agent_saul.graph.state import ClauseSegment, LegalRelationship
-    from app.shared.rag.graphiti.client import GraphitiService
+    from app.shared.langgraph_layer.agent_saul.state import ClauseSegment, LegalRelationship
 
 _MAX_CONCURRENT_WRITES: int = 5
 
@@ -244,7 +243,6 @@ async def _write_single_relationship_edge(
             confidence=relationship.citation.confidence,
         )
         uuid = await graphiti_service.write_relationship_edge(edge_input)
-
 
         await idempotency.set(
             key=idem_key,

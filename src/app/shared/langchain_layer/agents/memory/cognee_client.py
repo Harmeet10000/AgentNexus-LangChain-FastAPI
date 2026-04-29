@@ -67,7 +67,7 @@ async def setup_cognee(settings: Settings) -> dict:
             config_dict={
                 "llm_provider": "google_genai",
                 "llm_model": settings.GEMINI_FLASH_MODEL,
-                "llm_api_key": settings.GOOGLE_API_KEY,
+                "llm_api_key": settings.GEMINI_API_KEY,
             }
         )
         cognee.config.set_graph_db_config(

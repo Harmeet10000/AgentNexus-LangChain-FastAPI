@@ -1,0 +1,175 @@
+{
+  "nodes": [
+    {
+      "id": "celery_celery_app",
+      "label": "Celery Application",
+      "file_type": "document",
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "celery_rabbitmq_queue_topology",
+      "label": "RabbitMQ Queue Topology",
+      "file_type": "document",
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "celery_dlq_handling",
+      "label": "Dead Letter Queue Handling",
+      "file_type": "document",
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "celery_resilient_task",
+      "label": "ResilientTask",
+      "file_type": "document",
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "celery_idempotency_helpers",
+      "label": "Redis Backed Celery Idempotency Helpers",
+      "file_type": "document",
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "celery_circuit_breaker_helpers",
+      "label": "Redis Backed Celery Circuit Breaker Helpers",
+      "file_type": "document",
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "celery_fastapi_task_trigger",
+      "label": "FastAPI Task Triggering",
+      "file_type": "document",
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "celery_rpc_result_backend",
+      "label": "RPC Result Backend",
+      "file_type": "document",
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "celery_celery_app",
+      "target": "celery_rabbitmq_queue_topology",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "celery_rabbitmq_queue_topology",
+      "target": "celery_dlq_handling",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "celery_resilient_task",
+      "target": "celery_idempotency_helpers",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "celery_resilient_task",
+      "target": "celery_circuit_breaker_helpers",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "celery_fastapi_task_trigger",
+      "target": "celery_celery_app",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "celery_celery_app",
+      "target": "celery_rpc_result_backend",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "celery_idempotency_helpers",
+      "target": "redis_usage_redis_cache_utilities",
+      "relation": "shares_data_with",
+      "confidence": "INFERRED",
+      "confidence_score": 0.78,
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "celery_circuit_breaker_helpers",
+      "target": "redis_usage_redis_cache_utilities",
+      "relation": "shares_data_with",
+      "confidence": "INFERRED",
+      "confidence_score": 0.78,
+      "source_file": "src/app/examples/CELERY.md",
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": []
+}

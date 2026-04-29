@@ -8,8 +8,12 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import orjson
+from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import SecretStr
 
+from app.config import get_settings
 from app.connections import celery_app, init_db
+from app.shared.langgraph_layer.retrieval_kb import GeneratedAnswer, build_retrieval_graph
 from app.utils import ServiceUnavailableException, logger
 
 from .chunking import chunk_text
@@ -23,6 +27,8 @@ from .constants import (
 )
 from .dto import (
     HybridSearchRequest,
+    LegalAskResponse,
+    LegalCitationResponse,
     RagContextSectionResponse,
     RagSearchResponse,
     SearchIngestResponse,
@@ -38,20 +44,27 @@ from .repository import SearchRepository, build_chunk_rows
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from .chunking import TextChunk
-    from .dto import RagSearchRequest, SearchIngestRequest
+    from .dto import LegalAskRequest, RagSearchRequest, SearchIngestRequest
     from .fusion import RankedResultRow
 
 
 class SearchService:
     """Request-scoped orchestration for the search feature."""
 
-    def __init__(self, repo: SearchRepository, redis: Redis | None = None):
-        self.repo = repo
-        self.redis = redis
+    def __init__(
+        self,
+        repo: SearchRepository,
+        redis: Redis | None = None,
+        graphiti: object | None = None,
+    ):
+        self.repo: SearchRepository = repo
+        self.redis: Redis | None = redis
+        self.graphiti = graphiti
 
     async def ingest_document(self, payload: SearchIngestRequest) -> SearchIngestResponse:
         """Create or deduplicate a document, then enqueue chunk/embed work."""
@@ -138,7 +151,7 @@ class SearchService:
                 response = SearchResponse.model_validate_json(cached_response)
                 return response.model_copy(update={"cache_hit": True})
 
-        embedding_client = build_embedding_client()
+        embedding_client: GoogleGenerativeAIEmbeddings = build_embedding_client()
         query_embedding = await embedding_client.aembed_query(
             payload.query,
             task_type="RETRIEVAL_QUERY",
@@ -218,6 +231,46 @@ class SearchService:
             cache_hit=search_response.cache_hit,
         )
 
+    async def ask_legal(self, payload: LegalAskRequest, user_id: str) -> LegalAskResponse:
+        """Run the clauses-backed retrieval graph and return a grounded answer."""
+        settings = get_settings()
+        llm = ChatGoogleGenerativeAI(
+            model=settings.GEMINI_FLASH_MODEL,
+            api_key=SecretStr(settings.GEMINI_API_KEY) if settings.GEMINI_API_KEY else None,
+            temperature=0.1,
+            retries=0,
+        )
+        graph = build_retrieval_graph(
+            llm=llm,
+            repo=self.repo,
+            embedding_fn=build_embedding_client(),
+            redis=None if payload.bypass_cache else self.redis,
+            graphiti=self.graphiti,
+        )
+        result = await graph.ainvoke(
+            {
+                "user_id": user_id,
+                "query": payload.query,
+                "doc_ids_filter": payload.doc_ids_filter,
+                "messages": [],
+                "iteration_count": 0,
+            }
+        )
+        answer = GeneratedAnswer.model_validate(result["generated_answer"])
+        return LegalAskResponse(
+            answer=answer.answer,
+            citations=[
+                LegalCitationResponse(
+                    chunk_id=citation.chunk_id,
+                    clause_type=citation.clause_type,
+                    claim=citation.claim,
+                )
+                for citation in answer.citations
+            ],
+            confidence=answer.confidence,
+            cache_hit=bool(result.get("cache_hit")),
+        )
+
 
 async def process_ingestion_document(
     *,
@@ -227,7 +280,7 @@ async def process_ingestion_document(
 ) -> dict[str, object]:
     """Chunk, embed, and upsert search chunks for a document."""
     repo = SearchRepository(session)
-    embedding_client = build_embedding_client()
+    embedding_client: GoogleGenerativeAIEmbeddings = build_embedding_client()
     chunks = chunk_text(
         content,
         chunk_size=INGEST_CHUNK_SIZE,

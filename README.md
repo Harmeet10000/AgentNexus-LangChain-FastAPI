@@ -179,7 +179,7 @@ Populate it with the credentials and connection strings your local stack needs, 
 - `NEO4J_PASSWORD`
 - `REDIS_URL`
 - `MONGODB_URI`
-- `GOOGLE_API_KEY`
+- `GEMINI_API_KEY`
 - `LANGSMITH_API_KEY`
 
 ### 3. Install dependencies
