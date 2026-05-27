@@ -1556,4 +1556,14 @@ Why it's useful: These refactorings handle the "law of Demeter" violations (i.e.
 
 How it works: Hide Delegate creates a method on the outer object that delegates to the inner one. Remove Middle Man does the reverse—it exposes the delegate directly when the delegation becomes excessive.
 
+how to replace complex, hard-to-maintain conditional logic in Python—often cluttered with boolean flags—with the Policy Pattern. This design approach improves code scalability, testability, and flexibility by splitting logic into small, composable rules.
+
+Key Takeaways:
+
+The Problem with Conditionals (0:00 - 2:34): A single function managing multiple rules through if statements and boolean flags quickly becomes unmanageable, hard to test, and difficult to extend.
+The Policy Pattern (2:34 - 5:50): Instead of one massive function, rules are encapsulated into individual classes (policies). These can be composed, making them explicit and easier to isolate for testing.
+Functional Pythonic Style (6:51 - 10:56): The pattern can be simplified using standard Python functions and functional composition (using reduce). This approach reduces boilerplate code while maintaining the benefits of composition.
+Registry and Configuration (10:56 - 13:37): By mapping policies to names in a registry and using configuration files (like environment variables with Pydantic Settings), you can turn logic on or off dynamically without changing the core codebase, essentially creating a robust feature flag system.
+Trade-offs:
+While this pattern requires more upfront design and slightly more code than a simple function, it provides significant long-term benefits in maintainability and control for production system
 

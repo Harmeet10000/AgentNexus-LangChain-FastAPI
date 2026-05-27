@@ -237,22 +237,35 @@ todos:-
     
 178. From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on wont be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation. [cognee.shared.logging_utils]
 
+179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
+
+
+180. learn what can i learn about maintaining large codebases through tanStack ecosystem and others and see matt pocock video, how to hide/abstract away complexity behind a simple interface, make a skill/docs for this.
+ 
+181. how to use git when something is made then to use some commands on it while having another session work on the previous stuff when unrelated chnages have to be made. check what skills can help here
 add highly effevtive in copilot instruction
+182. add these for packages for time series data 
+https://github.com/balapriyac/data-science-tutorials/tree/main/useful-python-scripts-time-series
 ```
 
 --- summarise these chapters in great detail and take video's transcript as reference for summarising
+
+summarise this video in great detail and depth by dividing it into 5 minute chunk and take video's transcript as reference for summarising
+
+
 
 8/10 security person who knows 10/10 shit about browsers is more danerous than a 10/10 security person who knows 6/10 about browsers
 Previously, high-level hacking required deep historical knowledge and expertise. Now, because models can be forced into loops of iterative testing, individuals can effectively "bang their head against the wall" until they find vulnerabilities. They note that even benign inquiries can lead to dangerous outcomes if the model provides deep insights into obscure sub-dependencies.
 
 I am about to start this project. Interview me until you have 95% confidence in what I actually want, not what I think I should want.
 how to approach finding one a solution , how to think about these things, can you give me one small hint to steer me in right directions
- When I see something cool,
-I am more likely to go to the GitHub profile to find the creator of the thing than to read the code of the thing. I spend much more time on profiles on
- than repos on GitHub because it's so interesting to dig into who made the thing, why did they make the thing? What
- them to making this thing? What experiences did they have that made them want this thing to exist? How did they come to making this thing? How did they
+
+ When I see something cool, I am more likely to go to the GitHub profile to find the creator of the thing than to read the code of the thing. I spend much more time on profiles on
+ than repos on GitHub because it's so interesting to dig into who made the thing, why did they make the thing? What made them to making this thing? What experiences did they have that made them want this thing to exist? How did they come to making this thing? How did they
 c hoose to build this thing? How has it benefited them? Are they still working on it? Why are they working on it? And what do they have in common with you?
 
+
+bit packing, texture atlasting, delta encoding, deduplication
 
 <!-- memory usage of FastAPI app -->
 "memoryUsage": {
@@ -261,7 +274,7 @@ c hoose to build this thing? How has it benefited them? Are they still working o
       },
 
 # Upgrades
-1. DSPy shifts you from writing prompts to compiling them. Instead of manually guessing the best words for your LAWYER_SYSTEM_PROMPT, you define the input/output signature, give DSPy a few examples of good and bad answers, and it algorithmically finds the optimal prompt.
+1. Wont do it - DSPy shifts you from writing prompts to compiling them. Instead of manually guessing the best words for your LAWYER_SYSTEM_PROMPT, you define the input/output signature, give DSPy a few examples of good and bad answers, and it algorithmically finds the optimal prompt.
 2. add celery for offloading ingestion to a queue.
 3. make ingestion pipeline inspired from uber
 4. add pageindex for vectorless RAG, markitdown

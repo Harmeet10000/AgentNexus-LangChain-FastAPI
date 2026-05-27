@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Request
 from httpx import AsyncClient
 
 from app.shared.circuit_breaker.service import CircuitBreakerService
-from app.utils.exceptions import ServiceUnavailableException
+from app.utils import ServiceUnavailableException
 
 router = APIRouter()
 

@@ -253,3 +253,17 @@ Understand Self-Joins: On large tables, self-joins are expensive; look for ways 
 AI as an Assistant: AI is a helpful tool for identifying potential issues, but it should be treated as one input among many, not a substitute for analyzing the actual execution plan (18:48).
 
 materiased views to replace snowflake
+
+The Rise of True O_DIRECT in PG 18: Previously, using O_DIRECT (bypassing the Linux OS page cache to read straight from disk to shared_buffers) was risky in Postgres. Because I/O was synchronous, bypassing the kernel cache meant your backend took the full latency hit of the physical drive on every read. With PG 18 AIO, O_DIRECT becomes the gold standard. Postgres can prefetch blocks asynchronously straight from the NVMe silicon into shared_buffers with zero memory copies and zero CPU blocking.
+
+Eradication of I/O Spikes (The Checkpoint Problem): Historically, when Postgres executed a Checkpoint, the background writer had to flush massive amounts of dirty buffers to disk. This flooded the kernel with synchronous writes, causing massive latency spikes (I/O stalling) for read queries. With AIO, the checkpointer streams writes into io_uring at a highly controlled, throttled rate. The kernel handles it natively without blocking the I/O queues of foreground read queries.
+
+You are looking at the AIO patchset, but you are likely missing the terminal trajectory of this architecture. io_uring in Postgres 18 is not just about making disk reads non-blocking. It is the foundational Trojan Horse for User-Space Storage Polling.
+
+When you configure Postgres 18 with high-end NVMe drives, the absolute peak performance is unlocked by enabling IORING_SETUP_IOPOLL.
+
+In a standard interrupt-driven model, when the NVMe drive finishes reading a block, it sends an electrical hardware interrupt (IRQ) to the CPU. The CPU stops what it's doing, context switches to the kernel, handles the interrupt, and wakes up Postgres. That interrupt latency is roughly 2 to 3 microseconds. Modern NVMe drives can fetch data in 10 microseconds. You are wasting 30% of your storage latency just managing the electrical interrupt.
+
+With IOPOLL combined with PG 18 AIO, the kernel disables the hardware interrupt for the NVMe drive.
+
+Instead, the Postgres backend process uses a tight user-space loop to directly poll the hardware completion queue on the NVMe controller via the PCIe bus. The CPU never context switches. The kernel is never invoked. The database engine speaks directly to the flash memory controller in raw silicon time. This pushes PostgreSQL's random read latency into the realm of in-memory caching systems, fundamentally blurring the line between RAM and NVMe storage.

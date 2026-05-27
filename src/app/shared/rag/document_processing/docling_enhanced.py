@@ -24,7 +24,7 @@ from docling_core.types.doc import DoclingDocument
 from google import genai
 from PIL import Image
 
-from app.utils.logger import logger as loguru_logger
+from app.utils import logger as loguru_logger
 
 from .models import (
     DoclingEnhancementConfig,
