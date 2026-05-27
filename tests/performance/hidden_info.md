@@ -182,3 +182,11 @@ The second thing nobody documents: docling's table extraction outputs markdown t
 
 The single most dangerous production trap with pg_textsearch in your ingestion pipeline: BM25 IDF is corpus-wide. When you first ingest 3 documents, the IDF weights are computed over 3 documents. When you later ingest 3,000, the weights shift entirely — terms that were "rare" across 3 docs become "common" across 3,000. This means BM25 scores from day-1 queries are not comparable to scores from day-300 queries. Your RRF rank ordering stays stable (it's ordinal, not absolute), but any score threshold you set like < -0.5 for minimum relevance will need recalibration as the corpus grows. The mitigation: never hard-code score thresholds in application code. Store them as tunable parameters in your config table and expose them as a tuning endpoint. Also call bm25_force_merge after each significant batch ingestion — not just for query performance, but because segment compaction triggers a statistics rebuild that improves IDF accuracy across the full corpus.
 The second trap: the docs say BM25 indexes are single-column and that the implicit <@> syntax doesn't work inside PL/pgSQL. But there's a subtler version of this: the implicit syntax also behaves inconsistently inside SQLAlchemy's text() construct when the query planner can't see the index at parse time. Always use to_bm25query(:text, 'clauses_bm25_idx') with the explicit index name in every SQLAlchemy raw query. Never rely on implicit detection in production code paths.
+
+Most developers treat the Model Context Protocol (MCP) as a simple data bridge. The real alpha is in the Dual-State Channel Pattern: using one state for the LLM's reasoning loop and a separate, immutable state for the tool-execution results. This prevents "context drift" where the model starts hallucinating tool outputs into its own thought process. Keeping these execution traces strictly decoupled is how you build agents that actually scale without losing their minds.
+
+
+
+Actors should are useful in managing a shared IO resource (WebSocket or DB Connection)
+in Rust no lifetime annotations on actor types - antipattern because the message shouldnt be destroyed after the owner 
+
