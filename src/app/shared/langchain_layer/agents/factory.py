@@ -49,7 +49,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
 # from app.shared.langgraph_layer.agent_saul import BaseContext
-from ..models import build_chat_model
+from ..models import _build_chat_model
 from ..prompts import AGENT_SYSTEM_PROMPT, SystemPromptParts
 from .middlewares import build_default_middleware_stack
 
@@ -157,7 +157,7 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
         system_text = spec.system_prompt
 
     # Build LangChain model
-    model = build_chat_model(
+    model = _build_chat_model(
         model_name=spec.model_name,
         temperature=spec.temperature,
         max_tokens=spec.max_tokens,

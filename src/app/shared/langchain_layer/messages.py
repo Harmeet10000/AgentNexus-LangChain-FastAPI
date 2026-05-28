@@ -19,7 +19,9 @@ from langchain_core.messages import (
     trim_messages,
 )
 
-from .models import ainvoke_text, build_fast_model
+from app.config import get_settings
+
+from .models import ainvoke_text
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -27,6 +29,8 @@ if TYPE_CHECKING:
     from langchain_core.messages import (
         BaseMessage,
     )
+
+settings = get_settings()
 
 # ---------------------------------------------------------------------------
 # Trim
@@ -49,7 +53,7 @@ def trim_by_token_count(
         messages,
         max_tokens=max_tokens,
         strategy=strategy,
-        token_counter=build_fast_model(),  # uses model's tokenizer
+        token_counter=len,
         include_system=keep_system,
         allow_partial=False,
         start_on="human",
@@ -86,14 +90,13 @@ def delete_by_predicate(
 def delete_tool_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
     """Strip all ToolMessages and their paired AI tool-call messages."""
     # Remove ToolMessages
-    result = [m for m in messages if not isinstance(m, ToolMessage)]
+    without_tools = [m for m in messages if not isinstance(m, ToolMessage)]
     # Remove AIMessages that only contain tool_calls (no text content)
-    result = [
+    return [
         m
-        for m in result
+        for m in without_tools
         if not (isinstance(m, AIMessage) and m.tool_calls and not m.content)
     ]
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +148,7 @@ async def summarize_history(
 
     summary_system = SystemMessage(content=f"{summary_prefix}{summary}")
 
-    return system_msgs + [summary_system] + recent
+    return [*system_msgs, summary_system, *recent]
 
 
 # ---------------------------------------------------------------------------
@@ -173,13 +176,13 @@ async def manage_context(
 
     if strategy == "summarize":
         return await summarize_history(messages, keep_last=keep_last)
-    elif strategy == "trim":
+    if strategy == "trim":
         return trim_by_token_count(messages, max_tokens=max_tokens)
-    elif strategy == "delete":
+    if strategy == "delete":
         cleaned = delete_tool_messages(messages)
         return trim_by_token_count(cleaned, max_tokens=max_tokens)
-    else:
-        raise ValueError(f"Unknown strategy: {strategy}")
+    msg = f"Unknown strategy: {strategy}"
+    raise ValueError(msg)
 
 
 def _estimate_tokens(messages: Sequence[BaseMessage]) -> int:

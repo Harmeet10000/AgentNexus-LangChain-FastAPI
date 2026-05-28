@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage, filter_messages
 from langchain_core.runnables import RunnableConfig  # noqa: TC002
 from langchain_core.tools import InjectedToolArg, tool
 
-from app.shared.langchain_layer import build_chat_model
+from app.shared.langchain_layer.models import _build_chat_model
 from app.shared.services import search
 from app.utils import ExternalServiceException, logger
 
@@ -59,7 +59,7 @@ async def tavily_search(
 
     configurable: Configuration = Configuration.from_runnable_config(config)
     summarization_model = (
-        build_chat_model(
+        _build_chat_model(
             model_name=configurable.summarization_model,
             max_tokens=configurable.summarization_model_max_tokens,
         )

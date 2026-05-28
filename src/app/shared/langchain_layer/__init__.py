@@ -26,7 +26,6 @@ Usage::
 """
 
 from .callback import LatencyCallbackHandler, TokenUsageCallbackHandler, configure_langsmith
-from .models import build_chat_model
 
 # ---------------------------------------------------------------------------
 # Re-export built-in middleware for convenience
@@ -44,9 +43,7 @@ __all__ = [
     "SummarizationMiddleware",
     "TodoListMiddleware",
     "ToolRetryMiddleware",
-    "build_chat_model",
     "build_default_middleware_stack",
     "build_minimal_middleware_stack",
     "configure_langsmith",
 ]
-

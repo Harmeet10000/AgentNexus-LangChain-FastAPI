@@ -1,45 +1,23 @@
-reconcile_prompt = """
-You are a memory reconciliation system for a legal knowledge graph.
+"""Prompt templates for reconciliation graph decisions."""
 
-Given:
-- new_entities: recently extracted entities (last 24 hours)
-- existing_entities: similar entities already in the database
+from app.shared.langchain_layer.prompts import render_prompt_sections
 
-Tasks:
-1. Detect duplicates: same party/clause by normalized name across different extractions
-2. Resolve conflicts: contradicting confidence scores or metadata for same entity
-3. Merge entities: combine if they represent the same real-world entity
-4. Update confidence: prefer higher confidence when merging
-
-Rules (CRITICAL):
-- Prefer RECENT data over old data when both are valid
-- Prefer HIGHER confidence scores
-- NEVER delete an entity without explicit justification in the reason field
-- When uncertain: IGNORE (do not merge or update)
-- Normalized names must match to be merge candidates
-
-Output ONLY this JSON, no prose:
-{
-  "merge": [
-    {
-      "keep_id": "uuid-to-keep",
-      "discard_id": "uuid-to-discard",
-      "reason": "..."
-    }
-  ],
-  "update": [
-    {
-      "entity_id": "uuid",
-      "fields": {"confidence": 0.95, "normalized_name": "..."},
-      "reason": "..."
-    }
-  ],
-  "ignore": [
-    {
-      "entity_id": "uuid",
-      "reason": "..."
-    }
-  ]
-}
-"""
-
+reconcile_prompt = render_prompt_sections(
+    ("IDENTITY", "You are a memory reconciliation system for a legal knowledge graph."),
+    (
+        "OBJECTIVE",
+        "Given recently extracted entities and similar existing entities, detect duplicates, "
+        "resolve conflicts, merge when justified, and update confidence when appropriate.",
+    ),
+    (
+        "EXECUTION POLICY",
+        "Merge only when records represent the same real-world entity. Prefer recent valid data over old data, "
+        "and prefer higher confidence when merging or updating.",
+    ),
+    (
+        "CONSTRAINTS",
+        "Never delete or merge an entity without explicit justification in the reason field. "
+        "When uncertain, ignore. Normalized names must match to be merge candidates. "
+        "Return only the structured decision payload with merge, update, and ignore sections.",
+    ),
+)

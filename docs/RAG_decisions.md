@@ -1,3 +1,545 @@
+# RAG Decisions
+
+## Source
+
+- Title: `How to Design a RAG Pipeline for 10 Million Documents with Zero Hallucination (Live Demo)`
+- Author: `Vishal Mysore`
+- Format: cleaned and structured notes from the provided text
+
+## Core Thesis
+
+At small scale, naive RAG works:
+
+- chunk documents
+- embed them
+- run similarity search
+- pass top chunks to the LLM
+
+At 10 million documents, that breaks down.
+
+The hard problems are not mysterious. They are predictable engineering problems:
+
+- retrieval latency
+- index maintenance cost
+- precision degradation at scale
+- hallucinations from weak grounding
+- lack of verifiability
+- silent production failure without evaluation and observability
+
+The main claim is simple:
+
+> At large scale, retrieval quality matters more than the frontier model itself.
+
+Five well-retrieved chunks with a mid-tier model will outperform a stronger model reasoning over bad retrieval.
+
+---
+
+## Why 10 Million Documents Changes Everything
+
+At 1,000 documents, brute force is still tolerable.
+
+At 10 million documents:
+
+- brute-force vector search takes minutes, not milliseconds
+- no frontier model can directly inspect a meaningful fraction of the corpus
+- one bad retrieval step poisons everything downstream
+- hallucinations compound from one wrong fact into many plausible false extensions
+
+This is why the retrieval layer becomes the real foundation of the system.
+
+---
+
+## Decision 01: Ingest and Normalize Documents
+
+### Problem
+
+Large corpora come from mixed sources:
+
+- PDFs
+- Word docs
+- HTML
+- scanned images
+- database exports
+- Markdown
+- internal wikis
+
+These all carry different noise, encodings, and structural quirks.
+
+### Required actions
+
+- strip HTML tags, PDF control characters, and footnote noise
+- normalize Unicode with NFC
+- remove non-printable characters and control sequences
+- standardize whitespace and newline handling
+- detect multi-language content and route it separately
+- attach metadata during ingest
+
+### Required metadata
+
+- source
+- date
+- author
+- domain
+- version
+
+### Why this matters
+
+Silent normalization failures destroy recall. Example:
+
+- `Vishal Mysore` with a non-breaking space will not BM25-match the same text using a regular space
+
+At 10M scale, the recommendation is a distributed, idempotent ingest pipeline using tools like Kafka plus Spark or Flink, with a content hash so unchanged documents are skipped.
+
+---
+
+## Decision 02: Use Hybrid Retrieval, Not Embeddings Alone
+
+### Problem
+
+Embedding-only retrieval fails on exact identifiers.
+
+Example:
+
+> What did Clause 4.2.1 of the NDA say about termination?
+
+Dense retrieval may return chunks about termination in general. BM25 is far better at exact clause references.
+
+### BM25
+
+BM25 is useful because it rewards rare exact terms and normalizes for document length.
+
+High-level form:
+
+```text
+score(q, d) = sum over query terms of:
+IDF(t) * (tf(t, d) * (k1 + 1)) / (tf(t, d) + k1 * (1 - b + b * |d| / avgdl))
+
+k1 = 1.2
+b = 0.75
+```
+
+### Vector retrieval
+
+Suggested examples:
+
+- `all-MiniLM-L6-v2` for speed
+- `text-embedding-3-large` for higher accuracy
+
+Suggested practices:
+
+- mean pooling
+- L2 normalization
+- cosine similarity on normalized vectors
+
+### Fusion
+
+```text
+fused_score = alpha * cosine_similarity + (1 - alpha) * normalized_bm25
+```
+
+Where `alpha` depends on the domain:
+
+- legal documents: lean BM25, for example `0.3 vector / 0.7 BM25`
+- conceptual knowledge bases: lean vector, for example `0.7 vector / 0.3 BM25`
+
+### Recommended production pattern
+
+- run vector retrieval and BM25 retrieval in parallel
+- return top 30 from each branch
+- union candidates
+- fuse scores
+- pass top 15 to reranking
+
+---
+
+## Decision 03: Use Two-Stage Retrieval with ANN and Reranking
+
+### Stage 1: ANN retrieval
+
+Exact nearest-neighbor search over 10M high-dimensional vectors is too slow for real-time systems.
+
+Use ANN indexes instead.
+
+Common options:
+
+- HNSW: strongest recall/speed tradeoff in many production systems
+- IVF-PQ: lower memory footprint, common in FAISS
+- ScaNN: high throughput at extreme scale
+
+The article's recommendation favors HNSW for production maturity and practical performance.
+
+### Stage 2: Cross-encoder reranking
+
+ANN is fast but imprecise because query and chunk are scored independently.
+
+Cross-encoders score them jointly:
+
+```text
+CrossEncoder([query, chunk]) -> relevance_score in [0, 1]
+```
+
+Examples:
+
+- `ms-marco-MiniLM-L-6-v2`
+- `ms-marco-MiniLM-L-12-v2`
+
+### Why reranking matters
+
+Initial retrieval may surface the right chunk at rank 17. The reranker can move it to rank 1 after reading the query and chunk together.
+
+At scale:
+
+- rerank only the top 15 to 30 candidates
+- never rerank the whole corpus
+
+---
+
+## Decision 04: Score Source Confidence Before Generation
+
+Every retrieved chunk should carry a confidence score before it reaches the prompt.
+
+### Confidence components
+
+- retrieval confidence from the fused retrieval score
+- source freshness
+- source authority
+- cross-chunk agreement
+
+### Example weighting
+
+```text
+confidence =
+  0.5 * retrieval_score +
+  0.2 * freshness_score +
+  0.2 * authority_score +
+  0.1 * agreement_score
+```
+
+### Threshold gate
+
+If all retrieved chunks fall below a threshold like `0.65`, do not generate an answer.
+
+Return:
+
+> Insufficient information found in the knowledge base.
+
+This is not a product failure. It is a correctness feature.
+
+---
+
+## Decision 05: Constrain Generation Hard
+
+This is the central anti-hallucination decision.
+
+The model must be explicitly forbidden from using knowledge outside the provided context.
+
+### Example prompt contract
+
+```text
+System: You are a citation-backed AI assistant. Answer using ONLY the provided Context sections below.
+
+Rules:
+1. Every claim you make must be supported by the provided Context.
+2. Cite every assertion with [Source N] where N is the context section number.
+3. If the Context does not contain the answer, respond with exactly:
+   "The provided documents do not contain sufficient information to answer this question."
+4. Do NOT use any knowledge from your training data to fill gaps.
+5. Do NOT speculate, extrapolate, or make inferences beyond what the Context explicitly states.
+```
+
+### Model settings
+
+Use low temperature for RAG:
+
+- `0.0`
+- `0.1`
+
+High temperature increases creativity, which is the opposite of what grounded retrieval systems need.
+
+---
+
+## Decision 06: Make Every Response Citation-Backed
+
+Enterprise RAG requires claim-level traceability.
+
+### Example answer style
+
+```text
+Vishal Mysore joined the company in 2019 [Source 1] and led the cloud migration initiative [Source 3], which reduced infrastructure costs by 40% [Source 1, Source 2].
+```
+
+### Store per response
+
+- exact chunk text used
+- source document ID
+- source document version
+- page number
+- character offset
+- retrieval score at generation time
+- timestamp of the document version used
+
+### Why this is mandatory
+
+Legal, compliance, and audit teams need to trace every generated claim back to a source. Without that, the system is not enterprise-ready.
+
+Citations also create a repair loop:
+
+- user disputes a claim
+- system identifies the exact chunk
+- fix source content or retrieval behavior
+- invalidate related cache entries
+
+---
+
+## Decision 07: Add a Hallucination Fallback Layer
+
+Even with constrained prompting and citations, failures still slip through.
+
+### Three-pass verification
+
+#### Pass 1: assertion extraction
+
+Extract factual claims from the answer:
+
+- numbers
+- names
+- dates
+- percentages
+- named entities
+
+Use regex plus NER.
+
+#### Pass 2: grounding check
+
+For each assertion, verify that it appears in the retrieved context using fuzzy matching, not just exact string matching.
+
+#### Pass 3: faithfulness score
+
+```text
+faithfulness = verified_assertions / total_assertions
+```
+
+If `faithfulness < 0.8` and there are flagged assertions, surface a warning.
+
+### Fallback actions
+
+- show response with inline warning on unverified claims
+- rerun with `temperature = 0.0` and stricter prompt
+- return `cannot verify` if the second pass still fails
+- escalate to human review for high-risk cases
+
+### Production note
+
+This can run as an async post-processor:
+
+- stream answer first
+- verify in parallel
+- display warning shortly after completion if needed
+
+---
+
+## Decision 08: Run Continuous Evaluations
+
+RAG systems must be evaluated continuously in production, not just offline.
+
+### Three core metrics
+
+#### Context relevance
+
+Are the retrieved chunks actually relevant?
+
+```text
+context_relevance = overlap(query_tokens, context_tokens) / |query_tokens|
+```
+
+Low score usually means a retrieval problem.
+
+#### Faithfulness
+
+Is the answer grounded in the retrieved context?
+
+```text
+faithfulness = verified_claims / total_claims
+```
+
+Low score usually means a generation or grounding problem.
+
+#### Answer relevance
+
+Does the answer actually answer the question?
+
+```text
+answer_relevance = overlap(query_tokens, answer_tokens) / |query_tokens|
+```
+
+Low score despite strong context relevance suggests the model is ignoring the retrieved context.
+
+### Additional production metrics
+
+- latency p50, p95, p99 for each pipeline stage
+- cache hit rate
+- retrieval diversity
+- user rejection rate
+
+### Suggested pipeline
+
+- compute eval scores per query
+- log to a time-series store
+- visualize on dashboards
+- alert on regressions
+
+Example:
+
+- if rolling one-hour faithfulness drops below `0.75`, page someone
+
+---
+
+## Decision 09: Use Caching and Memory Intentionally
+
+At scale, repeated queries are normal. Recomputing the full pipeline each time wastes both time and money.
+
+### Two-level cache
+
+#### Level 1: exact query result cache
+
+Cache key shape:
+
+```text
+hash(query + retrieval_config + model)
+```
+
+Cache the full response plus citations.
+
+Invalidate when any source document used in the answer changes.
+
+#### Level 2: semantic near-duplicate cache
+
+- cache query embeddings
+- if a new query is highly similar to a prior one, for example cosine `> 0.97`, reuse the prior result
+
+### Memory layer
+
+#### Session memory
+
+Conversation systems should remember prior references.
+
+If a user discussed `Clause 4.2.1` three turns ago, they should not need to restate it.
+
+#### Long-term memory from human feedback
+
+When a human expert corrects the system, store the correction with:
+
+- query topic
+- source document
+- domain keywords
+
+Then retrieve those corrections for future similar queries.
+
+Example:
+
+```text
+[Retrieved expert correction from prior session]
+Note: Previous answer on termination clauses was incorrect.
+Clause 4.2.1 applies only to fixed-term contracts, not at-will.
+```
+
+This is one of the main ways a RAG system improves without retraining the base model.
+
+---
+
+## Decision 10: Add End-to-End Observability
+
+At 10M scale, failures are guaranteed. Observability determines whether you debug them in minutes or after customer damage.
+
+### Example trace output
+
+```text
+[INGEST LAYER]       Document parsed -> 847 chunks generated in 2.3s
+[VECTOR LAYER]       ANN search -> 30 candidates in 8ms (HNSW index)
+[BM25 LAYER]         Keyword search -> 12 candidates in 3ms
+[FUSION LAYER]       Hybrid merge -> 38 unique candidates, top 15 selected
+[RERANK LAYER]       Cross-encoder scored 15 chunks in 180ms
+[CONFIDENCE LAYER]   Top chunk: 0.847, threshold: 0.65 -> PASS
+[GENERATION LAYER]   LLM call -> 1240ms, 387 tokens generated
+[EVAL LAYER]         Faithfulness: 0.91, Relevance: 0.84 -> OK
+[CACHE LAYER]        Result cached. Key: a3f9b2c1...
+```
+
+### Trace per query
+
+- timing breakdown per stage
+- retrieved documents and scores
+- chunks selected and rejected by reranker
+- final prompt sent to the model
+- raw model output before citation post-processing
+- eval scores
+- cache hit or miss
+
+### Suggested infra
+
+- OpenTelemetry for tracing
+- Prometheus plus Grafana for metrics
+- Elasticsearch or Loki for structured logs
+
+Everything should be queryable by:
+
+- document ID
+- query hash
+- session
+- time range
+
+---
+
+## Main Takeaway
+
+Most teams optimize the wrong thing.
+
+They spend too much time comparing frontier models and not enough time improving retrieval.
+
+The real production lesson:
+
+> At 10 million documents, retrieval quality matters more than the frontier model itself.
+
+Your retrieval pipeline is the foundation. The LLM is the finishing layer.
+
+If the retrieval layer is weak, no model can rescue the answer reliably.
+
+---
+
+## Demo Notes from the Provided Text
+
+The source text describes a browser-based `Advanced Local RAG Demo` that maps each architectural choice to a visible system behavior.
+
+### Claimed visible behaviors
+
+- hybrid retrieval trace with vector and BM25 running in parallel
+- adjustable fusion weights between vector and keyword retrieval
+- stage 2 reranking with either syntactic reranking or neural cross-encoder reranking
+- per-source confidence display
+- citation badges that jump directly to the supporting chunk
+- automatic hallucination alerting when faithfulness drops below `0.8`
+- live display of context relevance, faithfulness, answer relevance, and latency
+- caching behavior visible through cache hit traces
+- side-by-side comparison of vector-only, BM25-only, and fused hybrid retrieval
+
+---
+
+## Practical Summary for This Repo
+
+If we adapt these ideas into repo-level architecture decisions, the strongest reusable principles are:
+
+- normalize aggressively at ingest
+- prefer hybrid retrieval over dense-only retrieval
+- add reranking as a mandatory precision layer
+- gate low-confidence retrieval before generation
+- enforce citation-only grounded prompting
+- verify faithfulness after generation
+- measure retrieval and generation separately
+- build cache invalidation around document versioning
+- treat observability as part of the product, not just platform plumbing
+
+---
+
 
 # RAG & Tools
 
@@ -1154,4 +1696,618 @@ Use this checklist instead of a unit-test plan for the current implementation pa
     - Temporal queries can use Graphiti's time-aware graph search instead of scanning Postgres.
 
 
-How to Design a RAG Pipeline for 10 Million Documents with Zero Hallucination ( Live Demo )Vishal MysoreVishal MysoreFollow12 min read1 day agoListenShareRetrieval-Augmented Generation (RAG) at scale is one of the most demanding engineering challenges in production AI today. The gap between a working prototype and a system that reliably handles millions of documents without hallucinating is not a small one  it spans architecture, infrastructure, evaluation, and operational discipline.When teams set out to build RAG systems for enterprise search, internal knowledge bases, legal document analysis, healthcare records, or large-scale customer support platforms, they quickly discover that the naive approach  grab some embeddings, do a similarity search, pass chunks to an LLM  breaks down fast. It works at 1,000 documents. It does not work at 1 million. And it is entirely unsuitable at 10 million.The reasons are not mysterious. They are specific, predictable engineering problems: retrieval latency, index maintenance cost, precision degradation at scale, hallucinations that compound through the generation step, lack of verifiability, and no way to know when the system is silently failing.Building a RAG pipeline for 10 million documents that produces trustworthy, citation-backed, hallucination-resistant responses requires treating each layer of the stack as a first-class engineering concern. There are 10 critical areas to get right  each one a deliberate design decision, each one a failure mode if skipped or underestimated. This article walks through all of them: the reasoning, the math, and the production tradeoffs.Why 10 Million Docs Changes EverythingAt 1,000 documents, you can brute-force anything. Vector scan every chunk, prompt the model with all of it, call it done.At 10 million documents, everything breaks:Brute-force vector search takes minutes, not millisecondsA single frontier model call cannot see even 0.001% of your corpusA bad retrieval step poisons everything downstream  the best model in the world cannot un-hallucinate a wrong chunkHallucinations compound: one wrong fact leads the model to generate plausible-sounding extensions of that factThis is why retrieval quality matters more than the frontier model itself at scale. A perfectly retrieved set of 5 chunks with GPT-3.5 will outperform a hallucinating GPT-4 response built on bad retrieval every single time.Step 01  Ingest + Normalize DocsBefore any retrieval can work, your data has to be clean and consistent.The problem: 10 million documents come from everywhere  PDFs, Word files, HTML pages, scanned images, database exports, Markdown files, internal wikis. Each has different encodings, different noise patterns, different structure.What you do:Strip all formatting artifacts (HTML tags, PDF control characters, footnote markers)Normalize Unicode (NFC normalization   and  are not the same bytes)Remove non-printable characters and control sequencesStandardize whitespace and newlinesDetect and handle multi-language content separatelyTag every document with metadata at ingest: source, date, author, domain, versionWhy it matters: A chunk that contains "Vishal Mysore" (non-breaking space) will never BM25-match a query for "Vishal Mysore" (regular space). These silent failures destroy recall and you will never debug them unless normalization is enforced at ingest.At 10M scale: Use a distributed ingestion pipeline (Kafka + Spark or Flink). Process documents in parallel, idempotently. Every document gets a content hash  re-ingest is a no-op if the content hasnt changed.Step 02  Hybrid Retrieval (BM25 + Embeddings)This is where most engineers make their first mistake: they use only embeddings.Embeddings are powerful but they have a known failure mode  exact keyword matching. If a user asks What did Clause 4.2.1 of the NDA say about termination?, a semantic embedding model will return chunks about termination in general rather than Clause 4.2.1 specifically. BM25 will nail it.BM25 (Okapi BM25):score(q, d) =  IDF(t)  [tf(t,d)  (k1+1)] / [tf(t,d) + k1(1-b+b|d|/avgdl)]k1 = 1.2 (term frequency saturation)b = 0.75 (length normalization)IDF rewards rare terms, penalizes common onesLength normalization prevents long chunks from dominating just because they repeat words moreVector embeddings:all-MiniLM-L6-v2 for speed (384 dimensions), or text-embedding-3-large for accuracyMean pooling with L2 normalizationCosine similarity = dot product on normalized vectorsHybrid fusion:fusedScore =   cosineSimilarity + (1-)  normalizedBM25The weight  is tunable per domain. Legal documents  lean BM25 (0.3 vector / 0.7 BM25). Conceptual knowledge bases  lean vector (0.7 vector / 0.3 BM25).At 10M docs, run both retrieval paths in parallel. Each returns top-30 candidates. Union them, fuse scores, pass top-15 to the reranker.Step 03  ANN + Reranking (Two-Stage)Stage 1: Approximate Nearest Neighbour (ANN)You cannot do exact cosine similarity over 10M  384-dimensional vectors in real time. ANN indices trade a small amount of accuracy for massive speed gains.Options ranked by production maturity:HNSW (Hierarchical Navigable Small World)  best recall/speed tradeoff, used in Pinecone, Weaviate, pgvectorIVF-PQ (Inverted File + Product Quantization)  used in FAISS, lower memory footprintScaNN  Googles implementation, best throughput at extreme scaleHNSW at 10M vectors returns top-100 candidates in ~10ms with >95% recall@10 compared to exact search.Stage 2: Cross-Encoder RerankingThe ANN stage is fast but imprecise  it scores query and chunk independently. A cross-encoder scores them jointly, reading both together:CrossEncoder([query, chunk])  relevance_score  [0,1]Models: ms-marco-MiniLM-L-6-v2 (fast, 90MB), ms-marco-MiniLM-L-12-v2 (more accurate).Why does this matter? The bi-encoder (ANN) that retrieved your top-30 might have ranked chunk #17 as the most relevant. The cross-encoder reads the actual query text against chunk #17s actual content and realizes chunk #3 is far more relevant. This reordering is the difference between a good RAG and a great one.At 10M scale, reranking only runs on top-15 to top-30 candidates  never the full corpus.Step 04  Source Confidence ScoringEvery retrieved chunk must carry a confidence score before it touches the LLM prompt. This score becomes your hallucination defence mechanism.Confidence components:Retrieval confidence  normalized fusion score from Step 3 (01)Source freshness  recency weight: documents older than 2 years get a decay penaltySource authority  domain-specific trust scores (internal audit docs > random web pages)Cross-chunk agreement  if 4 of your top-5 chunks say the same thing, confidence risesCompute a final weighted confidence:confidence = 0.5retrievalScore + 0.2freshnessScore + 0.2authorityScore + 0.1agreementScoreThreshold gate: If confidence < 0.65 for ALL retrieved chunks, do not generate. Return "Insufficient information found in the knowledge base." This is not a failure  this is the system working correctly. A confident wrong answer is infinitely worse than an honest "I don't know."Step 05  Constrained GenerationThis is the architectural decision that separates zero-hallucination RAG from regular RAG.The rule: The LLM system prompt must explicitly constrain the model to only use the provided context. No exceptions.System: You are a citation-backed AI assistant. Answer using ONLY the provided Context sections below.Rules:1. Every claim you make must be supported by the provided Context.2. Cite every assertion with [Source N] where N is the context section number.3. If the Context does not contain the answer, respond with exactly:   "The provided documents do not contain sufficient information to    answer this question."4. Do NOT use any knowledge from your training data to fill gaps.5. Do NOT speculate, extrapolate, or make inferences beyond what    the Context explicitly states.Context:---[Source 1: document_name.pdf, Page 4]<chunk text>---[Source 2: policy_v3.docx, Page 12]<chunk text>---Why this works: Modern LLMs are instruction-following machines. Given explicit, unambiguous constraints with consequences defined (cite or admit ignorance), they comply far more reliably than when given vague prompts like answer based on the documents.Temperature: Set to 0.0 or 0.1 for RAG. High temperature = high creativity = high hallucination. You do not want creativity. You want faithfulness.Step 06  Citation-Backed ResponsesEvery response must be verifiable. Not just heres the answer  but heres the answer, it came from these exact chunks, which came from these exact documents, on these exact pages.Citation format in the response:Vishal Mysore joined the company in 2019 [Source 1] and led the cloud migration initiative [Source 3], which reduced infrastructure costs by 40% [Source 1, Source 2].What you store per response:The exact chunk text usedThe source document ID and versionThe page number and character offsetThe retrieval score at the time of generationThe timestamp of the document version (was it the latest at query time?)Why this is non-negotiable at enterprise scale: Legal, compliance, and audit teams need to trace every AI-generated claim back to its source document. If you cannot do this, your RAG system is not enterprise-ready. Full stop.Get Vishal Mysores stories in your inboxJoin Medium for free to get updates from this writer.Enter your emailSubscribeRemember me for faster sign inCitations also enable a feedback loop  if a user disputes a claim, you know exactly which chunk generated it, which lets you fix the document, retrain embeddings for that document, and invalidate the cache for related queries.Step 07  Hallucination Fallback LayerEven with constrained generation and citations, hallucinations can slip through. You need an automated detection layer before the response reaches the user.Three-pass verification:Pass 1  Assertion extraction: Extract all factual claims from the response. Numbers, proper nouns, dates, percentages, named entities. Regex + NER (Named Entity Recognition).Pass 2  Grounding check: For each extracted assertion, verify it appears in the retrieved context. Fuzzy string matching (not exact  the model paraphrases). If an assertion appears in the response but NOT in any retrieved chunk, flag it.Pass 3  Confidence threshold:faithfulness = verified_assertions / total_assertionsIf faithfulness < 0.8 AND there are flagged assertions  show hallucination warning. Do NOT suppress the response  surface the warning to the user with the specific claims that could not be verified.Fallback action options (in order of severity):Show response with inline warning on unverified claimsRe-run with temperature = 0.0 and stricter promptReturn cannot verify if second pass also failsEscalate to human review queueAt 10M scale: Run this as an async post-processor. Stream the response to the user, run verification in parallel, and show the hallucination banner if needed within 500ms of response completion.Step 08  Continuous EvalsYou cannot improve what you do not measure. RAG evals must run continuously in production, not just during offline testing.The three core RAG metrics:Context Relevance  Are the retrieved chunks actually relevant to the query?contextRelevance = queryTokens  contextTokens / |queryTokens|Low context relevance = retrieval problem, not a model problem.Faithfulness  Does the response stay grounded in the retrieved context?faithfulness = verified_claims / total_claimsLow faithfulness = generation problem. Constrain the prompt harder.Answer Relevance  Does the response actually answer the question?answerRelevance = queryTokens  answerTokens / |queryTokens|Low answer relevance despite high context relevance = the model is ignoring the context.Beyond the three core metrics:Latency p50/p95/p99  per retrieval stage, per model callCache hit rate  should be >40% in production for common query patternsRetrieval diversity  are you always pulling from the same 5 documents?User rejection rate  how often do users click this answer is wrong?Pipeline: Every query  eval scores computed  logged to time-series store  dashboarded  alerting on degradation. If faithfulness drops below 0.75 over a rolling 1-hour window, page someone.Step 09  Caching + Memory LayerAt 10M documents and production traffic, you will see the same queries repeatedly. Recomputing the full pipeline for identical queries is wasteful and adds unnecessary latency.Two-level cache:Level 1  Query result cache (exact match): Hash (query + retrieval_config + model)  cache the full response with citations. TTL tied to document freshness  if any source document in the result has been updated, invalidate the cache entry.Level 2  Embedding cache (semantic near-duplicate): Cache query embeddings. For incoming queries, check if a semantically similar query (cosine similarity > 0.97) has been answered before. Return the cached result with a similar query matched note.Memory layer (session + long-term):Session memory: Within a conversation, maintain context of what has been discussed. If the user asked about Clause 4.2.1 three turns ago, they shouldnt have to repeat it. Store the conversation history and inject relevant prior turns into retrieval context.Long-term memory (HITL feedback): When a human expert corrects a wrong answer, store that correction tagged with the query topic, source document, and domain keywords. On future similar queries, retrieve relevant corrections and prepend them to the system prompt:[Retrieved expert correction from prior session]Note: Previous answer on termination clauses was incorrect  Clause 4.2.1 applies only to fixed-term contracts, not at-will.This is how your RAG system gets smarter over time without retraining the model.Step 10  Observability EverywhereAt 10M docs and production load, something will go wrong. The only question is whether you find out from your monitoring system or from an angry enterprise customer.Instrument every layer:[INGEST LAYER]       Document parsed  847 chunks generated in 2.3s[VECTOR LAYER]       ANN search  30 candidates in 8ms (HNSW index)[BM25 LAYER]         Keyword search  12 candidates in 3ms[FUSION LAYER]       Hybrid merge  38 unique candidates, top 15 selected[RERANK LAYER]       Cross-encoder scored 15 chunks in 180ms[CONFIDENCE LAYER]   Top chunk: 0.847, threshold: 0.65  PASS[GENERATION LAYER]   LLM call  1240ms, 387 tokens generated[EVAL LAYER]         Faithfulness: 0.91, Relevance: 0.84  OK[CACHE LAYER]        Result cached. Key: a3f9b2c1...What to trace per query:Timing breakdown per stage (not just total latency)Which documents were retrieved and their scoresWhich chunks were used vs rejected by the rerankerThe exact system prompt sent to the modelRaw model response before citation parsingEval scoresCache hit/missInfrastructure: OpenTelemetry for distributed tracing, Prometheus + Grafana for metrics, structured JSON logs to Elasticsearch or Loki. Every trace must be queryable by document ID, query hash, user session, and time range.Why this matters: When a hallucination slips through at 3am, you need to know within minutes: which document caused it, which retrieval step ranked it too highly, which eval metric failed to catch it, and how many users saw it. Without observability, youre guessing.The Takeaway That 99% MissMost engineers optimize in the wrong direction. They spend weeks evaluating GPT-4 vs Claude vs Gemini and minutes thinking about retrieval.The hard truth:At 10M documents, retrieval quality matters more than the frontier model itself. A well-retrieved set of 5 faithful chunks with a mid-tier model will produce a better, more trustworthy answer than a frontier model hallucinating over poorly retrieved context.Your retrieval pipeline is the foundation. The LLM is the finishing coat. You cannot paint over a cracked wall and expect it to hold.The engineers who understand this  who obsess over BM25 index quality, fusion weights, reranker calibration, confidence thresholds, and citation grounding  are the ones building RAG systems that actually work in production. The rest are building impressive demos that fail in the first enterprise audit.See It Live  Advanced RAG DemoEverything described in this article is running in your browser right now at the Advanced Local RAG Demo.No server. No backend. 100% browser-native.Here is what you can observe live as you use it:Step 02 in action  Hybrid Retrieval: Upload any PDF and watch the RAG Pipeline Observability Trace show both VECTOR RETRIEVAL and BM25 KEYWORD RETRIEVAL running in parallel, each returning scored candidates. Adjust the Weights slider (Vector vs Keyword) to see how changing  shifts which chunks surface.Step 03 in action  Two-Stage Reranking: Switch the Stage 2 Reranking dropdown between:Syntactic (Query Proximity Window)  watch the proximity score computation in the traceNeural (Cross-Encoder MiniLM  90MB)  triggers a real ONNX model download and scores your chunks with a genuine ML cross-encoder, entirely in-browser via WebAssemblyStep 04 in action  Confidence Scoring: Every source card in the Retrieved Sources panel shows its Vector Cosine score, BM25 score, and Confidence %  the exact three-component fusion score that gates whether that chunk enters the prompt.Step 05 + 06 in action  Constrained Generation + Citations: The generated answer uses [Source N] citation badges. Click any badge and it scrolls directly to the source chunk that backed that claim. The system prompt enforcing constrained generation is visible in the trace under PROMPT ASSEMBLY.Step 07 in action  Hallucination Detection: The Hallucination Alert banner fires automatically when faithfulness drops below 0.8. The banner tells you exactly which assertions in the response could not be grounded in the retrieved context.Step 08 in action  Continuous Evals: After every query, four metrics appear live: Context Relevance, Faithfulness, Answer Relevance, and Latency  computed locally in the browser without any eval API.Step 09 in action  Caching: Run the same query twice. The second run shows CACHE HIT in the trace and returns in milliseconds instead of seconds. Toggle Use Retrieval Cache off to force a fresh pipeline run and compare latencies.Step 10 in action  Observability: The entire RAG Pipeline Observability Trace panel is a live implementation of Step 10  every layer logs what it did, how long it took, and what score it produced. This is your local version of a distributed trace.Benchmark Mode: Toggle Compare Retrieval Methods to run all three retrieval strategies simultaneously  Vector Only, BM25 Only, and Fused Hybrid  side by side on the same query. You will see immediately why neither pure vector nor pure keyword retrieval matches the hybrid approach on real
+# Advanced RAG Utilities
+
+This folder now exposes one reusable module for the numbered strategy demos that previously lived in separate files.
+
+## Module Layout
+
+- `strategies.py`: reusable ingestion, retrieval, reranking, routing, and answer-generation helpers for advanced RAG strategies
+- `rag_agent_advanced.py`: older demo-oriented agent script that can consume the reusable helpers if needed
+- `graphiti/`, `langextract/`, `pageindex/`, `multimodal/`: strategy-adjacent integrations that remain separate because they solve distinct problems
+
+## Runtime Conventions
+
+The consolidated strategy module is aligned with the application runtime:
+
+- uses `app.state.db_engine` and `app.state.db_session_local`
+- writes SQL with SQLAlchemy `text(...)`
+- uses `app.utils.logger`
+- uses `orjson` for metadata serialization
+- avoids `psycopg2`, module-level DB connections, and hardcoded local credentials
+
+## Public API
+
+Core entrypoint:
+
+```python
+from app.shared.rag.strategies import RAGStrategyService
+
+service = RAGStrategyService.from_app(app)
+```
+
+Key reusable methods:
+
+- `ingest_document()`
+- `ingest_contextual_document()`
+- `ingest_context_aware_document()`
+- `ingest_late_chunked_document()`
+- `ingest_hierarchical_document()`
+- `vector_search()`
+- `search_with_reranking()`
+- `search_with_query_expansion()`
+- `search_with_multi_query()`
+- `search_hierarchical()`
+- `search_knowledge_graph()`
+- `run_agentic_rag()`
+- `run_self_reflective_rag()`
+- `retrieve_full_document()`
+
+Useful pure helpers:
+
+- `parse_query_variants()`
+- `semantic_chunk_text()`
+- `late_chunk_text()`
+- `mean_pool_embeddings()`
+- `serialize_metadata()`
+- `deserialize_metadata()`
+
+## Strategy Reference
+
+| Strategy | Support in `strategies.py` | Notes |
+|---|---|---|
+| Re-ranking | `search_with_reranking` | Two-stage vector retrieval plus cross-encoder reranking |
+| Agentic RAG | `run_agentic_rag` | Routes between vector, SQL, and web resolvers |
+| Knowledge graphs | `search_knowledge_graph` | Uses injected graph searcher instead of hardcoded Graphiti credentials |
+| Contextual retrieval | `ingest_contextual_document` | Adds LLM-generated chunk prefixes before embedding |
+| Query expansion | `expand_query`, `search_with_query_expansion` | Generates alternate phrasings and unions results |
+| Multi-query RAG | `search_with_multi_query` | Same expansion path, tuned for broader retrieval |
+| Context-aware chunking | `semantic_chunk_text`, `ingest_context_aware_document` | Splits on semantic boundaries rather than only size |
+| Late chunking | `late_chunk_text`, `ingest_late_chunked_document` | Blends document and chunk embeddings |
+| Hierarchical RAG | `ingest_hierarchical_document`, `search_hierarchical` | Stores parent/child relationships in `meta_data` |
+| Self-reflective RAG | `run_self_reflective_rag` | Grades retrieval quality, refines query, verifies answer support |
+| Fine-tuned embeddings | `ingest_document(..., use_fine_tuned_embeddings=True)` | Uses optional SentenceTransformer path supplied to the service |
+
+## Storage Model
+
+The old demos assumed ad hoc tables such as `chunks`, `parent_chunks`, and `child_chunks`. The merged implementation stores strategy variants in the existing `document_vectors` table and encodes strategy-specific state inside `meta_data`.
+
+Examples:
+
+- hierarchical parent rows use `{"strategy":"hierarchical","level":"parent","hierarchy_id":"..."}`
+- hierarchical child rows use `{"strategy":"hierarchical","level":"child","hierarchy_id":"..."}`
+- contextual retrieval rows use `{"strategy":"contextual_retrieval", ...}`
+
+## Example
+
+```python
+service = RAGStrategyService.from_app(app, fine_tuned_model_path="./fine_tuned_model")
+
+await service.ingest_contextual_document(
+    user_id="user-123",
+    document_id="doc-1",
+    title="Refund Policy",
+    text_value=document_text,
+)
+
+results = await service.search_with_reranking(
+    user_id="user-123",
+    query="What is the refund window?",
+    limit=5,
+)
+```
+
+## Notes
+
+- The consolidated module is reusable application code, not a turnkey “all strategies at once” production pipeline.
+- Graph-based retrieval still depends on the caller to provide a graph search function.
+- Cross-encoder and SentenceTransformer models are loaded lazily to avoid import-time side effects.
+- The old numbered files were educational demos and have been removed in favor of the single reusable module.
+
+
+# Re-ranking
+add all the contents of this file in the README.md
+
+
+## Resource
+**Rerankers and Two-Stage Retrieval | Pinecone**
+https://www.pinecone.io/learn/series/rag/rerankers/
+
+## What It Is
+Re-ranking uses a cross-encoder model to refine initial retrieval results by scoring query-document pairs more accurately. After a fast retriever (like vector search) returns candidate documents, the re-ranker evaluates each candidate with the query simultaneously, capturing richer semantic interactions. This two-stage approach balances speed and accuracy.
+
+## Simple Example
+```python
+# Stage 1: Fast retrieval
+candidates = vector_search(query, top_k=100)
+
+# Stage 2: Re-rank with cross-encoder
+reranker = CrossEncoder('ms-marco-MiniLM')
+scored_results = []
+for doc in candidates:
+    score = reranker.predict([query, doc])
+    scored_results.append((doc, score))
+
+# Return top re-ranked results
+final_results = sorted(scored_results, key=lambda x: x[1], reverse=True)[:10]
+```
+
+## Pros
+Significantly improves retrieval precision by understanding query-document relationships. Works well as a refinement layer on top of existing systems.
+
+## Cons
+Computationally expensive compared to embedding models. Adds latency as each document must be processed with the query.
+
+## When to Use It
+Use when accuracy is more important than speed. Ideal for narrowing down a large candidate set to the most relevant documents.
+
+## When NOT to Use It
+Avoid when real-time performance is critical. Skip if you have limited compute resources or very large result sets to re-rank.
+
+
+# Agentic RAG
+
+## Resource
+**What is Agentic RAG? Building Agents with Qdrant**
+https://qdrant.tech/articles/agentic-rag/
+
+## What It Is
+Agentic RAG empowers autonomous agents with multiple tools to explore knowledge dynamically. Unlike traditional RAG's single vector search, agents can write SQL queries for structured data, perform web searches, read entire files, or query multiple vector stores based on query complexity. The agent reasons about which tools to use and in what order, adapting its strategy to the task.
+
+## Simple Example
+```python
+# Agent decides which tools to use
+agent = RAGAgent(tools=[vector_search, sql_query, web_search, file_reader])
+
+query = "What were Q2 sales for ACME Corp?"
+
+# Agent reasoning:
+# 1. Checks if structured data needed → use SQL tool
+result = agent.sql_tool("SELECT revenue FROM quarterly_sales WHERE company='ACME' AND quarter='Q2'")
+
+# If insufficient, agent tries another tool
+if not result.complete:
+    result += agent.vector_search("ACME Q2 financial performance")
+```
+
+## Pros
+Highly flexible and adapts to query complexity. Can access heterogeneous data sources (SQL, files, web, vectors) intelligently.
+
+## Cons
+Increased complexity and unpredictability in behavior. Higher latency and cost due to multi-step reasoning and tool calls.
+
+## When to Use It
+Use for complex queries requiring multiple data sources or exploration strategies. Ideal when you have diverse knowledge types (structured and unstructured).
+
+## When NOT to Use It
+Avoid for simple lookups where traditional RAG suffices. Skip when you need predictable, fast responses or have limited tool infrastructure.
+
+
+# Knowledge Graphs
+
+## Resource
+**RAG Tutorial: How to Build a RAG System on a Knowledge Graph | Neo4j**
+https://neo4j.com/blog/developer/rag-tutorial/
+
+## What It Is
+Knowledge Graph RAG (GraphRAG) combines vector search with graph databases to capture both semantic meaning and explicit relationships between entities. Instead of just retrieving similar text chunks, the system queries a graph of interconnected entities (nodes) and relationships (edges), providing structured, contextual information. This grounds LLM responses in factual relationships and prevents hallucinations.
+
+## Simple Example
+```python
+# Knowledge graph structure
+graph = {
+    "ACME Corp": {
+        "type": "Company",
+        "relationships": {
+            "HAS_CEO": "Jane Smith",
+            "REPORTED_REVENUE": "$314M",
+            "LOCATED_IN": "California"
+        }
+    }
+}
+
+# Query combining vector + graph
+query = "Who runs ACME Corp?"
+
+# 1. Vector search finds relevant entity
+entity = vector_search(query)  # Returns "ACME Corp"
+
+# 2. Traverse graph for relationships
+result = graph.query(
+    "MATCH (c:Company {name: 'ACME Corp'})-[:HAS_CEO]->(ceo) RETURN ceo"
+)  # Returns "Jane Smith"
+
+# 3. LLM generates answer with structured facts
+answer = llm.generate(query, context=result)
+```
+
+## Pros
+Captures explicit relationships that vectors miss. Reduces hallucinations by providing structured, factual connections.
+
+## Cons
+Requires building and maintaining a knowledge graph. Complex setup and querying compared to simple vector search.
+
+## When to Use It
+Use when relationships between entities are crucial to answers. Ideal for domains with complex interconnections (healthcare, finance, research).
+
+## When NOT to Use It
+Avoid when data lacks clear entities and relationships. Skip if you need rapid prototyping without graph infrastructure investment.
+
+
+# Contextual Retrieval
+
+## Resource
+**Introducing Contextual Retrieval | Anthropic**
+https://www.anthropic.com/news/contextual-retrieval
+
+## What It Is
+Contextual Retrieval, introduced by Anthropic, prepends chunk-specific explanatory context to each chunk before embedding and indexing. An LLM generates a brief description explaining what each chunk is about in relation to the entire document. This technique includes Contextual Embeddings and Contextual BM25, reducing retrieval failures by 49% alone and 67% when combined with re-ranking.
+
+## Simple Example
+```python
+# Original chunk (lacks context)
+chunk = "The company's revenue grew by 3% over the previous quarter."
+
+# Generate contextual prefix with LLM
+context = llm.generate(
+    f"Document: {full_document}\n\nChunk: {chunk}\n\n"
+    "Provide brief context for this chunk:"
+)
+# Returns: "This chunk is from ACME Corp's Q2 2023 SEC filing;
+# previous quarter revenue was $314M."
+
+# Embed with context
+contextualized_chunk = context + " " + chunk
+embedding = embed_model.encode(contextualized_chunk)
+
+# Also create contextual BM25 index with the same contextualized chunks
+bm25_index.add(contextualized_chunk)
+```
+
+## Pros
+Dramatically improves retrieval accuracy by adding document context to chunks. Works with both vector embeddings and BM25 keyword search.
+
+## Cons
+Significantly increases indexing time and cost due to LLM calls for every chunk. Larger index size due to additional context text.
+
+## When to Use It
+Use when chunks lack standalone meaning without document context. Ideal for technical documents, financial reports, or dense reference materials.
+
+## When NOT to Use It
+Avoid when chunks are already self-contained and clear. Skip if indexing budget or time constraints are tight, or corpus updates frequently.
+
+
+
+# Query Expansion
+
+## Resource
+**Advanced RAG: Query Expansion | Haystack**
+https://haystack.deepset.ai/blog/query-expansion
+
+## What It Is
+Query Expansion enhances user queries by generating multiple variations or adding related terms before retrieval. An LLM automatically generates additional queries from different perspectives, capturing various aspects of the user's intent. This addresses vague or poorly formed queries and helps cover synonyms and similar meanings.
+
+## Simple Example
+```python
+# Original query
+user_query = "What is RAG?"
+
+# LLM generates expanded queries
+expanded_queries = [
+    "What is Retrieval Augmented Generation?",
+    "How does RAG work in AI systems?",
+    "Explain RAG architecture and components"
+]
+
+# Retrieve documents for all queries
+for query in expanded_queries:
+    results = vector_search(query)
+```
+
+## Pros
+Improves retrieval recall by capturing multiple interpretations of the query. Handles vague queries and terminology variations effectively.
+
+## Cons
+Increases latency and cost due to multiple LLM calls and retrievals. May introduce noise if expanded queries drift from original intent.
+
+## When to Use It
+Use when users provide short, ambiguous, or poorly-worded queries. Ideal for keyword-based retrieval systems that need semantic variations.
+
+## When NOT to Use It
+Avoid when queries are already specific and well-formed. Skip if latency is critical or when operating under strict cost constraints.
+
+
+# Multi-Query RAG
+
+## Resource
+**Advanced RAG: Multi-Query Retriever Approach | Medium**
+https://medium.com/@kbdhunga/advanced-rag-multi-query-retriever-approach-ad8cd0ea0f5b
+
+## What It Is
+Multi-Query RAG generates multiple reformulations of the original query, executes parallel searches, and aggregates results. An LLM creates diverse perspectives of the same question to overcome the limitations of distance-based retrieval. Results from all queries are combined (typically taking the unique union) to create a richer, more comprehensive result set.
+
+## Simple Example
+```python
+# Generate multiple query perspectives
+original_query = "How do I deploy a model?"
+
+reformulated_queries = llm.generate([
+    "What are model deployment steps?",
+    "Best practices for deploying ML models",
+    "Model deployment infrastructure options"
+])
+
+# Execute searches in parallel
+all_results = []
+for query in reformulated_queries:
+    results = vector_search(query, top_k=20)
+    all_results.extend(results)
+
+# Deduplicate and return unique results
+final_results = deduplicate(all_results)
+```
+
+## Pros
+Mitigates single query bias and improves result diversity. Increases recall by capturing different interpretations of user intent.
+
+## Cons
+Higher computational cost due to multiple retrievals. May retrieve redundant or less relevant documents if queries overlap poorly.
+
+## When to Use It
+Use when user queries may have multiple valid interpretations. Ideal for improving recall on ambiguous or broad questions.
+
+## When NOT to Use It
+Avoid for very specific queries with clear intent. Skip when latency and cost are major constraints, or retrieval corpus is small.
+
+
+
+# Context-Aware Chunking
+
+## Resource
+**Semantic Chunking for RAG | Medium**
+https://medium.com/the-ai-forum/semantic-chunking-for-rag-f4733025d5f5
+
+## What It Is
+Context-Aware Chunking (also called semantic chunking) intelligently determines chunk boundaries based on semantic similarity rather than fixed sizes. It generates embeddings for sentences, compares their similarity, and groups semantically related content together. This ensures chunks contain coherent topics, improving embedding quality and retrieval accuracy.
+
+## Simple Example
+```python
+# Split document into sentences
+sentences = document.split_sentences()
+
+# Generate embeddings for each sentence
+embeddings = [embed_model.encode(s) for s in sentences]
+
+# Calculate similarity between consecutive sentences
+similarities = [cosine_similarity(embeddings[i], embeddings[i+1])
+                for i in range(len(embeddings)-1)]
+
+# Group sentences where similarity > threshold
+chunks = []
+current_chunk = [sentences[0]]
+for i, sim in enumerate(similarities):
+    if sim > 0.8:  # High similarity = same topic
+        current_chunk.append(sentences[i+1])
+    else:  # Low similarity = new topic
+        chunks.append(" ".join(current_chunk))
+        current_chunk = [sentences[i+1]]
+```
+
+## Pros
+Creates semantically coherent chunks that improve embedding quality. Preserves topic continuity and contextual meaning within chunks.
+
+## Cons
+Computationally expensive due to embedding every sentence. Slower indexing process compared to simple fixed-size chunking.
+
+## When to Use It
+Use when document topics are diverse and intermingled. Ideal for complex documents where topic boundaries are important for retrieval.
+
+## When NOT to Use It
+Avoid when processing speed is critical or documents are already well-structured. Skip for homogeneous documents with consistent topics throughout.
+
+
+
+# Late Chunking
+
+## Resource
+**Late Chunking in Long-Context Embedding Models | Jina AI**
+https://jina.ai/news/late-chunking-in-long-context-embedding-models/
+
+## What It Is
+Late Chunking processes entire documents (or large sections) through the embedding model's transformer before splitting into chunks. Traditional "naive chunking" splits text first, losing long-distance context. Late Chunking embeds all tokens together, then applies chunking after the transformer but before pooling, preserving full contextual information in each chunk's embedding.
+
+## Simple Example
+```python
+# Traditional chunking (loses context)
+chunks = split_document(doc, chunk_size=512)
+embeddings = [embed_model.encode(chunk) for chunk in chunks]
+
+# Late Chunking (preserves context)
+# 1. Process entire document through transformer
+full_doc_embeddings = transformer_layer(doc)  # 8192 tokens max
+
+# 2. Chunk the token embeddings (not the text)
+chunk_boundaries = [0, 512, 1024, 1536, ...]
+chunk_embeddings = []
+for i in range(len(chunk_boundaries)-1):
+    start, end = chunk_boundaries[i], chunk_boundaries[i+1]
+    # Mean pool the token embeddings for this chunk
+    chunk_emb = mean_pool(full_doc_embeddings[start:end])
+    chunk_embeddings.append(chunk_emb)
+```
+
+## Pros
+Maintains full document context in chunk embeddings, improving accuracy. Leverages long-context models (8K+ tokens) effectively.
+
+## Cons
+Requires long-context embedding models with high token limits. More complex implementation than standard chunking approaches.
+
+## When to Use It
+Use when document context is crucial for understanding chunks. Ideal for documents where meaning depends on long-distance relationships.
+
+## When NOT to Use It
+Avoid when using standard embedding models with small context windows. Skip if documents are already short and context is local.
+
+
+
+# Hierarchical RAG
+
+## Resource
+**Document Hierarchy in RAG: Enhancing AI Efficiency | Medium**
+https://medium.com/@nay1228/document-hierarchy-in-rag-boosting-ai-retrieval-efficiency-aa23f21b5fb9
+
+## What It Is
+Hierarchical RAG organizes documents in parent-child relationships, retrieving small chunks for accurate matching while providing larger parent contexts for generation. Child chunks are embedded and searched, but when a match is found, the system returns the parent chunk (containing broader context) to the LLM. Metadata maintains relationships between chunks, enabling efficient navigation of the hierarchy.
+
+## Simple Example
+```python
+# Index structure
+document = {
+    "parent": "Q2 Financial Report - Full Section",
+    "children": [
+        "Revenue increased 3% to $314M",
+        "Operating costs decreased 5%",
+        "Net profit margin improved to 12%"
+    ]
+}
+
+# Embed only child chunks
+for child in document["children"]:
+    index.add(embed(child), metadata={"parent_id": document["parent"]})
+
+# Retrieval
+query = "What was Q2 revenue?"
+child_match = vector_search(query)  # Finds "Revenue increased 3%..."
+
+# Return parent context instead of just the child
+full_context = get_parent(child_match.metadata["parent_id"])
+# LLM sees entire Q2 section for better reasoning
+```
+
+## Pros
+Balances retrieval precision with generation context. Reduces noise in search while providing sufficient context for reasoning.
+
+## Cons
+Requires careful design of parent-child relationships. Adds complexity to indexing and retrieval logic.
+
+## When to Use It
+Use when small chunks match better but lack sufficient context for answers. Ideal for structured documents with natural hierarchies (sections, chapters).
+
+## When NOT to Use It
+Avoid when documents lack clear hierarchical structure. Skip if simple flat chunking provides adequate context for your use case.
+
+
+
+
+# Self-Reflective RAG
+
+## Resource
+**Self-Reflective RAG with LangGraph | LangChain**
+https://blog.langchain.com/agentic-rag-with-langgraph/
+
+## What It Is
+Self-Reflective RAG (including Self-RAG and Corrective RAG/CRAG) adds self-assessment and iterative refinement to retrieval. The system evaluates whether retrieved documents are relevant, grades response quality, and refines queries or retrieves additional information when necessary. It creates a feedback loop where the system critiques its own outputs and adapts until producing a satisfactory answer.
+
+## Simple Example
+```python
+# Initial retrieval
+query = "What is quantum computing?"
+docs = vector_search(query)
+
+# Self-reflection: Grade document relevance
+grades = []
+for doc in docs:
+    grade = llm.evaluate(f"Is this document relevant to '{query}'? {doc}")
+    grades.append(grade)
+
+# If relevance is low, refine and retry
+if avg(grades) < 0.7:
+    refined_query = llm.refine(query, docs)
+    docs = vector_search(refined_query)
+
+# Generate answer
+answer = llm.generate(query, docs)
+
+# Self-reflection: Verify answer quality
+if not llm.verify_answer(answer, docs):
+    # Retrieve more context or refine further
+    additional_docs = web_search(query)
+    answer = llm.generate(query, docs + additional_docs)
+```
+
+## Pros
+Improves answer quality through self-correction and validation. Adapts dynamically to poor retrieval results by refining approach.
+
+## Cons
+Significantly higher latency due to multiple LLM calls and iterations. Increased cost and complexity compared to single-pass RAG.
+
+## When to Use It
+Use when answer accuracy is critical and errors are costly. Ideal for complex queries where initial retrieval may be insufficient.
+
+## When NOT to Use It
+Avoid when real-time responses are required. Skip for simple queries or when operating under strict latency/cost budgets.
+
+
+
+# Fine-tuned Embedding Models
+
+## Resource
+**Fine-tune Embedding models for Retrieval Augmented Generation (RAG) | Philipp Schmid**
+https://www.philschmid.de/fine-tune-embedding-model-for-rag
+
+## What It Is
+Fine-tuning embedding models adapts pre-trained models to domain-specific data, improving retrieval accuracy for specialized vocabularies and contexts. Instead of using generic embeddings trained on broad data, you train the model on your specific corpus with relevant query-document pairs. This teaches the model to recognize domain jargon, relationships, and semantic patterns unique to your use case.
+
+## Simple Example
+```python
+# Prepare domain-specific training data
+training_data = [
+    ("What is EBITDA?", "positive_doc_about_EBITDA.txt"),
+    ("Explain capital expenditure", "capex_explanation.txt"),
+    # ... thousands of query-document pairs
+]
+
+# Load pre-trained model
+base_model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Fine-tune on domain data
+fine_tuned_model = base_model.fit(
+    train_data=training_data,
+    epochs=3,
+    loss=MultipleNegativesRankingLoss()
+)
+
+# Use fine-tuned model for retrieval
+query_embedding = fine_tuned_model.encode("What is working capital?")
+# Better matches domain-specific financial documents
+```
+
+## Pros
+Significantly improves retrieval accuracy for specialized domains (5-10% gains typical). Can achieve better performance with smaller model sizes after fine-tuning.
+
+## Cons
+Requires domain-specific training data (query-document pairs or synthetic data). Additional time and resources needed for training and evaluation.
+
+## When to Use It
+Use when working with specialized domains (medical, legal, technical) with unique terminology. Ideal when retrieval accuracy is suboptimal with generic embeddings.
+
+## When NOT to Use It
+Avoid when working with general knowledge or common topics. Skip if you lack training data or can't afford the fine-tuning investment.
+
+
+## 🎯 Strategy Overview
+
+| # | Strategy | Status | Use Case | Pros | Cons |
+|---|----------|--------|----------|------|------|
+| 1 | [Re-ranking](#1-re-ranking) | ✅ Code Example | Precision-critical | Highly accurate results | Slower, more compute |
+| 2 | [Agentic RAG](#2-agentic-rag) | ✅ Code Example | Flexible retrieval needs | Autonomous tool selection | More complex logic |
+| 3 | [Knowledge Graphs](#3-knowledge-graphs) | 📝 Pseudocode Only | Relationship-heavy | Captures connections | Infrastructure overhead |
+| 4 | [Contextual Retrieval](#4-contextual-retrieval) | ✅ Code Example | Critical documents | 35-49% better accuracy | High ingestion cost |
+| 5 | [Query Expansion](#5-query-expansion) | ✅ Code Example | Ambiguous queries | Better recall, multiple perspectives | Extra LLM call, higher cost |
+| 6 | [Multi-Query RAG](#6-multi-query-rag) | ✅ Code Example | Broad searches | Comprehensive coverage | Multiple API calls |
+| 7 | [Context-Aware Chunking](#7-context-aware-chunking) | ✅ Code Example | All documents | Semantic coherence | Slightly slower ingestion |
+| 8 | [Late Chunking](#8-late-chunking) | 📝 Pseudocode Only | Context preservation | Full document context | Requires long-context models |
+| 9 | [Hierarchical RAG](#9-hierarchical-rag) | 📝 Pseudocode Only | Complex documents | Precision + context | Complex setup |
+| 10 | [Self-Reflective RAG](#10-self-reflective-rag) | ✅ Code Example | Research queries | Self-correcting | Highest latency |
+| 11 | [Fine-tuned Embeddings](#11-fine-tuned-embeddings) | 📝 Pseudocode Only | Domain-specific | Best accuracy | Training required |
+
