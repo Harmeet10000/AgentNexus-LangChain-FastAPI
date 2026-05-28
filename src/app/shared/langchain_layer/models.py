@@ -54,7 +54,7 @@ import asyncio
 import base64
 import mimetypes
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import toons
 from langchain.chat_models import init_chat_model
@@ -66,11 +66,10 @@ from langchain_google_genai import (
     GoogleGenerativeAIEmbeddings,
     create_context_cache,
 )
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from pydantic import BaseModel
 
-from app.config import Settings, get_settings
-from app.connections import get_shared_httpx_client
+from app.config import get_settings
+from app.connections.httpx_client import get_shared_httpx_client
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -80,6 +79,8 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langchain_core.messages import BaseMessage
     from langchain_core.tools import BaseTool
+
+    from app.config import Settings
 
 settings: Settings = get_settings()
 _DEFAULT_GEMINI_TEMPERATURE = 0.3
@@ -108,39 +109,18 @@ def build_chat_model(
     """Return a configured Gemini chat model instance."""
 
     return init_chat_model(
-        # model=model_name,
+        model=model_name or settings.GEMINI_PRO_MODEL,
         thinking_level="medium",
-        temperature=Settings.GEMINI_VISION_MODEL,
+        temperature=temperature if temperature is not None else settings.GEMINI_TEMPERATURE,
         top_p=top_p if top_p is not None else _DEFAULT_GEMINI_TOP_P,
         top_k=top_k if top_k is not None else _DEFAULT_GEMINI_TOP_K,
-        max_output_tokens=max_tokens,
-        api_key=Settings.GEMINI_API_KEY,
+        max_output_tokens=max_tokens or settings.GEMINI_MAX_TOKENS,
+        api_key=settings.GEMINI_API_KEY,
         streaming=streaming,
-        # timeout=Settings.TAVILY_TIMEOUT_SECONDS,
         cached_content=cached_content,
         **kwargs,
         http_async_client=get_shared_httpx_client(),
     )
-
-
-client = ChatNVIDIA(
-  model="minimaxai/minimax-m2.7",
-  api_key="$NVIDIA_API_KEY",
-  temperature=1,
-  top_p=0.95,
-  max_tokens=8192,
-)
-
-
-
-
-# model = ChatOpenRouter(
-#     model="anthropic/claude-sonnet-4.5",
-#     temperature=0,
-#     max_tokens=1024,
-#     max_retries=2,
-#     # other params...
-# )
 
 
 def build_chat_google_genai_model(
@@ -155,18 +135,18 @@ def build_chat_google_genai_model(
     **kwargs: Any,
 ) -> ChatGoogleGenerativeAI:
     """Return a configured Gemini chat model via ChatGoogleGenerativeAI."""
-    default_temperature = min(_mcfg.default_temperature, _DEFAULT_GEMINI_TEMPERATURE)
+    default_temperature = min(settings.GEMINI_TEMPERATURE, _DEFAULT_GEMINI_TEMPERATURE)
 
     return ChatGoogleGenerativeAI(
-        model=model_name or _mcfg.gemini_pro_model,
+        model=model_name or settings.GEMINI_PRO_MODEL,
         thinking_level="medium",
         temperature=temperature if temperature is not None else default_temperature,
         top_p=top_p if top_p is not None else _DEFAULT_GEMINI_TOP_P,
         top_k=top_k if top_k is not None else _DEFAULT_GEMINI_TOP_K,
-        max_tokens=max_tokens or _mcfg.default_max_tokens,
-        api_key=settings_api_key,
+        max_tokens=max_tokens or settings.GEMINI_MAX_TOKENS,
+        api_key=settings.GEMINI_API_KEY,
         streaming=streaming,
-        timeout=_mcfg.default_timeout,
+        timeout=settings.TAVILY_TIMEOUT_SECONDS,
         cached_content=cached_content,
         **kwargs,
     )
@@ -174,7 +154,7 @@ def build_chat_google_genai_model(
 
 def build_fast_model(**kwargs: Any) -> BaseChatModel:
     """Flash model for lower-latency / cheaper tasks (guardrails, tool selection)."""
-    return build_chat_model(model_name=_mcfg.gemini_flash_model, **kwargs)
+    return build_chat_model(model_name=settings.GEMINI_FLASH_MODEL, **kwargs)
 
 
 def create_gemini_context_cache(
@@ -191,7 +171,7 @@ def create_gemini_context_cache(
     Use this for shared context that would otherwise be re-sent on every request,
     such as long system instructions, logs, code snapshots, or uploaded file refs.
     """
-    llm: BaseChatModel = model or build_fast_model()
+    llm = model if isinstance(model, ChatGoogleGenerativeAI) else build_chat_google_genai_model()
     return create_context_cache(
         model=llm,
         messages=messages,
@@ -241,7 +221,7 @@ def build_embedding_model_generic(
         **kwargs: Provider-specific configuration passed through.
     """
     return init_embeddings(
-        model=model_name or f"google-genai/{_mcfg.gemini_embedding_model}",
+        model=model_name or f"google-genai/{settings.GEMINI_EMBEDDING_MODEL}",
         **kwargs,
     )
 
@@ -288,8 +268,9 @@ def build_embedding_model_gemini_full(
             task_type="SEMANTIC_SIMILARITY",
         )
     """
+    _ = title
     return GoogleGenerativeAIEmbeddings(
-        model=model_name or _mcfg.gemini_embedding_model,
+        model=model_name or settings.GEMINI_EMBEDDING_MODEL,
         task_type=task_type,
         # title=title,
         client=client,
@@ -324,7 +305,7 @@ async def ainvoke_text(
         messages.append(SystemMessage(content=system))
     messages.append(HumanMessage(content=prompt))
     result = await llm.ainvoke(messages)
-    return result.content  # type: ignore[return-value]
+    return str(result.content)
 
 
 async def abatch_text(
@@ -339,7 +320,7 @@ async def abatch_text(
     Uses LangChain's native abatch which honours max_concurrency.
     """
     llm = model or build_chat_model()
-    max_c = max_concurrency or _mcfg.max_concurrency
+    max_c = max_concurrency or 5
 
     def _build(prompt: str) -> list[BaseMessage]:
         msgs: list[BaseMessage] = []
@@ -349,8 +330,8 @@ async def abatch_text(
         return msgs
 
     message_batches = [_build(p) for p in prompts]
-    results = await llm.abatch(message_batches, config={"max_concurrency": max_c})
-    return [r.content for r in results]
+    results = await llm.abatch(cast("Any", message_batches), config={"max_concurrency": max_c})
+    return [str(r.content) for r in results]
 
 
 async def astream_text(
@@ -430,7 +411,7 @@ def build_image_message(
         msg = "Provide one of image_path, image_url, or image_b64"
         raise ValueError(msg)
 
-    return HumanMessage(content=content)
+    return HumanMessage(content=cast("Any", content))
 
 
 async def ainvoke_multimodal(
@@ -455,7 +436,7 @@ async def ainvoke_multimodal(
         )
     )
     result = await llm.ainvoke(messages)
-    return result.content  # type: ignore[return-value]
+    return str(result.content)
 
 
 async def abatch_multimodal(
@@ -482,7 +463,7 @@ async def abatch_multimodal(
         )
         for item in items
     ]
-    sem = asyncio.Semaphore(max_concurrency or _mcfg.max_concurrency)
+    sem = asyncio.Semaphore(max_concurrency or 5)
 
     async def bounded(coro: Any) -> str:
         async with sem:
@@ -534,9 +515,9 @@ async def aembed_text(
 
     Args:
         text: The text to embed.
-        model: Embedding model. Defaults to build_embedding_model().
+        model: Embedding model. Defaults to build_embedding_model_gemini_full().
     """
-    emb = model or build_embedding_model()
+    emb = model or build_embedding_model_gemini_full()
     return await asyncio.to_thread(emb.embed_query, text)
 
 
@@ -552,11 +533,11 @@ async def aembed_batch(
 
     Args:
         texts: List of texts to embed.
-        model: Embedding model. Defaults to build_embedding_model().
+        model: Embedding model. Defaults to build_embedding_model_gemini_full().
         max_concurrency: Max concurrent requests (note: GoogleGenerativeAI
                         handles batch requests server-side).
     """
     _ = max_concurrency  # Note: Gemini batching is server-side; limit isn't used here
-    emb = model or build_embedding_model()
+    emb = model or build_embedding_model_gemini_full()
     # embed_documents is synchronous; run in thread pool
     return await asyncio.to_thread(emb.embed_documents, texts)

@@ -49,9 +49,7 @@ if TYPE_CHECKING:
     from langchain_core.tools.base import BaseTool
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from app.shared.langchain_layer.agents import (
-        IdempotencyGuard,
-    )
+    from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
 
     from .client import GraphitiService
 

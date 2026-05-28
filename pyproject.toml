@@ -59,7 +59,7 @@ dependencies = [
     "beanie>=2.0.1",
     "motor==3.7.1",
     # --- DATABASE: NEO4J ---
-    "graphiti-core[google-genai]>=0.28.2",
+    "graphiti-core[google-genai]>=0.29.1",
     "neo4j>=6.0.3",
     # --- CACHE: REDIS ---
     "redis[hiredis]>=5.1.0,<6.0.0",
@@ -105,7 +105,7 @@ dependencies = [
     "fastmcp>=3.1.0",
     # --- DEVELOPMENT & EVALUATION ---
     "apscheduler>=3.11.2",
-    "cognee>=0.5.3",
+    "cognee>=1.1.0",
     "compact-middleware>=0.1.1",
     "dspy>=2.5.7",
     "gepa>=0.1.1",

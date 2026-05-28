@@ -15,11 +15,9 @@ from fastapi import APIRouter, UploadFile
 
 from app.utils import APIResponse, http_response, logger
 
+from .dependencies import IngestionGraphDep, UserIdDep
 from .dto import DocumentUploadResponse
 from .service import IngestionService
-
-if TYPE_CHECKING:
-    from .dependencies import IngestionGraphDep, UserIdDep
 
 router = APIRouter(
     prefix="/ingestion",

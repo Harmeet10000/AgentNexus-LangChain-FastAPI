@@ -1,7 +1,8 @@
 """Graph state definitions and data structures for the Deep Research agent."""
 
 import operator
-from typing import Annotated
+from collections.abc import Mapping
+from typing import Annotated, cast
 
 from langchain_core.messages import MessageLikeRepresentation
 from langgraph.graph import MessagesState
@@ -58,12 +59,13 @@ class ResearchQuestion(BaseModel):
 ###################
 
 
-def override_reducer(current_value, new_value):
+def override_reducer(current_value: object, new_value: object) -> object:
     """Reducer function that allows overriding values in state."""
-    if isinstance(new_value, dict) and new_value.get("type") == "override":
-        return new_value.get("value", new_value)
-    else:
-        return operator.add(current_value, new_value)
+    if isinstance(new_value, Mapping):
+        override_value = cast("Mapping[str, object]", new_value)
+        if override_value.get("type") == "override":
+            return override_value.get("value", new_value)
+    return operator.add(current_value, new_value)
 
 
 class AgentInputState(MessagesState):
@@ -75,8 +77,8 @@ class AgentState(MessagesState):
 
     supervisor_messages: Annotated[list[MessageLikeRepresentation], override_reducer]
     research_brief: str | None
-    raw_notes: Annotated[list[str], override_reducer] = []
-    notes: Annotated[list[str], override_reducer] = []
+    raw_notes: Annotated[list[str], override_reducer]
+    notes: Annotated[list[str], override_reducer]
     final_report: str
 
 
@@ -85,19 +87,19 @@ class SupervisorState(TypedDict):
 
     supervisor_messages: Annotated[list[MessageLikeRepresentation], override_reducer]
     research_brief: str
-    notes: Annotated[list[str], override_reducer] = []
-    research_iterations: int = 0
-    raw_notes: Annotated[list[str], override_reducer] = []
+    notes: Annotated[list[str], override_reducer]
+    research_iterations: int
+    raw_notes: Annotated[list[str], override_reducer]
 
 
 class ResearcherState(TypedDict):
     """State for individual researchers conducting research."""
 
     researcher_messages: Annotated[list[MessageLikeRepresentation], operator.add]
-    tool_call_iterations: int = 0
+    tool_call_iterations: int
     research_topic: str
     compressed_research: str
-    raw_notes: Annotated[list[str], override_reducer] = []
+    raw_notes: Annotated[list[str], override_reducer]
 
 
 class ResearcherOutputState(BaseModel):
