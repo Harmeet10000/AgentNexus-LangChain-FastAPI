@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from typing import Any
 
 
-
 class Configuration(BaseModel):
     """Runtime configuration for Tavily-backed deep research.
 

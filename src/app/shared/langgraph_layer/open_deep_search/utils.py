@@ -15,7 +15,7 @@ from app.shared.langchain_layer.models import _build_chat_model
 from app.shared.services import search
 from app.utils import ExternalServiceException, logger
 
-from .configuration import Configuration
+from .config import Configuration
 from .prompts import _SUMMARIZE_WEBPAGE_PROMPT
 from .state import ResearchComplete, Summary
 

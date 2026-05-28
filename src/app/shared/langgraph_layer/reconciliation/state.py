@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 FetchNode = Callable[["ReconciliationState"], Awaitable[dict[str, object]]]
 ApplyNode = Callable[["ReconciliationState"], Awaitable[dict[str, object]]]
+ReconcileNode = Callable[["ReconciliationState"], Awaitable[dict[str, object]]]
+WriteVersionsNode = Callable[["ReconciliationState"], Awaitable[dict[str, object]]]
 ReconciliationRunnable = Runnable[list[BaseMessage], Any]
 
 
