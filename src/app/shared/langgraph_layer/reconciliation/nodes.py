@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.utils import logger
 
-from .prompt import _RECONCILIATION_SYSTEM_PROMPT
+from .prompts import _RECONCILIATION_SYSTEM_PROMPT
 from .state import (
     ReconciliationDecision,
     ReconciliationEntityRecord,
@@ -286,12 +286,14 @@ def make_write_versions_node(
 
 def _row_to_record(row: object) -> ReconciliationEntityRecord:
     values = cast("tuple[object, ...]", row)
+    confidence_value = values[4]
+    confidence = float(str(confidence_value))
     return ReconciliationEntityRecord(
         id=str(values[0]),
         entity_type=str(values[1]),
         name=str(values[2]),
         normalized_name=str(values[3]),
-        confidence=float(values[4]),
+        confidence=confidence,
         metadata=json.loads(str(values[5])) if values[5] else {},
         doc_id=str(values[6]) if values[6] is not None else None,
     )

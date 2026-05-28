@@ -1,11 +1,11 @@
 from .graph import build_reconciliation_graph
-from .pipeline_node import (
+from .nodes import (
     make_apply_changes_node,
     make_fetch_existing_node,
     make_reconcile_node,
     make_write_versions_node,
 )
-from .prompt import _RECONCILIATION_SYSTEM_PROMPT
+from .prompts import _RECONCILIATION_SYSTEM_PROMPT
 from .state import (
     IgnoreDecision,
     MergeDecision,

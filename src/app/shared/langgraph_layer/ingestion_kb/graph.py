@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from .pipeline_node import (
+from .nodes import (
     dispatch_contextualize_chunks,
     make_classify_extract_node,
     make_contextualize_chunk_node,

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from .configuration import Configuration, build_open_deep_search_config
-from .deep_researcher_graph import deep_researcher
-from .tool import DeepResearchInput, DeepResearchOutput, make_deep_research_tool
+from .config import Configuration, build_open_deep_search_config
+from .graph import deep_researcher
+from .tools import DeepResearchInput, DeepResearchOutput, make_deep_research_tool
 
 __all__ = [
     "Configuration",

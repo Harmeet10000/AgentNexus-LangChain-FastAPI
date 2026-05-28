@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
 
-from .deep_researcher_graph import deep_researcher
+from .graph import deep_researcher
 
 if TYPE_CHECKING:
     from typing import Any
@@ -47,12 +47,7 @@ def make_deep_research_tool(
     *,
     http_client: httpx.AsyncClient | None = None,
 ) -> BaseTool:
-    """Build a ToolNode-compatible deep research tool.
-
-    Args:
-        http_client: Optional lifespan-owned HTTPX/Tavily client injected into
-            RunnableConfig so Tavily search reuses shared connection pools.
-    """
+    """Build a ToolNode-compatible deep research tool."""
 
     async def run_deep_research(
         question: str,

@@ -19,7 +19,7 @@ from langgraph.types import Command
 from app.shared.langchain_layer.models import _build_chat_model
 from app.utils import logger
 
-from .configuration import Configuration
+from .config import Configuration
 from .prompts import (
     _CLARIFY_WITH_USER_PROMPT,
     _COMPRESS_RESEARCH_SYSTEM_PROMPT,
@@ -421,11 +421,6 @@ async def final_report_generation(
                 date=get_today_str(),
             )
             final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt)])
-            return {  # noqa: TRY300
-                "final_report": final_report.content,
-                "messages": [final_report],
-                **cleared_state,
-            }
         except Exception as exc:  # noqa: BLE001 - model providers expose varied exception classes.
             if not is_token_limit_exceeded(exc, configurable.final_report_model):
                 return {
@@ -449,6 +444,12 @@ async def final_report_generation(
                 else int(findings_token_limit * 0.9)
             )
             findings = findings[:findings_token_limit]
+        else:
+            return {
+                "final_report": final_report.content,
+                "messages": [final_report],
+                **cleared_state,
+            }
 
     return {
         "final_report": "Error generating final report: Maximum retries exceeded",

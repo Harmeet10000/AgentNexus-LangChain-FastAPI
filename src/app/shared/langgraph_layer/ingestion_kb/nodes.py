@@ -27,7 +27,7 @@ from app.shared.rag.graphiti.schemas import (
 )
 from app.utils import logger
 
-from .prompt import (
+from .prompts import (
     _CLASSIFY_EXTRACT_SYSTEM_PROMPT,
     _CONTEXTUALIZE_CHUNK_SYSTEM_PROMPT,
     _EXTRACT_SCHEMA_SYSTEM_PROMPT,
@@ -60,8 +60,7 @@ if TYPE_CHECKING:
     )
 
 _DEFAULT_LIMIT = 20
-# refactor document parser, grapgiti then use the updated code here in ingestion pipeline node, then modify the model.py, tool definations, retry logic, p
-# think about the retrival_kb afterwards
+
 
 def make_parse_document_node() -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def parse_document_node(state: IngestionState) -> dict[str, object]:
@@ -357,11 +356,11 @@ async def _parse_document_with_docling(
                 for table in getattr(document, "tables", [])
                 if hasattr(table, "to_markdown")
             ]
-            elements: list[Unknown] = [
-                item.to_dict()
-                for item, _level in document.iterate_items()
-                if hasattr(item, "to_dict")
-            ]
+            elements: list[Unknown] = []
+            for item, _level in document.iterate_items():
+                to_dict = getattr(item, "to_dict", None)
+                if callable(to_dict):
+                    elements.append(to_dict())
             return ParsedDocument(
                 markdown=markdown,
                 title=_extract_title(markdown, filename),
@@ -377,7 +376,7 @@ async def _parse_document_with_docling(
 def _fallback_segments(markdown: str) -> list[ClauseSegment]:
     blocks: list[str | Any] = [block.strip() for block in re.split(r"\n\s*\n", markdown) if block.strip()]
     if not blocks:
-        blocks: list[str | Any] = [markdown.strip()] if markdown.strip() else []
+        blocks = [markdown.strip()] if markdown.strip() else []
     return [
         ClauseSegment(
             clause_id=f"clause-{index + 1}",
@@ -464,6 +463,9 @@ async def _upsert_parent_document(
             },
         )
     ).fetchone()
+    if row is None:
+        msg = "parent document upsert did not return an id"
+        raise ValueError(msg)
     return str(row[0])
 
 
