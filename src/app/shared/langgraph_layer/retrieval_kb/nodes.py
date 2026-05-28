@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 EmbeddingFunction = Any
 
-QUERY_ANALYZER_PROMPT = render_prompt_sections(
+_QUERY_ANALYZER_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a legal retrieval query planning engine."),
     (
         "OBJECTIVE",
@@ -47,7 +47,7 @@ QUERY_ANALYZER_PROMPT = render_prompt_sections(
     ("CONSTRAINTS", "Return only QueryPlan."),
 )
 
-CONTEXT_GRADER_PROMPT = render_prompt_sections(
+_CONTEXT_GRADER_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a retrieval sufficiency grader."),
     (
         "OBJECTIVE",
@@ -60,7 +60,7 @@ CONTEXT_GRADER_PROMPT = render_prompt_sections(
     ("CONSTRAINTS", "Return only ContextGrade."),
 )
 
-GENERATOR_PROMPT = render_prompt_sections(
+_GENERATOR_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a grounded legal answer generator."),
     (
         "OBJECTIVE",
@@ -104,7 +104,7 @@ def make_query_analyzer_node(
                 ),
             }
         )
-        messages = [SystemMessage(content=QUERY_ANALYZER_PROMPT), HumanMessage(content=plan_input)]
+        messages = [SystemMessage(content=_QUERY_ANALYZER_SYSTEM_PROMPT), HumanMessage(content=plan_input)]
         try:
             raw_plan = await retry_immediate(
                 lambda: query_llm.ainvoke(cast("list[Any]", messages)),
@@ -217,7 +217,7 @@ def make_context_grader_node(
                 "chunks": [chunk.model_dump() for chunk in chunks],
             }
         )
-        messages = [SystemMessage(content=CONTEXT_GRADER_PROMPT), HumanMessage(content=payload)]
+        messages = [SystemMessage(content=_CONTEXT_GRADER_SYSTEM_PROMPT), HumanMessage(content=payload)]
         if not chunks:
             grade = ContextGrade(
                 sufficient=False,
@@ -263,7 +263,7 @@ def make_generator_node(
                 "chunks": [chunk.model_dump() for chunk in chunks],
             }
         )
-        messages = [SystemMessage(content=GENERATOR_PROMPT), HumanMessage(content=payload)]
+        messages = [SystemMessage(content=_GENERATOR_SYSTEM_PROMPT), HumanMessage(content=payload)]
         try:
             raw_answer = await retry_immediate(
                 lambda: generator_llm.ainvoke(cast("list[Any]", messages)),

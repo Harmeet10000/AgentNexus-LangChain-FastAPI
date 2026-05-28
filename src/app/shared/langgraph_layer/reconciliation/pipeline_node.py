@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.utils import logger
 
-from .prompt import reconcile_prompt
+from .prompt import _RECONCILIATION_SYSTEM_PROMPT
 from .state import (
     ReconciliationDecision,
     ReconciliationEntityRecord,
@@ -122,7 +122,7 @@ def make_reconcile_node(
         try:
             result = await reconcile_llm.ainvoke(
                 [
-                    SystemMessage(content=reconcile_prompt),
+                    SystemMessage(content=_RECONCILIATION_SYSTEM_PROMPT),
                     HumanMessage(content=context),
                 ]
             )

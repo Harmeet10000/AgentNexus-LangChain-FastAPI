@@ -298,7 +298,7 @@ class AgentSaulService:
                 raw = await self._receive_json(ws)
             except (WebSocketIdleTimeout, WebSocketSecurityViolation):
                 raise
-            except Exception as exc:
+            except (ValidationError, ValueError, TypeError) as exc:
                 self._log.warning("saul_ws_receive_failed", error=str(exc))
                 return None
 

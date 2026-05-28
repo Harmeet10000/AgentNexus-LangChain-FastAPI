@@ -28,10 +28,10 @@ from app.shared.rag.graphiti.schemas import (
 from app.utils import logger
 
 from .prompt import (
-    CLASSIFY_EXTRACT_SYSTEM_PROMPT,
-    CONTEXTUALIZE_CHUNK_SYSTEM_PROMPT,
-    EXTRACT_SCHEMA_SYSTEM_PROMPT,
-    SEGMENT_DOCUMENT_SYSTEM_PROMPT,
+    _CLASSIFY_EXTRACT_SYSTEM_PROMPT,
+    _CONTEXTUALIZE_CHUNK_SYSTEM_PROMPT,
+    _EXTRACT_SCHEMA_SYSTEM_PROMPT,
+    _SEGMENT_DOCUMENT_SYSTEM_PROMPT,
 )
 from .state import (
     ClauseSegment,
@@ -94,7 +94,7 @@ def make_extract_schema_node(
             }
         )
         messages = [
-            SystemMessage(content=EXTRACT_SCHEMA_SYSTEM_PROMPT),
+            SystemMessage(content=_EXTRACT_SCHEMA_SYSTEM_PROMPT),
             HumanMessage(content=payload),
         ]
         metadata = await retry_immediate(
@@ -126,7 +126,7 @@ def make_segment_document_node(
             }
         )
         messages = [
-            SystemMessage(content=SEGMENT_DOCUMENT_SYSTEM_PROMPT),
+            SystemMessage(content=_SEGMENT_DOCUMENT_SYSTEM_PROMPT),
             HumanMessage(content=payload),
         ]
         try:
@@ -177,7 +177,7 @@ def make_contextualize_chunk_node(
             }
         )
         messages: list[SystemMessage | HumanMessage] = [
-            SystemMessage(content=CONTEXTUALIZE_CHUNK_SYSTEM_PROMPT),
+            SystemMessage(content=_CONTEXTUALIZE_CHUNK_SYSTEM_PROMPT),
             HumanMessage(content=payload),
         ]
         try:
@@ -221,7 +221,7 @@ def make_classify_extract_node(
             }
         )
         messages = [
-            SystemMessage(content=CLASSIFY_EXTRACT_SYSTEM_PROMPT),
+            SystemMessage(content=_CLASSIFY_EXTRACT_SYSTEM_PROMPT),
             HumanMessage(content=payload[:80_000]),
         ]
         try:

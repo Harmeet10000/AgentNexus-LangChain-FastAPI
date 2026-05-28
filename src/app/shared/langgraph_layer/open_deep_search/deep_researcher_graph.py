@@ -21,13 +21,13 @@ from app.utils import logger
 
 from .configuration import Configuration
 from .prompts import (
-    clarify_with_user_instructions,
-    compress_research_simple_human_message,
-    compress_research_system_prompt,
-    final_report_generation_prompt,
-    lead_researcher_prompt,
-    research_system_prompt,
-    transform_messages_into_research_topic_prompt,
+    _CLARIFY_WITH_USER_PROMPT,
+    _COMPRESS_RESEARCH_SYSTEM_PROMPT,
+    _COMPRESS_RESEARCH_USER_PROMPT,
+    _FINAL_REPORT_GENERATION_PROMPT,
+    _LEAD_RESEARCHER_SYSTEM_PROMPT,
+    _RESEARCH_SYSTEM_PROMPT,
+    _TRANSFORM_MESSAGES_INTO_RESEARCH_TOPIC_PROMPT,
 )
 from .state import (
     AgentInputState,
@@ -78,7 +78,7 @@ async def clarify_with_user(
         .with_structured_output(ClarifyWithUser)
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
     )
-    prompt_content = clarify_with_user_instructions.format(
+    prompt_content = _CLARIFY_WITH_USER_PROMPT.format(
         messages=get_buffer_string(state["messages"]),
         date=get_today_str(),
     )
@@ -105,14 +105,14 @@ async def write_research_brief(
         .with_structured_output(ResearchQuestion)
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
     )
-    prompt_content = transform_messages_into_research_topic_prompt.format(
+    prompt_content = _TRANSFORM_MESSAGES_INTO_RESEARCH_TOPIC_PROMPT.format(
         messages=get_buffer_string(state.get("messages", [])),
         date=get_today_str(),
     )
     response = cast(
         "ResearchQuestion", await research_model.ainvoke([HumanMessage(content=prompt_content)])
     )
-    supervisor_system_prompt = lead_researcher_prompt.format(
+    supervisor_system_prompt = _LEAD_RESEARCHER_SYSTEM_PROMPT.format(
         date=get_today_str(),
         max_concurrent_research_units=configurable.max_concurrent_research_units,
         max_researcher_iterations=configurable.max_researcher_iterations,
@@ -279,7 +279,7 @@ async def researcher(
         msg = "No research tools are available. Tavily search must be configured."
         raise ValueError(msg)
 
-    researcher_prompt = research_system_prompt.format(mcp_prompt="", date=get_today_str())
+    researcher_prompt = _RESEARCH_SYSTEM_PROMPT.format(mcp_prompt="", date=get_today_str())
     research_model = (
         _build_model(configurable.research_model, configurable.research_model_max_tokens)
         .bind_tools(tools)
@@ -355,12 +355,12 @@ async def compress_research(
     )
     researcher_messages = [
         *state.get("researcher_messages", []),
-        HumanMessage(content=compress_research_simple_human_message),
+        HumanMessage(content=_COMPRESS_RESEARCH_USER_PROMPT),
     ]
 
     for _ in range(3):
         try:
-            compression_prompt = compress_research_system_prompt.format(date=get_today_str())
+            compression_prompt = _COMPRESS_RESEARCH_SYSTEM_PROMPT.format(date=get_today_str())
             response = await synthesizer_model.ainvoke(
                 [SystemMessage(content=compression_prompt), *researcher_messages]
             )
@@ -414,7 +414,7 @@ async def final_report_generation(
 
     for current_retry in range(4):
         try:
-            final_report_prompt = final_report_generation_prompt.format(
+            final_report_prompt = _FINAL_REPORT_GENERATION_PROMPT.format(
                 research_brief=state.get("research_brief", ""),
                 messages=get_buffer_string(state.get("messages", [])),
                 findings=findings,
