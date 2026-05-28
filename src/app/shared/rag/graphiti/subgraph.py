@@ -15,19 +15,30 @@ MemoryScope enforced at result level: post-traversal type filtering.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from neo4j import Query
+from neo4j.exceptions import Neo4jError
 from pydantic import BaseModel, ConfigDict
 
 from app.utils import logger
 
 if TYPE_CHECKING:
-    from typing import LiteralString
+    from typing import Any, LiteralString
 
     from neo4j import AsyncDriver
 
     from app.shared.langchain_layer.agents.memory.memory_scope import MemoryScope
+
+
+class BoundLogger(Protocol):
+    def info(self, message: str, **kwargs: object) -> None: ...
+
+    def warning(self, message: str, **kwargs: object) -> None: ...
+
+    def exception(self, message: str, **kwargs: object) -> None: ...
+
+
 _SUBGRAPH_CYPHER = """
 MATCH path = (seed)-[r*1..{depth}]-(connected)
 WHERE seed.uuid IN $seed_uuids
@@ -57,7 +68,7 @@ class SubgraphNode:
     name: str
     group_id: str | None
     labels: list[str]
-    properties: dict[str, Any]
+    properties: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -65,7 +76,7 @@ class SubgraphEdge:
     from_uuid: str
     to_uuid: str
     rel_type: str
-    properties: dict[str, Any]
+    properties: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -108,7 +119,7 @@ def create_subgraph_expander(driver: AsyncDriver) -> Neo4jSubgraphConfig:
     """
     return Neo4jSubgraphConfig(
         driver=driver,
-        log=logger.bind(service="neo4j_subgraph"),
+        log=cast("BoundLogger", logger.bind(service="neo4j_subgraph")),
     )
 
 
@@ -157,8 +168,8 @@ async def expand_from_seeds(
             )
             records = await result.data()
         return _parse_subgraph_records(records, seed_uuids, depth, scope)
-    except Exception as exc:
-        config.log.error("subgraph_expand_failed", error=str(exc))
+    except Neo4jError as exc:
+        config.log.exception("subgraph_expand_failed", error=str(exc))
         return SubgraphResult(nodes=[], edges=[], seed_uuids=seed_uuids, depth_used=depth)
 
 
@@ -193,15 +204,15 @@ async def get_obligation_chain(
         if not seed_uuids:
             return SubgraphResult(nodes=[], edges=[], seed_uuids=[], depth_used=0)
         return await expand_from_seeds(config, seed_uuids, scope, group_ids)
-    except Exception as exc:
-        config.log.error("obligation_chain_failed", error=str(exc))
+    except Neo4jError as exc:
+        config.log.exception("obligation_chain_failed", error=str(exc))
         return SubgraphResult(nodes=[], edges=[], seed_uuids=[], depth_used=0)
 
 
 async def detect_conflicts(
     config: Neo4jSubgraphConfig,
     group_ids: list[str],
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Find circular obligations and multi-hop override chains.
 
     Args:
@@ -223,7 +234,7 @@ async def detect_conflicts(
         async with config.driver.session() as session:
             result = await session.run(cypher, group_ids=group_ids)
             return await result.data()
-    except Exception as exc:
+    except Neo4jError as exc:
         config.log.warning("conflict_detection_failed", error=str(exc))
         return []
 
@@ -247,11 +258,11 @@ class Neo4jSubgraphConfig(BaseModel):
     )
 
     driver: AsyncDriver
-    log: Any  # structlog-bound logger
+    log: BoundLogger
 
 
 def _parse_subgraph_records(
-    records: list[dict[str, Any]],
+    records: list[dict[str, object]],
     seed_uuids: list[str],
     depth: int,
     scope: MemoryScope,
@@ -275,22 +286,22 @@ def _parse_subgraph_records(
     edges: list[SubgraphEdge] = []
 
     for row in records:
-        node_uuid = row.get("node_uuid", "")
-        node_props = row.get("node_props") or {}
+        node_uuid = cast("str", row.get("node_uuid", ""))
+        node_props = cast("dict[str, Any]", row.get("node_props") or {})
         entity_type = node_props.get("entity_type", "")
         if entity_type and not scope.allows_entity_type(entity_type):
             continue
         if node_uuid and node_uuid not in seen_nodes:
             seen_nodes[node_uuid] = SubgraphNode(
                 uuid=node_uuid,
-                name=row.get("node_name") or "",
-                group_id=row.get("group_id"),
-                labels=row.get("node_labels") or [],
+                name=cast("str", row.get("node_name") or ""),
+                group_id=cast("str | None", row.get("group_id")),
+                labels=cast("list[str]", row.get("node_labels") or []),
                 properties=node_props,
             )
-        rel_type = row.get("rel_type")
-        rel_from = row.get("rel_from")
-        rel_to = row.get("rel_to")
+        rel_type = cast("str | None", row.get("rel_type"))
+        rel_from = cast("str | None", row.get("rel_from"))
+        rel_to = cast("str | None", row.get("rel_to"))
         if rel_type and rel_from and rel_to:
             key = (rel_from, rel_to, rel_type)
             if key not in seen_edges:
@@ -300,7 +311,7 @@ def _parse_subgraph_records(
                         from_uuid=rel_from,
                         to_uuid=rel_to,
                         rel_type=rel_type,
-                        properties=row.get("rel_props") or {},
+                        properties=cast("dict[str, Any]", row.get("rel_props") or {}),
                     )
                 )
 

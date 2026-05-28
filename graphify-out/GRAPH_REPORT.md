@@ -1,107 +1,119 @@
-# Graph Report - src, docs  (2026-04-29)
+# Graph Report - langchain-fastapi-production  (2026-05-28)
 
 ## Corpus Check
-- 276 files · ~188,293 words
+- 257 files · ~224,309 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2751 nodes · 6073 edges · 68 communities detected
-- Extraction: 58% EXTRACTED · 42% INFERRED · 0% AMBIGUOUS · INFERRED: 2572 edges (avg confidence: 0.58)
+- 2811 nodes · 6233 edges · 80 communities detected
+- Extraction: 57% EXTRACTED · 43% INFERRED · 0% AMBIGUOUS · INFERRED: 2700 edges (avg confidence: 0.58)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
-- [[_COMMUNITY_Graph State Search|Graph State Search]]
-- [[_COMMUNITY_Token User Oauth|Token User Oauth]]
-- [[_COMMUNITY_Redis Args Search|Redis Args Search]]
-- [[_COMMUNITY_Graphiti Neo4j Episode|Graphiti Neo4j Episode]]
-- [[_COMMUNITY_Agent Build Chain|Agent Build Chain]]
-- [[_COMMUNITY_Crawler Crawl Url|Crawler Crawl Url]]
-- [[_COMMUNITY_Client Tavily Run|Client Tavily Run]]
-- [[_COMMUNITY_Research Deep State|Research Deep State]]
-- [[_COMMUNITY_Circuit Breaker Idempotency|Circuit Breaker Idempotency]]
-- [[_COMMUNITY_Args Embedding Chunk|Args Embedding Chunk]]
-- [[_COMMUNITY_Search Chunk Rag|Search Chunk Rag]]
-- [[_COMMUNITY_Node Make Graph|Node Make Graph]]
-- [[_COMMUNITY_Upload User Router|Upload User Router]]
-- [[_COMMUNITY_Saul Redis Agent|Saul Redis Agent]]
-- [[_COMMUNITY_Agent Mcp Legal|Agent Mcp Legal]]
-- [[_COMMUNITY_Connection Websocket Saul|Connection Websocket Saul]]
-- [[_COMMUNITY_Cognee Memory Subgraph|Cognee Memory Subgraph]]
-- [[_COMMUNITY_Node Make Graph|Node Make Graph]]
-- [[_COMMUNITY_Extract Extraction Code|Extract Extraction Code]]
-- [[_COMMUNITY_Extract Entity Args|Extract Entity Args]]
-- [[_COMMUNITY_Auth Frontend External|Auth Frontend External]]
-- [[_COMMUNITY_Health Check Feature|Health Check Feature]]
-- [[_COMMUNITY_Hitl Phase Extract|Hitl Phase Extract]]
-- [[_COMMUNITY_Tool Web Search|Tool Web Search]]
-- [[_COMMUNITY_Search Endpoint Bm25|Search Endpoint Bm25]]
-- [[_COMMUNITY_Client Indexing Chat|Client Indexing Chat]]
-- [[_COMMUNITY_Llm End Langsmith|Llm End Langsmith]]
-- [[_COMMUNITY_Chat Database All|Chat Database All]]
-- [[_COMMUNITY_Tool Validation Registry|Tool Validation Registry]]
-- [[_COMMUNITY_Query Cache Search|Query Cache Search]]
-- [[_COMMUNITY_Rag Retrieval Agentic|Rag Retrieval Agentic]]
-- [[_COMMUNITY_Write Decay Memory|Write Decay Memory]]
-- [[_COMMUNITY_Risk Context Compliance|Risk Context Compliance]]
-- [[_COMMUNITY_Envelope Apirouter Violation|Envelope Apirouter Violation]]
-- [[_COMMUNITY_Build Open Deep|Build Open Deep]]
-- [[_COMMUNITY_Toon Parser Baseoutputparser|Toon Parser Baseoutputparser]]
-- [[_COMMUNITY_Contract Clauses Textsearch|Contract Clauses Textsearch]]
-- [[_COMMUNITY_A7d9b1c2e3f Add Search|A7d9b1c2e3f Add Search]]
-- [[_COMMUNITY_C0c17c6eb1cc Initial Vectors|C0c17c6eb1cc Initial Vectors]]
-- [[_COMMUNITY_Bc7726317f6 Rename Metadata|Bc7726317f6 Rename Metadata]]
-- [[_COMMUNITY_Railway Private Internal|Railway Private Internal]]
-- [[_COMMUNITY_Getattr Langchain Fastapi|Getattr Langchain Fastapi]]
-- [[_COMMUNITY_Run Seeders All|Run Seeders All]]
-- [[_COMMUNITY_Law Database Connection|Law Database Connection]]
-- [[_COMMUNITY_Explain Auto Analyze|Explain Auto Analyze]]
-- [[_COMMUNITY_Llm Attack Vectors|Llm Attack Vectors]]
-- [[_COMMUNITY_Tool Postgres Executions|Tool Postgres Executions]]
-- [[_COMMUNITY_Application Features Domain|Application Features Domain]]
-- [[_COMMUNITY_Knowledge Feature|Knowledge Feature]]
-- [[_COMMUNITY_Web Scraping Feature|Web Scraping Feature]]
-- [[_COMMUNITY_Rag Retrieval Augmented|Rag Retrieval Augmented]]
-- [[_COMMUNITY_Langextract Utilities|Langextract Utilities]]
-- [[_COMMUNITY_Agent Definitions Utilities|Agent Definitions Utilities]]
-- [[_COMMUNITY_Vector Store Utilities|Vector Store Utilities]]
-- [[_COMMUNITY_Alembic Revision Modules|Alembic Revision Modules]]
-- [[_COMMUNITY_Postgresql Conf Tuning|Postgresql Conf Tuning]]
-- [[_COMMUNITY_Postgresql Index Design|Postgresql Index Design]]
-- [[_COMMUNITY_Agent Saul Production|Agent Saul Production]]
-- [[_COMMUNITY_Backstage Dev Portal|Backstage Dev Portal]]
-- [[_COMMUNITY_Control Plane Jenkins|Control Plane Jenkins]]
-- [[_COMMUNITY_Ensure Score Between|Ensure Score Between]]
-- [[_COMMUNITY_Validate Embedding Not|Validate Embedding Not]]
-- [[_COMMUNITY_Ensure Overlap Less|Ensure Overlap Less]]
-- [[_COMMUNITY_Configuration Instance Runnableconfig|Configuration Instance Runnableconfig]]
-- [[_COMMUNITY_Strip Leading Trailing|Strip Leading Trailing]]
-- [[_COMMUNITY_Cross Field Validation|Cross Field Validation]]
-- [[_COMMUNITY_Build Deterministic Sha|Build Deterministic Sha]]
-- [[_COMMUNITY_Load Configuration Settings|Load Configuration Settings]]
+- [[_COMMUNITY_Community 0|Community 0]]
+- [[_COMMUNITY_Community 1|Community 1]]
+- [[_COMMUNITY_Community 2|Community 2]]
+- [[_COMMUNITY_Community 3|Community 3]]
+- [[_COMMUNITY_Community 4|Community 4]]
+- [[_COMMUNITY_Community 5|Community 5]]
+- [[_COMMUNITY_Community 6|Community 6]]
+- [[_COMMUNITY_Community 7|Community 7]]
+- [[_COMMUNITY_Community 8|Community 8]]
+- [[_COMMUNITY_Community 9|Community 9]]
+- [[_COMMUNITY_Community 10|Community 10]]
+- [[_COMMUNITY_Community 11|Community 11]]
+- [[_COMMUNITY_Community 12|Community 12]]
+- [[_COMMUNITY_Community 13|Community 13]]
+- [[_COMMUNITY_Community 14|Community 14]]
+- [[_COMMUNITY_Community 15|Community 15]]
+- [[_COMMUNITY_Community 16|Community 16]]
+- [[_COMMUNITY_Community 17|Community 17]]
+- [[_COMMUNITY_Community 18|Community 18]]
+- [[_COMMUNITY_Community 19|Community 19]]
+- [[_COMMUNITY_Community 20|Community 20]]
+- [[_COMMUNITY_Community 21|Community 21]]
+- [[_COMMUNITY_Community 22|Community 22]]
+- [[_COMMUNITY_Community 23|Community 23]]
+- [[_COMMUNITY_Community 24|Community 24]]
+- [[_COMMUNITY_Community 25|Community 25]]
+- [[_COMMUNITY_Community 26|Community 26]]
+- [[_COMMUNITY_Community 27|Community 27]]
+- [[_COMMUNITY_Community 28|Community 28]]
+- [[_COMMUNITY_Community 29|Community 29]]
+- [[_COMMUNITY_Community 30|Community 30]]
+- [[_COMMUNITY_Community 31|Community 31]]
+- [[_COMMUNITY_Community 32|Community 32]]
+- [[_COMMUNITY_Community 33|Community 33]]
+- [[_COMMUNITY_Community 34|Community 34]]
+- [[_COMMUNITY_Community 35|Community 35]]
+- [[_COMMUNITY_Community 36|Community 36]]
+- [[_COMMUNITY_Community 37|Community 37]]
+- [[_COMMUNITY_Community 38|Community 38]]
+- [[_COMMUNITY_Community 39|Community 39]]
+- [[_COMMUNITY_Community 40|Community 40]]
+- [[_COMMUNITY_Community 41|Community 41]]
+- [[_COMMUNITY_Community 42|Community 42]]
+- [[_COMMUNITY_Community 43|Community 43]]
+- [[_COMMUNITY_Community 44|Community 44]]
+- [[_COMMUNITY_Community 45|Community 45]]
+- [[_COMMUNITY_Community 46|Community 46]]
+- [[_COMMUNITY_Community 47|Community 47]]
+- [[_COMMUNITY_Community 48|Community 48]]
+- [[_COMMUNITY_Community 49|Community 49]]
+- [[_COMMUNITY_Community 50|Community 50]]
+- [[_COMMUNITY_Community 51|Community 51]]
+- [[_COMMUNITY_Community 52|Community 52]]
+- [[_COMMUNITY_Community 53|Community 53]]
+- [[_COMMUNITY_Community 54|Community 54]]
+- [[_COMMUNITY_Community 55|Community 55]]
+- [[_COMMUNITY_Community 56|Community 56]]
+- [[_COMMUNITY_Community 57|Community 57]]
+- [[_COMMUNITY_Community 58|Community 58]]
+- [[_COMMUNITY_Community 59|Community 59]]
+- [[_COMMUNITY_Community 60|Community 60]]
+- [[_COMMUNITY_Community 61|Community 61]]
+- [[_COMMUNITY_Community 63|Community 63]]
+- [[_COMMUNITY_Community 64|Community 64]]
+- [[_COMMUNITY_Community 65|Community 65]]
+- [[_COMMUNITY_Community 66|Community 66]]
+- [[_COMMUNITY_Community 67|Community 67]]
+- [[_COMMUNITY_Community 91|Community 91]]
+- [[_COMMUNITY_Community 92|Community 92]]
+- [[_COMMUNITY_Community 93|Community 93]]
+- [[_COMMUNITY_Community 97|Community 97]]
+- [[_COMMUNITY_Community 98|Community 98]]
+- [[_COMMUNITY_Community 99|Community 99]]
+- [[_COMMUNITY_Community 105|Community 105]]
+- [[_COMMUNITY_Community 106|Community 106]]
+- [[_COMMUNITY_Community 111|Community 111]]
+- [[_COMMUNITY_Community 112|Community 112]]
+- [[_COMMUNITY_Community 113|Community 113]]
+- [[_COMMUNITY_Community 114|Community 114]]
+- [[_COMMUNITY_Community 115|Community 115]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `DatabaseException` - 63 edges
 2. `WorkflowStatus` - 54 edges
 3. `HITLInterruptType` - 46 edges
-4. `Configuration` - 44 edges
-5. `get_settings()` - 44 edges
-6. `ResearchComplete` - 42 edges
-7. `LegalAgentState` - 38 edges
-8. `AuthService` - 37 edges
-9. `DoclingExtractionResult` - 37 edges
-10. `SearchResponse` - 36 edges
+4. `LegalAgentState` - 44 edges
+5. `Configuration` - 44 edges
+6. `get_settings()` - 44 edges
+7. `LegalEdgeInput` - 43 edges
+8. `ClauseEpisodeMetadata` - 42 edges
+9. `FinalReportEpisodeMetadata` - 42 edges
+10. `ResearchComplete` - 42 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `AOT Cron Scheduler` --semantically_similar_to--> `Celery Application`  [INFERRED] [semantically similar]
-  docs/Lynk_Plan/api_server_plan.md → src/app/examples/CELERY.md
-- `MCP Tool Design Best Practices` --semantically_similar_to--> `Curated Read Only MCP Tools`  [INFERRED] [semantically similar]
-  docs/MCP_things.md → src/app/examples/FastMCP-guide.md
-- `Broker-backed Background Tasks` --semantically_similar_to--> `RabbitMQ Queue Topology`  [INFERRED] [semantically similar]
-  docs/Lynk_Plan/api_server_plan.md → src/app/examples/CELERY.md
-- `ingest_search_document()` --calls--> `run_ingestion_task()`  [INFERRED]
-  tasks/search_tasks.py → app/features/search/service.py
-- `Celery tasks for search ingestion.` --uses--> `ResilientTask`  [INFERRED]
-  tasks/search_tasks.py → app/connections/celery.py
+- `Celery Application` --semantically_similar_to--> `AOT Cron Scheduler`  [INFERRED] [semantically similar]
+  src/app/examples/CELERY.md → docs/Lynk_Plan/api_server_plan.md
+- `WebSocketSecurityService` --uses--> `Application lifespan management.`  [INFERRED]
+  src/app/features/auth/websocket_security.py → app/lifecycle/lifespan.py
+- `WebSocketSecurityService` --uses--> `Initialize Redis with health check.`  [INFERRED]
+  src/app/features/auth/websocket_security.py → app/lifecycle/lifespan.py
+- `WebSocketSecurityService` --uses--> `Initialize MongoDB with health check.`  [INFERRED]
+  src/app/features/auth/websocket_security.py → app/lifecycle/lifespan.py
+- `WebSocketSecurityService` --uses--> `Initialize Neo4j with connectivity verification.`  [INFERRED]
+  src/app/features/auth/websocket_security.py → app/lifecycle/lifespan.py
 
 ## Hyperedges (group relationships)
 - **Production MCP Surface** — fastmcp_guide_mcp_server_foundation, fastmcp_guide_mcp_security, fastmcp_guide_mcp_metrics, fastmcp_guide_internal_mcp_client_manager [EXTRACTED 1.00]
@@ -125,277 +137,325 @@
 
 ## Communities
 
-### Community 0 - "Graph State Search"
+### Community 0 - "Community 0"
 Cohesion: 0.02
-Nodes (145): Citation, ClauseSegment, ClauseType, ComplianceFinding, DocumentSection, EntityType, PlanActionType, RelationshipType (+137 more)
+Nodes (126): _extract_raw_token(), extract_raw_token_from_connection(), get_auth_service(), get_current_active_user(), get_current_user(), get_current_verified_user(), get_refresh_token_repository(), get_token_claims() (+118 more)
 
-### Community 1 - "Token User Oauth"
+### Community 1 - "Community 1"
 Cohesion: 0.03
-Nodes (97): _extract_raw_token(), extract_raw_token_from_connection(), get_auth_service(), get_current_active_user(), get_current_user(), get_current_verified_user(), get_refresh_token_repository(), get_token_claims() (+89 more)
+Nodes (160): AgentRegistry, build_agent_registry(), build_saul_graph(), Graph factory for Agent Saul.  Entry point: build_saul_graph(checkpointer, pro_l, Instantiate all agents + LLM chains once.     Called from build_saul_graph — nev, Build and compile the Agent Saul LangGraph.      Graph topology:       START → g, Holds all pre-built agents and structured-output LLM chains.     Created once at, SaulGraphNodes (+152 more)
 
-### Community 2 - "Redis Args Search"
-Cohesion: 0.03
-Nodes (139): add_to_bloom_filter(), _append_search_filter_args(), _append_search_highlight_args(), _append_search_summarize_args(), _bloom_filter_exists(), _build_create_search_index_args(), _build_database_exception(), _build_search_index_query_args() (+131 more)
-
-### Community 3 - "Graphiti Neo4j Episode"
-Cohesion: 0.03
-Nodes (115): close_neo4j_driver(), get_neo4j_session(), init_neo4j(), Neo4j database configuration with driver management., Initialize Neo4j driver and test connection.      Returns:         AsyncDriver:, Context manager for Neo4j sessions.      Args:         driver: Neo4j async drive, Close Neo4j driver and cleanup connections.      Args:         driver: Neo4j asy, close_graphiti() (+107 more)
-
-### Community 4 - "Agent Build Chain"
+### Community 2 - "Community 2"
 Cohesion: 0.02
-Nodes (111): AgentSpec, create_production_agent(), ProductionAgent, Agent factory — the main entry point for creating production agents.  Uses LangC, Build a fully configured production agent from a spec.      Returns a Production, Wraps a compiled LangGraph agent with production runtime behaviour:     - Long-t, Single async invocation.          Args:             user_message: The user's inp, Stream the agent's response token by token.          stream_mode options: "messa (+103 more)
+Nodes (173): BaseModel, Chunk, A chunk of content with metadata., ExtractionResult, Result from Gemini extraction., DeclarativeBase, chunk_document(), chunk_document_simple() (+165 more)
 
-### Community 5 - "Crawler Crawl Url"
-Cohesion: 0.04
-Nodes (101): Truncate content to maximum length with warning., truncate_content(), CrawlerConfig, get_crawler_config(), load_from_settings(), Crawler configuration and settings., Configuration for the web crawler., Get proxy configuration for Crawl4AI. (+93 more)
+### Community 3 - "Community 3"
+Cohesion: 0.03
+Nodes (151): add_to_bloom_filter(), _append_search_filter_args(), _append_search_highlight_args(), _append_search_summarize_args(), _bloom_filter_exists(), _build_create_search_index_args(), _build_database_exception(), _build_search_index_query_args() (+143 more)
 
-### Community 6 - "Client Tavily Run"
-Cohesion: 0.02
-Nodes (97): do_run_migrations(), Run migrations in 'offline' mode.      This is used for generating migration scr, Run migrations with the provided database connection.      Args:         connect, Run migrations in async mode using init_db() to get the engine., Run migrations in 'online' mode.      This connects to the database and applies, run_async_migrations(), run_migrations_offline(), run_migrations_online() (+89 more)
+### Community 4 - "Community 4"
+Cohesion: 0.03
+Nodes (106): Truncate content to maximum length with warning., truncate_content(), CrawlerConfig, get_crawler_config(), load_from_settings(), Crawler configuration and settings., Configuration for the web crawler., Get proxy configuration for Crawl4AI. (+98 more)
 
-### Community 7 - "Research Deep State"
+### Community 5 - "Community 5"
+Cohesion: 0.05
+Nodes (95): _extract_compliance_output(), _extract_risk_output(), make_compliance_node(), make_finalization_node(), make_grounding_verification_node(), make_human_review_node(), make_persist_memory_node(), make_risk_analysis_node() (+87 more)
+
+### Community 6 - "Community 6"
+Cohesion: 0.03
+Nodes (75): generate_text(), get_circuit_breaker(), create_app(), Create and configure FastAPI application with proper middleware order., main(), Cache utilities using Redis., Adapt a project Redis client to FastAPI Guard's Redis handler protocol., RedisProtocolAdapter (+67 more)
+
+### Community 7 - "Community 7"
+Cohesion: 0.05
+Nodes (94): chunk_text(), Token-based chunking helpers for search ingestion., Split text into overlapping token windows while preserving order., Normalized text chunk plus its ordinal position., TextChunk, Search feature constants., get_search_repository(), get_search_service() (+86 more)
+
+### Community 8 - "Community 8"
 Cohesion: 0.06
-Nodes (114): MessagesState, Config, Configuration, MCPConfig, Configuration management for the Open Deep Research system., Enumeration of available search API providers., Configuration for Model Context Protocol (MCP) servers., Pydantic configuration. (+106 more)
+Nodes (112): MessagesState, Configuration, MCPConfig, Configuration management for the Open Deep Research system., Enumeration of available search API providers., Configuration for Model Context Protocol (MCP) servers., Main configuration class for the Deep Research agent., SearchAPI (+104 more)
 
-### Community 8 - "Circuit Breaker Idempotency"
+### Community 9 - "Community 9"
 Cohesion: 0.03
-Nodes (90): create_celery_app(), get_redis_client(), Celery connection and production reliability configuration., Create and configure Celery application., Base Celery task with retries, observability, and reliability helpers., acquire_idempotency_lock(), build_circuit_breaker_key(), build_closed_circuit_breaker_state() (+82 more)
+Nodes (83): create_celery_app(), get_redis_client(), Celery connection and production reliability configuration., Create and configure Celery application., Base Celery task with retries, observability, and reliability helpers., acquire_idempotency_lock(), build_circuit_breaker_key(), build_closed_circuit_breaker_state() (+75 more)
 
-### Community 9 - "Args Embedding Chunk"
-Cohesion: 0.03
-Nodes (94): Chunk, clean_markdown(), extract_headers(), extract_title_from_markdown(), get_chunk_summary(), Content chunking utilities for crawled content., A chunk of content with metadata., Extract title from markdown content. (+86 more)
-
-### Community 10 - "Search Chunk Rag"
-Cohesion: 0.06
-Nodes (83): Base, chunk_text(), Token-based chunking helpers for search ingestion., Split text into overlapping token windows while preserving order., Normalized text chunk plus its ordinal position., TextChunk, Search feature constants., get_search_repository() (+75 more)
-
-### Community 11 - "Node Make Graph"
-Cohesion: 0.06
-Nodes (88): _extract_compliance_output(), _extract_risk_output(), make_compliance_node(), make_finalization_node(), make_grounding_verification_node(), make_human_review_node(), make_persist_memory_node(), make_risk_analysis_node() (+80 more)
-
-### Community 12 - "Upload User Router"
-Cohesion: 0.03
-Nodes (71): forgot_password(), get_me(), list_sessions(), login(), logout(), oauth_authorize(), refresh_token(), register() (+63 more)
-
-### Community 13 - "Saul Redis Agent"
-Cohesion: 0.03
-Nodes (47): AgentSaulDeps, get_agent_saul_deps(), get_agent_saul_ws_security_context(), get_current_user_id(), get_saul_checkpointer(), FastAPI dependencies for agent_saul.  All infra clients are read from request.ap, Stub — replace with your project's JWT/session auth dependency.     The user_id, Narrow context object for Agent Saul dependencies.      Typed against infra prot (+39 more)
-
-### Community 14 - "Agent Mcp Legal"
+### Community 10 - "Community 10"
 Cohesion: 0.02
 Nodes (91): AI Agent Control Loop, Context Engineering, Agent Memory Architecture, Multi-agent Patterns, Agent Observability, Agent Safety Primitives, Agent Tool Design, Agent Verification Hierarchy (+83 more)
 
-### Community 15 - "Connection Websocket Saul"
-Cohesion: 0.07
-Nodes (55): CreateSessionRequest, CreateSessionResponse, WebSocket protocol for Agent Saul.  Inbound  (client → server): discriminated on, Graph paused at interrupt(). Client must send WSResumeMessage to continue., Coarse-grained status transition between pipeline stages., Terminal frame.  Client should close the WS after receiving this., POST /agent-saul/sessions — pre-flight before WS connection., First message on a new WS connection.  Kicks off the graph. (+47 more)
-
-### Community 16 - "Cognee Memory Subgraph"
-Cohesion: 0.03
-Nodes (58): BaseStore, create_subgraph_expander(), detect_conflicts(), expand_from_seeds(), get_obligation_chain(), Neo4jSubgraphConfig, _parse_subgraph_records(), Neo4j Cypher subgraph expander for depth-N traversal.  Two-layer strategy:   Lay (+50 more)
-
-### Community 17 - "Node Make Graph"
+### Community 11 - "Community 11"
 Cohesion: 0.04
-Nodes (60): Exception, build_ingestion_graph(), _structured(), _cached_embedding(), _call_embedding_fn(), _chunk_metadata_json(), _contract_metadata_json(), _ensure_chunk_enrichment() (+52 more)
+Nodes (58): BaseStore, BoundLogger, create_subgraph_expander(), detect_conflicts(), expand_from_seeds(), get_obligation_chain(), Neo4jSubgraphConfig, _parse_subgraph_records() (+50 more)
 
-### Community 18 - "Extract Extraction Code"
+### Community 12 - "Community 12"
+Cohesion: 0.03
+Nodes (72): create_httpx_client(), get_httpx_client(), get_shared_httpx_client(), HTTPX client with optimal performance settings., Create production-grade HTTPX client with HTTP/2 and connection pooling.      Ke, Return a process-wide async HTTPX client for non-request runtimes., Dependency to inject HTTPX client., build_extraction_chain() (+64 more)
+
+### Community 13 - "Community 13"
+Cohesion: 0.04
+Nodes (56): forgot_password(), get_me(), list_sessions(), login(), logout(), oauth_authorize(), refresh_token(), register() (+48 more)
+
+### Community 14 - "Community 14"
+Cohesion: 0.06
+Nodes (46): AgentSpec, create_production_agent(), ProductionAgent, Agent factory — the main entry point for creating production agents.  Uses LangC, Build a fully configured production agent from a spec.      Returns a Production, Wraps a compiled LangGraph agent with production runtime behaviour:     - Long-t, Single async invocation.          Args:             user_message: The user's inp, Stream the agent's response token by token.          stream_mode options: "messa (+38 more)
+
+### Community 15 - "Community 15"
 Cohesion: 0.09
-Nodes (67): check_gpu_available(), convert_document(), create_converter(), create_document_converter(), _detect_language(), _encode_base64(), extract_code_blocks(), _extract_code_fallback() (+59 more)
+Nodes (65): check_gpu_available(), convert_document(), create_converter(), create_document_converter(), _detect_language(), _encode_base64(), extract_code_blocks(), _extract_code_fallback() (+57 more)
 
-### Community 19 - "Extract Entity Args"
-Cohesion: 0.08
-Nodes (43): ExtractionResult, GeminiProcessor, Result from Gemini extraction., Processor for Gemini-based content extraction and summarization., Summarize content using Gemini.          Args:             content: Content to s, Extract structured data from content using Gemini.          Args:             co, Extract structured data AND create a summary.          Args:             content, create_extractor() (+35 more)
+### Community 16 - "Community 16"
+Cohesion: 0.06
+Nodes (52): Exception, build_ingestion_graph(), Contract KB ingestion graph factory., Build the contract ingestion graph once during application startup., _structured(), Contract KB ingestion LangGraph package., _cached_embedding(), _call_embedding_fn() (+44 more)
 
-### Community 20 - "Auth Frontend External"
+### Community 17 - "Community 17"
+Cohesion: 0.06
+Nodes (32): build_validation_error_handler(), format_tool_validation_error(), make_structured_tool(), Tool base classes and registry.  All agent tools use structured Pydantic input/o, Return a schema-first validation error message the model can retry against., Create a stable validation error formatter bound to a specific schema., Decorator to register a @tool-decorated function in the global registry.      Us, Wrap an async function as a StructuredTool with typed input.     Automatically r (+24 more)
+
+### Community 18 - "Community 18"
 Cohesion: 0.06
 Nodes (43): Agent Runtime, Alloy OTLP, Analytics Flags, Atlas Docs, Auth DB, Auth Enforcement, Backend API, Beat Cron (+35 more)
 
-### Community 21 - "Health Check Feature"
+### Community 19 - "Community 19"
 Cohesion: 0.11
 Nodes (23): get_health_service(), Dependency wiring for health feature., HealthChecksDTO, HealthDataDTO, HealthResultDTO, DTOs for health feature responses., Per-component health checks., Aggregated health payload. (+15 more)
 
-### Community 22 - "Hitl Phase Extract"
+### Community 20 - "Community 20"
 Cohesion: 0.06
 Nodes (42): agent_saul LangGraph, Celery beat, Client, Cognee, comply, doc_id Returned, extract, Extract Validate Embed Store (+34 more)
 
-### Community 23 - "Tool Web Search"
+### Community 21 - "Community 21"
 Cohesion: 0.1
 Nodes (29): BaseTool, CrawlUrlInput, CrawlUrlTool, LangChain tool for web crawling., Input schema for crawl URL tool., Tool for crawling a URL and extracting content., Agent tools for web search, crawling and document processing., get_all_tools() (+21 more)
 
-### Community 24 - "Search Endpoint Bm25"
+### Community 22 - "Community 22"
+Cohesion: 0.11
+Nodes (26): build_retrieval_graph(), Retrieval graph factory for canonical clauses KB., Build a request-scoped retrieval graph over clauses., _structured(), Clauses-backed legal retrieval graph., _cached_embedding(), _call_embedding_fn(), make_context_grader_node() (+18 more)
+
+### Community 23 - "Community 23"
 Cohesion: 0.07
 Nodes (35): API Layer, Up to 500 App Clients, Async SQLAlchemy, BM25 Full-text Search, Celery, Chunk Embed Upsert Pipeline, Chunk Content Embedding BM25 Index Fields, chunks Table (+27 more)
 
-### Community 25 - "Client Indexing Chat"
+### Community 24 - "Community 24"
 Cohesion: 0.13
 Nodes (24): _get_sdk_client(), PageIndexBatchConfig, PageIndexChatConfig, PageIndexClient, PageIndexConfig, Configuration for indexing operations., Concurrency settings for batch indexing., Configuration for chat completion calls. (+16 more)
 
-### Community 26 - "Llm End Langsmith"
+### Community 25 - "Community 25"
+Cohesion: 0.09
+Nodes (17): DocumentIngestionPipeline, main(), Main ingestion script for processing markdown documents into vector DB and knowl, Ingest a single document.          Args:             file_path: Path to the docu, Find all supported document files in the documents folder., Pipeline for ingesting documents into vector DB and knowledge graph., Read document content from file - supports multiple formats via Docling., Initialize ingestion pipeline.          Args:             config: Ingestion conf (+9 more)
+
+### Community 26 - "Community 26"
+Cohesion: 0.1
+Nodes (26): close_tavily_http_client(), create_tavily_http_client(), get_shared_tavily_http_client(), get_tavily_http_client(), Tavily search client initialization and dependency injection., Return a process-wide async HTTPX client for Tavily requests.      Used for non-, Dependency to inject Tavily HTTP client from request lifespan., Create Tavily HTTP client for FastAPI lifespan management. (+18 more)
+
+### Community 27 - "Community 27"
 Cohesion: 0.08
 Nodes (12): AsyncCallbackHandler, BaseCallbackHandler, AsyncStreamingCallbackHandler, configure_langsmith(), LatencyCallbackHandler, LangSmith observability bootstrap and custom callbacks. Must be imported before, Bootstrap LangSmith tracing by setting env vars.     Call this at application st, Tracks per-run latency for structured logging. (+4 more)
 
-### Community 27 - "Chat Database All"
-Cohesion: 0.13
-Nodes (16): AsyncAttrs, Database package with Base and all schemas., DeclarativeBase, ChatMessage, ChatSession, Chat messages schema for storing user-LLM conversations., Store chat messages between user and LLM., Store chat session metadata. (+8 more)
+### Community 28 - "Community 28"
+Cohesion: 0.12
+Nodes (17): build_reconciliation_graph(), Build the reconciliation graph once during application startup., make_apply_changes_node(), make_fetch_existing_node(), make_reconcile_node(), make_write_versions_node(), _parse_reconciliation_decision(), Reconciliation graph nodes for background entity deduplication and conflict reso (+9 more)
 
-### Community 28 - "Tool Validation Registry"
+### Community 29 - "Community 29"
+Cohesion: 0.1
+Nodes (20): do_run_migrations(), Run migrations in 'offline' mode.      This is used for generating migration scr, Run migrations with the provided database connection.      Args:         connect, Run migrations in async mode using init_db() to get the engine., Run migrations in 'online' mode.      This connects to the database and applies, run_async_migrations(), run_migrations_offline(), run_migrations_online() (+12 more)
+
+### Community 30 - "Community 30"
+Cohesion: 0.14
+Nodes (16): AsyncAttrs, Base, Database package with Base and all schemas., ChatMessage, ChatSession, Chat messages schema for storing user-LLM conversations., Store chat messages between user and LLM., Store chat session metadata. (+8 more)
+
+### Community 31 - "Community 31"
 Cohesion: 0.11
-Nodes (12): build_validation_error_handler(), format_tool_validation_error(), make_structured_tool(), Tool base classes and registry.  All agent tools use structured Pydantic input/o, Return a schema-first validation error message the model can retry against., Create a stable validation error formatter bound to a specific schema., Decorator to register a @tool-decorated function in the global registry.      Us, Wrap an async function as a StructuredTool with typed input.     Automatically r (+4 more)
+Nodes (20): _compute_decay(), DecayStats, Background helpers for memory decay and reconciliation workflows., Run reconciliation sequentially for each user id., Run memory decay from a synchronous task runner., Run reconciliation for a single user., Run reconciliation for an already-resolved set of active users., Summary returned by the decay workflow. (+12 more)
 
-### Community 29 - "Query Cache Search"
+### Community 32 - "Community 32"
 Cohesion: 0.11
 Nodes (22): 768-Dimensional Embedding, BM25 Search, Cache Hit, Cache Miss, Cached Result, Embed Query, FastAPI, FTS Ranked Chunks (+14 more)
 
-### Community 30 - "Rag Retrieval Agentic"
+### Community 33 - "Community 33"
 Cohesion: 0.12
 Nodes (20): Agentic RAG Router Pattern, Hybrid Retrieval, HyDE Rejected for Legal RAG V1, Knowledge Graph Retrieval, Long Context versus RAG, Multi-modal RAG, Reciprocal Rank Fusion, Agentic RAG (+12 more)
 
-### Community 31 - "Write Decay Memory"
+### Community 34 - "Community 34"
+Cohesion: 0.19
+Nodes (8): DocumentUploadResponse, Ingestion feature: HTTP upload endpoint that runs IngestionGraph before WS.  Flo, Ingestion router: POST /ingestion/documents/upload  Accepts multipart form: file, Upload flow:       1. Read raw bytes from uploaded file.       2. Run IngestionG, Upload flow:       1. Read raw bytes from uploaded file.       2. Run IngestionG, upload_document(), IngestionService, IngestionService: runs IngestionGraph for a given uploaded document.  Called by
+
+### Community 35 - "Community 35"
+Cohesion: 0.2
+Nodes (13): CleanLegalDocument, DoclingProcessingContext, preprocess_legal_document(), Narrow context for document preprocessing., Structured output from preprocessing., Async wrapper around Docling (CPU-heavy)., BatchExtractionResult, LangExtractBatchContext (+5 more)
+
+### Community 36 - "Community 36"
 Cohesion: 0.14
 Nodes (15): Celery decay nightly, Cognee episodic procedural memory, entities.decay_score and clauses.decay_score, events immutable audit log, events dual write, Graphiti Neo4j episodes and entity edges, memory_versions CRDT snapshots, persist_memory node (+7 more)
 
-### Community 32 - "Risk Context Compliance"
+### Community 37 - "Community 37"
+Cohesion: 0.16
+Nodes (13): clean_markdown(), extract_headers(), extract_title_from_markdown(), get_chunk_summary(), Content chunking utilities for crawled content., Extract title from markdown content., Clean and normalize markdown content., Get a summary of a chunk. (+5 more)
+
+### Community 38 - "Community 38"
 Cohesion: 0.15
 Nodes (14): app.state.neo4j_driver, build_agent_context(), compliance, COMPLIANCE: +CONTRACT depth=1, Graphiti search_for_risk_context, memory_pipeline.py, MemoryScope, MemoryScope enforcement (+6 more)
 
-### Community 33 - "Envelope Apirouter Violation"
+### Community 39 - "Community 39"
+Cohesion: 0.18
+Nodes (8): AgentSaulDeps, get_agent_saul_deps(), get_agent_saul_ws_security_context(), get_current_user_id(), get_saul_checkpointer(), FastAPI dependencies for agent_saul.  All infra clients are read from request.ap, Stub — replace with your project's JWT/session auth dependency.     The user_id, Narrow context object for Agent Saul dependencies.      Typed against infra prot
+
+### Community 40 - "Community 40"
 Cohesion: 0.33
 Nodes (5): _is_envelope_violation(), Global API response envelope enforcement for routers., APIRouter that validates `response_model` uses `APIResponse[T]`., StrictEnvelopeAPIRouter, APIRouter
 
-### Community 34 - "Build Open Deep"
+### Community 41 - "Community 41"
 Cohesion: 0.5
 Nodes (3): build_open_deep_search_config(), Open Deep Search package exports., Build graph config with the lifespan-owned HTTPX client attached.
 
-### Community 35 - "Toon Parser Baseoutputparser"
+### Community 42 - "Community 42"
 Cohesion: 0.5
 Nodes (2): BaseOutputParser, ToonParser
 
-### Community 36 - "Contract Clauses Textsearch"
+### Community 43 - "Community 43"
 Cohesion: 0.5
 Nodes (1): Contract KB parent documents and pg_textsearch clauses.  Revision ID: 9f4a1b7c6d
 
-### Community 37 - "A7d9b1c2e3f Add Search"
+### Community 44 - "Community 44"
 Cohesion: 0.5
 Nodes (1): Add search documents and chunks schema  Revision ID: 8a7d9b1c2e3f Revises: 2bc77
 
-### Community 38 - "C0c17c6eb1cc Initial Vectors"
+### Community 45 - "Community 45"
 Cohesion: 0.5
 Nodes (1): Initial schema: document_vectors and chat tables  Revision ID: c0c17c6eb1cc Revi
 
-### Community 39 - "Bc7726317f6 Rename Metadata"
+### Community 46 - "Community 46"
 Cohesion: 0.5
 Nodes (1): rename_metadata_to_meta_data  Revision ID: 2bc7726317f6 Revises: c0c17c6eb1cc Cr
 
-### Community 40 - "Railway Private Internal"
+### Community 47 - "Community 47"
 Cohesion: 0.5
 Nodes (4): Private railway.internal Only Zone, Public Internet-Facing Zone, Railway Compute Plane, railway.internal Private Networking
 
-### Community 41 - "Getattr Langchain Fastapi"
+### Community 48 - "Community 48"
 Cohesion: 0.67
 Nodes (1): LangChain FastAPI Production - Main application package.
 
-### Community 42 - "Run Seeders All"
+### Community 49 - "Community 49"
 Cohesion: 0.67
 Nodes (2): Run all seeders in order., run_all_seeders()
 
-### Community 43 - "Law Database Connection"
+### Community 50 - "Community 50"
 Cohesion: 0.67
 Nodes (3): Database Connection Pool Sizing, Kingman's Law, Little's Law
 
-### Community 44 - "Explain Auto Analyze"
+### Community 51 - "Community 51"
 Cohesion: 0.67
 Nodes (3): auto_explain, EXPLAIN ANALYZE BUFFERS, pg_stat_statements
 
-### Community 45 - "Llm Attack Vectors"
+### Community 52 - "Community 52"
 Cohesion: 0.67
 Nodes (3): LLM Attack Vectors, ModernBERT Safety Discriminator, LLM Zero Trust Gap
 
-### Community 46 - "Tool Postgres Executions"
+### Community 53 - "Community 53"
 Cohesion: 1.0
 Nodes (3): Postgres tool_executions durable audit, Redis idempotency hot path, SHA-256(step_id + input + user_id) tool call key
 
-### Community 47 - "Application Features Domain"
+### Community 54 - "Community 54"
 Cohesion: 1.0
 Nodes (1): Application features/domain modules.
 
-### Community 48 - "Knowledge Feature"
+### Community 55 - "Community 55"
 Cohesion: 1.0
 Nodes (1): Knowledge base feature.
 
-### Community 49 - "Web Scraping Feature"
+### Community 56 - "Community 56"
 Cohesion: 1.0
 Nodes (1): Web scraping feature.
 
-### Community 50 - "Rag Retrieval Augmented"
+### Community 57 - "Community 57"
 Cohesion: 1.0
 Nodes (1): RAG (Retrieval-Augmented Generation) utilities.
 
-### Community 51 - "Langextract Utilities"
+### Community 58 - "Community 58"
 Cohesion: 1.0
 Nodes (1): LangExtract async utilities.
 
-### Community 52 - "Agent Definitions Utilities"
+### Community 59 - "Community 59"
 Cohesion: 1.0
 Nodes (1): Agent definitions and utilities.
 
-### Community 53 - "Vector Store Utilities"
+### Community 60 - "Community 60"
 Cohesion: 1.0
 Nodes (1): Vector store utilities.
 
-### Community 54 - "Alembic Revision Modules"
+### Community 61 - "Community 61"
 Cohesion: 1.0
 Nodes (1): Alembic revision modules.
 
-### Community 56 - "Postgresql Conf Tuning"
+### Community 63 - "Community 63"
 Cohesion: 1.0
 Nodes (2): postgresql.conf Tuning, work_mem Risk
 
-### Community 57 - "Postgresql Index Design"
+### Community 64 - "Community 64"
 Cohesion: 1.0
 Nodes (2): PostgreSQL Index Design, Linux perf PostgreSQL CPU Analysis
 
-### Community 58 - "Agent Saul Production"
+### Community 65 - "Community 65"
 Cohesion: 1.0
 Nodes (2): Agent Saul, Production Deployment Topology
 
-### Community 59 - "Backstage Dev Portal"
+### Community 66 - "Community 66"
 Cohesion: 1.0
 Nodes (2): Backstage, Dev Portal Catalog
 
-### Community 60 - "Control Plane Jenkins"
+### Community 67 - "Community 67"
 Cohesion: 1.0
 Nodes (2): CI/CD Control Plane, Jenkins
 
-### Community 80 - "Ensure Score Between"
+### Community 91 - "Community 91"
 Cohesion: 1.0
 Nodes (1): Ensure score is between 0 and 1.
 
-### Community 81 - "Validate Embedding Not"
+### Community 92 - "Community 92"
 Cohesion: 1.0
 Nodes (1): Validate embedding is not empty if provided.
 
-### Community 82 - "Ensure Overlap Less"
+### Community 93 - "Community 93"
 Cohesion: 1.0
 Nodes (1): Ensure overlap is less than chunk size.
 
-### Community 86 - "Configuration Instance Runnableconfig"
+### Community 97 - "Community 97"
 Cohesion: 1.0
 Nodes (1): Create a Configuration instance from a RunnableConfig.
 
-### Community 87 - "Strip Leading Trailing"
+### Community 98 - "Community 98"
 Cohesion: 1.0
 Nodes (1): Strip leading/trailing whitespace from optional fields.
 
-### Community 88 - "Cross Field Validation"
+### Community 99 - "Community 99"
 Cohesion: 1.0
 Nodes (1): Cross-field validation (e.g., role minimum length).
 
-### Community 94 - "Build Deterministic Sha"
+### Community 105 - "Community 105"
 Cohesion: 1.0
 Nodes (1): Build a deterministic SHA-256 key for a tool invocation.
 
-### Community 95 - "Load Configuration Settings"
+### Community 106 - "Community 106"
 Cohesion: 1.0
 Nodes (1): Load configuration from settings.
+
+### Community 111 - "Community 111"
+Cohesion: 1.0
+Nodes (1): Immutable collection of all pre-built LangChain tools.      Tool assignment to a
+
+### Community 112 - "Community 112"
+Cohesion: 1.0
+Nodes (1): Build all tools once.  Call at lifespan startup only.
+
+### Community 113 - "Community 113"
+Cohesion: 1.0
+Nodes (1): Main configuration class for the Deep Research agent.
+
+### Community 114 - "Community 114"
+Cohesion: 1.0
+Nodes (1): Create a Configuration instance from a RunnableConfig.
+
+### Community 115 - "Community 115"
+Cohesion: 1.0
+Nodes (1): Pydantic configuration.
 
 ## Ambiguous Edges - Review These
 - `norm` → `rel_map`  [AMBIGUOUS]
@@ -404,63 +464,73 @@ Nodes (1): Load configuration from settings.
   docs/diagrams/agent_saul_full_architecture.svg · relation: calls
 
 ## Knowledge Gaps
-- **553 isolated node(s):** `LangChain FastAPI Production - Main application package.`, `Create and configure FastAPI application with proper middleware order.`, `Application features/domain modules.`, `FastAPI dependencies for agent_saul.  All infra clients are read from request.ap`, `Stub — replace with your project's JWT/session auth dependency.     The user_id` (+548 more)
+- **565 isolated node(s):** `LangChain FastAPI Production - Main application package.`, `Create and configure FastAPI application with proper middleware order.`, `Application features/domain modules.`, `FastAPI dependencies for agent_saul.  All infra clients are read from request.ap`, `Stub — replace with your project's JWT/session auth dependency.     The user_id` (+560 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **Thin community `Toon Parser Baseoutputparser`** (4 nodes): `toon_parser.py`, `BaseOutputParser`, `ToonParser`, `.parse()`
+- **Thin community `Community 42`** (4 nodes): `BaseOutputParser`, `toon_parser.py`, `ToonParser`, `.parse()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Contract Clauses Textsearch`** (4 nodes): `9f4a1b7c6d2e_contract_kb_clauses_pg_textsearch.py`, `downgrade()`, `Contract KB parent documents and pg_textsearch clauses.  Revision ID: 9f4a1b7c6d`, `upgrade()`
+- **Thin community `Community 43`** (4 nodes): `9f4a1b7c6d2e_contract_kb_clauses_pg_textsearch.py`, `downgrade()`, `Contract KB parent documents and pg_textsearch clauses.  Revision ID: 9f4a1b7c6d`, `upgrade()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `A7d9b1c2e3f Add Search`** (4 nodes): `8a7d9b1c2e3f_add_search_documents_and_chunks.py`, `downgrade()`, `Add search documents and chunks schema  Revision ID: 8a7d9b1c2e3f Revises: 2bc77`, `upgrade()`
+- **Thin community `Community 44`** (4 nodes): `8a7d9b1c2e3f_add_search_documents_and_chunks.py`, `downgrade()`, `Add search documents and chunks schema  Revision ID: 8a7d9b1c2e3f Revises: 2bc77`, `upgrade()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `C0c17c6eb1cc Initial Vectors`** (4 nodes): `c0c17c6eb1cc_initial_schema_document_vectors_and_.py`, `downgrade()`, `Initial schema: document_vectors and chat tables  Revision ID: c0c17c6eb1cc Revi`, `upgrade()`
+- **Thin community `Community 45`** (4 nodes): `c0c17c6eb1cc_initial_schema_document_vectors_and_.py`, `downgrade()`, `Initial schema: document_vectors and chat tables  Revision ID: c0c17c6eb1cc Revi`, `upgrade()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Bc7726317f6 Rename Metadata`** (4 nodes): `2bc7726317f6_rename_metadata_to_meta_data.py`, `downgrade()`, `rename_metadata_to_meta_data  Revision ID: 2bc7726317f6 Revises: c0c17c6eb1cc Cr`, `upgrade()`
+- **Thin community `Community 46`** (4 nodes): `2bc7726317f6_rename_metadata_to_meta_data.py`, `downgrade()`, `rename_metadata_to_meta_data  Revision ID: 2bc7726317f6 Revises: c0c17c6eb1cc Cr`, `upgrade()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Getattr Langchain Fastapi`** (3 nodes): `__getattr__()`, `__init__.py`, `LangChain FastAPI Production - Main application package.`
+- **Thin community `Community 48`** (3 nodes): `__getattr__()`, `LangChain FastAPI Production - Main application package.`, `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Run Seeders All`** (3 nodes): `run_seeders.py`, `Run all seeders in order.`, `run_all_seeders()`
+- **Thin community `Community 49`** (3 nodes): `Run all seeders in order.`, `run_all_seeders()`, `run_seeders.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Application Features Domain`** (2 nodes): `__init__.py`, `Application features/domain modules.`
+- **Thin community `Community 54`** (2 nodes): `Application features/domain modules.`, `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Knowledge Feature`** (2 nodes): `__init__.py`, `Knowledge base feature.`
+- **Thin community `Community 55`** (2 nodes): `Knowledge base feature.`, `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Web Scraping Feature`** (2 nodes): `__init__.py`, `Web scraping feature.`
+- **Thin community `Community 56`** (2 nodes): `__init__.py`, `Web scraping feature.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Rag Retrieval Augmented`** (2 nodes): `__init__.py`, `RAG (Retrieval-Augmented Generation) utilities.`
+- **Thin community `Community 57`** (2 nodes): `RAG (Retrieval-Augmented Generation) utilities.`, `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Langextract Utilities`** (2 nodes): `__init__.py`, `LangExtract async utilities.`
+- **Thin community `Community 58`** (2 nodes): `LangExtract async utilities.`, `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Agent Definitions Utilities`** (2 nodes): `Agent definitions and utilities.`, `__init__.py`
+- **Thin community `Community 59`** (2 nodes): `Agent definitions and utilities.`, `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Vector Store Utilities`** (2 nodes): `__init__.py`, `Vector store utilities.`
+- **Thin community `Community 60`** (2 nodes): `__init__.py`, `Vector store utilities.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Alembic Revision Modules`** (2 nodes): `__init__.py`, `Alembic revision modules.`
+- **Thin community `Community 61`** (2 nodes): `__init__.py`, `Alembic revision modules.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Postgresql Conf Tuning`** (2 nodes): `postgresql.conf Tuning`, `work_mem Risk`
+- **Thin community `Community 63`** (2 nodes): `postgresql.conf Tuning`, `work_mem Risk`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Postgresql Index Design`** (2 nodes): `PostgreSQL Index Design`, `Linux perf PostgreSQL CPU Analysis`
+- **Thin community `Community 64`** (2 nodes): `PostgreSQL Index Design`, `Linux perf PostgreSQL CPU Analysis`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Agent Saul Production`** (2 nodes): `Agent Saul`, `Production Deployment Topology`
+- **Thin community `Community 65`** (2 nodes): `Agent Saul`, `Production Deployment Topology`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Backstage Dev Portal`** (2 nodes): `Backstage`, `Dev Portal Catalog`
+- **Thin community `Community 66`** (2 nodes): `Backstage`, `Dev Portal Catalog`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Control Plane Jenkins`** (2 nodes): `CI/CD Control Plane`, `Jenkins`
+- **Thin community `Community 67`** (2 nodes): `CI/CD Control Plane`, `Jenkins`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Ensure Score Between`** (1 nodes): `Ensure score is between 0 and 1.`
+- **Thin community `Community 91`** (1 nodes): `Ensure score is between 0 and 1.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Validate Embedding Not`** (1 nodes): `Validate embedding is not empty if provided.`
+- **Thin community `Community 92`** (1 nodes): `Validate embedding is not empty if provided.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Ensure Overlap Less`** (1 nodes): `Ensure overlap is less than chunk size.`
+- **Thin community `Community 93`** (1 nodes): `Ensure overlap is less than chunk size.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Configuration Instance Runnableconfig`** (1 nodes): `Create a Configuration instance from a RunnableConfig.`
+- **Thin community `Community 97`** (1 nodes): `Create a Configuration instance from a RunnableConfig.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Strip Leading Trailing`** (1 nodes): `Strip leading/trailing whitespace from optional fields.`
+- **Thin community `Community 98`** (1 nodes): `Strip leading/trailing whitespace from optional fields.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Cross Field Validation`** (1 nodes): `Cross-field validation (e.g., role minimum length).`
+- **Thin community `Community 99`** (1 nodes): `Cross-field validation (e.g., role minimum length).`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Build Deterministic Sha`** (1 nodes): `Build a deterministic SHA-256 key for a tool invocation.`
+- **Thin community `Community 105`** (1 nodes): `Build a deterministic SHA-256 key for a tool invocation.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Load Configuration Settings`** (1 nodes): `Load configuration from settings.`
+- **Thin community `Community 106`** (1 nodes): `Load configuration from settings.`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 111`** (1 nodes): `Immutable collection of all pre-built LangChain tools.      Tool assignment to a`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 112`** (1 nodes): `Build all tools once.  Call at lifespan startup only.`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 113`** (1 nodes): `Main configuration class for the Deep Research agent.`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 114`** (1 nodes): `Create a Configuration instance from a RunnableConfig.`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 115`** (1 nodes): `Pydantic configuration.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
@@ -470,12 +540,12 @@ _Questions this graph is uniquely positioned to answer:_
   _Edge tagged AMBIGUOUS (relation: calls) - confidence is low._
 - **What is the exact relationship between `risk` and `review HITL`?**
   _Edge tagged AMBIGUOUS (relation: calls) - confidence is low._
-- **Why does `get_settings()` connect `Client Tavily Run` to `Token User Oauth`, `Graphiti Neo4j Episode`, `Crawler Crawl Url`, `Circuit Breaker Idempotency`, `Search Chunk Rag`, `Upload User Router`, `Saul Redis Agent`, `Extract Entity Args`, `Client Indexing Chat`, `Llm End Langsmith`?**
-  _High betweenness centrality (0.040) - this node is a cross-community bridge._
-- **Why does `_encode_file()` connect `Agent Build Chain` to `Redis Args Search`?**
-  _High betweenness centrality (0.032) - this node is a cross-community bridge._
-- **Why does `Chunk` connect `Args Embedding Chunk` to `Graph State Search`?**
-  _High betweenness centrality (0.027) - this node is a cross-community bridge._
+- **Why does `get_settings()` connect `Community 6` to `Community 0`, `Community 1`, `Community 4`, `Community 7`, `Community 12`, `Community 13`, `Community 24`, `Community 26`, `Community 27`, `Community 29`?**
+  _High betweenness centrality (0.042) - this node is a cross-community bridge._
+- **Why does `create_production_agent()` connect `Community 14` to `Community 12`?**
+  _High betweenness centrality (0.024) - this node is a cross-community bridge._
+- **Why does `SystemPromptParts` connect `Community 14` to `Community 2`?**
+  _High betweenness centrality (0.023) - this node is a cross-community bridge._
 - **Are the 170 inferred relationships involving `str` (e.g. with `create_session()` and `saul_ws_endpoint()`) actually correct?**
   _`str` has 170 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 59 inferred relationships involving `DatabaseException` (e.g. with `UserProfile` and `UserUpdate`) actually correct?**

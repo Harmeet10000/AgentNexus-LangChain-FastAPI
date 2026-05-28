@@ -28,7 +28,7 @@ They're structured as an async service function, not a tool, because:
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -39,6 +39,19 @@ from .schemas import ClauseEpisodeMetadata, LegalEdgeInput
 
 if TYPE_CHECKING:
     from app.shared.langgraph_layer.agent_saul.state import ClauseSegment, LegalRelationship
+
+
+class GraphitiService(Protocol):
+    """Graphiti write operations needed by the clause memory writer."""
+
+    async def write_clause_episode(
+        self,
+        clause_text: str,
+        metadata: ClauseEpisodeMetadata,
+    ) -> str: ...
+
+    async def write_relationship_edge(self, edge: LegalEdgeInput) -> str: ...
+
 
 _MAX_CONCURRENT_WRITES: int = 5
 
@@ -195,7 +208,7 @@ async def _write_single_clause_episode(
                 episode_uuid=uuid,
                 success=True,
             )
-        except Exception as exc:
+        except (RuntimeError, ValueError, AttributeError) as exc:
             logger.bind(
                 clause_id=segment.clause_id,
                 error=str(exc),
@@ -259,7 +272,7 @@ async def _write_single_relationship_edge(
             episode_uuid=uuid,
             success=True,
         )
-    except Exception as exc:
+    except (RuntimeError, ValueError, AttributeError) as exc:
         logger.bind(
             edge_id=relationship.edge_id,
             error=str(exc),

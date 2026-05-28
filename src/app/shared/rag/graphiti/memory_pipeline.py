@@ -29,7 +29,7 @@ Design notes:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from langchain_core.messages import (
     AIMessage,
@@ -42,23 +42,33 @@ from langchain_core.messages import (
 from app.utils import logger
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from langchain_core.messages import BaseMessage
 
+    from app.shared.langgraph_layer.agent_saul.state import LegalAgentState
+
+
+class GraphitiSearchResultLike(Protocol):
+    relevance_score: float
+    name: str
+    content: str
+    created_at: datetime | None
+
+
+class GraphitiService(Protocol):
     # GraphitiService is a protocol/interface for the client functions
-    # This is a type stub for DI – the actual implementation is functions in .client
-    class GraphitiService:
-        """Type stub for Graphiti client operations."""
+    # This is a type stub for DI - the actual implementation is functions in .client
+    """Type stub for Graphiti client operations."""
 
-        async def search_for_risk_context(
-            self, query: str, user_id: str, doc_id: str, num_results: int
-        ) -> list: ...
+    async def search_for_risk_context(
+        self, query: str, user_id: str, doc_id: str, num_results: int
+    ) -> list[GraphitiSearchResultLike]: ...
 
-        async def search_for_precedent_chains(
-            self, query: str, user_id: str, jurisdiction: str, num_results: int
-        ) -> list: ...
+    async def search_for_precedent_chains(
+        self, query: str, user_id: str, jurisdiction: str, num_results: int
+    ) -> list[GraphitiSearchResultLike]: ...
 
-
-from app.shared.langgraph_layer.agent_saul.state import LegalAgentState
 
 _DEFAULT_MAX_TOKENS: int = 4_000
 _GRAPHITI_CONTEXT_RESULTS: int = 5
@@ -167,11 +177,10 @@ def _build_context_prefix(
 
     # Active risk findings as warnings
     risk_warnings: str = ""
-    if state.get("risk_analysis"):
+    risk_analysis = state.get("risk_analysis")
+    if risk_analysis is not None:
         critical_risks = [
-            f.title
-            for f in state["risk_analysis"].findings  # type: ignore[union-attr]
-            if f.label in ("critical", "high")
+            f.title for f in risk_analysis.findings if f.label in ("critical", "high")
         ]
         if critical_risks:
             risk_warnings = "HIGH PRIORITY RISKS DETECTED: " + ", ".join(critical_risks[:5])
@@ -230,6 +239,6 @@ async def _retrieve_graphiti_context(
 
         return "\n".join(lines)
 
-    except Exception as exc:
+    except (RuntimeError, ValueError, AttributeError) as exc:
         logger.bind(error=str(exc), task=task).warning("memory_pipeline_graphiti_failed")
         return ""
