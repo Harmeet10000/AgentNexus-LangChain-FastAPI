@@ -41,7 +41,8 @@ async def get_saul_graph(request: Request) -> CompiledStateGraph:
 async def get_saul_checkpointer(request: Request) -> AsyncPostgresSaver:
     checkpointer = request.app.state.langgraph_checkpointer
     if checkpointer is None:
-        raise ServiceUnavailableException("Persistence layer is unavailable")
+        message = "Persistence layer is unavailable"
+        raise ServiceUnavailableException(message)
     return checkpointer
 
 async def get_redis(request: Request) -> Redis:

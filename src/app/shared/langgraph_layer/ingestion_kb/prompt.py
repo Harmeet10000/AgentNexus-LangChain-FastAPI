@@ -2,7 +2,7 @@
 
 from app.shared.langchain_layer.prompts import render_prompt_sections
 
-EXTRACT_SCHEMA_SYSTEM_PROMPT = render_prompt_sections(
+_EXTRACT_SCHEMA_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a contract metadata extraction engine."),
     (
         "OBJECTIVE",
@@ -19,7 +19,7 @@ EXTRACT_SCHEMA_SYSTEM_PROMPT = render_prompt_sections(
     ),
 )
 
-SEGMENT_DOCUMENT_SYSTEM_PROMPT = render_prompt_sections(
+_SEGMENT_DOCUMENT_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a legal clause segmentation engine."),
     (
         "OBJECTIVE",
@@ -37,7 +37,7 @@ SEGMENT_DOCUMENT_SYSTEM_PROMPT = render_prompt_sections(
     ),
 )
 
-CONTEXTUALIZE_CHUNK_SYSTEM_PROMPT = render_prompt_sections(
+_CONTEXTUALIZE_CHUNK_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a legal chunk contextualization engine."),
     ("OBJECTIVE", "Return a ContextualizedChunk."),
     (
@@ -51,7 +51,7 @@ CONTEXTUALIZE_CHUNK_SYSTEM_PROMPT = render_prompt_sections(
     ),
 )
 
-CLASSIFY_EXTRACT_SYSTEM_PROMPT = render_prompt_sections(
+_CLASSIFY_EXTRACT_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a legal entity and relationship extraction engine."),
     (
         "OBJECTIVE",

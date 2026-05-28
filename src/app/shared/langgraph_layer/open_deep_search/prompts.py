@@ -2,7 +2,7 @@
 
 from app.shared.langchain_layer.prompts import render_prompt_sections
 
-clarify_with_user_instructions = render_prompt_sections(
+_CLARIFY_WITH_USER_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a research scope clarification engine."),
     (
         "OBJECTIVE",
@@ -23,7 +23,7 @@ clarify_with_user_instructions = render_prompt_sections(
 )
 
 
-transform_messages_into_research_topic_prompt = render_prompt_sections(
+_TRANSFORM_MESSAGES_INTO_RESEARCH_TOPIC_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a research brief formulation engine."),
     (
         "OBJECTIVE",
@@ -40,7 +40,7 @@ transform_messages_into_research_topic_prompt = render_prompt_sections(
     ("CONSTRAINTS", "Return a single research brief suitable for the ResearchQuestion schema."),
 )
 
-lead_researcher_prompt = render_prompt_sections(
+_LEAD_RESEARCHER_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a research supervisor."),
     (
         "OBJECTIVE",
@@ -60,7 +60,7 @@ lead_researcher_prompt = render_prompt_sections(
     ),
 )
 
-research_system_prompt = render_prompt_sections(
+_RESEARCH_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a research assistant conducting focused web research."),
     (
         "OBJECTIVE",
@@ -81,7 +81,7 @@ research_system_prompt = render_prompt_sections(
 )
 
 
-compress_research_system_prompt = render_prompt_sections(
+_COMPRESS_RESEARCH_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a research findings consolidation engine."),
     (
         "OBJECTIVE",
@@ -101,11 +101,15 @@ compress_research_system_prompt = render_prompt_sections(
     ),
 )
 
-compress_research_simple_human_message = """All above messages are about research conducted by an AI Researcher. Please clean up these findings.
+_COMPRESS_RESEARCH_USER_PROMPT = render_prompt_sections(
+    ("OBJECTIVE", "Clean up the findings gathered above by the AI researcher."),
+    (
+        "CONSTRAINTS",
+        "Do not summarize the information. Return the raw information in a cleaner format and preserve all relevant information. You may rewrite findings verbatim.",
+    ),
+)
 
-DO NOT summarize the information. I want the raw information returned, just in a cleaner format. Make sure all relevant information is preserved - you can rewrite findings verbatim."""
-
-final_report_generation_prompt = render_prompt_sections(
+_FINAL_REPORT_GENERATION_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a deep research report writer."),
     (
         "OBJECTIVE",
@@ -126,61 +130,22 @@ final_report_generation_prompt = render_prompt_sections(
 )
 
 
-summarize_webpage_prompt = """You are tasked with summarizing the raw content of a webpage retrieved from a web search. Your goal is to create a summary that preserves the most important information from the original web page. This summary will be used by a downstream research agent, so it's crucial to maintain the key details without losing essential information.
-
-Here is the raw content of the webpage:
-
-<webpage_content>
-{webpage_content}
-</webpage_content>
-
-Please follow these guidelines to create your summary:
-
-1. Identify and preserve the main topic or purpose of the webpage.
-2. Retain key facts, statistics, and data points that are central to the content's message.
-3. Keep important quotes from credible sources or experts.
-4. Maintain the chronological order of events if the content is time-sensitive or historical.
-5. Preserve any lists or step-by-step instructions if present.
-6. Include relevant dates, names, and locations that are crucial to understanding the content.
-7. Summarize lengthy explanations while keeping the core message intact.
-
-When handling different types of content:
-
-- For news articles: Focus on the who, what, when, where, why, and how.
-- For scientific content: Preserve methodology, results, and conclusions.
-- For opinion pieces: Maintain the main arguments and supporting points.
-- For product pages: Keep key features, specifications, and unique selling points.
-
-Your summary should be significantly shorter than the original content but comprehensive enough to stand alone as a source of information. Aim for about 25-30 percent of the original length, unless the content is already concise.
-
-Present your summary in the following format:
-
-```
-{{
-   "summary": "Your summary here, structured with appropriate paragraphs or bullet points as needed",
-   "key_excerpts": "First important quote or excerpt, Second important quote or excerpt, Third important quote or excerpt, ...Add more excerpts as needed, up to a maximum of 5"
-}}
-```
-
-Here are two examples of good summaries:
-
-Example 1 (for a news article):
-```json
-{{
-   "summary": "On July 15, 2023, NASA successfully launched the Artemis II mission from Kennedy Space Center. This marks the first crewed mission to the Moon since Apollo 17 in 1972. The four-person crew, led by Commander Jane Smith, will orbit the Moon for 10 days before returning to Earth. This mission is a crucial step in NASA's plans to establish a permanent human presence on the Moon by 2030.",
-   "key_excerpts": "Artemis II represents a new era in space exploration, said NASA Administrator John Doe. The mission will test critical systems for future long-duration stays on the Moon, explained Lead Engineer Sarah Johnson. We're not just going back to the Moon, we're going forward to the Moon, Commander Jane Smith stated during the pre-launch press conference."
-}}
-```
-
-Example 2 (for a scientific article):
-```json
-{{
-   "summary": "A new study published in Nature Climate Change reveals that global sea levels are rising faster than previously thought. Researchers analyzed satellite data from 1993 to 2022 and found that the rate of sea-level rise has accelerated by 0.08 mm/year² over the past three decades. This acceleration is primarily attributed to melting ice sheets in Greenland and Antarctica. The study projects that if current trends continue, global sea levels could rise by up to 2 meters by 2100, posing significant risks to coastal communities worldwide.",
-   "key_excerpts": "Our findings indicate a clear acceleration in sea-level rise, which has significant implications for coastal planning and adaptation strategies, lead author Dr. Emily Brown stated. The rate of ice sheet melt in Greenland and Antarctica has tripled since the 1990s, the study reports. Without immediate and substantial reductions in greenhouse gas emissions, we are looking at potentially catastrophic sea-level rise by the end of this century, warned co-author Professor Michael Green."
-}}
-```
-
-Remember, your goal is to create a summary that can be easily understood and utilized by a downstream research agent while preserving the most critical information from the original webpage.
-
-Today's date is {date}.
-"""
+_SUMMARIZE_WEBPAGE_PROMPT = render_prompt_sections(
+    ("IDENTITY", "You are a webpage summarization engine for downstream research."),
+    (
+        "OBJECTIVE",
+        "Summarize the raw webpage content while preserving the most important information for downstream research use.",
+    ),
+    (
+        "CONTEXT POLICY",
+        "Raw webpage content:\n{webpage_content}\n\nToday's date is {date}.",
+    ),
+    (
+        "EXECUTION POLICY",
+        "Preserve the main topic, key facts, statistics, important quotes, chronology when relevant, lists or step-by-step instructions, and crucial dates, names, and locations. For news, focus on who, what, when, where, why, and how. For scientific content, preserve methodology, results, and conclusions. For opinion pieces, preserve the main arguments. For product pages, preserve key features and specifications. Aim for a summary that is much shorter than the source but still stands alone.",
+    ),
+    (
+        "CONSTRAINTS",
+        "Return a structured response with summary and key_excerpts. Include up to five key excerpts. Preserve the most critical information without losing essential details.",
+    ),
+)

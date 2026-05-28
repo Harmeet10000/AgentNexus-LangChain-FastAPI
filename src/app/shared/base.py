@@ -1,8 +1,11 @@
 """SQLAlchemy base model for all database tables."""
 
-from sqlalchemy import MetaData
+from typing import Any
+
+from sqlalchemy import JSON, ForeignKey, MetaData, String
 from sqlalchemy.ext.asyncio import AsyncAttrs
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.ext.mutable import MutableDict
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
@@ -18,11 +21,6 @@ class Base(AsyncAttrs, DeclarativeBase):
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
-from typing import Any
-
-from sqlalchemy import JSON, ForeignKey, String
-from sqlalchemy.ext.mutable import MutableDict
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 # class Base(DeclarativeBase):

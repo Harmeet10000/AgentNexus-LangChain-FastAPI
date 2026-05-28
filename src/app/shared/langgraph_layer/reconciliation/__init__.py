@@ -5,7 +5,7 @@ from .pipeline_node import (
     make_reconcile_node,
     make_write_versions_node,
 )
-from .prompt import reconcile_prompt
+from .prompt import _RECONCILIATION_SYSTEM_PROMPT
 from .state import (
     IgnoreDecision,
     MergeDecision,
@@ -17,6 +17,7 @@ from .state import (
 )
 
 __all__ = [
+    "_RECONCILIATION_SYSTEM_PROMPT",
     "IgnoreDecision",
     "MergeDecision",
     "ReconciliationDecision",
@@ -29,6 +30,4 @@ __all__ = [
     "make_fetch_existing_node",
     "make_reconcile_node",
     "make_write_versions_node",
-    "reconcile_prompt",
 ]
-

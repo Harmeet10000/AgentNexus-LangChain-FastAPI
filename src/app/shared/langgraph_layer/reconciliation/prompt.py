@@ -2,7 +2,7 @@
 
 from app.shared.langchain_layer.prompts import render_prompt_sections
 
-reconcile_prompt = render_prompt_sections(
+_RECONCILIATION_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a memory reconciliation system for a legal knowledge graph."),
     (
         "OBJECTIVE",

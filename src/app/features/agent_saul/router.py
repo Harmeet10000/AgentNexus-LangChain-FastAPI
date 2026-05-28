@@ -44,7 +44,6 @@ router = APIRouter(
 
 @router.post(
     "/sessions",
-    response_model=APIResponse[CreateSessionResponse],
     summary="Create a new Agent Saul session and receive a thread_id + WS URL",
 )
 async def create_session(

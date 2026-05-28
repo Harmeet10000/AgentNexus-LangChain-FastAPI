@@ -16,7 +16,7 @@ from app.shared.services import search
 from app.utils import ExternalServiceException, logger
 
 from .configuration import Configuration
-from .prompts import summarize_webpage_prompt
+from .prompts import _SUMMARIZE_WEBPAGE_PROMPT
 from .state import ResearchComplete, Summary
 
 if TYPE_CHECKING:
@@ -151,7 +151,7 @@ def _get_httpx_client_from_config(config: RunnableConfig | None) -> httpx.AsyncC
 async def summarize_webpage(model: Any, webpage_content: str) -> str:
     """Summarize webpage content with timeout protection."""
     try:
-        prompt_content = summarize_webpage_prompt.format(
+        prompt_content = _SUMMARIZE_WEBPAGE_PROMPT.format(
             webpage_content=webpage_content,
             date=get_today_str(),
         )
