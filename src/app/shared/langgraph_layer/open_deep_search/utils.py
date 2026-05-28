@@ -11,8 +11,8 @@ from langchain_core.messages import AIMessage, HumanMessage, filter_messages
 from langchain_core.runnables import RunnableConfig  # noqa: TC002
 from langchain_core.tools import InjectedToolArg, tool
 
-from app.shared.langchain_layer.models import build_chat_model
-from app.shared.services.tavily import search
+from app.shared.langchain_layer import build_chat_model
+from app.shared.services import search
 from app.utils import ExternalServiceException, logger
 
 from .configuration import Configuration
@@ -108,8 +108,8 @@ async def tavily_search_async(
     config: RunnableConfig | None = None,
 ) -> list[SearchResponse]:
     """Execute bounded Tavily searches through the shared service client."""
-    http_client: AsyncClient | None = _get_httpx_client_from_config(config)
-    search_log: Logger = logger.bind(
+    http_client = _get_httpx_client_from_config(config)
+    search_log  = logger.bind(
         component="open_deep_search",
         search_api="tavily",
         queries=len(search_queries),

@@ -190,3 +190,40 @@ Most developers treat the Model Context Protocol (MCP) as a simple data bridge. 
 Actors should are useful in managing a shared IO resource (WebSocket or DB Connection)
 in Rust no lifetime annotations on actor types - antipattern because the message shouldnt be destroyed after the owner 
 
+
+
+# Main Risks
+1. Source-of-truth drift across too many state systems
+- You have Postgres/TigerData, Neo4j, Redis, MongoDB, LangGraph checkpoints, and long-term memory layers all participating in execution and retrieval (README.md:85-114, README.md:27-37).
+- The architecture wants state = source of truth, but the system also has separate write/read memory flows and multiple managed stores (graphify-out/GRAPH_REPORT.md:121-130).
+- Risk: one workflow step succeeds in one store and not another, and the agent later reads a contradictory picture of reality.
+2. Replay and idempotency failures in durable workflows
+- The project explicitly depends on deterministic replay and resumability (README.md:17-37).
+- The graph report shows “Tool Call Idempotency And Durable Audit Flow” as a first-class architectural concern (graphify-out/GRAPH_REPORT.md:124), which usually means this is both important and easy to get wrong.
+- Risk: resumed LangGraph nodes or retried Celery tasks duplicate writes, duplicate audits, or replay side effects incorrectly.
+3. Human-in-the-loop becoming an operational bottleneck
+- Human review is mandatory before trusted persistence (README.md:116-145).
+- HITLInterruptType, WorkflowStatus, and LegalAgentState are among the most connected abstractions in the codebase (graphify-out/GRAPH_REPORT.md:95-104).
+- Risk: the system becomes queue-bound on reviewer availability, and partially completed workflows accumulate in awkward intermediate states.
+4. Conflicting retrieval context from hybrid memory + search
+- The app mixes vector retrieval, text search, graph memory, precedent chains, and long-term memory (README.md:85-93).
+- The graph report shows separate hybrid query, RRF fusion, graph-memory, and read-path context flows (graphify-out/GRAPH_REPORT.md:122-130).
+- Risk: the model gets multiple plausible but inconsistent contexts and produces confident, hard-to-debug legal reasoning errors.
+5. High blast radius from infrastructure complexity
+- The runtime stack is large: FastAPI, LangGraph, LangChain, LangSmith, Redis, Celery, Postgres, Neo4j, MongoDB, Crawl4AI, Tavily, Docling, FastMCP (README.md:101-115, README.md:146-157).
+- Even auth/websocket services appear coupled to lifespan-managed infra initialization (graphify-out/GRAPH_REPORT.md:109-116).
+- Risk: small availability or startup problems cascade into broad feature failures.
+6. Over-centralization around core abstractions
+- DatabaseException, WorkflowStatus, HITLInterruptType, LegalAgentState, Configuration, and get_settings() are “god nodes” (graphify-out/GRAPH_REPORT.md:94-104).
+- Risk: changes to shared primitives ripple widely, making refactors dangerous and increasing hidden coupling between unrelated features.
+7. Security and trust-boundary exposure from tool-heavy agent workflows
+- The system does web research, crawling, ingestion, retrieval, chat, and background execution (README.md:85-93).
+- In a legal domain, external content can easily cross into trusted memory or user-facing legal analysis if the verification boundary slips.
+- Risk: prompt injection, poisoned retrieval context, or unreviewed external content contaminating persisted memory or legal outputs.
+Big Picture
+The architecture is ambitious and coherent, but the main failure mode is not “the model says something wrong once.” It’s “a complex, resumable, multi-store agent system slowly drifts out of sync while still looking healthy.”
+What I’d watch first
+1. Write-path idempotency and replay guarantees
+2. Clear ownership of truth between state/checkpoints/store/DBs
+3. Review queue backpressure and stuck workflow handling
+4. Retrieval provenance and contradiction detection
