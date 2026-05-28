@@ -16,7 +16,7 @@ from langchain_core.messages import (
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
-from app.shared.langchain_layer import build_chat_model
+from app.shared.langchain_layer.models import _build_chat_model
 from app.utils import logger
 
 from .configuration import Configuration
@@ -58,7 +58,7 @@ if TYPE_CHECKING:
 
 def _build_model(model_name: str, max_tokens: int) -> Any:
     """Build a shared Gemini model for deep research nodes."""
-    return build_chat_model(
+    return _build_chat_model(
         model_name=model_name,
         max_tokens=max_tokens,
     ).with_config({"tags": ["langsmith:nostream"]})

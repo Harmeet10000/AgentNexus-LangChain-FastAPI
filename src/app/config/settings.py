@@ -140,8 +140,11 @@ class Settings(BaseSettings):
     GEMINI_PRO_MODEL: str = Field(default="gemini-3.1-pro")
     GEMINI_VISION_MODEL: str = Field(default="gemini-2.5-flash-image")
     GEMINI_EMBEDDING_MODEL: str = Field(default="gemini-embedding-2-preview")
-    GEMINI_TEMPERATURE: float = Field(default=0.7)
+    GEMINI_TEMPERATURE: float = Field(default=0.7, ge=0.0, le=2.0)
+    GEMINI_TOP_P: float = Field(default=0.8, ge=0.0, le=1.0)
+    GEMINI_TOP_K: int = Field(default=20, gt=0)
     GEMINI_MAX_TOKENS: int = Field(default=2048)
+    GEMINI_CONTEXT_CACHE_TTL: str = Field(default="3600s", min_length=1)
     LANGEXTRACT_API_KEY: str = Field(
         default="empty-langextract-api-key"
     )  # Added this missing field

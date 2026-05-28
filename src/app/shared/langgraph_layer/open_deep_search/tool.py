@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
 
-from .deep_researcher import deep_researcher
+from .deep_researcher_graph import deep_researcher
 
 if TYPE_CHECKING:
     from typing import Any

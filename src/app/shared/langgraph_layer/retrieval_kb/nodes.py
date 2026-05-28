@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.shared.langchain_layer.models import serialize_to_toon
+from app.shared.langchain_layer.prompts import render_prompt_sections
 from app.shared.langgraph_layer.kb_retry import retry_immediate
 from app.utils import logger
 
@@ -27,25 +28,58 @@ if TYPE_CHECKING:
 
 EmbeddingFunction = Any
 
-QUERY_ANALYZER_PROMPT = """
-Analyze the legal retrieval query. Rewrite coreferences using the conversation,
-decompose multi-part questions, choose route hybrid_postgres, graph_neo4j, or both,
-and choose vector_weight/keyword_weight. Exact clause-reference queries should
-favor BM25; conceptual obligation/risk questions should favor vector search.
-Return only QueryPlan.
-"""
+QUERY_ANALYZER_PROMPT = render_prompt_sections(
+    ("IDENTITY", "You are a legal retrieval query planning engine."),
+    (
+        "OBJECTIVE",
+        "Analyze the legal retrieval query and produce a QueryPlan that maximizes grounded retrieval.",
+    ),
+    (
+        "CONTEXT POLICY",
+        "Use recent conversation messages only to resolve references and clarify retrieval intent.",
+    ),
+    (
+        "EXECUTION POLICY",
+        "Rewrite coreferences using the conversation, decompose multi-part questions, choose route "
+        "hybrid_postgres, graph_neo4j, or both, and choose vector_weight and keyword_weight. "
+        "Exact clause-reference queries should favor BM25; conceptual obligation or risk questions should favor vector search.",
+    ),
+    ("CONSTRAINTS", "Return only QueryPlan."),
+)
 
-CONTEXT_GRADER_PROMPT = """
-Grade whether the retrieved chunks are sufficient to answer the query without
-hallucination. If not sufficient, provide missing_aspects and a concise
-rewrite_suggestion. Return only ContextGrade.
-"""
+CONTEXT_GRADER_PROMPT = render_prompt_sections(
+    ("IDENTITY", "You are a retrieval sufficiency grader."),
+    (
+        "OBJECTIVE",
+        "Determine whether the retrieved chunks are sufficient to answer the query without hallucination.",
+    ),
+    (
+        "EXECUTION POLICY",
+        "If the evidence is insufficient, identify missing aspects and provide a concise rewrite suggestion.",
+    ),
+    ("CONSTRAINTS", "Return only ContextGrade."),
+)
 
-GENERATOR_PROMPT = """
-Answer using only retrieved chunks. Every factual claim must cite exact chunk_id
-and clause_type in the citations list. If support is weak, set confidence to
-uncertain. Return only GeneratedAnswer.
-"""
+GENERATOR_PROMPT = render_prompt_sections(
+    ("IDENTITY", "You are a grounded legal answer generator."),
+    (
+        "OBJECTIVE",
+        "Answer the user's question using only the retrieved chunks.",
+    ),
+    (
+        "CONTEXT POLICY",
+        "Treat retrieved chunks as the only admissible basis for factual claims.",
+    ),
+    (
+        "CONSTRAINTS",
+        "Every factual claim must cite exact chunk_id and clause_type in the citations list. "
+        "Return only GeneratedAnswer.",
+    ),
+    (
+        "UNCERTAINTY POLICY",
+        "If support is weak, set confidence to uncertain and avoid stronger claims than the evidence supports.",
+    ),
+)
 
 FALLBACK_ANSWER = (
     "I do not have enough grounded contract context to answer this reliably. "
