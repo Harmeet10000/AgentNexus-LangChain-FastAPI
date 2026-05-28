@@ -1,0 +1,44 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/AGENTS.md",
+    ".github/copilot-instructions.md"
+  ],
+  "skills": {
+    "paths": [
+      ".opencode/skills"
+    ]
+  },
+  "agent": {
+    "principal-software-engineer": {
+      "description": "Principal-level software engineering guidance for implementation reviews, trade-off analysis, and technical leadership work in this repo.",
+      "mode": "all"
+    },
+    "backend-developer": {
+      "description": "Backend delivery agent for FastAPI, LangGraph, persistence, and production backend changes in this repo.",
+      "mode": "all"
+    },
+    "architect-reviewer": {
+      "description": "Architecture review agent for system design, scalability, integration, and maintainability decisions in this repo.",
+      "mode": "all",
+      "permission": {
+        "edit": "deny"
+      }
+    }
+  },
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "uv *": "allow",
+      "pytest *": "allow",
+      "ruff *": "allow",
+      "ty *": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "graphify *": "allow",
+      "rm -rf *": "deny",
+      "git reset --hard *": "deny"
+    }
+  }
+}
