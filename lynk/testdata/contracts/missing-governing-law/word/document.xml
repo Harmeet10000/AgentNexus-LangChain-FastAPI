@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Title"/></w:pPr>
+      <w:r><w:t>Commercial Terms Sample</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:r><w:t>1. Services</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>"Services" means the implementation and support services described in a statement of work.</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:r><w:t>2. Fees</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>Invoices are payable within 30 Business Days of receipt.</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:r><w:t>3. Miscellaneous</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>If any provision of this Agreement is held invalid or unenforceable, the remaining provisions shall remain in full force and effect.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>

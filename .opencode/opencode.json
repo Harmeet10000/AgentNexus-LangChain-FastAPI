@@ -2,12 +2,22 @@
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
     ".opencode/plugins/graphify.js",
-    "@warp-dot-dev/opencode-warp"
+   "@warp-dot-dev/opencode-warp",
+    "@mohak34/opencode-notifier@latest",
+        "@zenobius/opencode-skillful",
+        "opencode-scheduler",
+        "opencode-firecrawl",
+        "opencode-conductor-plugin",
+    "oac"
   ],
   "skills": {
     "paths": [
-      ".opencode/skills"
+      ".opencode/skills",
+        "/home/harmeet/Desktop/prompts/skills"
     ]
+  },
+  "compaction": {
+    "auto": true
   },
   "permission": {
     "bash": {
@@ -20,7 +30,7 @@
       "git diff*": "allow",
       "git log*": "allow",
       "graphify *": "allow",
-      "rm -rf *": "deny",
+      "rm -rf *": "ask",
       "git reset --hard *": "deny"
     },
     "edit": "allow",
