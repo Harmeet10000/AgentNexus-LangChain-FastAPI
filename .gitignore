@@ -172,6 +172,7 @@ temp/
 logs/
 .langsmith/
 .langgraph/
+.firecrawl/
 vector_store/
 downloads/
 uploads/

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Title"/></w:pPr>
+      <w:r><w:t>Master Services Agreement</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:r><w:t>1. Confidentiality</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>"Services" means the services described in a statement of work.</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:r><w:t>2. Governing Law</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>This Agreement shall be governed by the laws of India and the courts at Bengaluru shall have jurisdiction.</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:r><w:t>3. Miscellaneous</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>If any provision of this Agreement is held invalid or unenforceable, the remaining provisions shall remain in full force and effect.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>

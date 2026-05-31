@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Title"/></w:pPr>
+      <w:r><w:t>Dispute Clause Sample</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:r><w:t>1. Dispute Resolution</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>All disputes shall be resolved by arbitration seated in Mumbai.</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>The courts at Bengaluru shall have exclusive jurisdiction.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>

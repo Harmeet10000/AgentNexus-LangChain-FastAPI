@@ -1,0 +1,24 @@
+{
+  "document_title": "Dispute Clause Sample",
+  "document_path": "__FIXTURE_PATH__",
+  "diagnostics": [
+    {
+      "code": "B2B019",
+      "severity": "warning",
+      "message": "Contract appears to lack a severability clause.",
+      "suggestion": {
+        "summary": "Add a standard severability clause in the miscellaneous section.",
+        "pattern": "If any provision of this Agreement is held invalid or unenforceable, the remaining provisions shall remain in full force and effect."
+      }
+    },
+    {
+      "code": "B2B052",
+      "severity": "warning",
+      "message": "Document contains both arbitration language and direct court-forum language. Review dispute-resolution consistency.",
+      "suggestion": {
+        "summary": "Clarify whether disputes go to arbitration first, and whether court jurisdiction is limited to interim relief or enforcement.",
+        "pattern": "Any dispute arising out of or in connection with this Agreement shall be finally resolved by arbitration... Courts at [City] shall have jurisdiction only for interim relief and enforcement of the award."
+      }
+    }
+  ]
+}

@@ -150,7 +150,27 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 108. use the new gemini embedding 2 for multi-modal embeddings, LLMToolSelectMiddleware        DONE
 165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384    DONE 
 62. can i use openRouter keys for my Gemini model    DONE             
+177. 
+ PydanticDeprecatedSince20: `json_encoders` is deprecated. See https://docs.pydantic.dev/2.12/concepts/serialization/custom-serializers for alternatives. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/deep_researcher.py:701: LangGraphDeprecatedSinceV10: `config_schema` is deprecated and will be removed. Please use `context_schema` instead. Deprecated in LangGraph V1.0 to be removed in V2.0.
+  deep_researcher_builder = StateGraph(
+/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/deep_researcher.py:701: LangGraphDeprecatedSinceV05: `input` is deprecated and will be removed. Please use `input_schema` instead. Deprecated in LangGraph V0.5 to be removed in V2.0.
+  deep_researcher_builder = StateGraph(
+/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/deep_researcher.py:589: LangGraphDeprecatedSinceV05: `output` is deprecated and will be removed. Please use `output_schema` instead. Deprecated in LangGraph V0.5 to be removed in V2.0.
+  researcher_builder = StateGraph(                                      
 
+/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/configuration.py:214: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'optional', 'metadata'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+  mcp_config: MCPConfig | None = Field(                                        DONE
+168. do migration of open_deep_research  and pass it to agent_saul as a ToolNode
+    a. remove MCP from it
+    b. store the MCP code for any best practices in mcp/
+    c. remove other model providers
+    d. use own taily client and httpx_client and replace existing one
+    e. reorganise code                                          DONE
+59. No skill composition. Skills are flat callables. Theres no way to chain skills (skill A output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.   DONE
+169. EARS-compliant acceptance criteria, research about what Kiro does for SDD, which standards does it use   DONE
+
+146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note and also check if i am right in passong HTTPException to APIException and other classes        DELAYED
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses     DELAYED    
 156. check the page https://docs.langchain.com/langsmith/deployments#
@@ -176,11 +196,10 @@ def compose(*functions: Composable) -> Composable:
 53. add voice support by using gemini 3 for TTS and STT  with websockets
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
-59. No skill composition. Skills are flat callables. Theres no way to chain skills (skill A output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.
 44. correct the code for crawler and the packages used
 115. logs inbetween the layers are empty or not coming except start and end, should i pass logger as an argument or should i import it where needed 
 140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
-146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note and also check if i am right in passong HTTPException to APIException and other classes
+
 148. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
 151. add langchain-cisco-aidefense, compact-middleware, langchain-collapse
 152. see cogneeRetriver how does vertex ai differ from google_genai
@@ -209,32 +228,15 @@ todos:-
 164. refactor RAG code
 166. use Call a toolNode and check id toolNode should be used or subgraph inside a node for Open Deep Research
 167. how systemPromptPaarts, chatPromptTemplate, systemmessage, humanMessage, AImessage,ToolMessage look like while passing it in graph and how should i serialise these with toons before sending to LLM
-168. do migration of open_deep_research  and pass it to agent_saul as a ToolNode
-    a. remove MCP from it
-    b. store the MCP code for any best practices in mcp/
-    c. remove other model providers
-    d. use own taily client and httpx_client and replace existing one
-    e. reorganise code
-169. EARS-compliant acceptance criteria, research about what Kiro does for SDD, which standards does it use
+
 170. write cron job for memory decay and then send to celery for off loading
 171. use CacheBackedEmbeddings fore reusing embeddings
 172. use prebuilt and custom middlewares in langchain 
 173. rewrite the tools for the new grpahiti, cognee etc
 174. add proper cognee functions, graphiti from docs
-175. what are state machine  in design patterns
+175. 
 176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
-177. 
- PydanticDeprecatedSince20: `json_encoders` is deprecated. See https://docs.pydantic.dev/2.12/concepts/serialization/custom-serializers for alternatives. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
-/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/deep_researcher.py:701: LangGraphDeprecatedSinceV10: `config_schema` is deprecated and will be removed. Please use `context_schema` instead. Deprecated in LangGraph V1.0 to be removed in V2.0.
-  deep_researcher_builder = StateGraph(
-/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/deep_researcher.py:701: LangGraphDeprecatedSinceV05: `input` is deprecated and will be removed. Please use `input_schema` instead. Deprecated in LangGraph V0.5 to be removed in V2.0.
-  deep_researcher_builder = StateGraph(
-/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/deep_researcher.py:589: LangGraphDeprecatedSinceV05: `output` is deprecated and will be removed. Please use `output_schema` instead. Deprecated in LangGraph V0.5 to be removed in V2.0.
-  researcher_builder = StateGraph(
 
-/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/configuration.py:214: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'optional', 'metadata'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
-  mcp_config: MCPConfig | None = Field(
-    
 178. From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on wont be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation. [cognee.shared.logging_utils]
 
 179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
@@ -243,9 +245,8 @@ todos:-
 180. learn what can i learn about maintaining large codebases through tanStack ecosystem and others and see matt pocock video, how to hide/abstract away complexity behind a simple interface, make a skill/docs for this.
  
 181. how to use git when something is made then to use some commands on it while having another session work on the previous stuff when unrelated chnages have to be made. check what skills can help here
-add highly effevtive in copilot instruction
-182. add these for packages for time series data 
-https://github.com/balapriyac/data-science-tutorials/tree/main/useful-python-scripts-time-series
+182. add the old lynk plan as it was deleted
+
 ```
 
 --- summarise these chapters in great detail and take video's transcript as reference for summarising

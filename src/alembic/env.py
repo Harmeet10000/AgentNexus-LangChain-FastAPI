@@ -8,6 +8,10 @@ from alembic import context
 # Import database initialization function
 from app.connections.postgres import init_db
 from app.utils.logger import logger
+from database import Base
+
+# Import all models to register with Base.metadata
+from database.schemas import ChatMessage, ChatSession, DocumentVector
 
 # Alembic Config object
 config = context.config
@@ -18,10 +22,7 @@ if config.config_file_name is not None:
 
 # Import all models here for autogenerate support
 try:
-    from database import Base
 
-    # Import all models to register with Base.metadata
-    from database.schemas import ChatMessage, ChatSession, DocumentVector
 
     target_metadata = Base.metadata
 except ImportError as e:

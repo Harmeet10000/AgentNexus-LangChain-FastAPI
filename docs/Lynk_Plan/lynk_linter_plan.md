@@ -1,3 +1,302 @@
+## Lynk Linter Plan
+
+### Purpose
+
+This plan replaces the earlier broad "compiler-from-scratch" framing with a V1 that is technically excellent, operationally lightweight, and shaped by the actual product decisions already made.
+
+Lynk V1 is not a universal legal compiler. It is a deterministic linter and suggestion engine for Indian commercial B2B contracts, with a shared core that can later serve a CLI, backend API, and editor integrations.
+
+### Binding V1 Decisions
+
+These decisions take precedence over earlier exploratory arguments in this document family.
+
+1. **Primary language:** Go.
+2. **Distribution:** single static binary.
+3. **Primary input format:** `.docx` only.
+4. **Primary legal wedge:** Indian commercial B2B contracts.
+5. **Primary outputs:** diagnostics plus suggested fixes.
+6. **Reasoning model:** mostly deterministic core.
+7. **Interaction model for V1:** batch or short-wait analysis, where a few seconds is acceptable.
+8. **Product surfaces:** shared core first, with CLI first; backend and editor adapters follow on the same core.
+
+### Why V1 Uses Go
+
+Go is the best fit for the actual V1 shape:
+
+- fast enough for streaming OOXML parsing, indexing, graph resolution, and deterministic rule passes
+- simple deployment as a single static binary
+- strong concurrency for document-level workloads
+- lower implementation risk and faster team velocity than Rust for this first release
+- well suited to a shared core that can power CLI and server surfaces
+
+Go is not chosen because it is theoretically the fastest possible language. It is chosen because it gives the best delivery-to-performance ratio for this V1.
+
+### What V1 Is
+
+Lynk V1 will:
+
+- read `.docx` Indian commercial B2B contracts
+- normalize OOXML into a lightweight internal document model
+- build structural and semantic indexes in one deterministic analysis pass
+- emit stable, typed diagnostics
+- emit suggestion payloads for human review
+- support a CLI first
+- preserve a reusable core for later API and editor surfaces
+
+### What V1 Is Not
+
+Lynk V1 will not:
+
+- be a universal legal compiler across all domains of law
+- support all Indian legal practice areas
+- require sub-second live editing
+- implement a full formatter or auto-refactoring engine
+- depend heavily on LLMs for detection
+- require custom arena allocators, SIMD XML scanners, or hand-built red-green trees
+- support many document formats from day one
+
+### V1 Architecture
+
+The V1 architecture borrows ideas from editor and compiler systems without copying their heaviest machinery.
+
+#### 1. Input Layer
+
+- source of truth: `.docx`
+- unzip package and stream `word/document.xml`
+- use streaming XML parsing, not DOM parsing
+- merge fragmented Word runs where contiguous text shares equivalent formatting semantics
+
+#### 2. Normalized Document Model
+
+The parser will not expose raw OOXML to downstream rules.
+
+It will produce a normalized internal representation containing:
+
+- document text blocks
+- paragraph boundaries
+- heading hierarchy
+- numbered section spans
+- run-level style facts needed for rules
+- offsets/spans for traceability back to source
+
+This model is the first stable seam in the system.
+
+#### 3. Structural Indexes
+
+From the normalized model, Lynk V1 derives:
+
+- section index
+- definition index
+- reference index
+- dispute-resolution facts
+
+Deferred from the earlier broader draft to later iterations:
+
+- party/entity index
+- style index beyond heading detection
+- clause classification tags
+
+These indexes should be separate modules so rules run on indexed facts, not on raw text rescans.
+
+#### 4. Semantic Reference Layer
+
+V1 includes a lightweight reference layer for:
+
+- section-to-section references captured as source paragraph to target section edges
+
+Inbound adjacency maps, definition-usage links, and clause-to-obligation references are deferred to a later pass once the shipped V1 rule set is expanded.
+
+#### 5. Rule Engine
+
+Rules will execute over typed indexes and the reference graph.
+
+V1 rule engine requirements:
+
+- deterministic
+- typed inputs and outputs
+- stable diagnostic codes
+- rule categories by domain through code prefixes
+- support for suggestions without mutating source by default
+
+#### 6. Output Layer
+
+V1 outputs:
+
+- diagnostics with code, severity, message, paragraph or section locator, and evidence
+- suggestion payloads with replacement text or recommended clause pattern
+- machine-readable JSON for future editor/API integration
+- human-readable CLI output
+
+### V1 Data Structures
+
+V1 will prefer simple, proven structures that keep memory pressure low without premature low-level optimization.
+
+#### Use in V1
+
+- append-friendly normalized text segments
+- span-based node references instead of copying clause text repeatedly
+- symbol tables for definitions and scoped references
+
+Possible later optimizations if profiling justifies them:
+
+- string interning for repeated defined terms, clause labels, and parties
+- adjacency maps for richer inbound or bidirectional reference traversal
+- content-hash cache for whole-document repeat analysis
+
+#### Do not require in V1
+
+- custom arena allocator
+- manual memory pools
+- full piece-tree editing engine
+- custom SIMD lexer
+- full red-green syntax tree
+
+### V1 Rule Packs
+
+The first rule pack is intentionally narrow.
+
+#### Included in V1
+
+- `STR`: structural contract integrity
+- `LEX`: definition and terminology consistency
+- `B2B`: commercial B2B essentials for Indian contracts
+
+#### Explicit V1 examples
+
+- unresolved cross-reference
+- inconsistent defined term case
+- ambiguous use of "days"
+- missing severability clause
+- missing governing law or jurisdiction clause
+- conflicting jurisdiction references
+
+Good next deterministic additions after the current shipped slice:
+
+- missing survival language for confidentiality where detectable
+- broken heading/section hierarchy
+- orphaned signature structure if extractable from `.docx` layout facts
+
+#### Deferred to V2
+
+- broad employment rule packs
+- real-estate-heavy registration packs
+- consumer-law packs
+- tax/FEMA/IP/deep state-specific packs beyond the initial commercial wedge
+- large ontology-heavy semantic type checking
+
+### Indian Law Modeling in V1
+
+V1 should model only the highest-value Indian commercial facts needed for the B2B wedge.
+
+Required contextual facts:
+
+- governing law mention
+- jurisdiction forum mention
+- arbitration seat/venue mention when present
+
+Planned later once the analyzer grows beyond the current V1 slice:
+
+- party names and party roles when detectable
+- notice, liability, indemnity, confidentiality, term/termination, payment, and severability sections when classifiable
+
+Deferred to V2:
+
+- deeper state-level statutory overrides
+- state-schism modeling between execution state and governing state
+- rich regulatory packs across sectors
+- comprehensive statute and precedent graphing
+
+### CLI-First Product Surface
+
+The shared core will be wrapped first by a CLI.
+
+V1 CLI responsibilities:
+
+- accept a `.docx` path
+- run deterministic analysis
+- print diagnostics
+- emit JSON output
+- support rule selection by exact code
+
+Prefix or category selection can be added later without changing the core result model.
+
+The CLI is the proving ground for the core. API and editor surfaces must reuse the same analysis contracts.
+
+### Planned V2 Scope
+
+The following are explicitly V2 or later:
+
+- live editor-first incremental analysis
+- Word add-in and LSP/editor integrations
+- backend multi-document service features
+- partial re-analysis and finer invalidation boundaries
+- broader Indian jurisdiction packs
+- formatter/autofix engine
+- red-green or other lossless editing trees if later justified
+- LLM-assisted rewrite quality improvements
+- PDF support
+- cross-document dependency analysis
+
+### Technical Principles
+
+1. Keep the core deterministic.
+2. Separate text normalization from legal semantics.
+3. Run rules on indexed facts, not repeated text scans.
+4. Favor stable intermediate representations over clever parser tricks.
+5. Profile before optimizing low-level memory layout.
+6. Reuse one core across CLI, API, and editor adapters.
+
+### Initial Implementation Order
+
+#### Slice 1
+
+- Go module and CLI skeleton
+- `.docx` reader
+- streaming OOXML text extraction
+- normalized document model
+
+#### Slice 2
+
+- structural indexing
+- section and definition extraction
+- reference extraction
+- dispute-resolution fact extraction
+
+#### Slice 3
+
+- deterministic rule engine
+- first commercial B2B rule pack
+- diagnostic and suggestion output
+
+#### Slice 4
+
+- JSON output stability
+- cache layer
+- API/editor adapters planning
+
+### Success Criteria for V1
+
+V1 succeeds if it can reliably do the following on Indian commercial B2B `.docx` contracts:
+
+- extract usable structure from Word documents without full DOM loading
+- identify core structural and terminology defects deterministically
+- report stable diagnostics with evidence and paragraph or section locators
+- produce human-reviewable suggested fixes
+- run as a single static Go binary
+
+### Final Guidance
+
+The earlier version of this plan over-rotated toward theoretical compiler maximalism.
+
+The correct V1 is smaller and sharper:
+
+- `.docx` in
+- normalized document model
+- indexes and reference edges
+- deterministic Indian B2B rule packs
+- diagnostics plus suggestions
+- CLI first, shared core underneath
+
 Building a compiler-grade linter and type checker for legal documents is one of the most lucrative, untapped architectural challenges of this decade. Most "Legal AI" companies just throw raw text at an LLM and pray. To build a system modeled after high-performance tools like Ruff (and modern type checkers like Pyright/Mypy or Astral's Red-Knot), you must stop treating legal contracts as "text" and start treating them as **source code**.
 
 Here is the architectural blueprint for building a hyper-fast, deterministic legal compiler.

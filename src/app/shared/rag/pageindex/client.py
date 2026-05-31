@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.utils import (
-    APIException,
+    ExternalServiceException,
     ValidationException,
     logger,
 )
@@ -78,7 +78,7 @@ class PageIndexClient:
             logger.info("document_submitted", doc_id=doc_id)
         except Exception as exc:
             logger.exception("submit_failed")
-            raise APIException("PageIndex submit failed") from exc
+            raise ExternalServiceException("PageIndex", "submit failed") from exc
         else:
             return doc_id
 
