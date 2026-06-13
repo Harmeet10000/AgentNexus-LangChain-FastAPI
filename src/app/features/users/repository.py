@@ -2,8 +2,10 @@ from datetime import datetime
 
 from beanie import PydanticObjectId
 from beanie.operators import Or, RegEx, Set
+from returns.result import Failure, Success
 
 from app.features.auth import User, UserRole
+from app.shared.result import AppResult, ValidationAppError
 
 
 class UserAdminRepository:
@@ -14,10 +16,22 @@ class UserAdminRepository:
     """
 
     async def find_by_id(self, user_id: str) -> User | None:
-        try:
-            return await User.get(PydanticObjectId(user_id))
-        except Exception:
+        result = await self.find_by_id_result(user_id)
+        if isinstance(result, Failure):
             return None
+        return result.unwrap()
+
+    async def find_by_id_result(self, user_id: str) -> AppResult[User | None]:
+        if not PydanticObjectId.is_valid(user_id):
+            return Failure(
+                ValidationAppError(
+                    code="INVALID_USER_ID",
+                    message="Invalid user identifier",
+                    details={"user_id": user_id},
+                    source="users_repository",
+                )
+            )
+        return Success(await User.get(PydanticObjectId(user_id)))
 
     async def list_users(
         self,

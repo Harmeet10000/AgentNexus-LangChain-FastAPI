@@ -1,9 +1,12 @@
+import operator
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Annotated, Any
 
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.shared.result import AppError
 
 FetchNode = Callable[["ReconciliationState"], Awaitable[dict[str, object]]]
 ApplyNode = Callable[["ReconciliationState"], Awaitable[dict[str, object]]]
@@ -64,16 +67,14 @@ class ReconciliationState(BaseModel):
 
     new_entities: list[ReconciliationEntityRecord] = Field(default_factory=list)
     existing_entities: list[ReconciliationEntityRecord] = Field(default_factory=list)
-    fetch_error: str | None = None
 
     reconciliation_decision: ReconciliationDecision = Field(
         default_factory=ReconciliationDecision
     )
-    reconcile_error: str | None = None
 
     merged_count: int = 0
     updated_count: int = 0
     versions_written: int = 0
-    apply_error: str | None = None
+    failures: Annotated[list[AppError], operator.add] = Field(default_factory=list)
 
     completed: bool = False

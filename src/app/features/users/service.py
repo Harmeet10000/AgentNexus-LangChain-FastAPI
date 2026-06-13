@@ -1,6 +1,9 @@
 import math
 
+from returns.result import Failure, Success
+
 from app.features.auth import RefreshTokenRepository, User, UserRole, create_impersonation_token
+from app.shared.result import app_error_to_exception, log_expected_failure
 from app.utils import ConflictException, ForbiddenException, NotFoundException, logger
 
 from .dto import (
@@ -34,6 +37,19 @@ class UserAdminService:
         self._user_repo = user_repo
         self._token_repo = token_repo
 
+    async def _get_user_or_raise(self, user_id: str) -> User:
+        result = await self._user_repo.find_by_id_result(user_id)
+        match result:
+            case Success(user) if user is not None:
+                return user
+            case Success():
+                raise NotFoundException("User", user_id)
+            case Failure(error):
+                log_expected_failure(error, operation="user_admin_lookup")
+                raise app_error_to_exception(error)
+        resource = "User"
+        raise NotFoundException(resource, user_id)
+
     async def list_users(
         self,
         page: int,
@@ -59,9 +75,7 @@ class UserAdminService:
         )
 
     async def get_user(self, user_id: str) -> UserAdminResponse:
-        user = await self._user_repo.find_by_id(user_id)
-        if user is None:
-            raise NotFoundException(f"User {user_id} not found")
+        user = await self._get_user_or_raise(user_id)
         return _to_admin_response(user)
 
     async def update_role(
@@ -72,9 +86,7 @@ class UserAdminService:
     ) -> UserAdminResponse:
         if user_id == requesting_admin_id:
             raise ConflictException("Admins cannot update their own role")
-        user = await self._user_repo.find_by_id(user_id)
-        if user is None:
-            raise NotFoundException(f"User {user_id} not found")
+        user = await self._get_user_or_raise(user_id)
         user = await self._user_repo.update_role(user, new_role)
         logger.bind(
             target_user_id=user_id,
@@ -92,9 +104,7 @@ class UserAdminService:
     ) -> UserAdminResponse:
         if user_id == requesting_admin_id:
             raise ConflictException("Admins cannot deactivate themselves")
-        user = await self._user_repo.find_by_id(user_id)
-        if user is None:
-            raise NotFoundException(f"User {user_id} not found")
+        user = await self._get_user_or_raise(user_id)
         user = await self._user_repo.set_active(user, is_active=is_active)
         if not is_active:
             # Force all sessions offline when account is deactivated
@@ -116,9 +126,7 @@ class UserAdminService:
     ) -> None:
         if user_id == requesting_admin_id:
             raise ConflictException("Admins cannot delete themselves")
-        user = await self._user_repo.find_by_id(user_id)
-        if user is None:
-            raise NotFoundException(f"User {user_id} not found")
+        user = await self._get_user_or_raise(user_id)
         # Revoke sessions before deletion so Redis doesn't hold orphaned keys
         await self._token_repo.revoke_all_user_sessions(
             user_id=user_id,
@@ -134,9 +142,7 @@ class UserAdminService:
     ) -> ImpersonateResponse:
         if target_user_id == admin_user_id:
             raise ForbiddenException("Cannot impersonate yourself")
-        user = await self._user_repo.find_by_id(target_user_id)
-        if user is None:
-            raise NotFoundException(f"User {target_user_id} not found")
+        user = await self._get_user_or_raise(target_user_id)
         if not user.is_active:
             raise ForbiddenException("Cannot impersonate a disabled account")
 

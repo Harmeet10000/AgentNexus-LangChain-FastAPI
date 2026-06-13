@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.shared.result import AppError  # noqa: TC001 - Pydantic resolves this field at runtime.
+
 if TYPE_CHECKING:
     from typing import Annotated
 
@@ -189,7 +191,7 @@ class IngestionState(BaseModel):
     stored_relationship_ids: list[str] = Field(default_factory=list)
     graphiti_episode_ids: list[str] = Field(default_factory=list)
     ingestion_complete: bool = False
-    error: str | None = None
+    failure: AppError | None = None
 
 
 StructuredRunnable = Runnable[list[Any], Any]

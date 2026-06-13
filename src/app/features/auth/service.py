@@ -3,8 +3,10 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 from authlib.integrations.httpx_client import AsyncOAuth2Client
+from returns.result import Failure, Success
 
 from app.config import get_settings
+from app.shared.result import log_expected_failure
 from app.utils import logger
 from app.utils.exceptions import (
     ConflictException,
@@ -140,15 +142,24 @@ class AuthService:
         if session is None:
             raise UnauthorizedException("Session expired or revoked")
 
-        user = await self._user_repo.find_by_id(claims.sub)
-        if user is None or not user.is_active:
+        user_result = await self._user_repo.find_by_id_result(claims.sub)
+        match user_result:
+            case Success(user) if user is not None:
+                resolved_user = user
+            case Success():
+                raise UnauthorizedException("User not found or disabled")
+            case Failure(error):
+                log_expected_failure(error, operation="refresh_user_lookup")
+                raise UnauthorizedException("Invalid token subject")
+
+        if not resolved_user.is_active:
             raise UnauthorizedException("User not found or disabled")
 
         access_token, expires_in = create_access_token(
-            user_id=str(user.id),
+            user_id=str(resolved_user.id),
             session_id=claims.jti,
-            role=user.role,
-            permissions=user.get_permissions(),
+            role=resolved_user.role,
+            permissions=resolved_user.get_permissions(),
         )
         return TokenResponse(
             access_token=access_token,

@@ -111,7 +111,6 @@ dependencies = [
     "gepa>=0.1.1",
     "honcho-ai>=2.0.1",
     "openevals>=0.2.0",
-    "result>=0.17.0",
     "returns>=0.26.0",
     "schemathesis",
     # --- UTILITIES & OTHER ---
