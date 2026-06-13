@@ -246,7 +246,7 @@ todos:-
  
 181. how to use git when something is made then to use some commands on it while having another session work on the previous stuff when unrelated chnages have to be made. check what skills can help here
 182. add the old lynk plan as it was deleted
-
+183. scrapling vs crawl4ai, add headroom-ai for comrpression
 ```
 
 --- summarise these chapters in great detail and take video's transcript as reference for summarising
