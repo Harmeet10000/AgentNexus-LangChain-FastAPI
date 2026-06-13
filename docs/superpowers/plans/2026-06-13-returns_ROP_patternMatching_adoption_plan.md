@@ -4,10 +4,9 @@ This document is the canonical repository-specific policy and phased migration p
 
 ## Current State
 
-- `pyproject.toml` and `uv.lock` currently declare both `result` and `returns`.
 - Repository policy selects `returns` as the Result-style library for this codebase.
-- The older `result` dependency remains only until migration confirms there is no runtime usage to preserve.
-- Migration is still primarily at the policy and planning stage; code adoption should be evaluated against this document, not assumed from dependency declarations.
+- `result` was the older Result-style dependency and should remain absent once runtime usage is verified as removed.
+- Migration is no longer only a dependency declaration. Code adoption should still be evaluated against this document, not assumed from dependency presence.
 - This document consolidates previously duplicated policy and migration content into a single source of truth.
 
 ## Adoption Policy
@@ -90,12 +89,24 @@ Required shared convention:
 
 - create `src/app/shared/result/`
 - define `AppResult[T] = Result[T, AppError]`
+- define `AppFutureResult[T]` only as an available convention, not as the default async style
 - use frozen Pydantic models for expected internal error types
-- include fields appropriate to boundary mapping, such as `code`, `message`, `details`, `retryable`, and `source`
+- include fields appropriate to boundary mapping and observability, such as `code`, `message`, `details`, `retryable`, `source`, operation name, correlation ID if available, and flow/execution path
 - add mapper functions from internal Result errors to existing project exceptions
 - add a narrow structured logging helper for expected failures at ownership boundaries only
 
 `Failure` must not become a stealth logging system. A `Failure` should carry business or operational meaning, not forensic detail. Stack traces belong to raised exceptions and boundary logs.
+
+Boundary logging for expected failures should bind at least:
+
+- `error_code`
+- `retryable`
+- `source`
+- `operation`
+- `correlation_id` when available from request or task context
+- `flow` or `execution_path` when available
+
+Keep `logger.exception(...)` for unexpected crashes. Expected failures should be logged once at the ownership boundary, not at every `Failure(...)` construction site.
 
 ### Service Boundary Rule
 
@@ -134,6 +145,8 @@ Plain `Result` is most appropriate for:
 - normalization
 - mapping
 - domain decision helpers
+
+Use `flow`, `bind`, `map_`, `@safe`, or related `returns` composition helpers only when they make the pipeline clearer than ordinary Python. They are optional tools, not a style mandate. In async code, prefer ordinary `async def` plus local `Result` helpers unless `FutureResult` materially removes repeated branching.
 
 Pattern matching guidance:
 
@@ -200,6 +213,7 @@ Goals:
 - add boundary mappers to existing project exceptions
 - add a structured logging helper for expected failures at ownership boundaries
 - start using `trace_layer(...)` or equivalent flow tracking in real orchestration entrypoints where it materially improves diagnostics
+- include correlation ID and flow/execution-path context in expected-failure logs when available
 
 ### Phase 2: Ingestion Vertical Slice
 
@@ -214,6 +228,7 @@ Goals:
 - keep LangGraph node signatures unchanged and compatible with LangGraph
 - keep `DocumentUploadResponse` unchanged unless an explicit contract change is approved later
 - map final `Failure` values to project exceptions at the service boundary so upload failures continue through `global_exception_handler`
+- use the actual active ingestion node module in this checkout (`nodes.py`) if `pipeline_node.py` is stale or absent
 
 ### Phase 3: Reconciliation Vertical Slice
 
@@ -260,10 +275,32 @@ Do not expand by default into:
 - MCP and tool interop contracts
 - fail-fast infrastructure code
 
+Good later candidates, subject to local inspection:
+
+- internal parser/normalizer helpers that currently return ad-hoc `success` / `error` shapes before being mapped to stable DTOs
+- external-service adapter helpers where a known subset of upstream failures should become typed, retryable internal failures
+- graph or workflow helpers where repeated manual branching hides the meaningful failure categories
+
+Keep these contracts unchanged unless a separate contract decision approves a change:
+
+- HTTP response DTOs
+- health-check summary payloads
+- WebSocket frame contracts
+- LangChain tool return contracts
+- MCP tool contracts
+- existing `ToolResult` / `MCPToolResponse` style interop envelopes
+
 ### Phase 6: Dependency Cleanup
 
 - once migration code is in place and runtime usage is verified, remove the unused `result` dependency
 - keep `returns` as the only Result-style library in the repository
+- verify there are no `from result ...` or `import result` runtime imports before removing the dependency
+
+## Documentation Source Of Truth
+
+This file is the canonical migration plan. Do not maintain a second `returns` adoption plan with conflicting paths, checklist state, or policy wording.
+
+If older notes are useful, fold their durable guidance into this document and delete or archive the duplicate. Stale paths such as `pipeline_node.py` or `pipeline (1).py` must be reconciled against the current repository layout before implementation.
 
 ## Test And Verification Plan
 
