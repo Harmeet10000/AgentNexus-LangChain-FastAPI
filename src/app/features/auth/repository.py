@@ -5,9 +5,11 @@ from beanie.operators import In, Set
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
+from returns.result import Failure, Success
 
 from app.features.auth.model import OAuthAccount, User
 from app.features.auth.token_audit_log import TokenAuditLog
+from app.shared.result import AppResult, ValidationAppError
 
 _SESSION_KEY = "auth:session:{}"
 _USER_SESSIONS_KEY = "auth:user_sessions:{}"
@@ -34,10 +36,22 @@ class UserRepository:
         self._db = db  # retained for raw Motor queries when needed
 
     async def find_by_id(self, user_id: str) -> User | None:
-        try:
-            return await User.get(PydanticObjectId(user_id))
-        except Exception:
+        result = await self.find_by_id_result(user_id)
+        if isinstance(result, Failure):
             return None
+        return result.unwrap()
+
+    async def find_by_id_result(self, user_id: str) -> AppResult[User | None]:
+        if not PydanticObjectId.is_valid(user_id):
+            return Failure(
+                ValidationAppError(
+                    code="INVALID_USER_ID",
+                    message="Invalid user identifier",
+                    details={"user_id": user_id},
+                    source="auth_repository",
+                )
+            )
+        return Success(await User.get(PydanticObjectId(user_id)))
 
     async def find_by_email(self, email: str) -> User | None:
         return await User.find_one(User.email == email.lower())
@@ -176,7 +190,7 @@ class RefreshTokenRepository:
         sessions: list[SessionData] = []
         dead: list[str] = []
 
-        for sid, raw in zip(sid_list, results):
+        for sid, raw in zip(sid_list, results, strict=True):
             if raw is None:
                 dead.append(sid)
             else:

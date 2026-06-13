@@ -2,8 +2,8 @@
 IngestionService: runs IngestionGraph for a given uploaded document.
 
 Called by the HTTP router. Non-streaming — awaits completion before returning.
-If IngestionGraph fails, returns an error status (not a 500) so the client
-can retry or show a user-facing error.
+If IngestionGraph returns an expected typed failure, maps it to the existing
+project exception boundary before returning to FastAPI.
 """
 
 from __future__ import annotations
@@ -12,6 +12,12 @@ from uuid import uuid4
 
 from langgraph.graph.state import CompiledStateGraph
 
+from app.shared.result import (
+    AppError,
+    InfrastructureAppError,
+    app_error_to_exception,
+    log_expected_failure,
+)
 from app.utils import logger
 
 from .dto import DocumentUploadResponse
@@ -56,27 +62,20 @@ class IngestionService:
             result = await self._graph.ainvoke(initial_state)
         except Exception as exc:
             log.exception("ingestion_graph_failed", error=str(exc))
-            return DocumentUploadResponse(
-                doc_id=resolved_doc_id,
-                status="failed",
-                entity_count=0,
-                clause_count=0,
-                relationship_count=0,
-                dropped_entity_count=0,
-                error=str(exc),
-            )
+            raise app_error_to_exception(
+                InfrastructureAppError(
+                    code="INGESTION_GRAPH_FAILED",
+                    message="Document ingestion failed",
+                    details={"doc_id": resolved_doc_id},
+                    source="ingestion_service",
+                )
+            ) from exc
 
-        if result.get("error"):
-            log.error("ingestion_error", error=result["error"])
-            return DocumentUploadResponse(
-                doc_id=resolved_doc_id,
-                status="failed",
-                entity_count=0,
-                clause_count=0,
-                relationship_count=0,
-                dropped_entity_count=result.get("dropped_entity_count", 0),
-                error=result["error"],
-            )
+        failure = result.get("failure")
+        if failure is not None:
+            error = failure if isinstance(failure, AppError) else AppError.model_validate(failure)
+            log_expected_failure(error, operation="ingest_document")
+            raise app_error_to_exception(error)
 
         log.info(
             "ingestion_completed",

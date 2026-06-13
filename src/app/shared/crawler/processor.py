@@ -6,8 +6,10 @@ from typing import Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
+from returns.result import Failure, Success
 
 from app.config.settings import get_settings
+from app.shared.result import AppResult, ValidationAppError
 
 
 class SchemaType(StrEnum):
@@ -165,15 +167,13 @@ class GeminiProcessor:
             Summary:"""
 
             response = self.model.invoke(prompt)
-            summary = (
-                response.content if hasattr(response, "content") else str(response)
-            )
+            summary = _response_text(response)
 
             return ExtractionResult(
                 success=True,
                 summary=summary.strip(),
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - DTO boundary preserves crawler error contract.
             return ExtractionResult(
                 success=False,
                 error=str(e),
@@ -196,23 +196,12 @@ class GeminiProcessor:
         Returns:
             ExtractionResult with extracted data
         """
-        if schema_type and schema_type != SchemaType.CUSTOM:
-            schema = PREDEFINED_SCHEMAS.get(schema_type)
-            schema_name = schema_type.value
-        elif custom_schema:
-            schema = custom_schema
-            schema_name = "custom"
-        else:
-            return ExtractionResult(
-                success=False,
-                error="No schema provided. Use schema_type or custom_schema.",
-            )
-
-        if not schema:
-            return ExtractionResult(
-                success=False,
-                error=f"Unknown schema type: {schema_type}",
-            )
+        schema_result = _resolve_extraction_schema(schema_type, custom_schema)
+        match schema_result:
+            case Success((schema, _schema_name)):
+                pass
+            case Failure(error):
+                return ExtractionResult(success=False, error=error.message)
 
         try:
             schema_json = json.dumps(schema, indent=2)
@@ -230,22 +219,20 @@ class GeminiProcessor:
             JSON:"""
 
             response = self.model.invoke(prompt)
-            response_text = (
-                response.content if hasattr(response, "content") else str(response)
-            )
+            response_text = _response_text(response)
 
-            extracted_data = json.loads(response_text.strip())
+            extraction_result = _parse_extraction_json(response_text)
+            match extraction_result:
+                case Success(extracted_data):
+                    pass
+                case Failure(error):
+                    return ExtractionResult(success=False, error=error.message)
 
             return ExtractionResult(
                 success=True,
                 extracted_data=extracted_data,
             )
-        except json.JSONDecodeError as e:
-            return ExtractionResult(
-                success=False,
-                error=f"Failed to parse JSON: {e!s}",
-            )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - DTO boundary preserves crawler error contract.
             return ExtractionResult(
                 success=False,
                 error=str(e),
@@ -287,6 +274,66 @@ class GeminiProcessor:
 def get_schema_for_type(schema_type: SchemaType) -> dict[str, Any] | None:
     """Get predefined schema for a type."""
     return PREDEFINED_SCHEMAS.get(schema_type)
+
+
+def _resolve_extraction_schema(
+    schema_type: SchemaType | None,
+    custom_schema: dict[str, Any] | None,
+) -> AppResult[tuple[dict[str, Any], str]]:
+    if schema_type is not None and schema_type != SchemaType.CUSTOM:
+        schema = PREDEFINED_SCHEMAS.get(schema_type)
+        if schema is not None:
+            return Success((schema, schema_type.value))
+        return Failure(
+            ValidationAppError(
+                code="UNKNOWN_EXTRACTION_SCHEMA",
+                message=f"Unknown schema type: {schema_type}",
+                details={"schema_type": schema_type.value},
+                source="crawler_processor",
+            )
+        )
+
+    if custom_schema:
+        return Success((custom_schema, "custom"))
+
+    return Failure(
+        ValidationAppError(
+            code="MISSING_EXTRACTION_SCHEMA",
+            message="No schema provided. Use schema_type or custom_schema.",
+            source="crawler_processor",
+        )
+    )
+
+
+def _response_text(response: object) -> str:
+    content = getattr(response, "content", response)
+    if isinstance(content, str):
+        return content
+    return str(content)
+
+
+def _parse_extraction_json(response_text: str) -> AppResult[dict[str, Any]]:
+    try:
+        parsed = json.loads(response_text.strip())
+    except json.JSONDecodeError as exc:
+        return Failure(
+            ValidationAppError(
+                code="INVALID_EXTRACTION_JSON",
+                message=f"Failed to parse JSON: {exc!s}",
+                source="crawler_processor",
+            )
+        )
+
+    if not isinstance(parsed, dict):
+        return Failure(
+            ValidationAppError(
+                code="INVALID_EXTRACTION_SHAPE",
+                message="Structured extraction response must be a JSON object.",
+                source="crawler_processor",
+            )
+        )
+
+    return Success(parsed)
 
 
 async def get_processor() -> GeminiProcessor:

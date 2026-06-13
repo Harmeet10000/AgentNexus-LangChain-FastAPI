@@ -25,6 +25,7 @@ from app.shared.rag.graphiti.schemas import (
     GRAPHITI_EDGE_TYPES,
     GRAPHITI_ENTITY_TYPES,
 )
+from app.shared.result import ValidationAppError
 from app.utils import logger
 
 from .prompts import (
@@ -53,6 +54,8 @@ if TYPE_CHECKING:
     from sqlalchemy.sql.elements import TextClause
     from ty_extensions import Unknown
 
+    from app.shared.result import AppError
+
     from .state import (
         EmbeddingFunction,
         IngestionState,
@@ -62,10 +65,29 @@ if TYPE_CHECKING:
 _DEFAULT_LIMIT = 20
 
 
+def _ingestion_failure(error: AppError) -> dict[str, object]:
+    return {"failure": error, "ingestion_complete": False}
+
+
+def _validation_failure(code: str, message: str, *, doc_id: str = "") -> dict[str, object]:
+    return _ingestion_failure(
+        ValidationAppError(
+            code=code,
+            message=message,
+            details={"doc_id": doc_id} if doc_id else None,
+            source="ingestion_graph",
+        )
+    )
+
+
 def make_parse_document_node() -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def parse_document_node(state: IngestionState) -> dict[str, object]:
         if not state.raw_bytes:
-            return {"error": "empty_document", "ingestion_complete": False}
+            return _validation_failure(
+                "EMPTY_DOCUMENT",
+                "Uploaded document is empty",
+                doc_id=state.doc_id,
+            )
 
         parsed: ParsedDocument = await retry_immediate(
             lambda: _parse_document_with_docling(state.raw_bytes, state.filename, state.source),
@@ -82,7 +104,11 @@ def make_extract_schema_node(
     async def extract_schema_node(state: IngestionState) -> dict[str, object]:
         parsed = state.parsed_document
         if parsed is None:
-            return {"error": "missing_parsed_document", "ingestion_complete": False}
+            return _validation_failure(
+                "MISSING_PARSED_DOCUMENT",
+                "Parsed document is required before schema extraction",
+                doc_id=state.doc_id,
+            )
 
         payload = serialize_to_toon(
             {
@@ -115,7 +141,11 @@ def make_segment_document_node(
         parsed = state.parsed_document
         metadata = state.contract_metadata
         if parsed is None or metadata is None:
-            return {"error": "missing_document_or_metadata", "ingestion_complete": False}
+            return _validation_failure(
+                "MISSING_DOCUMENT_OR_METADATA",
+                "Parsed document and metadata are required before segmentation",
+                doc_id=state.doc_id,
+            )
 
         payload = serialize_to_toon(
             {
@@ -211,7 +241,11 @@ def make_classify_extract_node(
     async def classify_extract_node(state: IngestionState) -> dict[str, object]:
         metadata: ContractMetadata | None = state.contract_metadata
         if metadata is None:
-            return {"error": "missing_contract_metadata", "ingestion_complete": False}
+            return _validation_failure(
+                "MISSING_CONTRACT_METADATA",
+                "Contract metadata is required before entity extraction",
+                doc_id=state.doc_id,
+            )
 
         payload = serialize_to_toon(
             {
@@ -251,7 +285,11 @@ def make_embed_store_node(
         parsed: ParsedDocument | None = state.parsed_document
         metadata: ContractMetadata | None = state.contract_metadata
         if parsed is None or metadata is None:
-            return {"error": "missing_parsed_document_or_metadata", "ingestion_complete": False}
+            return _validation_failure(
+                "MISSING_PARSED_DOCUMENT_OR_METADATA",
+                "Parsed document and metadata are required before storage",
+                doc_id=state.doc_id,
+            )
 
         async with AsyncSession(db_engine) as session, session.begin():
             parent_doc_id = await retry_immediate(
