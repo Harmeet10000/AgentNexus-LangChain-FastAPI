@@ -1,0 +1,177 @@
+{
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/specs/2026-04-05-merged-rag-module-design.md": {
+    "mtime": 1775390911.4953578,
+    "ast_hash": "e392d9cbc41051984f11cb45a99bb0b6",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/specs/2026-05-28-model-config-simplification-design.md": {
+    "mtime": 1779964089.442636,
+    "ast_hash": "cce0b2fec039c0c1905de06c6bc12fc4",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/specs/2026-05-28-legal-agent-persona-design.md": {
+    "mtime": 1779971795.4107568,
+    "ast_hash": "2165e0883ea07230953e13df55c9345c",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/specs/2026-05-28-langchain-langgraph-skill-redesign.md": {
+    "mtime": 1779959485.1456234,
+    "ast_hash": "a140a9a6364d34f551481a002e637e9b",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/specs/2026-05-28-opencode-setup-design.md": {
+    "mtime": 1779955446.0836675,
+    "ast_hash": "48341d8e5ebed246b215a5a7abdd38d9",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/plans/2026-05-28-legal-agent-persona-integration.md": {
+    "mtime": 1779972144.92781,
+    "ast_hash": "66fa177688ea7907b27ea970ca162a3e",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/plans/2026-06-13-new_ingestion_PLAN.md": {
+    "mtime": 1781205746.0762365,
+    "ast_hash": "28552783b4267a475fd73a49a2f8b430",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/plans/2026-05-28-model-config-simplification.md": {
+    "mtime": 1779964473.994194,
+    "ast_hash": "940b3a7db046614a99ce6cff194e34fb",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/plans/2026-05-31-agent-saul-websocket-hardening.md": {
+    "mtime": 1780237789.923959,
+    "ast_hash": "7ae660ee9974b64a3e375f2eaa18e804",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/plans/2026-04-13-reconciliation-langgraph-package-split.md": {
+    "mtime": 1776102372.1381154,
+    "ast_hash": "359dc9a6e4d8e08b2911b4af2ba29b49",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/plans/2026-06-13-returns_ROP_patternMatching_adoption_plan.md": {
+    "mtime": 1781347916.3006816,
+    "ast_hash": "f92dd350c5973b9092c4ed77e76103fd",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/superpowers/plans/2026-04-05-merged-rag-module.md": {
+    "mtime": 1775390952.0995176,
+    "ast_hash": "cfe98b03506d2fa426440575ddd85f48",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Lynk_Plan/lynk_linter_plan.md": {
+    "mtime": 1780260072.0398147,
+    "ast_hash": "965a9d6b4ad924de2d5e2ff1ebfde796",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Lynk_Plan/lynk_linter_old.md": {
+    "mtime": 1780506668.4856236,
+    "ast_hash": "6c909f9ace260378dd077d3a1fad38af",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Lynk_Plan/api_server_plan.md": {
+    "mtime": 1776192855.413847,
+    "ast_hash": "799fb8531ac5edd91b01e57903bf7d19",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Lynk_Plan/editor_plan.md": {
+    "mtime": 1775937155.2019234,
+    "ast_hash": "c023dd2f72130b762b65f7e967615a81",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Lynk_Plan/lynk_linter_lld.md": {
+    "mtime": 1780253720.8042076,
+    "ast_hash": "8439e67f933260de6d83ea7209e655ae",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Lynk_Plan/lynk_v1_v2_split.md": {
+    "mtime": 1780259996.6682718,
+    "ast_hash": "dac5c5c608cfd54eeb6e97cc3dc48385",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Agent_thingies/MCP_things.md": {
+    "mtime": 1776358990.1718235,
+    "ast_hash": "3300ce338f997985cf67caeba69cb65f",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Agent_thingies/CAP for AI Agents.md": {
+    "mtime": 1774383370.9178956,
+    "ast_hash": "a19f65e73cd631b0a5cb1b159a3c9184",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Agent_thingies/RAG_decisions.md": {
+    "mtime": 1779962390.0399382,
+    "ast_hash": "90c88e7bad0291d7b8a8c8a1c11e5d5f",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Agent_thingies/memory-arch-plan_Agent_Saul.md": {
+    "mtime": 1779884829.0503664,
+    "ast_hash": "30a0d5e9e6752d06ee53e132782871bc",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Agent_thingies/Evals.md": {
+    "mtime": 1776361160.9851136,
+    "ast_hash": "9577f6680c626bffbc8778f3cb882862",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Agent_thingies/AI_agents_security.md": {
+    "mtime": 1776363387.269002,
+    "ast_hash": "188df806e71c07e8c527d0064be51c50",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Agent_thingies/Saul_agent_Arch.md": {
+    "mtime": 1776018591.765826,
+    "ast_hash": "8c8fbc0351afa38cbc98a3a1d89e274a",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/Agent_thingies/ai-agent-engineering-guide.md": {
+    "mtime": 1776928910.4761732,
+    "ast_hash": "16925762e3c493a6507ffc18a1349e72",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/code-maintainability/kiro_sdd_ears_playbook.md": {
+    "mtime": 1780235815.52954,
+    "ast_hash": "52e703f1d5b6bb679a5327b9adda7a64",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/code-maintainability/DB_insights.md": {
+    "mtime": 1779884829.047368,
+    "ast_hash": "3c1c41387f05d063aaf2a537000bf84c",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/code-maintainability/simple-interfaces-deep-modules.md": {
+    "mtime": 1780243266.7714736,
+    "ast_hash": "ed94f4ad243c6f04e59fd892be598b55",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/code-maintainability/railway-deployment-plan.md": {
+    "mtime": 1774952656.6092641,
+    "ast_hash": "f6513d49c7603dc7190d5d66862ea9eb",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/diagrams/memory_stack_architecture.svg": {
+    "mtime": 1775996131.6853535,
+    "ast_hash": "cae7410907031419071f5f50e502e4fa",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/diagrams/agent_saul_deployment_topology.svg": {
+    "mtime": 1776019755.6836686,
+    "ast_hash": "886e7ba0028745c744fe323ce63f7417",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/diagrams/hybrid_query_pipeline.svg": {
+    "mtime": 1775393827.8819966,
+    "ast_hash": "d8b8876a59c5d10e57bfe655e74c6a29",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/diagrams/search_system_architecture_overview.svg": {
+    "mtime": 1775393864.4299307,
+    "ast_hash": "ca27867a7db6b3d9e8d0c2edcc77f923",
+    "semantic_hash": ""
+  },
+  "/home/harmeet/Desktop/Projects/langchain-fastapi-production/docs/diagrams/agent_saul_full_architecture.svg": {
+    "mtime": 1774633151.8333857,
+    "ast_hash": "4be497a719087f8298a73049e39b9d5b",
+    "semantic_hash": ""
+  }
+}

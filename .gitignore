@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+#
+graphify-out/cost.json
+graphify-out/cache/
+
 # C extensions
 *.so
 

@@ -58,9 +58,59 @@ That maps cleanly to the actual requirements:
 - Agent coordination: workers are specialized sub-agents
 - Shared state: orchestrator owns `LegalAgentState`, workers read and write through controlled surfaces
 
+## LangGraph performance rules
+
+Do not initialize models or compile agents inside LangGraph nodes. That is the fast path to slow requests, memory churn, noisy traces, and production pain.
+
+Bad pattern:
+
+```python
+def research_node(state):
+    model = init_chat_model("gpt-4o")
+    agent = create_agent(model, tools)
+    return agent.invoke(state)
+```
+
+Why it hurts:
+
+- Model initialization can spend 100-500ms fetching config and metadata.
+- Agent construction can add another 50ms or more.
+- Ten nodes across ten concurrent requests can become hundreds of avoidable model/agent constructions per second.
+- LangSmith traces become harder to compare because the runtime shape keeps being rebuilt.
+- Memory use grows with repeated object creation instead of stable reuse.
+
+Correct pattern:
+
+```python
+research_agent = create_agent(
+    init_chat_model("gpt-4o"),
+    tools=[search_caselaw],
+)
+
+
+def research_node(state):
+    return research_agent.invoke(state)
+```
+
+Compile models, tools, and agents once at startup. Then pass compiled callables into graph nodes. Node functions should execute workflow logic, not rebuild the runtime.
+
+The intended node strategy:
+
+- Precompile `create_agent(...)` outside the graph.
+- Pass node callables into `graph.add_node(...)`.
+- Use per-node or per-workflow checkpointers where isolation matters.
+- Use explicit model lookup tables for dynamic model selection.
+- Initialize heavy resources in FastAPI lifespan, then read them from `app.state`.
+
+The expected result is lower latency, stable memory, reusable traces, and a graph that behaves like infrastructure instead of improvisation.
+
 ## Why this exists
 
 This is not about shallow "time-saving".
+
+Legal work has a strange cruelty to it: the most expensive human judgment often sits behind a wall of repetitive reading, clause sorting, calendar math, template comparison, and anxious second-guessing. The people who need clarity most are usually the least able to buy it continuously: founders signing vendor terms, families reading settlement papers, policyholders facing claim language, and small businesses trying not to discover a liability clause after the damage is done.
+
+Agent Saul exists to reduce that information asymmetry. Not by pretending to be a lawyer, and not by turning legal judgment into autocomplete, but by making the repetitive surface area small enough that humans can spend their attention on the parts that actually require judgment.
 
 The actual pain in India is different:
 
@@ -79,6 +129,14 @@ High-volume work worth automating:
 - "Is this clause enforceable in India?"
 
 Time is a symptom. Risk and uncertainty are the disease.
+
+The same pattern shows up across domains:
+
+- Insurance: detect claim-rejection loopholes and reduce policyholder vs insurer asymmetry.
+- Healthcare: review hospital contracts, consent forms, vendor SLAs, and clinical establishment compliance.
+- Family settlements and prenups: reason about Indian enforceability, asset disclosure, and future dispute risk.
+- Business contracts: help MSMEs understand vendor lock-in, liability caps, payment traps, and jurisdiction exposure.
+- Wills and land: flag title risk, ambiguous beneficiary clauses, and state-specific succession issues.
 
 ## What is inside
 
@@ -143,6 +201,31 @@ This becomes training data and audit data, not just UI feedback.
 
 In Indian legal work, judgment interpretation is not optional context. The system has to preserve judgment context, surface conflicting rulings, and distinguish what binds a District Court, a High Court, and the Supreme Court of India.
 
+## Context window discipline
+
+Agents do not only spend tokens on user prompts. The context window fills from several sources:
+
+```text
+system prompt             2K-5K tokens
+bootstrap files           varies, often large
+memory files              grows over time
+skills and instructions   per selected skill
+conversation history      primary recurring cost
+tool output history       silent killer, can reach huge character counts
+compaction summaries      usually 1K-3K tokens
+```
+
+The system should treat context as an operating budget, not a junk drawer.
+
+Practical rules:
+
+- Keep state canonical and memory as indexed projections of state.
+- Summarize or truncate tool outputs before they become permanent conversation drag.
+- Prefer retrieval of focused facts over loading entire documents.
+- Keep prompts stable and small enough to audit.
+- Preserve citations, IDs, and decision points rather than every intermediate paragraph.
+- Design graph nodes so each node receives the minimum state it needs.
+
 ## Prerequisites
 
 - Python `3.12+`
@@ -165,23 +248,6 @@ git clone https://github.com/Harmeet10000/langchain-fastapi-production.git
 cd langchain-fastapi-production
 ```
 
-### 2. Create the environment file
-
-```bash
-touch .env.development
-```
-
-Populate it with the credentials and connection strings your local stack needs, especially:
-
-- `POSTGRES_URL`
-- `NEO4J_URI`
-- `NEO4J_USERNAME`
-- `NEO4J_PASSWORD`
-- `REDIS_URL`
-- `MONGODB_URI`
-- `GEMINI_API_KEY`
-- `LANGSMITH_API_KEY`
-
 ### 3. Install dependencies
 
 ```bash
@@ -195,13 +261,7 @@ uv sync --extra dev
 
 ```bash
 uv run uvicorn src.app.main:app --reload --reload-dir src --host 0.0.0.0 --port 5000 --no-access-log
-```
-
-Alternative entrypoints:
-
-```bash
 uv run python src/app/server.py
-uv run hmr src/app/main.py --host 0.0.0.0 --port 5000
 ```
 
 ## Common commands
