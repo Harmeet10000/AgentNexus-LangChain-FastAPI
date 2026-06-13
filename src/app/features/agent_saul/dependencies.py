@@ -9,6 +9,7 @@ Lifespan callers must set:
     app.state.langgraph_checkpointer → AsyncPostgresSaver
     app.state.redis                 → redis.asyncio.Redis
 """
+
 from dataclasses import dataclass
 from typing import Annotated
 from uuid import uuid4
@@ -44,6 +45,7 @@ async def get_saul_checkpointer(request: Request) -> AsyncPostgresSaver:
         message = "Persistence layer is unavailable"
         raise ServiceUnavailableException(message)
     return checkpointer
+
 
 async def get_redis(request: Request) -> Redis:
     return request.app.state.redis

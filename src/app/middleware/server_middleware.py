@@ -59,7 +59,7 @@ app_up = Gauge(
     name="app_up",
     documentation="Application up status",
     labelnames=["project"],
-    registry=metrics_registry
+    registry=metrics_registry,
 )
 
 mcp_http_requests_total = Counter(
@@ -113,7 +113,6 @@ mcp_upstream_server_health = Gauge(
     labelnames=["server", "project"],
     registry=metrics_registry,
 )
-
 
 
 RATE_LIMIT_EXCLUDED_PATH_PREFIXES = ("/api-docs", "/api-redoc")
@@ -212,6 +211,7 @@ class RequestStateLoggingMiddleware:
         status_code = 500
 
         with logger.contextualize(**state):
+
             async def send_wrapper(message: dict) -> None:
                 nonlocal response_started, response_finished, status_code
 
@@ -335,7 +335,6 @@ class MetricsMiddleware:
             http_requests_in_progress.labels(
                 method=method, endpoint=endpoint, project=self.project_name
             ).dec()
-
 
 
 def _is_streaming_response(response: Response) -> bool:

@@ -169,6 +169,7 @@ When sub-agents return results, they're raw strings. There's no typed contract f
     e. reorganise code                                          DONE
 59. No skill composition. Skills are flat callables. Theres no way to chain skills (skill A output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.   DONE
 169. EARS-compliant acceptance criteria, research about what Kiro does for SDD, which standards does it use   DONE
+180. learn what can i learn about maintaining large codebases through tanStack ecosystem and others and see matt pocock video, how to hide/abstract away complexity behind a simple interface, make a skill/docs for this.  DONE
 
 146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note and also check if i am right in passong HTTPException to APIException and other classes        DELAYED
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
@@ -224,7 +225,7 @@ todos:-
 57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
 136. use LangExtract outputs to build rich graph knowledge from your legal documents.
 162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
-163. refactor vectorStore code
+163. refactor vectorStore code        TSVECTOR,
 164. refactor RAG code
 166. use Call a toolNode and check id toolNode should be used or subgraph inside a node for Open Deep Research
 167. how systemPromptPaarts, chatPromptTemplate, systemmessage, humanMessage, AImessage,ToolMessage look like while passing it in graph and how should i serialise these with toons before sending to LLM
@@ -234,7 +235,7 @@ todos:-
 172. use prebuilt and custom middlewares in langchain 
 173. rewrite the tools for the new grpahiti, cognee etc
 174. add proper cognee functions, graphiti from docs
-175. 
+175. SecretStr(settings.GEMINI_API_KEY) learn about this
 176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
 
 178. From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on wont be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation. [cognee.shared.logging_utils]
@@ -242,11 +243,18 @@ todos:-
 179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
 
 
-180. learn what can i learn about maintaining large codebases through tanStack ecosystem and others and see matt pocock video, how to hide/abstract away complexity behind a simple interface, make a skill/docs for this.
  
 181. how to use git when something is made then to use some commands on it while having another session work on the previous stuff when unrelated chnages have to be made. check what skills can help here
 182. add the old lynk plan as it was deleted
-183. scrapling vs crawl4ai, add headroom-ai for comrpression
+183. scrapling vs crawl4ai, add crawl4ai in open_deep_search graph, add headroom-ai for comrpression
+184. You correctly called out that documents/chunks should be the sole retrieval truth.
+But a lot of current Agent Saul / precedent / reconciliation code still reads clauses directly.
+Do you want me to:
+- A. keep the architecture clean now: new documents/chunks become the only retrieval substrate, and any old code still tied to clauses is left stale/disabled until second pass
+185. remove ts_vector from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
+186. divide AGENTS.md/copilot-instructions.md into samller files, add lint, fmt, commands, sort imports, 
+187. documents/ uses docling from shared and doesnt uses its own one.
+188. add more S3 functions, see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
 ```
 
 --- summarise these chapters in great detail and take video's transcript as reference for summarising

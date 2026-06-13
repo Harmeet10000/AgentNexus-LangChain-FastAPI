@@ -109,7 +109,7 @@ async def tavily_search_async(
 ) -> list[SearchResponse]:
     """Execute bounded Tavily searches through the shared service client."""
     http_client = _get_httpx_client_from_config(config)
-    search_log  = logger.bind(
+    search_log = logger.bind(
         component="open_deep_search",
         search_api="tavily",
         queries=len(search_queries),

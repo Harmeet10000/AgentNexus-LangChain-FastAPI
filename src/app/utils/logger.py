@@ -125,7 +125,9 @@ def trace_layer(layer_name: str) -> Any:
                 except Exception as e:
                     # Log failure timing before raising
                     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-                    logger.bind(layer_duration_ms=duration_ms).error(f"Failed in {func.__name__} with error: {e}")
+                    logger.bind(layer_duration_ms=duration_ms).error(
+                        f"Failed in {func.__name__} with error: {e}"
+                    )
                     raise
 
                 finally:
@@ -135,5 +137,3 @@ def trace_layer(layer_name: str) -> Any:
         return wrapper
 
     return decorator
-
-

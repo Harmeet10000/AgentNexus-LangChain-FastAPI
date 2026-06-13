@@ -24,21 +24,19 @@ from app.connections import (
     init_neo4j,
 )
 from app.features.auth import TokenAuditLog, User, build_websocket_security_service
-from app.features.search.embeddings import build_embedding_client
+from app.features.documents.readiness import run_document_startup_checks
 from app.middleware import initialize_fastapi_guard
 
 # from app.shared import get_mcp_client_manager
 from app.shared.langchain_layer.agents.memory import setup_cognee
-from app.shared.langgraph_layer.checkpointer import (
-    setup_langgraph_checkpointer,
-    teardown_langgraph_checkpointer,
-)
-from app.shared.langgraph_layer.ingestion_kb import build_ingestion_graph
+from app.shared.langgraph_layer.checkpointer import teardown_langgraph_checkpointer
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
+from app.shared.services.storage import StorageService
 from app.utils import ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
+
     from app.features.auth.websocket_security import WebSocketSecurityService
     # from app.shared.mcp import MCPClientManager
 
@@ -132,6 +130,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
         neo4j_user=settings.NEO4J_USERNAME,
         neo4j_password=settings.NEO4J_PASSWORD,
     )
+    # TODO: Do i need to setup indices here? Or is it done in the Graphiti constructor? or is it required only once.
     await setup_graphiti_indices(graphiti)
     app.state.graphiti: Graphiti = graphiti
     logger.info("Graphiti initialized")
@@ -157,7 +156,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
     # Initialize Tavily HTTP client
     app.state.tavily_http_client = await create_tavily_http_client()
     logger.info("Tavily HTTP client initialized")
-    # app.state.storage = StorageService.from_settings()
+    settings = get_settings()
+    app.state.object_store = StorageService.from_settings(settings=settings)
+    await run_document_startup_checks(
+        engine=app.state.db_engine,
+        object_store=app.state.object_store,
+    )
 
     # Celery setup (optional, non-blocking)
     try:
@@ -221,6 +225,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
             tg.create_task(coro=close_neo4j_driver(driver=app.state.neo4j_driver))
         # mcp_manager: MCPClientManager = get_mcp_client_manager()
         # if mcp_manager is not None:
-            # tg.create_task(coro=mcp_manager.close())
+        # tg.create_task(coro=mcp_manager.close())
 
     logger.info("Application shutdown complete", status="stopped")

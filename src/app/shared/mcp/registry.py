@@ -157,7 +157,11 @@ def _tool_catalog() -> list[MCPToolCatalogEntry]:
         ),
     ]
 
-    return [entry for entry in entries if not settings.MCP_SERVER_ENABLED_TOOLS or entry.name in settings.MCP_SERVER_ENABLED_TOOLS]
+    return [
+        entry
+        for entry in entries
+        if not settings.MCP_SERVER_ENABLED_TOOLS or entry.name in settings.MCP_SERVER_ENABLED_TOOLS
+    ]
 
 
 def _catalog_by_name() -> dict[str, MCPToolCatalogEntry]:
@@ -219,7 +223,13 @@ def _register_tools(server: Any) -> None:
                 dependencies = _runtime_dependencies()
                 ready = dependencies["mounted"] and all(
                     dependencies[key]
-                    for key in ("httpx_client", "redis", "mongo_client", "db_engine", "neo4j_driver")
+                    for key in (
+                        "httpx_client",
+                        "redis",
+                        "mongo_client",
+                        "db_engine",
+                        "neo4j_driver",
+                    )
                 )
                 return _ok(
                     {

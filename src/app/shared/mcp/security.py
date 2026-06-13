@@ -157,7 +157,9 @@ class MCPObservabilityMiddleware:
                 message["headers"] = headers
             await send(message)
 
-        logger.bind(path=path, subject=subject, correlation_id=correlation_id).info("MCP request started")
+        logger.bind(path=path, subject=subject, correlation_id=correlation_id).info(
+            "MCP request started"
+        )
         try:
             await self.app(scope, receive, send_wrapper)
         finally:

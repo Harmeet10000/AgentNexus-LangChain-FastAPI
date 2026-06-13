@@ -131,6 +131,7 @@ def create_refresh_token(
     token: bytes = jwt.encode(_JWT_HEADER, claims, _jwt_key())
     return token.decode("utf-8"), expire_secs
 
+
 def create_impersonation_token(
     target_user_id: str,
     target_role: UserRole,

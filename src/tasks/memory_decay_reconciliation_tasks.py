@@ -56,8 +56,8 @@ def _compute_decay(age_days: float, access_count: int, confidence: float) -> flo
 
     time_factor = math.exp(-_LAMBDA_T * bounded_age)
     usage_factor = min(1.0, bounded_access_count / 10.0)
-    return (_W_TIME * time_factor) + (_W_USAGE * usage_factor) + (
-        _W_CONFIDENCE * bounded_confidence
+    return (
+        (_W_TIME * time_factor) + (_W_USAGE * usage_factor) + (_W_CONFIDENCE * bounded_confidence)
     )
 
 
@@ -165,9 +165,7 @@ async def _run_reconciliation_async(
                 "versions": int(result.get("versions_written", 0)),
             }
             results[user_id] = user_result
-            logger.bind(user_id=user_id, **user_result).info(
-                "User reconciliation completed"
-            )
+            logger.bind(user_id=user_id, **user_result).info("User reconciliation completed")
         except Exception as exc:  # noqa: BLE001
             error_message = str(exc)
             results[user_id] = {"error": error_message}
@@ -193,9 +191,7 @@ def run_reconciliation_for_user(
     logger.bind(user_id=user_id, lookback_hours=lookback_hours).info(
         "Single-user reconciliation started"
     )
-    return asyncio.run(
-        _run_reconciliation_async([user_id], reconciliation_graph, lookback_hours)
-    )
+    return asyncio.run(_run_reconciliation_async([user_id], reconciliation_graph, lookback_hours))
 
 
 def run_reconciliation_for_active_users(
@@ -209,8 +205,4 @@ def run_reconciliation_for_active_users(
         lookback_hours=lookback_hours,
         active_user_count=len(user_ids),
     ).info("Active-user reconciliation started")
-    return asyncio.run(
-        _run_reconciliation_async(user_ids, reconciliation_graph, lookback_hours)
-    )
-
-
+    return asyncio.run(_run_reconciliation_async(user_ids, reconciliation_graph, lookback_hours))

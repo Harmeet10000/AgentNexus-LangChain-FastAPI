@@ -5,7 +5,9 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from starlette.requests import HTTPConnection
 
 
-async def create_mongo_client(uri: str, db_name: str, document_models: list) -> tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
+async def create_mongo_client(
+    uri: str, db_name: str, document_models: list
+) -> tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
     """
     Initialize database connection using Beanie's recommended approach.
     """

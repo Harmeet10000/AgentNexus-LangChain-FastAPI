@@ -412,7 +412,9 @@ async def _parse_document_with_docling(
 
 
 def _fallback_segments(markdown: str) -> list[ClauseSegment]:
-    blocks: list[str | Any] = [block.strip() for block in re.split(r"\n\s*\n", markdown) if block.strip()]
+    blocks: list[str | Any] = [
+        block.strip() for block in re.split(r"\n\s*\n", markdown) if block.strip()
+    ]
     if not blocks:
         blocks = [markdown.strip()] if markdown.strip() else []
     return [

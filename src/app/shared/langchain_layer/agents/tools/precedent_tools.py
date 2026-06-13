@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from app.shared.rag.graphiti.client import GraphitiService
     from app.shared.rag.graphiti.subgraph import Neo4jSubgraphExpander
 
+
 def make_hybrid_retrieve_precedents_tool(
     graphiti_service: GraphitiService,
     subgraph_expander: Neo4jSubgraphExpander,
@@ -192,9 +193,7 @@ def make_detect_graph_conflicts_tool(
         if cached is not None:
             return cached.model_dump()
 
-        conflicts = await subgraph_expander.detect_conflicts(
-            group_ids=[user_id, doc_id]
-        )
+        conflicts = await subgraph_expander.detect_conflicts(group_ids=[user_id, doc_id])
 
         result = ToolResult.ok(
             data={

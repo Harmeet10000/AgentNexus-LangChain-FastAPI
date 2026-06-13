@@ -24,9 +24,7 @@ def configure_langsmith() -> Client | None:
     Call this at application startup, before any agents are built.
     """
     settings = get_settings()
-    return Client(
-        api_url=settings.LANGSMITH_ENDPOINT, api_key=settings.LANGSMITH_API_KEY
-    )
+    return Client(api_url=settings.LANGSMITH_ENDPOINT, api_key=settings.LANGSMITH_API_KEY)
 
 
 class LatencyCallbackHandler(BaseCallbackHandler):
@@ -41,6 +39,7 @@ class LatencyCallbackHandler(BaseCallbackHandler):
     def on_llm_end(self, *args: Any, run_id: UUID, **kwargs: Any) -> None:
         elapsed = time.perf_counter() - self._start.pop(run_id, time.perf_counter())
         import logging
+
         logging.getLogger(__name__).info("llm_latency_ms=%.1f", elapsed * 1000)
 
     def on_llm_error(self, *args: Any, run_id: UUID, **kwargs: Any) -> None:
@@ -81,6 +80,7 @@ class AsyncStreamingCallbackHandler(AsyncCallbackHandler):
 
     def __init__(self) -> None:
         import asyncio
+
         self._queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     async def on_llm_new_token(self, token: str, **kwargs: Any) -> None:

@@ -20,9 +20,7 @@ class APIException(HTTPException):
         data: Any = None,
         headers: dict[str, str] | None = None,
     ):
-        self.error_code = (
-            error_code or self.__class__.__name__.replace("Exception", "").upper()
-        )
+        self.error_code = error_code or self.__class__.__name__.replace("Exception", "").upper()
         self.data = data
 
         # We put everything inside 'detail' so the frontend gets a rich object

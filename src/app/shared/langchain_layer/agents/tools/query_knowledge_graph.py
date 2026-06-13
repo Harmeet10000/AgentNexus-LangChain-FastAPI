@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
     from app.shared.rag.graphiti.client import GraphitiService
 
+
 def make_query_knowledge_graph_tool(
     graphiti_service: GraphitiService,
     idempotency: IdempotencyGuard,

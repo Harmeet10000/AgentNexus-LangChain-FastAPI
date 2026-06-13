@@ -278,6 +278,7 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY_ID: str = Field(default="")
     S3_SECRET_ACCESS_KEY: str = Field(default="")
     S3_REGION: str = Field(default="auto")
+    S3_FORCE_PATH_STYLE: bool = Field(default=True)
     S3_PUBLIC_URL: str = Field(default="")
 
     # --- File Upload ---

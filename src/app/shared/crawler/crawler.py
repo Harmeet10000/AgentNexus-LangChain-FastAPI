@@ -248,9 +248,7 @@ class WebCrawler:
                     break
 
                 urls_to_crawl = [
-                    normalize_url(url)
-                    for url in current_urls
-                    if normalize_url(url) not in visited
+                    normalize_url(url) for url in current_urls if normalize_url(url) not in visited
                 ][: max_pages - len(results)]
 
                 if not urls_to_crawl:
@@ -267,9 +265,7 @@ class WebCrawler:
                     visited.add(norm_url)
 
                     if result.success:
-                        markdown = (
-                            result.markdown.raw_markdown if result.markdown else None
-                        )
+                        markdown = result.markdown.raw_markdown if result.markdown else None
                         word_count = len(markdown.split()) if markdown else 0
 
                         crawl_result = CrawlResult(
@@ -277,19 +273,13 @@ class WebCrawler:
                             success=True,
                             markdown=markdown,
                             html=result.html,
-                            title=result.metadata.get("title")
-                            if result.metadata
-                            else None,
-                            links=result.links.get("internal", [])
-                            if result.links
-                            else [],
+                            title=result.metadata.get("title") if result.metadata else None,
+                            links=result.links.get("internal", []) if result.links else [],
                             word_count=word_count,
                         )
                         results.append(crawl_result)
 
-                        for link in (
-                            result.links.get("internal", []) if result.links else []
-                        ):
+                        for link in result.links.get("internal", []) if result.links else []:
                             next_url = normalize_url(link.get("href", ""))
                             if next_url not in visited and is_valid_url(next_url):
                                 next_level_urls.add(next_url)

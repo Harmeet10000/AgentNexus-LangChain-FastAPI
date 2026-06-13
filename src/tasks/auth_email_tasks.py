@@ -35,9 +35,7 @@ def send_verification_email(
                 template_id=settings.RESEND_VERIFICATION_TEMPLATE_ID,
                 variables={"verification_url": url, "email": email},
             )
-            logger.bind(user_id=user_id, email=email, url=url).info(
-                "Verification email dispatched"
-            )
+            logger.bind(user_id=user_id, email=email, url=url).info("Verification email dispatched")
             return {"status": "sent", "user_id": user_id}
 
         result = self.run_with_circuit_breaker("email-provider", send_email)

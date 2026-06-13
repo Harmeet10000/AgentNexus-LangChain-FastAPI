@@ -228,6 +228,3 @@ async def get_context(
     )
 
     return "\n\n".join(context_parts)
-
-
-

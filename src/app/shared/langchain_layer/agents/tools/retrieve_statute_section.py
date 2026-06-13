@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from langchain_core.tools.base import BaseTool
     from sqlalchemy.ext.asyncio import AsyncEngine
 
+
 def make_retrieve_statute_section_tool(
     db_engine: AsyncEngine,
     idempotency: IdempotencyGuard,

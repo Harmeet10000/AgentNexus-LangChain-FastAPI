@@ -27,6 +27,7 @@ def process_document(self, document_id: str) -> dict[str, str]:
     # 3. Let ResilientTask handle transient failure retries with backoff+jitter.
     return {"status": "completed", "document_id": document_id}
 
+
 # @celery_app.task(bind=True, base=ResilientTask)
 # def charge_customer(self, payment_id: str, idempotency_key: str) -> None:
 #     if idempotency_store.already_done(idempotency_key):

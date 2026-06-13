@@ -147,7 +147,9 @@ class AgentSaulService:
                 final_state = state_snapshot.values
                 final_report = final_state.get("final_report")
                 summary = final_report.summary if final_report else None
-                await self._send_json(ws, WSDoneFrame(thread_id=thread_id, summary=summary).model_dump())
+                await self._send_json(
+                    ws, WSDoneFrame(thread_id=thread_id, summary=summary).model_dump()
+                )
                 self._log.info("saul_session_completed", thread_id=thread_id)
                 break
 
@@ -237,9 +239,7 @@ class AgentSaulService:
         if event_type == "on_chain_end" and event_name in GRAPH_NODE_NAMES:
             output = data.get("output")
             output_keys = (
-                [key for key in output if isinstance(key, str)]
-                if isinstance(output, dict)
-                else []
+                [key for key in output if isinstance(key, str)] if isinstance(output, dict) else []
             )
             return WSNodeEndFrame(
                 node=event_name,

@@ -55,9 +55,7 @@ async def crawl_url(
     """
     client_id = get_client_identifier(request)
 
-    is_allowed, rate_info = await rate_limiter.check_rate_limit(
-        client_id, RateLimitScope.CRAWL
-    )
+    is_allowed, rate_info = await rate_limiter.check_rate_limit(client_id, RateLimitScope.CRAWL)
     if not is_allowed:
         raise TooManyRequestsException(
             detail=rate_info.get("error") or "Rate limit exceeded",
@@ -92,9 +90,7 @@ async def search_web(
 
     client_id = get_client_identifier(request)
 
-    is_allowed, rate_info = await rate_limiter.check_rate_limit(
-        client_id, RateLimitScope.SEARCH
-    )
+    is_allowed, rate_info = await rate_limiter.check_rate_limit(client_id, RateLimitScope.SEARCH)
     if not is_allowed:
         raise TooManyRequestsException(
             detail=rate_info.get("error") or "Rate limit exceeded",
@@ -123,15 +119,11 @@ async def get_rate_limit_info(
     client_id = get_client_identifier(request)
 
     crawl_remaining = await rate_limiter.get_remaining(client_id, RateLimitScope.CRAWL)
-    search_remaining = await rate_limiter.get_remaining(
-        client_id, RateLimitScope.SEARCH
-    )
+    search_remaining = await rate_limiter.get_remaining(client_id, RateLimitScope.SEARCH)
 
     return RateLimitInfo(
         remaining_minute=min(
             crawl_remaining["remaining_minute"], search_remaining["remaining_minute"]
         ),
-        remaining_hour=min(
-            crawl_remaining["remaining_hour"], search_remaining["remaining_hour"]
-        ),
+        remaining_hour=min(crawl_remaining["remaining_hour"], search_remaining["remaining_hour"]),
     )

@@ -20,7 +20,6 @@ from .embedder import create_embedder
 load_dotenv()
 
 
-
 class DocumentIngestionPipeline:
     """Pipeline for ingesting documents into vector DB and knowledge graph."""
 
@@ -74,9 +73,7 @@ class DocumentIngestionPipeline:
             await close_database()
             self._initialized = False
 
-    async def ingest_documents(
-        self, progress_callback = None
-    ) -> list[IngestionResult]:
+    async def ingest_documents(self, progress_callback=None) -> list[IngestionResult]:
         """
         Ingest all documents from the documents folder.
 
@@ -97,9 +94,7 @@ class DocumentIngestionPipeline:
         document_files = self._find_document_files()
 
         if not document_files:
-            logger.warning(
-                f"No supported document files found in {self.documents_folder}"
-            )
+            logger.warning(f"No supported document files found in {self.documents_folder}")
             return []
 
         logger.info(f"Found {len(document_files)} document files to process")
@@ -108,9 +103,7 @@ class DocumentIngestionPipeline:
 
         for i, file_path in enumerate(document_files):
             try:
-                logger.info(
-                    f"Processing file {i + 1}/{len(document_files)}: {file_path}"
-                )
+                logger.info(f"Processing file {i + 1}/{len(document_files)}: {file_path}")
 
                 result = await self._ingest_single_document(file_path)
                 results.append(result)
@@ -251,9 +244,7 @@ class DocumentIngestionPipeline:
 
         for pattern in patterns:
             files.extend(
-                glob.glob(
-                    os.path.join(self.documents_folder, "**", pattern), recursive=True
-                )
+                glob.glob(os.path.join(self.documents_folder, "**", pattern), recursive=True)
             )
 
         return sorted(files)
@@ -300,9 +291,7 @@ class DocumentIngestionPipeline:
 
                 # Export to markdown for consistent processing
                 markdown_content = result.document.export_to_markdown()
-                logger.info(
-                    f"Successfully converted {os.path.basename(file_path)} to markdown"
-                )
+                logger.info(f"Successfully converted {os.path.basename(file_path)} to markdown")
 
                 # Return both markdown and DoclingDocument for HybridChunker
                 return (markdown_content, result.document)
@@ -343,9 +332,7 @@ class DocumentIngestionPipeline:
 
             # Use Path object - Docling expects this
             audio_path = Path(file_path).resolve()
-            logger.info(
-                f"Transcribing audio file using Whisper Turbo: {audio_path.name}"
-            )
+            logger.info(f"Transcribing audio file using Whisper Turbo: {audio_path.name}")
             logger.info(f"Audio file absolute path: {audio_path}")
 
             # Verify file exists
@@ -389,9 +376,7 @@ class DocumentIngestionPipeline:
         # Fallback to filename
         return os.path.splitext(os.path.basename(file_path))[0]
 
-    def _extract_document_metadata(
-        self, content: str, file_path: str
-    ) -> dict[str, Any]:
+    def _extract_document_metadata(self, content: str, file_path: str) -> dict[str, Any]:
         """Extract metadata from document content."""
         metadata = {
             "file_path": file_path,
@@ -487,9 +472,7 @@ class DocumentIngestionPipeline:
 async def main():
     """Main function for running ingestion."""
     parser = argparse.ArgumentParser(description="Ingest documents into vector DB")
-    parser.add_argument(
-        "--documents", "-d", default="documents", help="Documents folder path"
-    )
+    parser.add_argument("--documents", "-d", default="documents", help="Documents folder path")
     parser.add_argument(
         "--no-clean",
         action="store_true",
@@ -501,16 +484,10 @@ async def main():
         default=1000,
         help="Chunk size for splitting documents",
     )
-    parser.add_argument(
-        "--chunk-overlap", type=int, default=200, help="Chunk overlap size"
-    )
-    parser.add_argument(
-        "--no-semantic", action="store_true", help="Disable semantic chunking"
-    )
+    parser.add_argument("--chunk-overlap", type=int, default=200, help="Chunk overlap size")
+    parser.add_argument("--no-semantic", action="store_true", help="Disable semantic chunking")
     # Graph-related arguments removed
-    parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Enable verbose logging"
-    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
 
     args = parser.parse_args()
 

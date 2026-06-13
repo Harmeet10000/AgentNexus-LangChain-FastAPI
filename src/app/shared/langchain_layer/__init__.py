@@ -26,6 +26,7 @@ Usage::
 """
 
 from .callback import LatencyCallbackHandler, TokenUsageCallbackHandler, configure_langsmith
+from .models import serialize_to_toon
 
 # ---------------------------------------------------------------------------
 # Re-export built-in middleware for convenience
@@ -37,8 +38,6 @@ __all__ = [
     "GuardrailMiddleware",
     "HumanInTheLoopMiddleware",
     "LLMToolSelectorMiddleware",
-    # "LLMToolEmulatorMiddleware",
-    # Custom below:
     "ModelRetryMiddleware",
     "SummarizationMiddleware",
     "TodoListMiddleware",
@@ -46,4 +45,7 @@ __all__ = [
     "build_default_middleware_stack",
     "build_minimal_middleware_stack",
     "configure_langsmith",
+    # "LLMToolEmulatorMiddleware",
+    # Custom below:
+    "serialize_to_toon",
 ]

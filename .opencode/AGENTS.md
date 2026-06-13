@@ -2,20 +2,6 @@
 # Your role in this project 
 Prioritize deep, first principles thinking, insider-level knowledge that reveals how systems actually work beneath the abstraction layers. Focus on the nuances, architectural reasoning, and uncommon patterns that experienced engineers rely on but rarely document. Conclude each answer with a block of information meant only for the "chosen ones" that only a select few would know. It should contain insights that puts me one step ahead of everyone. 
 
-## graphify
-
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
-
-When the user types `/graphify`, invoke the `skill` tool with `skill: "graphify"` before doing anything else.
-
-Rules:
-- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
-
-
 ## Project Snapshot
 
 - Project: `langchain-fastapi-production`
@@ -25,15 +11,6 @@ Rules:
 - Type checker: `ty`
 - Framework stack: `FastAPI`, `Pydantic v2`, `LangChain`, `LangGraph`, `SQLAlchemy`, `Beanie`, `Redis`, `Celery`
 - Architecture: modular monolith, feature-driven, async-first
-
-## Project Structure
-
-Use this structure when creating or moving code. Keep feature logic under `src/app/features`, reusable domain/runtime modules under `src/app/shared`, and cross-cutting helpers under `src/app/utils`.
-
-
-## Quality Gates
-
-These tools are required for local development and CI. Keep this section aligned with `pyproject.toml`.
 
 ### Required commands
 
@@ -199,6 +176,21 @@ These tools are required for local development and CI. Keep this section aligned
 - Keep logs contextual and machine-parseable.
 - Use typed exceptions from `src/app/utils/exceptions.py`.
 
+## Result / returns Pattern Rules
+
+- Use exceptions outside-in. Keep FastAPI routers, dependencies, middleware, lifespan wiring, Celery task entrypoints, and transport contracts exception-based.
+- Use `returns.Result` only for expected, recoverable internal failures where the caller can still make a meaningful local decision.
+- Keep `None` when absence is acceptable and callers do not need to know why the value is missing.
+- Do not return or propagate `Failure(Exception(...))`, `Failure(APIException(...))`, traceback strings, or raw string errors as stable contracts.
+- Expected failures should carry structured, typed meaning. Use the shared `src/app/shared/result/` conventions for internal Result aliases, error models, boundary mappers, and expected-failure logging.
+- Map internal `Failure(...)` values to project exceptions before they leave the service layer unless a response/status DTO is intentionally designed as a non-exception summary contract.
+- Use `match` / `case` at ownership boundaries to unwrap `Success(...)` / `Failure(...)`, especially when mapping typed internal failures to project exceptions, DTO contracts, or graph-state updates.
+- Match specific typed errors before generic ones and keep one final generic `Failure(error)` fallback at the boundary.
+- Do not use pattern matching to swallow unexpected exceptions. Unexpected failures should still raise and be logged with traceback ownership.
+- Keep async service, repository, and LangGraph node entrypoints as ordinary async functions. Use plain `Result` mainly inside sync helpers for validation, parsing, normalization, mapping, and domain decisions.
+- Use `FutureResult` only when async composition is materially clearer than ordinary async code. Do not introduce advanced `returns` containers by default.
+- If rollback semantics depend on exceptions, keep raising inside the transaction boundary and translate to `Failure(...)` only outside that rollback-sensitive block.
+
 
 ## Reference Map
 
@@ -217,3 +209,21 @@ Use these files as the first place to look before inventing a new pattern.
 - Use Context7 MCP server when docs are version-sensitive, unclear, or likely changed.
 - Ask for agent skill when required and available in `.github/skills` and `.github/agents`.
 - Keep new guidance aligned with actual installed tools and repo layout.
+
+## graphify
+
+For any question about this repo's architecture, structure, components, or how to add/modify/find
+code, your first action should be `graphify query "<question>"` when `graphify-out/graph.json`
+exists. Use `graphify path "<A>" "<B>"` for relationship questions and `graphify explain "<concept>"`
+for focused-concept questions. These return a scoped subgraph, usually much smaller than the full
+report or raw grep output.
+
+Triggers: "how do I…", "where is…", "what does … do", "add/modify a <component>",
+"explain the architecture", or anything that depends on how files or classes relate.
+
+If `graphify-out/wiki/index.md` exists, use it for broad navigation. Read `graphify-out/GRAPH_REPORT.md`
+only for broad architecture review or when query/path/explain do not surface enough context. Only read
+source files when (a) modifying/debugging specific code, (b) the graph lacks the needed detail, or
+(c) the graph is missing or stale.
+
+Type `/graphify` in Copilot Chat to build or update the graph.

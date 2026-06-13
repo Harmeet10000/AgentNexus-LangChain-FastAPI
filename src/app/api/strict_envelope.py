@@ -20,10 +20,7 @@ class StrictEnvelopeAPIRouter(APIRouter):
 
         if self._is_envelope_violation(response_model=response_model):
             endpoint_name = getattr(endpoint, "__name__", "unknown")
-            message = (
-                f"Route '{path}' ({endpoint_name}) must declare "
-                "response_model=APIResponse[T]"
-            )
+            message = f"Route '{path}' ({endpoint_name}) must declare response_model=APIResponse[T]"
             if self.strict_enforce:
                 raise ValueError(message)
             # logger.warning(message)

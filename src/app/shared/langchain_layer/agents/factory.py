@@ -38,7 +38,6 @@ Uses LangChain 1.0's `create_agent` with:
 # agent = create_production_agent(spec)
 # ```
 
-
 from __future__ import annotations
 
 import asyncio
@@ -60,7 +59,6 @@ if TYPE_CHECKING:
     from typing import Any
 
     from langchain_core.tools import BaseTool
-
 
 
 # ---------------------------------------------------------------------------
@@ -136,14 +134,17 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
             resolved_tools.append(t)
 
     # Build middleware stack
-    middleware = build_default_middleware_stack(
-        max_tokens_before_summary=spec.max_tokens_before_summary,
-        messages_to_keep=spec.messages_to_keep,
-        enable_guardrails=spec.enable_guardrails,
-        enable_tool_selector=spec.enable_tool_selector and bool(resolved_tools),
-        enable_human_loop=spec.enable_human_loop,
-        human_loop_tools=spec.human_loop_tools,
-    ) + spec.extra_middleware
+    middleware = (
+        build_default_middleware_stack(
+            max_tokens_before_summary=spec.max_tokens_before_summary,
+            messages_to_keep=spec.messages_to_keep,
+            enable_guardrails=spec.enable_guardrails,
+            enable_tool_selector=spec.enable_tool_selector and bool(resolved_tools),
+            enable_human_loop=spec.enable_human_loop,
+            human_loop_tools=spec.human_loop_tools,
+        )
+        + spec.extra_middleware
+    )
 
     # Build memory
     memory = MemoryManager(backend=spec.memory_backend)
@@ -301,9 +302,7 @@ class ProductionAgent:
             async with semaphore:
                 return await self.ainvoke(msg, thread_id=tid, context=context, user_id=user_id)
 
-        return await asyncio.gather(
-            *[bounded_invoke(m, t) for m, t in zip(messages, thread_ids)]
-        )
+        return await asyncio.gather(*[bounded_invoke(m, t) for m, t in zip(messages, thread_ids)])
 
     async def resume_after_approval(
         self,

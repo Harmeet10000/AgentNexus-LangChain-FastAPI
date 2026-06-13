@@ -1,35 +1,46 @@
 """Document processing utilities."""
 
-from app.shared.document_processing.chunker import (
-    ChunkingConfig,
-    DocumentChunk,
-    create_chunker,
+from app.shared.rag.document_processing.chunker import (
+    chunk_document,
+    chunk_document_simple,
+    create_hybrid_chunker,
+    get_tokenizer,
 )
-from app.shared.document_processing.docling_enhanced import (
-    BatchDoclingProcessor,
-    DoclingEnhancedConverter,
+from app.shared.rag.document_processing.docling_enhanced import (
     DoclingEnhancementConfig,
     DoclingExtractionResult,
     ExtractedCodeBlock,
     ExtractedImage,
     ExtractedTable,
     create_converter,
+    create_document_converter,
+    extract_code_blocks,
+    extract_images,
+    extract_tables,
 )
-from app.shared.document_processing.embedder import EmbeddingGenerator, create_embedder
-from app.shared.document_processing.entity_extractor import (
+from app.shared.rag.document_processing.embedder import (
+    create_embedder,
+    embed_chunks,
+    generate_embedding,
+    generate_embeddings_batch,
+)
+from app.shared.rag.document_processing.entity_extractor import (
     Entity,
     ExtractionResult,
-    GraphitiExtractor,
     Relationship,
-    SimpleEntityExtractor,
     create_extractor,
+    extract,
+    extract_entities_batch,
+    extract_with_fallback,
+    extract_with_graphiti,
 )
-from app.shared.document_processing.ingest import DocumentIngestionPipeline
-from app.shared.document_processing.models import (
+from app.shared.rag.document_processing.ingest import DocumentIngestionPipeline
+from app.shared.rag.document_processing.models import (
     AgentContext,
     AgentDependencies,
     Chunk,
     Document,
+    DocumentMetadata,
     IngestionConfig,
     IngestionResult,
     Message,
@@ -43,44 +54,46 @@ from app.shared.document_processing.models import (
 )
 
 __all__ = [
-    # Models
+    "AgentContext",
+    "AgentDependencies",
+    "Chunk",
+    "chunk_document",
+    "chunk_document_simple",
+    "create_converter",
+    "create_document_converter",
+    "create_embedder",
+    "create_extractor",
+    "create_hybrid_chunker",
+    "DoclingEnhancementConfig",
+    "DoclingExtractionResult",
+    "Document",
+    "DocumentIngestionPipeline",
+    "DocumentMetadata",
+    "Entity",
+    "ExtractionResult",
+    "ExtractedCodeBlock",
+    "ExtractedImage",
+    "ExtractedTable",
+    "IngestionConfig",
+    "IngestionResult",
+    "embed_chunks",
+    "Message",
+    "MessageRole",
+    "Relationship",
     "SearchRequest",
     "SearchResponse",
     "SearchType",
-    "MessageRole",
-    "Document",
-    "Chunk",
     "Session",
-    "Message",
-    "AgentDependencies",
-    "AgentContext",
-    "IngestionConfig",
-    "IngestionResult",
-    "ToolCall",
     "StreamDelta",
-    # Chunker
-    "ChunkingConfig",
-    "DocumentChunk",
-    "create_chunker",
-    # Embedder
-    "EmbeddingGenerator",
-    "create_embedder",
-    # Ingest
-    "DocumentIngestionPipeline",
-    # Docling Enhanced
-    "DoclingEnhancementConfig",
-    "DoclingEnhancedConverter",
-    "DoclingExtractionResult",
-    "ExtractedTable",
-    "ExtractedCodeBlock",
-    "ExtractedImage",
-    "BatchDoclingProcessor",
-    "create_converter",
-    # Entity Extractor
-    "Entity",
-    "Relationship",
-    "ExtractionResult",
-    "GraphitiExtractor",
-    "SimpleEntityExtractor",
-    "create_extractor",
+    "ToolCall",
+    "extract",
+    "extract_code_blocks",
+    "extract_entities_batch",
+    "extract_images",
+    "extract_tables",
+    "extract_with_fallback",
+    "extract_with_graphiti",
+    "generate_embedding",
+    "generate_embeddings_batch",
+    "get_tokenizer",
 ]

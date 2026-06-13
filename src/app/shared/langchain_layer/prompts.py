@@ -154,7 +154,6 @@ def render_prompt_sections(*sections: tuple[str, str | None]) -> str:
     return "\n\n".join(rendered)
 
 
-
 # ---------------------------------------------------------------------------
 # Pre-built system prompts
 # ---------------------------------------------------------------------------
@@ -185,40 +184,34 @@ AGENT_SYSTEM_PROMPT = SystemPromptParts(
     ),
 )
 
-_SUMMARIZER_SYSTEM_PROMPT = (
-    render_prompt_sections(
-        ("IDENTITY", "You are a conversation summarizer."),
-        (
-            "OBJECTIVE",
-            "Produce a concise but complete summary of the conversation while preserving key facts, decisions, and tool results.",
-        ),
-        ("CONSTRAINTS", "Write in third person."),
-    )
+_SUMMARIZER_SYSTEM_PROMPT = render_prompt_sections(
+    ("IDENTITY", "You are a conversation summarizer."),
+    (
+        "OBJECTIVE",
+        "Produce a concise but complete summary of the conversation while preserving key facts, decisions, and tool results.",
+    ),
+    ("CONSTRAINTS", "Write in third person."),
 )
 
-_ROUTER_SYSTEM_PROMPT = (
-    render_prompt_sections(
-        ("IDENTITY", "You are a routing agent."),
-        (
-            "OBJECTIVE",
-            "Decide which specialized agent or skill should handle the user's request.",
-        ),
-        ("CONSTRAINTS", "Return only a JSON object with the key 'agent'."),
-    )
+_ROUTER_SYSTEM_PROMPT = render_prompt_sections(
+    ("IDENTITY", "You are a routing agent."),
+    (
+        "OBJECTIVE",
+        "Decide which specialized agent or skill should handle the user's request.",
+    ),
+    ("CONSTRAINTS", "Return only a JSON object with the key 'agent'."),
 )
 
-_GUARDRAIL_SYSTEM_PROMPT = (
-    render_prompt_sections(
-        ("IDENTITY", "You are a safety evaluator."),
-        (
-            "OBJECTIVE",
-            "Determine whether the evaluated AI response is safe, accurate, and appropriate.",
-        ),
-        (
-            "CONSTRAINTS",
-            "Return JSON with keys: safe (bool), reason (str), severity (low, medium, or high).",
-        ),
-    )
+_GUARDRAIL_SYSTEM_PROMPT = render_prompt_sections(
+    ("IDENTITY", "You are a safety evaluator."),
+    (
+        "OBJECTIVE",
+        "Determine whether the evaluated AI response is safe, accurate, and appropriate.",
+    ),
+    (
+        "CONSTRAINTS",
+        "Return JSON with keys: safe (bool), reason (str), severity (low, medium, or high).",
+    ),
 )
 
 LAWYER_SYSTEM_PROMPT = SystemPromptParts(

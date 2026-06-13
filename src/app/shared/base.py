@@ -22,7 +22,6 @@ class Base(AsyncAttrs, DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
-
 # class Base(DeclarativeBase):
 #     custom_data: Mapped[dict[str, Any]] = mapped_column(
 #         MutableDict.as_mutable(JSON),

@@ -55,7 +55,7 @@ class OAuthAccount(BaseModel):
     provider: str  # "google" | "github"
     provider_user_id: str
     provider_email: str | None = None
-    linked_at: datetime = Field(default_factory=lambda: datetime.now(UTC    ))
+    linked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class User(Document):

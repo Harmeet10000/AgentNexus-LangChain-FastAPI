@@ -26,4 +26,3 @@ __all__ = [
     "get_health_service",
     "router",
 ]
-

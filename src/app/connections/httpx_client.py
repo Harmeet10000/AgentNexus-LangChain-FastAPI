@@ -1,4 +1,5 @@
 """HTTPX client with optimal performance settings."""
+
 from functools import lru_cache
 
 import httpx
