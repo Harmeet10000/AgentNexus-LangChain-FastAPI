@@ -248,6 +248,7 @@ class Settings(BaseSettings):
     # --- URLs ---
     BACKEND_URL: str = Field(default="http://localhost:5000")
     FRONTEND_URL: str = Field(default="http://localhost:3000")
+    RESEND_SEND_URL: str = Field(default="https://api.resend.com/emails")
 
     # --- WebSocket Security ---
     WEBSOCKET_ALLOWED_ORIGINS: list[str] = Field(default_factory=list)

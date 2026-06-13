@@ -16,7 +16,7 @@ class UserAdminRepository:
     """
 
     async def find_by_id(self, user_id: str) -> User | None:
-        result = await self.find_by_id_result(user_id)
+        result: AppResult[User | None] = await self.find_by_id_result(user_id)
         if isinstance(result, Failure):
             return None
         return result.unwrap()
@@ -64,12 +64,12 @@ class UserAdminRepository:
 
     async def update_role(self, user: User, role: UserRole) -> User:
         await user.update(Set({User.role: role, User.updated_at: datetime.utcnow()}))
-        user.role = role
+        user.role: UserRole = role
         return user
 
     async def set_active(self, user: User, *, is_active: bool) -> User:
         await user.update(Set({User.is_active: is_active, User.updated_at: datetime.utcnow()}))
-        user.is_active = is_active
+        user.is_active: bool = is_active
         return user
 
     async def hard_delete(self, user: User) -> None:

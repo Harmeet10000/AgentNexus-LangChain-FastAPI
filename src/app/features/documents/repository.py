@@ -7,13 +7,21 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from returns.result import Failure, Success
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.features.search.constants import (
     DISKANN_QUERY_RESCORE,
     DISKANN_QUERY_SEARCH_LIST_SIZE,
     TRIGRAM_SIMILARITY_THRESHOLD,
+)
+from app.shared.result import (
+    ConflictAppError,
+    InfrastructureAppError,
+    NotFoundAppError,
+    app_error_to_exception,
 )
 
 from .model import UnifiedChunk, UnifiedDocument
@@ -23,6 +31,8 @@ if TYPE_CHECKING:
     from typing import Any
 
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.shared.result import AppResult
 
 
 _FILTER_SQL = """
@@ -49,20 +59,88 @@ class DocumentRepository:
         user_id: str,
         content_hash: str,
     ) -> UnifiedDocument | None:
-        statement = select(UnifiedDocument).where(
-            UnifiedDocument.user_id == user_id,
-            UnifiedDocument.content_hash == content_hash,
+        result = await self.get_document_by_user_hash_result(
+            user_id=user_id,
+            content_hash=content_hash,
         )
-        result = await self.session.execute(statement)
-        return result.scalar_one_or_none()
+        if isinstance(result, Failure):
+            return None
+        return result.unwrap()
+
+    async def get_document_by_user_hash_result(
+        self,
+        *,
+        user_id: str,
+        content_hash: str,
+    ) -> AppResult[UnifiedDocument | None]:
+        try:
+            statement = select(UnifiedDocument).where(
+                UnifiedDocument.user_id == user_id,
+                UnifiedDocument.content_hash == content_hash,
+            )
+            result = await self.session.execute(statement)
+            doc = result.scalar_one_or_none()
+            if doc is None:
+                return Failure(
+                    NotFoundAppError(
+                        code="DOCUMENT_NOT_FOUND",
+                        message="Document not found for the given user and content hash",
+                        details={"user_id": user_id, "content_hash": content_hash},
+                        source="document_repository",
+                    )
+                )
+            return Success(doc)
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while fetching document by user hash",
+                    details={"user_id": user_id, "content_hash": content_hash, "error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
     async def get_document_by_id(self, *, user_id: str, document_id: str) -> UnifiedDocument | None:
-        statement = select(UnifiedDocument).where(
-            UnifiedDocument.user_id == user_id,
-            UnifiedDocument.id == UUID(document_id),
+        result = await self.get_document_by_id_result(
+            user_id=user_id,
+            document_id=document_id,
         )
-        result = await self.session.execute(statement)
-        return result.scalar_one_or_none()
+        if isinstance(result, Failure):
+            return None
+        return result.unwrap()
+
+    async def get_document_by_id_result(
+        self,
+        *,
+        user_id: str,
+        document_id: str,
+    ) -> AppResult[UnifiedDocument | None]:
+        try:
+            statement = select(UnifiedDocument).where(
+                UnifiedDocument.user_id == user_id,
+                UnifiedDocument.id == UUID(document_id),
+            )
+            result = await self.session.execute(statement)
+            doc = result.scalar_one_or_none()
+            if doc is None:
+                return Failure(
+                    NotFoundAppError(
+                        code="DOCUMENT_NOT_FOUND",
+                        message="Document not found for the given user and document ID",
+                        details={"user_id": user_id, "document_id": document_id},
+                        source="document_repository",
+                    )
+                )
+            return Success(doc)
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while fetching document by ID",
+                    details={"user_id": user_id, "document_id": document_id, "error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
     async def create_document(
         self,
@@ -79,7 +157,7 @@ class DocumentRepository:
         parties: list[object],
         metadata_: dict[str, object],
     ) -> UnifiedDocument:
-        document = UnifiedDocument(
+        result = await self.create_document_result(
             user_id=user_id,
             title=title,
             source_uri=source_uri,
@@ -92,9 +170,60 @@ class DocumentRepository:
             parties=parties,
             metadata_=metadata_,
         )
-        self.session.add(document)
-        await self.session.flush()
-        return document
+        if isinstance(result, Failure):
+            raise app_error_to_exception(result.failure())
+        return result.unwrap()
+
+    async def create_document_result(
+        self,
+        *,
+        user_id: str,
+        title: str,
+        source_uri: str | None,
+        object_uri: str,
+        content_hash: str,
+        document_kind: str,
+        status: str,
+        jurisdiction: str | None,
+        contract_type: str | None,
+        parties: list[object],
+        metadata_: dict[str, object],
+    ) -> AppResult[UnifiedDocument]:
+        try:
+            document = UnifiedDocument(
+                user_id=user_id,
+                title=title,
+                source_uri=source_uri,
+                object_uri=object_uri,
+                content_hash=content_hash,
+                document_kind=document_kind,
+                status=status,
+                jurisdiction=jurisdiction,
+                contract_type=contract_type,
+                parties=parties,
+                metadata_=metadata_,
+            )
+            self.session.add(document)
+            await self.session.flush()
+            return Success(document)
+        except IntegrityError as exc:
+            return Failure(
+                ConflictAppError(
+                    code="DOCUMENT_CONFLICT",
+                    message="Document creation failed due to a constraint violation",
+                    details={"user_id": user_id, "content_hash": content_hash, "error": str(exc)},
+                    source="document_repository",
+                )
+            )
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while creating document",
+                    details={"user_id": user_id, "content_hash": content_hash, "error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
     async def update_document_status(
         self,
@@ -139,54 +268,110 @@ class DocumentRepository:
         )
 
     async def upsert_chunks(self, rows: list[dict[str, Any]]) -> None:
+        result = await self.upsert_chunks_result(rows=rows)
+        if isinstance(result, Failure):
+            raise app_error_to_exception(result.failure())
+        return result.unwrap()
+
+    async def upsert_chunks_result(self, rows: list[dict[str, Any]]) -> AppResult[None]:
         if not rows:
-            return
-        statement = insert(UnifiedChunk).values(rows)
-        statement = statement.on_conflict_do_update(
-            constraint="uq_chunks_document_chunk_index",
-            set_={
-                "chunk_kind": statement.excluded.chunk_kind,
-                "content": statement.excluded.content,
-                "preamble": statement.excluded.preamble,
-                "clause_type": statement.excluded.clause_type,
-                "page_no": statement.excluded.page_no,
-                "embedding": statement.excluded.embedding,
-                "metadata_": statement.excluded.metadata_,
-                "custom_metadata": statement.excluded.custom_metadata,
-                "quality_warnings": statement.excluded.quality_warnings,
-                "graphiti_episode_id": statement.excluded.graphiti_episode_id,
-                "graphiti_verified": statement.excluded.graphiti_verified,
-            },
-        )
-        await self.session.execute(statement)
+            return Success(None)
+        try:
+            statement = insert(UnifiedChunk).values(rows)
+            statement = statement.on_conflict_do_update(
+                constraint="uq_chunks_document_chunk_index",
+                set_={
+                    "chunk_kind": statement.excluded.chunk_kind,
+                    "content": statement.excluded.content,
+                    "preamble": statement.excluded.preamble,
+                    "clause_type": statement.excluded.clause_type,
+                    "page_no": statement.excluded.page_no,
+                    "embedding": statement.excluded.embedding,
+                    "metadata_": statement.excluded.metadata_,
+                    "custom_metadata": statement.excluded.custom_metadata,
+                    "quality_warnings": statement.excluded.quality_warnings,
+                    "graphiti_episode_id": statement.excluded.graphiti_episode_id,
+                    "graphiti_verified": statement.excluded.graphiti_verified,
+                },
+            )
+            await self.session.execute(statement)
+            return Success(None)
+        except IntegrityError as exc:
+            return Failure(
+                ConflictAppError(
+                    code="CHUNK_CONFLICT",
+                    message="Chunk upsert failed due to a constraint violation",
+                    details={"error": str(exc)},
+                    source="document_repository",
+                )
+            )
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while upserting chunks",
+                    details={"error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
     async def analyze_chunks(self) -> None:
         await self.session.execute(text("ANALYZE chunks"))
 
     async def fetch_status(self, *, user_id: str, document_id: str) -> dict[str, Any] | None:
-        statement = text(
-            """
-            SELECT
-                d.id::text AS document_id,
-                d.status,
-                d.object_uri,
-                d.title,
-                d.document_kind,
-                COUNT(c.id)::int AS chunk_count,
-                COUNT(*) FILTER (WHERE c.graphiti_verified)::int AS verified_chunk_count,
-                COALESCE(jsonb_agg(c.quality_warnings) FILTER (WHERE c.id IS NOT NULL), '[]'::jsonb) AS warnings
-            FROM documents AS d
-            LEFT JOIN chunks AS c
-              ON c.document_id = d.id
-            WHERE d.user_id = :user_id AND d.id = :document_id::uuid
-            GROUP BY d.id, d.status, d.object_uri, d.title, d.document_kind
-            """
-        )
-        result = await self.session.execute(
-            statement, {"user_id": user_id, "document_id": document_id}
-        )
-        row = result.mappings().one_or_none()
-        return dict(row) if row is not None else None
+        result = await self.fetch_status_result(user_id=user_id, document_id=document_id)
+        if isinstance(result, Failure):
+            return None
+        return result.unwrap()
+
+    async def fetch_status_result(
+        self,
+        *,
+        user_id: str,
+        document_id: str,
+    ) -> AppResult[dict[str, Any] | None]:
+        try:
+            statement = text(
+                """
+                SELECT
+                    d.id::text AS document_id,
+                    d.status,
+                    d.object_uri,
+                    d.title,
+                    d.document_kind,
+                    COUNT(c.id)::int AS chunk_count,
+                    COUNT(*) FILTER (WHERE c.graphiti_verified)::int AS verified_chunk_count,
+                    COALESCE(jsonb_agg(c.quality_warnings) FILTER (WHERE c.id IS NOT NULL), '[]'::jsonb) AS warnings
+                FROM documents AS d
+                LEFT JOIN chunks AS c
+                  ON c.document_id = d.id
+                WHERE d.user_id = :user_id AND d.id = :document_id::uuid
+                GROUP BY d.id, d.status, d.object_uri, d.title, d.document_kind
+                """
+            )
+            result = await self.session.execute(
+                statement, {"user_id": user_id, "document_id": document_id}
+            )
+            row = result.mappings().one_or_none()
+            if row is None:
+                return Failure(
+                    NotFoundAppError(
+                        code="STATUS_NOT_FOUND",
+                        message="Status not found for the given document",
+                        details={"user_id": user_id, "document_id": document_id},
+                        source="document_repository",
+                    )
+                )
+            return Success(dict(row))
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while fetching document status",
+                    details={"user_id": user_id, "document_id": document_id, "error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
     async def bm25_search(
         self,

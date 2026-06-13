@@ -1,6 +1,6 @@
 """Boundary mappers from internal Result errors to project exceptions."""
 
-from app.utils.exceptions import (
+from app.utils import (
     APIException,
     ConflictException,
     DatabaseException,

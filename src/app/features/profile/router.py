@@ -32,7 +32,7 @@ async def _get_profile_service(request: Request) -> ProfileService:
     return ProfileService(user_repo, token_repo, storage)
 
 
-@router.get("/", response_model=APIResponse[UserResponse])
+@router.get("/")
 async def get_profile(user: CurrentVerifiedUser) -> APIResponse[UserResponse]:
     result = UserResponse(
         id=str(user.id),
@@ -46,7 +46,7 @@ async def get_profile(user: CurrentVerifiedUser) -> APIResponse[UserResponse]:
     return http_response("Profile retrieved", data=result)
 
 
-@router.patch("/", response_model=APIResponse[UserResponse])
+@router.patch("/")
 async def update_profile(
     body: UpdateProfileRequest,
     user: CurrentVerifiedUser,
@@ -97,7 +97,7 @@ async def change_password(
     return http_response(msg)
 
 
-@router.post("/avatar", response_model=APIResponse[AvatarResponse])
+@router.post("/avatar")
 async def upload_avatar(
     user: CurrentVerifiedUser,
     request: Request,

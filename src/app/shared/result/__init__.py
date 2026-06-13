@@ -10,11 +10,10 @@ from .errors import (
 )
 from .logging import log_expected_failure
 from .mappers import app_error_to_exception
-from .types import AppFutureResult, AppResult
+from .types import AppResult
 
 __all__ = [
     "AppError",
-    "AppFutureResult",
     "AppResult",
     "ConflictAppError",
     "ExternalServiceAppError",
