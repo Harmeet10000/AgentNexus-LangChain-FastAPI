@@ -1,6 +1,6 @@
 """Shared services module."""
 
-from app.shared.services.mailer import MailerService
+from app.shared.services.mailer import MailerConfig, send_template
 from app.shared.services.rate_limiter import (
     RateLimitConfig,
     RateLimiter,
@@ -15,7 +15,7 @@ from app.shared.services.tavily import (
 )
 
 __all__ = [
-    "MailerService",
+    "MailerConfig",
     "RateLimitConfig",
     "RateLimitScope",
     "RateLimiter",
@@ -24,4 +24,5 @@ __all__ = [
     "get_context",
     "get_rate_limiter",
     "search",
+    "send_template",
 ]

@@ -7,11 +7,11 @@ from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.shared.result import log_expected_failure
-from app.utils import logger
-from app.utils.exceptions import (
+from app.utils import (
     ConflictException,
     NotFoundException,
     UnauthorizedException,
+    logger,
 )
 from tasks.auth_email_tasks import send_password_reset_email, send_verification_email
 

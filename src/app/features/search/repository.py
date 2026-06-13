@@ -7,8 +7,16 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from returns.result import Failure, Success
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.shared.result import (
+    InfrastructureAppError,
+    NotFoundAppError,
+    app_error_to_exception,
+)
 
 from .constants import (
     DISKANN_QUERY_RESCORE,
@@ -25,6 +33,8 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from app.shared.result import AppResult
+
 
 class SearchRepository:
     """Database operations for the search feature."""
@@ -33,14 +43,72 @@ class SearchRepository:
         self.session = session
 
     async def get_document_by_content_hash(self, content_hash: str) -> SearchDocument | None:
-        statement = select(SearchDocument).where(SearchDocument.content_hash == content_hash)
-        result = await self.session.execute(statement)
-        return result.scalar_one_or_none()
+        result = await self.get_document_by_content_hash_result(content_hash=content_hash)
+        if isinstance(result, Failure):
+            return None
+        return result.unwrap()
+
+    async def get_document_by_content_hash_result(
+        self,
+        content_hash: str,
+    ) -> AppResult[SearchDocument | None]:
+        try:
+            statement = select(SearchDocument).where(SearchDocument.content_hash == content_hash)
+            result = await self.session.execute(statement)
+            doc = result.scalar_one_or_none()
+            if doc is None:
+                return Failure(
+                    NotFoundAppError(
+                        code="SEARCH_DOCUMENT_NOT_FOUND",
+                        message="Search document not found for the given content hash",
+                        details={"content_hash": content_hash},
+                        source="search_repository",
+                    )
+                )
+            return Success(doc)
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while fetching search document by content hash",
+                    details={"content_hash": content_hash, "error": str(exc)},
+                    source="search_repository",
+                )
+            )
 
     async def get_document_by_id(self, document_id: str) -> SearchDocument | None:
-        statement = select(SearchDocument).where(SearchDocument.id == UUID(document_id))
-        result = await self.session.execute(statement)
-        return result.scalar_one_or_none()
+        result = await self.get_document_by_id_result(document_id=document_id)
+        if isinstance(result, Failure):
+            return None
+        return result.unwrap()
+
+    async def get_document_by_id_result(
+        self,
+        document_id: str,
+    ) -> AppResult[SearchDocument | None]:
+        try:
+            statement = select(SearchDocument).where(SearchDocument.id == UUID(document_id))
+            result = await self.session.execute(statement)
+            doc = result.scalar_one_or_none()
+            if doc is None:
+                return Failure(
+                    NotFoundAppError(
+                        code="SEARCH_DOCUMENT_NOT_FOUND",
+                        message="Search document not found for the given document ID",
+                        details={"document_id": document_id},
+                        source="search_repository",
+                    )
+                )
+            return Success(doc)
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while fetching search document by ID",
+                    details={"document_id": document_id, "error": str(exc)},
+                    source="search_repository",
+                )
+            )
 
     async def create_document(
         self,
@@ -87,14 +155,40 @@ class SearchRepository:
         candidate_limit: int,
         metadata_filter: dict[str, Any],
     ) -> list[RankedResultRow]:
-        statement, filter_params = _build_bm25_statement(metadata_filter)
-        params = {
-            "query": query,
-            "candidate_limit": candidate_limit,
-            **filter_params,
-        }
-        result = await self.session.execute(statement, params)
-        return _rank_rows(result.mappings().all())
+        result = await self.bm25_search_result(
+            query=query,
+            candidate_limit=candidate_limit,
+            metadata_filter=metadata_filter,
+        )
+        if isinstance(result, Failure):
+            raise app_error_to_exception(result.failure())
+        return result.unwrap()
+
+    async def bm25_search_result(
+        self,
+        *,
+        query: str,
+        candidate_limit: int,
+        metadata_filter: dict[str, Any],
+    ) -> AppResult[list[RankedResultRow]]:
+        try:
+            statement, filter_params = _build_bm25_statement(metadata_filter)
+            params = {
+                "query": query,
+                "candidate_limit": candidate_limit,
+                **filter_params,
+            }
+            result = await self.session.execute(statement, params)
+            return Success(_rank_rows(result.mappings().all()))
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error during BM25 search",
+                    details={"query": query, "error": str(exc)},
+                    source="search_repository",
+                )
+            )
 
     async def vector_search(
         self,
@@ -103,21 +197,47 @@ class SearchRepository:
         candidate_limit: int,
         metadata_filter: dict[str, Any],
     ) -> list[RankedResultRow]:
-        statement, filter_params = _build_vector_statement(metadata_filter)
-        vector_literal = _vector_literal(embedding)
-        await self.session.execute(
-            text(f"SET LOCAL diskann.query_search_list_size = {DISKANN_QUERY_SEARCH_LIST_SIZE}")
+        result = await self.vector_search_result(
+            embedding=embedding,
+            candidate_limit=candidate_limit,
+            metadata_filter=metadata_filter,
         )
-        await self.session.execute(
-            text(f"SET LOCAL diskann.query_rescore = {DISKANN_QUERY_RESCORE}")
-        )
-        params = {
-            "embedding": vector_literal,
-            "candidate_limit": candidate_limit,
-            **filter_params,
-        }
-        result = await self.session.execute(statement, params)
-        return _rank_rows(result.mappings().all())
+        if isinstance(result, Failure):
+            raise app_error_to_exception(result.failure())
+        return result.unwrap()
+
+    async def vector_search_result(
+        self,
+        *,
+        embedding: list[float],
+        candidate_limit: int,
+        metadata_filter: dict[str, Any],
+    ) -> AppResult[list[RankedResultRow]]:
+        try:
+            statement, filter_params = _build_vector_statement(metadata_filter)
+            vector_literal = _vector_literal(embedding)
+            await self.session.execute(
+                text(f"SET LOCAL diskann.query_search_list_size = {DISKANN_QUERY_SEARCH_LIST_SIZE}")
+            )
+            await self.session.execute(
+                text(f"SET LOCAL diskann.query_rescore = {DISKANN_QUERY_RESCORE}")
+            )
+            params = {
+                "embedding": vector_literal,
+                "candidate_limit": candidate_limit,
+                **filter_params,
+            }
+            result = await self.session.execute(statement, params)
+            return Success(_rank_rows(result.mappings().all()))
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error during vector search",
+                    details={"error": str(exc)},
+                    source="search_repository",
+                )
+            )
 
     async def trigram_search(
         self,
@@ -126,15 +246,41 @@ class SearchRepository:
         candidate_limit: int,
         metadata_filter: dict[str, Any],
     ) -> list[RankedResultRow]:
-        statement, filter_params = _build_trigram_statement(metadata_filter)
-        params = {
-            "query": query,
-            "candidate_limit": candidate_limit,
-            "similarity_threshold": TRIGRAM_SIMILARITY_THRESHOLD,
-            **filter_params,
-        }
-        result = await self.session.execute(statement, params)
-        return _rank_rows(result.mappings().all())
+        result = await self.trigram_search_result(
+            query=query,
+            candidate_limit=candidate_limit,
+            metadata_filter=metadata_filter,
+        )
+        if isinstance(result, Failure):
+            raise app_error_to_exception(result.failure())
+        return result.unwrap()
+
+    async def trigram_search_result(
+        self,
+        *,
+        query: str,
+        candidate_limit: int,
+        metadata_filter: dict[str, Any],
+    ) -> AppResult[list[RankedResultRow]]:
+        try:
+            statement, filter_params = _build_trigram_statement(metadata_filter)
+            params = {
+                "query": query,
+                "candidate_limit": candidate_limit,
+                "similarity_threshold": TRIGRAM_SIMILARITY_THRESHOLD,
+                **filter_params,
+            }
+            result = await self.session.execute(statement, params)
+            return Success(_rank_rows(result.mappings().all()))
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error during trigram search",
+                    details={"query": query, "error": str(exc)},
+                    source="search_repository",
+                )
+            )
 
     async def fetch_chunks_by_ids(self, chunk_ids: Sequence[str]) -> dict[str, SearchChunkRecord]:
         if not chunk_ids:

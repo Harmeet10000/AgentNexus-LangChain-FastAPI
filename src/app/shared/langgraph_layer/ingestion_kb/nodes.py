@@ -15,6 +15,7 @@ from docling.document_converter import DocumentConverter
 from graphiti_core.nodes import EpisodeType
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.types import Send
+from returns.result import Failure
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +26,7 @@ from app.shared.rag.graphiti.schemas import (
     GRAPHITI_EDGE_TYPES,
     GRAPHITI_ENTITY_TYPES,
 )
-from app.shared.result import ValidationAppError
+from app.shared.result import ValidationAppError, log_expected_failure
 from app.utils import logger
 
 from .prompts import (
@@ -65,11 +66,16 @@ if TYPE_CHECKING:
 _DEFAULT_LIMIT = 20
 
 
-def _ingestion_failure(error: AppError) -> dict[str, object]:
+def _state_failure(error: AppError) -> dict[str, object]:
+    """Construct a state dict from a failure error (node boundary)."""
     return {"failure": error, "ingestion_complete": False}
 
 
-def _validation_failure(code: str, message: str, *, doc_id: str = "") -> dict[str, object]:
+def _ingestion_failure(error: AppError) -> Failure[AppError]:
+    return Failure(error)
+
+
+def _validation_failure(code: str, message: str, *, doc_id: str = "") -> Failure[AppError]:
     return _ingestion_failure(
         ValidationAppError(
             code=code,
@@ -83,11 +89,13 @@ def _validation_failure(code: str, message: str, *, doc_id: str = "") -> dict[st
 def make_parse_document_node() -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def parse_document_node(state: IngestionState) -> dict[str, object]:
         if not state.raw_bytes:
-            return _validation_failure(
+            result = _validation_failure(
                 "EMPTY_DOCUMENT",
                 "Uploaded document is empty",
                 doc_id=state.doc_id,
             )
+            log_expected_failure(result.failure, operation="parse_document")
+            return _state_failure(result.failure)
 
         parsed: ParsedDocument = await retry_immediate(
             lambda: _parse_document_with_docling(state.raw_bytes, state.filename, state.source),
@@ -104,11 +112,13 @@ def make_extract_schema_node(
     async def extract_schema_node(state: IngestionState) -> dict[str, object]:
         parsed = state.parsed_document
         if parsed is None:
-            return _validation_failure(
+            result = _validation_failure(
                 "MISSING_PARSED_DOCUMENT",
                 "Parsed document is required before schema extraction",
                 doc_id=state.doc_id,
             )
+            log_expected_failure(result.failure, operation="extract_schema")
+            return _state_failure(result.failure)
 
         payload = serialize_to_toon(
             {
@@ -141,11 +151,13 @@ def make_segment_document_node(
         parsed = state.parsed_document
         metadata = state.contract_metadata
         if parsed is None or metadata is None:
-            return _validation_failure(
+            result = _validation_failure(
                 "MISSING_DOCUMENT_OR_METADATA",
                 "Parsed document and metadata are required before segmentation",
                 doc_id=state.doc_id,
             )
+            log_expected_failure(result.failure, operation="segment_document")
+            return _state_failure(result.failure)
 
         payload = serialize_to_toon(
             {
@@ -241,11 +253,13 @@ def make_classify_extract_node(
     async def classify_extract_node(state: IngestionState) -> dict[str, object]:
         metadata: ContractMetadata | None = state.contract_metadata
         if metadata is None:
-            return _validation_failure(
+            result = _validation_failure(
                 "MISSING_CONTRACT_METADATA",
                 "Contract metadata is required before entity extraction",
                 doc_id=state.doc_id,
             )
+            log_expected_failure(result.failure, operation="classify_extract")
+            return _state_failure(result.failure)
 
         payload = serialize_to_toon(
             {
@@ -285,11 +299,13 @@ def make_embed_store_node(
         parsed: ParsedDocument | None = state.parsed_document
         metadata: ContractMetadata | None = state.contract_metadata
         if parsed is None or metadata is None:
-            return _validation_failure(
+            result = _validation_failure(
                 "MISSING_PARSED_DOCUMENT_OR_METADATA",
                 "Parsed document and metadata are required before storage",
                 doc_id=state.doc_id,
             )
+            log_expected_failure(result.failure, operation="embed_store")
+            return _state_failure(result.failure)
 
         async with AsyncSession(db_engine) as session, session.begin():
             parent_doc_id = await retry_immediate(

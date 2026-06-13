@@ -13,8 +13,9 @@ from authlib.jose.errors import ExpiredTokenError, JoseError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from app.config import get_settings
-from app.features.auth.model import Permission, UserRole
 from app.utils import UnauthorizedException, ValidationException
+
+from .model import Permission, UserRole
 
 # ── Password hashing ──────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 from app.config import get_settings
 from app.connections import ResilientTask, celery_app
-from app.shared.services import MailerService
+from app.shared.services.mailer import config_from_settings, send_template
 from app.utils import logger
 
 settings = get_settings()
@@ -30,7 +30,8 @@ def send_verification_email(
 
         def send_email() -> dict[str, str]:
             url = f"{settings.FRONTEND_URL}/verify-email?token={token}"
-            MailerService.from_settings().send_template(
+            send_template(
+                config_from_settings(settings),
                 to=email,
                 template_id=settings.RESEND_VERIFICATION_TEMPLATE_ID,
                 variables={"verification_url": url, "email": email},
@@ -79,7 +80,8 @@ def send_password_reset_email(
 
         def send_email() -> dict[str, str]:
             url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
-            MailerService.from_settings().send_template(
+            send_template(
+                config_from_settings(settings),
                 to=email,
                 template_id=settings.RESEND_PASSWORD_RESET_TEMPLATE_ID,
                 variables={"reset_url": url, "email": email},

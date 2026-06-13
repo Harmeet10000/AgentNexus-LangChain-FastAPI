@@ -22,7 +22,6 @@ _require_users_read = Depends(require_permission(Permission.USERS_READ))
 
 @router.get(
     "/",
-    response_model=APIResponse[PaginatedData[UserAdminResponse]],
     dependencies=[_require_users_read],
 )
 async def list_users(
@@ -45,7 +44,6 @@ async def list_users(
 
 @router.get(
     "/{user_id}",
-    response_model=APIResponse[UserAdminResponse],
     dependencies=[_require_users_read],
 )
 async def get_user(
@@ -58,7 +56,6 @@ async def get_user(
 
 @router.patch(
     "/{user_id}/role",
-    response_model=APIResponse[UserAdminResponse],
     dependencies=[Depends(require_permission(Permission.USERS_WRITE))],
 )
 async def update_user_role(
@@ -77,7 +74,6 @@ async def update_user_role(
 
 @router.patch(
     "/{user_id}/activate",
-    response_model=APIResponse[UserAdminResponse],
     dependencies=[Depends(require_permission(Permission.USERS_WRITE))],
 )
 async def activate_user(
@@ -95,7 +91,6 @@ async def activate_user(
 
 @router.patch(
     "/{user_id}/deactivate",
-    response_model=APIResponse[UserAdminResponse],
     dependencies=[Depends(require_permission(Permission.USERS_WRITE))],
 )
 async def deactivate_user(
@@ -130,7 +125,6 @@ async def delete_user(
 
 @router.post(
     "/{user_id}/impersonate",
-    response_model=APIResponse[ImpersonateResponse],
     dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def impersonate_user(

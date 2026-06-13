@@ -96,7 +96,6 @@ limit_resend_verification = get_rate_limiter(burst=2, rate=2, period=300)
 
 @router.post(
     "/register",
-    response_model=APIResponse[UserResponse],
     status_code=201,
     dependencies=[Depends(limit_register)],
 )
@@ -113,7 +112,7 @@ async def register(
 
 
 @router.post(
-    "/login", response_model=APIResponse[TokenResponse], dependencies=[Depends(limit_login)]
+    "/login", dependencies=[Depends(limit_login)]
 )
 async def login(
     body: LoginRequest,
@@ -147,7 +146,7 @@ async def logout(
     return http_response("Logged out successfully")
 
 
-@router.post("/refresh", response_model=APIResponse[TokenResponse])
+@router.post("/refresh")
 async def refresh_token(
     body: RefreshRequest,
     response: Response,
@@ -218,7 +217,7 @@ async def reset_password(
 # ── OAuth2 ─────────────────────────────────────────────────────────────────────
 
 
-@router.get("/oauth/{provider}/authorize", response_model=APIResponse[OAuthAuthorizeResponse])
+@router.get("/oauth/{provider}/authorize")
 async def oauth_authorize(
     provider: Annotated[str, Path()],
     response: Response,
@@ -300,7 +299,7 @@ async def oauth_callback(
 # ── Protected endpoints ────────────────────────────────────────────────────────
 
 
-@router.get("/me", response_model=APIResponse[UserResponse])
+@router.get("/me")
 async def get_me(user: CurrentVerifiedUser) -> APIResponse[UserResponse]:
     result = UserResponse(
         id=str(user.id),
@@ -314,7 +313,7 @@ async def get_me(user: CurrentVerifiedUser) -> APIResponse[UserResponse]:
     return http_response("User profile", data=result)
 
 
-@router.get("/sessions", response_model=APIResponse[list[SessionResponse]])
+@router.get("/sessions")
 async def list_sessions(
     claims: CurrentClaims,
     service: AuthServiceDep,

@@ -13,10 +13,11 @@ from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
+from returns.result import Failure
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.shared.result import InfrastructureAppError, ValidationAppError
+from app.shared.result import InfrastructureAppError, ValidationAppError, log_expected_failure
 from app.utils import logger
 
 from .prompts import _RECONCILIATION_SYSTEM_PROMPT
@@ -35,8 +36,8 @@ if TYPE_CHECKING:
     from .state import ReconciliationRunnable, ReconciliationState
 
 
-def _reconciliation_failure(error: AppError) -> list[AppError]:
-    return [error]
+def _reconciliation_failure(error: AppError) -> Failure[AppError]:
+    return Failure(error)
 
 
 def _infrastructure_failure(
@@ -45,7 +46,7 @@ def _infrastructure_failure(
     *,
     user_id: str,
     retryable: bool = True,
-) -> list[AppError]:
+) -> Failure[AppError]:
     return _reconciliation_failure(
         InfrastructureAppError(
             code=code,
@@ -109,12 +110,14 @@ def make_fetch_existing_node(
             log.info("fetch_done", new=len(new_entities), existing=len(existing_entities))
         except Exception as exc:  # noqa: BLE001
             log.bind(error=str(exc)).exception("fetch_failed")
+            error_result = _infrastructure_failure(
+                "RECONCILIATION_FETCH_FAILED",
+                "Failed to fetch reconciliation candidates",
+                user_id=state.user_id,
+            )
+            log_expected_failure(error_result.failure, operation="fetch_existing")
             return {
-                "failures": _infrastructure_failure(
-                    "RECONCILIATION_FETCH_FAILED",
-                    "Failed to fetch reconciliation candidates",
-                    user_id=state.user_id,
-                ),
+                "failures": [error_result.failure],
                 "new_entities": [],
                 "existing_entities": [],
             }
@@ -165,26 +168,30 @@ def make_reconcile_node(
             )
         except (ValidationError, json.JSONDecodeError) as exc:
             log.bind(error=str(exc)).warning("reconcile_invalid_payload")
+            error_result = _reconciliation_failure(
+                ValidationAppError(
+                    code="RECONCILIATION_INVALID_PAYLOAD",
+                    message="Reconciliation model returned an invalid decision payload",
+                    details={"user_id": state.user_id},
+                    source="reconciliation_graph",
+                )
+            )
+            log_expected_failure(error_result.failure, operation="reconcile")
             return {
                 "reconciliation_decision": ReconciliationDecision(),
-                "failures": _reconciliation_failure(
-                    ValidationAppError(
-                        code="RECONCILIATION_INVALID_PAYLOAD",
-                        message="Reconciliation model returned an invalid decision payload",
-                        details={"user_id": state.user_id},
-                        source="reconciliation_graph",
-                    )
-                ),
+                "failures": [error_result.failure],
             }
         except Exception as exc:  # noqa: BLE001
             log.bind(error=str(exc)).exception("reconcile_failed")
+            error_result = _infrastructure_failure(
+                "RECONCILIATION_LLM_FAILED",
+                "Failed to reconcile entities",
+                user_id=state.user_id,
+            )
+            log_expected_failure(error_result.failure, operation="reconcile")
             return {
                 "reconciliation_decision": ReconciliationDecision(),
-                "failures": _infrastructure_failure(
-                    "RECONCILIATION_LLM_FAILED",
-                    "Failed to reconcile entities",
-                    user_id=state.user_id,
-                ),
+                "failures": [error_result.failure],
             }
         else:
             return {"reconciliation_decision": decision}
@@ -243,12 +250,14 @@ def make_apply_changes_node(
             log.info("apply_done", merged=merged_count, updated=updated_count)
         except Exception as exc:  # noqa: BLE001
             log.bind(error=str(exc)).exception("apply_failed")
+            error_result = _infrastructure_failure(
+                "RECONCILIATION_APPLY_FAILED",
+                "Failed to apply reconciliation changes",
+                user_id=state.user_id,
+            )
+            log_expected_failure(error_result.failure, operation="apply_changes")
             return {
-                "failures": _infrastructure_failure(
-                    "RECONCILIATION_APPLY_FAILED",
-                    "Failed to apply reconciliation changes",
-                    user_id=state.user_id,
-                ),
+                "failures": [error_result.failure],
                 "merged_count": 0,
                 "updated_count": 0,
             }
@@ -324,13 +333,15 @@ def make_write_versions_node(
             log.info("versions_written", count=versions_written)
         except Exception as exc:  # noqa: BLE001
             log.bind(error=str(exc)).exception("write_versions_failed")
+            error_result = _infrastructure_failure(
+                "RECONCILIATION_VERSION_WRITE_FAILED",
+                "Failed to write reconciliation memory versions",
+                user_id=state.user_id,
+                retryable=False,
+            )
+            log_expected_failure(error_result.failure, operation="write_versions")
             return {
-                "failures": _infrastructure_failure(
-                    "RECONCILIATION_VERSION_WRITE_FAILED",
-                    "Failed to write reconciliation memory versions",
-                    user_id=state.user_id,
-                    retryable=False,
-                ),
+                "failures": [error_result.failure],
                 "versions_written": 0,
                 "completed": True,
             }

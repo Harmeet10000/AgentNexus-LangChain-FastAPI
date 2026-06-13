@@ -1,6 +1,6 @@
 """Structured logging helpers for expected internal failures."""
 
-from app.utils.logger import execution_path, logger
+from app.utils import execution_path, logger
 
 from .errors import AppError
 
