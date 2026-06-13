@@ -106,7 +106,7 @@ class MCPClientManager:
         *,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        config = self._get_config(server_name)
+        config: MCPClientServerConfig = self._get_config(server_name)
         if config.allowed_tools and tool_name not in config.allowed_tools:
             raise ServiceUnavailableException(
                 detail=f"Tool '{tool_name}' is not approved for upstream server '{server_name}'",

@@ -12,10 +12,6 @@ Prioritize deep, first principles thinking, insider-level knowledge that reveals
 - Framework stack: `FastAPI`, `Pydantic v2`, `LangChain`, `LangGraph`, `SQLAlchemy`, `Beanie`, `Redis`, `Celery`
 - Architecture: modular monolith, feature-driven, async-first
 
-## Quality Gates
-
-These tools are required for local development and CI. Keep this section aligned with `pyproject.toml`.
-
 ### Required commands
 
 - `uv sync`
@@ -179,6 +175,21 @@ These tools are required for local development and CI. Keep this section aligned
 - Use structured logging consistently.
 - Keep logs contextual and machine-parseable.
 - Use typed exceptions from `src/app/utils/exceptions.py`.
+
+## Result / returns Pattern Rules
+
+- Use exceptions outside-in. Keep FastAPI routers, dependencies, middleware, lifespan wiring, Celery task entrypoints, and transport contracts exception-based.
+- Use `returns.Result` only for expected, recoverable internal failures where the caller can still make a meaningful local decision.
+- Keep `None` when absence is acceptable and callers do not need to know why the value is missing.
+- Do not return or propagate `Failure(Exception(...))`, `Failure(APIException(...))`, traceback strings, or raw string errors as stable contracts.
+- Expected failures should carry structured, typed meaning. Use the shared `src/app/shared/result/` conventions for internal Result aliases, error models, boundary mappers, and expected-failure logging.
+- Map internal `Failure(...)` values to project exceptions before they leave the service layer unless a response/status DTO is intentionally designed as a non-exception summary contract.
+- Use `match` / `case` at ownership boundaries to unwrap `Success(...)` / `Failure(...)`, especially when mapping typed internal failures to project exceptions, DTO contracts, or graph-state updates.
+- Match specific typed errors before generic ones and keep one final generic `Failure(error)` fallback at the boundary.
+- Do not use pattern matching to swallow unexpected exceptions. Unexpected failures should still raise and be logged with traceback ownership.
+- Keep async service, repository, and LangGraph node entrypoints as ordinary async functions. Use plain `Result` mainly inside sync helpers for validation, parsing, normalization, mapping, and domain decisions.
+- Use `FutureResult` only when async composition is materially clearer than ordinary async code. Do not introduce advanced `returns` containers by default.
+- If rollback semantics depend on exceptions, keep raising inside the transaction boundary and translate to `Failure(...)` only outside that rollback-sensitive block.
 
 
 ## Reference Map
