@@ -2,6 +2,7 @@
 
 Keep this module lightweight to avoid circular imports.
 """
+
 from .dependencies import (
     CurrentClaims,
     CurrentVerifiedUser,
@@ -54,4 +55,3 @@ __all__ = [
     "require_role",
     "verify_password",
 ]
-

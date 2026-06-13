@@ -104,7 +104,10 @@ def make_query_analyzer_node(
                 ),
             }
         )
-        messages = [SystemMessage(content=_QUERY_ANALYZER_SYSTEM_PROMPT), HumanMessage(content=plan_input)]
+        messages = [
+            SystemMessage(content=_QUERY_ANALYZER_SYSTEM_PROMPT),
+            HumanMessage(content=plan_input),
+        ]
         try:
             raw_plan = await retry_immediate(
                 lambda: query_llm.ainvoke(cast("list[Any]", messages)),
@@ -217,7 +220,10 @@ def make_context_grader_node(
                 "chunks": [chunk.model_dump() for chunk in chunks],
             }
         )
-        messages = [SystemMessage(content=_CONTEXT_GRADER_SYSTEM_PROMPT), HumanMessage(content=payload)]
+        messages = [
+            SystemMessage(content=_CONTEXT_GRADER_SYSTEM_PROMPT),
+            HumanMessage(content=payload),
+        ]
         if not chunks:
             grade = ContextGrade(
                 sufficient=False,

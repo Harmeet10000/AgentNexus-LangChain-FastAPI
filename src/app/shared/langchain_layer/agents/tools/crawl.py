@@ -103,13 +103,8 @@ class CrawlUrlTool(BaseTool):
 
         if result.links:
             links = [link.get("href", "") for link in result.links[:10]]
-            parts.append(
-                "\n## Links Found\n" + "\n".join(f"- {link}" for link in links)
-            )
+            parts.append("\n## Links Found\n" + "\n".join(f"- {link}" for link in links))
 
         await crawler.close()
 
         return "\n\n".join(parts)
-
-
-

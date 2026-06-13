@@ -143,9 +143,7 @@ def make_reconcile_node(
         context = json.dumps(
             {
                 "new_entities": [entity.model_dump() for entity in new_entities[:50]],
-                "existing_entities": [
-                    entity.model_dump() for entity in existing_entities[:50]
-                ],
+                "existing_entities": [entity.model_dump() for entity in existing_entities[:50]],
             },
             indent=2,
             default=str,
@@ -234,9 +232,7 @@ def make_apply_changes_node(
 
                     for field_name, field_value in field_updates.items():
                         statement_value = (
-                            json.dumps(field_value)
-                            if field_name == "metadata"
-                            else field_value
+                            json.dumps(field_value) if field_name == "metadata" else field_value
                         )
                         await session.execute(
                             text(_entity_update_statement(field_name)),
@@ -419,14 +415,9 @@ def _entity_update_statement(field_name: str) -> str:
     statements = {
         "confidence": "UPDATE entities SET confidence = :value WHERE id = :entity_id",
         "entity_type": "UPDATE entities SET entity_type = :value WHERE id = :entity_id",
-        "metadata": (
-            "UPDATE entities SET metadata = CAST(:value AS JSONB) "
-            "WHERE id = :entity_id"
-        ),
+        "metadata": ("UPDATE entities SET metadata = CAST(:value AS JSONB) WHERE id = :entity_id"),
         "name": "UPDATE entities SET name = :value WHERE id = :entity_id",
-        "normalized_name": (
-            "UPDATE entities SET normalized_name = :value WHERE id = :entity_id"
-        ),
+        "normalized_name": ("UPDATE entities SET normalized_name = :value WHERE id = :entity_id"),
     }
     statement = statements.get(field_name)
     if statement is None:

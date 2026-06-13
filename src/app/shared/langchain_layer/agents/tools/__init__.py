@@ -1,7 +1,5 @@
 """Agent tools for web search, crawling and document processing."""
 
-
-
 from .crawl import CrawlUrlTool, get_crawl_url_tool
 from .get_obligation_chain import make_get_obligation_chain_tool
 from .idempotency import IdempotencyGuard, ToolResult

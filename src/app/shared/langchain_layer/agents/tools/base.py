@@ -81,8 +81,7 @@ class ToolRegistry:
     def by_tags(self, *tags: str) -> list[BaseTool]:
         """Return tools matching ALL given tags."""
         return [
-            t for name, t in self._tools.items()
-            if set(tags).issubset(self._tags.get(name, set()))
+            t for name, t in self._tools.items() if set(tags).issubset(self._tags.get(name, set()))
         ]
 
     def by_names(self, names: list[str]) -> list[BaseTool]:
@@ -133,6 +132,7 @@ def register_tool(*tags: str) -> Callable[[BaseTool], BaseTool]:
         def web_search(query: str) -> str:
             ...
     """
+
     def decorator(t: BaseTool) -> BaseTool:
         registry.register(t, tags=list(tags))
         return t

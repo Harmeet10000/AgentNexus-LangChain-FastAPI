@@ -7,9 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorCollection
 class APIFeatures:
     """MongoDB query builder with filtering, sorting, and pagination."""
 
-    def __init__(
-        self, collection: AsyncIOMotorCollection, query_params: dict[str, Any]
-    ):
+    def __init__(self, collection: AsyncIOMotorCollection, query_params: dict[str, Any]):
         self.collection = collection
         self.query_params = query_params
         self.filter_query: dict[str, Any] = {}

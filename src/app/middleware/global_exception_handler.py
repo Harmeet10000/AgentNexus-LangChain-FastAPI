@@ -9,7 +9,9 @@ from app.config import get_settings
 from app.utils import APIException, execution_path, http_error, logger
 
 
-def _json_error_response(payload, status_code: int, headers: dict[str, str] | None = None) -> JSONResponse:
+def _json_error_response(
+    payload, status_code: int, headers: dict[str, str] | None = None
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content=payload.model_dump(mode="json"),

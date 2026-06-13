@@ -139,6 +139,7 @@ dependencies = [
     "langcache>=0.12.0",
     "redisvl>=0.18.0",
     "headroom-ai[all]>=0.25.0",
+    "mypy-boto3-s3>=1.43.14",
 ]
 
 [project.scripts]

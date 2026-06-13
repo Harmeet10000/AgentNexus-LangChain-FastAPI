@@ -1,4 +1,5 @@
 """Startup-time Agent Saul graph composition helpers."""
+
 from dataclasses import dataclass
 from typing import Any, cast
 

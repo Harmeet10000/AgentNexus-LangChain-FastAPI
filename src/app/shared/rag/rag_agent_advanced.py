@@ -32,21 +32,22 @@ reranker = None
 
 async def initialize_db():
 
-        logger.info("Database connection pool initialized")
+    logger.info("Database connection pool initialized")
 
 
 async def close_db():
 
-        logger.info("Database connection pool closed")
+    logger.info("Database connection pool closed")
 
 
 def initialize_reranker():
-         logger.info("Cross-encoder loaded")
+    logger.info("Cross-encoder loaded")
 
 
 # ======================
 # STRATEGY 1: QUERY EXPANSION
 # ======================
+
 
 async def expand_query_variations(ctx: RunContext[None], query: str) -> List[str]:
     """
@@ -59,6 +60,7 @@ async def expand_query_variations(ctx: RunContext[None], query: str) -> List[str
         List of query variations including the original
     """
     from openai import AsyncOpenAI
+
     client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     expansion_prompt = f"""Generate 3 different variations of this search query.
@@ -72,11 +74,11 @@ Return only the 3 variations, one per line, without numbers or bullets."""
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": expansion_prompt}],
-            temperature=0.7
+            temperature=0.7,
         )
 
         variations_text = response.choices[0].message.content.strip()
-        variations = [v.strip() for v in variations_text.split('\n') if v.strip()]
+        variations = [v.strip() for v in variations_text.split("\n") if v.strip()]
 
         # Return original + variations
         return [query] + variations[:3]
@@ -89,6 +91,7 @@ Return only the 3 variations, one per line, without numbers or bullets."""
 # ======================
 # STRATEGY 2 & 3: MULTI-QUERY RAG (parallel search with variations)
 # ======================
+
 
 async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int = 5) -> str:
     """
@@ -113,6 +116,7 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
 
         # Generate embeddings for all queries
         from ingestion.embedder import create_embedder
+
         embedder = create_embedder()
 
         # Execute searches in parallel
@@ -122,14 +126,14 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
         async with db_pool.acquire() as conn:
             for q in queries:
                 query_embedding = await embedder.embed_query(q)
-                embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
+                embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
 
                 task = conn.fetch(
                     """
                     SELECT * FROM match_chunks($1::vector, $2)
                     """,
                     embedding_str,
-                    limit
+                    limit,
                 )
                 search_tasks.append(task)
 
@@ -146,18 +150,16 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
         # Deduplicate by chunk ID and keep highest similarity
         seen = {}
         for row in all_results:
-            chunk_id = row['chunk_id']
-            if chunk_id not in seen or row['similarity'] > seen[chunk_id]['similarity']:
+            chunk_id = row["chunk_id"]
+            if chunk_id not in seen or row["similarity"] > seen[chunk_id]["similarity"]:
                 seen[chunk_id] = row
 
-        unique_results = sorted(seen.values(), key=lambda x: x['similarity'], reverse=True)[:limit]
+        unique_results = sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)[:limit]
 
         # Format results
         response_parts = []
         for i, row in enumerate(unique_results, 1):
-            response_parts.append(
-                f"[Source: {row['document_title']}]\n{row['content']}\n"
-            )
+            response_parts.append(f"[Source: {row['document_title']}]\n{row['content']}\n")
 
         return f"Found {len(response_parts)} relevant results:\n\n" + "\n---\n".join(response_parts)
 
@@ -169,6 +171,7 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
 # ======================
 # STRATEGY 3: RE-RANKING
 # ======================
+
 
 async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 5) -> str:
     """
@@ -189,9 +192,10 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
 
         # Stage 1: Fast vector retrieval (retrieve more candidates)
         from ingestion.embedder import create_embedder
+
         embedder = create_embedder()
         query_embedding = await embedder.embed_query(query)
-        embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
+        embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
 
         # Retrieve 20 candidates for re-ranking
         candidate_limit = min(limit * 4, 20)
@@ -202,7 +206,7 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
                 SELECT * FROM match_chunks($1::vector, $2)
                 """,
                 embedding_str,
-                candidate_limit
+                candidate_limit,
             )
 
         if not results:
@@ -211,15 +215,11 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
         # Stage 2: Re-rank with cross-encoder
         logger.info(f"Re-ranking {len(results)} candidates")
 
-        pairs = [[query, row['content']] for row in results]
+        pairs = [[query, row["content"]] for row in results]
         scores = reranker.predict(pairs)
 
         # Combine results with new scores
-        reranked = sorted(
-            zip(results, scores),
-            key=lambda x: x[1],
-            reverse=True
-        )[:limit]
+        reranked = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)[:limit]
 
         # Format results
         response_parts = []
@@ -228,7 +228,9 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
                 f"[Source: {row['document_title']} | Relevance: {score:.2f}]\n{row['content']}\n"
             )
 
-        return f"Found {len(response_parts)} highly relevant results:\n\n" + "\n---\n".join(response_parts)
+        return f"Found {len(response_parts)} highly relevant results:\n\n" + "\n---\n".join(
+            response_parts
+        )
 
     except Exception as e:
         logger.error(f"Re-ranking search failed: {e}", exc_info=True)
@@ -238,6 +240,7 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
 # ======================
 # STRATEGY 4: AGENTIC RAG (Semantic Search + Full File Retrieval)
 # ======================
+
 
 async def search_knowledge_base(ctx: RunContext[None], query: str, limit: int = 5) -> str:
     """
@@ -255,9 +258,10 @@ async def search_knowledge_base(ctx: RunContext[None], query: str, limit: int = 
             await initialize_db()
 
         from ingestion.embedder import create_embedder
+
         embedder = create_embedder()
         query_embedding = await embedder.embed_query(query)
-        embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
+        embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
 
         async with db_pool.acquire() as conn:
             results = await conn.fetch(
@@ -265,7 +269,7 @@ async def search_knowledge_base(ctx: RunContext[None], query: str, limit: int = 
                 SELECT * FROM match_chunks($1::vector, $2)
                 """,
                 embedding_str,
-                limit
+                limit,
             )
 
         if not results:
@@ -273,9 +277,7 @@ async def search_knowledge_base(ctx: RunContext[None], query: str, limit: int = 
 
         response_parts = []
         for i, row in enumerate(results, 1):
-            response_parts.append(
-                f"[Source: {row['document_title']}]\n{row['content']}\n"
-            )
+            response_parts.append(f"[Source: {row['document_title']}]\n{row['content']}\n")
 
         return f"Found {len(response_parts)} relevant results:\n\n" + "\n---\n".join(response_parts)
 
@@ -309,7 +311,7 @@ async def retrieve_full_document(ctx: RunContext[None], document_title: str) -> 
                 WHERE title ILIKE $1
                 LIMIT 1
                 """,
-                f"%{document_title}%"
+                f"%{document_title}%",
             )
 
         if not result:
@@ -323,10 +325,12 @@ async def retrieve_full_document(ctx: RunContext[None], document_title: str) -> 
                     """
                 )
 
-            doc_list = "\n- ".join([doc['title'] for doc in docs])
+            doc_list = "\n- ".join([doc["title"] for doc in docs])
             return f"Document '{document_title}' not found. Available documents:\n- {doc_list}"
 
-        return f"**Document: {result['title']}**\n\nSource: {result['source']}\n\n{result['content']}"
+        return (
+            f"**Document: {result['title']}**\n\nSource: {result['source']}\n\n{result['content']}"
+        )
 
     except Exception as e:
         logger.error(f"Full document retrieval failed: {e}", exc_info=True)
@@ -336,6 +340,7 @@ async def retrieve_full_document(ctx: RunContext[None], document_title: str) -> 
 # ======================
 # STRATEGY 5: SELF-REFLECTIVE RAG
 # ======================
+
 
 async def search_with_self_reflection(ctx: RunContext[None], query: str, limit: int = 5) -> str:
     """
@@ -365,7 +370,7 @@ async def search_with_self_reflection(ctx: RunContext[None], query: str, limit: 
 
         # Initial search
         query_embedding = await embedder.embed_query(query)
-        embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
+        embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
 
         async with db_pool.acquire() as conn:
             results = await conn.fetch(
@@ -373,7 +378,7 @@ async def search_with_self_reflection(ctx: RunContext[None], query: str, limit: 
                 SELECT * FROM match_chunks($1::vector, $2)
                 """,
                 embedding_str,
-                limit
+                limit,
             )
 
         if not results:
@@ -383,7 +388,7 @@ async def search_with_self_reflection(ctx: RunContext[None], query: str, limit: 
         grade_prompt = f"""Query: {query}
 
 Retrieved Documents:
-{chr(10).join([f"{i+1}. {r['content'][:200]}..." for i, r in enumerate(results)])}
+{chr(10).join([f"{i + 1}. {r['content'][:200]}..." for i, r in enumerate(results)])}
 
 Grade the overall relevance of these documents to the query on a scale of 1-5:
 1 = Not relevant at all
@@ -398,7 +403,7 @@ Respond with only a single number (1-5) and a brief reason."""
             grade_response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": grade_prompt}],
-                temperature=0
+                temperature=0,
             )
 
             grade_text = grade_response.choices[0].message.content.strip()
@@ -420,7 +425,7 @@ Respond with only the improved query, nothing else."""
                 refine_response = await client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": refine_prompt}],
-                    temperature=0.7
+                    temperature=0.7,
                 )
 
                 refined_query = refine_response.choices[0].message.content.strip()
@@ -428,7 +433,7 @@ Respond with only the improved query, nothing else."""
 
                 # Search again with refined query
                 refined_embedding = await embedder.embed_query(refined_query)
-                refined_embedding_str = '[' + ','.join(map(str, refined_embedding)) + ']'
+                refined_embedding_str = "[" + ",".join(map(str, refined_embedding)) + "]"
 
                 async with db_pool.acquire() as conn:
                     results = await conn.fetch(
@@ -436,10 +441,12 @@ Respond with only the improved query, nothing else."""
                         SELECT * FROM match_chunks($1::vector, $2)
                         """,
                         refined_embedding_str,
-                        limit
+                        limit,
                     )
 
-                reflection_note = f"\n[Reflection: Refined query from '{query}' to '{refined_query}']\n"
+                reflection_note = (
+                    f"\n[Reflection: Refined query from '{query}' to '{refined_query}']\n"
+                )
 
             except Exception as e:
                 logger.warning(f"Query refinement failed: {e}")
@@ -450,11 +457,13 @@ Respond with only the improved query, nothing else."""
         # Format final results
         response_parts = []
         for i, row in enumerate(results, 1):
-            response_parts.append(
-                f"[Source: {row['document_title']}]\n{row['content']}\n"
-            )
+            response_parts.append(f"[Source: {row['document_title']}]\n{row['content']}\n")
 
-        return reflection_note + f"Found {len(response_parts)} results:\n\n" + "\n---\n".join(response_parts)
+        return (
+            reflection_note
+            + f"Found {len(response_parts)} results:\n\n"
+            + "\n---\n".join(response_parts)
+        )
 
     except Exception as e:
         logger.error(f"Self-reflective search failed: {e}", exc_info=True)
@@ -466,7 +475,7 @@ Respond with only the improved query, nothing else."""
 # ======================
 
 agent = Agent(
-    'openai:gpt-4o-mini',
+    "openai:gpt-4o-mini",
     system_prompt="""You are an advanced knowledge assistant with multiple retrieval strategies at your disposal.
 
 AVAILABLE TOOLS:
@@ -489,8 +498,8 @@ You can use multiple tools in sequence if needed. Be concise but thorough.""",
         retrieve_full_document,
         search_with_multi_query,
         search_with_reranking,
-        search_with_self_reflection
-    ]
+        search_with_self_reflection,
+    ],
 )
 
 
@@ -519,17 +528,14 @@ async def run_cli():
             if not user_input:
                 continue
 
-            if user_input.lower() in ['quit', 'exit', 'bye']:
+            if user_input.lower() in ["quit", "exit", "bye"]:
                 print("\nAssistant: Thank you for using the knowledge assistant. Goodbye!")
                 break
 
             print("Assistant: ", end="", flush=True)
 
             try:
-                async with agent.run_stream(
-                    user_input,
-                    message_history=message_history
-                ) as result:
+                async with agent.run_stream(user_input, message_history=message_history) as result:
                     async for text in result.stream_text(delta=True):
                         print(text, end="", flush=True)
 
@@ -554,8 +560,7 @@ async def run_cli():
 async def main():
     """Main entry point."""
     logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
     if not os.getenv("DATABASE_URL"):

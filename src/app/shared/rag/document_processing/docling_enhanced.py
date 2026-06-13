@@ -80,9 +80,7 @@ def extract_tables(doc: DoclingDocument) -> list[ExtractedTable]:
             try:
                 md_table = table.to_markdown()
                 rows = md_table.split("\n")
-                row_count = len(
-                    [r for r in rows if r.strip() and not r.startswith("|---")]
-                )
+                row_count = len([r for r in rows if r.strip() and not r.startswith("|---")])
                 col_count = len(rows[0].split("|")) - 2 if rows else 0
 
                 csv_content = _markdown_to_csv(md_table)
@@ -266,11 +264,7 @@ def _encode_base64(data: bytes) -> str:
 
 def _markdown_to_csv(md_table: str) -> str:
     """Convert markdown table to CSV."""
-    lines = [
-        line
-        for line in md_table.split("\n")
-        if line.strip() and not line.startswith("|---")
-    ]
+    lines = [line for line in md_table.split("\n") if line.strip() and not line.startswith("|---")]
 
     if not lines:
         return ""
@@ -291,11 +285,7 @@ def _markdown_to_csv(md_table: str) -> str:
 
 def _markdown_to_html(md_table: str) -> str:
     """Convert markdown table to HTML."""
-    lines = [
-        line
-        for line in md_table.split("\n")
-        if line.strip() and not line.startswith("|---")
-    ]
+    lines = [line for line in md_table.split("\n") if line.strip() and not line.startswith("|---")]
 
     if not lines:
         return "<table></table>"
@@ -420,9 +410,7 @@ async def process_documents_batch(
                 gpu_available=gpu_available,
             )
 
-    tasks = [
-        process_with_semaphore(source, idx) for idx, source in enumerate(sources)
-    ]
+    tasks = [process_with_semaphore(source, idx) for idx, source in enumerate(sources)]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 

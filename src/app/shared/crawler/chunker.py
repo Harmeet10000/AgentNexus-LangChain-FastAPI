@@ -60,9 +60,7 @@ def smart_chunk_markdown(markdown: str, max_len: int = 1000) -> list[Chunk]:
     final_chunks = []
     for c in chunks:
         if len(c) > max_len:
-            final_chunks.extend(
-                [c[i : i + max_len].strip() for i in range(0, len(c), max_len)]
-            )
+            final_chunks.extend([c[i : i + max_len].strip() for i in range(0, len(c), max_len)])
         else:
             final_chunks.append(c)
 
@@ -94,7 +92,9 @@ def truncate_content(content: str, max_length: int = 100000) -> str:
         return content
 
     truncated = content[:max_length]
-    truncated += f"\n\n[Content truncated at {max_length} characters. Full content available upon request.]"
+    truncated += (
+        f"\n\n[Content truncated at {max_length} characters. Full content available upon request.]"
+    )
     return truncated
 
 

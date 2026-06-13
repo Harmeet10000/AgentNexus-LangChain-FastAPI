@@ -121,9 +121,7 @@ class IdempotencyGuard:
             step_id=step_id,
             expires_at=expires_at,
         )
-        self._log.bind(tool_name=tool_name, key_prefix=key[:16]).debug(
-            "Idempotency state written."
-        )
+        self._log.bind(tool_name=tool_name, key_prefix=key[:16]).debug("Idempotency state written.")
 
     async def _warm_redis_cache(self, key: str, result: ToolResult) -> None:
         try:

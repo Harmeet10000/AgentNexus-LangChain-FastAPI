@@ -100,7 +100,9 @@ def _build_chat_model(
     """Return a configured Gemini chat model instance."""
 
     resolved_model_name: str = model_name or settings.GEMINI_PRO_MODEL
-    resolved_temperature: int | float = temperature if temperature is not None else settings.GEMINI_TEMPERATURE
+    resolved_temperature: int | float = (
+        temperature if temperature is not None else settings.GEMINI_TEMPERATURE
+    )
     resolved_top_p: int | float = top_p if top_p is not None else settings.GEMINI_TOP_P
     resolved_top_k: int = top_k if top_k is not None else settings.GEMINI_TOP_K
     resolved_max_tokens: int = max_tokens or settings.GEMINI_MAX_TOKENS
@@ -151,9 +153,9 @@ async def acreate_gemini_context_cache(
     """
     llm = cast(
         "ChatGoogleGenerativeAI",
-        model if isinstance(model, ChatGoogleGenerativeAI) else _build_chat_model(
-            implementation="google_genai"
-        ),
+        model
+        if isinstance(model, ChatGoogleGenerativeAI)
+        else _build_chat_model(implementation="google_genai"),
     )
     resolved_ttl = ttl or settings.GEMINI_CONTEXT_CACHE_TTL
     return await asyncio.to_thread(

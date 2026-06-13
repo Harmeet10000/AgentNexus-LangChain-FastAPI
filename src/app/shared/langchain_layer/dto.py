@@ -33,9 +33,7 @@ class AgentInvokeRequest(BaseModel):
     """Single-turn agent invocation request."""
 
     message: str = Field(..., description="The user's message.")
-    thread_id: str = Field(
-        ..., description="Session/thread identifier for conversation history."
-    )
+    thread_id: str = Field(..., description="Session/thread identifier for conversation history.")
     user_id: str = Field("default", description="User identifier for long-term memory.")
 
     # Optional runtime context (serialised; factory will reconstruct the dataclass)

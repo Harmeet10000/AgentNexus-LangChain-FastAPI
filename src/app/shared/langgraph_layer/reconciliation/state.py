@@ -68,9 +68,7 @@ class ReconciliationState(BaseModel):
     new_entities: list[ReconciliationEntityRecord] = Field(default_factory=list)
     existing_entities: list[ReconciliationEntityRecord] = Field(default_factory=list)
 
-    reconciliation_decision: ReconciliationDecision = Field(
-        default_factory=ReconciliationDecision
-    )
+    reconciliation_decision: ReconciliationDecision = Field(default_factory=ReconciliationDecision)
 
     merged_count: int = 0
     updated_count: int = 0

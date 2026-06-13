@@ -255,9 +255,7 @@ class GeminiProcessor:
         Returns:
             ExtractionResult with both extracted data and summary
         """
-        extract_result = await self.extract_structured(
-            content, schema_type, custom_schema
-        )
+        extract_result = await self.extract_structured(content, schema_type, custom_schema)
 
         if not extract_result.success:
             return extract_result

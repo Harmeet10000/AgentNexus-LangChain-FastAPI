@@ -67,9 +67,7 @@ def trim_by_count(
     keep_system: bool = True,
 ) -> list[BaseMessage]:
     """Keep only the last N messages, always preserving the SystemMessage."""
-    system = (
-        [m for m in messages if isinstance(m, SystemMessage)] if keep_system else []
-    )
+    system = [m for m in messages if isinstance(m, SystemMessage)] if keep_system else []
     non_system = [m for m in messages if not isinstance(m, SystemMessage)]
     return system + non_system[-keep_last:]
 
@@ -188,8 +186,7 @@ async def manage_context(
 def _estimate_tokens(messages: Sequence[BaseMessage]) -> int:
     """Rough token estimate: 4 chars ≈ 1 token."""
     total_chars = sum(
-        len(m.content) if isinstance(m.content, str) else len(str(m.content))
-        for m in messages
+        len(m.content) if isinstance(m.content, str) else len(str(m.content)) for m in messages
     )
     return total_chars // 4
 

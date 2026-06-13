@@ -51,9 +51,15 @@ class HealthService:
 
     async def get_health(self) -> HealthResultDTO:
         """Run all health checks and return aggregated status."""
-        database_check = await self._check_mongodb() if self.mongo_client else self._not_configured()
+        database_check = (
+            await self._check_mongodb() if self.mongo_client else self._not_configured()
+        )
         redis_check = await self._check_redis() if self.redis_client else self._not_configured()
-        postgres_check = await self._check_postgres() if self.postgres_session_factory else self._not_configured()
+        postgres_check = (
+            await self._check_postgres()
+            if self.postgres_session_factory
+            else self._not_configured()
+        )
         neo4j_check = await self._check_neo4j() if self.neo4j_driver else self._not_configured()
         celery_check = self._check_celery()
         memory_check = self._check_memory()

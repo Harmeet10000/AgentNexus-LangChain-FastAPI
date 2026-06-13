@@ -48,4 +48,3 @@ def get_health_service(
         neo4j_driver=neo4j_driver,
         celery_app=celery_app,
     )
-

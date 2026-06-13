@@ -112,7 +112,9 @@ async def register(
     )
 
 
-@router.post("/login", response_model=APIResponse[TokenResponse], dependencies=[Depends(limit_login)])
+@router.post(
+    "/login", response_model=APIResponse[TokenResponse], dependencies=[Depends(limit_login)]
+)
 async def login(
     body: LoginRequest,
     request: Request,

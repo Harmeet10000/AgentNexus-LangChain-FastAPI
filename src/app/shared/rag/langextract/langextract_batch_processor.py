@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     )
 
 
-
 class LangExtractBatchContext(BaseModel):
     """Orchestration context for batch extraction."""
 

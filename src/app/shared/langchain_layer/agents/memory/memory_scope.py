@@ -25,8 +25,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 
-
-
 class MemoryEntityType(StrEnum):
     CLAUSE = "CLAUSE"
     CONTRACT = "CONTRACT"
@@ -94,6 +92,7 @@ class MemoryScope(BaseModel):
             "top_k": self.top_k,
         }
 
+
 def _coerce_entity_types(
     entity_types: Iterable[MemoryEntityType | str],
 ) -> frozenset[MemoryEntityType]:
@@ -101,6 +100,7 @@ def _coerce_entity_types(
         entity_type if isinstance(entity_type, MemoryEntityType) else MemoryEntityType(entity_type)
         for entity_type in entity_types
     )
+
 
 def _coerce_sources(
     sources: Iterable[MemorySource | str],
@@ -236,8 +236,3 @@ def _read_iterable_field(
     if isinstance(value, Iterable):
         return tuple(item for item in value if isinstance(item, str | StrEnum))
     return fallback
-
-
-
-
-

@@ -110,9 +110,7 @@ async def get_cached_user(user_id: str, redis: Redis) -> UserProfile:
     return user
 
 
-async def update_cached_user(
-    user_id: str, updates: UserUpdate, redis: Redis
-) -> UserProfile:
+async def update_cached_user(user_id: str, updates: UserUpdate, redis: Redis) -> UserProfile:
     """Update user and refresh cache.
 
     For small updates, use Hash to avoid re-fetching entire document.
@@ -165,9 +163,7 @@ async def add_activity(user_id: str, activity: ActivityLog, redis: Redis) -> Non
         logger.error(f"Failed to log activity for user {user_id}: {e.detail}")
 
 
-async def get_user_activity(
-    user_id: str, redis: Redis, limit: int = 20
-) -> list[ActivityLog]:
+async def get_user_activity(user_id: str, redis: Redis, limit: int = 20) -> list[ActivityLog]:
     """Get user's recent activities."""
     try:
         raw_activities = await get_list_items(
@@ -192,9 +188,7 @@ router = APIRouter(prefix="/api/v1/users", tags=["Users"])
 
 
 @router.get("/{user_id}")
-async def get_user_endpoint(
-    user_id: str, redis: Redis = Depends(get_redis)
-) -> UserProfile:
+async def get_user_endpoint(user_id: str, redis: Redis = Depends(get_redis)) -> UserProfile:
     """Get user profile with Redis caching.
 
     Endpoint example:
@@ -333,9 +327,7 @@ async def get_activity_endpoint(
 
 
 @router.get("/batch/users")
-async def get_multiple_users(
-    user_ids: list[str], redis: Redis = Depends(get_redis)
-) -> dict:
+async def get_multiple_users(user_ids: list[str], redis: Redis = Depends(get_redis)) -> dict:
     """Get multiple users efficiently.
 
     Query example:

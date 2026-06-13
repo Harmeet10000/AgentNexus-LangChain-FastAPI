@@ -12,23 +12,13 @@ class CrawlRequest(BaseModel):
 
     url: str = Field(..., description="URL to crawl")
     mode: CrawlMode = Field(default=CrawlMode.MARKDOWN, description="Output mode")
-    max_depth: int = Field(
-        default=1, ge=1, le=5, description="Recursion depth (1 = single page)"
-    )
-    max_pages: int = Field(
-        default=10, ge=1, le=50, description="Max pages for recursive crawl"
-    )
+    max_depth: int = Field(default=1, ge=1, le=5, description="Recursion depth (1 = single page)")
+    max_pages: int = Field(default=10, ge=1, le=50, description="Max pages for recursive crawl")
     use_proxy: bool = Field(default=False, description="Use proxy for crawling")
     bypass_cache: bool = Field(default=False, description="Bypass cache")
-    extract_structured: bool = Field(
-        default=False, description="Extract structured data"
-    )
-    schema_type: SchemaType | None = Field(
-        default=None, description="Predefined schema type"
-    )
-    custom_schema: dict[str, Any] | None = Field(
-        default=None, description="Custom JSON schema"
-    )
+    extract_structured: bool = Field(default=False, description="Extract structured data")
+    schema_type: SchemaType | None = Field(default=None, description="Predefined schema type")
+    custom_schema: dict[str, Any] | None = Field(default=None, description="Custom JSON schema")
     summary: bool = Field(default=False, description="Generate summary using Gemini")
     timeout: int = Field(default=30, ge=5, le=120, description="Timeout in seconds")
 

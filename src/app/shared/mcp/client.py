@@ -64,7 +64,11 @@ class MCPClientManager:
 
     async def ping(self, server_name: str) -> bool:
         client = await self._connect(server_name)
-        attempts = max(1, self._get_config(server_name).retry_attempts or self._settings.MCP_CLIENT_RETRY_ATTEMPTS)
+        attempts = max(
+            1,
+            self._get_config(server_name).retry_attempts
+            or self._settings.MCP_CLIENT_RETRY_ATTEMPTS,
+        )
         last_error: Exception | None = None
         for _ in range(attempts):
             try:
@@ -132,8 +136,12 @@ class MCPClientManager:
                         self._record_success(server_name)
                         return self._normalize_tool_result(server_name, tool_name, result)
                 status = "error"
-                self._record_failure(server_name, str(last_error) if last_error else "tool call failed")
-                raise ExternalServiceException(server_name, f"Tool call '{tool_name}' failed") from last_error
+                self._record_failure(
+                    server_name, str(last_error) if last_error else "tool call failed"
+                )
+                raise ExternalServiceException(
+                    server_name, f"Tool call '{tool_name}' failed"
+                ) from last_error
             finally:
                 observe_mcp_client_call(
                     server_name=server_name,
@@ -216,7 +224,9 @@ class MCPClientManager:
         }
         return Client(source, timeout=timeout, auth=auth)
 
-    def _normalize_tool_result(self, server_name: str, tool_name: str, result: Any) -> dict[str, Any]:
+    def _normalize_tool_result(
+        self, server_name: str, tool_name: str, result: Any
+    ) -> dict[str, Any]:
         data = getattr(result, "data", None)
         content = getattr(result, "content", None)
         structured = getattr(result, "structured_content", None)
@@ -252,8 +262,7 @@ class MCPClientManager:
         circuit = self._circuits[server_name]
         circuit.failures += 1
         if circuit.failures >= (
-            config.circuit_breaker_threshold
-            or self._settings.MCP_CLIENT_CIRCUIT_BREAKER_THRESHOLD
+            config.circuit_breaker_threshold or self._settings.MCP_CLIENT_CIRCUIT_BREAKER_THRESHOLD
         ):
             cooldown = (
                 config.circuit_breaker_cooldown_seconds

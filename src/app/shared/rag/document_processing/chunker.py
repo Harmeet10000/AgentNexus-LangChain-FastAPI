@@ -25,9 +25,7 @@ def get_tokenizer(model_id: str = "sentence-transformers/all-MiniLM-L6-v2") -> A
     return AutoTokenizer.from_pretrained(model_id)
 
 
-def create_hybrid_chunker(
-    tokenizer: AutoTokenizer, config: IngestionConfig
-) -> HybridChunker:
+def create_hybrid_chunker(tokenizer: AutoTokenizer, config: IngestionConfig) -> HybridChunker:
     """Create HybridChunker instance."""
     loguru_logger.info(f"HybridChunker initialized (max_tokens={config.max_tokens})")
     return HybridChunker(

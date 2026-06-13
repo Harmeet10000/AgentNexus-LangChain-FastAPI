@@ -576,8 +576,7 @@ def make_risk_analysis_node(risk_agent: Any) -> StateNode:
 
 def _build_analysis_context(state: LegalAgentState) -> str:
     clauses = "\n".join(
-        f"[{seg.clause_type}] {seg.clause_id}: {seg.text[:300]}"
-        for seg in state["segments"]
+        f"[{seg.clause_type}] {seg.clause_id}: {seg.text[:300]}" for seg in state["segments"]
     )
     entities = "\n".join(
         f"{e.entity_type}: {e.value} (party: {e.party or 'N/A'})"

@@ -131,17 +131,13 @@ async def generate_embeddings_batch(  # noqa: RET503
         except genai_errors.ClientError as e:
             logger.error(f"Gemini API error in batch: {e}")
             if attempt == max_retries - 1:
-                return await _process_embeddings_individually(
-                    processed_texts, model, retry_delay
-                )
+                return await _process_embeddings_individually(processed_texts, model, retry_delay)
             await asyncio.sleep(retry_delay)
 
         except Exception as e:
             logger.error(f"Unexpected error in batch embedding: {e}")
             if attempt == max_retries - 1:
-                return await _process_embeddings_individually(
-                    processed_texts, model, retry_delay
-                )
+                return await _process_embeddings_individually(processed_texts, model, retry_delay)
             await asyncio.sleep(retry_delay)
 
 
@@ -259,9 +255,7 @@ async def embed_chunks(
     return embedded_chunks
 
 
-async def embed_query(
-    query: str, model: str = GEMINI_EMBEDDING_MODEL
-) -> list[float]:
+async def embed_query(query: str, model: str = GEMINI_EMBEDDING_MODEL) -> list[float]:
     """
     Generate embedding for a search query.
 
@@ -312,9 +306,7 @@ class EmbeddingCache:
 
         # Evict oldest entries if cache is full
         if len(self.cache) >= self.max_size:
-            oldest_key = min(
-                self.access_times.keys(), key=lambda k: self.access_times[k]
-            )
+            oldest_key = min(self.access_times.keys(), key=lambda k: self.access_times[k])
             del self.cache[oldest_key]
             del self.access_times[oldest_key]
 

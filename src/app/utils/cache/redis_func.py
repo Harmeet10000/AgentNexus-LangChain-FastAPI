@@ -45,8 +45,6 @@ def _redis_error_contains(exc: RedisError, message: str) -> bool:
     return message.lower() in str(exc).lower()
 
 
-
-
 def get_key_name(object_type: str, *args: CacheKeyPart) -> str:
     """Generate a namespaced cache key from object type and args.
 

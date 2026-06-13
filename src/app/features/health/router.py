@@ -1,4 +1,5 @@
 """Health feature API router."""
+
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.utils import APIResponse, http_response

@@ -45,11 +45,7 @@ def find_document_files(documents_folder: str) -> list[str]:
     files = []
 
     for pattern in patterns:
-        files.extend(
-            glob.glob(
-                os.path.join(documents_folder, "**", pattern), recursive=True
-            )
-        )
+        files.extend(glob.glob(os.path.join(documents_folder, "**", pattern), recursive=True))
 
     return sorted(files)
 
@@ -109,6 +105,7 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
     audio_formats = [".mp3", ".wav", ".m4a", ".flac"]
     if file_ext in audio_formats:
         from .docling_enhanced import _transcribe_audio
+
         content = await _transcribe_audio(file_path)
         return (content, None)
 
@@ -127,9 +124,7 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
             result = converter.convert(file_path)
 
             markdown_content = result.document.export_to_markdown()
-            loguru_logger.info(
-                f"Successfully converted {os.path.basename(file_path)} to markdown"
-            )
+            loguru_logger.info(f"Successfully converted {os.path.basename(file_path)} to markdown")
 
             return (markdown_content, result.document)
 
@@ -321,9 +316,7 @@ async def ingest_documents(
     document_files = find_document_files(documents_folder)
 
     if not document_files:
-        loguru_logger.warning(
-            f"No supported document files found in {documents_folder}"
-        )
+        loguru_logger.warning(f"No supported document files found in {documents_folder}")
         return []
 
     loguru_logger.info(f"Found {len(document_files)} document files to process")
@@ -339,9 +332,7 @@ async def ingest_documents(
 
     for i, file_path in enumerate(document_files):
         try:
-            loguru_logger.info(
-                f"Processing file {i + 1}/{len(document_files)}: {file_path}"
-            )
+            loguru_logger.info(f"Processing file {i + 1}/{len(document_files)}: {file_path}")
 
             result = await ingest_single_document(
                 file_path,

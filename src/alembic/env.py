@@ -22,8 +22,6 @@ if config.config_file_name is not None:
 
 # Import all models here for autogenerate support
 try:
-
-
     target_metadata = Base.metadata
 except ImportError as e:
     logger.warning(f"Failed to import models: {e}")

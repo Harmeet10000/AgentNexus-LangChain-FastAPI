@@ -146,9 +146,7 @@ def _extract_entities_simple(text: str, document_id: str) -> list[Entity]:
         )
         entity_id += 1
 
-    org_pattern = (
-        r"\b([A-Z][a-zA-Z]+ (Inc|Corp|LLC|Ltd|Company|Group|Foundation))\b"
-    )
+    org_pattern = r"\b([A-Z][a-zA-Z]+ (Inc|Corp|LLC|Ltd|Company|Group|Foundation))\b"
     for match in re.finditer(org_pattern, text):
         entities.append(
             Entity(
@@ -178,9 +176,7 @@ def _extract_entities_simple(text: str, document_id: str) -> list[Entity]:
     return entities
 
 
-def _extract_relationships_simple(
-    text: str, entities: list[Entity]
-) -> list[Relationship]:
+def _extract_relationships_simple(text: str, entities: list[Entity]) -> list[Relationship]:
     """Simple pattern-based relationship extraction."""
     relationships = []
     rel_id = 0

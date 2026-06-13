@@ -1,4 +1,5 @@
 """Neon Postgres database configuration with SQLAlchemy."""
+
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse

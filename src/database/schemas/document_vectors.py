@@ -1,4 +1,5 @@
 """Document vectors schema for storing embeddings."""
+
 from datetime import UTC, datetime
 
 from sqlalchemy import JSON, DateTime, Integer, String, Text

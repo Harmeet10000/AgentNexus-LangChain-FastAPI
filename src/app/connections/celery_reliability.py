@@ -19,9 +19,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, cast
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
-type JsonValue = (
-    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
-)
+type JsonValue = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 type RedisOperationResult = object | Awaitable[object]
 
 
@@ -227,9 +225,7 @@ def release_idempotency_processing_lock(
     namespace: str = IDEMPOTENCY_NAMESPACE,
 ) -> None:
     """Release the processing lock so a later retry can acquire it again."""
-    run_redis_call(
-        redis_client.delete(build_idempotency_key(idempotency_key, namespace=namespace))
-    )
+    run_redis_call(redis_client.delete(build_idempotency_key(idempotency_key, namespace=namespace)))
 
 
 def get_idempotency_status(
