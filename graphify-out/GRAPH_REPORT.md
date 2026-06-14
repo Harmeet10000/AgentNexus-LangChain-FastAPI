@@ -1,16 +1,16 @@
-# Graph Report - langchain-fastapi-production  (2026-06-13)
+# Graph Report - langchain-fastapi-production  (2026-06-14)
 
 ## Corpus Check
-- 297 files · ~108,178 words
+- 295 files · ~110,262 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3448 nodes · 10098 edges · 191 communities (170 shown, 21 thin omitted)
-- Extraction: 63% EXTRACTED · 37% INFERRED · 0% AMBIGUOUS · INFERRED: 3746 edges (avg confidence: 0.51)
+- 3449 nodes · 10105 edges · 189 communities (167 shown, 22 thin omitted)
+- Extraction: 63% EXTRACTED · 37% INFERRED · 0% AMBIGUOUS · INFERRED: 3731 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e7aef251`
+- Built from commit: `64e98201`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -159,8 +159,6 @@
 - [[_COMMUNITY_Community 146|Community 146]]
 - [[_COMMUNITY_Community 147|Community 147]]
 - [[_COMMUNITY_Community 148|Community 148]]
-- [[_COMMUNITY_Community 149|Community 149]]
-- [[_COMMUNITY_Community 151|Community 151]]
 - [[_COMMUNITY_Community 152|Community 152]]
 - [[_COMMUNITY_Community 153|Community 153]]
 - [[_COMMUNITY_Community 154|Community 154]]
@@ -183,20 +181,20 @@
 10. `RankedChunk` - 51 edges
 
 ## Surprising Connections (you probably didn't know these)
+- `WebSocketSecurityService` --uses--> `TokenClaims`  [INFERRED]
+  src/app/features/auth/websocket_security.py → src/app/features/auth/security.py
+- `TokenClaims` --uses--> `TokenClaims`  [INFERRED]
+  src/app/features/auth/websocket_security.py → src/app/features/auth/security.py
+- `ProductionAgent` --uses--> `BaseTool`  [INFERRED]
+  src/app/shared/langchain_layer/agents/factory.py → src/app/shared/langgraph_layer/open_deep_search/tools.py
 - `async_sessionmaker` --uses--> `Settings`  [INFERRED]
   src/app/connections/postgres.py → src/app/config/settings.py
 - `AsyncEngine` --uses--> `Settings`  [INFERRED]
   src/app/connections/postgres.py → src/app/config/settings.py
-- `HTTPConnection` --uses--> `Settings`  [INFERRED]
-  src/app/connections/postgres.py → src/app/config/settings.py
-- `ResilientTask` --uses--> `ResilientTask`  [INFERRED]
-  src/tasks/document_tasks.py → src/app/connections/celery.py
-- `ResilientTask` --uses--> `ResilientTask`  [INFERRED]
-  src/tasks/search_tasks.py → src/app/connections/celery.py
 
 ## Import Cycles
-- 1-file cycle: `src/app/connections/celery.py -> src/app/connections/celery.py`
 - 1-file cycle: `src/app/shared/langchain_layer/callback.py -> src/app/shared/langchain_layer/callback.py`
+- 1-file cycle: `src/app/connections/celery.py -> src/app/connections/celery.py`
 - 1-file cycle: `src/app/features/health/dependencies.py -> src/app/features/health/dependencies.py`
 - 1-file cycle: `src/app/features/health/service.py -> src/app/features/health/service.py`
 - 1-file cycle: `src/app/lifecycle/lifespan.py -> src/app/lifecycle/lifespan.py`
@@ -205,15 +203,15 @@
 - 1-file cycle: `src/app/shared/mcp/registry.py -> src/app/shared/mcp/registry.py`
 - 1-file cycle: `src/app/shared/rag/graphiti/client.py -> src/app/shared/rag/graphiti/client.py`
 
-## Communities (191 total, 21 thin omitted)
+## Communities (189 total, 22 thin omitted)
 
 ### Community 0 - "Community 0"
-Cohesion: 0.07
-Nodes (119): Predefined schema types., SchemaType, CrawlRequest, CrawlResponse, CrawlResultItem, RateLimitInfo, Crawler feature DTOs (Data Transfer Objects)., Request to crawl a URL. (+111 more)
+Cohesion: 0.22
+Nodes (47): HybridSearchRequest, LegalAskRequest, LegalAskResponse, RagSearchRequest, RagSearchResponse, DTOs for the search feature., Hybrid retrieval plus RAG context assembly request., Hybrid hits plus assembled RAG context. (+39 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.10
-Nodes (102): AgentRegistry, build_agent_registry(), _build_graph_nodes(), Startup-time Agent Saul graph composition helpers., Holds all pre-built agents and structured-output LLM chains.     Created once at, Instantiate all agents + LLM chains once.     Called from build_saul_graph — nev, SaulGraphNodes, build_saul_graph() (+94 more)
+Cohesion: 0.08
+Nodes (113): AgentRegistry, build_agent_registry(), _build_graph_nodes(), Startup-time Agent Saul graph composition helpers., Instantiate all agents + LLM chains once.     Called from build_saul_graph — nev, Holds all pre-built agents and structured-output LLM chains.     Created once at, SaulGraphNodes, build_saul_graph() (+105 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.09
@@ -232,36 +230,36 @@ Cohesion: 0.11
 Nodes (53): ADMIN, ge, le, max_length, require_permission, require_role, Depends, get_refresh_token_repository (+45 more)
 
 ### Community 6 - "Community 6"
-Cohesion: 0.26
-Nodes (48): BaseSettings, Application settings loaded from environment variables., Settings, ContextGrade, ClassifiedDocument, ParsedDocument, PreparedChunk, QualityWarning (+40 more)
+Cohesion: 0.21
+Nodes (44): BaseSettings, Application settings loaded from environment variables., Settings, ContextGrade, ParsedDocument, DocumentSearchResultItem, LegalCitationResponse, QualityWarningDTO (+36 more)
 
 ### Community 7 - "Community 7"
 Cohesion: 0.06
 Nodes (37): Any, BaseTool, StructuredTool, build_validation_error_handler(), format_tool_validation_error(), make_structured_tool(), Tool base classes and registry.  All agent tools use structured Pydantic input/o, Return a schema-first validation error message the model can retry against. (+29 more)
 
 ### Community 8 - "Community 8"
-Cohesion: 0.14
-Nodes (11): BaseCallbackHandler, Client, configure_langsmith(), LatencyCallbackHandler, LangSmith observability bootstrap and custom callbacks. Must be imported before, Bootstrap LangSmith tracing by setting env vars.     Call this at application st, Tracks per-run latency for structured logging., Accumulates token usage across an entire request for billing/monitoring. (+3 more)
+Cohesion: 0.10
+Nodes (14): AsyncCallbackHandler, BaseCallbackHandler, Client, AsyncStreamingCallbackHandler, configure_langsmith(), LatencyCallbackHandler, LangSmith observability bootstrap and custom callbacks. Must be imported before, Bootstrap LangSmith tracing by setting env vars.     Call this at application st (+6 more)
 
 ### Community 9 - "Community 9"
-Cohesion: 0.12
-Nodes (23): _extract_postgres_chunk_ids(), _extract_search_blob(), GraphitiVerificationResult, Graphiti write and verification helpers for legal chunks., write_and_verify_chunk(), _batched(), _build_answer_cache_key(), _build_cache_key() (+15 more)
+Cohesion: 0.11
+Nodes (27): _extract_postgres_chunk_ids(), _extract_search_blob(), GraphitiVerificationResult, Graphiti write and verification helpers for legal chunks., write_and_verify_chunk(), contract_event_dates(), _extract_title(), parse_document() (+19 more)
 
 ### Community 10 - "Community 10"
-Cohesion: 0.11
-Nodes (48): _extract_raw_token(), extract_raw_token_from_connection(), get_auth_service(), get_current_active_user(), get_current_user(), get_current_verified_user(), get_refresh_token_repository(), get_token_claims() (+40 more)
+Cohesion: 0.12
+Nodes (45): _extract_raw_token(), extract_raw_token_from_connection(), get_auth_service(), get_current_active_user(), get_current_user(), get_current_verified_user(), get_refresh_token_repository(), get_token_claims() (+37 more)
 
 ### Community 11 - "Community 11"
 Cohesion: 0.11
-Nodes (47): add_to_bloom_filter(), _build_database_exception(), delete_cache(), delete_hash(), delete_hash_field(), delete_list(), delete_search_index(), deserialize_data() (+39 more)
+Nodes (47): add_to_bloom_filter(), _build_database_exception(), delete_cache(), delete_hash(), delete_hash_field(), delete_list(), deserialize_data(), execute_pipeline() (+39 more)
 
 ### Community 12 - "Community 12"
 Cohesion: 0.26
 Nodes (48): ForgotPasswordRequest, LoginRequest, LogoutRequest, OAuthAuthorizeResponse, RefreshRequest, RegisterRequest, ResendVerificationRequest, ResetPasswordRequest (+40 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.08
-Nodes (35): Any, AsyncEngine, datetime, Redis, BaseTool, GraphitiService, IdempotencyGuard, Any (+27 more)
+Cohesion: 0.07
+Nodes (43): build_tool_registry(), Build all tools once.  Call at lifespan startup only., BaseTool, GraphitiService, IdempotencyGuard, Any, datetime, BaseTool (+35 more)
 
 ### Community 14 - "Community 14"
 Cohesion: 0.13
@@ -280,24 +278,24 @@ Cohesion: 0.11
 Nodes (45): DoclingEnhancementConfig, check_gpu_available(), convert_document(), create_document_converter(), _detect_language(), _encode_base64(), extract_code_blocks(), _extract_code_fallback() (+37 more)
 
 ### Community 18 - "Community 18"
-Cohesion: 0.10
-Nodes (28): CrawlMode, CrawlResult, get_crawler(), Core crawler module using Crawl4AI., Result from crawling a URL., Get a crawler instance., Web crawler using Crawl4AI with caching., WebCrawler (+20 more)
+Cohesion: 0.11
+Nodes (23): CrawlMode, CrawlResult, Result from crawling a URL., CrawlerService, Crawler feature service., Process a single crawl result with optional Gemini processing., Search the web using Tavily.          Args:             request: Search request, Close all connections. (+15 more)
 
 ### Community 19 - "Community 19"
 Cohesion: 0.09
-Nodes (25): JSONResponse, global_exception_handler(), _json_error_response(), API middleware for error handling and request processing., apply_fastapi_guard_response_modifier(), get_security_middleware(), initialize_fastapi_guard(), _is_streaming_response() (+17 more)
+Nodes (24): JSONResponse, global_exception_handler(), _json_error_response(), API middleware for error handling and request processing., apply_fastapi_guard_response_modifier(), get_security_middleware(), initialize_fastapi_guard(), _is_streaming_response() (+16 more)
 
 ### Community 20 - "Community 20"
 Cohesion: 0.08
 Nodes (35): BaseTool, CrawlUrlTool, Immutable collection of all pre-built LangChain tools.      Tool assignment to a, ToolRegistry, Any, BaseTool, CrawlUrlInput, CrawlUrlTool (+27 more)
 
 ### Community 21 - "Community 21"
-Cohesion: 0.09
-Nodes (41): Redis-serializable session record. Frozen for safe pipeline use., SessionData, create_access_token(), create_refresh_token(), decode_token(), fetch_oauth_userinfo(), generate_token(), get_oauth_config() (+33 more)
+Cohesion: 0.13
+Nodes (23): Returns only sessions still active in Redis; lazily cleans up expired IDs., Redis-serializable session record. Frozen for safe pipeline use., SessionData, generate_token(), hash_password(), hash_token(), Cryptographically secure URL-safe token for email delivery., SHA-256 digest stored in DB; the raw token travels only via email. (+15 more)
 
 ### Community 22 - "Community 22"
-Cohesion: 0.16
-Nodes (11): AsyncAttrs, DeclarativeBase, ChatMessage, ChatSession, Chat messages schema for storing user-LLM conversations., Store chat messages between user and LLM., Store chat session metadata., Base (+3 more)
+Cohesion: 0.08
+Nodes (26): AsyncAttrs, DeclarativeBase, ChatMessage, ChatSession, Chat messages schema for storing user-LLM conversations., Store chat messages between user and LLM., Store chat session metadata., DocumentVector (+18 more)
 
 ### Community 23 - "Community 23"
 Cohesion: 0.17
@@ -312,20 +310,20 @@ Cohesion: 0.13
 Nodes (28): _get_sdk_client(), PageIndexBatchConfig, PageIndexChatConfig, PageIndexClient, PageIndexConfig, Configuration for indexing operations., Concurrency settings for batch indexing., Configuration for chat completion calls. (+20 more)
 
 ### Community 26 - "Community 26"
-Cohesion: 0.10
-Nodes (38): Cache a value with expiration.      Args:         redis: Redis client instance, set_cache(), ActivityLog, add_activity(), cache_with_fallback(), delete_user_endpoint(), get_activity_endpoint(), get_cached_user() (+30 more)
+Cohesion: 0.11
+Nodes (36): ActivityLog, add_activity(), cache_with_fallback(), delete_user_endpoint(), get_activity_endpoint(), get_cached_user(), get_multiple_users(), get_user_activity() (+28 more)
 
 ### Community 27 - "Community 27"
 Cohesion: 0.10
 Nodes (35): InjectedToolArg, MessageLikeRepresentation, Configuration, Configuration management for the Open Deep Search graph., Runtime configuration for Tavily-backed deep research.      The graph intentiona, System prompts and prompt templates for the Deep Research agent., override_reducer(), Graph state definitions and data structures for the Deep Research agent. (+27 more)
 
 ### Community 28 - "Community 28"
-Cohesion: 0.14
-Nodes (30): get_settings(), Returns a cached instance of the application settings., get_mcp_client_manager(), load_mcp_client_server_configs(), MCPClientAuthMode, MCPClientTransport, MCPToolCatalogEntry, MCPToolResponse (+22 more)
+Cohesion: 0.22
+Nodes (22): MCPToolCatalogEntry, MCPToolResponse, bind_mcp_parent_app(), _catalog_by_name(), _error(), get_bound_mcp_parent_app(), get_mcp_http_app(), get_mcp_server() (+14 more)
 
 ### Community 29 - "Community 29"
-Cohesion: 0.10
-Nodes (36): run_document_ingestion_task(), Graphiti, close_graphiti(), get_obligation_chain(), _has_jurisdiction(), Graphiti: async wrapper for the legal domain knowledge graph.  Design decisions:, Create a Graphiti instance with its own Neo4j connection pool.      NOTE: Graphi, Create indices and constraints in Neo4j.      Call once at lifespan startup afte (+28 more)
+Cohesion: 0.08
+Nodes (44): Graphiti, close_graphiti(), get_obligation_chain(), GraphitiService, _has_jurisdiction(), Graphiti: async wrapper for the legal domain knowledge graph.  Design decisions:, Create a Graphiti instance with its own Neo4j connection pool.      NOTE: Graphi, Create indices and constraints in Neo4j.      Call once at lifespan startup afte (+36 more)
 
 ### Community 30 - "Community 30"
 Cohesion: 0.14
@@ -336,8 +334,8 @@ Cohesion: 0.15
 Nodes (40): build_retrieval_graph(), Retrieval graph factory for canonical clauses KB., Build a request-scoped retrieval graph over clauses., _structured(), Clauses-backed legal retrieval graph., _cached_embedding(), _call_embedding_fn(), _extract_postgres_chunk_ids() (+32 more)
 
 ### Community 32 - "Community 32"
-Cohesion: 0.40
-Nodes (4): Truncate content to maximum length with warning., truncate_content(), Any, Run the crawl tool.          Args:             url: URL to crawl             ext
+Cohesion: 0.22
+Nodes (7): Truncate content to maximum length with warning., truncate_content(), get_crawler(), Core crawler module using Crawl4AI., Get a crawler instance., Any, Run the crawl tool.          Args:             url: URL to crawl             ext
 
 ### Community 33 - "Community 33"
 Cohesion: 0.09
@@ -348,8 +346,8 @@ Cohesion: 0.17
 Nodes (14): Neo4jSubgraphExpander, Any, AsyncEngine, BaseTool, GraphitiService, IdempotencyGuard, make_detect_graph_conflicts_tool(), make_hybrid_retrieve_precedents_tool() (+6 more)
 
 ### Community 35 - "Community 35"
-Cohesion: 0.31
-Nodes (6): _client_ip(), MCPAuthMiddleware, MCPObservabilityMiddleware, MCPRateLimitMiddleware, _send_json_response(), Any
+Cohesion: 0.23
+Nodes (9): build_mcp_http_middleware(), _client_ip(), MCPAuthMiddleware, MCPObservabilityMiddleware, MCPRateLimitMiddleware, _send_json_response(), Middleware, observe_mcp_http_request() (+1 more)
 
 ### Community 36 - "Community 36"
 Cohesion: 0.14
@@ -360,8 +358,8 @@ Cohesion: 0.22
 Nodes (8): Cognee: long-term episodic + procedural memory for Agent Saul.  Cognee role:   -, Store a human-approved final report in Cognee's episodic memory.      Dataset na, Store the legal relationship graph summary in Cognee.      Stored in {user_id}.l, Configure Cognee to use the same Neo4j + Postgres as the app.      Cognee create, setup_cognee(), store_final_report(), store_relationships(), Settings
 
 ### Community 38 - "Community 38"
-Cohesion: 0.06
-Nodes (79): close_neo4j_driver(), get_neo4j_driver(), get_neo4j_session(), init_neo4j(), Neo4j database configuration with driver management., Initialize Neo4j driver and test connection.      Returns:         AsyncDriver:, Context manager for Neo4j sessions.      Args:         driver: Neo4j async drive, Close Neo4j driver and cleanup connections.      Args:         driver: Neo4j asy (+71 more)
+Cohesion: 0.05
+Nodes (87): close_neo4j_driver(), get_neo4j_driver(), get_neo4j_session(), init_neo4j(), Neo4j database configuration with driver management., Initialize Neo4j driver and test connection.      Returns:         AsyncDriver:, Context manager for Neo4j sessions.      Args:         driver: Neo4j async drive, Close Neo4j driver and cleanup connections.      Args:         driver: Neo4j asy (+79 more)
 
 ### Community 39 - "Community 39"
 Cohesion: 0.23
@@ -372,8 +370,8 @@ Cohesion: 0.19
 Nodes (22): ClauseEpisodeMetadata, LegalEdgeInput, LegalEpisodeType, Legal domain schemas for Graphiti episodes and edges.  Design rationale: - Episo, Input for writing a structured legal relationship edge to Graphiti.      Graphit, Maps to graphiti_core.nodes.EpisodeType.text for all of these.     We use our ow, Stored as source_description in Graphiti. Always co-retrieved with episode., ClauseWriteResult (+14 more)
 
 ### Community 41 - "Community 41"
-Cohesion: 0.15
-Nodes (21): crawl_url(), get_client_identifier(), get_rate_limit_info(), Crawler feature API endpoints., Get current rate limit information., Get client identifier from request (IP or user ID)., Crawl a URL and optionally extract structured data.      - **url**: URL to crawl, Search the web using Tavily.      - **query**: Search query     - **max_results* (+13 more)
+Cohesion: 0.18
+Nodes (16): crawl_url(), get_client_identifier(), get_rate_limit_info(), Crawler feature API endpoints., Get current rate limit information., Get client identifier from request (IP or user ID)., Crawl a URL and optionally extract structured data.      - **url**: URL to crawl, Search the web using Tavily.      - **query**: Search query     - **max_results* (+8 more)
 
 ### Community 42 - "Community 42"
 Cohesion: 0.12
@@ -392,24 +390,24 @@ Cohesion: 0.09
 Nodes (23): Basic Task, Celery Usage, Circuit Breaker, code:env (RABBITMQ_URL=amqp://guest:guest@localhost:5672//), code:bash (uv run celery -A app.connections.celery:celery_app inspect a), code:python (from app.connections import celery_app), code:bash (uv run celery -A app.connections.celery:celery_app worker --), code:python (from fastapi import APIRouter) (+15 more)
 
 ### Community 46 - "Community 46"
-Cohesion: 0.11
-Nodes (16): Crawl a single URL.          Args:             url: URL to crawl             use, Recursively crawl internal links from starting URLs.          Args:, Generate cache key for URL., Get cached crawl result., Save crawl result to cache., get_domain_from_url(), is_private_ip(), is_valid_url() (+8 more)
+Cohesion: 0.20
+Nodes (10): Recursively crawl internal links from starting URLs.          Args:, get_domain_from_url(), is_private_ip(), is_valid_url(), URL validation and SSRF protection for crawler., Extract domain from URL., Quick check if URL is valid and allowed., Check if an IP address is private. (+2 more)
 
 ### Community 47 - "Community 47"
 Cohesion: 0.14
 Nodes (27): get_tokenizer(), Initialize tokenizer for token-aware chunking., clean_databases(), create_ingestion_pipeline(), extract_document_metadata(), extract_title(), find_document_files(), ingest_documents() (+19 more)
 
 ### Community 48 - "Community 48"
-Cohesion: 0.16
+Cohesion: 0.15
 Nodes (19): ExtractionResult, GeminiProcessor, get_processor(), get_schema_for_type(), _parse_extraction_json(), Gemini processing for content extraction and summarization., Result from Gemini extraction., Processor for Gemini-based content extraction and summarization. (+11 more)
 
 ### Community 49 - "Community 49"
-Cohesion: 0.11
-Nodes (15): build_default_middleware_stack(), build_minimal_middleware_stack(), ContextEditingMiddleware, DynamicSystemPromptMiddleware, GuardrailMiddleware, ModelRetryMiddleware, Allows runtime editing of context: inject variables, redact PII,     or transfor, Model-based guardrails: evaluates the AI's response before returning it.     On (+7 more)
+Cohesion: 0.13
+Nodes (13): build_default_middleware_stack(), build_minimal_middleware_stack(), ContextEditingMiddleware, GuardrailMiddleware, ModelRetryMiddleware, Allows runtime editing of context: inject variables, redact PII,     or transfor, Model-based guardrails: evaluates the AI's response before returning it.     On, Production-ready default middleware stack.      Order matters — middleware runs (+5 more)
 
 ### Community 50 - "Community 50"
-Cohesion: 0.15
-Nodes (20): _append_search_filter_args(), _append_search_highlight_args(), _append_search_summarize_args(), _build_create_search_index_args(), _build_search_index_query_args(), check_bloom_filter(), create_search_index(), _parse_search_result() (+12 more)
+Cohesion: 0.13
+Nodes (22): _append_search_filter_args(), _append_search_highlight_args(), _append_search_summarize_args(), _build_create_search_index_args(), _build_search_index_query_args(), check_bloom_filter(), create_search_index(), delete_search_index() (+14 more)
 
 ### Community 51 - "Community 51"
 Cohesion: 0.18
@@ -421,7 +419,7 @@ Nodes (29): build_reconciliation_graph(), Build the reconciliation graph once du
 
 ### Community 53 - "Community 53"
 Cohesion: 0.09
-Nodes (29): Base, Hybrid search fusion helpers., Fuse ranked result lists with the standard reciprocal-rank formula., reciprocal_rank_fusion(), SQLAlchemy models for search documents and chunks., Parent document record used for deduplication and context assembly., Searchable child chunk record., SearchChunk (+21 more)
+Nodes (32): Base, Search feature constants., RankedResultRow, Hybrid search fusion helpers., Fuse ranked result lists with the standard reciprocal-rank formula., Minimal ranked row returned by a search branch., reciprocal_rank_fusion(), SQLAlchemy models for search documents and chunks. (+24 more)
 
 ### Community 54 - "Community 54"
 Cohesion: 0.16
@@ -436,8 +434,8 @@ Cohesion: 0.12
 Nodes (17): Shared LangGraph layer exports., build_open_deep_search_config(), Create a Configuration instance from RunnableConfig and environment., Build graph config with the lifespan-owned HTTPX client attached., Open Deep Search package exports., DeepResearchInput, DeepResearchOutput, make_deep_research_tool() (+9 more)
 
 ### Community 57 - "Community 57"
-Cohesion: 0.15
-Nodes (12): CrawlerConfig, get_crawler_config(), Crawler configuration and settings., Configuration for the web crawler., Load configuration from settings., Get proxy configuration for Crawl4AI., Convert to Crawl4AI BrowserConfig kwargs., Convert to Crawl4AI CrawlerRunConfig kwargs. (+4 more)
+Cohesion: 0.09
+Nodes (20): CrawlerConfig, get_crawler_config(), Crawler configuration and settings., Configuration for the web crawler., Load configuration from settings., Get proxy configuration for Crawl4AI., Convert to Crawl4AI BrowserConfig kwargs., Convert to Crawl4AI CrawlerRunConfig kwargs. (+12 more)
 
 ### Community 58 - "Community 58"
 Cohesion: 0.17
@@ -460,8 +458,8 @@ Cohesion: 0.12
 Nodes (27): Cache utilities using Redis., RequestMeta, Any, APIResponse, T, Any, _build_request_meta(), http_error() (+19 more)
 
 ### Community 63 - "Community 63"
-Cohesion: 0.24
-Nodes (4): AsyncCallbackHandler, AsyncStreamingCallbackHandler, Async callback that forwards tokens to an asyncio.Queue.     Use in FastAPI SSE, Any
+Cohesion: 0.12
+Nodes (24): main(), create_access_token(), create_impersonation_token(), create_refresh_token(), fetch_oauth_userinfo(), get_oauth_config(), _jwt_key(), needs_rehash() (+16 more)
 
 ### Community 64 - "Community 64"
 Cohesion: 0.21
@@ -473,7 +471,7 @@ Nodes (11): BaseOutputParser, ChatPromptTemplate, Assemble the full system promp
 
 ### Community 66 - "Community 66"
 Cohesion: 0.13
-Nodes (17): exchange_subject_token_for_mcp_token(), _find_mcp_error(), get_stored_mcp_tokens(), Reusable MCP client best-practice helpers.  These helpers are intentionally not, Search nested exception groups for an MCP error., Exchange an application access token for an MCP access token., Retrieve non-expired MCP tokens from the LangGraph store., Store MCP tokens in the LangGraph store. (+9 more)
+Nodes (18): exchange_subject_token_for_mcp_token(), get_stored_mcp_tokens(), Reusable MCP client best-practice helpers.  These helpers are intentionally not, Exchange an application access token for an MCP access token., Retrieve non-expired MCP tokens from the LangGraph store., Store MCP tokens in the LangGraph store., Convert MCP interaction-required errors into model-visible tool errors., set_stored_mcp_tokens() (+10 more)
 
 ### Community 67 - "Community 67"
 Cohesion: 0.04
@@ -484,16 +482,16 @@ Cohesion: 0.12
 Nodes (10): AsyncIOMotorCollection, Any, APIFeatures, Execute the query and return results., Apply filtering to query., Apply sorting to query., Apply field limiting (projection)., MongoDB query builder with filtering, sorting, and pagination. (+2 more)
 
 ### Community 69 - "Community 69"
-Cohesion: 0.11
-Nodes (19): GraphitiService, Behavior contract for Graphiti memory operations used by agents/tools., build_tool_registry(), ToolRegistry: all LangChain tools assembled once at lifespan startup.  build_too, Build all tools once.  Call at lifespan startup only., GraphitiSearchResult, Normalised result returned by GraphitiService.search_*().     Consumers never to, BaseTool (+11 more)
+Cohesion: 0.17
+Nodes (18): get_current_user_id(), get_search_repository(), get_search_service(), Dependency wiring for the search feature., Database operations for the search feature., Bulk upsert chunk rows using the document/chunk unique key., SearchRepository, Return ingestion status from Celery and, when possible, document metadata. (+10 more)
 
 ### Community 70 - "Community 70"
 Cohesion: 0.20
 Nodes (10): get_rate_limiter(), Build a FastAPI dependency that enforces a Redis-backed rate limit.      Args:, Rate limiting helpers., _raise_rate_limit_exceeded(), RateLimitService, Evaluates the rate limit using GCRA. Raises TooManyRequestsException if exceeded, Request, Redis (+2 more)
 
 ### Community 71 - "Community 71"
-Cohesion: 0.22
-Nodes (17): AgentSpec, create_production_agent(), ProductionAgent, Agent factory — the main entry point for creating production agents.  Uses LangC, Build a fully configured production agent from a spec.      Returns a Production, Wraps a compiled LangGraph agent with production runtime behaviour:     - Long-t, Declarative specification for a production agent.     Pass to `create_production, CodeAgentContext (+9 more)
+Cohesion: 0.19
+Nodes (20): AgentSpec, create_production_agent(), ProductionAgent, Agent factory — the main entry point for creating production agents.  Uses LangC, Build a fully configured production agent from a spec.      Returns a Production, Wraps a compiled LangGraph agent with production runtime behaviour:     - Long-t, Declarative specification for a production agent.     Pass to `create_production, CodeAgentContext (+12 more)
 
 ### Community 72 - "Community 72"
 Cohesion: 0.14
@@ -504,16 +502,16 @@ Cohesion: 0.17
 Nodes (29): create_extractor(), extract(), extract_entities_batch(), _extract_entities_simple(), _extract_relationships_simple(), extract_with_fallback(), extract_with_graphiti(), _infer_relationships() (+21 more)
 
 ### Community 74 - "Community 74"
-Cohesion: 0.09
-Nodes (14): Submit for indexing. Prefer Celery for production., Any, Exception, APIException, ExpiredTokenException, ForbiddenException, InvalidRefreshTokenException, InvalidTokenException (+6 more)
+Cohesion: 0.10
+Nodes (13): Submit for indexing. Prefer Celery for production., Any, APIException, ExpiredTokenException, ExternalServiceException, ForbiddenException, InvalidRefreshTokenException, InvalidTokenException (+5 more)
 
 ### Community 75 - "Community 75"
 Cohesion: 0.19
 Nodes (4): Adapt a project Redis client to FastAPI Guard's Redis handler protocol., RedisProtocolAdapter, Any, Redis
 
 ### Community 76 - "Community 76"
-Cohesion: 0.16
-Nodes (11): Crawler feature constants., Enum, RateLimitConfig, RateLimitScope, Rate limiting using fastapi-limiter and Redis., Increment rate limit counter., Rate limit scope types., Get remaining rate limit quota. (+3 more)
+Cohesion: 0.12
+Nodes (19): get_crawler_service(), get_rate_limiter(), Crawler feature dependencies., Get crawler service instance with Redis from app.state., Get rate limiter instance with Redis from app.state., get_rate_limiter(), RateLimiter, RateLimitScope (+11 more)
 
 ### Community 77 - "Community 77"
 Cohesion: 0.15
@@ -548,12 +546,12 @@ Cohesion: 0.27
 Nodes (9): create_httpx_client(), get_httpx_client(), get_shared_httpx_client(), HTTPX client with optimal performance settings., Create production-grade HTTPX client with HTTP/2 and connection pooling.      Ke, Return a process-wide async HTTPX client for non-request runtimes., Dependency to inject HTTPX client., AsyncClient (+1 more)
 
 ### Community 85 - "Community 85"
-Cohesion: 0.09
-Nodes (23): build_document_ingestion_graph(), DocumentIngestionState, _make_ingest_document_node(), Document ingestion graph wrapper., Build the per-job ingestion graph., Unified document and chunk SQLAlchemy models., Single retrieval-truth parent row for uploaded or ingested documents., Single retrieval-truth searchable chunk row. (+15 more)
+Cohesion: 0.10
+Nodes (22): build_document_ingestion_graph(), DocumentIngestionState, _make_ingest_document_node(), Document ingestion graph wrapper., Build the per-job ingestion graph., Unified document and chunk SQLAlchemy models., Single retrieval-truth parent row for uploaded or ingested documents., Single retrieval-truth searchable chunk row. (+14 more)
 
 ### Community 86 - "Community 86"
-Cohesion: 0.22
-Nodes (13): FinalReportEpisodeMetadata, Final report metadata for high-trust episode storage., CogneeService, GraphitiService, MemoryPersistResult, Persist memory functions: write_final_report_to_memory  Called by persist_memory, Graphiti write operations., Cognee episodic/procedural memory storage. (+5 more)
+Cohesion: 0.20
+Nodes (20): LegalCitationResponse, RagContextSectionResponse, Citation returned by grounded legal generation., Ranked hybrid search hit., Ordered context section for RAG consumers., SearchResultItem, _build_cache_key(), _build_search_items() (+12 more)
 
 ### Community 87 - "Community 87"
 Cohesion: 0.33
@@ -584,32 +582,32 @@ Cohesion: 0.23
 Nodes (22): AgentSaulDeps, get_agent_saul_deps(), get_agent_saul_ws_security_context(), get_current_user_id(), get_redis(), get_saul_checkpointer(), get_saul_graph(), get_websocket_security_service() (+14 more)
 
 ### Community 97 - "Community 97"
-Cohesion: 0.29
-Nodes (7): get_key_name(), Generate a namespaced cache key from object type and args.      Args:         ob, CacheKeyPart, DatabaseException, Exception, DatabaseException, Database operation failed (caught & handled).
+Cohesion: 0.22
+Nodes (8): get_key_name(), Generate a namespaced cache key from object type and args.      Args:         ob, CacheKeyPart, DatabaseException, Exception, Exception, DatabaseException, Database operation failed (caught & handled).
 
 ### Community 98 - "Community 98"
 Cohesion: 0.13
 Nodes (28): APIException, AppError, ConflictAppError, ExternalServiceAppError, InfrastructureAppError, NotFoundAppError, Typed payloads for expected internal failures., Base expected failure payload for internal Result values. (+20 more)
 
 ### Community 99 - "Community 99"
-Cohesion: 0.22
-Nodes (13): DocumentUploadResponse, Ingestion feature: HTTP upload endpoint that runs IngestionGraph before WS.  Flo, Ingestion router: POST /ingestion/documents/upload  Accepts multipart form: file, Upload flow:       1. Read raw bytes from uploaded file.       2. Run IngestionG, upload_document(), IngestionService, IngestionService: runs IngestionGraph for a given uploaded document.  Called by, IngestionGraphDep (+5 more)
+Cohesion: 0.16
+Nodes (17): get_current_user_id(), get_ingestion_graph(), DocumentUploadResponse, Ingestion feature: HTTP upload endpoint that runs IngestionGraph before WS.  Flo, Ingestion router: POST /ingestion/documents/upload  Accepts multipart form: file, Upload flow:       1. Read raw bytes from uploaded file.       2. Run IngestionG, upload_document(), IngestionService (+9 more)
 
 ### Community 100 - "Community 100"
-Cohesion: 0.33
-Nodes (6): Async PostgreSQL checkpointer for LangGraph persistence.  Uses the existing Post, Initialize AsyncPostgresSaver using existing PostgreSQL connection.      AsyncPo, Graceful shutdown of AsyncPostgresSaver connection pool.      Closes all active, setup_langgraph_checkpointer(), teardown_langgraph_checkpointer(), AsyncPostgresSaver
+Cohesion: 0.14
+Nodes (18): chunk_text(), Token-based chunking helpers for search ingestion., Split text into overlapping token windows while preserving order., Normalized text chunk plus its ordinal position., TextChunk, build_embedding_client(), Gemini embedding helpers for search., Construct the shared Gemini embedding client used by search. (+10 more)
 
 ### Community 101 - "Community 101"
-Cohesion: 0.23
-Nodes (12): Base, Clause, Entity, Event, MemoryVersion, ParentDocument, SQLAlchemy async models for the legal memory schema.  Tables:   entities, One uploaded file. Child retrieval chunks live in clauses. (+4 more)
+Cohesion: 0.16
+Nodes (16): Predefined schema types., SchemaType, CrawlRequest, CrawlResponse, CrawlResultItem, RateLimitInfo, Crawler feature DTOs (Data Transfer Objects)., Request to crawl a URL. (+8 more)
 
 ### Community 111 - "Community 111"
 Cohesion: 0.12
 Nodes (21): delete_by_predicate(), delete_tool_messages(), _estimate_tokens(), manage_context(), mark_for_removal(), Message utilities for context window management and multimodal message construct, Default memory strategy for production agents.      1. Keeps the SystemMessage (, Unified context management. Call before passing messages to a model.      strate (+13 more)
 
 ### Community 114 - "Community 114"
-Cohesion: 0.18
-Nodes (14): BoundLogger, detect_conflicts(), expand_from_seeds(), get_obligation_chain(), _parse_subgraph_records(), Neo4j Cypher subgraph expander for depth-N traversal.  Two-layer strategy:   Lay, Expand from seed node UUIDs to depth-N subgraph.      Args:         config: Neo4, Find and expand obligation chain for a named entity.      Args:         config: (+6 more)
+Cohesion: 0.14
+Nodes (20): AsyncDriver, BoundLogger, create_subgraph_expander(), detect_conflicts(), expand_from_seeds(), get_obligation_chain(), Neo4jSubgraphConfig, _parse_subgraph_records() (+12 more)
 
 ### Community 115 - "Community 115"
 Cohesion: 0.23
@@ -644,12 +642,8 @@ Cohesion: 0.23
 Nodes (6): ConflictingDisputeResolutionRule, MissingGoverningLawOrJurisdictionRule, MissingSeverabilityRule, Diagnostic, Document, Indexes
 
 ### Community 123 - "Community 123"
-Cohesion: 0.12
-Nodes (27): ClassifiedDocument, _build_preamble(), classify_document(), _extract_contract_type(), _extract_jurisdiction(), _extract_parties(), _infer_clause_type(), _looks_like_contract() (+19 more)
-
-### Community 124 - "Community 124"
-Cohesion: 0.21
-Nodes (8): create_subgraph_expander(), Neo4jSubgraphConfig, Factory: create a Neo4j subgraph expansion context.      Wraps the driver in a c, Configuration container for Neo4j subgraph operations.      This replaces the Ne, MemoryScope, Immutable memory retrieval policy for a single agent role., Neo4jSubgraphConfig, AsyncDriver
+Cohesion: 0.17
+Nodes (27): ClassifiedDocument, _build_preamble(), ClassifiedDocument, classify_document(), _extract_contract_type(), _extract_jurisdiction(), _extract_parties(), _infer_clause_type() (+19 more)
 
 ### Community 125 - "Community 125"
 Cohesion: 0.18
@@ -668,8 +662,8 @@ Cohesion: 0.27
 Nodes (5): AmbiguousTimeComputationRule, InconsistentDefinitionCaseRule, Diagnostic, Document, Indexes
 
 ### Community 129 - "Community 129"
-Cohesion: 0.25
-Nodes (8): get_crawler_service(), get_rate_limiter(), Crawler feature dependencies., Get crawler service instance with Redis from app.state., Get rate limiter instance with Redis from app.state., CrawlerService, RateLimiter, Request
+Cohesion: 0.50
+Nodes (4): _find_mcp_error(), Search nested exception groups for an MCP error., McpError, BaseException
 
 ### Community 130 - "Community 130"
 Cohesion: 0.36
@@ -687,17 +681,13 @@ Nodes (4): UnresolvedCrossReferenceRule, Diagnostic, Document, Indexes
 Cohesion: 0.33
 Nodes (3): MailerService, Sync Resend client — correct for Celery worker context.      Uses httpx sync cli, Send a Resend hosted template email. Raises httpx.HTTPStatusError on failure.
 
-### Community 134 - "Community 134"
-Cohesion: 0.50
-Nodes (4): get_current_user_id(), get_ingestion_graph(), CompiledStateGraph, Request
-
 ### Community 135 - "Community 135"
 Cohesion: 0.50
 Nodes (4): generate_text(), get_circuit_breaker(), CircuitBreakerService, Request
 
 ### Community 136 - "Community 136"
-Cohesion: 0.29
-Nodes (3): main(), Environment, Application environment.
+Cohesion: 0.18
+Nodes (7): Environment, Application environment., Crawler feature constants., Enum, RateLimitConfig, Rate limiting using fastapi-limiter and Redis., Rate limit configuration.
 
 ### Community 137 - "Community 137"
 Cohesion: 0.50
@@ -735,24 +725,20 @@ Nodes (3): Prompt management for cross-provider, framework-aware system prompts.
 Cohesion: 1.00
 Nodes (4): Document, Paragraph, Section, Span
 
-### Community 149 - "Community 149"
-Cohesion: 0.50
-Nodes (3): DocumentVector, Document vectors schema for storing embeddings., Store document embeddings and metadata.
-
 ## Knowledge Gaps
-- **129 isolated node(s):** `Connection`, `Request`, `HTTPConnection`, `AsyncIOMotorClient`, `HTTPConnection` (+124 more)
+- **130 isolated node(s):** `AsyncDriver`, `Connection`, `Request`, `HTTPConnection`, `AsyncIOMotorClient` (+125 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **21 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **22 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `BaseModel` connect `Community 67` to `Community 0`, `Community 1`, `Community 2`, `Community 3`, `Community 5`, `Community 6`, `Community 7`, `Community 12`, `Community 13`, `Community 14`, `Community 15`, `Community 17`, `Community 18`, `Community 145`, `Community 20`, `Community 21`, `Community 24`, `Community 25`, `Community 26`, `Community 27`, `Community 28`, `Community 30`, `Community 31`, `Community 38`, `Community 39`, `Community 40`, `Community 47`, `Community 48`, `Community 52`, `Community 53`, `Community 54`, `Community 55`, `Community 56`, `Community 57`, `Community 59`, `Community 62`, `Community 64`, `Community 65`, `Community 69`, `Community 71`, `Community 72`, `Community 73`, `Community 76`, `Community 85`, `Community 86`, `Community 87`, `Community 98`, `Community 99`, `Community 124`?**
-  _High betweenness centrality (0.512) - this node is a cross-community bridge._
-- **Why does `get_settings()` connect `Community 28` to `Community 0`, `Community 133`, `Community 6`, `Community 136`, `Community 9`, `Community 10`, `Community 8`, `Community 12`, `Community 19`, `Community 21`, `Community 25`, `Community 29`, `Community 30`, `Community 39`, `Community 46`, `Community 57`, `Community 62`, `Community 84`, `Community 88`, `Community 118`, `Community 123`?**
-  _High betweenness centrality (0.068) - this node is a cross-community bridge._
-- **Why does `UUID` connect `Community 8` to `Community 0`, `Community 2`, `Community 3`, `Community 99`, `Community 101`, `Community 9`, `Community 43`, `Community 52`, `Community 21`, `Community 85`, `Community 53`, `Community 27`, `Community 93`, `Community 63`?**
-  _High betweenness centrality (0.054) - this node is a cross-community bridge._
+- **Why does `BaseModel` connect `Community 67` to `Community 0`, `Community 1`, `Community 2`, `Community 3`, `Community 5`, `Community 6`, `Community 7`, `Community 136`, `Community 12`, `Community 13`, `Community 14`, `Community 15`, `Community 17`, `Community 18`, `Community 20`, `Community 21`, `Community 24`, `Community 25`, `Community 26`, `Community 27`, `Community 28`, `Community 29`, `Community 30`, `Community 31`, `Community 38`, `Community 39`, `Community 40`, `Community 47`, `Community 48`, `Community 52`, `Community 53`, `Community 54`, `Community 55`, `Community 56`, `Community 57`, `Community 59`, `Community 62`, `Community 64`, `Community 65`, `Community 66`, `Community 71`, `Community 72`, `Community 73`, `Community 85`, `Community 86`, `Community 87`, `Community 98`, `Community 99`, `Community 100`, `Community 101`, `Community 114`, `Community 123`, `Community 124`?**
+  _High betweenness centrality (0.523) - this node is a cross-community bridge._
+- **Why does `get_settings()` connect `Community 63` to `Community 133`, `Community 6`, `Community 136`, `Community 9`, `Community 8`, `Community 12`, `Community 15`, `Community 19`, `Community 21`, `Community 25`, `Community 28`, `Community 30`, `Community 35`, `Community 38`, `Community 39`, `Community 48`, `Community 57`, `Community 62`, `Community 66`, `Community 84`, `Community 86`, `Community 88`, `Community 100`, `Community 118`?**
+  _High betweenness centrality (0.067) - this node is a cross-community bridge._
+- **Why does `UUID` connect `Community 53` to `Community 2`, `Community 3`, `Community 99`, `Community 100`, `Community 8`, `Community 9`, `Community 43`, `Community 52`, `Community 85`, `Community 22`, `Community 27`, `Community 93`, `Community 63`?**
+  _High betweenness centrality (0.053) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `BaseModel` (e.g. with `BaseMessage` and `BaseTool`) actually correct?**
   _`BaseModel` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 45 inferred relationships involving `AuthService` (e.g. with `LoginRequest` and `RegisterRequest`) actually correct?**

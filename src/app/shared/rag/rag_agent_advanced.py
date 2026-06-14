@@ -15,7 +15,6 @@ import logging
 import os
 import sys
 
-import asyncpg
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -165,7 +164,7 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
 
     except Exception as e:
         logger.error(f"Multi-query search failed: {e}", exc_info=True)
-        return f"Search error: {str(e)}"
+        return f"Search error: {e!s}"
 
 
 # ======================
@@ -234,7 +233,7 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
 
     except Exception as e:
         logger.error(f"Re-ranking search failed: {e}", exc_info=True)
-        return f"Search error: {str(e)}"
+        return f"Search error: {e!s}"
 
 
 # ======================
@@ -283,7 +282,7 @@ async def search_knowledge_base(ctx: RunContext[None], query: str, limit: int = 
 
     except Exception as e:
         logger.error(f"Knowledge base search failed: {e}", exc_info=True)
-        return f"Search error: {str(e)}"
+        return f"Search error: {e!s}"
 
 
 async def retrieve_full_document(ctx: RunContext[None], document_title: str) -> str:
@@ -334,7 +333,7 @@ async def retrieve_full_document(ctx: RunContext[None], document_title: str) -> 
 
     except Exception as e:
         logger.error(f"Full document retrieval failed: {e}", exc_info=True)
-        return f"Error retrieving document: {str(e)}"
+        return f"Error retrieving document: {e!s}"
 
 
 # ======================
@@ -467,7 +466,7 @@ Respond with only the improved query, nothing else."""
 
     except Exception as e:
         logger.error(f"Self-reflective search failed: {e}", exc_info=True)
-        return f"Search error: {str(e)}"
+        return f"Search error: {e!s}"
 
 
 # ======================

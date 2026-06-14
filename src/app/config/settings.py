@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = Field(default="localhost")
     POSTGRES_PORT: int = Field(default=5432)
     POSTGRES_USERNAME: str = Field(default="user")
-    POSTGRES_PASSWORD: str = Field(default="pass")
+    POSTGRES_PASSWORD: SecretStr = Field(default=SecretStr("pass"))
     POSTGRES_DB_NAME: str = Field(default="db")
     POSTGRES_MAX_OVERFLOW: int = Field(default=10)  # Added this missing field
     POSTGRES_POOL_SIZE: int = Field(default=5)  # Added this missing field
@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     # --- Neo4j Database ---
     NEO4J_URI: str = Field(default="bolt://localhost:7687")
     NEO4J_USERNAME: str = Field(default="neo4j")
-    NEO4J_PASSWORD: str = Field(default="password")
+    NEO4J_PASSWORD: SecretStr = Field(default=SecretStr("password"))
     NEO4J_DATABASE: str = Field(default="neo4j")
 
     # --- Redis Cache ---
@@ -105,7 +105,7 @@ class Settings(BaseSettings):
     REDIS_HOST: str = Field(default="localhost")
     REDIS_PORT: int = Field(default=6379)
     REDIS_USERNAME: str = Field(default="default")
-    REDIS_PASSWORD: str | None = Field(default=None)
+    REDIS_PASSWORD: SecretStr | None = Field(default=None)
 
     # Note: REDIS_DB and CACHE_TTL were not in your ENV, so they remain as defaults
     REDIS_DB: int = Field(default=0)
@@ -115,7 +115,7 @@ class Settings(BaseSettings):
     RABBITMQ_URL: str = Field(default="amqp://guest:guest@localhost:5672//")
     RABBITMQ_PRIVATE_URL: str = Field(default="amqp://guest:guest@localhost:5672//")
     RABBITMQ_DEFAULT_USER: str = Field(default="guest")
-    RABBITMQ_DEFAULT_PASS: str = Field(default="guest")
+    RABBITMQ_DEFAULT_PASS: SecretStr = Field(default=SecretStr("guest"))
     RABBITMQ_NODENAME: str = Field(default="rabbit@localhost")
     CELERY_DEFAULT_QUEUE: str = Field(default="default")
     CELERY_DEFAULT_EXCHANGE: str = Field(default="tasks")
@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT: int = Field(default=60)
 
     # --- Google Gemini API ---
-    GEMINI_API_KEY: str = Field(default="")
+    GEMINI_API_KEY: SecretStr = Field(default=SecretStr(""))
     GEMINI_FLASH_MODEL: str = Field(default="gemini-3.1-flash")
     GEMINI_PRO_MODEL: str = Field(default="gemini-3.1-pro")
     GEMINI_VISION_MODEL: str = Field(default="gemini-2.5-flash-image")
@@ -145,12 +145,12 @@ class Settings(BaseSettings):
     GEMINI_TOP_K: int = Field(default=20, gt=0)
     GEMINI_MAX_TOKENS: int = Field(default=2048)
     GEMINI_CONTEXT_CACHE_TTL: str = Field(default="3600s", min_length=1)
-    LANGEXTRACT_API_KEY: str = Field(
-        default="empty-langextract-api-key"
+    LANGEXTRACT_API_KEY: SecretStr = Field(
+        default=SecretStr("empty-langextract-api-key")
     )  # Added this missing field
 
     # --- Pinecone Vector Database ---
-    PINECONE_API_KEY: str = Field(default="")
+    PINECONE_API_KEY: SecretStr = Field(default=SecretStr(""))
     PINECONE_ENVIRONMENT: str = Field(default="")
     PINECONE_INDEX_NAME: str = Field(default="langchain-index")
     PINECONE_DIMENSION: int = Field(default=768)
@@ -160,7 +160,9 @@ class Settings(BaseSettings):
     # Renamed to match the variable in your ENV file: LANGSMITH_TRACING=true
     LANGSMITH_TRACING: bool = Field(default=False)
     LANGSMITH_ENDPOINT: str = Field(default="https://api.smith.langchain.com")
-    LANGSMITH_API_KEY: str = Field(default="")  # Note: Your ENV had LANGSMITH_API_KEY
+    LANGSMITH_API_KEY: SecretStr = Field(
+        default=SecretStr("")
+    )  # Note: Your ENV had LANGSMITH_API_KEY
     LANGSMITH_PROJECT: str = Field(default="langchain-production")
     LANGCHAIN_PROJECT: str = Field(
         default="langchain-production"
@@ -179,13 +181,13 @@ class Settings(BaseSettings):
     CRAWL4AI_MAX_CONTENT_SIZE: int = Field(default=102400)  # 100KB
 
     # --- Tavily Search Configuration ---
-    TAVILY_API_KEY: str = Field(default="")
+    TAVILY_API_KEY: SecretStr = Field(default=SecretStr(""))
     TAVILY_BASE_URL: str = Field(default="https://api.tavily.com")
     TAVILY_MAX_RESULTS_LIMIT: int = Field(default=20)
     TAVILY_TIMEOUT_SECONDS: float = Field(default=30.0)
 
     # --- PageIndex Configuration ---
-    PAGEINDEX_API_KEY: str = Field(default="")
+    PAGEINDEX_API_KEY: SecretStr = Field(default=SecretStr(""))
 
     # --- Crawl/Search Rate Limiting ---
     CRAWL_RATE_LIMIT_PER_MINUTE: int = Field(default=10)
@@ -227,11 +229,11 @@ class Settings(BaseSettings):
     FASTAPI_GUARD_BLOCKED_COUNTRIES: list[str] = Field(default_factory=list)
     FASTAPI_GUARD_WHITELIST_COUNTRIES: list[str] = Field(default_factory=list)
     FASTAPI_GUARD_BLOCK_CLOUD_PROVIDERS: list[str] = Field(default_factory=list)
-    FASTAPI_GUARD_IPINFO_TOKEN: str | None = Field(default=None)
+    FASTAPI_GUARD_IPINFO_TOKEN: SecretStr | None = Field(default=None)
     FASTAPI_GUARD_LOG_FORMAT: str = Field(default="text")
 
     # --- JWT Authentication ---
-    JWT_SECRET_KEY: str = Field(default="super-secret-change-this-in-production")
+    JWT_SECRET_KEY: SecretStr = Field(default=SecretStr("super-secret-change-this-in-production"))
     JWT_ISSUER: str = Field(default="your-app")
     JWT_ALGORITHM: str = Field(default="HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15)
@@ -239,11 +241,11 @@ class Settings(BaseSettings):
     PASSWORD_RESET_EXPIRE_MINUTES: int = Field(default=30)
 
     # --- OAuth Configuration ---
-    OAUTH_STATE_SECRET: str = Field(default="your-oauth-state-secret")
+    OAUTH_STATE_SECRET: SecretStr = Field(default=SecretStr("your-oauth-state-secret"))
     GOOGLE_CLIENT_ID: str = Field(default="")
-    GOOGLE_CLIENT_SECRET: str = Field(default="")
+    GOOGLE_CLIENT_SECRET: SecretStr = Field(default=SecretStr(""))
     GITHUB_CLIENT_ID: str = Field(default="")
-    GITHUB_CLIENT_SECRET: str = Field(default="")
+    GITHUB_CLIENT_SECRET: SecretStr = Field(default=SecretStr(""))
 
     # --- URLs ---
     BACKEND_URL: str = Field(default="http://localhost:5000")
@@ -268,7 +270,7 @@ class Settings(BaseSettings):
     UVICORN_WS_PING_TIMEOUT: float = Field(default=20.0)
 
     # --- Resend Email Service ---
-    RESEND_API_KEY: str = Field(default="")
+    RESEND_API_KEY: SecretStr = Field(default=SecretStr(""))
     RESEND_FROM_EMAIL: str = Field(default="noreply@yourdomain.com")
     RESEND_VERIFICATION_TEMPLATE_ID: str = Field(default="")
     RESEND_PASSWORD_RESET_TEMPLATE_ID: str = Field(default="")
@@ -276,8 +278,8 @@ class Settings(BaseSettings):
     # --- S3 / R2 Storage ---
     S3_BUCKET_NAME: str = Field(default="")
     S3_ENDPOINT_URL: str | None = Field(default=None)
-    S3_ACCESS_KEY_ID: str = Field(default="")
-    S3_SECRET_ACCESS_KEY: str = Field(default="")
+    S3_ACCESS_KEY_ID: SecretStr = Field(default=SecretStr(""))
+    S3_SECRET_ACCESS_KEY: SecretStr = Field(default=SecretStr(""))
     S3_REGION: str = Field(default="auto")
     S3_FORCE_PATH_STYLE: bool = Field(default=True)
     S3_PUBLIC_URL: str = Field(default="")

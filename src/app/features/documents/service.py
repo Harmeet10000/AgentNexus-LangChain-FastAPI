@@ -7,10 +7,8 @@ import hashlib
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
-import orjson
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydantic import SecretStr
 
 from app.config import get_settings
 from app.connections import celery_app, init_db
@@ -39,6 +37,7 @@ from app.shared.langgraph_layer.retrieval_kb import (
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.services.storage import StorageService, build_s3_key, key_from_s3_uri
 from app.utils import NotFoundException, ServiceUnavailableException, ValidationException, logger
+from app.utils.json_serializer import from_json_float_list, to_float_list_str, to_sorted_key_bytes
 
 from .classification import classify_document, segment_chunks
 from .dto import (
@@ -326,7 +325,9 @@ class DocumentQueryService:
         settings: Settings = get_settings()
         llm = ChatGoogleGenerativeAI(
             model=settings.GEMINI_FLASH_MODEL,
-            api_key=SecretStr(settings.GEMINI_API_KEY) if settings.GEMINI_API_KEY else None,
+            api_key=settings.GEMINI_API_KEY.get_secret_value()
+            if settings.GEMINI_API_KEY.get_secret_value()
+            else None,
             temperature=0.1,
             retries=0,
         )
@@ -435,8 +436,8 @@ async def process_document_ingestion(
     if classified.graphiti_required:
         llm = ChatGoogleGenerativeAI(
             model=get_settings().GEMINI_FLASH_MODEL,
-            api_key=SecretStr(get_settings().GEMINI_API_KEY)
-            if get_settings().GEMINI_API_KEY
+            api_key=get_settings().GEMINI_API_KEY.get_secret_value()
+            if get_settings().GEMINI_API_KEY.get_secret_value()
             else None,
             temperature=0.1,
             retries=0,
@@ -547,7 +548,7 @@ async def run_document_ingestion_task(
     graphiti: Graphiti = await setup_graphiti(
         neo4j_uri=settings.NEO4J_URI,
         neo4j_user=settings.NEO4J_USERNAME,
-        neo4j_password=settings.NEO4J_PASSWORD,
+        neo4j_password=settings.NEO4J_PASSWORD.get_secret_value(),
     )
     await setup_graphiti_indices(graphiti)
     try:
@@ -767,13 +768,13 @@ async def _cached_embedding(
         cached = await redis.get(cache_key)
         if cached:
             raw = cached.decode("utf-8") if isinstance(cached, bytes) else str(cached)
-            return list(orjson.loads(raw))
+            return from_json_float_list(raw)
     embedding = await retry_immediate(
         lambda: embedding_fn.aembed_query(text_to_embed, task_type="RETRIEVAL_QUERY"),
         label="documents_query_embedding",
     )
     if redis is not None:
-        await redis.setex(cache_key, 60 * 60 * 24, orjson.dumps(embedding).decode("utf-8"))
+        await redis.setex(cache_key, 60 * 60 * 24, to_float_list_str(embedding))
     return _normalize_embedding(list(embedding))
 
 
@@ -827,7 +828,7 @@ def _build_search_items(
 
 def _build_cache_key(kind: str, payload: UnifiedSearchRequest) -> str:
     normalized_query = " ".join(payload.query.lower().split())
-    filter_json = orjson.dumps(payload.metadata_filter.model_dump(), option=orjson.OPT_SORT_KEYS)
+    filter_json = to_sorted_key_bytes(payload.metadata_filter.model_dump())
     raw = b"|".join(
         [
             kind.encode("utf-8"),
@@ -849,7 +850,7 @@ def _build_answer_cache_key(
     clause_type: str | None,
     require_graphiti_verified: bool,
 ) -> str:
-    raw = orjson.dumps(
+    raw = to_sorted_key_bytes(
         {
             "query": " ".join(query.lower().split()),
             "doc_ids_filter": sorted(doc_ids_filter),
@@ -858,7 +859,6 @@ def _build_answer_cache_key(
             "clause_type": clause_type,
             "require_graphiti_verified": require_graphiti_verified,
         },
-        option=orjson.OPT_SORT_KEYS,
     )
     return "documents:answer:" + hashlib.sha256(raw).hexdigest()
 

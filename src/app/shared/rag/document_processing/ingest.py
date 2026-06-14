@@ -461,10 +461,9 @@ class DocumentIngestionPipeline:
         logger.warning("Cleaning existing data from databases...")
 
         # Clean PostgreSQL
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute("DELETE FROM chunks")
-                await conn.execute("DELETE FROM documents")
+        async with db_pool.acquire() as conn, conn.transaction():
+            await conn.execute("DELETE FROM chunks")
+            await conn.execute("DELETE FROM documents")
 
         logger.info("Cleaned PostgreSQL database")
 

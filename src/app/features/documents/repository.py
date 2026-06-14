@@ -23,6 +23,7 @@ from app.shared.result import (
     NotFoundAppError,
     app_error_to_exception,
 )
+from app.utils import ErrorCode
 
 from .model import UnifiedChunk, UnifiedDocument
 
@@ -83,7 +84,7 @@ class DocumentRepository:
             if doc is None:
                 return Failure(
                     NotFoundAppError(
-                        code="DOCUMENT_NOT_FOUND",
+                        code=ErrorCode.DOCUMENT_NOT_FOUND,
                         message="Document not found for the given user and content hash",
                         details={"user_id": user_id, "content_hash": content_hash},
                         source="document_repository",
@@ -125,7 +126,7 @@ class DocumentRepository:
             if doc is None:
                 return Failure(
                     NotFoundAppError(
-                        code="DOCUMENT_NOT_FOUND",
+                        code=ErrorCode.DOCUMENT_NOT_FOUND,
                         message="Document not found for the given user and document ID",
                         details={"user_id": user_id, "document_id": document_id},
                         source="document_repository",
@@ -356,7 +357,7 @@ class DocumentRepository:
             if row is None:
                 return Failure(
                     NotFoundAppError(
-                        code="STATUS_NOT_FOUND",
+                        code=ErrorCode.STATUS_NOT_FOUND,
                         message="Status not found for the given document",
                         details={"user_id": user_id, "document_id": document_id},
                         source="document_repository",

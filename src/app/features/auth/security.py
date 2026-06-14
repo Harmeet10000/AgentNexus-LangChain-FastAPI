@@ -78,7 +78,7 @@ class TokenClaims(BaseModel):
 
 
 def _jwt_key() -> bytes:
-    return get_settings().JWT_SECRET_KEY.encode()
+    return get_settings().JWT_SECRET_KEY.get_secret_value().encode()
 
 
 def create_access_token(
@@ -195,7 +195,7 @@ _SUPPORTED_PROVIDERS = frozenset({"google", "github"})
 
 
 def _state_signer() -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(get_settings().OAUTH_STATE_SECRET)
+    return URLSafeTimedSerializer(get_settings().OAUTH_STATE_SECRET.get_secret_value())
 
 
 def sign_oauth_state(state: str, provider: str) -> str:
@@ -240,7 +240,7 @@ def get_oauth_config(provider: str) -> OAuthProviderConfig:
         case "google":
             return OAuthProviderConfig(
                 client_id=settings.GOOGLE_CLIENT_ID,
-                client_secret=settings.GOOGLE_CLIENT_SECRET,
+                client_secret=settings.GOOGLE_CLIENT_SECRET.get_secret_value(),
                 authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
                 token_endpoint="https://oauth2.googleapis.com/token",
                 scope="openid email profile",
@@ -249,7 +249,7 @@ def get_oauth_config(provider: str) -> OAuthProviderConfig:
         case "github":
             return OAuthProviderConfig(
                 client_id=settings.GITHUB_CLIENT_ID,
-                client_secret=settings.GITHUB_CLIENT_SECRET,
+                client_secret=settings.GITHUB_CLIENT_SECRET.get_secret_value(),
                 authorization_endpoint="https://github.com/login/oauth/authorize",
                 token_endpoint="https://github.com/login/oauth/access_token",
                 scope="read:user user:email",

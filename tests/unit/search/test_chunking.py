@@ -1,4 +1,4 @@
-from app.features.search.chunking import chunk_text
+from app.features.search import chunk_text
 
 
 def test_chunk_text_preserves_order_and_overlap() -> None:

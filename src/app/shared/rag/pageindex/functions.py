@@ -26,7 +26,7 @@ async def apage_index(
     """Run PageIndex document indexing without blocking the event loop."""
     runtime = config or PageIndexConfig()
     settings = get_settings()
-    api_key = runtime.api_key or settings.PAGEINDEX_API_KEY
+    api_key = runtime.api_key or settings.PAGEINDEX_API_KEY.get_secret_value()
     if not api_key:
         msg = "PAGEINDEX_API_KEY is required for PageIndex operations."
         logger.error(msg)

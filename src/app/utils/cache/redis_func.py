@@ -17,12 +17,12 @@ Use Case | Recommended Redis Type:
 
 from typing import Any
 
-import orjson
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from app.utils import logger
 from app.utils.exceptions import DatabaseException
+from app.utils.json_serializer import from_json, to_json_str
 
 type CacheKeyPart = str | int
 type CacheKey = CacheKeyPart | list[CacheKeyPart]
@@ -75,7 +75,7 @@ def get_cache_key(object_type: str, key: CacheKey) -> str:
 
 
 def serialize_data(value: Any) -> str:
-    """Serialize data to JSON string using orjson.
+    """Serialize data to JSON string.
 
     Args:
         value: Data to serialize
@@ -89,8 +89,7 @@ def serialize_data(value: Any) -> str:
     try:
         if isinstance(value, str):
             return value
-        # orjson returns bytes, decode to string
-        return orjson.dumps(value).decode("utf-8")
+        return to_json_str(value)
     except Exception as exc:
         raise _build_database_exception(
             detail=f"Failed to serialize data: {exc!s}",
@@ -99,7 +98,7 @@ def serialize_data(value: Any) -> str:
 
 
 def deserialize_data(value: str | bytes) -> Any:
-    """Deserialize JSON string using orjson.
+    """Deserialize JSON string.
 
     Args:
         value: JSON string or bytes
@@ -111,9 +110,7 @@ def deserialize_data(value: str | bytes) -> Any:
         DatabaseException: If deserialization fails
     """
     try:
-        if isinstance(value, bytes):
-            return orjson.loads(value)
-        return orjson.loads(value.encode("utf-8") if isinstance(value, str) else value)
+        return from_json(value) if isinstance(value, (str, bytes)) else value
     except Exception as exc:
         raise _build_database_exception(
             detail=f"Failed to deserialize data: {exc!s}",

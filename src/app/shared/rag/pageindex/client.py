@@ -57,9 +57,9 @@ class PageIndexChatConfig(BaseModel):
 def _get_sdk_client() -> pageindex.PageIndexClient:
     """Cached SDK client (handles pooling internally)."""
     settings = get_settings()  # or get_settings()
-    if not settings.PAGEINDEX_API_KEY:
+    if not settings.PAGEINDEX_API_KEY.get_secret_value():
         raise ValidationException("PAGEINDEX_API_KEY is required")
-    return pageindex.PageIndexClient(api_key=settings.PAGEINDEX_API_KEY)
+    return pageindex.PageIndexClient(api_key=settings.PAGEINDEX_API_KEY.get_secret_value())
 
 
 class PageIndexClient:

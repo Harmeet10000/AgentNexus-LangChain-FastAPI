@@ -24,7 +24,9 @@ async def init_neo4j() -> AsyncDriver:
     try:
         return AsyncGraphDatabase.driver(
             uri=settings.NEO4J_URI,
-            auth=basic_auth(user=settings.NEO4J_USERNAME, password=settings.NEO4J_PASSWORD),
+            auth=basic_auth(
+                user=settings.NEO4J_USERNAME, password=settings.NEO4J_PASSWORD.get_secret_value()
+            ),
             max_connection_pool_size=50,
             connection_acquisition_timeout=30,
             connection_timeout=15,

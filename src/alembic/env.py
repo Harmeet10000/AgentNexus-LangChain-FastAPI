@@ -11,7 +11,6 @@ from app.utils.logger import logger
 from database import Base
 
 # Import all models to register with Base.metadata
-from database.schemas import ChatMessage, ChatSession, DocumentVector
 
 # Alembic Config object
 config = context.config

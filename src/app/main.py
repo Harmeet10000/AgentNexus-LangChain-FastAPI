@@ -17,7 +17,7 @@ from .middleware import (
 )
 from .shared.langchain_layer import configure_langsmith
 from .shared.mcp import get_mcp_http_app, parse_mcp_http_transport
-from .utils import APIResponse, http_error, logger
+from .utils import APIResponse, ErrorCode, http_error, logger
 
 configure_langsmith()
 # Load environment variables
@@ -48,19 +48,19 @@ def create_app() -> FastAPI:
     SecurityMiddleware.configure_cors(app=app, config=guard_config)
 
     # 3. Compression (Performance optimization)
-    app.add_middleware(GZipMiddleware, minimum_size=15000, compresslevel=6)  # ty:ignore[invalid-argument-type]
+    app.add_middleware(GZipMiddleware, minimum_size=15000, compresslevel=6)
 
     # 4. Timeout (Prevent hanging requests)
     # app.add_middleware(TimeoutMiddleware, timeout_seconds=30)
 
     # 5. Security middleware (headers, rate limiting, penetration detection)
-    app.add_middleware(SecurityMiddleware, config=guard_config)  # ty:ignore[invalid-argument-type]
+    app.add_middleware(SecurityMiddleware, config=guard_config)
 
     # 6. Metrics collection (Monitor requests, including guard-blocked traffic)
-    # app.add_middleware(MetricsMiddleware, project_name="langchain-fastapi")  # ty:ignore[invalid-argument-type]
+    # app.add_middleware(MetricsMiddleware, project_name="langchain-fastapi")
 
     # 7. Request state logging (Keep tracing context alive for streaming responses)
-    app.add_middleware(RequestStateLoggingMiddleware)  # ty:ignore[invalid-argument-type]
+    app.add_middleware(RequestStateLoggingMiddleware)
 
     # ============================================================================
     # EXCEPTION HANDLERS (Register after middleware, before routes)
@@ -118,7 +118,7 @@ def create_app() -> FastAPI:
         return http_error(
             message=f"Can't find {request.url.path} on this server",
             status_code=status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
+            error_code=ErrorCode.NOT_FOUND,
             data={
                 "path": request.url.path,
                 "correlation_id": correlation_id,

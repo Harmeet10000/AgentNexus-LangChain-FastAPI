@@ -417,11 +417,14 @@ def build_fastapi_guard_config(settings: "Settings") -> SecurityConfig:
         "custom": None,
     }
     geo_ip_handler = None
-    if settings.FASTAPI_GUARD_IPINFO_TOKEN and (
-        settings.FASTAPI_GUARD_BLOCKED_COUNTRIES or settings.FASTAPI_GUARD_WHITELIST_COUNTRIES
+    ipinfo_token = settings.FASTAPI_GUARD_IPINFO_TOKEN
+    if (
+        ipinfo_token is not None
+        and ipinfo_token.get_secret_value()
+        and (settings.FASTAPI_GUARD_BLOCKED_COUNTRIES or settings.FASTAPI_GUARD_WHITELIST_COUNTRIES)
     ):
         geo_ip_handler = IPInfoManager(
-            token=settings.FASTAPI_GUARD_IPINFO_TOKEN,
+            token=ipinfo_token.get_secret_value(),
             db_path=Path("data/ipinfo/country_asn.mmdb"),
         )
 
