@@ -1,9 +1,9 @@
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from enum import IntEnum
 
+from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
@@ -22,8 +22,9 @@ class AcquireStatus(IntEnum):
     REJECT = 0
 
 
-@dataclass(slots=True, frozen=True)
-class CircuitBreakerSettings:
+class CircuitBreakerSettings(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     service_name: str
     failure_threshold: int = 5
     recovery_timeout_seconds: int = 60
@@ -38,8 +39,9 @@ class CircuitBreakerSettings:
         return self.probe_ttl_seconds * 1000
 
 
-@dataclass(slots=True, frozen=True)
-class CircuitBreakerKeys:
+class CircuitBreakerKeys(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     state: str
     failures: str
     timeout: str

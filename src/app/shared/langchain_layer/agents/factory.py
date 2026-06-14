@@ -41,11 +41,11 @@ Uses LangChain 1.0's `create_agent` with:
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
+from pydantic import BaseModel, ConfigDict, Field
 
 # from app.shared.langgraph_layer.agent_saul import BaseContext
 from ..models import _build_chat_model
@@ -66,12 +66,13 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class AgentSpec:
+class AgentSpec(BaseModel):
     """
     Declarative specification for a production agent.
     Pass to `create_production_agent`.
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # Identity
     name: str
@@ -83,12 +84,12 @@ class AgentSpec:
     max_tokens: int | None = None
 
     # Tools (names from registry, or BaseTool instances)
-    tools: list[str | BaseTool] = field(default_factory=list)
+    tools: list[str | BaseTool] = Field(default_factory=list)
 
     # Prompt
     system_prompt: str | SystemPromptParts | None = None
 
-    # Context schema (dataclass)
+    # Context schema
     context_schema: type | None = None
 
     # Structured output schema (Pydantic model), or None for text
@@ -107,7 +108,7 @@ class AgentSpec:
     messages_to_keep: int = 8
 
     # Additional middleware to inject
-    extra_middleware: list[Any] = field(default_factory=list)
+    extra_middleware: list[Any] = Field(default_factory=list)
 
     # LangGraph options
     debug: bool = False
@@ -189,14 +190,15 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class ProductionAgent:
+class ProductionAgent(BaseModel):
     """
     Wraps a compiled LangGraph agent with production runtime behaviour:
     - Long-term memory injection
     - Session saving
     - Async invoke, stream, and batch
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     spec: AgentSpec
     compiled: Any  # CompiledStateGraph

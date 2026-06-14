@@ -14,7 +14,6 @@ MemoryScope enforced at result level: post-traversal type filtering.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 
 from neo4j import Query
@@ -62,8 +61,9 @@ LIMIT $limit
 """
 
 
-@dataclass(frozen=True)
-class SubgraphNode:
+class SubgraphNode(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     uuid: str
     name: str
     group_id: str | None
@@ -71,16 +71,18 @@ class SubgraphNode:
     properties: dict[str, object]
 
 
-@dataclass(frozen=True)
-class SubgraphEdge:
+class SubgraphEdge(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     from_uuid: str
     to_uuid: str
     rel_type: str
     properties: dict[str, object]
 
 
-@dataclass(frozen=True)
-class SubgraphResult:
+class SubgraphResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     nodes: list[SubgraphNode]
     edges: list[SubgraphEdge]
     seed_uuids: list[str]

@@ -10,13 +10,13 @@ Lifespan callers must set:
     app.state.redis                 → redis.asyncio.Redis
 """
 
-from dataclasses import dataclass
 from typing import Annotated
 from uuid import uuid4
 
 from fastapi import Depends, Request, WebSocket, WebSocketException, status
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
+from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 
 from app.features.auth import (
@@ -70,13 +70,14 @@ async def get_websocket_security_service(websocket: WebSocket) -> WebSocketSecur
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class AgentSaulDeps:
+class AgentSaulDeps(BaseModel):
     """Narrow context object for Agent Saul dependencies.
 
     Typed against infra protocols so nodes remain decoupled from concrete
     client implementations in tests.
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     graph: CompiledStateGraph
     checkpointer: AsyncPostgresSaver

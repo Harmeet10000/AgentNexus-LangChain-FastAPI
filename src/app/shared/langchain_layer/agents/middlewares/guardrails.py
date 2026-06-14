@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from langchain.agents.middleware import (
@@ -16,6 +15,7 @@ from langchain.agents.middleware import (
     # wrap_tool_call,
 )
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.shared.langchain_layer.chains import build_guardrail_chain
 
@@ -28,8 +28,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class ModelRetryMiddleware:
+class ModelRetryMiddleware(BaseModel):
     """
     Retries the LLM call on failure with exponential back-off.
 
@@ -37,11 +36,13 @@ class ModelRetryMiddleware:
     retries up to max_retries on exception.
     """
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     max_retries: int = 2
     base_delay: float = 1.0
     retryable_exceptions: tuple[type[Exception], ...] = (Exception,)
 
-    def __post_init__(self):
+    def model_post_init(self, __context: object) -> None:
         @wrap_model_call
         async def _retry_wrapper(request, handler):
             for attempt in range(self.max_retries + 1):
@@ -71,8 +72,7 @@ class ModelRetryMiddleware:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class TodoListMiddleware:
+class TodoListMiddleware(BaseModel):
     """
     Maintains a persistent to-do list in agent state.
     Injects the current to-do list into the system prompt before each model call.
@@ -137,14 +137,13 @@ class TodoListMiddleware:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class ContextEditingMiddleware:
+class ContextEditingMiddleware(BaseModel):
     """
     Allows runtime editing of context: inject variables, redact PII,
     or transform messages before model sees them.
     """
 
-    redact_patterns: list[str] = field(default_factory=list)  # regex patterns
+    redact_patterns: list[str] = Field(default_factory=list)  # regex patterns
     inject_context_fn: Callable[[Any], dict[str, str]] | None = None
 
     def build(self):
@@ -194,8 +193,7 @@ class ContextEditingMiddleware:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class GuardrailMiddleware:
+class GuardrailMiddleware(BaseModel):
     """
     Model-based guardrails: evaluates the AI's response before returning it.
     On violation, replaces the response with a safe fallback.
@@ -259,11 +257,12 @@ class GuardrailMiddleware:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class DynamicSystemPromptMiddleware:
+class DynamicSystemPromptMiddleware(BaseModel):
     """
     Generates or modifies the system prompt at runtime based on context.
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     prompt_fn: Callable[[Any, Any], str]  # (state, context) -> system_prompt
 
