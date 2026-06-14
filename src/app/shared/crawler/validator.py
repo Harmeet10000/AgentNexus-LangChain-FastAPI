@@ -23,7 +23,7 @@ PRIVATE_IP_RANGES = [
     ipaddress.ip_network("ff00::/8"),  # IPv6 multicast
 ]
 
-BLOCKED_DOMAINS = {
+BLOCKED_DOMAINS: set[str] = {
     "localhost",
     "localhost.localdomain",
     "metadata.google.internal",
@@ -33,7 +33,7 @@ BLOCKED_DOMAINS = {
     "kubernetes.default.svc",
 }
 
-BLOCKED_HOSTNAME_PATTERNS = [
+BLOCKED_HOSTNAME_PATTERNS: list[str] = [
     r".*\.local$",
     r".*\.localhost$",
     r".*\.internal$",
@@ -46,7 +46,7 @@ BLOCKED_HOSTNAME_PATTERNS = [
 def is_private_ip(ip_str: str) -> bool:
     """Check if an IP address is private."""
     try:
-        ip = ipaddress.ip_address(ip_str)
+        ip: ipaddress.IPv4Address | ipaddress.IPv6Address = ipaddress.ip_address(ip_str)
         for network in PRIVATE_IP_RANGES:
             if ip in network:
                 return True
@@ -67,7 +67,7 @@ def validate_url(url: str) -> tuple[bool, str]:
 
     try:
         parsed = urlparse(url)
-    except Exception:
+    except ValueError:
         return False, "Invalid URL format"
 
     if not parsed.scheme:
@@ -90,12 +90,8 @@ def validate_url(url: str) -> tuple[bool, str]:
         if re.match(pattern, hostname):
             return False, f"Hostname '{hostname}' is not allowed"
 
-    try:
-        ip_str = parsed.hostname
-        if is_private_ip(ip_str):
-            return False, f"Private IP addresses are not allowed: {ip_str}"
-    except Exception:
-        pass
+    if is_private_ip(parsed.hostname):
+        return False, f"Private IP addresses are not allowed: {parsed.hostname}"
 
     port = parsed.port
     if port and port in (22, 23, 25, 3306, 5432, 6379, 27017, 11211):
