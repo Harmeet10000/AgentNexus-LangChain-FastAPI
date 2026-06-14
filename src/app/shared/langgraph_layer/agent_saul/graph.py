@@ -7,9 +7,16 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from app.shared.rag.graphiti.registry import ToolRegistry
+
 from .factory import SaulGraphNodes, _build_graph_nodes, build_agent_registry
-from .nodes import dispatch_entity_extraction, route_after_qna, route_from_orchestrator
-from .state import LegalAgentState
+from .nodes import (
+    dispatch_entity_extraction,
+    route_after_qna,
+    route_deep_research,
+    route_from_orchestrator,
+)
+from .state import LegalAgentInputState, LegalAgentOutputState, LegalAgentState
 
 
 def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
@@ -28,6 +35,7 @@ def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
     graph.add_node("human_review", nodes.human_review)
     graph.add_node("finalization", nodes.finalization)
     graph.add_node("persist_memory", nodes.persist_memory)
+    graph.add_node("deep_research", nodes.deep_research)
 
     graph.set_entry_point("gateway")
     graph.add_edge("gateway", "qna")
@@ -43,10 +51,16 @@ def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
             "planner": "planner",
             "ingestion": "ingestion",
             "finalization": "finalization",
+            "deep_research": "deep_research",
             END: END,
         },
     )
-    graph.add_edge("planner", "orchestrator")
+    graph.add_conditional_edges(
+        "planner",
+        route_deep_research,
+        {"deep_research": "deep_research", "orchestrator": "orchestrator"},
+    )
+    graph.add_edge("deep_research", "orchestrator")
     graph.add_edge("ingestion", "normalization")
     graph.add_edge("normalization", "segmentation")
     graph.add_conditional_edges("segmentation", dispatch_entity_extraction)
@@ -66,13 +80,19 @@ def build_saul_graph(
     pro_llm: BaseChatModel,
     flash_llm: BaseChatModel,
     cognee_client: Any,
+    tool_registry: ToolRegistry,
 ) -> CompiledStateGraph:
     """Build and compile the Agent Saul LangGraph."""
     registry = build_agent_registry(pro_llm, flash_llm)
-    nodes = _build_graph_nodes(registry=registry, pro_llm=pro_llm, cognee_client=cognee_client)
+    nodes = _build_graph_nodes(
+        registry=registry,
+        pro_llm=pro_llm,
+        cognee_client=cognee_client,
+        tool_registry=tool_registry,
+    )
 
     state_graph_factory = cast("Any", StateGraph)
-    graph: Any = state_graph_factory(LegalAgentState)
+    graph: Any = state_graph_factory(LegalAgentState, input_schema=LegalAgentInputState, output_schema=LegalAgentOutputState)
     _wire_graph(graph=graph, nodes=nodes)
 
     return cast("CompiledStateGraph", graph.compile(checkpointer=checkpointer))

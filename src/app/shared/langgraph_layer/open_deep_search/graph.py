@@ -38,6 +38,7 @@ from .state import (
     ResearcherOutputState,
     ResearcherState,
     ResearchQuestion,
+    SupervisorOutputState,
     SupervisorState,
 )
 from .utils import (
@@ -261,7 +262,7 @@ async def supervisor_tools(
 
 
 state_graph_factory = cast("Any", StateGraph)
-supervisor_builder = state_graph_factory(SupervisorState, context_schema=Configuration)
+supervisor_builder = state_graph_factory(SupervisorState, output_schema=SupervisorOutputState, context_schema=Configuration)
 supervisor_builder.add_node("supervisor", supervisor)
 supervisor_builder.add_node("supervisor_tools", supervisor_tools)
 supervisor_builder.add_edge(START, "supervisor")

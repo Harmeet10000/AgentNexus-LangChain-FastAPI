@@ -4,10 +4,10 @@ Document ingestion pipeline for processing documents into vector DB.
 Function-based architecture with factory functions for dependency injection.
 """
 
-import glob
 import json
-import os
 from datetime import datetime
+from os.path import relpath
+from pathlib import Path
 from typing import Any
 
 from app.utils.logger import logger as loguru_logger
@@ -19,7 +19,7 @@ from .models import IngestionConfig, IngestionResult
 
 def find_document_files(documents_folder: str) -> list[str]:
     """Find all supported document files in the documents folder."""
-    if not os.path.exists(documents_folder):
+    if not Path(documents_folder).exists():
         loguru_logger.error(f"Documents folder not found: {documents_folder}")
         return []
 
@@ -45,7 +45,7 @@ def find_document_files(documents_folder: str) -> list[str]:
     files = []
 
     for pattern in patterns:
-        files.extend(glob.glob(os.path.join(documents_folder, "**", pattern), recursive=True))
+        files.extend(str(p) for p in Path(documents_folder).glob(f"**/{pattern}"))
 
     return sorted(files)
 
@@ -58,7 +58,7 @@ def extract_title(content: str, file_path: str) -> str:
         if line.startswith("# "):
             return line[2:].strip()
 
-    return os.path.splitext(os.path.basename(file_path))[0]
+    return Path(file_path).stem
 
 
 def extract_document_metadata(content: str, file_path: str) -> dict[str, Any]:
@@ -99,7 +99,7 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
     Returns:
         Tuple of (markdown_content, docling_document)
     """
-    file_ext = os.path.splitext(file_path)[1].lower()
+    file_ext = Path(file_path).suffix.lower()
 
     # Audio formats - transcribe with Whisper ASR
     audio_formats = [".mp3", ".wav", ".m4a", ".flac"]
@@ -117,14 +117,14 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
             from docling.document_converter import DocumentConverter
 
             loguru_logger.info(
-                f"Converting {file_ext} file using Docling: {os.path.basename(file_path)}"
+                f"Converting {file_ext} file using Docling: {Path(file_path).name}"
             )
 
             converter = DocumentConverter()
             result = converter.convert(file_path)
 
             markdown_content = result.document.export_to_markdown()
-            loguru_logger.info(f"Successfully converted {os.path.basename(file_path)} to markdown")
+            loguru_logger.info(f"Successfully converted {Path(file_path).name} to markdown")
 
             return (markdown_content, result.document)
 
@@ -134,7 +134,7 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
                 with open(file_path, encoding="utf-8") as f:
                     return (f.read(), None)
             except Exception:
-                return (f"[Error: Could not read file {os.path.basename(file_path)}]", None)
+                return (f"[Error: Could not read file {Path(file_path).name}]", None)
 
     # Text-based formats
     else:
@@ -170,7 +170,7 @@ async def ingest_single_document(
 
     document_content, docling_doc = await read_document(file_path)
     document_title = extract_title(document_content, file_path)
-    document_source = os.path.relpath(file_path, "documents")
+    document_source = relpath(file_path, "documents")
     document_metadata = extract_document_metadata(document_content, file_path)
 
     loguru_logger.info(f"Processing document: {document_title}")
@@ -351,7 +351,7 @@ async def ingest_documents(
             results.append(
                 IngestionResult(
                     document_id="",
-                    title=os.path.basename(file_path),
+                    title=Path(file_path).name,
                     chunks_created=0,
                     processing_time_ms=0,
                     errors=[str(e)],

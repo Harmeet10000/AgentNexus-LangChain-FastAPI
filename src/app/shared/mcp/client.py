@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from contextlib import suppress
-from functools import lru_cache
+from functools import cache
 from typing import TYPE_CHECKING
 
 from fastmcp import Client
@@ -281,7 +281,7 @@ class MCPClientManager:
         set_mcp_upstream_health(server_name, True)
 
 
-@lru_cache(maxsize=1)
+@cache
 def get_mcp_client_manager() -> MCPClientManager:
     if not get_settings().MCP_CLIENT_ENABLED:
         return MCPClientManager(server_configs=[])

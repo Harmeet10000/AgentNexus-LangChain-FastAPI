@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from functools import lru_cache
+from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import FastAPI
@@ -338,7 +338,7 @@ def _register_tools(server: Any) -> None:
             return await _timed_tool("list_upstream_servers", _handler)
 
 
-@lru_cache(maxsize=1)
+@cache
 def get_mcp_server() -> Any:
     server = FastMCP(name=_server_name(), instructions=_instructions())
     _register_tools(server)

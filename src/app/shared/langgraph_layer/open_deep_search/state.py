@@ -102,6 +102,15 @@ class ResearcherState(TypedDict):
     raw_notes: Annotated[list[str], override_reducer]
 
 
+class SupervisorOutputState(BaseModel):
+    """Output state from the supervisor subgraph."""
+
+    supervisor_messages: list[MessageLikeRepresentation]
+    research_brief: str
+    notes: list[str] = []
+    raw_notes: list[str] = []
+
+
 class ResearcherOutputState(BaseModel):
     """Output state from individual researchers."""
 

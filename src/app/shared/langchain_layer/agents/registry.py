@@ -7,7 +7,7 @@ Each agent is a module-level singleton, lazy-initialised on first use.
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from typing import TYPE_CHECKING
 
 from langchain_core.tools import tool
@@ -81,7 +81,7 @@ class CodeReviewOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-@lru_cache(maxsize=1)
+@cache
 def get_research_agent() -> ProductionAgent:
     spec = AgentSpec(
         name="research_agent",
