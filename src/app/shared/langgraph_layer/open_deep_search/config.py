@@ -65,12 +65,13 @@ def build_open_deep_search_config(
     metadata: dict[str, Any] | None = None,
     tags: list[str] | None = None,
 ) -> RunnableConfig:
-    """Build graph config with the lifespan-owned HTTPX client attached."""
+    """Build graph config with lifespan-owned clients attached."""
     return RunnableConfig(
         configurable={
             "thread_id": thread_id,
             "httpx_client": request.app.state.httpx_client,
             "tavily_http_client": getattr(request.app.state, "tavily_http_client", None),
+            "crawl4ai_crawler": getattr(request.app.state, "crawl4ai_crawler", None),
             **(configurable or {}),
         },
         metadata=metadata or {},

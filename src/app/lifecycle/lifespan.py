@@ -28,6 +28,8 @@ from app.features.documents.readiness import run_document_startup_checks
 from app.middleware import initialize_fastapi_guard
 
 # from app.shared import get_mcp_client_manager
+from crawl4ai import AsyncWebCrawler, BrowserConfig
+
 from app.shared.langchain_layer.agents.memory import setup_cognee
 from app.shared.langgraph_layer.checkpointer import teardown_langgraph_checkpointer
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
@@ -156,6 +158,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
     # Initialize Tavily HTTP client
     app.state.tavily_http_client = await create_tavily_http_client()
     logger.info("Tavily HTTP client initialized")
+
+    # Initialize Crawl4AI browser
+    try:
+        crawl4ai_crawler = AsyncWebCrawler(config=BrowserConfig(headless=True))
+        await crawl4ai_crawler.start()
+        app.state.crawl4ai_crawler = crawl4ai_crawler
+        logger.info("Crawl4AI browser initialized")
+    except Exception:
+        logger.exception("Crawl4AI browser startup failed, continuing without crawl capability")
+        app.state.crawl4ai_crawler = None
     settings = get_settings()
     app.state.object_store = StorageService.from_settings(settings=settings)
     await run_document_startup_checks(
@@ -211,6 +223,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
 
     if hasattr(app.state, "graphiti"):
         await close_graphiti(app.state.graphiti)
+
+    if hasattr(app.state, "crawl4ai_crawler") and app.state.crawl4ai_crawler is not None:
+        await app.state.crawl4ai_crawler.close()
 
     # MongoDB close is synchronous - run outside TaskGroup
     if hasattr(app.state, "mongo_client"):

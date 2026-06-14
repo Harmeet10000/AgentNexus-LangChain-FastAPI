@@ -43,6 +43,17 @@ if TYPE_CHECKING:
 # Factory: Setup Cognee with Neo4j + Postgres
 # ---------------------------------------------------------------------------
 
+#  TODO: add this VECTOR_DB_PROVIDER=pgvector
+# # LLM
+# LLM_PROVIDER = "gemini"
+# LLM_MODEL = "gemini/gemini-flash-latest"
+# LLM_API_KEY = "your_gemini_api_key"
+
+# Embeddings
+# EMBEDDING_PROVIDER = "gemini"
+# EMBEDDING_MODEL = "gemini/gemini-embedding-001"
+# EMBEDDING_API_KEY = "your_gemini_api_key"
+
 
 async def setup_cognee(settings: Settings) -> dict:
     """Configure Cognee to use the same Neo4j + Postgres as the app.

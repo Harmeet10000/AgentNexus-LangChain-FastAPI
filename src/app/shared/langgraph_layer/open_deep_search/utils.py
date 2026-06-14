@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast  # noqa: TC003
 
 import httpx
+from crawl4ai import CacheMode, CrawlerRunConfig
+from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from langchain_core.messages import AIMessage, HumanMessage, filter_messages
 from langchain_core.runnables import RunnableConfig  # noqa: TC002
 from langchain_core.tools import InjectedToolArg, tool
 
-from app.shared.langchain_layer.models import _build_chat_model
+from app.shared.crawler import sanitize_url, validate_url
+from app.shared.langchain_layer import _build_chat_model
 from app.shared.services import search
 from app.utils import ExternalServiceException, logger
 
@@ -148,6 +152,14 @@ def _get_httpx_client_from_config(config: RunnableConfig | None) -> httpx.AsyncC
     return None
 
 
+def _get_crawl4ai_crawler_from_config(config: RunnableConfig | None) -> Any:
+    """Read the lifespan-owned Crawl4AI AsyncWebCrawler from RunnableConfig when present."""
+    if not config:
+        return None
+    configurable = config.get("configurable", {})
+    return configurable.get("crawl4ai_crawler")
+
+
 async def summarize_webpage(model: Any, webpage_content: str) -> str:
     """Summarize webpage content with timeout protection."""
     try:
@@ -174,6 +186,57 @@ async def summarize_webpage(model: Any, webpage_content: str) -> str:
         return webpage_content
 
 
+CRAWL_WEBPAGE_DESCRIPTION = (
+    "Crawl a single URL with a headless browser to extract its full rendered markdown content. "
+    "Use this when you need deeper content from a specific URL than Tavily's summary provides, "
+    "when the target page requires JavaScript rendering, or when a user explicitly provides a URL."
+)
+
+
+@tool(description=CRAWL_WEBPAGE_DESCRIPTION)
+async def crawl_webpage(
+    url: str,
+    config: RunnableConfig | None = None,
+) -> str:
+    """Fetch and return rendered markdown content from a URL using Crawl4AI."""
+    url = sanitize_url(url)
+    is_valid, error_msg = validate_url(url)
+    if not is_valid:
+        return f"Error: cannot crawl URL — {error_msg}"
+
+    crawler = _get_crawl4ai_crawler_from_config(config)
+    if crawler is None:
+        return "Error: Crawl4AI browser is not available (not configured or failed to start)"
+
+    start_time = time.time()
+    try:
+        run_config = CrawlerRunConfig(
+            markdown_generator=DefaultMarkdownGenerator(),
+            cache_mode=CacheMode.BYPASS,
+        )
+        result = await crawler.arun(url=url, config=run_config)
+    except TimeoutError:
+        return f"Error crawling {url}: Crawl timeout"
+    except Exception as exc:  # noqa: BLE001 - Crawl4AI may wrap varied browser/network errors.
+        return f"Error crawling {url}: {exc!s}"
+
+    elapsed = int((time.time() - start_time) * 1000)
+    if result.success:
+        markdown = result.markdown.raw_markdown if result.markdown else None
+        word_count = len(markdown.split()) if markdown else 0
+        title = result.metadata.get("title") if result.metadata else None
+
+        parts = [f"Crawl result for: {result.url}"]
+        if title:
+            parts.append(f"Title: {title}")
+        parts.append(f"Words: {word_count} | Time: {elapsed}ms")
+        parts.append("")
+        parts.append(markdown or "(no content extracted)")
+        return "\n".join(parts)
+
+    return f"Error crawling {url}: {result.error_message or 'Unknown error'} ({elapsed}ms)"
+
+
 @tool(description="Strategic reflection tool for research planning")
 def think_tool(reflection: str) -> str:
     """Record a short reflection before deciding whether to search again."""
@@ -181,7 +244,7 @@ def think_tool(reflection: str) -> str:
 
 
 async def get_all_tools(config: RunnableConfig | None = None) -> list[BaseTool]:
-    """Assemble Tavily-only research tools."""
+    """Assemble research tools (Tavily search + Crawl4AI + reflection)."""
     _ = config
     search_tool = tavily_search
     search_tool.metadata = {
@@ -189,7 +252,13 @@ async def get_all_tools(config: RunnableConfig | None = None) -> list[BaseTool]:
         "type": "search",
         "name": "web_search",
     }
-    return [tool(ResearchComplete), think_tool, search_tool]
+    crawl_tool = crawl_webpage
+    crawl_tool.metadata = {
+        **(crawl_tool.metadata or {}),
+        "type": "crawl",
+        "name": "crawl_webpage",
+    }
+    return [tool(ResearchComplete), think_tool, search_tool, crawl_tool]
 
 
 def get_notes_from_tool_calls(messages: list[MessageLikeRepresentation]) -> list[str]:

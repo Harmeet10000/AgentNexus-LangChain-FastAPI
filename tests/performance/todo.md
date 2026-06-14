@@ -178,7 +178,8 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 191. check which will live in connection.app.state and which will live in app.state   DONE
 189. check for writing error messages should i write then in StrEnum, string variable   DONE
 181. how to use git when something is made then to use some commands on it while having another session work on the previous stuff when unrelated chnages have to be made. check what skills can help here    DONE
-192. make a plan to migrate from orjson, serializing generic Python data (like a dict or list that isn't a Pydantic model to model.model_dump_json():  TypeAdapter.dump_json() with reuable functions    DONE
+192. make a plan to migrate from orjson, serializing generic Python data like a dict or list that isn't a Pydantic model to model.model_dump_json():  TypeAdapter.dump_json() with reuable functions    DONE
+178. From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on wont be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation. [cognee.shared.logging_utils]  and also migrate to veriosn 1.1    DONE
 
 146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note and also check if i am right in passong HTTPException to APIException and other classes        DELAYED
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
@@ -213,7 +214,7 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 todos:-
     1. toons reusable , point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
     a. docling - Legal docs need hierarchical chunking, convert dataclass to pydantic models, use embedders(batch, chunks, etc) to reusable function in langchain_layer, remove Grapgiti initilisation from here
-    b. langextract point 136
+    b. langextract and pageindex
     c. graphiti refactor
     d. postgres RAG should be agentic
     e. celery for off loading to a queue
@@ -239,10 +240,6 @@ todos:-
 176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
 
 179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
-
-
- 
-
 184. You correctly called out that documents/chunks should be the sole retrieval truth.
 But a lot of current Agent Saul / precedent / reconciliation code still reads clauses directly.
 Do you want me to:
@@ -255,16 +252,17 @@ type Composable = Callable[[Any], Any]
 
 
 def compose(*functions: Composable) -> Composable:
-    def apply(value: Any, fn: Composable) -> Any:
+    def apply(value: Any, fn: Composable) -> Any:add headroom-ai for comrpression
         return fn(value)
 
     return lambda data: reduce(apply, functions, data)
 
-178. From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on wont be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation. [cognee.shared.logging_utils]  and also migrate to veriosn 1.1
 183. scrapling vs crawl4ai, add crawl4ai in open_deep_search graph with proper plan and specs with openspec, add headroom-ai for comrpression
+193. check if client of these cognee, grapgiti, langextract, pageindex, tavilty, fastMCP, crawl4ai needs to be in connections and then in lifespan
+194. add headroom-ai for comrpression
 ```
 
---- summarise these chapters in great detail and take video's transcript as reference for summarising
+summarise these chapters in great detail and take video's transcript as reference for summarising
 
 summarise this video in great detail and depth by dividing it into 5 minute chunk and take video's transcript as reference for summarising
 

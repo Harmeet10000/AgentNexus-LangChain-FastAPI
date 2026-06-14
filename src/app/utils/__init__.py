@@ -86,5 +86,5 @@ __all__ = [
     "to_json_bytes",
     "to_json_str",
     "to_sorted_key_bytes",
-    "trace_layer"
+    "trace_layer",
 ]

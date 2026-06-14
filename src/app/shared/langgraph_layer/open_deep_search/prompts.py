@@ -72,11 +72,11 @@ _RESEARCH_SYSTEM_PROMPT = render_prompt_sections(
     ),
     (
         "EXECUTION POLICY",
-        "Start with broader searches, then narrow only to fill important gaps. Use think_tool after each search to assess results and plan next steps. Do not call think_tool in parallel with tavily_search or any other tool. Stop when you can answer confidently rather than searching for perfection.",
+        "Start with broader searches, then narrow only to fill important gaps. Use think_tool after each search to assess results and plan next steps. Do not call think_tool in parallel with tavily_search or any other tool. Use tavily_search when you need to discover relevant pages from a general query. Use crawl_webpage when you already have a specific URL and need the full page content. Stop when you can answer confidently rather than searching for perfection.",
     ),
     (
         "CONSTRAINTS",
-        "Use 2 to 3 search calls for simple queries and up to 5 for complex queries. Stop immediately when you can answer comprehensively, when you have at least three relevant sources or examples, or when the last two searches returned similar information.",
+        "Use 2 to 3 search calls for simple queries and up to 5 for complex queries. Use crawl_webpage sparingly — only when a specific URL from search results appears to contain critical detail. Stop immediately when you can answer comprehensively, when you have at least three relevant sources or examples, or when the last two searches returned similar information.",
     ),
 )
 
