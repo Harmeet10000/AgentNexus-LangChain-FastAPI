@@ -4,11 +4,11 @@ Main ingestion script for processing markdown documents into vector DB and knowl
 
 import argparse
 import asyncio
-import glob
 import json
 import logging
-import os
 from datetime import datetime
+from os.path import relpath
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -116,7 +116,7 @@ class DocumentIngestionPipeline:
                 results.append(
                     IngestionResult(
                         document_id="",
-                        title=os.path.basename(file_path),
+                        title=Path(file_path).name,
                         chunks_created=0,
                         entities_extracted=0,
                         relationships_created=0,
@@ -150,7 +150,7 @@ class DocumentIngestionPipeline:
         # Read document (returns tuple: content, docling_doc)
         document_content, docling_doc = self._read_document(file_path)
         document_title = self._extract_title(document_content, file_path)
-        document_source = os.path.relpath(file_path, self.documents_folder)
+        document_source = relpath(file_path, self.documents_folder)
 
         # Extract metadata from content
         document_metadata = self._extract_document_metadata(document_content, file_path)
@@ -217,7 +217,7 @@ class DocumentIngestionPipeline:
 
     def _find_document_files(self) -> list[str]:
         """Find all supported document files in the documents folder."""
-        if not os.path.exists(self.documents_folder):
+        if not Path(self.documents_folder).exists():
             logger.error(f"Documents folder not found: {self.documents_folder}")
             return []
 
@@ -244,7 +244,7 @@ class DocumentIngestionPipeline:
 
         for pattern in patterns:
             files.extend(
-                glob.glob(os.path.join(self.documents_folder, "**", pattern), recursive=True)
+                str(p) for p in Path(self.documents_folder).glob(f"**/{pattern}")
             )
 
         return sorted(files)
@@ -257,7 +257,7 @@ class DocumentIngestionPipeline:
             Tuple of (markdown_content, docling_document)
             docling_document is None for text files and audio files
         """
-        file_ext = os.path.splitext(file_path)[1].lower()
+        file_ext = Path(file_path).suffix.lower()
 
         # Audio formats - transcribe with Whisper ASR
         audio_formats = [".mp3", ".wav", ".m4a", ".flac"]
@@ -283,7 +283,7 @@ class DocumentIngestionPipeline:
                 from docling.document_converter import DocumentConverter
 
                 logger.info(
-                    f"Converting {file_ext} file using Docling: {os.path.basename(file_path)}"
+                    f"Converting {file_ext} file using Docling: {Path(file_path).name}"
                 )
 
                 converter = DocumentConverter()
@@ -291,7 +291,7 @@ class DocumentIngestionPipeline:
 
                 # Export to markdown for consistent processing
                 markdown_content = result.document.export_to_markdown()
-                logger.info(f"Successfully converted {os.path.basename(file_path)} to markdown")
+                logger.info(f"Successfully converted {Path(file_path).name} to markdown")
 
                 # Return both markdown and DoclingDocument for HybridChunker
                 return (markdown_content, result.document)
@@ -305,7 +305,7 @@ class DocumentIngestionPipeline:
                         return (f.read(), None)
                 except:
                     return (
-                        f"[Error: Could not read file {os.path.basename(file_path)}]",
+                        f"[Error: Could not read file {Path(file_path).name}]",
                         None,
                     )
 
@@ -322,8 +322,6 @@ class DocumentIngestionPipeline:
     def _transcribe_audio(self, file_path: str) -> str:
         """Transcribe audio file using Whisper ASR via Docling."""
         try:
-            from pathlib import Path
-
             from docling.datamodel import asr_model_specs
             from docling.datamodel.base_models import InputFormat
             from docling.datamodel.pipeline_options import AsrPipelineOptions
@@ -357,12 +355,12 @@ class DocumentIngestionPipeline:
 
             # Export to markdown with timestamps
             markdown_content = result.document.export_to_markdown()
-            logger.info(f"Successfully transcribed {os.path.basename(file_path)}")
+            logger.info(f"Successfully transcribed {Path(file_path).name}")
             return markdown_content
 
         except Exception as e:
             logger.error(f"Failed to transcribe {file_path} with Whisper ASR: {e}")
-            return f"[Error: Could not transcribe audio file {os.path.basename(file_path)}]"
+            return f"[Error: Could not transcribe audio file {Path(file_path).name}]"
 
     def _extract_title(self, content: str, file_path: str) -> str:
         """Extract title from document content or filename."""
@@ -374,7 +372,7 @@ class DocumentIngestionPipeline:
                 return line[2:].strip()
 
         # Fallback to filename
-        return os.path.splitext(os.path.basename(file_path))[0]
+        return Path(file_path).stem
 
     def _extract_document_metadata(self, content: str, file_path: str) -> dict[str, Any]:
         """Extract metadata from document content."""

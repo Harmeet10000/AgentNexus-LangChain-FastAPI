@@ -1,20 +1,24 @@
 """Tavily search client initialization and dependency injection."""
 
-from functools import lru_cache
+from functools import cache
+from typing import TYPE_CHECKING
 
 import httpx
 from fastapi.requests import HTTPConnection
 
 from app.config import get_settings
 
+if TYPE_CHECKING:
+    from app.config.settings import Settings
 
-@lru_cache(maxsize=1)
+
+@cache
 def get_shared_tavily_http_client() -> httpx.AsyncClient:
     """Return a process-wide async HTTPX client for Tavily requests.
 
     Used for non-request runtimes like background tasks and Celery workers.
     """
-    settings = get_settings()
+    settings: Settings = get_settings()
     return httpx.AsyncClient(
         base_url=settings.TAVILY_BASE_URL.rstrip("/"),
         timeout=httpx.Timeout(settings.TAVILY_TIMEOUT_SECONDS),

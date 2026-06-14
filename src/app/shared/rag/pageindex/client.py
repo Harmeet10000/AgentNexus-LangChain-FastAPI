@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 
 import pageindex
 from asyncer import asyncify
@@ -53,7 +53,7 @@ class PageIndexChatConfig(BaseModel):
     additional_kwargs: dict[str, object] = Field(default_factory=dict)
 
 
-@lru_cache(maxsize=1)
+@cache
 def _get_sdk_client() -> pageindex.PageIndexClient:
     """Cached SDK client (handles pooling internally)."""
     settings = get_settings()  # or get_settings()

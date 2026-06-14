@@ -1,6 +1,6 @@
 # src/settings.py
 
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 from pydantic import Field, SecretStr
@@ -297,8 +297,7 @@ class Settings(BaseSettings):
     OTEL_METRICS_EXPORTER: str = Field(default="otlp")
 
 
-@lru_cache(maxsize=1)
+@cache
 def get_settings() -> Settings:
     """Returns a cached instance of the application settings."""
-    # Instantiating the class here ensures it's only done once (due to @lru_cache)
     return Settings()

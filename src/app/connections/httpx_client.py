@@ -1,11 +1,14 @@
 """HTTPX client with optimal performance settings."""
-
-from functools import lru_cache
+from functools import cache
+from typing import TYPE_CHECKING
 
 import httpx
 from fastapi.requests import HTTPConnection
 
 from app.config import get_settings
+
+if TYPE_CHECKING:
+    from app.config.settings import Settings
 
 
 def create_httpx_client() -> httpx.AsyncClient:
@@ -18,7 +21,7 @@ def create_httpx_client() -> httpx.AsyncClient:
     - Automatic retries with exponential backoff
     - Request/response compression
     """
-    settings = get_settings()
+    settings: Settings = get_settings()
 
     return httpx.AsyncClient(
         # HTTP/2 for multiplexing (THE secret weapon)
@@ -52,7 +55,7 @@ def create_httpx_client() -> httpx.AsyncClient:
     )
 
 
-@lru_cache(maxsize=1)
+@cache
 def get_shared_httpx_client() -> httpx.AsyncClient:
     """Return a process-wide async HTTPX client for non-request runtimes."""
     return create_httpx_client()

@@ -9,12 +9,13 @@ and pass that client into these functions.
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from collections.abc import Awaitable
 from datetime import UTC, datetime
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
+
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -40,29 +41,21 @@ IDEMPOTENCY_NAMESPACE = "celery:idempotency"
 CIRCUIT_BREAKER_NAMESPACE = "celery:circuit"
 
 
-class IdempotencyRecord(TypedDict):
+class IdempotencyRecord(BaseModel, frozen=True):
     """Serialized idempotency record stored in Redis."""
 
     status: IdempotencyStatus
-    task_id: str | None
+    task_id: str | None = None
     updated_at: str
     metadata: JsonMetadata
 
 
-class CircuitBreakerState(TypedDict):
+class CircuitBreakerState(BaseModel, frozen=True):
     """Circuit breaker state snapshot."""
 
-    state: str
-    failures: int
-    opened_at: float | None
-
-
-class RawCircuitBreakerState(TypedDict, total=False):
-    """Partially validated state loaded from Redis."""
-
-    state: object
-    failures: object
-    opened_at: object
+    state: str = "closed"
+    failures: int = 0
+    opened_at: float | None = None
 
 
 class CircuitBreakerOpenError(RuntimeError):
@@ -91,61 +84,13 @@ def serialize_idempotency_record(
     updated_at: str | None = None,
     metadata: JsonMetadata | None = None,
 ) -> str:
-    record: IdempotencyRecord = {
-        "status": status,
-        "task_id": task_id,
-        "updated_at": updated_at or datetime.now(tz=UTC).isoformat(),
-        "metadata": metadata or {},
-    }
-    return json.dumps(record)
-
-
-def parse_idempotency_status(value: object) -> IdempotencyStatus | None:
-    if value in {PROCESSING_STATUS, COMPLETED_STATUS, FAILED_PERMANENT_STATUS}:
-        return cast("IdempotencyStatus", value)
-    return None
-
-
-def default_circuit_breaker_state() -> CircuitBreakerState:
-    return {"state": "closed", "failures": 0, "opened_at": None}
-
-
-def parse_circuit_breaker_state(payload: str) -> CircuitBreakerState:
-    data = cast("RawCircuitBreakerState", json.loads(payload))
-    opened_at = data.get("opened_at")
-    failures = data.get("failures", 0)
-    return {
-        "state": str(data.get("state", "closed")),
-        "failures": int(cast("int | float | str", failures)),
-        "opened_at": float(cast("int | float | str", opened_at)) if opened_at is not None else None,
-    }
-
-
-def build_open_circuit_breaker_state(failures: int) -> CircuitBreakerState:
-    return {
-        "state": "open",
-        "failures": failures,
-        "opened_at": time.time(),
-    }
-
-
-def build_closed_circuit_breaker_state(failures: int) -> CircuitBreakerState:
-    return {
-        "state": "closed",
-        "failures": failures,
-        "opened_at": None,
-    }
-
-
-def build_half_open_circuit_breaker_state(
-    failures: int,
-    opened_at: float | None,
-) -> CircuitBreakerState:
-    return {
-        "state": "half_open",
-        "failures": failures,
-        "opened_at": opened_at,
-    }
+    record = IdempotencyRecord(
+        status=status,
+        task_id=task_id,
+        updated_at=updated_at if updated_at is not None else datetime.now(tz=UTC).isoformat(),
+        metadata=metadata or {},
+    )
+    return record.model_dump_json()
 
 
 def acquire_idempotency_lock(
@@ -243,8 +188,8 @@ def get_idempotency_status(
     if not payload:
         return None
 
-    parsed = cast("IdempotencyRecord", json.loads(payload))
-    return parse_idempotency_status(parsed.get("status"))
+    record = IdempotencyRecord.model_validate_json(payload)
+    return record.status
 
 
 def build_circuit_breaker_key(
@@ -266,8 +211,8 @@ def get_circuit_breaker_state(
         run_redis_call(redis_client.get(build_circuit_breaker_key(name, namespace=namespace))),
     )
     if not payload:
-        return default_circuit_breaker_state()
-    return parse_circuit_breaker_state(payload)
+        return CircuitBreakerState()
+    return CircuitBreakerState.model_validate_json(payload)
 
 
 def set_circuit_breaker_state(
@@ -281,7 +226,7 @@ def set_circuit_breaker_state(
     run_redis_call(
         redis_client.set(
             name=build_circuit_breaker_key(name, namespace=namespace),
-            value=json.dumps(state),
+            value=state.model_dump_json(),
             ex=recovery_timeout_seconds * 2,
         )
     )
@@ -295,20 +240,17 @@ def is_circuit_breaker_open(
     namespace: str = CIRCUIT_BREAKER_NAMESPACE,
 ) -> bool:
     state = get_circuit_breaker_state(redis_client, name, namespace=namespace)
-    if state["state"] != "open" or state["opened_at"] is None:
+    if state.state != "open" or state.opened_at is None:
         return False
 
-    elapsed = time.time() - state["opened_at"]
+    elapsed = time.time() - state.opened_at
     if elapsed < recovery_timeout_seconds:
         return True
 
     set_circuit_breaker_state(
         redis_client,
         name,
-        build_half_open_circuit_breaker_state(
-            failures=state["failures"],
-            opened_at=state["opened_at"],
-        ),
+        CircuitBreakerState(state="half_open", failures=state.failures, opened_at=state.opened_at),
         recovery_timeout_seconds=recovery_timeout_seconds,
         namespace=namespace,
     )
@@ -333,13 +275,13 @@ def record_circuit_breaker_failure(
     namespace: str = CIRCUIT_BREAKER_NAMESPACE,
 ) -> None:
     state = get_circuit_breaker_state(redis_client, name, namespace=namespace)
-    failures = state["failures"] + 1
+    failures = state.failures + 1
 
     if failures >= failure_threshold:
         set_circuit_breaker_state(
             redis_client,
             name,
-            build_open_circuit_breaker_state(failures),
+            CircuitBreakerState(state="open", failures=failures, opened_at=time.time()),
             recovery_timeout_seconds=recovery_timeout_seconds,
             namespace=namespace,
         )
@@ -348,7 +290,7 @@ def record_circuit_breaker_failure(
     set_circuit_breaker_state(
         redis_client,
         name,
-        build_closed_circuit_breaker_state(failures),
+        CircuitBreakerState(state="closed", failures=failures),
         recovery_timeout_seconds=recovery_timeout_seconds,
         namespace=namespace,
     )
@@ -370,7 +312,8 @@ def run_with_circuit_breaker[T](
         recovery_timeout_seconds=recovery_timeout_seconds,
         namespace=namespace,
     ):
-        raise CircuitBreakerOpenError(f"Circuit breaker open for '{name}'")
+        msg = f"Circuit breaker open for '{name}'"
+        raise CircuitBreakerOpenError(msg)
 
     try:
         result = operation()

@@ -359,11 +359,40 @@ class LegalAgentState(TypedDict):
     long_term_refs: list[str]  # cognee store namespace keys
     working_memory: dict[str, Any]  # ephemeral cross-node scratch space
 
+    # --- Deep research ---
+    deep_research_results: str | None  # batch results from deep_research node
+
     # --- Control ---
     status: WorkflowStatus
     errors: Annotated[list[AgentError], operator.add]
     retry_count: int
     permissions: dict[str, bool]
+
+
+# ---------------------------------------------------------------------------
+# Boundary schemas — Pydantic models at graph input/output edges
+# Interior state stays TypedDict per LangGraph best practice.
+# ---------------------------------------------------------------------------
+
+
+class LegalAgentInputState(BaseModel, frozen=True):
+    """Minimal fields required to start a LegalAgent session."""
+
+    user_id: str
+    thread_id: str
+    correlation_id: str
+    schema_version: int = 1
+    doc_id: str
+    user_query: str
+    permissions: dict[str, bool]
+
+
+class LegalAgentOutputState(BaseModel, frozen=True):
+    """Fields surfaced to callers after graph completion."""
+
+    final_report: FinalReport | None = None
+    status: WorkflowStatus
+    errors: list[AgentError] = []
 
 
 # Exported node names — used by service to filter astream_events
@@ -384,5 +413,6 @@ GRAPH_NODE_NAMES: frozenset[str] = frozenset(
         "human_review",
         "finalization",
         "persist_memory",
+        "deep_research",
     }
 )
