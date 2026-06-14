@@ -170,6 +170,9 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 59. No skill composition. Skills are flat callables. Theres no way to chain skills (skill A output feeds skill B) without writing a new skill. A Pipeline primitive for skills would unlock complex, cheap workflows.   DONE
 169. EARS-compliant acceptance criteria, research about what Kiro does for SDD, which standards does it use   DONE
 180. learn what can i learn about maintaining large codebases through tanStack ecosystem and others and see matt pocock video, how to hide/abstract away complexity behind a simple interface, make a skill/docs for this.  DONE
+186. documents/ uses docling from shared and doesnt uses its own one.  DONE
+187. add more S3 functions, rewrite resend DONE
+188. divide AGENTS.md/copilot-instructions.md into samller files, add lint, fmt, commands, sort imports, think of most used uv and ruff and ty commands     DONE
 
 146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note and also check if i am right in passong HTTPException to APIException and other classes        DELAYED
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
@@ -235,7 +238,6 @@ todos:-
 172. use prebuilt and custom middlewares in langchain 
 173. rewrite the tools for the new grpahiti, cognee etc
 174. add proper cognee functions, graphiti from docs
-175. SecretStr(settings.GEMINI_API_KEY) learn about this
 176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
 
 178. From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on wont be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation. [cognee.shared.logging_utils]
@@ -250,11 +252,12 @@ todos:-
 184. You correctly called out that documents/chunks should be the sole retrieval truth.
 But a lot of current Agent Saul / precedent / reconciliation code still reads clauses directly.
 Do you want me to:
-- A. keep the architecture clean now: new documents/chunks become the only retrieval substrate, and any old code still tied to clauses is left stale/disabled until second pass
+- A. keep the architecture clean now: new documents/chunks become the only retrieval substrate, and any old code still tied to clauses is left stale/disabled until second pass   
 185. remove ts_vector from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
-186. divide AGENTS.md/copilot-instructions.md into samller files, add lint, fmt, commands, sort imports, 
-187. documents/ uses docling from shared and doesnt uses its own one.
-188. add more S3 functions, see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
+190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
+189. check for writing error messages should i write then in StrEnum, string variable
+175. SecretStr(settings.GEMINI_API_KEY), PrivateAttr and more learn about this
+191. check which will live in connection.app.state and which will live in app.state
 ```
 
 --- summarise these chapters in great detail and take video's transcript as reference for summarising

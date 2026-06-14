@@ -1,11 +1,11 @@
 """Startup-time Agent Saul graph composition helpers."""
 
-from dataclasses import dataclass
 from typing import Any, cast
 
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
+from pydantic import BaseModel, ConfigDict
 
 from .nodes import (
     ClauseSegmentationOutput,
@@ -46,8 +46,7 @@ from .state import (
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class AgentRegistry:
+class AgentRegistry(BaseModel):
     """
     Holds all pre-built agents and structured-output LLM chains.
     Created once at lifespan startup; referenced by closure in every node.
@@ -56,6 +55,8 @@ class AgentRegistry:
       create_react_agent → nodes that need tool-calling (orchestrator, risk, compliance)
       llm.with_structured_output → schema-locked nodes (qna, planner, pipeline nodes)
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # create_react_agent compiled sub-graphs
     orchestrator_agent: Any  # CompiledStateGraph
@@ -73,8 +74,9 @@ class AgentRegistry:
     finalization_llm: Runnable[list[Any], Any]  # FinalReport
 
 
-@dataclass
-class SaulGraphNodes:
+class SaulGraphNodes(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     gateway: Any
     qna: Any
     orchestrator: Any

@@ -7,7 +7,6 @@ Each agent is a module-level singleton, lazy-initialised on first use.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -48,14 +47,12 @@ async def web_search_tool(query: str, max_results: int = 5) -> str:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
 class CodeAgentContext(BaseContext):
     repo_path: str = "/tmp/repo"
     language: str = "python"
-    allowed_extensions: list[str] = field(default_factory=lambda: [".py", ".js", ".ts"])
+    allowed_extensions: list[str] = Field(default_factory=lambda: [".py", ".js", ".ts"])
 
 
-@dataclass
 class ResearchAgentContext(BaseContext):
     depth: str = "standard"  # "quick" | "standard" | "deep"
     output_format: str = "markdown"

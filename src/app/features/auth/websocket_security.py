@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import suppress
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fastapi import WebSocket, WebSocketException, status
 from fastapi_limiter.depends import WebSocketRateLimiter
+from pydantic import BaseModel, ConfigDict
 from pyrate_limiter import Limiter, Rate, RedisBucket
 
 if TYPE_CHECKING:
@@ -21,8 +21,9 @@ _SESSION_CONNECTIONS_KEY = "ws:session_connections:{}"
 _CONNECTION_KEY = "ws:connection:{}"
 
 
-@dataclass(frozen=True)
-class WebSocketSecurityContext:
+class WebSocketSecurityContext(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     claims: TokenClaims
     user_id: str
     session_id: str | None

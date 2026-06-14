@@ -1,7 +1,6 @@
 import hashlib
 import secrets
 import time
-from dataclasses import dataclass
 from datetime import timedelta
 from uuid import uuid4
 
@@ -11,6 +10,7 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client
 from authlib.jose import jwt
 from authlib.jose.errors import ExpiredTokenError, JoseError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from pydantic import BaseModel, ConfigDict
 
 from app.config import get_settings
 from app.utils import UnauthorizedException, ValidationException
@@ -64,8 +64,9 @@ def hash_token(token: str) -> str:
 _JWT_HEADER: dict[str, str] = {"alg": "HS256"}
 
 
-@dataclass(frozen=True)
-class TokenClaims:
+class TokenClaims(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     sub: str
     jti: str
     sid: str | None
@@ -217,8 +218,9 @@ def verify_oauth_state(
 # ── OAuth2 provider configuration ─────────────────────────────────────────────
 
 
-@dataclass(frozen=True)
-class OAuthProviderConfig:
+class OAuthProviderConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     client_id: str
     client_secret: str
     authorization_endpoint: str
@@ -260,8 +262,9 @@ def get_oauth_config(provider: str) -> OAuthProviderConfig:
 # ── OAuth2 userinfo normalization ─────────────────────────────────────────────
 
 
-@dataclass(frozen=True)
-class OAuthUserInfo:
+class OAuthUserInfo(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     email: str
     provider_user_id: str
     full_name: str | None = None
