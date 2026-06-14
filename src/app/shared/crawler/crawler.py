@@ -13,18 +13,19 @@ from crawl4ai import (
     MemoryAdaptiveDispatcher,
 )
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 
-from app.config.settings import get_settings
+from app.config import get_settings
 from app.shared.crawler.config import CrawlerConfig, get_crawler_config
 from app.shared.crawler.validator import is_valid_url, sanitize_url
+from app.utils import logger
 
 
 class CrawlResult(BaseModel):
     """Result from crawling a URL."""
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     url: str
     success: bool
@@ -60,16 +61,12 @@ class WebCrawler:
             return None
 
         try:
-            settings = get_settings()
-            if not settings.CRAWL4AI_PROXY:
-                return None
-
             cache_key = self._get_cache_key(url)
             cached = await self.redis_client.get(cache_key)
 
             if cached:
                 data = json.loads(cached)
-                result = CrawlResult(
+                return CrawlResult(
                     url=data["url"],
                     success=data["success"],
                     markdown=data.get("markdown"),
@@ -81,9 +78,8 @@ class WebCrawler:
                     word_count=data.get("word_count"),
                     cached=True,
                 )
-                return result
         except Exception:
-            pass
+            logger.bind(operation="cache_read", url=url).exception("Cache read failed")
         return None
 
     async def _save_to_cache(self, url: str, result: CrawlResult):
@@ -113,7 +109,7 @@ class WebCrawler:
                 json.dumps(data),
             )
         except Exception:
-            pass
+            logger.bind(operation="cache_write", url=url).exception("Cache write failed")
 
     async def crawl(
         self,
@@ -297,6 +293,6 @@ class WebCrawler:
         return results
 
 
-async def get_crawler() -> WebCrawler:
+async def get_crawler(redis_client: Redis | None = None) -> WebCrawler:
     """Get a crawler instance."""
-    return WebCrawler()
+    return WebCrawler(redis_client=redis_client)

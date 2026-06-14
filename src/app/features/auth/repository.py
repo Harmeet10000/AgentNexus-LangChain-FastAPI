@@ -10,8 +10,6 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
-from app.features.auth.model import OAuthAccount, User
-from app.features.auth.token_audit_log import TokenAuditLog
 from app.shared.result import (
     AppResult,
     ConflictAppError,
@@ -21,6 +19,9 @@ from app.shared.result import (
     app_error_to_exception,
 )
 from app.utils import ErrorCode
+
+from .model import OAuthAccount, User
+from .token_audit_log import TokenAuditLog
 
 _SESSION_KEY = "auth:session:{}"
 _USER_SESSIONS_KEY = "auth:user_sessions:{}"

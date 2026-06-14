@@ -57,13 +57,6 @@ def smart_chunk_markdown(markdown: str, max_len: int = 1000) -> list[Chunk]:
         else:
             chunks.append(h1)
 
-    final_chunks = []
-    for c in chunks:
-        if len(c) > max_len:
-            final_chunks.extend([c[i : i + max_len].strip() for i in range(0, len(c), max_len)])
-        else:
-            final_chunks.append(c)
-
     result_chunks = []
     for idx, text in enumerate([c for c in final_chunks if c]):
         headers = extract_headers(text)

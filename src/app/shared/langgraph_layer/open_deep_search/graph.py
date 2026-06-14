@@ -69,7 +69,7 @@ async def clarify_with_user(
     config: RunnableConfig,
 ) -> Command[Literal["write_research_brief", "__end__"]]:
     """Ask a clarifying question when the requested research scope is unclear."""
-    configurable = Configuration.from_runnable_config(config)
+    configurable: Configuration = Configuration.from_runnable_config(config)
     if not configurable.allow_clarification:
         return Command(goto="write_research_brief")
 
@@ -82,7 +82,7 @@ async def clarify_with_user(
         messages=get_buffer_string(state["messages"]),
         date=get_today_str(),
     )
-    response = cast(
+    response: ClarifyWithUser = cast(
         "ClarifyWithUser", await clarification_model.ainvoke([HumanMessage(content=prompt_content)])
     )
 
@@ -99,20 +99,20 @@ async def write_research_brief(
     config: RunnableConfig,
 ) -> Command[Literal["research_supervisor"]]:
     """Transform user messages into a structured research brief."""
-    configurable = Configuration.from_runnable_config(config)
+    configurable: Configuration = Configuration.from_runnable_config(config)
     research_model = (
         _build_model(configurable.research_model, configurable.research_model_max_tokens)
         .with_structured_output(ResearchQuestion)
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
     )
-    prompt_content = _TRANSFORM_MESSAGES_INTO_RESEARCH_TOPIC_PROMPT.format(
+    prompt_content: str = _TRANSFORM_MESSAGES_INTO_RESEARCH_TOPIC_PROMPT.format(
         messages=get_buffer_string(state.get("messages", [])),
         date=get_today_str(),
     )
-    response = cast(
+    response: ResearchQuestion = cast(
         "ResearchQuestion", await research_model.ainvoke([HumanMessage(content=prompt_content)])
     )
-    supervisor_system_prompt = _LEAD_RESEARCHER_SYSTEM_PROMPT.format(
+    supervisor_system_prompt: str = _LEAD_RESEARCHER_SYSTEM_PROMPT.format(
         date=get_today_str(),
         max_concurrent_research_units=configurable.max_concurrent_research_units,
         max_researcher_iterations=configurable.max_researcher_iterations,
@@ -137,7 +137,7 @@ async def supervisor(
     config: RunnableConfig,
 ) -> Command[Literal["supervisor_tools"]]:
     """Plan research and delegate focused topics to researcher subgraphs."""
-    configurable = Configuration.from_runnable_config(config)
+    configurable: Configuration = Configuration.from_runnable_config(config)
     lead_researcher_tools = [ConductResearch, ResearchComplete, think_tool]
     research_model = (
         _build_model(configurable.research_model, configurable.research_model_max_tokens)
@@ -159,14 +159,14 @@ async def supervisor_tools(
     config: RunnableConfig,
 ) -> Command[Literal["supervisor", "__end__"]]:
     """Execute supervisor tool calls for reflection and research delegation."""
-    configurable = Configuration.from_runnable_config(config)
+    configurable: Configuration = Configuration.from_runnable_config(config)
     supervisor_messages = state.get("supervisor_messages", [])
-    research_iterations = state.get("research_iterations", 0)
+    research_iterations: int = state.get("research_iterations", 0)
     most_recent_message = cast("Any", supervisor_messages[-1])
 
-    exceeded_iterations = research_iterations > configurable.max_researcher_iterations
-    no_tool_calls = not most_recent_message.tool_calls
-    research_complete = any(
+    exceeded_iterations: bool = research_iterations > configurable.max_researcher_iterations
+    no_tool_calls: Any = not most_recent_message.tool_calls
+    research_complete: bool = any(
         tool_call["name"] == "ResearchComplete" for tool_call in most_recent_message.tool_calls
     )
     if exceeded_iterations or no_tool_calls or research_complete:
@@ -271,7 +271,7 @@ supervisor_subgraph = supervisor_builder.compile()
 async def researcher(
     state: ResearcherState,
     config: RunnableConfig,
-) -> Command[Literal["researcher_tools"]]:
+) -> Command[Literal["researcher_tools", "crawl_executor", "compress_research"]]:
     """Conduct focused research on one supervisor-assigned topic."""
     configurable = Configuration.from_runnable_config(config)
     tools = await get_all_tools(config)
@@ -288,12 +288,33 @@ async def researcher(
     messages = [SystemMessage(content=researcher_prompt), *state.get("researcher_messages", [])]
     response = await research_model.ainvoke(messages)
     return Command(
-        goto="researcher_tools",
         update={
             "researcher_messages": [response],
             "tool_call_iterations": state.get("tool_call_iterations", 0) + 1,
         },
     )
+
+
+def route_researcher(
+    state: ResearcherState,
+) -> Literal["researcher_tools", "crawl_executor", "compress_research"]:
+    """Router: crawl calls go to crawl_executor, other tool calls go to researcher_tools."""
+    researcher_messages = state.get("researcher_messages", [])
+    if not researcher_messages:
+        return "compress_research"
+    most_recent = cast("Any", researcher_messages[-1])
+    if not most_recent.tool_calls:
+        return "compress_research"
+
+    tool_names = {tc["name"] for tc in most_recent.tool_calls}
+    has_crawl = "crawl_webpage" in tool_names
+    has_other = any(name != "crawl_webpage" for name in tool_names)
+
+    if has_crawl:
+        return "crawl_executor"
+    if has_other:
+        return "researcher_tools"
+    return "compress_research"
 
 
 async def execute_tool_safely(tool_to_call, args: dict[str, object], config: RunnableConfig) -> str:
@@ -320,7 +341,7 @@ async def researcher_tools(
     tool_calls = [
         tool_call
         for tool_call in most_recent_message.tool_calls
-        if tool_call["name"] in tools_by_name
+        if tool_call["name"] in tools_by_name and tool_call["name"] != "crawl_webpage"
     ]
     observations = await asyncio.gather(
         *(
@@ -342,6 +363,52 @@ async def researcher_tools(
     if exceeded_iterations or research_complete:
         return Command(goto="compress_research", update={"researcher_messages": tool_outputs})
     return Command(goto="researcher", update={"researcher_messages": tool_outputs})
+
+
+async def crawl_executor(
+    state: ResearcherState,
+    config: RunnableConfig,
+) -> Command[Literal["researcher_tools", "researcher", "compress_research"]]:
+    """Execute crawl_webpage tool calls from the researcher."""
+    configurable = Configuration.from_runnable_config(config)
+    researcher_messages = state.get("researcher_messages", [])
+    if not researcher_messages:
+        return Command(goto="compress_research")
+    most_recent_message = cast("Any", researcher_messages[-1])
+
+    if not most_recent_message.tool_calls:
+        return Command(goto="compress_research")
+
+    crawl_calls = [tc for tc in most_recent_message.tool_calls if tc["name"] == "crawl_webpage"]
+    if not crawl_calls:
+        return Command(goto="compress_research")
+
+    tools = await get_all_tools(config)
+    tools_by_name = {t.name: t for t in tools}
+    crawl_tool = tools_by_name.get("crawl_webpage")
+
+    if not crawl_tool:
+        return Command(goto="compress_research")
+
+    observations = await asyncio.gather(
+        *(execute_tool_safely(crawl_tool, call["args"], config) for call in crawl_calls)
+    )
+    crawl_outputs = [
+        ToolMessage(content=obs, name=call["name"], tool_call_id=call["id"])
+        for obs, call in zip(observations, crawl_calls, strict=True)
+    ]
+
+    non_crawl_calls = [tc for tc in most_recent_message.tool_calls if tc["name"] != "crawl_webpage"]
+    if non_crawl_calls:
+        return Command(goto="researcher_tools", update={"researcher_messages": crawl_outputs})
+
+    exceeded = state.get("tool_call_iterations", 0) >= configurable.max_react_tool_calls
+    research_complete = any(
+        tc["name"] == "ResearchComplete" for tc in most_recent_message.tool_calls
+    )
+    if exceeded or research_complete:
+        return Command(goto="compress_research", update={"researcher_messages": crawl_outputs})
+    return Command(goto="researcher", update={"researcher_messages": crawl_outputs})
 
 
 async def compress_research(
@@ -389,10 +456,12 @@ researcher_builder = state_graph_factory(
     output_schema=ResearcherOutputState,
     context_schema=Configuration,
 )
+researcher_builder.add_edge(START, "researcher")
 researcher_builder.add_node("researcher", researcher)
 researcher_builder.add_node("researcher_tools", researcher_tools)
+researcher_builder.add_node("crawl_executor", crawl_executor)
 researcher_builder.add_node("compress_research", compress_research)
-researcher_builder.add_edge(START, "researcher")
+researcher_builder.add_conditional_edges("researcher", route_researcher)
 researcher_builder.add_edge("compress_research", END)
 researcher_subgraph = researcher_builder.compile()
 

@@ -3,17 +3,20 @@ import sys
 import time
 from contextvars import ContextVar
 from datetime import UTC
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger as loguru_logger
+
+if TYPE_CHECKING:
+    from _contextvars import Token
 
 # Assuming you have these from your existing codebase
 # from app.config.settings import get_settings
 # from string_utils import generate  # Wherever your generate() comes from
 
 # 1. Context Variables
-request_state: ContextVar[dict[str, Any]] = ContextVar("request_state", default={})
-execution_path: ContextVar[list[str]] = ContextVar("execution_path", default=[])
+request_state: ContextVar[dict[str, Any]] = ContextVar("request_state", default={})  # noqa: B039
+execution_path: ContextVar[list[str]] = ContextVar("execution_path", default=[])  # noqa: B039
 
 
 # 2. Console Formatter (Unchanged - Your logic here is perfect)
@@ -109,7 +112,7 @@ def trace_layer(layer_name: str) -> Any:
             current_flow.append(func.__name__)
 
             # VERY IMPORTANT: Save the token to reset later
-            token = execution_path.set(current_flow)
+            token: Token[list[str]] = execution_path.set(current_flow)
             flow_str = " -> ".join(current_flow)
 
             # 2. Execute with Context

@@ -4,11 +4,11 @@ import json
 from enum import StrEnum
 from typing import Any
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel
 from returns.result import Failure, Success
 
-from app.config.settings import get_settings
+from app.shared.langchain_layer.models import _build_chat_model
 from app.shared.result import AppResult, ValidationAppError
 
 
@@ -133,13 +133,8 @@ class ExtractionResult(BaseModel):
 class GeminiProcessor:
     """Processor for Gemini-based content extraction and summarization."""
 
-    def __init__(self):
-        settings = get_settings()
-        self.model = ChatGoogleGenerativeAI(
-            model=settings.GEMINI_MODEL,
-            temperature=0.3,
-            max_tokens=4096,
-        )
+    def __init__(self, model: BaseChatModel | None = None):
+        self.model = model or _build_chat_model()
 
     async def summarize(
         self,
