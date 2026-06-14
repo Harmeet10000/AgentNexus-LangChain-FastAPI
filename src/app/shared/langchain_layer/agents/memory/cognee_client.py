@@ -67,7 +67,7 @@ async def setup_cognee(settings: Settings) -> dict:
             config_dict={
                 "llm_provider": "google_genai",
                 "llm_model": settings.GEMINI_FLASH_MODEL,
-                "llm_api_key": settings.GEMINI_API_KEY,
+                "llm_api_key": settings.GEMINI_API_KEY.get_secret_value(),
             }
         )
         cognee.config.set_graph_db_config(
@@ -75,7 +75,7 @@ async def setup_cognee(settings: Settings) -> dict:
                 "graph_database_provider": "neo4j",
                 "graph_database_url": settings.NEO4J_URI,
                 "graph_database_username": settings.NEO4J_USERNAME,
-                "graph_database_password": settings.NEO4J_PASSWORD,
+                "graph_database_password": settings.NEO4J_PASSWORD.get_secret_value(),
             }
         )
         cognee.config.set_relational_db_config(
@@ -84,7 +84,7 @@ async def setup_cognee(settings: Settings) -> dict:
                 "db_host": settings.POSTGRES_HOST,
                 "db_port": str(settings.POSTGRES_PORT),
                 "db_username": settings.POSTGRES_USERNAME,
-                "db_password": settings.POSTGRES_PASSWORD,
+                "db_password": settings.POSTGRES_PASSWORD.get_secret_value(),
                 "db_name": settings.POSTGRES_DB_NAME,
                 "db_path": "",
             }

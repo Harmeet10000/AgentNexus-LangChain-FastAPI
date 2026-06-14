@@ -27,7 +27,7 @@ class MailerConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    api_key: str = Field(default=settings.RESEND_API_KEY)
+    api_key: str = Field(default=settings.RESEND_API_KEY.get_secret_value())
     from_email: str = Field(default=settings.RESEND_FROM_EMAIL)
 
 

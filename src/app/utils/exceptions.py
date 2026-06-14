@@ -3,6 +3,8 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+from .error_codes import ErrorCode
+
 
 class APIException(HTTPException):
     """
@@ -49,7 +51,7 @@ class ValidationException(APIException):
     def __init__(
         self,
         detail: str = "Validation error",
-        error_code: str = "VALIDATION_ERROR",
+        error_code: ErrorCode = ErrorCode.VALIDATION_ERROR,
         data: dict | None = None,  # ← very useful: field → error messages
     ):
         super().__init__(
@@ -67,7 +69,7 @@ class NotFoundException(APIException):
         self,
         resource: str,
         identifier: str | int | None = None,
-        error_code: str = "NOT_FOUND",
+        error_code: ErrorCode = ErrorCode.NOT_FOUND,
     ):
         if identifier is not None:
             msg = f"{resource} with ID '{identifier}' not found"
@@ -86,7 +88,7 @@ class UnauthorizedException(APIException):
     def __init__(
         self,
         detail: str = "Authentication failed",
-        error_code: str = "UNAUTHORIZED",
+        error_code: ErrorCode = ErrorCode.UNAUTHORIZED,
     ):
         super().__init__(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -102,7 +104,7 @@ class ForbiddenException(APIException):
     def __init__(
         self,
         detail: str = "Insufficient permissions",
-        error_code: str = "FORBIDDEN",
+        error_code: ErrorCode = ErrorCode.FORBIDDEN,
     ):
         super().__init__(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -117,7 +119,7 @@ class ConflictException(APIException):
     def __init__(
         self,
         detail: str,
-        error_code: str = "CONFLICT",
+        error_code: ErrorCode = ErrorCode.CONFLICT,
         data: dict | None = None,
     ):
         super().__init__(
@@ -134,7 +136,7 @@ class TooManyRequestsException(APIException):
     def __init__(
         self,
         detail: str = "Too many requests",
-        error_code: str = "TOO_MANY_REQUESTS",
+        error_code: ErrorCode = ErrorCode.TOO_MANY_REQUESTS,
         headers: dict[str, str] | None = None,
         data: dict | None = None,
     ):
@@ -153,7 +155,7 @@ class ServiceUnavailableException(APIException):
     def __init__(
         self,
         detail: str = "Service temporarily unavailable",
-        error_code: str = "SERVICE_UNAVAILABLE",
+        error_code: ErrorCode = ErrorCode.SERVICE_UNAVAILABLE,
         headers: dict[str, str] | None = None,
         data: dict | None = None,
     ):
@@ -177,7 +179,7 @@ class DatabaseException(APIException):
     def __init__(
         self,
         detail: str = "Database operation failed",
-        error_code: str = "DATABASE_ERROR",
+        error_code: ErrorCode = ErrorCode.DATABASE_ERROR,
         original_exc: Exception | None = None,
     ):
         data = None
@@ -198,7 +200,7 @@ class ExternalServiceException(APIException):
         self,
         service: str,
         detail: str,
-        error_code: str = "EXTERNAL_SERVICE_ERROR",
+        error_code: ErrorCode = ErrorCode.EXTERNAL_SERVICE_ERROR,
         status_code: int = status.HTTP_502_BAD_GATEWAY,
     ):
         msg = f"{service} request failed: {detail}"
@@ -217,14 +219,14 @@ class InvalidTokenException(UnauthorizedException):
         msg = "Invalid token"
         if reason:
             msg += f": {reason}"
-        super().__init__(detail=msg, error_code="INVALID_TOKEN")
+        super().__init__(detail=msg, error_code=ErrorCode.INVALID_TOKEN)
 
 
 class ExpiredTokenException(UnauthorizedException):
     """Token has expired."""
 
     def __init__(self):
-        super().__init__(detail="Token has expired", error_code="TOKEN_EXPIRED")
+        super().__init__(detail="Token has expired", error_code=ErrorCode.TOKEN_EXPIRED)
 
 
 class InvalidRefreshTokenException(UnauthorizedException):
@@ -234,4 +236,4 @@ class InvalidRefreshTokenException(UnauthorizedException):
         msg = "Invalid refresh token"
         if reason:
             msg += f" — {reason}"
-        super().__init__(detail=msg, error_code="REFRESH_TOKEN_INVALID")
+        super().__init__(detail=msg, error_code=ErrorCode.REFRESH_TOKEN_INVALID)

@@ -54,7 +54,7 @@ def _validate_search_inputs(query: str, max_results: int, topic: str) -> None:
         ValidationException: If inputs are invalid
     """
     settings = get_settings()
-    if not settings.TAVILY_API_KEY:
+    if not settings.TAVILY_API_KEY.get_secret_value():
         raise ValidationException(detail="Tavily API key not configured")
     if not query.strip():
         raise ValidationException(detail="Search query is required")
@@ -127,7 +127,7 @@ async def search(
     _validate_search_inputs(query=query, max_results=max_results, topic=topic)
 
     payload = {
-        "api_key": settings.TAVILY_API_KEY,
+        "api_key": settings.TAVILY_API_KEY.get_secret_value(),
         "query": query,
         "max_results": min(max_results, settings.TAVILY_MAX_RESULTS_LIMIT),
         "topic": topic,

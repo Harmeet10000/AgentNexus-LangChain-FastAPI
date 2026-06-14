@@ -129,15 +129,22 @@ async def setup_graphiti(
             graph_driver=None,  # Optional[Neo4jDriver | other driver]
             # LLM Configuration (critical for entity extraction, summarization, etc.)
             llm_client=GeminiClient(
-                config=LLMConfig(api_key=settings.GEMINI_API_KEY, model=settings.GEMINI_FLASH_MODEL)
+                config=LLMConfig(
+                    api_key=settings.GEMINI_API_KEY.get_secret_value(),
+                    model=settings.GEMINI_FLASH_MODEL,
+                )
             ),
             embedder=GeminiEmbedder(
                 config=GeminiEmbedderConfig(
-                    api_key=settings.GEMINI_API_KEY, embedding_model=settings.GEMINI_EMBEDDING_MODEL
+                    api_key=settings.GEMINI_API_KEY.get_secret_value(),
+                    embedding_model=settings.GEMINI_EMBEDDING_MODEL,
                 )
             ),
             cross_encoder=GeminiRerankerClient(
-                config=LLMConfig(api_key=settings.GEMINI_API_KEY, model=settings.GEMINI_FLASH_MODEL)
+                config=LLMConfig(
+                    api_key=settings.GEMINI_API_KEY.get_secret_value(),
+                    model=settings.GEMINI_FLASH_MODEL,
+                )
             ),
             # Other important options
             # group_id=None,  # Optional[str] — useful for multi-tenant / team isolation

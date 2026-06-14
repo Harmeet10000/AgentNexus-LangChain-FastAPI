@@ -102,7 +102,7 @@ def serialize_idempotency_record(
 
 def parse_idempotency_status(value: object) -> IdempotencyStatus | None:
     if value in {PROCESSING_STATUS, COMPLETED_STATUS, FAILED_PERMANENT_STATUS}:
-        return cast(IdempotencyStatus, value)
+        return cast("IdempotencyStatus", value)
     return None
 
 
@@ -111,13 +111,13 @@ def default_circuit_breaker_state() -> CircuitBreakerState:
 
 
 def parse_circuit_breaker_state(payload: str) -> CircuitBreakerState:
-    data = cast(RawCircuitBreakerState, json.loads(payload))
+    data = cast("RawCircuitBreakerState", json.loads(payload))
     opened_at = data.get("opened_at")
     failures = data.get("failures", 0)
     return {
         "state": str(data.get("state", "closed")),
-        "failures": int(cast(int | float | str, failures)),
-        "opened_at": float(cast(int | float | str, opened_at)) if opened_at is not None else None,
+        "failures": int(cast("int | float | str", failures)),
+        "opened_at": float(cast("int | float | str", opened_at)) if opened_at is not None else None,
     }
 
 
@@ -235,7 +235,7 @@ def get_idempotency_status(
     namespace: str = IDEMPOTENCY_NAMESPACE,
 ) -> IdempotencyStatus | None:
     payload = cast(
-        str | None,
+        "str | None",
         run_redis_call(
             redis_client.get(build_idempotency_key(idempotency_key, namespace=namespace))
         ),
@@ -243,7 +243,7 @@ def get_idempotency_status(
     if not payload:
         return None
 
-    parsed = cast(IdempotencyRecord, json.loads(payload))
+    parsed = cast("IdempotencyRecord", json.loads(payload))
     return parse_idempotency_status(parsed.get("status"))
 
 
@@ -262,7 +262,7 @@ def get_circuit_breaker_state(
     namespace: str = CIRCUIT_BREAKER_NAMESPACE,
 ) -> CircuitBreakerState:
     payload = cast(
-        str | None,
+        "str | None",
         run_redis_call(redis_client.get(build_circuit_breaker_key(name, namespace=namespace))),
     )
     if not payload:

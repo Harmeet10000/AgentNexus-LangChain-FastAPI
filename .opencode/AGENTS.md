@@ -12,3 +12,19 @@ Detailed project rules are in `.opencode/instructions/`. These are loaded into y
 - `PYTHON-TYPING-RULES.md` — Python style, generics, async, Pydantic/DTO
 - `RESULT-PATTERN.md` — returns.Result rules
 - `REFERENCE-MAP.md` — file references, graphify, context7
+
+Ask me as many questions as required to remove doubt.
+When suggesting options tell me pros and cons so that i can make a opinionated choice.
+
+## graphify
+
+For any question about this repo's architecture, structure, components, or how to add/modify/find code, first use:
+- `graphify query "<question>"` — when `graphify-out/graph.json` exists
+- `graphify path "<A>" "<B>"` — for relationship questions
+- `graphify explain "<concept>"` — for focused-concept questions
+
+If `graphify-out/wiki/index.md` exists, use it for broad navigation.
+Read `graphify-out/GRAPH_REPORT.md` only for broad architecture review.
+Only read source files when modifying/debugging specific code or the graph lacks detail.
+
+Type `/graphify` in Copilot Chat to build or update the graph.

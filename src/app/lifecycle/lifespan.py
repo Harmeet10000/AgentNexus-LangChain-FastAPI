@@ -128,7 +128,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
     graphiti = await setup_graphiti(
         neo4j_uri=settings.NEO4J_URI,
         neo4j_user=settings.NEO4J_USERNAME,
-        neo4j_password=settings.NEO4J_PASSWORD,
+        neo4j_password=settings.NEO4J_PASSWORD.get_secret_value(),
     )
     # TODO: Do i need to setup indices here? Or is it done in the Graphiti constructor? or is it required only once.
     await setup_graphiti_indices(graphiti)
@@ -137,7 +137,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
 
     # ingestion_llm = ChatGoogleGenerativeAI(
     #     model=settings.GEMINI_FLASH_MODEL,
-    #     api_key=settings.GEMINI_API_KEY,
+    #     api_key=settings.GEMINI_API_KEY.get_secret_value(),
     #     temperature=0.1,
     #     retries=0,
     # )

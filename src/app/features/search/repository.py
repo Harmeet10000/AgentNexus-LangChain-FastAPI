@@ -17,6 +17,7 @@ from app.shared.result import (
     NotFoundAppError,
     app_error_to_exception,
 )
+from app.utils import ErrorCode
 
 from .constants import (
     DISKANN_QUERY_RESCORE,
@@ -59,7 +60,7 @@ class SearchRepository:
             if doc is None:
                 return Failure(
                     NotFoundAppError(
-                        code="SEARCH_DOCUMENT_NOT_FOUND",
+                        code=ErrorCode.SEARCH_DOCUMENT_NOT_FOUND,
                         message="Search document not found for the given content hash",
                         details={"content_hash": content_hash},
                         source="search_repository",
@@ -93,7 +94,7 @@ class SearchRepository:
             if doc is None:
                 return Failure(
                     NotFoundAppError(
-                        code="SEARCH_DOCUMENT_NOT_FOUND",
+                        code=ErrorCode.SEARCH_DOCUMENT_NOT_FOUND,
                         message="Search document not found for the given document ID",
                         details={"document_id": document_id},
                         source="search_repository",

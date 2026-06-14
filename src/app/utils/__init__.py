@@ -35,6 +35,7 @@ from .exceptions import (
     APIException,
     ConflictException,
     DatabaseException,
+    ErrorCode,
     ExternalServiceException,
     ForbiddenException,
     NotFoundException,
@@ -44,6 +45,15 @@ from .exceptions import (
     ValidationException,
 )
 from .http_response import http_error, http_response
+from .json_serializer import (
+    from_json,
+    from_json_float_list,
+    to_float_list_bytes,
+    to_float_list_str,
+    to_json_bytes,
+    to_json_str,
+    to_sorted_key_bytes,
+)
 from .logger import execution_path, logger, request_state, trace_layer
 from .response_type import APIResponse, ErrorDetail, RequestMeta
 
@@ -53,6 +63,7 @@ __all__ = [
     "APIResponse",
     "ConflictException",
     "DatabaseException",
+    "ErrorCode",
     "ErrorDetail",
     "ExternalServiceException",
     "ForbiddenException",
@@ -64,9 +75,16 @@ __all__ = [
     "UnauthorizedException",
     "ValidationException",
     "execution_path",
+    "from_json",
+    "from_json_float_list",
     "http_error",
     "http_response",
     "logger",
     "request_state",
-    "trace_layer",
+    "to_float_list_bytes",
+    "to_float_list_str",
+    "to_json_bytes",
+    "to_json_str",
+    "to_sorted_key_bytes",
+    "trace_layer"
 ]

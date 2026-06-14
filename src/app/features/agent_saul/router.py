@@ -16,7 +16,7 @@ from uuid import uuid4
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.features.auth import CurrentClaims, WebSocketSecurityViolation
-from app.utils import APIResponse, ValidationException, http_response, logger
+from app.utils import APIResponse, ErrorCode, ValidationException, http_response, logger
 
 from .dependencies import (
     AgentSaulDepsAnnotated,
@@ -163,7 +163,7 @@ async def saul_ws_endpoint(
                 websocket,
                 WSErrorFrame(
                     node=None,
-                    code="VALIDATION_ERROR",
+                    code=ErrorCode.VALIDATION_ERROR,
                     message=str(exc),
                     retryable=False,
                 ).model_dump(),

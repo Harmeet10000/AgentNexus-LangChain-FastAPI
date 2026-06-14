@@ -160,7 +160,7 @@ When sub-agents return results, they're raw strings. There's no typed contract f
   researcher_builder = StateGraph(                                      
 
 /home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/open_deep_search/configuration.py:214: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'optional', 'metadata'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
-  mcp_config: MCPConfig | None = Field(                                        DONE
+  mcp_config: MCPConfig | None = Field(                                            DONE
 168. do migration of open_deep_research  and pass it to agent_saul as a ToolNode
     a. remove MCP from it
     b. store the MCP code for any best practices in mcp/
@@ -173,6 +173,12 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 186. documents/ uses docling from shared and doesnt uses its own one.  DONE
 187. add more S3 functions, rewrite resend DONE
 188. divide AGENTS.md/copilot-instructions.md into samller files, add lint, fmt, commands, sort imports, think of most used uv and ruff and ty commands     DONE
+182. add the old lynk plan as it was deleted   DONE
+175. SecretStr(settings.GEMINI_API_KEY), PrivateAttr and more learn about this   DONE
+191. check which will live in connection.app.state and which will live in app.state   DONE
+189. check for writing error messages should i write then in StrEnum, string variable   DONE
+181. how to use git when something is made then to use some commands on it while having another session work on the previous stuff when unrelated chnages have to be made. check what skills can help here    DONE
+192. make a plan to migrate from orjson, serializing generic Python data (like a dict or list that isn't a Pydantic model to model.model_dump_json():  TypeAdapter.dump_json() with reuable functions    DONE
 
 146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note and also check if i am right in passong HTTPException to APIException and other classes        DELAYED
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
@@ -184,15 +190,7 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 158. add tests that suits the project
 159. discover RAGFlow, OpenRAG if or if not to use it
 160. check how can Port & Adapter/strategy & factory can help 
-161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
-type Composable = Callable[[Any], Any]
 
-
-def compose(*functions: Composable) -> Composable:
-    def apply(value: Any, fn: Composable) -> Any:
-        return fn(value)
-
-    return lambda data: reduce(apply, functions, data)
 
 64. No eval framework. Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
@@ -240,24 +238,30 @@ todos:-
 174. add proper cognee functions, graphiti from docs
 176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
 
-178. From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on wont be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation. [cognee.shared.logging_utils]
-
 179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
 
 
  
-181. how to use git when something is made then to use some commands on it while having another session work on the previous stuff when unrelated chnages have to be made. check what skills can help here
-182. add the old lynk plan as it was deleted
-183. scrapling vs crawl4ai, add crawl4ai in open_deep_search graph, add headroom-ai for comrpression
+
 184. You correctly called out that documents/chunks should be the sole retrieval truth.
 But a lot of current Agent Saul / precedent / reconciliation code still reads clauses directly.
 Do you want me to:
 - A. keep the architecture clean now: new documents/chunks become the only retrieval substrate, and any old code still tied to clauses is left stale/disabled until second pass   
-185. remove ts_vector from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
+185. remove ts_vector(think if it is required here or other extension can do the job here) from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
 190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
-189. check for writing error messages should i write then in StrEnum, string variable
-175. SecretStr(settings.GEMINI_API_KEY), PrivateAttr and more learn about this
-191. check which will live in connection.app.state and which will live in app.state
+
+161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
+type Composable = Callable[[Any], Any]
+
+
+def compose(*functions: Composable) -> Composable:
+    def apply(value: Any, fn: Composable) -> Any:
+        return fn(value)
+
+    return lambda data: reduce(apply, functions, data)
+
+178. From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on wont be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation. [cognee.shared.logging_utils]  and also migrate to veriosn 1.1
+183. scrapling vs crawl4ai, add crawl4ai in open_deep_search graph with proper plan and specs with openspec, add headroom-ai for comrpression
 ```
 
 --- summarise these chapters in great detail and take video's transcript as reference for summarising

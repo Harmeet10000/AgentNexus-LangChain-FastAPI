@@ -111,9 +111,7 @@ async def register(
     )
 
 
-@router.post(
-    "/login", dependencies=[Depends(limit_login)]
-)
+@router.post("/login", dependencies=[Depends(limit_login)])
 async def login(
     body: LoginRequest,
     request: Request,

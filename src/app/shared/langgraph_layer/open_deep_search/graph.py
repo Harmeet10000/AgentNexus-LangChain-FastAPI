@@ -261,7 +261,7 @@ async def supervisor_tools(
 
 
 state_graph_factory = cast("Any", StateGraph)
-supervisor_builder = state_graph_factory(SupervisorState, config_schema=Configuration)
+supervisor_builder = state_graph_factory(SupervisorState, context_schema=Configuration)
 supervisor_builder.add_node("supervisor", supervisor)
 supervisor_builder.add_node("supervisor_tools", supervisor_tools)
 supervisor_builder.add_edge(START, "supervisor")
@@ -386,8 +386,8 @@ async def compress_research(
 
 researcher_builder = state_graph_factory(
     ResearcherState,
-    output=ResearcherOutputState,
-    config_schema=Configuration,
+    output_schema=ResearcherOutputState,
+    context_schema=Configuration,
 )
 researcher_builder.add_node("researcher", researcher)
 researcher_builder.add_node("researcher_tools", researcher_tools)
@@ -460,8 +460,8 @@ async def final_report_generation(
 
 deep_researcher_builder = state_graph_factory(
     AgentState,
-    input=AgentInputState,
-    config_schema=Configuration,
+    input_schema=AgentInputState,
+    context_schema=Configuration,
 )
 deep_researcher_builder.add_node("clarify_with_user", clarify_with_user)
 deep_researcher_builder.add_node("write_research_brief", write_research_brief)

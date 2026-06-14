@@ -7,14 +7,13 @@ import hashlib
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-import orjson
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydantic import SecretStr
 
 from app.config import get_settings
 from app.connections import celery_app, init_db
 from app.shared.langgraph_layer.retrieval_kb import GeneratedAnswer, build_retrieval_graph
 from app.utils import ServiceUnavailableException, logger
+from app.utils.json_serializer import to_sorted_key_bytes
 
 from .chunking import chunk_text
 from .constants import (
@@ -236,7 +235,9 @@ class SearchService:
         settings = get_settings()
         llm = ChatGoogleGenerativeAI(
             model=settings.GEMINI_FLASH_MODEL,
-            api_key=SecretStr(settings.GEMINI_API_KEY) if settings.GEMINI_API_KEY else None,
+            api_key=settings.GEMINI_API_KEY.get_secret_value()
+            if settings.GEMINI_API_KEY.get_secret_value()
+            else None,
             temperature=0.1,
             retries=0,
         )
@@ -402,7 +403,7 @@ def _batched(values: Sequence[TextChunk], batch_size: int) -> list[Sequence[Text
 
 def _build_cache_key(kind: str, payload: HybridSearchRequest) -> str:
     normalized_query = " ".join(payload.query.lower().split())
-    filter_json = orjson.dumps(payload.metadata_filter.chunk_metadata, option=orjson.OPT_SORT_KEYS)
+    filter_json = to_sorted_key_bytes(payload.metadata_filter.chunk_metadata)
     raw_key = b"|".join(
         [
             kind.encode("utf-8"),

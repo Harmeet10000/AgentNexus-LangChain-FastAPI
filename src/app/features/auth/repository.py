@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import cast
 
 from beanie import PydanticObjectId
@@ -20,6 +20,7 @@ from app.shared.result import (
     ValidationAppError,
     app_error_to_exception,
 )
+from app.utils import ErrorCode
 
 _SESSION_KEY = "auth:session:{}"
 _USER_SESSIONS_KEY = "auth:user_sessions:{}"
@@ -75,7 +76,7 @@ class UserRepository:
             if user is None:
                 return Failure(
                     NotFoundAppError(
-                        code="USER_NOT_FOUND",
+                        code=ErrorCode.USER_NOT_FOUND,
                         message="User not found with the given email",
                         details={"email": email},
                         source="auth_repository",
@@ -107,7 +108,7 @@ class UserRepository:
             if user is None:
                 return Failure(
                     NotFoundAppError(
-                        code="USER_NOT_FOUND",
+                        code=ErrorCode.USER_NOT_FOUND,
                         message="User not found with the given verification token hash",
                         details={"token_hash": token_hash},
                         source="auth_repository",
@@ -139,7 +140,7 @@ class UserRepository:
             if user is None:
                 return Failure(
                     NotFoundAppError(
-                        code="USER_NOT_FOUND",
+                        code=ErrorCode.USER_NOT_FOUND,
                         message="User not found with the given reset token hash",
                         details={"token_hash": token_hash},
                         source="auth_repository",
@@ -193,7 +194,7 @@ class UserRepository:
 
     async def save_result(self, user: User) -> AppResult[User]:
         try:
-            user.updated_at = datetime.now(tz=timezone.utc)
+            user.updated_at = datetime.now(tz=UTC)
             await user.save()
             return Success(user)
         except PyMongoError as exc:

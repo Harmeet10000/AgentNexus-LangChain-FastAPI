@@ -24,7 +24,9 @@ def configure_langsmith() -> Client | None:
     Call this at application startup, before any agents are built.
     """
     settings = get_settings()
-    return Client(api_url=settings.LANGSMITH_ENDPOINT, api_key=settings.LANGSMITH_API_KEY)
+    return Client(
+        api_url=settings.LANGSMITH_ENDPOINT, api_key=settings.LANGSMITH_API_KEY.get_secret_value()
+    )
 
 
 class LatencyCallbackHandler(BaseCallbackHandler):

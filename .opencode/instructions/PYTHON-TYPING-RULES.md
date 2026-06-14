@@ -44,3 +44,40 @@
 - `ConfigDict(arbitrary_types_allowed=True)` for classes holding callables, `Any`, `Runnable`, or non-JSON-serializable types.
 - `model_post_init(self, __context: object)` replaces `__post_init__`.
 - `Field(default_factory=...)` replaces `field(default_factory=...)`.
+
+### SecretStr
+
+- Use `pydantic.SecretStr` for all settings fields that hold secrets, tokens, passwords, or API keys.
+- Consumers call `.get_secret_value()` to extract the underlying `str`.
+- Pydantic v2 auto-converts `str` env vars to `SecretStr` when the field type is `SecretStr`.
+- `SecretStr` automatically redacts values in `repr()`, `model_dump()`, and `model_dump_json()`.
+- For optional secrets: annotate as `SecretStr | None = Field(default=None)`.
+
+```python
+GEMINI_API_KEY: SecretStr = Field(default=SecretStr(""))
+# Usage: settings.GEMINI_API_KEY.get_secret_value()
+```
+
+### PrivateAttr
+
+- Use `PrivateAttr` only for non-serializable runtime state that is derived from validated fields (e.g., cached clients, connection pools).
+- Prefer `@property` or `Field(default=..., exclude=True)` when the value is serializable.
+- `PrivateAttr` values do not participate in Pydantic serialization/validation.
+
+```python
+from pydantic import BaseModel, PrivateAttr
+
+class S3ClientWrapper(BaseModel):
+    bucket: str
+    _client: S3Client = PrivateAttr()
+
+    def model_post_init(self, __context: object) -> None:
+        self._client = boto3.client("s3", ...)
+```
+
+### Field Patterns
+
+- `Field(default_factory=...)` for mutable defaults (lists, dicts, sets).
+- `ConfigDict(frozen=True)` for immutable read models.
+- `extra="forbid"` for request models to reject unknown fields.
+- `ConfigDict(extra="forbid", frozen=True)` for DTOs serving as both request and response.

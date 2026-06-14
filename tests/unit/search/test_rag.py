@@ -1,5 +1,4 @@
-from app.features.search.fusion import RankedChunk
-from app.features.search.rag import SearchChunkRecord, assemble_rag_context
+from app.features.search import RankedChunk, SearchChunkRecord, assemble_rag_context
 
 
 def test_assemble_rag_context_groups_by_document_and_merges_adjacent_chunks() -> None:

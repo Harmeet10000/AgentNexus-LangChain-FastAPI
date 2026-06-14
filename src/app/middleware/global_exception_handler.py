@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
-from app.utils import APIException, execution_path, http_error, logger
+from app.utils import APIException, ErrorCode, execution_path, http_error, logger
 
 
 def _json_error_response(
@@ -52,7 +52,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     # ────────────────────────────────────────────────
     if isinstance(exc, RequestValidationError):
         status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
-        error_code = "VALIDATION_ERROR"
+        error_code = ErrorCode.VALIDATION_ERROR
         message = "Request validation failed"
 
         validation_errors = [
@@ -103,7 +103,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     # 4. Catch-all — unexpected server errors (500)
     # ────────────────────────────────────────────────
     status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-    error_code = "INTERNAL_SERVER_ERROR"
+    error_code = ErrorCode.INTERNAL_SERVER_ERROR
     message = "An unexpected error occurred"
 
     trace = traceback.format_exc() if settings.ENVIRONMENT != "production" else None

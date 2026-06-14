@@ -268,8 +268,8 @@ class StorageService(BaseModel):
         client = boto3.client(
             "s3",
             endpoint_url=settings.S3_ENDPOINT_URL,
-            aws_access_key_id=settings.S3_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY,
+            aws_access_key_id=settings.S3_ACCESS_KEY_ID.get_secret_value(),
+            aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY.get_secret_value(),
             region_name=settings.S3_REGION,
         )
         wrapper = S3ClientWrapper.from_boto_client(
