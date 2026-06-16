@@ -3,11 +3,13 @@
 from typing import Annotated
 
 from fastapi import Depends, Request
+from langchain_core.language_models import BaseChatModel
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.connections import get_postgres_db, get_redis
+from app.shared.langchain_layer.models import _build_chat_model
 from app.shared.services.storage import StorageService
 
 from .repository import DocumentRepository
@@ -18,6 +20,14 @@ async def get_document_repository(
     session: Annotated[AsyncSession, Depends(get_postgres_db)],
 ) -> DocumentRepository:
     return DocumentRepository(session)
+
+
+def _get_document_llm() -> BaseChatModel:
+    return _build_chat_model(
+        model_name=None,
+        temperature=0.1,
+        implementation="generic",
+    )
 
 
 async def get_document_command_service(
@@ -37,6 +47,7 @@ async def get_document_query_service(
 ) -> DocumentQueryService:
     return DocumentQueryService(
         repo=repo,
+        llm=_get_document_llm(),
         redis=redis,
         graphiti=getattr(request.app.state, "graphiti", None),
     )

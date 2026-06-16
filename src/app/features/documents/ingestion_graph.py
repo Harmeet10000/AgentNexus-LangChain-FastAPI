@@ -10,6 +10,8 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
+
     from app.shared.services.storage import StorageService
 
     from .repository import DocumentRepository
@@ -37,6 +39,7 @@ def build_document_ingestion_graph(
     repo: DocumentRepository,
     graphiti: object | None,
     ingest_document_fn: IngestDocumentFn,
+    llm: BaseChatModel,
 ) -> CompiledStateGraph:
     """Build the per-job ingestion graph."""
 
@@ -50,6 +53,7 @@ def build_document_ingestion_graph(
                 repo=repo,
                 graphiti=graphiti,
                 ingest_document_fn=ingest_document_fn,
+                llm=llm,
             ),
         ),
     )
@@ -64,6 +68,7 @@ def _make_ingest_document_node(
     repo: DocumentRepository,
     graphiti: object | None,
     ingest_document_fn: IngestDocumentFn,
+    llm: BaseChatModel,
 ) -> IngestDocumentFn:
     async def ingest_document_node(state: DocumentIngestionState) -> dict[str, object]:
         return await ingest_document_fn(
@@ -75,6 +80,7 @@ def _make_ingest_document_node(
             object_store=object_store,
             repo=repo,
             graphiti=graphiti,
+            llm=llm,
         )
 
     return ingest_document_node

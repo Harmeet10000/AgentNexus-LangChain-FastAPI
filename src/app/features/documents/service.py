@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.config import get_settings
 from app.connections import celery_app, init_db
@@ -25,6 +24,7 @@ from app.features.search import (
     reciprocal_rank_fusion,
 )
 from app.shared.langchain_layer import serialize_to_toon
+from app.shared.langchain_layer.models import _build_chat_model
 from app.shared.langgraph_layer.kb_retry import retry_immediate
 from app.shared.langgraph_layer.retrieval_kb import (
     ContextGrade,
@@ -67,6 +67,7 @@ if TYPE_CHECKING:
     from typing import Any, Literal
 
     from graphiti_core.graphiti import Graphiti
+    from langchain_core.language_models import BaseChatModel
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
     from ty_extensions import Unknown
 
@@ -203,10 +204,12 @@ class DocumentQueryService:
     def __init__(
         self,
         repo: DocumentRepository,
+        llm: BaseChatModel,
         redis: object | None,
         graphiti: object | None,
     ):
         self.repo = repo
+        self._llm = llm
         self.redis = redis
         self.graphiti = graphiti
 
@@ -323,14 +326,8 @@ class DocumentQueryService:
                 return response.model_copy(update={"cache_hit": True})
 
         settings: Settings = get_settings()
-        llm = ChatGoogleGenerativeAI(
-            model=settings.GEMINI_FLASH_MODEL,
-            api_key=settings.GEMINI_API_KEY.get_secret_value()
-            if settings.GEMINI_API_KEY.get_secret_value()
-            else None,
-            temperature=0.1,
-            retries=0,
-        )
+        _ = settings
+        llm = self._llm
         query_llm = llm.with_structured_output(QueryPlan)
         grader_llm = llm.with_structured_output(ContextGrade)
         generator_llm = llm.with_structured_output(GeneratedAnswer)
@@ -425,6 +422,7 @@ async def process_document_ingestion(
     object_store: StorageService,
     repo: DocumentRepository,
     graphiti: object | None,
+    llm: BaseChatModel,
 ) -> dict[str, object]:
     raw_bytes = await object_store.get_object(key=key_from_s3_uri(object_uri))
     parsed: ParsedDocument = await parse_document(
@@ -434,14 +432,6 @@ async def process_document_ingestion(
     legal_metadata: LegalMetadataExtraction | None = None
     metadata_warnings: list[QualityWarning] = []
     if classified.graphiti_required:
-        llm = ChatGoogleGenerativeAI(
-            model=get_settings().GEMINI_FLASH_MODEL,
-            api_key=get_settings().GEMINI_API_KEY.get_secret_value()
-            if get_settings().GEMINI_API_KEY.get_secret_value()
-            else None,
-            temperature=0.1,
-            retries=0,
-        )
         legal_metadata, metadata_warnings = await extract_legal_metadata(
             llm=llm,
             markdown=parsed.markdown,
@@ -545,6 +535,11 @@ async def run_document_ingestion_task(
     engine, session_local = await init_db()
     settings: Settings = get_settings()
     object_store: StorageService = StorageService.from_settings(settings=settings)
+    llm = _build_chat_model(
+        model_name=settings.GEMINI_FLASH_MODEL,
+        temperature=0.1,
+        implementation="generic",
+    )
     graphiti: Graphiti = await setup_graphiti(
         neo4j_uri=settings.NEO4J_URI,
         neo4j_user=settings.NEO4J_USERNAME,
@@ -559,6 +554,7 @@ async def run_document_ingestion_task(
                 repo=repo,
                 graphiti=graphiti,
                 ingest_document_fn=process_document_ingestion,
+                llm=llm,
             )
             return await graph.ainvoke(
                 {
@@ -778,12 +774,16 @@ async def _cached_embedding(
     return _normalize_embedding(list(embedding))
 
 
-def _normalize_embedding(embedding: list[float]) -> list[float]:
-    if len(embedding) == 768:
+def _normalize_embedding(
+    embedding: list[float], expected_dim: int | None = None
+) -> list[float]:
+    if expected_dim is None:
+        expected_dim = get_settings().EMBEDDING_DIMENSION
+    if len(embedding) == expected_dim:
         return embedding
-    if len(embedding) > 768:
-        return embedding[:768]
-    return [*embedding, *([0.0] * (768 - len(embedding)))]
+    if len(embedding) > expected_dim:
+        return embedding[:expected_dim]
+    return [*embedding, *([0.0] * (expected_dim - len(embedding)))]
 
 
 def _to_ranked_rows(rows: list[dict[str, object]]) -> list[RankedResultRow]:

@@ -2,7 +2,7 @@
 Pydantic models for data validation and serialization.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -286,7 +286,7 @@ class Entity(BaseModel):
     description: str | None = None
     properties: dict[str, Any] = Field(default_factory=dict)
     source_document_id: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class Relationship(BaseModel):
@@ -298,7 +298,7 @@ class Relationship(BaseModel):
     relationship_type: str
     properties: dict[str, Any] = Field(default_factory=dict)
     source_document_id: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ExtractionResult(BaseModel):

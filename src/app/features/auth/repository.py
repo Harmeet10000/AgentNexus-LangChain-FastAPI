@@ -404,7 +404,7 @@ class RefreshTokenRepository:
                 Set(
                     {
                         "is_revoked": True,
-                        "revoked_at": datetime.utcnow(),
+                        "revoked_at": datetime.now(UTC),
                         "revoke_reason": reason,
                     }
                 )
@@ -510,7 +510,7 @@ class RefreshTokenRepository:
                 Set(
                     {
                         "is_revoked": True,
-                        "revoked_at": datetime.utcnow(),
+                        "revoked_at": datetime.now(UTC),
                         "revoke_reason": reason,
                     }
                 )
