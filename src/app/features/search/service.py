@@ -7,9 +7,6 @@ import hashlib
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from langchain_google_genai import ChatGoogleGenerativeAI
-
-from app.config import get_settings
 from app.connections import celery_app, init_db
 from app.shared.langgraph_layer.retrieval_kb import GeneratedAnswer, build_retrieval_graph
 from app.utils import ServiceUnavailableException, logger
@@ -43,6 +40,7 @@ from .repository import SearchRepository, build_chunk_rows
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from langchain_core.language_models import BaseChatModel
     from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,10 +56,12 @@ class SearchService:
     def __init__(
         self,
         repo: SearchRepository,
+        llm: BaseChatModel,
         redis: Redis | None = None,
         graphiti: object | None = None,
     ):
         self.repo: SearchRepository = repo
+        self._llm = llm
         self.redis: Redis | None = redis
         self.graphiti = graphiti
 
@@ -232,17 +232,8 @@ class SearchService:
 
     async def ask_legal(self, payload: LegalAskRequest, user_id: str) -> LegalAskResponse:
         """Run the clauses-backed retrieval graph and return a grounded answer."""
-        settings = get_settings()
-        llm = ChatGoogleGenerativeAI(
-            model=settings.GEMINI_FLASH_MODEL,
-            api_key=settings.GEMINI_API_KEY.get_secret_value()
-            if settings.GEMINI_API_KEY.get_secret_value()
-            else None,
-            temperature=0.1,
-            retries=0,
-        )
         graph = build_retrieval_graph(
-            llm=llm,
+            llm=self._llm,
             repo=self.repo,
             embedding_fn=build_embedding_client(),
             redis=None if payload.bypass_cache else self.redis,

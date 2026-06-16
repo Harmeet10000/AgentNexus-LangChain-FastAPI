@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from authlib.integrations.httpx_client import AsyncOAuth2Client
@@ -218,7 +218,7 @@ class AuthService:
         if user is None:
             raise NotFoundException("Invalid or expired reset token")
 
-        if user.reset_token_expires_at is None or user.reset_token_expires_at < datetime.utcnow():
+        if user.reset_token_expires_at is None or user.reset_token_expires_at < datetime.now(UTC):
             raise UnauthorizedException("Reset token has expired")
 
         user.hashed_password = hash_password(new_password)

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from beanie import PydanticObjectId
 from beanie.operators import Or, RegEx, Set
@@ -63,12 +63,12 @@ class UserAdminRepository:
         return items, total
 
     async def update_role(self, user: User, role: UserRole) -> User:
-        await user.update(Set({User.role: role, User.updated_at: datetime.utcnow()}))
+        await user.update(Set({User.role: role, User.updated_at: datetime.now(UTC)}))
         user.role: UserRole = role
         return user
 
     async def set_active(self, user: User, *, is_active: bool) -> User:
-        await user.update(Set({User.is_active: is_active, User.updated_at: datetime.utcnow()}))
+        await user.update(Set({User.is_active: is_active, User.updated_at: datetime.now(UTC)}))
         user.is_active: bool = is_active
         return user
 

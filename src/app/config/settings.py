@@ -3,8 +3,21 @@
 from functools import cache
 from pathlib import Path
 
+from loguru import logger
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PRODUCTION_SECRET_FIELDS: dict[str, list[str]] = {
+    "JWT_SECRET_KEY": ["super-secret-change-this-in-production"],
+    "NEO4J_PASSWORD": ["password"],
+    "GEMINI_API_KEY": [""],
+    "RESEND_API_KEY": [""],
+    "OAUTH_STATE_SECRET": ["your-oauth-state-secret"],
+    "S3_ACCESS_KEY_ID": [""],
+    "S3_SECRET_ACCESS_KEY": [""],
+    "TAVILY_API_KEY": [""],
+    "PINECONE_API_KEY": [""],
+}
 
 
 class Settings(BaseSettings):
@@ -43,7 +56,7 @@ class Settings(BaseSettings):
         ]
     )
     CORS_EXPOSE_HEADERS: list[str] = Field(
-        default_factory=lambda: ["X-Total-Count", "X-Correlation-ID", "X-Process-Time", "Link"]
+        default_factory=lambda: ["X-Total-Count", "X-Correlation-ID", "X-Process-Time", "Link", "Deprecation", "Sunset"]
     )
     CORS_ALLOW_CREDENTIALS: bool = Field(default=True)
     CORS_MAX_AGE: int = Field(default=3600)
@@ -52,6 +65,10 @@ class Settings(BaseSettings):
     HOST: str = Field(default="0.0.0.0")  # noqa: S104
     PORT: int = Field(default=5000)
     WORKERS: int = Field(default=1)
+
+    # --- API Versioning ---
+    API_SUNSET_DATE: str = Field(default="2027-06-15")
+    API_V2_BASE_PATH: str = Field(default="/api/v2")
 
     # --- MCP Configuration ---
     MCP_ENABLE_STDIO: bool = Field(default=True)
@@ -155,6 +172,9 @@ class Settings(BaseSettings):
     PINECONE_INDEX_NAME: str = Field(default="langchain-index")
     PINECONE_DIMENSION: int = Field(default=768)
     PINECONE_METRIC: str = Field(default="cosine")
+
+    # --- Embedding ---
+    EMBEDDING_DIMENSION: int = Field(default=768, gt=0)
 
     # --- LangSmith ---
     # Renamed to match the variable in your ENV file: LANGSMITH_TRACING=true
@@ -295,6 +315,33 @@ class Settings(BaseSettings):
     OTEL_SERVICE_NAME: str = Field(default="langchain-fastapi")
     OTEL_TRACES_EXPORTER: str = Field(default="otlp")
     OTEL_METRICS_EXPORTER: str = Field(default="otlp")
+
+    def model_post_init(self, __context: object) -> None:
+        bad_fields: list[str] = []
+        for field_name, bad_defaults in PRODUCTION_SECRET_FIELDS.items():
+            raw = getattr(self, field_name, None)
+            if raw is None:
+                continue
+            value = raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw)
+            if value in bad_defaults:
+                bad_fields.append(field_name)
+
+        if self.ENVIRONMENT == "production" and bad_fields:
+            error_lines = "\n".join(f"  - {f}" for f in bad_fields)
+            msg = (
+                "Settings validation failed for production environment.\n"
+                "The following secret fields have default/insecure values:\n"
+                f"{error_lines}\n"
+                "Set these environment variables before starting the application."
+            )
+            raise ValueError(msg)
+
+        if self.ENVIRONMENT != "production" and bad_fields:
+            logger.warning(
+                "Secret fields have default values (safe in {}): {}",
+                self.ENVIRONMENT,
+                ", ".join(bad_fields),
+            )
 
 
 @cache
