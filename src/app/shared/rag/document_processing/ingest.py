@@ -5,13 +5,14 @@ Main ingestion script for processing markdown documents into vector DB and knowl
 import argparse
 import asyncio
 import json
-import logging
 from datetime import datetime
 from os.path import relpath
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+
+from app.utils.logger import logger
 
 from .chunker import ChunkingConfig, DocumentChunk, create_chunker
 from .embedder import create_embedder
@@ -243,9 +244,7 @@ class DocumentIngestionPipeline:
         files = []
 
         for pattern in patterns:
-            files.extend(
-                str(p) for p in Path(self.documents_folder).glob(f"**/{pattern}")
-            )
+            files.extend(str(p) for p in Path(self.documents_folder).glob(f"**/{pattern}"))
 
         return sorted(files)
 
@@ -282,9 +281,7 @@ class DocumentIngestionPipeline:
             try:
                 from docling.document_converter import DocumentConverter
 
-                logger.info(
-                    f"Converting {file_ext} file using Docling: {Path(file_path).name}"
-                )
+                logger.info(f"Converting {file_ext} file using Docling: {Path(file_path).name}")
 
                 converter = DocumentConverter()
                 result = converter.convert(file_path)
@@ -488,12 +485,6 @@ async def main():
 
     args = parser.parse_args()
 
-    # Configure logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-
     # Create ingestion configuration
     config = IngestionConfig(
         chunk_size=args.chunk_size,
@@ -509,7 +500,7 @@ async def main():
     )
 
     def progress_callback(current: int, total: int):
-        print(f"Progress: {current}/{total} documents processed")
+        logger.info(f"Progress: {current}/{total} documents processed")
 
     try:
         start_time = datetime.now()
@@ -519,28 +510,26 @@ async def main():
         end_time = datetime.now()
         total_time = (end_time - start_time).total_seconds()
 
-        # Print summary
-        print("\n" + "=" * 50)
-        print("INGESTION SUMMARY")
-        print("=" * 50)
-        print(f"Documents processed: {len(results)}")
-        print(f"Total chunks created: {sum(r.chunks_created for r in results)}")
-        # Graph-related stats removed
-        print(f"Total errors: {sum(len(r.errors) for r in results)}")
-        print(f"Total processing time: {total_time:.2f} seconds")
-        print()
+        # Summary
+        logger.info("=" * 50)
+        logger.info("INGESTION SUMMARY")
+        logger.info("=" * 50)
+        logger.info(f"Documents processed: {len(results)}")
+        logger.info(f"Total chunks created: {sum(r.chunks_created for r in results)}")
+        logger.info(f"Total errors: {sum(len(r.errors) for r in results)}")
+        logger.info(f"Total processing time: {total_time:.2f} seconds")
 
-        # Print individual results
+        # Individual results
         for result in results:
             status = "✓" if not result.errors else "✗"
-            print(f"{status} {result.title}: {result.chunks_created} chunks")
+            logger.info(f"{status} {result.title}: {result.chunks_created} chunks")
 
             if result.errors:
                 for error in result.errors:
-                    print(f"  Error: {error}")
+                    logger.error(f"  Error: {error}")
 
     except KeyboardInterrupt:
-        print("\nIngestion interrupted by user")
+        logger.info("Ingestion interrupted by user")
     except Exception as e:
         logger.error(f"Ingestion failed: {e}")
         raise

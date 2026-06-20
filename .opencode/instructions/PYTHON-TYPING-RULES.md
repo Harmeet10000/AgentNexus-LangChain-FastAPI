@@ -49,13 +49,17 @@
 
 - Use `pydantic.SecretStr` for all settings fields that hold secrets, tokens, passwords, or API keys.
 - Consumers call `.get_secret_value()` to extract the underlying `str`.
+- **Never use `str(settings.FIELD)` on a `SecretStr` field** — it silently leaks secrets into logs/tracebacks. Always use `.get_secret_value()`.
 - Pydantic v2 auto-converts `str` env vars to `SecretStr` when the field type is `SecretStr`.
 - `SecretStr` automatically redacts values in `repr()`, `model_dump()`, and `model_dump_json()`.
 - For optional secrets: annotate as `SecretStr | None = Field(default=None)`.
 
 ```python
-GEMINI_API_KEY: SecretStr = Field(default=SecretStr(""))
-# Usage: settings.GEMINI_API_KEY.get_secret_value()
+# Correct
+api_key = settings.GEMINI_API_KEY.get_secret_value()
+
+# Wrong — leaks secret into str() then into logs/tracebacks
+api_key = str(settings.GEMINI_API_KEY)
 ```
 
 ### PrivateAttr
