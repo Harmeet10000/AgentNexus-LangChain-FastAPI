@@ -11,16 +11,15 @@ Implements multiple RAG strategies:
 """
 
 import asyncio
-import logging
 import os
 import sys
 
 from dotenv import load_dotenv
 
+from app.utils.logger import logger
+
 # Load environment variables
 load_dotenv(".env")
-
-logger = logging.getLogger(__name__)
 
 # Global database pool
 db_pool = None
@@ -507,13 +506,12 @@ async def run_cli():
 
     await initialize_db()
 
-    print("=" * 60)
-    print("Advanced RAG Knowledge Assistant")
-    print("=" * 60)
-    print("Multiple retrieval strategies available!")
-    print("Type 'quit', 'exit', or press Ctrl+C to exit.")
-    print("=" * 60)
-    print()
+    logger.info("=" * 60)
+    logger.info("Advanced RAG Knowledge Assistant")
+    logger.info("=" * 60)
+    logger.info("Multiple retrieval strategies available!")
+    logger.info("Type 'quit', 'exit', or press Ctrl+C to exit.")
+    logger.info("=" * 60)
 
     message_history = []
 
@@ -528,39 +526,35 @@ async def run_cli():
                 continue
 
             if user_input.lower() in ["quit", "exit", "bye"]:
-                print("\nAssistant: Thank you for using the knowledge assistant. Goodbye!")
+                logger.info("Assistant: Thank you for using the knowledge assistant. Goodbye!")
                 break
 
-            print("Assistant: ", end="", flush=True)
+            logger.info("Assistant: ")
 
             try:
                 async with agent.run_stream(user_input, message_history=message_history) as result:
                     async for text in result.stream_text(delta=True):
-                        print(text, end="", flush=True)
+                        print(
+                            text, end="", flush=True
+                        )  # ponytail: stdout streaming, loguru can't stream per-token
 
-                    print()
+                    logger.info("Stream complete")
                     message_history = result.all_messages()
 
             except KeyboardInterrupt:
-                print("\n\n[Interrupted]")
+                logger.info("\n[Interrupted]")
                 break
             except Exception as e:
-                print(f"\n\nError: {e}")
                 logger.error(f"Agent error: {e}", exc_info=True)
 
-            print()
-
     except KeyboardInterrupt:
-        print("\n\nGoodbye!")
+        logger.info("Goodbye!")
     finally:
         await close_db()
 
 
 async def main():
     """Main entry point."""
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
 
     if not os.getenv("DATABASE_URL"):
         logger.error("DATABASE_URL environment variable is required")
@@ -577,4 +571,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n\nShutting down...")
+        logger.info("Shutting down...")
