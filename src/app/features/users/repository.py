@@ -15,13 +15,7 @@ class UserAdminRepository:
     Beanie manages the connection at the document class level after init.
     """
 
-    async def find_by_id(self, user_id: str) -> User | None:
-        result: AppResult[User | None] = await self.find_by_id_result(user_id)
-        if isinstance(result, Failure):
-            return None
-        return result.unwrap()
-
-    async def find_by_id_result(self, user_id: str) -> AppResult[User | None]:
+    async def find_by_id(self, user_id: str) -> AppResult[User | None]:
         if not PydanticObjectId.is_valid(user_id):
             return Failure(
                 ValidationAppError(

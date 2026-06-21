@@ -115,9 +115,9 @@ def make_fetch_existing_node(
                 "Failed to fetch reconciliation candidates",
                 user_id=state.user_id,
             )
-            log_expected_failure(error_result.failure, operation="fetch_existing")
+            log_expected_failure(error_result.failure(), operation="fetch_existing")
             return {
-                "failures": [error_result.failure],
+                "failures": [error_result.failure()],
                 "new_entities": [],
                 "existing_entities": [],
             }
@@ -176,10 +176,10 @@ def make_reconcile_node(
                     source="reconciliation_graph",
                 )
             )
-            log_expected_failure(error_result.failure, operation="reconcile")
+            log_expected_failure(error_result.failure(), operation="reconcile")
             return {
                 "reconciliation_decision": ReconciliationDecision(),
-                "failures": [error_result.failure],
+                "failures": [error_result.failure()],
             }
         except Exception as exc:  # noqa: BLE001
             log.bind(error=str(exc)).exception("reconcile_failed")
@@ -188,10 +188,10 @@ def make_reconcile_node(
                 "Failed to reconcile entities",
                 user_id=state.user_id,
             )
-            log_expected_failure(error_result.failure, operation="reconcile")
+            log_expected_failure(error_result.failure(), operation="reconcile")
             return {
                 "reconciliation_decision": ReconciliationDecision(),
-                "failures": [error_result.failure],
+                "failures": [error_result.failure()],
             }
         else:
             return {"reconciliation_decision": decision}
@@ -255,9 +255,9 @@ def make_apply_changes_node(
                 "Failed to apply reconciliation changes",
                 user_id=state.user_id,
             )
-            log_expected_failure(error_result.failure, operation="apply_changes")
+            log_expected_failure(error_result.failure(), operation="apply_changes")
             return {
-                "failures": [error_result.failure],
+                "failures": [error_result.failure()],
                 "merged_count": 0,
                 "updated_count": 0,
             }
@@ -339,9 +339,9 @@ def make_write_versions_node(
                 user_id=state.user_id,
                 retryable=False,
             )
-            log_expected_failure(error_result.failure, operation="write_versions")
+            log_expected_failure(error_result.failure(), operation="write_versions")
             return {
-                "failures": [error_result.failure],
+                "failures": [error_result.failure()],
                 "versions_written": 0,
                 "completed": True,
             }

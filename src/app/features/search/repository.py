@@ -10,7 +10,7 @@ from uuid import UUID
 from returns.result import Failure, Success
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.shared.result import (
     InfrastructureAppError,
@@ -43,13 +43,7 @@ class SearchRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_document_by_content_hash(self, content_hash: str) -> SearchDocument | None:
-        result = await self.get_document_by_content_hash_result(content_hash=content_hash)
-        if isinstance(result, Failure):
-            return None
-        return result.unwrap()
-
-    async def get_document_by_content_hash_result(
+    async def get_document_by_content_hash(
         self,
         content_hash: str,
     ) -> AppResult[SearchDocument | None]:
@@ -77,13 +71,7 @@ class SearchRepository:
                 )
             )
 
-    async def get_document_by_id(self, document_id: str) -> SearchDocument | None:
-        result = await self.get_document_by_id_result(document_id=document_id)
-        if isinstance(result, Failure):
-            return None
-        return result.unwrap()
-
-    async def get_document_by_id_result(
+    async def get_document_by_id(
         self,
         document_id: str,
     ) -> AppResult[SearchDocument | None]:
@@ -119,53 +107,96 @@ class SearchRepository:
         content_hash: str,
         doc_metadata: dict[str, Any],
     ) -> SearchDocument:
-        document = SearchDocument(
+        result = await self.create_document_result(
             title=title,
             source_uri=source_uri,
             content_hash=content_hash,
             doc_metadata=doc_metadata,
         )
-        self.session.add(document)
-        await self.session.flush()
-        return document
+        if isinstance(result, Failure):
+            raise app_error_to_exception(result.failure())
+        return result.unwrap()
 
-    async def upsert_chunks(self, rows: list[dict[str, Any]]) -> None:
+    async def create_document_result(
+        self,
+        *,
+        title: str,
+        source_uri: str | None,
+        content_hash: str,
+        doc_metadata: dict[str, Any],
+    ) -> AppResult[SearchDocument]:
+        try:
+            document = SearchDocument(
+                title=title,
+                source_uri=source_uri,
+                content_hash=content_hash,
+                doc_metadata=doc_metadata,
+            )
+            self.session.add(document)
+            await self.session.flush()
+            return Success(document)
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while creating search document",
+                    details={"title": title, "error": str(exc)},
+                    source="search_repository",
+                )
+            )
+
+    async def upsert_chunks(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> None:
+        result = await self.upsert_chunks_result(rows=rows)
+        if isinstance(result, Failure):
+            raise app_error_to_exception(result.failure())
+        return result.unwrap()
+
+    async def upsert_chunks_result(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> AppResult[None]:
         """Bulk upsert chunk rows using the document/chunk unique key."""
         if not rows:
-            return
-
-        statement = insert(SearchChunk).values(rows)
-        statement = statement.on_conflict_do_update(
-            constraint="uq_search_chunks_document_chunk_index",
-            set_={
-                "content": statement.excluded.content,
-                "embedding": statement.excluded.embedding,
-                "chunk_metadata": statement.excluded.chunk_metadata,
-                "updated_at": statement.excluded.updated_at,
-            },
-        )
-        await self.session.execute(statement)
+            return Success(None)
+        try:
+            statement = insert(SearchChunk).values(rows)
+            statement = statement.on_conflict_do_update(
+                constraint="uq_search_chunks_document_chunk_index",
+                set_={
+                    "content": statement.excluded.content,
+                    "embedding": statement.excluded.embedding,
+                    "chunk_metadata": statement.excluded.chunk_metadata,
+                    "updated_at": statement.excluded.updated_at,
+                },
+            )
+            await self.session.execute(statement)
+            return Success(None)
+        except IntegrityError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_INTEGRITY_ERROR",
+                    message="Integrity error while upserting chunks",
+                    details={"error": str(exc)},
+                    source="search_repository",
+                )
+            )
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while upserting chunks",
+                    details={"error": str(exc)},
+                    source="search_repository",
+                )
+            )
 
     async def analyze_chunks(self) -> None:
         await self.session.execute(text("ANALYZE search_chunks"))
 
     async def bm25_search(
-        self,
-        *,
-        query: str,
-        candidate_limit: int,
-        metadata_filter: dict[str, Any],
-    ) -> list[RankedResultRow]:
-        result = await self.bm25_search_result(
-            query=query,
-            candidate_limit=candidate_limit,
-            metadata_filter=metadata_filter,
-        )
-        if isinstance(result, Failure):
-            raise app_error_to_exception(result.failure())
-        return result.unwrap()
-
-    async def bm25_search_result(
         self,
         *,
         query: str,
@@ -192,22 +223,6 @@ class SearchRepository:
             )
 
     async def vector_search(
-        self,
-        *,
-        embedding: list[float],
-        candidate_limit: int,
-        metadata_filter: dict[str, Any],
-    ) -> list[RankedResultRow]:
-        result = await self.vector_search_result(
-            embedding=embedding,
-            candidate_limit=candidate_limit,
-            metadata_filter=metadata_filter,
-        )
-        if isinstance(result, Failure):
-            raise app_error_to_exception(result.failure())
-        return result.unwrap()
-
-    async def vector_search_result(
         self,
         *,
         embedding: list[float],
@@ -246,22 +261,6 @@ class SearchRepository:
         query: str,
         candidate_limit: int,
         metadata_filter: dict[str, Any],
-    ) -> list[RankedResultRow]:
-        result = await self.trigram_search_result(
-            query=query,
-            candidate_limit=candidate_limit,
-            metadata_filter=metadata_filter,
-        )
-        if isinstance(result, Failure):
-            raise app_error_to_exception(result.failure())
-        return result.unwrap()
-
-    async def trigram_search_result(
-        self,
-        *,
-        query: str,
-        candidate_limit: int,
-        metadata_filter: dict[str, Any],
     ) -> AppResult[list[RankedResultRow]]:
         try:
             statement, filter_params = _build_trigram_statement(metadata_filter)
@@ -283,36 +282,59 @@ class SearchRepository:
                 )
             )
 
-    async def fetch_chunks_by_ids(self, chunk_ids: Sequence[str]) -> dict[str, SearchChunkRecord]:
-        if not chunk_ids:
-            return {}
+    async def fetch_chunks_by_ids(
+        self,
+        chunk_ids: Sequence[str],
+    ) -> dict[str, SearchChunkRecord]:
+        result = await self.fetch_chunks_by_ids_result(chunk_ids=chunk_ids)
+        if isinstance(result, Failure):
+            raise app_error_to_exception(result.failure())
+        return result.unwrap()
 
-        statement = text(
-            """
-            SELECT
-                c.id::text AS chunk_id,
-                c.document_id::text AS document_id,
-                d.title AS title,
-                c.content AS content,
-                c.chunk_index AS chunk_index,
-                c.chunk_metadata AS chunk_metadata
-            FROM search_chunks AS c
-            JOIN search_documents AS d
-              ON d.id = c.document_id
-            WHERE c.id = ANY(CAST(:chunk_ids AS uuid[]))
-            """
-        )
-        result = await self.session.execute(statement, {"chunk_ids": list(chunk_ids)})
-        return {
-            str(row["chunk_id"]): SearchChunkRecord(
-                document_id=str(row["document_id"]),
-                title=str(row["title"]),
-                content=str(row["content"]),
-                chunk_index=int(row["chunk_index"]),
-                chunk_metadata=dict(row["chunk_metadata"] or {}),
+    async def fetch_chunks_by_ids_result(
+        self,
+        chunk_ids: Sequence[str],
+    ) -> AppResult[dict[str, SearchChunkRecord]]:
+        if not chunk_ids:
+            return Success({})
+        try:
+            statement = text(
+                """
+                SELECT
+                    c.id::text AS chunk_id,
+                    c.document_id::text AS document_id,
+                    d.title AS title,
+                    c.content AS content,
+                    c.chunk_index AS chunk_index,
+                    c.chunk_metadata AS chunk_metadata
+                FROM search_chunks AS c
+                JOIN search_documents AS d
+                  ON d.id = c.document_id
+                WHERE c.id = ANY(CAST(:chunk_ids AS uuid[]))
+                """
             )
-            for row in result.mappings().all()
-        }
+            result = await self.session.execute(statement, {"chunk_ids": list(chunk_ids)})
+            return Success(
+                {
+                    str(row["chunk_id"]): SearchChunkRecord(
+                        document_id=str(row["document_id"]),
+                        title=str(row["title"]),
+                        content=str(row["content"]),
+                        chunk_index=int(row["chunk_index"]),
+                        chunk_metadata=dict(row["chunk_metadata"] or {}),
+                    )
+                    for row in result.mappings().all()
+                }
+            )
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while fetching chunks by IDs",
+                    details={"error": str(exc)},
+                    source="search_repository",
+                )
+            )
 
     async def legal_rrf_search(
         self,

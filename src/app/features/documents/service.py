@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.connections import celery_app, init_db
@@ -35,6 +36,7 @@ from app.shared.langgraph_layer.retrieval_kb import (
     _extract_postgres_chunk_ids,
 )
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
+from app.shared.result import app_error_to_exception, log_expected_failure
 from app.shared.services.storage import StorageService, build_s3_key, key_from_s3_uri
 from app.utils import NotFoundException, ServiceUnavailableException, ValidationException, logger
 from app.utils.json_serializer import from_json_float_list, to_float_list_str, to_sorted_key_bytes
@@ -115,15 +117,18 @@ class DocumentCommandService:
             message = "Uploaded document is empty"
             raise ValidationException(message)
         content_hash = hashlib.sha256(raw_bytes).hexdigest()
-        existing = await self.repo.get_document_by_user_hash(
-            user_id=user_id, content_hash=content_hash
-        )
-        if existing is not None:
-            return DocumentUploadResponse(
-                doc_id=str(existing.id),
-                status=existing.status,
-                duplicate=True,
-            )
+        match await self.repo.get_document_by_user_hash(user_id=user_id, content_hash=content_hash):
+            case Success(existing) if existing is not None:
+                return DocumentUploadResponse(
+                    doc_id=str(existing.id),
+                    status=existing.status,
+                    duplicate=True,
+                )
+            case Success():
+                pass
+            case Failure(error):
+                log_expected_failure(error, operation="document_upload")
+                raise app_error_to_exception(error)
 
         document_id = str(uuid4())
         object_key = build_s3_key(
@@ -139,7 +144,7 @@ class DocumentCommandService:
             content_type=content_type,
             metadata={"user_id": user_id, "document_id": document_id, "content_hash": content_hash},
         )
-        document = await self.repo.create_document(
+        match await self.repo.create_document(
             user_id=user_id,
             title=filename,
             source_uri=filename,
@@ -151,7 +156,12 @@ class DocumentCommandService:
             contract_type=None,
             parties=[],
             metadata_={"content_type": content_type, "filename": filename},
-        )
+        ):
+            case Success(document):
+                pass
+            case Failure(error):
+                log_expected_failure(error, operation="document_upload")
+                raise app_error_to_exception(error)
 
         try:
             task = celery_app.send_task(
@@ -181,22 +191,23 @@ class DocumentCommandService:
         )
 
     async def get_status(self, *, user_id: str, document_id: str) -> DocumentStatusResponse:
-        record = await self.repo.fetch_status(user_id=user_id, document_id=document_id)
-        if record is None:
-            resource = "Document"
-            raise NotFoundException(resource, document_id)
-        warnings = _flatten_warnings(record.get("warnings", []))
-        return DocumentStatusResponse(
-            doc_id=str(record["document_id"]),
-            status=str(record["status"]),
-            object_uri=str(record["object_uri"]),
-            title=str(record["title"]),
-            document_kind=str(record["document_kind"]),
-            chunk_count=int(record["chunk_count"]),
-            verified_chunk_count=int(record["verified_chunk_count"]),
-            warning_count=len(warnings),
-            warnings=warnings,
-        )
+        match await self.repo.fetch_status(user_id=user_id, document_id=document_id):
+            case Success(record) if record is not None:
+                warnings = _flatten_warnings(record.get("warnings", []))
+                return DocumentStatusResponse(
+                    doc_id=str(record["document_id"]),
+                    status=str(record["status"]),
+                    object_uri=str(record["object_uri"]),
+                    title=str(record["title"]),
+                    document_kind=str(record["document_kind"]),
+                    chunk_count=int(record["chunk_count"]),
+                    verified_chunk_count=int(record["verified_chunk_count"]),
+                    warning_count=len(warnings),
+                    warnings=warnings,
+                )
+            case _:
+                resource = "Document"
+                raise NotFoundException(resource, document_id)
 
 
 class DocumentQueryService:
@@ -468,9 +479,14 @@ async def process_document_ingestion(
         chunks=chunks,
         extra_warnings=segmentation_warnings + classified.warnings + metadata_warnings,
     )
-    await repo.upsert_chunks(
+    match await repo.upsert_chunks(
         build_chunk_rows(document_id=document_id, user_id=user_id, chunks=chunk_rows)
-    )
+    ):
+        case Success():
+            pass
+        case Failure(error):
+            log_expected_failure(error, operation="document_ingestion")
+            raise app_error_to_exception(error)
     if len(chunk_rows) > ANALYZE_THRESHOLD_CHUNKS:
         await repo.analyze_chunks()
     await repo.update_document_status(document_id=document_id, status="stored_postgres")
@@ -631,9 +647,14 @@ async def _verify_legal_chunks(
         chunk["graphiti_verified"] = result.verified
         if result.verified:
             verified_count += 1
-    await repo.upsert_chunks(
+    match await repo.upsert_chunks(
         build_chunk_rows(document_id=document_id, user_id=user_id, chunks=chunk_rows)
-    )
+    ):
+        case Success():
+            pass
+        case Failure(error):
+            log_expected_failure(error, operation="verify_legal_chunks")
+            raise app_error_to_exception(error)
     return verified_count
 
 
