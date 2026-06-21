@@ -95,8 +95,8 @@ def make_parse_document_node() -> Callable[[IngestionState], Awaitable[dict[str,
                 "Uploaded document is empty",
                 doc_id=state.doc_id,
             )
-            log_expected_failure(result.failure, operation="parse_document")
-            return _state_failure(result.failure)
+            log_expected_failure(result.failure(), operation="parse_document")
+            return _state_failure(result.failure())
 
         parsed: ParsedDocument = await retry_immediate(
             lambda: _parse_document_with_docling(state.raw_bytes, state.filename, state.source),
@@ -118,8 +118,8 @@ def make_extract_schema_node(
                 "Parsed document is required before schema extraction",
                 doc_id=state.doc_id,
             )
-            log_expected_failure(result.failure, operation="extract_schema")
-            return _state_failure(result.failure)
+            log_expected_failure(result.failure(), operation="extract_schema")
+            return _state_failure(result.failure())
 
         payload = serialize_to_toon(
             {
@@ -157,8 +157,8 @@ def make_segment_document_node(
                 "Parsed document and metadata are required before segmentation",
                 doc_id=state.doc_id,
             )
-            log_expected_failure(result.failure, operation="segment_document")
-            return _state_failure(result.failure)
+            log_expected_failure(result.failure(), operation="segment_document")
+            return _state_failure(result.failure())
 
         payload = serialize_to_toon(
             {
@@ -259,8 +259,8 @@ def make_classify_extract_node(
                 "Contract metadata is required before entity extraction",
                 doc_id=state.doc_id,
             )
-            log_expected_failure(result.failure, operation="classify_extract")
-            return _state_failure(result.failure)
+            log_expected_failure(result.failure(), operation="classify_extract")
+            return _state_failure(result.failure())
 
         payload = serialize_to_toon(
             {
@@ -305,8 +305,8 @@ def make_embed_store_node(
                 "Parsed document and metadata are required before storage",
                 doc_id=state.doc_id,
             )
-            log_expected_failure(result.failure, operation="embed_store")
-            return _state_failure(result.failure)
+            log_expected_failure(result.failure(), operation="embed_store")
+            return _state_failure(result.failure())
 
         async with AsyncSession(db_engine) as session, session.begin():
             parent_doc_id = await retry_immediate(
@@ -735,9 +735,7 @@ async def _call_embedding_fn(embedding_fn: EmbeddingFunction, text_to_embed: str
     return cast("list[float]", result)
 
 
-def _normalize_embedding(
-    embedding: list[float], expected_dim: int | None = None
-) -> list[float]:
+def _normalize_embedding(embedding: list[float], expected_dim: int | None = None) -> list[float]:
     if expected_dim is None:
         expected_dim = get_settings().EMBEDDING_DIMENSION
     if len(embedding) == expected_dim:

@@ -7,8 +7,11 @@ import hashlib
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from returns.result import Failure, Success
+
 from app.connections import celery_app, init_db
 from app.shared.langgraph_layer.retrieval_kb import GeneratedAnswer, build_retrieval_graph
+from app.shared.result import app_error_to_exception, log_expected_failure
 from app.utils import ServiceUnavailableException, logger
 from app.utils.json_serializer import to_sorted_key_bytes
 
@@ -70,21 +73,31 @@ class SearchService:
         """Create or deduplicate a document, then enqueue chunk/embed work."""
         canonical_content = payload.content.strip()
         content_hash = hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
-        existing_document = await self.repo.get_document_by_content_hash(content_hash)
-        if existing_document is not None:
-            return SearchIngestResponse(
-                document_id=str(existing_document.id),
-                task_id=None,
-                status="completed",
-                duplicate=True,
-            )
+        match await self.repo.get_document_by_content_hash(content_hash):
+            case Success(existing) if existing is not None:
+                return SearchIngestResponse(
+                    document_id=str(existing.id),
+                    task_id=None,
+                    status="completed",
+                    duplicate=True,
+                )
+            case Success():
+                pass
+            case Failure(error):
+                log_expected_failure(error, operation="search_ingest")
+                raise app_error_to_exception(error)
 
-        document = await self.repo.create_document(
+        match await self.repo.create_document_result(
             title=payload.title,
             source_uri=payload.source_uri,
             content_hash=content_hash,
             doc_metadata=payload.doc_metadata,
-        )
+        ):
+            case Success(document):
+                pass
+            case Failure(error):
+                log_expected_failure(error, operation="search_ingest")
+                raise app_error_to_exception(error)
 
         try:
             task = celery_app.send_task(
@@ -126,13 +139,15 @@ class SearchService:
             error = str(task_result.result)
 
         if document_id is not None:
-            document = await self.repo.get_document_by_id(document_id)
-            if document is not None:
-                result_payload = {
-                    **(result_payload or {}),
-                    "title": document.title,
-                    "source_uri": document.source_uri,
-                }
+            match await self.repo.get_document_by_id(document_id):
+                case Success(doc) if doc is not None:
+                    result_payload = {
+                        **(result_payload or {}),
+                        "title": doc.title,
+                        "source_uri": doc.source_uri,
+                    }
+                case _:
+                    pass
 
         return SearchTaskStatusResponse(
             task_id=task_id,
@@ -346,7 +361,7 @@ async def _run_parallel_search(
     candidate_limit: int,
     metadata_filter: dict[str, object],
 ) -> tuple[list[RankedResultRow], list[RankedResultRow], list[RankedResultRow]]:
-    return await asyncio.gather(
+    results = await asyncio.gather(
         repo.bm25_search(
             query=query,
             candidate_limit=candidate_limit,
@@ -363,6 +378,12 @@ async def _run_parallel_search(
             metadata_filter=metadata_filter,
         ),
     )
+    for r in results:
+        match r:
+            case Failure(error):
+                log_expected_failure(error, operation="parallel_search")
+                raise app_error_to_exception(error)
+    return (results[0].unwrap(), results[1].unwrap(), results[2].unwrap())
 
 
 def _build_search_items(

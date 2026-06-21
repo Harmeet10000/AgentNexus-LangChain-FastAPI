@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from returns.result import Success
 from starlette.requests import HTTPConnection
 
 from app.connections import get_mongodb, get_redis
@@ -103,10 +104,11 @@ async def get_current_user(
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
 ) -> User:
     """Full user hydration from MongoDB. Use when the handler needs live user state."""
-    user: User | None = await user_repo.find_by_id(claims.sub)
-    if user is None:
-        raise UnauthorizedException("User not found")
-    return user
+    match await user_repo.find_by_id(claims.sub):
+        case Success(user) if user is not None:
+            return user
+        case _:
+            raise UnauthorizedException("User not found")
 
 
 async def get_current_active_user(

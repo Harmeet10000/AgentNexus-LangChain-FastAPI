@@ -59,20 +59,6 @@ class DocumentRepository:
         *,
         user_id: str,
         content_hash: str,
-    ) -> UnifiedDocument | None:
-        result = await self.get_document_by_user_hash_result(
-            user_id=user_id,
-            content_hash=content_hash,
-        )
-        if isinstance(result, Failure):
-            return None
-        return result.unwrap()
-
-    async def get_document_by_user_hash_result(
-        self,
-        *,
-        user_id: str,
-        content_hash: str,
     ) -> AppResult[UnifiedDocument | None]:
         try:
             statement = select(UnifiedDocument).where(
@@ -101,16 +87,7 @@ class DocumentRepository:
                 )
             )
 
-    async def get_document_by_id(self, *, user_id: str, document_id: str) -> UnifiedDocument | None:
-        result = await self.get_document_by_id_result(
-            user_id=user_id,
-            document_id=document_id,
-        )
-        if isinstance(result, Failure):
-            return None
-        return result.unwrap()
-
-    async def get_document_by_id_result(
+    async def get_document_by_id(
         self,
         *,
         user_id: str,
@@ -144,38 +121,6 @@ class DocumentRepository:
             )
 
     async def create_document(
-        self,
-        *,
-        user_id: str,
-        title: str,
-        source_uri: str | None,
-        object_uri: str,
-        content_hash: str,
-        document_kind: str,
-        status: str,
-        jurisdiction: str | None,
-        contract_type: str | None,
-        parties: list[object],
-        metadata_: dict[str, object],
-    ) -> UnifiedDocument:
-        result = await self.create_document_result(
-            user_id=user_id,
-            title=title,
-            source_uri=source_uri,
-            object_uri=object_uri,
-            content_hash=content_hash,
-            document_kind=document_kind,
-            status=status,
-            jurisdiction=jurisdiction,
-            contract_type=contract_type,
-            parties=parties,
-            metadata_=metadata_,
-        )
-        if isinstance(result, Failure):
-            raise app_error_to_exception(result.failure())
-        return result.unwrap()
-
-    async def create_document_result(
         self,
         *,
         user_id: str,
@@ -268,13 +213,7 @@ class DocumentRepository:
             },
         )
 
-    async def upsert_chunks(self, rows: list[dict[str, Any]]) -> None:
-        result = await self.upsert_chunks_result(rows=rows)
-        if isinstance(result, Failure):
-            raise app_error_to_exception(result.failure())
-        return result.unwrap()
-
-    async def upsert_chunks_result(self, rows: list[dict[str, Any]]) -> AppResult[None]:
+    async def upsert_chunks(self, rows: list[dict[str, Any]]) -> AppResult[None]:
         if not rows:
             return Success(None)
         try:
@@ -319,13 +258,7 @@ class DocumentRepository:
     async def analyze_chunks(self) -> None:
         await self.session.execute(text("ANALYZE chunks"))
 
-    async def fetch_status(self, *, user_id: str, document_id: str) -> dict[str, Any] | None:
-        result = await self.fetch_status_result(user_id=user_id, document_id=document_id)
-        if isinstance(result, Failure):
-            return None
-        return result.unwrap()
-
-    async def fetch_status_result(
+    async def fetch_status(
         self,
         *,
         user_id: str,
@@ -382,32 +315,60 @@ class DocumentRepository:
         candidate_limit: int,
         filter_params: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        statement = text(
-            """
-            SELECT
-                c.id::text AS chunk_id,
-                (-1 * (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx'))) AS score
-            FROM chunks AS c
-            JOIN documents AS d ON d.id = c.document_id
-            WHERE d.user_id = :user_id
-              AND (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')) < 0
-            """
-            + _FILTER_SQL
-            + """
-            ORDER BY (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')) ASC
-            LIMIT :candidate_limit
-            """
+        result = await self.bm25_search_result(
+            user_id=user_id,
+            query=query,
+            candidate_limit=candidate_limit,
+            filter_params=filter_params,
         )
-        result = await self.session.execute(
-            statement,
-            {
-                "user_id": user_id,
-                "query": query,
-                "candidate_limit": candidate_limit,
-                **filter_params,
-            },
-        )
-        return [dict(row) for row in result.mappings().all()]
+        if isinstance(result, Failure):
+            raise app_error_to_exception(result.failure())
+        return result.unwrap()
+
+    async def bm25_search_result(
+        self,
+        *,
+        user_id: str,
+        query: str,
+        candidate_limit: int,
+        filter_params: dict[str, Any],
+    ) -> AppResult[list[dict[str, Any]]]:
+        try:
+            statement = text(
+                """
+                SELECT
+                    c.id::text AS chunk_id,
+                    (-1 * (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx'))) AS score
+                FROM chunks AS c
+                JOIN documents AS d ON d.id = c.document_id
+                WHERE d.user_id = :user_id
+                  AND (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')) < 0
+                """
+                + _FILTER_SQL
+                + """
+                ORDER BY (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')) ASC
+                LIMIT :candidate_limit
+                """
+            )
+            result = await self.session.execute(
+                statement,
+                {
+                    "user_id": user_id,
+                    "query": query,
+                    "candidate_limit": candidate_limit,
+                    **filter_params,
+                },
+            )
+            return Success([dict(row) for row in result.mappings().all()])
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while performing BM25 search",
+                    details={"error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
     async def vector_search(
         self,
@@ -417,38 +378,66 @@ class DocumentRepository:
         candidate_limit: int,
         filter_params: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        statement = text(
-            """
-            SELECT
-                c.id::text AS chunk_id,
-                (1 - (c.embedding <=> CAST(:embedding AS vector))) AS score
-            FROM chunks AS c
-            JOIN documents AS d ON d.id = c.document_id
-            WHERE d.user_id = :user_id
-              AND c.embedding IS NOT NULL
-            """
-            + _FILTER_SQL
-            + """
-            ORDER BY c.embedding <=> CAST(:embedding AS vector)
-            LIMIT :candidate_limit
-            """
+        result = await self.vector_search_result(
+            user_id=user_id,
+            embedding=embedding,
+            candidate_limit=candidate_limit,
+            filter_params=filter_params,
         )
-        await self.session.execute(
-            text(f"SET LOCAL diskann.query_search_list_size = {DISKANN_QUERY_SEARCH_LIST_SIZE}")
-        )
-        await self.session.execute(
-            text(f"SET LOCAL diskann.query_rescore = {DISKANN_QUERY_RESCORE}")
-        )
-        result = await self.session.execute(
-            statement,
-            {
-                "user_id": user_id,
-                "embedding": _vector_literal(embedding),
-                "candidate_limit": candidate_limit,
-                **filter_params,
-            },
-        )
-        return [dict(row) for row in result.mappings().all()]
+        if isinstance(result, Failure):
+            raise app_error_to_exception(result.failure())
+        return result.unwrap()
+
+    async def vector_search_result(
+        self,
+        *,
+        user_id: str,
+        embedding: list[float],
+        candidate_limit: int,
+        filter_params: dict[str, Any],
+    ) -> AppResult[list[dict[str, Any]]]:
+        try:
+            statement = text(
+                """
+                SELECT
+                    c.id::text AS chunk_id,
+                    (1 - (c.embedding <=> CAST(:embedding AS vector))) AS score
+                FROM chunks AS c
+                JOIN documents AS d ON d.id = c.document_id
+                WHERE d.user_id = :user_id
+                  AND c.embedding IS NOT NULL
+                """
+                + _FILTER_SQL
+                + """
+                ORDER BY c.embedding <=> CAST(:embedding AS vector)
+                LIMIT :candidate_limit
+                """
+            )
+            await self.session.execute(
+                text(f"SET LOCAL diskann.query_search_list_size = {DISKANN_QUERY_SEARCH_LIST_SIZE}")
+            )
+            await self.session.execute(
+                text(f"SET LOCAL diskann.query_rescore = {DISKANN_QUERY_RESCORE}")
+            )
+            result = await self.session.execute(
+                statement,
+                {
+                    "user_id": user_id,
+                    "embedding": _vector_literal(embedding),
+                    "candidate_limit": candidate_limit,
+                    **filter_params,
+                },
+            )
+            return Success([dict(row) for row in result.mappings().all()])
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while performing vector search",
+                    details={"error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
     async def trigram_search(
         self,
@@ -458,34 +447,62 @@ class DocumentRepository:
         candidate_limit: int,
         filter_params: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        statement = text(
-            """
-            SELECT
-                c.id::text AS chunk_id,
-                similarity(c.search_text, :query) AS score
-            FROM chunks AS c
-            JOIN documents AS d ON d.id = c.document_id
-            WHERE d.user_id = :user_id
-              AND c.search_text % :query
-              AND similarity(c.search_text, :query) >= :similarity_threshold
-            """
-            + _FILTER_SQL
-            + """
-            ORDER BY similarity(c.search_text, :query) DESC
-            LIMIT :candidate_limit
-            """
+        result = await self.trigram_search_result(
+            user_id=user_id,
+            query=query,
+            candidate_limit=candidate_limit,
+            filter_params=filter_params,
         )
-        result = await self.session.execute(
-            statement,
-            {
-                "user_id": user_id,
-                "query": query,
-                "candidate_limit": candidate_limit,
-                "similarity_threshold": TRIGRAM_SIMILARITY_THRESHOLD,
-                **filter_params,
-            },
-        )
-        return [dict(row) for row in result.mappings().all()]
+        if isinstance(result, Failure):
+            raise app_error_to_exception(result.failure())
+        return result.unwrap()
+
+    async def trigram_search_result(
+        self,
+        *,
+        user_id: str,
+        query: str,
+        candidate_limit: int,
+        filter_params: dict[str, Any],
+    ) -> AppResult[list[dict[str, Any]]]:
+        try:
+            statement = text(
+                """
+                SELECT
+                    c.id::text AS chunk_id,
+                    similarity(c.search_text, :query) AS score
+                FROM chunks AS c
+                JOIN documents AS d ON d.id = c.document_id
+                WHERE d.user_id = :user_id
+                  AND c.search_text % :query
+                  AND similarity(c.search_text, :query) >= :similarity_threshold
+                """
+                + _FILTER_SQL
+                + """
+                ORDER BY similarity(c.search_text, :query) DESC
+                LIMIT :candidate_limit
+                """
+            )
+            result = await self.session.execute(
+                statement,
+                {
+                    "user_id": user_id,
+                    "query": query,
+                    "candidate_limit": candidate_limit,
+                    "similarity_threshold": TRIGRAM_SIMILARITY_THRESHOLD,
+                    **filter_params,
+                },
+            )
+            return Success([dict(row) for row in result.mappings().all()])
+        except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while performing trigram search",
+                    details={"error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
     async def fetch_chunks_by_ids(self, chunk_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
         if not chunk_ids:
