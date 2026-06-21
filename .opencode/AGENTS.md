@@ -11,10 +11,12 @@ Detailed project rules are in `.opencode/instructions/`. These are loaded into y
 - `ARCHITECTURE-RULES.md` — layering, dep passing, FastAPI, service/repo
 - `PYTHON-TYPING-RULES.md` — Python style, generics, async, Pydantic/DTO
 - `RESULT-PATTERN.md` — returns.Result rules
+- `EXCEPTION-RULES.md` — raise/catch patterns, APIException hierarchy, e.add_note(), GEH
 - `REFERENCE-MAP.md` — file references, graphify, context7
 
 Ask me as many questions as required to remove doubt.
 When suggesting options tell me pros and cons so that i can make a opinionated choice.
+always use ast-grep after using graphify for finding and searching for code
 
 ## graphify
 

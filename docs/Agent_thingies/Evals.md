@@ -1,3 +1,45 @@
+# Evals through DeepEval (G-Eval)
+
+Evaluation Metrics (Stop Lying to Yourself)
+
+Accuracy ≠ BLEU ≠ ROUGE.
+
+You need legal correctness metrics.
+
+3.1 Clause Detection Metrics
+Boundary precision/recall
+Clause-type confusion matrix
+
+Failing here breaks everything downstream.
+
+3.2 Entity Metrics
+Exact match accuracy
+Normalization accuracy (₹ vs words)
+False positive penalty (VERY important)
+
+A wrong entity is worse than a missing one.
+
+3.3 Risk Assessment Metrics
+Human agreement rate
+Severity misclassification rate
+False alarm rate
+
+Lawyers hate noise.
+
+3.4 Compliance Metrics
+Statute grounding accuracy
+Precedent relevance score
+Jurisdiction correctness
+
+One wrong citation = trust collapse.
+
+3.5 System Metrics (enterprise reality)
+Reproducibility (same input → same output)
+Override frequency
+Review time reduction
+
+This is what enterprises buy.
+
 # Building calibrated LLM-as-a-judge evaluators that align with human expectations to ensure reliable agent performance. Below is a detailed summary of the core concepts presented
 
 1. The Challenge of LLM-as-a-Judge (0:00 - 4:15)

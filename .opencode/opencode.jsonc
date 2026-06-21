@@ -1,93 +1,66 @@
 {
-    "$schema": "https://opencode.ai/config.json",
-    "instructions": [
-        ".opencode/AGENTS.md",
-        ".opencode/instructions/PROJECT-SNAPSHOT.md",
-        ".opencode/instructions/TOOLING-COMMANDS.md",
-        ".opencode/instructions/ARCHITECTURE-RULES.md",
-        ".opencode/instructions/PYTHON-TYPING-RULES.md",
-        ".opencode/instructions/RESULT-PATTERN.md",
-        ".opencode/instructions/REFERENCE-MAP.md"
-    ],
-    "references": {
-        "docs": {
-            "path": "docs",
-            "description": "Use for product behavior, architecture decisions, and domain documentation conventions"
-        }
-    },
-    "skills": {
-        "paths": [
-            ".opencode/skills",
-            ".github/skills",
-            "/home/harmeet/Desktop/prompts/skills"
-        ]
-    },
-    "agent": {
-        // "principal-software-engineer": {
-        //     "description": "Principal-level engineering guidance for architecture, implementation quality, trade-offs, and technical leadership in this repo.",
-        //     "mode": "all"
-        // },
-        // "backend-developer": {
-        //     "description": "Build and review backend APIs, services, persistence flows, and production backend integrations for this FastAPI and LangGraph repo.",
-        //     "mode": "all"
-        // },
-        // "architect-reviewer": {
-        //     "description": "Review architecture, scalability, integration boundaries, and system design decisions for this repo without directly changing code by default.",
-        //     "mode": "all",
-        //     "permission": {
-        //         "edit": "deny"
-        //     }
-        // }
-    },
-    "command": {
-        // "lint": {
-        //     "description": "Run ruff format + ruff check on the entire src/ tree",
-        //     "prompt": "Run `uv run ruff format src/` then `uv run ruff check src/` and report any errors.",
-        //     "template": "bash"
-        // },
-        // "typecheck": {
-        //     "description": "Run ty type checker on src/",
-        //     // "prompt": "Run `uv run ty check src/` and report any type errors found.",
-        //     "template": "uv run ty check src/"
-        // }
-    },
-    "plugin": [
-        ".opencode/plugins/graphify.js",
-        ".opencode/plugins/post-edit-check.ts",
-        "@warp-dot-dev/opencode-warp",
-        "@mohak34/opencode-notifier@latest",
-        "@zenobius/opencode-skillful",
-        "opencode-scheduler",
-        "opencode-firecrawl",
-        "opencode-handoff",
-        "opencode-agent-memory"
-    ],
-    "permission": {
-        "bash": {
-            "*": "ask",
-            "uv *": "allow",
-            "pytest *": "allow",
-            "ruff *": "allow",
-            "ty *": "allow",
-            "git status*": "allow",
-            "git diff*": "allow",
-            "git log*": "allow",
-            "graphify *": "allow",
-            "rm -rf *": "deny",
-            "git reset --hard *": "deny"
-        },
-        "edit": "allow",
-        "read": "allow",
-        "glob": "allow",
-        "grep": "allow",
-        "list": "allow",
-        "task": "allow",
-        "todowrite": "allow",
-        "question": "allow",
-        "skill": "allow",
-        "webfetch": "allow"
-    },
-    "compaction": {
-        "auto": true
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/AGENTS.md",
+    ".opencode/instructions/PROJECT-SNAPSHOT.md",
+    ".opencode/instructions/TOOLING-COMMANDS.md",
+    ".opencode/instructions/ARCHITECTURE-RULES.md",
+    ".opencode/instructions/PYTHON-TYPING-RULES.md",
+    ".opencode/instructions/RESULT-PATTERN.md",
+    ".opencode/instructions/REFERENCE-MAP.md"
+  ],
+  "references": {
+    "docs": {
+      "path": "docs",
+      "description": "Use for product behavior, architecture decisions, and domain documentation conventions"
     }
+  },
+  "skills": {
+    "paths": [
+      ".opencode/skills",
+      ".github/skills",
+      "/home/harmeet/Desktop/prompts/skills"
+    ]
+  },
+  "agent": {},
+  "command": {},
+  "plugin": [
+    ".opencode/plugins/graphify.js",
+    "@warp-dot-dev/opencode-warp@0.1.5",
+    "@mohak34/opencode-notifier@latest",
+    "@zenobius/opencode-skillful",
+    "opencode-scheduler",
+    "@lyculs/opencode-firecrawl",
+    "opencode-handoff",
+    "opencode-agent-memory",
+    "opencode-ponytail"
+  ],
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "uv *": "allow",
+      "pytest *": "allow",
+      "ruff *": "allow",
+      "ty *": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "graphify *": "allow",
+      "rm -rf *": "deny",
+      "git reset --hard *": "deny"
+    },
+    "edit": "allow",
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "task": "allow",
+    "todowrite": "allow",
+    "question": "allow",
+    "skill": "allow",
+    "webfetch": "allow"
+  },
+  "compaction": {
+    "auto": true
+  }
 }
