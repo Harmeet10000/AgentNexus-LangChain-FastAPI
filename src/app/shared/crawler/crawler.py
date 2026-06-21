@@ -1,17 +1,22 @@
 """Core crawler module using Crawl4AI."""
+
 import hashlib
 import json
 import time
 from typing import TYPE_CHECKING, Any
 
 from crawl4ai import (
+    AsyncUrlSeeder,
     AsyncWebCrawler,
     BrowserConfig,
+    CrawlerMonitor,
     CrawlerRunConfig,
     MemoryAdaptiveDispatcher,
+    SeedingConfig,
 )
 from crawl4ai.async_dispatcher import RateLimiter
 from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+from crawl4ai.processors.pdf import PDFContentScrapingStrategy
 from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 
@@ -140,6 +145,43 @@ class WebCrawler:
             crawl_time_ms=crawl_time_ms,
         )
 
+    async def discover_urls(
+        self,
+        domain: str,
+        pattern: str | None = None,
+        max_urls: int = 50,
+    ) -> list[str]:
+        """Discover URLs for a domain via sitemap without full crawl."""
+        async with AsyncUrlSeeder() as seeder:
+            seeded = await seeder.urls(
+                domain,
+                SeedingConfig(
+                    source="sitemap",
+                    pattern=pattern or f"*{domain}*",
+                    max_urls=max_urls,
+                    extract_head=False,
+                ),
+            )
+        return [row["url"] for row in seeded if row.get("status") == "valid"]
+
+    def _is_pdf_url(self, url: str) -> bool:
+        """Check if URL points to a PDF."""
+        return url.lower().rstrip("/").endswith(".pdf")
+
+    def _build_dispatcher(self) -> MemoryAdaptiveDispatcher:
+        """Build dispatcher with optional CrawlerMonitor."""
+        kwargs: dict[str, Any] = {
+            "memory_threshold_percent": self.config.memory_threshold,
+            "max_session_permit": self.config.max_concurrent,
+            "rate_limiter": RateLimiter(
+                base_delay=self.config.rate_limit_delay,
+                max_retries=2,
+            ),
+        }
+        if self.config.enable_monitor:
+            kwargs["monitor"] = CrawlerMonitor()
+        return MemoryAdaptiveDispatcher(**kwargs)
+
     async def crawl(
         self,
         url: str,
@@ -172,6 +214,11 @@ class WebCrawler:
         # SPEC-05: Use MarkdownGenerator with content filters
         md_generator = self.config.get_markdown_generator()
         run_config_dict = self.config.to_crawler_run_config()
+
+        # Auto-detect PDF URLs
+        if self._is_pdf_url(url):
+            run_config_dict["scraping_strategy"] = PDFContentScrapingStrategy()
+
         run_config = CrawlerRunConfig(
             markdown_generator=md_generator,
             **run_config_dict,
@@ -208,7 +255,7 @@ class WebCrawler:
         max_pages: int = 10,
     ) -> list[CrawlResult]:
         """Recursively crawl internal links using native BFS deep crawl strategy."""
-        start_time = time.time()
+        start_time: int | float = time.time()
 
         browser_config = BrowserConfig(**self.config.to_browser_config())
 
@@ -224,20 +271,19 @@ class WebCrawler:
 
         # SPEC-07: Rate limiter on dispatcher
         run_config_dict = self.config.to_crawler_run_config()
+
+        # Auto-detect PDF URLs in seed list
+        has_pdfs = any(self._is_pdf_url(u) for u in urls)
+        if has_pdfs:
+            run_config_dict["scraping_strategy"] = PDFContentScrapingStrategy()
+
         run_config = CrawlerRunConfig(
             deep_crawl_strategy=deep_crawl,
             markdown_generator=md_generator,
             **run_config_dict,
         )
 
-        dispatcher = MemoryAdaptiveDispatcher(
-            memory_threshold_percent=self.config.memory_threshold,
-            max_session_permit=self.config.max_concurrent,
-            rate_limiter=RateLimiter(
-                base_delay=self.config.rate_limit_delay,
-                max_retries=2,
-            ),
-        )
+        dispatcher = self._build_dispatcher()
 
         async with AsyncWebCrawler(config=browser_config) as crawler:
             crawl_results = await crawler.arun_many(

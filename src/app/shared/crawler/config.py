@@ -62,6 +62,16 @@ class CrawlerConfig(BaseModel):
     # SPEC-08: URL-specific configs
     url_patterns: list[str] = Field(default_factory=list)
 
+    # Magic mode: locale, timezone, geolocation spoofing
+    magic: bool = Field(default_factory=lambda: get_settings().CRAWL4AI_MAGIC)
+    locale: str | None = Field(default_factory=lambda: get_settings().CRAWL4AI_LOCALE)
+    timezone_id: str | None = Field(default_factory=lambda: get_settings().CRAWL4AI_TIMEZONE_ID)
+    geolocation_lat: float | None = Field(default_factory=lambda: get_settings().CRAWL4AI_GEO_LAT)
+    geolocation_lon: float | None = Field(default_factory=lambda: get_settings().CRAWL4AI_GEO_LON)
+
+    # Monitor
+    enable_monitor: bool = Field(default_factory=lambda: get_settings().CRAWL4AI_ENABLE_MONITOR)
+
     def get_proxy_dict(self) -> dict[str, Any] | None:
         """Get proxy configuration for Crawl4AI."""
         if self.proxy_enabled and self.proxy_server:
@@ -112,6 +122,18 @@ class CrawlerConfig(BaseModel):
             config["wait_until"] = self.wait_until
         if self.wait_for:
             config["wait_for"] = self.wait_for
+        if self.magic:
+            config["magic"] = True
+            config["remove_overlay_elements"] = True
+        if self.locale:
+            config["locale"] = self.locale
+        if self.timezone_id:
+            config["timezone_id"] = self.timezone_id
+        if self.geolocation_lat is not None and self.geolocation_lon is not None:
+            config["geolocation"] = {
+                "latitude": self.geolocation_lat,
+                "longitude": self.geolocation_lon,
+            }
         return config
 
     def get_markdown_generator(

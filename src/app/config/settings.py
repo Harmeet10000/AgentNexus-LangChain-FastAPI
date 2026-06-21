@@ -218,6 +218,16 @@ class Settings(BaseSettings):
     CRAWL4AI_RATE_LIMIT_DELAY_MIN: float = Field(default=0.5)
     CRAWL4AI_RATE_LIMIT_DELAY_MAX: float = Field(default=1.0)
 
+    # --- Crawl4AI: Magic mode ---
+    CRAWL4AI_MAGIC: bool = Field(default=False)
+    CRAWL4AI_LOCALE: str | None = Field(default=None)
+    CRAWL4AI_TIMEZONE_ID: str | None = Field(default=None)
+    CRAWL4AI_GEO_LAT: float | None = Field(default=None)
+    CRAWL4AI_GEO_LON: float | None = Field(default=None)
+
+    # --- Crawl4AI: Monitor ---
+    CRAWL4AI_ENABLE_MONITOR: bool = Field(default=False)
+
     # --- Tavily Search Configuration ---
     TAVILY_API_KEY: SecretStr = Field(default=SecretStr(""))
     TAVILY_BASE_URL: str = Field(default="https://api.tavily.com")
