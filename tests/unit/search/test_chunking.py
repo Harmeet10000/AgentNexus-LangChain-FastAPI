@@ -16,3 +16,24 @@ def test_chunk_text_preserves_order_and_overlap() -> None:
 
 def test_chunk_text_returns_empty_list_for_blank_input() -> None:
     assert chunk_text("   ", chunk_size=5, chunk_overlap=1) == []
+
+
+def test_chunk_text_overlap_behavior() -> None:
+    text = "one two three four five six seven eight"
+    chunks = chunk_text(text, chunk_size=4, chunk_overlap=2)
+
+    assert len(chunks) >= 2
+    assert chunks[0].content == "one two three four"
+    assert chunks[1].content == "three four five six"
+    assert chunks[0].content != chunks[1].content
+    assert "three four" in chunks[0].content
+    assert "three four" in chunks[1].content
+
+
+def test_chunk_text_unicode_content() -> None:
+    text = "café résumé naïve coöperatief über cool"
+    chunks = chunk_text(text, chunk_size=3, chunk_overlap=0)
+
+    assert len(chunks) >= 2
+    assert "café" in chunks[0].content
+    assert all(len(c.content) > 0 for c in chunks)

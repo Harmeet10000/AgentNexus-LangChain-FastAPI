@@ -51,3 +51,30 @@ def test_reciprocal_rank_fusion_supports_trigram_branch() -> None:
     )
 
     assert [item.chunk_id for item in fused] == ["c", "a", "b", "d"]
+
+
+def test_reciprocal_rank_fusion_with_three_sources() -> None:
+    bm25 = [
+        RankedResultRow(chunk_id="x", score=0.0, rank=1),
+        RankedResultRow(chunk_id="y", score=0.0, rank=2),
+        RankedResultRow(chunk_id="z", score=0.0, rank=3),
+    ]
+    vector = [
+        RankedResultRow(chunk_id="y", score=0.0, rank=1),
+        RankedResultRow(chunk_id="z", score=0.0, rank=2),
+    ]
+    trigram = [
+        RankedResultRow(chunk_id="z", score=0.0, rank=1),
+    ]
+
+    fused = reciprocal_rank_fusion(bm25, vector, trigram, k=60, limit=5)
+
+    assert len(fused) == 3
+    assert fused[0].chunk_id == "z"
+    scores = {c.chunk_id: c.score for c in fused}
+    assert scores["z"] > scores["y"] > scores["x"]
+
+
+def test_reciprocal_rank_fusion_empty_input() -> None:
+    fused = reciprocal_rank_fusion(k=60, limit=10)
+    assert fused == []
