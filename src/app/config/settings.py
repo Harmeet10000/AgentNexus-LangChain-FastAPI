@@ -56,7 +56,14 @@ class Settings(BaseSettings):
         ]
     )
     CORS_EXPOSE_HEADERS: list[str] = Field(
-        default_factory=lambda: ["X-Total-Count", "X-Correlation-ID", "X-Process-Time", "Link", "Deprecation", "Sunset"]
+        default_factory=lambda: [
+            "X-Total-Count",
+            "X-Correlation-ID",
+            "X-Process-Time",
+            "Link",
+            "Deprecation",
+            "Sunset",
+        ]
     )
     CORS_ALLOW_CREDENTIALS: bool = Field(default=True)
     CORS_MAX_AGE: int = Field(default=3600)
@@ -199,6 +206,17 @@ class Settings(BaseSettings):
     CRAWL4AI_MAX_DEPTH: int = Field(default=3)
     CRAWL4AI_MAX_PAGES: int = Field(default=10)
     CRAWL4AI_MAX_CONTENT_SIZE: int = Field(default=102400)  # 100KB
+    CRAWL4AI_EXCLUDED_TAGS: str = Field(default="nav,footer,header,aside,form")
+    CRAWL4AI_WORD_COUNT_THRESHOLD: int = Field(default=30)
+    CRAWL4AI_PRUNING_THRESHOLD: float = Field(default=0.5)
+    CRAWL4AI_PAGE_TIMEOUT: int = Field(default=30000)
+    CRAWL4AI_WAIT_UNTIL: str | None = Field(default=None)
+    CRAWL4AI_WAIT_FOR: str | None = Field(default=None)
+    CRAWL4AI_VIEWPORT_WIDTH: int = Field(default=1280)
+    CRAWL4AI_VIEWPORT_HEIGHT: int = Field(default=720)
+    CRAWL4AI_STEALTH: bool = Field(default=False)
+    CRAWL4AI_RATE_LIMIT_DELAY_MIN: float = Field(default=0.5)
+    CRAWL4AI_RATE_LIMIT_DELAY_MAX: float = Field(default=1.0)
 
     # --- Tavily Search Configuration ---
     TAVILY_API_KEY: SecretStr = Field(default=SecretStr(""))

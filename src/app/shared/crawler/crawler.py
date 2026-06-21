@@ -1,10 +1,8 @@
 """Core crawler module using Crawl4AI."""
-
 import hashlib
 import json
 import time
-from typing import Any
-from urllib.parse import urldefrag
+from typing import TYPE_CHECKING, Any
 
 from crawl4ai import (
     AsyncWebCrawler,
@@ -12,7 +10,8 @@ from crawl4ai import (
     CrawlerRunConfig,
     MemoryAdaptiveDispatcher,
 )
-from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
+from crawl4ai.async_dispatcher import RateLimiter
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
 from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 
@@ -21,6 +20,9 @@ from app.utils import logger
 
 from .config import CrawlerConfig, get_crawler_config
 from .validator import is_valid_url, sanitize_url
+
+if TYPE_CHECKING:
+    from app.config.settings import Settings
 
 
 class CrawlResult(BaseModel):
@@ -79,20 +81,20 @@ class WebCrawler:
                     word_count=data.get("word_count"),
                     cached=True,
                 )
-        except Exception:
+        except Exception:  # noqa: BLE001 — cache read can fail for any reason
             logger.bind(operation="cache_read", url=url).exception("Cache read failed")
         return None
 
-    async def _save_to_cache(self, url: str, result: CrawlResult):
+    async def _save_to_cache(self, url: str, result: CrawlResult) -> None:
         """Save crawl result to cache."""
         if not self.redis_client:
             return
 
         try:
-            settings = get_settings()
+            settings: Settings = get_settings()
             cache_key = self._get_cache_key(url)
 
-            data = {
+            data: dict[str, str | int | None | list[dict[str, Any]]] = {
                 "url": result.url,
                 "success": result.success,
                 "markdown": result.markdown,
@@ -109,8 +111,34 @@ class WebCrawler:
                 settings.REDIS_CRAWL_CACHE_TTL,
                 json.dumps(data),
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — cache write can fail for any reason
             logger.bind(operation="cache_write", url=url).exception("Cache write failed")
+
+    @staticmethod
+    def _to_crawl_result(result: Any, start_time: float) -> CrawlResult:
+        """Convert crawl4ai result to domain CrawlResult."""
+        crawl_time_ms = int((time.time() - start_time) * 1000)
+
+        if result.success:
+            markdown = result.markdown.raw_markdown if result.markdown else None
+            word_count = len(markdown.split()) if markdown else 0
+            return CrawlResult(
+                url=result.url,
+                success=True,
+                markdown=markdown,
+                html=result.html,
+                title=result.metadata.get("title") if result.metadata else None,
+                links=result.links.get("internal", []) if result.links else [],
+                crawl_time_ms=crawl_time_ms,
+                word_count=word_count,
+            )
+
+        return CrawlResult(
+            url=result.url,
+            success=False,
+            error_message=result.error_message or "Unknown error",
+            crawl_time_ms=crawl_time_ms,
+        )
 
     async def crawl(
         self,
@@ -118,17 +146,7 @@ class WebCrawler:
         use_proxy: bool = False,
         bypass_cache: bool = False,
     ) -> CrawlResult:
-        """
-        Crawl a single URL.
-
-        Args:
-            url: URL to crawl
-            use_proxy: Whether to use proxy
-            bypass_cache: Whether to bypass cache
-
-        Returns:
-            CrawlResult with crawled content
-        """
+        """Crawl a single URL."""
         url = sanitize_url(url)
 
         if not is_valid_url(url):
@@ -151,9 +169,11 @@ class WebCrawler:
 
         browser_config = BrowserConfig(**browser_config_dict)
 
+        # SPEC-05: Use MarkdownGenerator with content filters
+        md_generator = self.config.get_markdown_generator()
         run_config_dict = self.config.to_crawler_run_config()
         run_config = CrawlerRunConfig(
-            markdown_generator=DefaultMarkdownGenerator(),
+            markdown_generator=md_generator,
             **run_config_dict,
         )
 
@@ -161,33 +181,12 @@ class WebCrawler:
             async with AsyncWebCrawler(config=browser_config) as crawler:
                 result = await crawler.arun(url=url, config=run_config)
 
-                crawl_time_ms = int((time.time() - start_time) * 1000)
+                crawl_result = self._to_crawl_result(result, start_time)
 
-                if result.success:
-                    markdown = result.markdown.raw_markdown if result.markdown else None
-                    word_count = len(markdown.split()) if markdown else 0
-
-                    crawl_result = CrawlResult(
-                        url=result.url,
-                        success=True,
-                        markdown=markdown,
-                        html=result.html,
-                        title=result.metadata.get("title") if result.metadata else None,
-                        links=result.links.get("internal", []) if result.links else [],
-                        crawl_time_ms=crawl_time_ms,
-                        word_count=word_count,
-                    )
-
+                if crawl_result.success:
                     await self._save_to_cache(url, crawl_result)
 
-                    return crawl_result
-                else:
-                    return CrawlResult(
-                        url=url,
-                        success=False,
-                        error_message=result.error_message or "Unknown error",
-                        crawl_time_ms=crawl_time_ms,
-                    )
+                return crawl_result
 
         except TimeoutError:
             return CrawlResult(
@@ -195,7 +194,7 @@ class WebCrawler:
                 success=False,
                 error_message="Crawl timeout",
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — Crawl4AI wraps varied browser/network errors
             return CrawlResult(
                 url=url,
                 success=False,
@@ -208,87 +207,43 @@ class WebCrawler:
         max_depth: int = 1,
         max_pages: int = 10,
     ) -> list[CrawlResult]:
-        """
-        Recursively crawl internal links from starting URLs.
+        """Recursively crawl internal links using native BFS deep crawl strategy."""
+        start_time = time.time()
 
-        Args:
-            urls: Starting URLs
-            max_depth: Maximum crawl depth
-            max_pages: Maximum pages to crawl
+        browser_config = BrowserConfig(**self.config.to_browser_config())
 
-        Returns:
-            List of crawl results
-        """
-        visited = set()
-        results: list[CrawlResult] = []
+        # SPEC-06: Use native BFSDeepCrawlStrategy
+        deep_crawl = BFSDeepCrawlStrategy(
+            max_depth=max_depth,
+            max_pages=max_pages,
+            include_external=False,
+        )
 
-        def normalize_url(url: str) -> str:
-            return urldefrag(url)[0]
+        # SPEC-05: MarkdownGenerator with content filters
+        md_generator = self.config.get_markdown_generator()
 
-        current_urls = set([normalize_url(u) for u in urls])
-
-        browser_config_dict = self.config.to_browser_config()
-        browser_config = BrowserConfig(**browser_config_dict)
-
+        # SPEC-07: Rate limiter on dispatcher
         run_config_dict = self.config.to_crawler_run_config()
-        run_config = CrawlerRunConfig(**run_config_dict)
+        run_config = CrawlerRunConfig(
+            deep_crawl_strategy=deep_crawl,
+            markdown_generator=md_generator,
+            **run_config_dict,
+        )
 
         dispatcher = MemoryAdaptiveDispatcher(
             memory_threshold_percent=self.config.memory_threshold,
-            check_interval=1.0,
             max_session_permit=self.config.max_concurrent,
+            rate_limiter=RateLimiter(
+                base_delay=self.config.rate_limit_delay,
+                max_retries=2,
+            ),
         )
 
         async with AsyncWebCrawler(config=browser_config) as crawler:
-            for depth in range(max_depth):
-                if len(results) >= max_pages:
-                    break
+            crawl_results = await crawler.arun_many(
+                urls=urls,
+                config=run_config,
+                dispatcher=dispatcher,
+            )
 
-                urls_to_crawl = [
-                    normalize_url(url) for url in current_urls if normalize_url(url) not in visited
-                ][: max_pages - len(results)]
-
-                if not urls_to_crawl:
-                    break
-
-                crawl_results = await crawler.arun_many(
-                    urls=urls_to_crawl, config=run_config, dispatcher=dispatcher
-                )
-
-                next_level_urls = set()
-
-                for result in crawl_results:
-                    norm_url = normalize_url(result.url)
-                    visited.add(norm_url)
-
-                    if result.success:
-                        markdown = result.markdown.raw_markdown if result.markdown else None
-                        word_count = len(markdown.split()) if markdown else 0
-
-                        crawl_result = CrawlResult(
-                            url=result.url,
-                            success=True,
-                            markdown=markdown,
-                            html=result.html,
-                            title=result.metadata.get("title") if result.metadata else None,
-                            links=result.links.get("internal", []) if result.links else [],
-                            word_count=word_count,
-                        )
-                        results.append(crawl_result)
-
-                        for link in result.links.get("internal", []) if result.links else []:
-                            next_url = normalize_url(link.get("href", ""))
-                            if next_url not in visited and is_valid_url(next_url):
-                                next_level_urls.add(next_url)
-                    else:
-                        results.append(
-                            CrawlResult(
-                                url=result.url,
-                                success=False,
-                                error_message=result.error_message,
-                            )
-                        )
-
-                current_urls = next_level_urls
-
-        return results
+        return [self._to_crawl_result(result, start_time) for result in crawl_results]
