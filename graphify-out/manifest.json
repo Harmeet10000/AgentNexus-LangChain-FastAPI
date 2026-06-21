@@ -205,8 +205,8 @@
     "semantic_hash": ""
   },
   "src/app/features/auth/router.py": {
-    "mtime": 1781427482.2581615,
-    "ast_hash": "385f0f685d6b45cf1bfe34f24c300c28",
+    "mtime": 1782043324.0691574,
+    "ast_hash": "613a3a2c604793732f377ca698fccb0e",
     "semantic_hash": ""
   },
   "src/app/features/auth/security.py": {
@@ -1215,8 +1215,8 @@
     "semantic_hash": ""
   },
   "src/app/utils/__init__.py": {
-    "mtime": 1781447109.8072364,
-    "ast_hash": "0730e8943996ece67619b94c18a809df",
+    "mtime": 1782045688.7642317,
+    "ast_hash": "63a17e4fba5d36d64613f0089689dc92",
     "semantic_hash": ""
   },
   "src/app/utils/api_features.py": {
@@ -1687,6 +1687,216 @@
   "docs/diagrams/search_system_architecture_overview.svg": {
     "mtime": 1775393864.4299307,
     "ast_hash": "ca27867a7db6b3d9e8d0c2edcc77f923",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/01.1_first_crawl.py": {
+    "mtime": 1782051261.1809845,
+    "ast_hash": "ea72986246e31341a8eb9df5cf21ee34",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/01.2_hello_arun.py": {
+    "mtime": 1782051291.8993816,
+    "ast_hash": "a2700eb79cc6352c8d70998f5c17bd4f",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/02.1_browser_config.py": {
+    "mtime": 1782051304.9891229,
+    "ast_hash": "25fb2b319b9ecd0cd0331174d74778a0",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/02.2_crawler_run_config.py": {
+    "mtime": 1782051311.9832735,
+    "ast_hash": "57a9c7b6e086f60fc66c5cc85e00b65b",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/02_config_objects.py": {
+    "mtime": 1782051317.742707,
+    "ast_hash": "13a8d3ae5060b77234abfdb81b7adadb",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/03_cache_modes.py": {
+    "mtime": 1782051335.2383263,
+    "ast_hash": "38ca2a26d98ecf5aa8e4348aeaaf195b",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/04_content_selection.py": {
+    "mtime": 1782051342.4212964,
+    "ast_hash": "b29d56bfa5eae6ba55c7970ad2a1cecb",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/05.1_markdown_generation.py": {
+    "mtime": 1782051365.213513,
+    "ast_hash": "1ce99c726b935def966e0a9854c1028d",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/05.2_markdown_filters.py": {
+    "mtime": 1782051370.9220252,
+    "ast_hash": "12df22bface67570e7ef6be5234c9f1a",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/05.3_fit_markdown_filters.py": {
+    "mtime": 1782051378.1090405,
+    "ast_hash": "71417ef365ceb7eec6f280d8b4e63d72",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/05_markdown_generation_filters.py": {
+    "mtime": 1782051383.7504196,
+    "ast_hash": "dbf2bbe5b8996b7ca0cbccfa0782b24a",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/06.1_crawl_result_tour.py": {
+    "mtime": 1782051400.636686,
+    "ast_hash": "ea292fd9881528aeff98e71cddac590f",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/06.2_crawl_result_masterclass.py": {
+    "mtime": 1782051406.5864663,
+    "ast_hash": "03e0163d8f2ddc0dff377ce2f813e10e",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/06.3_links_and_media.py": {
+    "mtime": 1782051411.888404,
+    "ast_hash": "e99fe69e19116901b89638dbd4a1f3fe",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/07.1_css_extraction.py": {
+    "mtime": 1782051419.647065,
+    "ast_hash": "b05dd14437fda1dae6375b05a6567b44",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/07.2_json_css_extraction.py": {
+    "mtime": 1782051424.5483406,
+    "ast_hash": "e1db918b474f8115bb6d2d4b5126a21e",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/08.1_schema_power_moves.py": {
+    "mtime": 1782051442.517566,
+    "ast_hash": "8d50cc929094b67d5fc932c27bf750e5",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/08.2_schema_generation.py": {
+    "mtime": 1782051447.9633355,
+    "ast_hash": "9591134b8ee1a09fe1836c0a7232a7c1",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/08.3_generate_schema_tokenusage.py": {
+    "mtime": 1782051452.9445097,
+    "ast_hash": "9d441a1e71b7d97735cfdd22d8a14de2",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/09.1_xpath_and_regex.py": {
+    "mtime": 1782051458.704167,
+    "ast_hash": "035438987645890186529af8517b73a9",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/09.2_regex_extraction.py": {
+    "mtime": 1782051464.7744246,
+    "ast_hash": "bcb16664b55de0660106937e03beb7e8",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/10.1_llm_extraction.py": {
+    "mtime": 1782051479.6970856,
+    "ast_hash": "09b89704cdaa16dae35b2fdeee517e48",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/10.2_llm_extraction_chunking.py": {
+    "mtime": 1782051485.4190917,
+    "ast_hash": "730adf6b9c0fac167065d0d221813cdb",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/10.3_knowledge_graph.py": {
+    "mtime": 1782051490.3475237,
+    "ast_hash": "c2d53deb83c8d7dd06299389690ea06a",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/11_strategy_selection.py": {
+    "mtime": 1782051497.0545604,
+    "ast_hash": "37c141e8ca4ee5c261e900a798371ffd",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/12.1_page_interaction.py": {
+    "mtime": 1782051530.0711627,
+    "ast_hash": "4691220a710180025b629664e5a894da",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/12.2_js_and_waits.py": {
+    "mtime": 1782051536.2757092,
+    "ast_hash": "54c08aeffc3f62ade2029de22b00b130",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/13.1_virtual_scroll.py": {
+    "mtime": 1782051540.9052887,
+    "ast_hash": "91bf76376a34ceb8d37406f0b592834c",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/13.2_virtual_scroll_alt.py": {
+    "mtime": 1782051555.4598444,
+    "ast_hash": "187abf4130f5316510c218d2a8a512c2",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/14.1_session_management.py": {
+    "mtime": 1782051578.6099863,
+    "ast_hash": "679c9d97ed8eb28e2f08f7b1e3ec620d",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/14.2_session_management_alt.py": {
+    "mtime": 1782051584.5541852,
+    "ast_hash": "834d15c80edca76927e42a53914c43b4",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/15_c4a_script_dsl.py": {
+    "mtime": 1782051591.1031559,
+    "ast_hash": "6ae859e42466ef887f1154aaee8a1443",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/16_hooks_and_auth.py": {
+    "mtime": 1782051596.8349721,
+    "ast_hash": "0216cce27f44ba53fbbc94d81cb5c502",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/17_identity_and_magic_mode.py": {
+    "mtime": 1782051602.5707893,
+    "ast_hash": "c8e95e8df69a48cd91d159be3718581c",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/18_proxy_and_stealth.py": {
+    "mtime": 1782051621.6071877,
+    "ast_hash": "c4bd656858e70f7d4eb8592ffe2b85e9",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/19.1_deep_crawling.py": {
+    "mtime": 1782051631.9623544,
+    "ast_hash": "b42ee720e994420244a7f2d2c56fd37d",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/19.2_deep_crawling_alt.py": {
+    "mtime": 1782051638.8192167,
+    "ast_hash": "daf8a941d702333287790737ca49e4e4",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/19.3_url_seeding.py": {
+    "mtime": 1782051646.7379267,
+    "ast_hash": "a3b49b27649445f242ff1363f34dfd28",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/20.1_multi_url_dispatchers.py": {
+    "mtime": 1782051675.0641072,
+    "ast_hash": "79b521864d13420847e505b769185a9a",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/20.2_arun_many_dispatchers.py": {
+    "mtime": 1782051680.4091065,
+    "ast_hash": "d62edc9813c931b3db30bc30d9da862c",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/23_downloads_screenshots_ssl.py": {
+    "mtime": 1782051712.9614122,
+    "ast_hash": "631275b2ebe024812b9907f31c64cf74",
+    "semantic_hash": ""
+  },
+  "src/app/shared/crawler/new/24_ai_ready_pipeline.py": {
+    "mtime": 1782051719.8542097,
+    "ast_hash": "98731e105a8377b5d45735a41e1568af",
     "semantic_hash": ""
   }
 }

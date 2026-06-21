@@ -1,16 +1,16 @@
 # Graph Report - langchain-fastapi-production  (2026-06-21)
 
 ## Corpus Check
-- 333 files · ~259,659 words
+- 375 files · ~276,471 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 823 nodes · 1405 edges · 53 communities (43 shown, 10 thin omitted)
+- 853 nodes · 1475 edges · 41 communities (39 shown, 2 thin omitted)
 - Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 158 edges (avg confidence: 0.52)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `9c40e9b7`
+- Built from commit: `e4d019e0`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -52,20 +52,8 @@
 - [[_COMMUNITY_Community 36|Community 36]]
 - [[_COMMUNITY_Community 37|Community 37]]
 - [[_COMMUNITY_Community 38|Community 38]]
-- [[_COMMUNITY_Community 39|Community 39]]
-- [[_COMMUNITY_Community 40|Community 40]]
-- [[_COMMUNITY_Community 41|Community 41]]
 - [[_COMMUNITY_Community 42|Community 42]]
 - [[_COMMUNITY_Community 43|Community 43]]
-- [[_COMMUNITY_Community 44|Community 44]]
-- [[_COMMUNITY_Community 45|Community 45]]
-- [[_COMMUNITY_Community 46|Community 46]]
-- [[_COMMUNITY_Community 47|Community 47]]
-- [[_COMMUNITY_Community 48|Community 48]]
-- [[_COMMUNITY_Community 49|Community 49]]
-- [[_COMMUNITY_Community 50|Community 50]]
-- [[_COMMUNITY_Community 51|Community 51]]
-- [[_COMMUNITY_Community 52|Community 52]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `Settings` - 30 edges
@@ -82,25 +70,25 @@
 ## Surprising Connections (you probably didn't know these)
 - `WebCrawler` --uses--> `AsyncWebCrawler`  [INFERRED]
   src/app/features/crawler/service.py → src/app/connections/crawl4ai.py
-- `AgentRegistry` --uses--> `ToolRegistry`  [INFERRED]
-  src/app/shared/langgraph_layer/agent_saul/factory.py → src/app/shared/rag/graphiti/registry.py
-- `SaulGraphNodes` --uses--> `ToolRegistry`  [INFERRED]
-  src/app/shared/langgraph_layer/agent_saul/factory.py → src/app/shared/rag/graphiti/registry.py
-- `BaseChatModel` --uses--> `ToolRegistry`  [INFERRED]
-  src/app/shared/langgraph_layer/agent_saul/factory.py → src/app/shared/rag/graphiti/registry.py
-- `Any` --uses--> `ToolRegistry`  [INFERRED]
-  src/app/shared/langgraph_layer/agent_saul/factory.py → src/app/shared/rag/graphiti/registry.py
+- `Any` --uses--> `Settings`  [INFERRED]
+  src/app/connections/celery_registry.py → src/app/config/settings.py
+- `DocumentSearchResultItem` --uses--> `Settings`  [INFERRED]
+  src/app/features/documents/service.py → src/app/config/settings.py
+- `DocumentStatusResponse` --uses--> `Settings`  [INFERRED]
+  src/app/features/documents/service.py → src/app/config/settings.py
+- `DocumentUploadResponse` --uses--> `Settings`  [INFERRED]
+  src/app/features/documents/service.py → src/app/config/settings.py
 
 ## Import Cycles
 - 1-file cycle: `src/app/lifecycle/lifespan.py -> src/app/lifecycle/lifespan.py`
 - 1-file cycle: `src/app/main.py -> src/app/main.py`
 - 1-file cycle: `src/app/middleware/health_check.py -> src/app/middleware/health_check.py`
 
-## Communities (53 total, 10 thin omitted)
+## Communities (41 total, 2 thin omitted)
 
 ### Community 0 - "Community 0"
-Cohesion: 0.14
-Nodes (14): BaseModel, AgentContext, ChatResponse, DoclingExtractionResult, DocumentMetadata, Message, Agent execution context., Complete extraction result from enhanced Docling processing. (+6 more)
+Cohesion: 0.05
+Nodes (52): BaseModel, AgentContext, AgentDependencies, ChatResponse, Chunk, ChunkResult, DoclingEnhancementConfig, DoclingExtractionResult (+44 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.06
@@ -115,8 +103,8 @@ Cohesion: 0.08
 Nodes (19): Redis-serializable session record. Frozen for safe pipeline use., Redis-primary, MongoDB-audit session store., RefreshTokenRepository, SessionData, UserRepository, AuthService, Return (authorization_url, signed_state_for_cookie)., _to_user_response() (+11 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.11
-Nodes (52): AgentRegistry, build_agent_registry(), _build_graph_nodes(), Startup-time Agent Saul graph composition helpers., Instantiate all agents + LLM chains once.     Called from build_saul_graph — nev, Holds all pre-built agents and structured-output LLM chains.     Created once at, SaulGraphNodes, _build_analysis_context() (+44 more)
+Cohesion: 0.08
+Nodes (61): AgentRegistry, build_agent_registry(), _build_graph_nodes(), Startup-time Agent Saul graph composition helpers., Instantiate all agents + LLM chains once.     Called from build_saul_graph — nev, Holds all pre-built agents and structured-output LLM chains.     Created once at, SaulGraphNodes, _build_analysis_context() (+53 more)
 
 ### Community 5 - "Community 5"
 Cohesion: 0.09
@@ -128,7 +116,7 @@ Nodes (6): AppResult, User, UserRole, Admin-scoped user queries.      Directly u
 
 ### Community 7 - "Community 7"
 Cohesion: 0.07
-Nodes (34): create_app(), Create and configure FastAPI application with proper middleware order., BaseHTTPMiddleware, DependencyHealth, ApiDeprecationMiddleware, Middleware to inject API deprecation headers on v1 routes.  Adds ``Deprecation``, Inject ``Deprecation``, ``Sunset``, and ``Link`` headers on v1 routes., check_graphiti() (+26 more)
+Nodes (32): create_app(), Create and configure FastAPI application with proper middleware order., BaseHTTPMiddleware, DependencyHealth, ApiDeprecationMiddleware, Middleware to inject API deprecation headers on v1 routes.  Adds ``Deprecation``, Inject ``Deprecation``, ``Sunset``, and ``Link`` headers on v1 routes., check_graphiti() (+24 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.17
@@ -155,8 +143,8 @@ Cohesion: 0.18
 Nodes (18): CrossEncoderReranker, _cached_embedding(), _call_embedding_fn(), make_context_grader_node(), make_generator_node(), make_graph_retrieval_node(), make_hybrid_retrieval_node(), make_query_analyzer_node() (+10 more)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.19
-Nodes (9): build_tool_registry(), ToolRegistry: all LangChain tools assembled once at lifespan startup.  build_too, Build all tools once.  Call at lifespan startup only., Immutable collection of all pre-built LangChain tools.      Tool assignment to a, ToolRegistry, GraphitiService, IdempotencyGuard, AsyncEngine (+1 more)
+Cohesion: 0.14
+Nodes (29): APIResponse, forgot_password(), get_me(), list_sessions(), login(), logout(), oauth_authorize(), oauth_callback() (+21 more)
 
 ### Community 16 - "Community 16"
 Cohesion: 0.27
@@ -177,10 +165,6 @@ Nodes (12): 11.1 Recovery Model, 11. Persistence Layer, 12. Observability, 13. S
 ### Community 21 - "Community 21"
 Cohesion: 0.17
 Nodes (12): 16.3.1 Structure of a System Prompt, 16.4 Rationale, ## Dos and Don'ts (Operational Guardrails), ## Output Formatting & Interoperability, Recommended Structure:, ## Security & Injection Defense (The "Shield"), ## Strategic Goals & Acceptance Criteria, ## System Prompt Architecture (The Bone Structure) (+4 more)
-
-### Community 22 - "Community 22"
-Cohesion: 0.18
-Nodes (11): AgentDependencies, Document, ExtractionResult, MessageRole, Pydantic models for data validation and serialization., Streaming response delta., Dependencies for the agent., Result of entity extraction. (+3 more)
 
 ### Community 23 - "Community 23"
 Cohesion: 0.18
@@ -246,26 +230,14 @@ Nodes (4): 6.1 State Schema, 6.2 Memory Processing Pipeline, 6.3 Long-Term Memor
 Cohesion: 0.50
 Nodes (4): 7.1 Structured Outputs, 7.2 Validation Pipeline, 7. Phase 4: Tooling & Schema Enforcement, BEST PRACTICES for tool calling:
 
-### Community 39 - "Community 39"
-Cohesion: 0.50
-Nodes (3): Chunk, Document chunk model., Validate embedding is not empty if provided.
-
-### Community 40 - "Community 40"
-Cohesion: 0.50
-Nodes (3): ChunkResult, Chunk search result model., Ensure score is between 0 and 1.
-
-### Community 41 - "Community 41"
-Cohesion: 0.50
-Nodes (3): IngestionConfig, Configuration for document ingestion., Ensure overlap is less than chunk size.
-
 ### Community 43 - "Community 43"
 Cohesion: 0.67
 Nodes (3): 10.1 Rules, 10.2 Execution Model, 10. State & Execution Model
 
 ## Knowledge Gaps
-- **165 isolated node(s):** `Guardrails`, `Why Encoders Models`, `Key architectural features that make ModernBERT efficient include`, `Practical Implementation`, `The 4-Step Maturity Model` (+160 more)
+- **171 isolated node(s):** `LogoutRequest`, `RefreshRequest`, `VerifyEmailRequest`, `ResendVerificationRequest`, `ForgotPasswordRequest` (+166 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **10 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **2 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -273,14 +245,14 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `CrawlResult` connect `Community 11` to `Community 0`?**
   _High betweenness centrality (0.140) - this node is a cross-community bridge._
 - **Why does `SessionData` connect `Community 3` to `Community 0`?**
-  _High betweenness centrality (0.085) - this node is a cross-community bridge._
+  _High betweenness centrality (0.105) - this node is a cross-community bridge._
 - **Why does `Any` connect `Community 9` to `Community 2`, `Community 5`?**
-  _High betweenness centrality (0.081) - this node is a cross-community bridge._
+  _High betweenness centrality (0.078) - this node is a cross-community bridge._
 - **Are the 25 inferred relationships involving `Settings` (e.g. with `Any` and `ContextGrade`) actually correct?**
   _`Settings` has 25 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 9 inferred relationships involving `UserRepository` (e.g. with `AuthService` and `LoginRequest`) actually correct?**
   _`UserRepository` has 9 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 9 inferred relationships involving `RefreshTokenRepository` (e.g. with `AuthService` and `LoginRequest`) actually correct?**
   _`RefreshTokenRepository` has 9 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `Guardrails`, `Why Encoders Models`, `Key architectural features that make ModernBERT efficient include` to the rest of the system?**
-  _307 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **What connects `LogoutRequest`, `RefreshRequest`, `VerifyEmailRequest` to the rest of the system?**
+  _314 weakly-connected nodes found - possible documentation gaps or missing edges._

@@ -185,6 +185,7 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 197.  might need to connect open_deep_research to agent_saul graph   DONE
 146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note and also check if i am right in passong HTTPException to APIException and other classes        DONE
 133. use pydantic for data configuration, tool arguments, or schema validation in langraph and check if converting all typedDict to pydantic is useful or docs do not recommends it (only for custom state schema)   DONE
+201. make full skill for ast-grep    DONE
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses     DELAYED    
@@ -266,12 +267,14 @@ The project uses `combine_lifespans(...)` to merge the FastMCP lifespan with the
 u
 199. ANN001/002/003/204 ignored globally  understandable for AI-heavy code but weakens type safety PLR0913 (too-many-arguments) ignored  some service methods have 8+ params; consider context objects DocumentQueryService.__init__ uses object | None for redis/graphiti  should be Redis | None and Graphiti | None Some TYPE_CHECKING blocks are verbose; PEP 695 generics would clean up (type Alias[T] = ...) 
 200. need a new superpower/brainstorming skill with openspec, graphify, ast-grep, poytail, firecrawl, with proper git workflows, and stop using grep and older tools 
-201. make full skill for ast-grep
+202. figure out how to put graphify, ast-grep in opencode without putting in system prompt and disabling grep and other tools and turing permissions on for most used task
 ```
 
 summarise these chapters in great detail and take video's transcript as reference for summarising
 
 summarise this video in great detail and depth by dividing it into 5 minute chunk and take video's transcript as reference for summarising
+
+
 
 
 
