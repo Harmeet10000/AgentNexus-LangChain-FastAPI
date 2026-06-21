@@ -69,6 +69,7 @@ if TYPE_CHECKING:
     from graphiti_core.graphiti import Graphiti
     from langchain_core.language_models import BaseChatModel
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
+    from redis.asyncio import Redis
     from ty_extensions import Unknown
 
     from app.config.settings import Settings
@@ -205,8 +206,8 @@ class DocumentQueryService:
         self,
         repo: DocumentRepository,
         llm: BaseChatModel,
-        redis: object | None,
-        graphiti: object | None,
+        redis: Redis | None,
+        graphiti: Graphiti | None,
     ):
         self.repo = repo
         self._llm = llm
@@ -421,7 +422,7 @@ async def process_document_ingestion(
     object_uri: str,
     object_store: StorageService,
     repo: DocumentRepository,
-    graphiti: object | None,
+    graphiti: Graphiti | None,
     llm: BaseChatModel,
 ) -> dict[str, object]:
     raw_bytes = await object_store.get_object(key=key_from_s3_uri(object_uri))
@@ -610,7 +611,7 @@ async def _embed_chunks(
 async def _verify_legal_chunks(
     *,
     repo: DocumentRepository,
-    graphiti: object | None,
+    graphiti: Graphiti | None,
     user_id: str,
     document_id: str,
     chunk_rows: list[dict[str, object]],
@@ -684,7 +685,7 @@ async def _build_query_plan(
 
 async def _graphiti_filter_chunk_ids(
     *,
-    graphiti: Any | None,
+    graphiti: Graphiti | None,
     user_id: str,
     query: str,
     doc_ids_filter: list[str],
@@ -755,7 +756,7 @@ async def _generate_answer(
 
 
 async def _cached_embedding(
-    redis: object | None,
+    redis: Redis | None,
     embedding_fn: object,
     text_to_embed: str,
 ) -> list[float]:
@@ -774,9 +775,7 @@ async def _cached_embedding(
     return _normalize_embedding(list(embedding))
 
 
-def _normalize_embedding(
-    embedding: list[float], expected_dim: int | None = None
-) -> list[float]:
+def _normalize_embedding(embedding: list[float], expected_dim: int | None = None) -> list[float]:
     if expected_dim is None:
         expected_dim = get_settings().EMBEDDING_DIMENSION
     if len(embedding) == expected_dim:

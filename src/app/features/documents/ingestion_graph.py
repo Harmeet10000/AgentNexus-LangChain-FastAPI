@@ -10,6 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
+    from graphiti_core.graphiti import Graphiti
     from langchain_core.language_models import BaseChatModel
 
     from app.shared.services.storage import StorageService
@@ -37,7 +38,7 @@ def build_document_ingestion_graph(
     *,
     object_store: StorageService,
     repo: DocumentRepository,
-    graphiti: object | None,
+    graphiti: Graphiti | None,
     ingest_document_fn: IngestDocumentFn,
     llm: BaseChatModel,
 ) -> CompiledStateGraph:
@@ -66,7 +67,7 @@ def _make_ingest_document_node(
     *,
     object_store: StorageService,
     repo: DocumentRepository,
-    graphiti: object | None,
+    graphiti: Graphiti | None,
     ingest_document_fn: IngestDocumentFn,
     llm: BaseChatModel,
 ) -> IngestDocumentFn:
