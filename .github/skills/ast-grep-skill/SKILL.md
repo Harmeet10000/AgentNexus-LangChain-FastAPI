@@ -1,5 +1,5 @@
 ---
-name: ast-grep
+name: ast-grep-skill
 description: Structural code search, linting, and rewriting using AST-level pattern matching. Use when users need to search code by syntax structure (not text), write custom lint rules, perform codemods across a codebase, replace regex grep for precise AST-aware queries, or create reusable lint rule sets. Covers CLI usage, pattern syntax, rule system (atomic/relational/composite/utility), lint rule authoring, rewrite/transform, project setup, and testing.
 version: 0.1.0
 ast-grep_version: ">=0.43.0"
@@ -24,21 +24,6 @@ Powered by Rust. Handles 10k+ files in seconds. Supports search, lint, rewrite, 
 | Mobile | Kotlin, Swift |
 | Config | JSON, YAML, HCL |
 | Scripting | Lua, Nix |
-
-## Quick Start
-
-### Installation
-
-```bash
-# npm (macOS/Linux/Windows)
-npm i -g @ast-grep/cli
-
-# pip
-pip install ast-grep-cli
-
-# cargo
-cargo install ast-grep --locked
-```
 
 ### First Search
 

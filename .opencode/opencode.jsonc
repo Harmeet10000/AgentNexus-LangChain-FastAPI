@@ -42,12 +42,18 @@
       "pytest *": "allow",
       "ruff *": "allow",
       "ty *": "allow",
-      "git status*": "allow",
-      "git diff*": "allow",
-      "git log*": "allow",
+      "git *": "allow",
       "graphify *": "allow",
-      "rm -rf *": "deny",
-      "git reset --hard *": "deny"
+      "rm -rf *": "ask",
+      "git reset --hard *": "ask",
+      "grep *": "allow",
+      "ls *": "allow",
+      "cat *": "allow",
+      "echo *": "allow",
+      "cd *": "allow",
+      "pwd": "allow",
+      "python3 *": "allow",
+      
     },
     "edit": "allow",
     "read": "allow",
@@ -61,6 +67,6 @@
     "webfetch": "allow"
   },
   "compaction": {
-    "auto": true
+    "auto": false
   }
 }
