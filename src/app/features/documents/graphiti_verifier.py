@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from graphiti_core.nodes import EpisodeType
 from pydantic import BaseModel, ConfigDict
 
 from app.utils import logger
+
+if TYPE_CHECKING:
+    from graphiti_core.graphiti import Graphiti
 
 
 class GraphitiVerificationResult(BaseModel):
@@ -21,7 +25,7 @@ class GraphitiVerificationResult(BaseModel):
 
 async def write_and_verify_chunk(
     *,
-    graphiti: object | None,
+    graphiti: Graphiti | None,
     user_id: str,
     document_id: str,
     chunk_id: str,

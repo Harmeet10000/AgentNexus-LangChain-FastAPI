@@ -40,6 +40,7 @@ from .repository import SearchRepository, build_chunk_rows
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from graphiti_core.graphiti import Graphiti
     from langchain_core.language_models import BaseChatModel
     from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
     from redis.asyncio import Redis
@@ -58,7 +59,7 @@ class SearchService:
         repo: SearchRepository,
         llm: BaseChatModel,
         redis: Redis | None = None,
-        graphiti: object | None = None,
+        graphiti: Graphiti | None = None,
     ):
         self.repo: SearchRepository = repo
         self._llm = llm
