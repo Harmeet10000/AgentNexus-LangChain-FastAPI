@@ -1,3 +1,6 @@
+from enum import StrEnum
+from typing import Self
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -50,3 +53,47 @@ class APIResponse[T](BaseModel):
     message: str = Field(default="Success")
     data: T | None = Field(default=None)
     error: ErrorDetail | None = Field(default=None)
+
+
+# ---------------------------------------------------------------------------
+# Health check models
+# ---------------------------------------------------------------------------
+
+
+class HealthStatus(StrEnum):
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+
+
+class DependencyHealth(BaseModel):
+    """Health status of a single dependency."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, serialize_by_alias=True)
+
+    name: str
+    status: HealthStatus
+    latency_ms: float = Field(default=0.0)
+    message: str | None = None
+
+    @classmethod
+    def ok(cls, name: str, latency_ms: float = 0.0) -> Self:
+        return cls(name=name, status=HealthStatus.HEALTHY, latency_ms=latency_ms)
+
+    @classmethod
+    def fail(cls, name: str, message: str, latency_ms: float = 0.0) -> Self:
+        return cls(name=name, status=HealthStatus.UNHEALTHY, latency_ms=latency_ms, message=message)
+
+    @classmethod
+    def degraded(cls, name: str, message: str, latency_ms: float = 0.0) -> Self:
+        return cls(name=name, status=HealthStatus.DEGRADED, latency_ms=latency_ms, message=message)
+
+
+class HealthResponse(BaseModel):
+    """Response body for GET /health."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, serialize_by_alias=True)
+
+    status: HealthStatus
+    version: str = Field(default="1.0.0")
+    dependencies: list[DependencyHealth] = Field(default_factory=list)

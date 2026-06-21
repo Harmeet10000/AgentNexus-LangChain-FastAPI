@@ -1,5 +1,4 @@
 """Application lifespan management."""
-
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -14,8 +13,10 @@ from neo4j import AsyncDriver
 from app.config import get_settings
 from app.connections import (
     celery_app,
+    close_crawl4ai_crawler,
     close_neo4j_driver,
     close_tavily_http_client,
+    create_crawl4ai_crawler,
     create_mongo_client,
     create_redis_client,
     create_tavily_http_client,
@@ -24,13 +25,11 @@ from app.connections import (
     init_neo4j,
 )
 from app.features.auth import TokenAuditLog, User, build_websocket_security_service
-from app.features.documents.readiness import run_document_startup_checks
+from app.features.documents import run_document_startup_checks
 from app.middleware import initialize_fastapi_guard
-
-# from app.shared import get_mcp_client_manager
-from crawl4ai import AsyncWebCrawler, BrowserConfig
-
 from app.shared.langchain_layer.agents.memory import setup_cognee
+
+# from app.shared.mcp import get_mcp_client_manager
 from app.shared.langgraph_layer.checkpointer import teardown_langgraph_checkpointer
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.services.storage import StorageService
@@ -38,6 +37,7 @@ from app.utils import ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
+    from httpx._client import AsyncClient
 
     from app.features.auth.websocket_security import WebSocketSecurityService
     # from app.shared.mcp import MCPClientManager
@@ -93,12 +93,12 @@ def setup_celery() -> Celery | None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR0912
     """Manage application startup and shutdown with parallel execution."""
     settings = get_settings()
     logger.info("Application starting", app_name=app.title, version=app.version)
 
-    # STARTUP: Parallel execution using TaskGroup (fail-fast)
+    # STARTUP: Parallel execution — critical deps fail-fast, optional deps degrade
     async with asyncio.TaskGroup() as tg:
         pg_task = tg.create_task(coro=init_db())
         mongo_task = tg.create_task(
@@ -111,11 +111,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
         redis_task = tg.create_task(coro=setup_redis(url=settings.REDIS_URL))
         neo_task = tg.create_task(coro=setup_neo4j())
 
-    # All tasks succeeded - store results
-    app.state.db_engine, app.state.db_session_local = pg_task.result()
-    app.state.mongo_client, app.state.db = mongo_task.result()
-    app.state.redis: redis.asyncio.Redis = redis_task.result()
-    app.state.neo4j_driver: AsyncDriver = neo_task.result()
+    # Critical deps: PG, Redis, MongoDB — raise on failure
+    try:
+        app.state.db_engine, app.state.db_session_local = pg_task.result()
+    except Exception as exc:
+        msg = f"PostgreSQL startup failed: {exc}"
+        raise ServiceUnavailableException(msg) from exc
+
+    try:
+        app.state.mongo_client, app.state.db = mongo_task.result()
+    except Exception as exc:
+        msg = f"MongoDB startup failed: {exc}"
+        raise ServiceUnavailableException(msg) from exc
+
+    try:
+        app.state.redis: redis.asyncio.Redis = redis_task.result()
+    except Exception as exc:
+        msg = f"Redis startup failed: {exc}"
+        raise ServiceUnavailableException(msg) from exc
+
+    # Optional deps: Neo4j, Graphiti — log warning, set None on failure
+    try:
+        app.state.neo4j_driver: AsyncDriver = neo_task.result()
+    except Exception as exc:  # noqa: BLE001 — graceful degradation for optional dep
+        logger.warning("Neo4j startup failed, continuing without graph features", error=str(exc))
+        app.state.neo4j_driver = None  # type: ignore[assignment]
+
     app.state.websocket_security: WebSocketSecurityService = await build_websocket_security_service(
         redis=app.state.redis,
         settings=settings,
@@ -126,16 +147,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
     app.state.cognee_config = cognee_config
     logger.info("Cognee configured")
 
-    # Setup Graphiti for legal knowledge graph
-    graphiti = await setup_graphiti(
-        neo4j_uri=settings.NEO4J_URI,
-        neo4j_user=settings.NEO4J_USERNAME,
-        neo4j_password=settings.NEO4J_PASSWORD.get_secret_value(),
-    )
-    # TODO: Do i need to setup indices here? Or is it done in the Graphiti constructor? or is it required only once.
-    await setup_graphiti_indices(graphiti)
-    app.state.graphiti: Graphiti = graphiti
-    logger.info("Graphiti initialized")
+    # Setup Graphiti for legal knowledge graph (optional)
+    try:
+        graphiti = await setup_graphiti(
+            neo4j_uri=settings.NEO4J_URI,
+            neo4j_user=settings.NEO4J_USERNAME,
+            neo4j_password=settings.NEO4J_PASSWORD.get_secret_value(),
+        )
+        await setup_graphiti_indices(graphiti)
+        app.state.graphiti: Graphiti = graphiti
+        logger.info("Graphiti initialized")
+    except Exception as exc:  # noqa: BLE001 — graceful degradation for optional dep
+        logger.warning("Graphiti startup failed, continuing without graph features", error=str(exc))
+        app.state.graphiti = None  # type: ignore[assignment]
 
     # ingestion_llm = ChatGoogleGenerativeAI(
     #     model=settings.GEMINI_FLASH_MODEL,
@@ -153,17 +177,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
     # logger.info("Contract KB ingestion graph initialized")
     # app.state.pageindex_client = PageIndexClient()
     # Initialize HTTPX client (HTTP/2 + connection pooling)
-    app.state.httpx_client = get_shared_httpx_client()
+    app.state.httpx_client: AsyncClient = get_shared_httpx_client()
     logger.info("HTTPX client initialized with HTTP/2")
     # Initialize Tavily HTTP client
-    app.state.tavily_http_client = await create_tavily_http_client()
+    app.state.tavily_http_client: AsyncClient = await create_tavily_http_client()
     logger.info("Tavily HTTP client initialized")
 
     # Initialize Crawl4AI browser
     try:
-        crawl4ai_crawler = AsyncWebCrawler(config=BrowserConfig(headless=True))
-        await crawl4ai_crawler.start()
-        app.state.crawl4ai_crawler = crawl4ai_crawler
+        app.state.crawl4ai_crawler = await create_crawl4ai_crawler()
         logger.info("Crawl4AI browser initialized")
     except Exception:
         logger.exception("Crawl4AI browser startup failed, continuing without crawl capability")
@@ -202,6 +224,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
     #     )
     #     app.state.langgraph_checkpointer = None
 
+    # MCPClientManager lifecycle (lazy-connects to upstream MCP servers)
+    # try:
+    #     app.state.mcp_manager = get_mcp_client_manager()
+    #     logger.info("MCP client manager initialized")
+    # except Exception:
+    #     logger.exception("MCP client manager startup failed, continuing without MCP tools")
+    #     app.state.mcp_manager = None
+
     logger.info("Application ready", status="running")
 
     yield
@@ -224,8 +254,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915
     if hasattr(app.state, "graphiti"):
         await close_graphiti(app.state.graphiti)
 
-    if hasattr(app.state, "crawl4ai_crawler") and app.state.crawl4ai_crawler is not None:
-        await app.state.crawl4ai_crawler.close()
+    if hasattr(app.state, "crawl4ai_crawler"):
+        await close_crawl4ai_crawler(app.state.crawl4ai_crawler)
 
     # MongoDB close is synchronous - run outside TaskGroup
     if hasattr(app.state, "mongo_client"):

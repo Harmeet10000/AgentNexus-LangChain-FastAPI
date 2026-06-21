@@ -8,7 +8,7 @@ from app.features.health import router as health_router
 from app.features.profile import router as profile_router
 from app.features.users import router as users_router
 
-v1_router = StrictEnvelopeAPIRouter(prefix="/api/v1")
+v1_router = StrictEnvelopeAPIRouter(prefix="/api/v1", deprecated=True)
 v1_router.include_router(auth_router)
 v1_router.include_router(health_router)
 v1_router.include_router(users_router)
