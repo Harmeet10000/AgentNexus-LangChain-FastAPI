@@ -148,7 +148,6 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 172. learn about langGrpah.prebuilt, create_react_agent from langraph.prebuilt   DONE
 138. add neo4j driver, DB session from request.app.state in Graphiti, Cognee, AsyncPostgresCheckpointer, vector_store and other places where required in tools and do the same for DB, redis            DONE
 108. use the new gemini embedding 2 for multi-modal embeddings, LLMToolSelectMiddleware        DONE
-165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384    DONE 
 62. can i use openRouter keys for my Gemini model    DONE             
 177. 
  PydanticDeprecatedSince20: `json_encoders` is deprecated. See https://docs.pydantic.dev/2.12/concepts/serialization/custom-serializers for alternatives. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
@@ -180,8 +179,13 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 181. how to use git when something is made then to use some commands on it while having another session work on the previous stuff when unrelated chnages have to be made. check what skills can help here    DONE
 192. make a plan to migrate from orjson, serializing generic Python data like a dict or list that isn't a Pydantic model to model.model_dump_json():  TypeAdapter.dump_json() with reuable functions    DONE
 178. From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on wont be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation. [cognee.shared.logging_utils]  and also migrate to veriosn 1.1    DONE
+183. scrapling vs crawl4ai, add crawl4ai in open_deep_search graph with proper plan and specs with openspec DONE
+193. check if client of these cognee, grapgiti, langextract, pageindex, tavilty, fastMCP, crawl4ai needs to be in connections and then in lifespan    DONE
+166. use Call a toolNode and check id toolNode should be used or subgraph inside a node for Open Deep Research   DONE
+197.  might need to connect open_deep_research to agent_saul graph   DONE
+146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note and also check if i am right in passong HTTPException to APIException and other classes        DONE
+133. use pydantic for data configuration, tool arguments, or schema validation in langraph and check if converting all typedDict to pydantic is useful or docs do not recommends it (only for custom state schema)   DONE
 
-146. use the return package and write it in copilot instructions and implement the plan written in this and check how exception should be written like raise and let GEH handle it or  except Exception/ExceptionName as e:, also use e.add_note and also check if i am right in passong HTTPException to APIException and other classes        DELAYED
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses     DELAYED    
 156. check the page https://docs.langchain.com/langsmith/deployments#
@@ -203,34 +207,16 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 115. logs inbetween the layers are empty or not coming except start and end, should i pass logger as an argument or should i import it where needed 
 140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
 
-148. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
 151. add langchain-cisco-aidefense, compact-middleware, langchain-collapse
 152. see cogneeRetriver how does vertex ai differ from google_genai
 153. add a hydration node after checkpointer  LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
 
     The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
     
-155. complete the ingestion pipeline to working condition and see where reconciliation comes init
-todos:-
-    1. toons reusable , point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
-    a. docling - Legal docs need hierarchical chunking, convert dataclass to pydantic models, use embedders(batch, chunks, etc) to reusable function in langchain_layer, remove Grapgiti initilisation from here
-    b. langextract and pageindex
-    c. graphiti refactor
-    d. postgres RAG should be agentic
-    e. celery for off loading to a queue
-    f. insert the langgraph in app.state in lifespan
-    g. pass default and metadata for particular config in pydantic models for agents
-    h. research for RAG pipeline with Gemini
-    i. use MessagesState to standardise the moving of data between Agent A and Agent 
-    j. use tenacity for retries, new capabilities, output format from chatpromptparts, check newer things F-S-A-T-O-F as capabilites, output format can be outside System Prompt
-133. use pydantic for data configuration, tool arguments, or schema validation in langraph and check if converting all typedDict to pydantic is useful or docs do not recommends it (only for custom state schema)
-57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
-136. use LangExtract outputs to build rich graph knowledge from your legal documents.
+
 162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
 163. refactor vectorStore code        TSVECTOR,
 164. refactor RAG code
-166. use Call a toolNode and check id toolNode should be used or subgraph inside a node for Open Deep Research
-167. how systemPromptPaarts, chatPromptTemplate, systemmessage, humanMessage, AImessage,ToolMessage look like while passing it in graph and how should i serialise these with toons before sending to LLM
 
 170. write cron job for memory decay and then send to celery for off loading
 171. use CacheBackedEmbeddings fore reusing embeddings
@@ -246,20 +232,41 @@ Do you want me to:
 - A. keep the architecture clean now: new documents/chunks become the only retrieval substrate, and any old code still tied to clauses is left stale/disabled until second pass   
 185. remove ts_vector(think if it is required here or other extension can do the job here) from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
 190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
-
+155. complete the ingestion pipeline to working condition and see where reconciliation comes init
+todos:-
+    1. toons reusable , point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
+    a. docling - Legal docs need hierarchical chunking, convert dataclass to pydantic models, use embedders(batch, chunks, etc) to reusable function in langchain_layer, remove Grapgiti initilisation from here
+    b. langextract and pageindex
+    c. graphiti refactor
+    d. postgres RAG should be agentic
+    e. celery for off loading to a queue
+    f. insert the langgraph in app.state in lifespan
+    g. pass default and metadata for particular config in pydantic models for agents
+    h. research for RAG pipeline with Gemini
+    i. use MessagesState to standardise the moving of data between Agent A and Agent 
+    j. use tenacity for retries, new capabilities, output format from chatpromptparts, check newer things F-S-A-T-O-F as capabilites, output format can be outside System Prompt
 161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
 type Composable = Callable[[Any], Any]
-
-
 def compose(*functions: Composable) -> Composable:
     def apply(value: Any, fn: Composable) -> Any:add headroom-ai for comrpression
         return fn(value)
 
     return lambda data: reduce(apply, functions, data)
-
-183. scrapling vs crawl4ai, add crawl4ai in open_deep_search graph with proper plan and specs with openspec, add headroom-ai for comrpression
-193. check if client of these cognee, grapgiti, langextract, pageindex, tavilty, fastMCP, crawl4ai needs to be in connections and then in lifespan
-194. add headroom-ai for comrpression
+148. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
+167. how systemPromptPaarts, chatPromptTemplate, systemmessage, humanMessage, AImessage,ToolMessage look like while passing it in graph and how should i serialise these with toons before sending to LLM, find which parts should be removed from system prompt parts, how are system/human/ai/toolMessage are sent to LLM
+57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
+194. add headroom-ai for **comrpression**
+165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384    DONE 
+136. use LangExtract outputs to build rich graph knowledge from your legal documents.
+195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
+196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node 
+197. The codebase has a `_result` dual-method pattern in repositories (Success/Failure). A service method calls `find_by_email_result(...)` and gets a `Failure`. What should it do next?
+The project uses `combine_lifespans(...)` to merge the FastMCP lifespan with the existing FastAPI lifespan. Why can't you just call `app.add_lifespan_handler(fastmcp_lifespan)` instead?
+198.  1. HYBRID SEARCH CACHING RACE CONDITION                            In DocumentQueryService.search(): cache check  embed          search  cache set. Two concurrent requests for same query      both miss cache, both embed, both search. Fix: use              `redis.setnx` with short TTL as "computing" lock, or            `async-cache-dedupe` (already in tier-2 observability plan). 2. GRAPHITI INITIALIZATION ORDER                                    lifespan.py: Graphiti setup AFTER Cognee, but Graphiti          needs Neo4j indices. If Neo4j driver fails, Graphiti setup      crashes but TaskGroup already succeeded (PG/Mongo/Redis         ok). App starts in degraded state silently. Add **health**          check endpoint that verifies all clients.                    3. EMBEDDING DIMENSION HARDCODING                                   _normalize_embedding() assumes 768-dim (Gemini). If you g switch models, this silently truncates/pads. Make it            configurable via settings or derive from embedding client.   4. CELERY TASK DEFINITIONS SCATTERED                                Tasks in `src/tasks/*.py` but invoked via string names          (`"tasks.documents_ingest"`). No type safety, no IDE            support. Consider `@celery_app.task` decorators in same         module or a task registry with typed signatures.             5. MIDDLEWARE ORDER SUBTLE BUG                                      main.py: CORS (Guard)  GZip  Security  Metrics  Logging    But Guard's CORS helper adds middleware *internally*.           If SecurityMiddleware also adds CORS headers, they conflict.    Verify with `curl -H "Origin: x" -v`  check for duplicate      `Access-Control-Allow-
+u
+199. ANN001/002/003/204 ignored globally  understandable for AI-heavy code but weakens type safety PLR0913 (too-many-arguments) ignored  some service methods have 8+ params; consider context objects DocumentQueryService.__init__ uses object | None for redis/graphiti  should be Redis | None and Graphiti | None Some TYPE_CHECKING blocks are verbose; PEP 695 generics would clean up (type Alias[T] = ...) 
+200. need a new superpower/brainstorming skill with openspec, graphify, ast-grep, poytail, firecrawl, with proper git workflows, and stop using grep and older tools 
+201. make full skill for ast-grep
 ```
 
 summarise these chapters in great detail and take video's transcript as reference for summarising
@@ -288,9 +295,9 @@ bit packing, texture atlasting, delta encoding, deduplication
       },
 
 # Upgrades
-1. Wont do it - DSPy shifts you from writing prompts to compiling them. Instead of manually guessing the best words for your LAWYER_SYSTEM_PROMPT, you define the input/output signature, give DSPy a few examples of good and bad answers, and it algorithmically finds the optimal prompt.
-2. add celery for offloading ingestion to a queue.
-3. make ingestion pipeline inspired from uber
+1. Wont do it - DSPy shifts you from writing prompts to compiling them. Instead of manually guessing the best words for your LAWYER_SYSTEM_PROMPT, you define the input/output signature, give DSPy a few examples of good and bad answers, and it algorithmically finds the optimal prompt.    ABANDONED
+2. add celery for offloading ingestion to a queue.   DONE
+3. make ingestion pipeline inspired from uber   
 4. add pageindex for vectorless RAG, markitdown
 5. (after writing code) When using AsyncPostgresSaver (or any checkpointer) for persistence, LangGraph serializes and saves the entire state blob at the end of every single node execution (super-step). If your messages array contains large document extractions or base64 PDFs, your state blob will rapidly swell to megabytes. Multiplied by 1000s of concurrent sessions, your PostgreSQL database will choke on I/O operations, and your latency will spike from 500ms to 5 seconds per step just writing to the DB.
 
@@ -493,78 +500,8 @@ Here're 10 Actionable Insights:
 > Track when bad facts enter summaries and propagate through subsequent turns.
 > Log before/after token counts to detect when critical details are being pruned.
 
-# Guardrails
 
-1. Guardrails real scope (India-specific)
 
-Guardrails are not optional, they are existential.
-
-A. Legal Liability Guardrails
-Must never claim “legal advice”
-Must surface:
-Confidence score
-Source (clause + judgement + statute)
-Mandatory disclaimers + audit logs
-B. Hallucination Control
-Retrieval-first architecture
-No free-form answers without citations
-“Insufficient data” must be a valid output
-C. Data Privacy
-
-Indian contracts contain:
-
-PAN, Aadhaar, bank details
-Trade secrets
-
-So:
-
-PII redaction
-On-prem / VPC deploy option
-Encryption at rest + in transit
-
-If you ignore this, enterprises won’t touch it.
-
-# Evals through DeepEval (G-Eval)
-
-Evaluation Metrics (Stop Lying to Yourself)
-
-Accuracy ≠ BLEU ≠ ROUGE.
-
-You need legal correctness metrics.
-
-3.1 Clause Detection Metrics
-Boundary precision/recall
-Clause-type confusion matrix
-
-Failing here breaks everything downstream.
-
-3.2 Entity Metrics
-Exact match accuracy
-Normalization accuracy (₹ vs words)
-False positive penalty (VERY important)
-
-A wrong entity is worse than a missing one.
-
-3.3 Risk Assessment Metrics
-Human agreement rate
-Severity misclassification rate
-False alarm rate
-
-Lawyers hate noise.
-
-3.4 Compliance Metrics
-Statute grounding accuracy
-Precedent relevance score
-Jurisdiction correctness
-
-One wrong citation = trust collapse.
-
-3.5 System Metrics (enterprise reality)
-Reproducibility (same input → same output)
-Override frequency
-Review time reduction
-
-This is what enterprises buy.
 
 # AI Gateway
 
@@ -591,43 +528,7 @@ START: Do you need AI Gateway?
   │
   └─ None of the above → NO (use FastAPI + LangGraph only)
 
-**Best additions for this repo**
 
-- `functools.cache`
-  Reason: you have several zero-argument “build once and reuse forever” functions where `@cache` expresses intent better than `@lru_cache(maxsize=1)`.
-  Best fit: settings/executor/module loaders like [settings.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/config/settings.py#L161), [langextract client.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/rag/langextract/client.py#L40), and similar no-arg factories in [agents registry.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/agents/registry.py#L79).
-  Why it helps: clearer semantics for true singleton memoization. Keep `lru_cache` where you cache by argument, like keyed clients.
-
-- `itertools.pairwise`
-  Reason: you have adjacent-element loops that are currently index-driven.
-  Best fit: [chunker.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/crawler/chunker.py#L24) and [graphs.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/langgraph_layer/graphs.py#L147).
-  Why it helps: removes off-by-one style indexing and makes adjacency logic easier to read.
-
-- More `Protocol`
-  Reason: right now it’s used once, but this codebase has many external integrations where structural contracts would help testing and swapability.
-  Best fit: search embeddings in [service.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/search/service.py#L46), agent/tool registries, crawler adapters, vector store boundaries.
-  Why it helps: easier mocking, less tight coupling to vendor SDK classes, cleaner dependency injection.
-
-- `match` with guards
-  Reason: you have several branchy mode/type dispatchers where the control flow is really pattern selection.
-  Best fit: crawl mode handling in [service.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/crawler/service.py#L193), response shaping in [httpResponse.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/utils/httpResponse.py#L15), and content-type classification in [docling_enhanced.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/document_processing/docling_enhanced.py#L337).
-  Why it helps: clearer declarative branching when you are dispatching on enums, tagged strings, or object shapes.
-
-- `pathlib` standardization
-  Reason: you already prefer it in tooling, and Ruff is configured with `PTH`, but some core ingestion code still uses `os.path`.
-  Best fit: [ingest.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/document_processing/ingest.py#L140) and [multimodal/code.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/shared/rag/multimodal/code.py#L75).
-  Why it helps: less string-path manipulation, fewer join/split/ext bugs, better readability across file-heavy pipelines.
-
-- `contextlib.suppress`
-  Best fit: best-effort cleanup and optional deletes.
-  Why not higher: I don’t see many concrete suppression-heavy areas yet, so forcing it would be cosmetic.
-
-- `contextlib.ExitStack`
-  Important nuance: for this repo, `AsyncExitStack` is probably more valuable than `ExitStack` because much of your resource management is async.
-  Best fit: places that may conditionally acquire multiple async resources during app lifespan or ingestion orchestration.
-  Why not higher: good tool, but only when resource lifetimes are genuinely dynamic.
-
-Arjan strongly recommends using modules instead (7:26-8:04). Modules are managed natively by Python, are inherently singletons, and are far more thread-safe, simple, and testable than a custom class-based Singleton. Singleton pattern has legitimate merit when used for lazy loading or controlled instantiation
 
 the architectural design differences between Python properties and methods, emphasizing the contract these choices establish for your code.
 
@@ -638,36 +539,7 @@ Derived State: Properties are ideal for computing simple values from existing ob
 Setters and Side Effects: While properties can have setters, they should generally avoid performing I/O or heavy operations. Persistence logic (like database saves) should be handled by explicit methods to keep code predictable and avoid blocking (8:58 - 10:29).
 Async Properties: While technically possible, making properties asynchronous is considered a design smell (13:13 - 14:31). It hides asynchronous waiting behind attribute access, which violates the expected simplicity of a property. Instead, use asynchronous methods for loading and saving data (14:31 - 16:10).
 
-# Unit Testing
 
-The Basics of Unit Testing (1:01): Validating the behavior of small, isolated pieces of code (functions/methods) to catch bugs, ensure safe refactoring, and document behavior.
-Monkey Patching (3:45): Dynamically replacing functions at runtime (e.g., swapping real HTTP requests for fake ones) to make tests deterministic.
-Mocking (8:51): Using unittest.mock (specifically MagicMock) to create flexible fake objects, which allows for advanced assertions like checking if a method was called.
-Fixtures (12:20): Utilizing pytest.fixture to handle setup and teardown of test states, promoting code reuse.
-Refactoring for Testability (14:01): Improving code design by introducing dependencies (like an HTTP client) to make testing easier without complex patching.
-Advanced pytest Features (16:39):
-Parameterization: Running the same test with different inputs using @pytest.mark.parametrize.
-Exception Testing: Using pytest.raises to ensure code handles errors correctly.
-Skipping/X-failing: Using @pytest.mark.skip or @pytest.mark.xfail to manage known issues or conditional testing.
-Best Practices (19:59): Aim for a single assertion per test, keep test names descriptive, and maintain a clear file structure (tests/) separate from production code.
-
-What the Host Says to Do (Best Practices)
-Keep tests focused and small (1:01): Unit tests should validate a single, isolated piece of code, such as a function or method, to keep them fast and easy to run.
-Use pytest instead of unittest (3:16): The host strongly recommends pytest because it allows for simpler function-based tests, powerful assertions, and a more pleasant user experience.
-Use Monkey Patching for external dependencies (3:51): When your code calls an external service (like an API), use monkeypatch to replace the real function with a fake one (setattr(httpx, 'get', fake_get)) so your tests don't make actual network calls (3:54).
-While monkey patching allows you to test existing, tightly coupled code, Arjan notes that the process is "ugly" and difficult to maintain. This serves as a precursor to the second part of the series, where he will demonstrate how refactoring (specifically using dependency injection) simplifies testing and yields a cleaner, more modular design.
-
-Leverage MagicMock for complex objects (8:51): Use unittest.mock.MagicMock to create objects that mimic external APIs without needing to write custom fake classes. You can configure return values for methods like json or raise_for_status (10:03).
-Utilize Fixtures for setup (12:20): Use @pytest.fixture to handle the repetitive setup and teardown of objects, making your test functions cleaner and more reusable (13:05).
-Refactor for Testability (14:01): Improve your code design by using Dependency Injection (e.g., passing a client object to the service) rather than hardcoding external dependencies inside methods (15:05).
-Parameterize tests (16:49): Use @pytest.mark.parametrize to run the same test logic with multiple different input data sets, avoiding code duplication (17:00).
-Test for exceptions (17:45): Use pytest.raises to ensure your code correctly handles and raises expected errors (17:57).
-Use Descriptive Naming (20:18): Name your tests clearly so that the intent is obvious when reading test reports (e.g., test_get_temperature_with_monkeypatch).
-What Not to Do (Pitfalls)
-Do not make real API calls in unit tests (0:18): Hardcoding HTTP requests makes tests slow, unreliable, and prone to failing due to network issues rather than code bugs.
-Do not use unit tests to write sloppy code (2:37): Tests are not an excuse to skip proper software design; good design leads to code that is naturally easier to test.
-Do not mix production and test code (20:33): Keep your tests in a separate directory (e.g., a tests/ folder) away from the source code (20:45).
-Do not have multiple assertions per test (20:02): The host recommends focusing each test on a single, specific outcome, usually resulting in a single assert statement per test.
 
 This video provides a deep dive into designing a distributed cache capable of handling over a billion requests. It moves beyond basic theory to explain the architectural challenges of building a reliable, clustered caching fleet.
 
