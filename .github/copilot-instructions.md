@@ -13,6 +13,7 @@ Full project rules live in `.opencode/instructions/`. Open this directory and re
 | `ARCHITECTURE-RULES.md` | Layering, FastAPI rules, service/repo patterns |
 | `PYTHON-TYPING-RULES.md` | Python style, async, Pydantic/DTO, generics |
 | `RESULT-PATTERN.md` | returns.Result when/not-to-use, dual-method pattern |
+| `EXCEPTION-RULES.md` | raise vs catch, APIException hierarchy, e.add_note(), GEH dispatch |
 | `REFERENCE-MAP.md` | Key source files, graphify, Context7 |
 
 ## Quick reference

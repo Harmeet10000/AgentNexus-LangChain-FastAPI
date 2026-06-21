@@ -1,3 +1,35 @@
+# Guardrails
+
+1. Guardrails real scope (India-specific)
+
+Guardrails are not optional, they are existential.
+
+A. Legal Liability Guardrails
+Must never claim “legal advice”
+Must surface:
+Confidence score
+Source (clause + judgement + statute)
+Mandatory disclaimers + audit logs
+B. Hallucination Control
+Retrieval-first architecture
+No free-form answers without citations
+“Insufficient data” must be a valid output
+C. Data Privacy
+
+Indian contracts contain:
+
+PAN, Aadhaar, bank details
+Trade secrets
+
+So:
+
+PII redaction
+On-prem / VPC deploy option
+Encryption at rest + in transit
+
+If you ignore this, enterprises won’t touch it.
+
+
 # The Zero Trust Gap in LLMs
 
 The speaker emphasizes that LLM attacks have moved from being anomalies to the baseline. These systems suffer from a lack of native separation between system controls and data, leading to a "zero trust gap." The six primary attack vectors identified are:
