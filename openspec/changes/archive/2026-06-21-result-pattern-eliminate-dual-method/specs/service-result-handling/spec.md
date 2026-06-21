@@ -4,17 +4,8 @@
 
 Every service or dependency that previously called a public wrapper method SHALL be updated to pattern-match on `AppResult[T]` instead.
 
-#### Scenario: auth/service.py login (previously swallowed)
+#### Scenario: auth/service.py login (constant-time, uses `case _`)
 
-**Before:**
-```python
-user = await self._user_repo.find_by_email(dto.email)
-if user is None or user.hashed_password is None:
-    verify_password(_DUMMY_HASH, dto.password)
-    raise UnauthorizedException("Invalid credentials")
-```
-
-**After:**
 ```python
 match await self._user_repo.find_by_email(dto.email):
     case Success(user) if user is not None and user.hashed_password is not None:
@@ -24,43 +15,42 @@ match await self._user_repo.find_by_email(dto.email):
         raise UnauthorizedException("Invalid credentials")
 ```
 
-#### Scenario: auth/service.py refresh (previously called _result directly)
+Note: Uses `case _` — no `log_expected_failure`, no error differentiation. This path must stay constant-time against timing attacks.
 
-**Before:**
+#### Scenario: auth/service.py verify_email (user-facing, logs failure)
+
 ```python
-user_result = await self._user_repo.find_by_id_result(claims.sub)
-match user_result:
+match await self._user_repo.find_by_verification_token_hash(hash_token(token)):
     case Success(user) if user is not None:
-        resolved_user = user
-    case Success():
-        raise UnauthorizedException("User not found or disabled")
-    case Failure(error):
-        log_expected_failure(error, operation="refresh_user_lookup")
-        raise UnauthorizedException("Invalid token subject")
+        ...
+    case _:
+        raise NotFoundException("Invalid or expired verification token")
 ```
 
-**After** (method renamed, no suffix change needed):
+#### Scenario: auth/service.py logout (write path, logs failure)
+
 ```python
-match await self._user_repo.find_by_id(claims.sub):
-    case Success(user) if user is not None:
-        resolved_user = user
+match await self._token_repo.revoke_session(session_id=claims.jti, user_id=claims.sub, reason="logout"):
     case Success():
-        raise UnauthorizedException("User not found or disabled")
+        pass
     case Failure(error):
-        log_expected_failure(error, operation="refresh_user_lookup")
-        raise UnauthorizedException("Invalid token subject")
+        log_expected_failure(error, operation="logout")
+        raise app_error_to_exception(error)
+```
+
+#### Scenario: auth/service.py oauth_callback (write path, logs failure)
+
+```python
+match await self._user_repo.find_or_create_oauth_user(...):
+    case Success((user, created)):
+        ...
+    case Failure(error):
+        log_expected_failure(error, operation="oauth_callback")
+        raise app_error_to_exception(error)
 ```
 
 #### Scenario: auth/dependencies.py get_current_user
 
-**Before:**
-```python
-user: User | None = await user_repo.find_by_id(claims.sub)
-if user is None:
-    raise UnauthorizedException("User not found")
-```
-
-**After:**
 ```python
 match await user_repo.find_by_id(claims.sub):
     case Success(user) if user is not None:
@@ -69,65 +59,24 @@ match await user_repo.find_by_id(claims.sub):
         raise UnauthorizedException("User not found")
 ```
 
-#### Scenario: documents/service.py upload_document
-
-**Before:**
-```python
-existing = await self.repo.get_document_by_user_hash(
-    user_id=user_id, content_hash=content_hash
-)
-if existing is not None:
-    return DocumentUploadResponse(..., duplicate=True)
-```
-
-**After:**
-```python
-match await self.repo.get_document_by_user_hash(
-    user_id=user_id, content_hash=content_hash
-):
-    case Success(existing) if existing is not None:
-        return DocumentUploadResponse(..., duplicate=True)
-    case Success():
-        pass  # no duplicate, continue
-    case Failure(error):
-        raise app_error_to_exception(error)
-```
-
 #### Scenario: documents/service.py get_status
 
-**Before:**
-```python
-record = await self.repo.fetch_status(user_id=user_id, document_id=document_id)
-if record is None:
-    raise NotFoundException("Document", document_id)
-```
-
-**After:**
 ```python
 match await self.repo.fetch_status(user_id=user_id, document_id=document_id):
     case Success(record) if record is not None:
-        ...
+        warnings = _flatten_warnings(record.get("warnings", []))
+        return DocumentStatusResponse(...)
     case _:
         raise NotFoundException("Document", document_id)
 ```
 
 #### Scenario: search/service.py _run_parallel_search
 
-**Before:**
-```python
-return tuple(await asyncio.gather(
-    repo.bm25_search(...),       # raises on Failure
-    repo.vector_search(...),     # raises on Failure
-    repo.trigram_search(...),    # raises on Failure
-))
-```
-
-**After (wraps each call in failure handling):**
 ```python
 results = await asyncio.gather(
-    repo.bm25_search(...),       # returns AppResult
-    repo.vector_search(...),     # returns AppResult
-    repo.trigram_search(...),    # returns AppResult
+    repo.bm25_search(...),       # now returns AppResult
+    repo.vector_search(...),     # now returns AppResult
+    repo.trigram_search(...),    # now returns AppResult
     return_exceptions=False,
 )
 for r in results:
@@ -135,4 +84,66 @@ for r in results:
         case Failure(error):
             raise app_error_to_exception(error)
 return tuple(r.unwrap() for r in results)
+```
+
+### Requirement: Fix result.failure → result.failure() in LangGraph nodes
+
+All occurrences of `result.failure` (property access) in `ingestion_kb/nodes.py` and `reconciliation/nodes.py` SHALL be changed to `result.failure()` (method call).
+
+#### Scenario: ingestion_kb/nodes.py
+
+- **WHEN** `result.failure` is called without parentheses
+- **THEN** SHALL be `result.failure()` — `Failure.failure` is a method in this `returns` version, not a property
+
+Affected lines in `ingestion_kb/nodes.py`: 98, 121, 160, 262, 308
+Affected lines in `reconciliation/nodes.py`: 118, 179, 191, 258, 342
+
+### Requirement: Add log_expected_failure to all Failure match branches
+
+Every service `Failure(error)` match branch at the ownership boundary SHALL call `log_expected_failure(error, operation="...")` before raising or returning, EXCEPT constant-time paths in `auth/service.py` (login, forgot_password, resend_verification).
+
+#### Scenario: auth/service.py refresh (already has it)
+
+- **WHEN** `Failure(error)` is matched in `AuthService.refresh`
+- **THEN** `log_expected_failure(error, operation="refresh_user_lookup")` SHALL be called before raising
+
+#### Scenario: documents/service.py upload
+
+- **WHEN** `Failure(error)` is matched after `create_document` returns `AppResult`
+- **THEN** `log_expected_failure(error, operation="document_upload")` SHALL be called before raising
+
+#### Scenario: search/service.py ingest
+
+- **WHEN** `Failure(error)` is matched after `get_document_by_content_hash` returns `AppResult`
+- **THEN** `log_expected_failure(error, operation="search_ingest")` SHALL be called before raising
+
+### Requirement: SearchService unused imports cleanup
+
+`SearchService.__init__` SHALL remove the `Failure` and `Success` imports from `returns.result` if they are no longer directly used.
+
+#### Scenario: Clean imports
+
+- **WHEN** `search/service.py` no longer directly constructs `Failure`/`Success`
+- **THEN** the `from returns.result import Failure, Success` import SHALL be removed
+
+### Requirement: Service pattern for write paths
+
+For write operations (create, save, upsert, revoke), the service pattern SHALL be:
+```python
+match await repo.create(user):
+    case Success(created):
+        return created
+    case Failure(error):
+        log_expected_failure(error, operation="create_user")
+        raise app_error_to_exception(error)
+```
+
+For idempotent writes (upsert, save):
+```python
+match await repo.save(user):
+    case Success():
+        pass
+    case Failure(error):
+        log_expected_failure(error, operation="save_user")
+        raise app_error_to_exception(error)
 ```

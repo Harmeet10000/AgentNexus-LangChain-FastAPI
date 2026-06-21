@@ -1,72 +1,109 @@
 ## 1. Repositories — auth
 
-- [ ] 1.1 Delete `UserRepository.find_by_id` wrapper, rename `find_by_id_result` → `find_by_id`
-- [ ] 1.2 Delete `UserRepository.find_by_email` wrapper, rename `find_by_email_result` → `find_by_email`
-- [ ] 1.3 Delete `UserRepository.find_by_verification_token_hash` wrapper, rename `_result` → primary
-- [ ] 1.4 Delete `UserRepository.find_by_reset_token_hash` wrapper, rename `_result` → primary
-- [ ] 1.5 Delete `UserRepository.email_exists` wrapper, rename `_result` → `email_exists`
-- [ ] 1.6 Delete `UserRepository.create` wrapper, rename `create_result` → `create`
-- [ ] 1.7 Delete `UserRepository.save` wrapper, rename `save_result` → `save`
-- [ ] 1.8 Delete `UserRepository.find_or_create_oauth_user` wrapper, rename `_result` → primary
-- [ ] 1.9 Delete `RefreshTokenRepository.store_session` wrapper, rename `_result` → `store_session`
-- [ ] 1.10 Delete `RefreshTokenRepository.get_session` wrapper, rename `_result` → `get_session`
-- [ ] 1.11 Delete `RefreshTokenRepository.revoke_session` wrapper, rename `_result` → `revoke_session`
-- [ ] 1.12 Delete `RefreshTokenRepository.get_user_sessions` wrapper, rename `_result` → primary
-- [ ] 1.13 Delete `RefreshTokenRepository.revoke_all_user_sessions` wrapper, rename `_result` → primary
-- [ ] 1.14 Remove unused `app_error_to_exception` import
+✅ Already refactored (13 wrappers deleted, 13 `_result` renamed).
 
-## 2. Repositories — users
+## 2. Repositories — users (1 method)
 
-- [ ] 2.1 Delete `UserAdminRepository.find_by_id` wrapper, rename `find_by_id_result` → `find_by_id`
+- [x] 2.1 Delete `UserAdminRepository.find_by_id` wrapper (line 18-22), rename `find_by_id_result` → `find_by_id` (line 24)
 
-## 3. Repositories — documents
+## 3. Repositories — documents (5 rename + 3 new)
 
-- [ ] 3.1 Delete `DocumentRepository.get_document_by_user_hash` wrapper, rename `_result` → primary
-- [ ] 3.2 Delete `DocumentRepository.get_document_by_id` wrapper, rename `_result` → primary
-- [ ] 3.3 Delete `DocumentRepository.create_document` wrapper, rename `_result` → primary
-- [ ] 3.4 Delete `DocumentRepository.upsert_chunks` wrapper, rename `_result` → `upsert_chunks`
-- [ ] 3.5 Delete `DocumentRepository.fetch_status` wrapper, rename `_result` → `fetch_status`
-- [ ] 3.6 Remove unused `app_error_to_exception` import
+- [x] 3.1 Delete wrapper (lines 57-69), rename `get_document_by_user_hash_result` → `get_document_by_user_hash`
+- [x] 3.2 Delete wrapper (lines 104-111), rename `get_document_by_id_result` → `get_document_by_id`
+- [x] 3.3 Delete wrapper (lines 146-176), rename `create_document_result` → `create_document`
+- [x] 3.4 Delete wrapper (lines 271-275), rename `upsert_chunks_result` → `upsert_chunks`
+- [x] 3.5 Delete wrapper (lines 322-326), rename `fetch_status_result` → `fetch_status`
+- [x] 3.6 Remove unused `app_error_to_exception` import (line 24)
+- [x] 3.7 Add `_result` variant + wrapper to `bm25_search` (line 377) — wraps `SQLAlchemyError`
+- [x] 3.8 Add `_result` variant + wrapper to `vector_search` (line 412)
+- [x] 3.9 Add `_result` variant + wrapper to `trigram_search` (line 453)
 
-## 4. Repositories — search
+## 4. Repositories — search (5 rename + 3 new)
 
-- [ ] 4.1 Delete `SearchRepository.get_document_by_content_hash` wrapper, rename `_result` → primary
-- [ ] 4.2 Delete `SearchRepository.get_document_by_id` wrapper, rename `_result` → primary
-- [ ] 4.3 Delete `SearchRepository.bm25_search` wrapper, rename `_result` → `bm25_search`
-- [ ] 4.4 Delete `SearchRepository.vector_search` wrapper, rename `_result` → `vector_search`
-- [ ] 4.5 Delete `SearchRepository.trigram_search` wrapper, rename `_result` → `trigram_search`
-- [ ] 4.6 Remove unused `app_error_to_exception` import
+- [x] 4.1 Delete wrapper (lines 46-50), rename `get_document_by_content_hash_result` → `get_document_by_content_hash`
+- [x] 4.2 Delete wrapper (lines 80-84), rename `get_document_by_id_result` → `get_document_by_id`
+- [x] 4.3 Delete wrapper (lines 152-166), rename `bm25_search_result` → `bm25_search`
+- [x] 4.4 Delete wrapper (lines 194-208), rename `vector_search_result` → `vector_search`
+- [x] 4.5 Delete wrapper (lines 243-257), rename `trigram_search_result` → `trigram_search`
+- [x] 4.6 Remove unused `app_error_to_exception` import (line 18)
+- [x] 4.7 Add `_result` variant + wrapper to `create_document` (line 114) — wraps `SQLAlchemyError`
+- [x] 4.8 Add `_result` variant + wrapper to `upsert_chunks` (line 132)
+- [x] 4.9 Add `_result` variant + wrapper to `fetch_chunks_by_ids` (line 286)
 
-## 5. Services — auth
+## 5. Services — auth (21 call sites)
 
-- [ ] 5.1 Update `AuthService.login`: match on `find_by_email` returning `AppResult`
-- [ ] 5.2 Update `AuthService.refresh`: `find_by_id` instead of `find_by_id_result` (pattern match already exists)
-- [ ] 5.3 Update `AuthService.verify_email`: match on `find_by_verification_token_hash`
-- [ ] 5.4 Update `AuthService.resend_verification`: match on `find_by_email`
-- [ ] 5.5 Update `AuthService.forgot_password`: match on `find_by_email`
-- [ ] 5.6 Update `AuthService.reset_password`: match on `find_by_reset_token_hash`
-- [ ] 5.7 Update `AuthService.logout`: match on `revoke_session`
-- [ ] 5.8 Update `AuthService.oauth_callback`: match on `find_or_create_oauth_user`
+- [x] 5.1 `register` (line 69, 79): match `email_exists` + `create`
+- [x] 5.2 `login` (line 95): match `find_by_email` with `case _` (constant-time)
+- [x] 5.3 `login` (line 115): match `save`
+- [x] 5.4 `logout` (line 128): match `revoke_session`
+- [x] 5.5 `refresh` (line 141-152): match `get_session` + `find_by_id` (rename from `find_by_id_result`)
+- [x] 5.6 `verify_email` (line 172): match `find_by_verification_token_hash`
+- [x] 5.7 `verify_email` (line 177): match `save`
+- [x] 5.8 `resend_verification` (line 181): match `find_by_email` with `case _`
+- [x] 5.9 `resend_verification` (line 190): match `save`
+- [x] 5.10 `forgot_password` (line 199): match `find_by_email` with `case _`
+- [x] 5.11 `forgot_password` (line 209): match `save`
+- [x] 5.12 `reset_password` (line 217): match `find_by_reset_token_hash`
+- [x] 5.13 `reset_password` (line 227): match `save`
+- [x] 5.14 `reset_password` (line 230): match `revoke_all_user_sessions`
+- [x] 5.15 `oauth_callback` (line 267): match `find_or_create_oauth_user`
+- [x] 5.16 `list_sessions` (line 286): match `get_user_sessions`
+- [x] 5.17 `revoke_session` (line 305-310): match `get_session` + `revoke_session`
+- [x] 5.18 `revoke_all_sessions` (line 321): match `revoke_all_user_sessions`
+- [x] 5.19 `_create_session` (line 350): match `store_session`
+- [x] 5.20 Remove unused `Failure`/`Success` imports after refactor
+- [x] 5.21 Ensure `log_expected_failure` is imported (line 9, already present)
 
-## 6. Dependencies — auth
+## 6. Dependencies — auth (1 call site)
 
-- [ ] 6.1 Update `get_current_user`: match on `find_by_id` returning `AppResult`
+- [x] 6.1 `get_current_user` (deps.py:106): match `find_by_id` with `case _` wildcard
 
-## 7. Services — documents
+## 7. Services — documents (8 call sites)
 
-- [ ] 7.1 Update `upload_document`: match on `get_document_by_user_hash`, `create_document`
-- [ ] 7.2 Update `get_status`: match on `fetch_status`
-- [ ] 7.3 Update `process_document_ingestion`: match on `upsert_chunks`
-- [ ] 7.4 Update `_verify_legal_chunks`: match on `upsert_chunks`
+- [x] 7.1 `upload_document` (line 118): match `get_document_by_user_hash`
+- [x] 7.2 `upload_document` (line 142): match `create_document` + add `log_expected_failure`
+- [x] 7.3 `get_status` (line 184): match `fetch_status` with `case _`
+- [x] 7.4 `search` (lines 233-245): unwrap `bm25_search`/`vector_search`/`trigram_search` from `asyncio.gather`
+- [x] 7.5 `fetch_chunks_by_ids` (line 259): match result
+- [x] 7.6 `process_document_ingestion` (line 471): match `upsert_chunks`
+- [x] 7.7 `_verify_legal_chunks` (line 634): match `upsert_chunks`
+- [x] 7.8 Add `log_expected_failure` to all `Failure` branches
 
-## 8. Services — search
+## 8. Services — search (4 call sites)
 
-- [ ] 8.1 Update `ingest_document`: match on `get_document_by_content_hash`, `create_document`
-- [ ] 8.2 Update `get_ingest_status`: match on `get_document_by_id`
-- [ ] 8.3 Update `_run_parallel_search`: wrap `asyncio.gather` results in failure matching
+- [x] 8.1 `ingest_document` (line 73): match `get_document_by_content_hash`
+- [x] 8.2 `ingest_document` (line 82): match `create_document`
+- [x] 8.3 `get_ingest_status` (line 129): match `get_document_by_id`
+- [x] 8.4 `_run_parallel_search` (lines 350-360): unwrap `AppResult` from each gathered result + `log_expected_failure`
 
-## 9. Verification
+## 9. LangGraph nodes — ingestion_kb (10 fixes)
 
-- [ ] 9.1 Run `ruff check` on all changed files
-- [ ] 9.2 Run `ruff format` on all changed files
-- [ ] 9.3 Run `ty check` on all changed files
+- [x] 9.1 Line 98: `result.failure` → `result.failure()`
+- [x] 9.2 Line 99: `result.failure` → `result.failure()`
+- [x] 9.3 Line 121: `result.failure` → `result.failure()`
+- [x] 9.4 Line 122: `result.failure` → `result.failure()`
+- [x] 9.5 Line 160: `result.failure` → `result.failure()`
+- [x] 9.6 Line 161: `result.failure` → `result.failure()`
+- [x] 9.7 Line 262: `result.failure` → `result.failure()`
+- [x] 9.8 Line 263: `result.failure` → `result.failure()`
+- [x] 9.9 Line 308: `result.failure` → `result.failure()`
+- [x] 9.10 Line 309: `result.failure` → `result.failure()`
+
+## 10. LangGraph nodes — reconciliation (10 fixes)
+
+- [x] 10.1 Line 118: `error_result.failure` → `error_result.failure()`
+- [x] 10.2 Line 120: `error_result.failure` → `error_result.failure()`
+- [x] 10.3 Line 179: `error_result.failure` → `error_result.failure()`
+- [x] 10.4 Line 182: `error_result.failure` → `error_result.failure()`
+- [x] 10.5 Line 191: `error_result.failure` → `error_result.failure()`
+- [x] 10.6 Line 194: `error_result.failure` → `error_result.failure()`
+- [x] 10.7 Line 258: `error_result.failure` → `error_result.failure()`
+- [x] 10.8 Line 260: `error_result.failure` → `error_result.failure()`
+- [x] 10.9 Line 342: `error_result.failure` → `error_result.failure()`
+- [x] 10.10 Line 344: `error_result.failure` → `error_result.failure()`
+
+## 11. Verification
+
+- [x] 11.1 Run `ruff check` on all changed files
+- [x] 11.2 Run `ruff format` on all changed files
+- [x] 11.3 Run `ty check` on all changed files

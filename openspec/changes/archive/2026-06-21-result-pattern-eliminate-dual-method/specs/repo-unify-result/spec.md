@@ -2,12 +2,12 @@
 
 ### Requirement: Delete public wrapper, rename _result to primary
 
-For every dual-method pair in auth/repository.py, users/repository.py, documents/repository.py, and search/repository.py, the system SHALL delete the public wrapper method and rename the `_result` method to be the primary method (remove `_result` suffix).
+For every dual-method pair in `auth/repository.py`, `users/repository.py`, `documents/repository.py`, and `search/repository.py`, the system SHALL delete the public wrapper method and rename the `_result` method to be the primary method (remove `_result` suffix).
 
 #### Scenario: find_by_email in auth repository
 
-**Before:**
 ```python
+# Before
 async def find_by_email(self, email: str) -> User | None:
     result = await self.find_by_email_result(email=email)
     if isinstance(result, Failure):
@@ -16,47 +16,35 @@ async def find_by_email(self, email: str) -> User | None:
 
 async def find_by_email_result(self, email: str) -> AppResult[User | None]:
     ...
-    return Success(user) if user else Failure(NotFoundAppError(...))
-```
 
-**After:**
-```python
+# After
 async def find_by_email(self, email: str) -> AppResult[User | None]:
     ...
-    return Success(user) if user else Failure(NotFoundAppError(...))
 ```
 
-#### Scenario: create in auth repository (was a "raise" wrapper)
+#### Scenario: store_session in RefreshTokenRepository (was "raise" wrapper)
 
-**Before:**
 ```python
-async def create(self, user: User) -> User:
-    result = await self.create_result(user=user)
+# Before
+async def store_session(self, session: SessionData) -> None:
+    result = await self.store_session_result(session=session)
     if isinstance(result, Failure):
         raise app_error_to_exception(result.failure())
     return result.unwrap()
-```
 
-**After:**
-```python
-async def create(self, user: User) -> AppResult[User]:
+# After
+async def store_session(self, session: SessionData) -> AppResult[None]:
     ...
-    return Success(created)
 ```
 
 ### Requirement: Remove app_error_to_exception from repos
 
-The system SHALL remove imports of `app_error_to_exception` from repository files that no longer use it.
+The system SHALL remove imports of `app_error_to_exception` from all 4 repository files.
 
-#### Scenario: auth/repository.py
+#### Scenario: Imports cleaned
 
-- **WHEN** the refactor is complete
-- **THEN** `from app.shared.result import ... app_error_to_exception` SHALL be removed (only `ConflictAppError`, `InfrastructureAppError`, `NotFoundAppError`, `ValidationAppError` remain)
-
-#### Scenario: search/repository.py
-
-- **WHEN** the refactor is complete
-- **THEN** the import of `app_error_to_exception` SHALL be removed
+- **WHEN** refactored
+- **THEN** `from app.shared.result import ... app_error_to_exception` SHALL be removed from `auth/repository.py`, `documents/repository.py`, `search/repository.py` (users already doesn't import it)
 
 ### Requirement: All repo methods return AppResult[T]
 
@@ -65,4 +53,18 @@ Every method in the affected repositories SHALL return `AppResult[T]` where `T` 
 #### Scenario: Consistency
 
 - **WHEN** a caller invokes `repo.find_by_email(email)` or `repo.create(user)`
-- **THEN** the return type SHALL be `AppResult[User | None]` or `AppResult[User]` — not `User | None` or `User` directly
+- **THEN** the return type SHALL be `AppResult[User | None]` or `AppResult[User]`
+
+### Requirement: Add _result variants to uncovered repo methods
+
+Methods in `DocumentRepository` (`bm25_search`, `vector_search`, `trigram_search`) and `SearchRepository` (`create_document`, `upsert_chunks`, `fetch_chunks_by_ids`) that lack `_result` variants SHALL be wrapped with error handling.
+
+#### Scenario: bm25_search in DocumentRepository gets error wrapping
+
+- **WHEN** `DocumentRepository.bm25_search()` raises `SQLAlchemyError`
+- **THEN** the error SHALL be captured as `Failure(InfrastructureAppError(...))` instead of crashing
+
+#### Scenario: create_document in SearchRepository gets error wrapping
+
+- **WHEN** `SearchRepository.create_document()` raises an integrity error
+- **THEN** the error SHALL be captured as either `Failure(ConflictAppError(...))` or `Failure(InfrastructureAppError(...))` instead of crashing
