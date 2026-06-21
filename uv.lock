@@ -3584,6 +3584,7 @@ docs = [
 ]
 test = [
     { name = "factory-boy" },
+    { name = "fakeredis", extra = ["lua"] },
     { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -3595,6 +3596,14 @@ dev = [
     { name = "pre-commit" },
     { name = "ruff" },
     { name = "ty" },
+]
+test = [
+    { name = "factory-boy" },
+    { name = "fakeredis", extra = ["lua"] },
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
 ]
 
 [package.metadata]
@@ -3622,6 +3631,7 @@ requires-dist = [
     { name = "docling", specifier = ">=2.72.0" },
     { name = "dspy", specifier = ">=2.5.7" },
     { name = "factory-boy", marker = "extra == 'test'", specifier = ">=3.3.0,<4.0.0" },
+    { name = "fakeredis", extras = ["lua"], marker = "extra == 'test'", specifier = ">=2.24.0,<3.0.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.135.0" },
     { name = "fastapi-guard", specifier = ">=4.4.0" },
     { name = "fastapi-limiter", specifier = ">=0.2.0" },
@@ -3719,6 +3729,14 @@ dev = [
     { name = "pre-commit", specifier = ">=4.3.0" },
     { name = "ruff", specifier = ">=0.15.10" },
     { name = "ty", specifier = ">=0.0.29" },
+]
+test = [
+    { name = "factory-boy", specifier = ">=3.3.0,<4.0.0" },
+    { name = "fakeredis", extras = ["lua"], specifier = ">=2.24.0,<3.0.0" },
+    { name = "httpx", specifier = ">=0.27.0,<1.0.0" },
+    { name = "pytest", specifier = ">=8.2.2,<9.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23.7,<1.0.0" },
+    { name = "pytest-cov", specifier = ">=5.0.0,<6.0.0" },
 ]
 
 [[package]]

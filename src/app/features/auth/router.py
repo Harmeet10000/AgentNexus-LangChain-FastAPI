@@ -103,7 +103,7 @@ async def register(
     body: RegisterRequest,
     service: AuthServiceDep,
 ) -> APIResponse[UserResponse]:
-    result = await service.register(body)
+    result: UserResponse = await service.register(body)
     return http_response(
         "Registration successful. Check your email to verify your account.",
         data=result,
@@ -118,10 +118,10 @@ async def login(
     response: Response,
     service: AuthServiceDep,
 ) -> APIResponse[TokenResponse]:
-    ip = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
+    ip: str | None = request.client.host if request.client else None
+    user_agent: str | None = request.headers.get("user-agent")
 
-    tokens = await service.login(body, ip=ip, user_agent=user_agent)
+    tokens: TokenResponse = await service.login(body, ip=ip, user_agent=user_agent)
     response.set_cookie(
         _ACCESS_TOKEN_COOKIE,
         tokens.access_token,
