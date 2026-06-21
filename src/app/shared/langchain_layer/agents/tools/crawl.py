@@ -4,7 +4,8 @@ from typing import Any
 
 from langchain_core.tools import BaseTool
 
-from app.shared.crawler import get_crawler, truncate_content
+from app.connections.crawl4ai import get_crawler
+from app.shared.crawler import truncate_content
 from app.shared.crawler.processor import (
     SchemaType as ProcessorSchemaType,
 )

@@ -8,7 +8,7 @@ from .chunker import (
     truncate_content,
 )
 from .config import CrawlerConfig, get_crawler_config
-from .crawler import CrawlResult, WebCrawler, get_crawler
+from .crawler import CrawlResult, WebCrawler
 from .processor import (
     ExtractionResult,
     GeminiProcessor,
@@ -33,7 +33,6 @@ __all__ = [
     "WebCrawler",
     "extract_headers",
     "extract_title_from_markdown",
-    "get_crawler",
     "get_crawler_config",
     "get_domain_from_url",
     "get_processor",

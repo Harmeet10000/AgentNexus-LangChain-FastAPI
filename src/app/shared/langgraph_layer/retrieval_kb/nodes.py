@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from app.config import get_settings
 from app.shared.langchain_layer.models import serialize_to_toon
 from app.shared.langchain_layer.prompts import render_prompt_sections
 from app.shared.langgraph_layer.kb_retry import retry_immediate
@@ -360,12 +361,16 @@ async def _call_embedding_fn(embedding_fn: EmbeddingFunction, text_to_embed: str
     return cast("list[float]", result)
 
 
-def _normalize_embedding(embedding: list[float]) -> list[float]:
-    if len(embedding) == 768:
+def _normalize_embedding(
+    embedding: list[float], expected_dim: int | None = None
+) -> list[float]:
+    if expected_dim is None:
+        expected_dim = get_settings().EMBEDDING_DIMENSION
+    if len(embedding) == expected_dim:
         return embedding
-    if len(embedding) > 768:
-        return embedding[:768]
-    return [*embedding, *([0.0] * (768 - len(embedding)))]
+    if len(embedding) > expected_dim:
+        return embedding[:expected_dim]
+    return [*embedding, *([0.0] * (expected_dim - len(embedding)))]
 
 
 def _row_to_chunk(row: dict[str, Any]) -> RetrievedChunk:
