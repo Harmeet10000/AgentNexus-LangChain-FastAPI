@@ -13,9 +13,10 @@ Rules:
 
 ## ast-grep
 
-Use ast-grep for structural code search when grep/ripgrep is not enough. Invoke the `skill` tool with `skill: "ast-grep"` before using it.
+Skill at `.github/skills/ast-grep-skill/SKILL.md`. Invoke `skill: "ast-grep"` before using.
 
 Rules:
-- Use ast-grep when searching for code patterns by syntax (e.g., "find async functions without try-catch", "find all console.log calls").
-- Always verify ast-grep is installed: `ast-grep --version`
-- For simple text search, prefer grep/ripgrep — use ast-grep only for structural/AST-based queries.
+- Use ast-grep for structural/AST-based code search (e.g., "find async functions without try-catch", "find all console.log calls")
+- For simple text search, prefer grep/ripgrep
+- Always verify: `ast-grep --version`
+- Rule reference has transform operators, catalog patterns, and FAQ at `references/catalog/` for ready-made rule YAML
