@@ -18,10 +18,21 @@ from .celery_reliability import (
     run_with_circuit_breaker,
     set_circuit_breaker_state,
 )
+from .crawl4ai import (
+    close_crawl4ai_crawler,
+    create_crawl4ai_crawler,
+    get_crawl4ai_crawler,
+    get_crawler,
+)
 from .httpx_client import (
     create_httpx_client,
     get_httpx_client,
     get_shared_httpx_client,
+)
+from .mcp import (
+    close_mcp_client_manager,
+    get_mcp_client_manager_dep,
+    get_shared_mcp_client_manager,
 )
 from .mongodb import create_mongo_client, get_mongodb
 from .neo4j import (
@@ -41,20 +52,27 @@ from .tavily import (
 
 __all__ = [
     "ResilientTaskcelery_app",
+    "close_crawl4ai_crawler",
+    "close_mcp_client_manager",
     "close_neo4j_driver",
     "close_tavily_http_client",
     "create_celery_app",
+    "create_crawl4ai_crawler",
     "create_httpx_client",
     "create_mongo_client",
     "create_redis_client",
     "create_tavily_http_client",
+    "get_crawl4ai_crawler",
+    "get_crawler",
     "get_httpx_client",
+    "get_mcp_client_manager_dep",
     "get_mongodb",
     "get_neo4j_driver",
     "get_neo4j_session",
     "get_postgres_db",
     "get_redis",
     "get_shared_httpx_client",
+    "get_shared_mcp_client_manager",
     "get_shared_tavily_http_client",
     "get_tavily_http_client",
     "init_db",

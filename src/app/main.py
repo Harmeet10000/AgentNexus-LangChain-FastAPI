@@ -1,3 +1,5 @@
+import asyncio
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.gzip import GZipMiddleware
@@ -15,9 +17,12 @@ from .middleware import (
     get_metrics,
     global_exception_handler,
 )
+from .middleware.api_versioning import ApiDeprecationMiddleware
+from .middleware.health_check import ALL_PROBES
 from .shared.langchain_layer import configure_langsmith
 from .shared.mcp import get_mcp_http_app, parse_mcp_http_transport
 from .utils import APIResponse, ErrorCode, http_error, logger
+from .utils.response_type import DependencyHealth, HealthResponse, HealthStatus
 
 configure_langsmith()
 # Load environment variables
@@ -42,6 +47,14 @@ def create_app() -> FastAPI:
     # ============================================================================
     # Add middlewares in REVERSE order of execution
     # Last added = First executed
+    #
+    # Execution order (outermost → innermost):
+    #   1. RequestStateLoggingMiddleware — correlation ID, request state
+    #   2. SecurityMiddleware (Guard) — IP checks, rate limiting, pen-test detection
+    #   3. GZipMiddleware — response compression
+    #   4. ApiDeprecationMiddleware — Deprecation/Sunset headers on v1
+    #   5. CORSMiddleware (via Guard.configure_cors) — CORS headers
+    #   6. Route handler
     # ============================================================================
 
     # 1. CORS (managed by FastAPI Guard's helper)
@@ -50,7 +63,14 @@ def create_app() -> FastAPI:
     # 3. Compression (Performance optimization)
     app.add_middleware(GZipMiddleware, minimum_size=15000, compresslevel=6)
 
-    # 4. Timeout (Prevent hanging requests)
+    # 4. API deprecation headers (v1 → v2 migration support)
+    app.add_middleware(
+        ApiDeprecationMiddleware,
+        sunset_date=settings.API_SUNSET_DATE,
+        v2_base_path=settings.API_V2_BASE_PATH,
+    )
+
+    # 5. Timeout (Prevent hanging requests)
     # app.add_middleware(TimeoutMiddleware, timeout_seconds=30)
 
     # 5. Security middleware (headers, rate limiting, penetration detection)
@@ -79,6 +99,36 @@ def create_app() -> FastAPI:
             "status": "healthy",
             "version": "1.0.0",
         }
+
+    @app.get(path="/health", tags=["Monitoring"])
+    async def health() -> Response:
+        """Deep health check — probes all critical dependencies in parallel."""
+        results = await asyncio.gather(
+            *[probe(app) for probe in ALL_PROBES],
+            return_exceptions=True,
+        )
+        deps: list[DependencyHealth] = []
+        for r in results:
+            if isinstance(r, Exception):
+                deps.append(DependencyHealth.fail("unknown", str(r)))
+            else:
+                deps.append(r)
+
+        failed = sum(1 for d in deps if d.status == HealthStatus.UNHEALTHY)
+        if failed >= 3:
+            overall = HealthStatus.UNHEALTHY
+        elif failed >= 1:
+            overall = HealthStatus.DEGRADED
+        else:
+            overall = HealthStatus.HEALTHY
+
+        body = HealthResponse(status=overall, dependencies=deps)
+        code = status.HTTP_503_SERVICE_UNAVAILABLE if overall == HealthStatus.UNHEALTHY else status.HTTP_200_OK
+        return Response(
+            content=body.model_dump_json(),
+            status_code=code,
+            media_type="application/json",
+        )
 
     @app.get(path="/metrics", tags=["Monitoring"])
     async def metrics() -> Response:
