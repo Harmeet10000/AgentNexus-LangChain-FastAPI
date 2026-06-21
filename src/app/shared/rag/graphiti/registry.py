@@ -26,9 +26,8 @@ Lifespan wiring (in src/app/lifecycle/lifespan.py):
         checkpointer=app.state.saul_checkpointer,
         pro_llm=pro_llm,
         flash_llm=flash_llm,
-        cognee_client=app.state.cognee,
+        cognee_client=app.state.cognee_config,
         tool_registry=tool_registry,
-        graphiti_service=app.state.graphiti,
     )
 """
 
@@ -62,6 +61,7 @@ class ToolRegistry(BaseModel):
       compliance_agent  → [search_legal_precedents, retrieve_statute_section]
       risk_agent        → [query_knowledge_graph, get_obligation_chain]
       orchestrator      → [] (uses structured output, no tools needed)
+      deep_research     → deep_research_tool (delegates to search_legal_precedents)
 
     Non-@tool functions (called directly from nodes, not via agent):
       write_clause_episodes_to_graphiti  → relationship_mapping node
@@ -89,6 +89,10 @@ class ToolRegistry(BaseModel):
     @property
     def risk_tools(self) -> list[BaseTool]:
         return [self.query_knowledge_graph, self.get_obligation_chain]
+
+    @property
+    def deep_research_tool(self) -> BaseTool:
+        return self.search_legal_precedents
 
 
 def build_tool_registry(

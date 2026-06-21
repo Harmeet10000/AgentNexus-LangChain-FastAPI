@@ -1,11 +1,13 @@
 """Agent Saul node implementations and routing helpers."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
+from langchain_core.tools import BaseTool
 from langgraph.graph import END
 from langgraph.types import Send, interrupt
 from pydantic import BaseModel, Field
@@ -40,6 +42,7 @@ from .state import (
     NormalizedDocument,
     OrchestratorAction,
     OrchestratorActionType,
+    PlanActionType,
     PlanStep,
     ReviewOverride,
     RiskAnalysisOutput,
@@ -62,6 +65,7 @@ _VALID_WORKER_NODES = frozenset(
         "compliance",
         "grounding_verification",
         "finalization",
+        "deep_research",
     }
 )
 
@@ -808,3 +812,67 @@ def make_persist_memory_node(_cognee_client: Any) -> StateNode:
         }
 
     return persist_memory_node
+
+
+def route_deep_research(state: LegalAgentState) -> Literal["deep_research", "orchestrator"]:
+    plan = state.get("plan", [])
+    current_step = state.get("current_step", 0)
+
+    for step in plan[current_step:]:
+        if step.action == PlanActionType.SEARCH_PRECEDENTS:
+            return "deep_research"
+    return "orchestrator"
+
+
+def make_deep_research_node(
+    deep_research_tool: BaseTool,
+) -> StateNode:
+    async def deep_research_node(state: LegalAgentState) -> dict[str, Any]:
+        log = logger.bind(
+            node="deep_research",
+            user_id=state["user_id"],
+            thread_id=state["thread_id"],
+        )
+
+        plan = state.get("plan", [])
+        current_step = state.get("current_step", 0)
+
+        research_steps = [
+            step for step in plan[current_step:] if step.action == PlanActionType.SEARCH_PRECEDENTS
+        ]
+
+        if not research_steps:
+            return {}
+
+        log.info(
+            "deep_research_started",
+            step_count=len(research_steps),
+            current_step=current_step,
+        )
+
+        results = await asyncio.gather(
+            *(
+                deep_research_tool.ainvoke({"question": step.description})
+                for step in research_steps
+            ),
+            return_exceptions=True,
+        )
+
+        concatenated = "\n\n---\n\n".join(str(r) for r in results if not isinstance(r, Exception))
+
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                r.add_note(f"step_id={research_steps[i].step_id}")
+                r.add_note(f"description={research_steps[i].description[:120]}")
+                log.warning(
+                    "deep_research_step_failed",
+                    step_id=research_steps[i].step_id,
+                    error=str(r),
+                )
+
+        return {
+            "deep_research_results": concatenated,
+            "current_step": len(plan),
+        }
+
+    return deep_research_node

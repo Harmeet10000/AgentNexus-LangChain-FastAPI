@@ -7,6 +7,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict
 
+from app.shared.rag.graphiti.registry import ToolRegistry
+
 from .nodes import (
     ClauseSegmentationOutput,
     EntityExtractionOutput,
@@ -14,6 +16,7 @@ from .nodes import (
     QnAOutput,
     RelationshipMappingOutput,
     make_compliance_node,
+    make_deep_research_node,
     make_entity_extraction_node,
     make_finalization_node,
     make_gateway_node,
@@ -92,6 +95,7 @@ class SaulGraphNodes(BaseModel):
     human_review: Any
     finalization: Any
     persist_memory: Any
+    deep_research: Any
 
 
 def build_agent_registry(
@@ -175,6 +179,7 @@ def _build_graph_nodes(
     registry: AgentRegistry,
     pro_llm: BaseChatModel,
     cognee_client: Any,
+    tool_registry: ToolRegistry,
 ) -> SaulGraphNodes:
     return SaulGraphNodes(
         gateway=make_gateway_node(),
@@ -197,4 +202,5 @@ def _build_graph_nodes(
         human_review=make_human_review_node(),
         finalization=make_finalization_node(registry.finalization_llm),
         persist_memory=make_persist_memory_node(cognee_client),
+        deep_research=make_deep_research_node(tool_registry.deep_research_tool),
     )

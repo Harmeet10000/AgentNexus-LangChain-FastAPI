@@ -1,12 +1,24 @@
 """Crawler feature service."""
-
+import asyncio
 import time
-from typing import Any
+from typing import TYPE_CHECKING
 
 from redis.asyncio import Redis
 
-from app.features.crawler.constants import CrawlMode
-from app.features.crawler.dto import (
+from app.connections.crawl4ai import get_crawler
+from app.shared.crawler import (
+    CrawlResult,
+    GeminiProcessor,
+    WebCrawler,
+    get_processor,
+    truncate_content,
+)
+from app.shared.crawler import SchemaType as ProcessorSchemaType
+from app.shared.services import RateLimiter, RateLimitScope, get_rate_limiter, search
+from app.utils import logger
+
+from .constants import CrawlMode
+from .dto import (
     CrawlRequest,
     CrawlResponse,
     CrawlResultItem,
@@ -14,18 +26,9 @@ from app.features.crawler.dto import (
     SearchResponse,
     SearchResultItem,
 )
-from app.shared.crawler import (
-    CrawlResult,
-    GeminiProcessor,
-    WebCrawler,
-    get_crawler,
-    get_processor,
-    truncate_content,
-)
-from app.shared.crawler.processor import SchemaType as ProcessorSchemaType
-from app.shared.services import RateLimitScope, search
-from app.shared.services.rate_limiter import RateLimiter
-from app.utils.logger import logger
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 class CrawlerService:
@@ -46,7 +49,7 @@ class CrawlerService:
     @property
     def crawler(self) -> WebCrawler:
         if self._crawler is None:
-            import asyncio
+
 
             self._crawler = asyncio.run(get_crawler(redis_client=self._redis_client))
         return self._crawler
@@ -54,7 +57,7 @@ class CrawlerService:
     @property
     def processor(self) -> GeminiProcessor:
         if self._processor is None:
-            import asyncio
+
 
             self._processor = asyncio.run(get_processor())
         return self._processor
@@ -62,13 +65,13 @@ class CrawlerService:
     @property
     def rate_limiter(self) -> RateLimiter:
         if self._rate_limiter is None:
-            import asyncio
+
 
             self._rate_limiter = asyncio.run(self._get_rate_limiter())
         return self._rate_limiter
 
     async def _get_rate_limiter(self) -> RateLimiter:
-        from app.shared.services import get_rate_limiter
+
 
         return get_rate_limiter()
 

@@ -17,9 +17,10 @@ from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 
 from app.config import get_settings
-from app.shared.crawler.config import CrawlerConfig, get_crawler_config
-from app.shared.crawler.validator import is_valid_url, sanitize_url
 from app.utils import logger
+
+from .config import CrawlerConfig, get_crawler_config
+from .validator import is_valid_url, sanitize_url
 
 
 class CrawlResult(BaseModel):
@@ -291,8 +292,3 @@ class WebCrawler:
                 current_urls = next_level_urls
 
         return results
-
-
-async def get_crawler(redis_client: Redis | None = None) -> WebCrawler:
-    """Get a crawler instance."""
-    return WebCrawler(redis_client=redis_client)
