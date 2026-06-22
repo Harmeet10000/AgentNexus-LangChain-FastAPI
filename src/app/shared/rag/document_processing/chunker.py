@@ -263,7 +263,8 @@ async def initialize_chunking(
         Tuple of (tokenizer, hybrid_chunker)
     """
     if not config.use_semantic_chunking:
-        raise ValueError("This function requires semantic chunking enabled")
+        msg = "This function requires semantic chunking enabled"
+        raise ValueError(msg)
 
     tokenizer = get_tokenizer()
     hybrid_chunker = create_hybrid_chunker(tokenizer, config)

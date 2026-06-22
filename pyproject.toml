@@ -53,6 +53,7 @@ dependencies = [
     # --- DATABASE: POSTGRESQL ---
     "alembic==1.16.5",
     "asyncpg==0.29.0",
+    "asyncpg-listen>=0.0.9",
     "pgvector>=0.4.2",
     "sqlalchemy==2.0.39",
     # --- DATABASE: MONGODB ---
@@ -101,7 +102,7 @@ dependencies = [
     "opentelemetry-sdk>=1.39.1",
     "prometheus-client>=0.23.1",
     # --- MCP ---
-    "fastmcp>=3.1.0",
+    "fastmcp>=3.4.2",
     # --- DEVELOPMENT & EVALUATION ---
     "apscheduler>=3.11.2",
     "cognee>=1.1.0",

@@ -315,14 +315,16 @@ def _register_tools(server: Any) -> None:
                     tool_name = resource_id.split(":", 1)[1]
                     entry = catalog.get(tool_name)
                     if entry is None:
-                        raise NotFoundException("MCP tool", tool_name)
+                        msg = "MCP tool"
+                        raise NotFoundException(msg, tool_name)
                     return _ok(entry.model_dump(mode="json"))
 
                 if resource_id.startswith("upstream:"):
                     server_name = resource_id.split(":", 1)[1]
                     return _ok(await get_mcp_client_manager().get_server_status(server_name))
 
-                raise NotFoundException("MCP catalog entry", resource_id)
+                msg = "MCP catalog entry"
+                raise NotFoundException(msg, resource_id)
 
             return await _timed_tool("fetch", _handler)
 

@@ -25,22 +25,48 @@ CREATE INDEX idx_outbox_unpublished ON outbox_events (created_at)
 ```
 
 ### R2: Outbox Helper
-- `with_outbox(tx, aggregate_type, aggregate_id, event_type, payload)` — writes outbox row inside existing transaction
+- `with_outbox(session, aggregate_type, aggregate_id, event_type, payload)` — writes outbox row inside existing transaction
 - Uses SQLAlchemy `AsyncSession` (same transaction as business write)
+- After INSERT and flush, call `SELECT pg_notify('outbox_channel', :event_id)` inside the **same transaction** — `pg_notify` is transactional, so the notification is only delivered after the business write commits
 - Called from service layer instead of `celery_app.send_task()`
+- Returns the event ID (UUID string)
 
-### R3: Relay Process
-- Runs as `asyncio.Task` in FastAPI process
-- Polls every 250ms: `SELECT ... WHERE published_at IS NULL AND publish_attempts < 5 ORDER BY created_at LIMIT 10 FOR UPDATE SKIP LOCKED`
-- For each row: call `celery_app.send_task()` with payload from `outbox_events.payload`
-- On success: set `published_at = now()`
-- On failure: increment `publish_attempts`, set `last_error`
-- After 5 failures: move to `dead_letter_events` table (same schema + `dead_letter_at`)
+### R3: Relay Process — NOTIFY/LISTEN (not polling)
+- Uses `asyncpg-listen` library for PostgreSQL LISTEN connection management (auto-reconnect)
+- Subscribe to `outbox_channel` at relay startup
+- On notification: parse event_id from payload, SELECT the row by ID:
+  ```sql
+  SELECT * FROM outbox_events
+  WHERE id = :event_id
+    AND published_at IS NULL
+    AND publish_attempts < 5
+  FOR UPDATE SKIP LOCKED
+  ```
+- If the SELECT returns a row: call `celery_app.send_task()` with payload
+- On success: `UPDATE outbox_events SET published_at = now() WHERE id = :event_id`
+- On failure: `UPDATE outbox_events SET publish_attempts = publish_attempts + 1, last_error = :error WHERE id = :event_id`
+- After 5 failures: move row to `dead_letter_events` table
+
+#### Startup scan
+- On relay start, run a one-time scan for unpublished events:
+  ```sql
+  SELECT * FROM outbox_events
+  WHERE published_at IS NULL
+    AND publish_attempts < 5
+  ORDER BY created_at
+  LIMIT 100
+  FOR UPDATE SKIP LOCKED
+  ```
+- Process all found events (same logic as notification path)
+- After the scan, switch to pure LISTEN mode — no periodic polling
+- This catches events created while the relay was offline
 
 ### R4: Relay Lifecycle
 - Start in `lifespan.py` after all deps are ready
-- Stop on shutdown with 5s drain window
-- Log per-publish success/failure with timing
+- Establish asyncpg-listen connection using the same DATABASE_URL as the app
+- Run startup scan, then enter listen loop
+- On shutdown: stop the listen task with 5s drain window
+- Log relay start/stop, daily event counts
 
 ### R5: Dead Letter
 - After 5 failed publishes, move to `dead_letter_events` table
@@ -51,10 +77,14 @@ CREATE INDEX idx_outbox_unpublished ON outbox_events (created_at)
 - Alembic migration for `outbox_events` + `dead_letter_events` tables
 - Idempotent migration (safe to run multiple times)
 
+## Dependencies Added
+- `asyncpg-listen` — PyPI library for asyncpg LISTEN connection management with auto-reconnect
+
 ## Acceptance Criteria
-- [ ] `with_outbox()` writes outbox row in same transaction as business data
-- [ ] Relay publishes pending events within 250ms
-- [ ] Failed publishes retry up to 5 times
+- [ ] `with_outbox()` writes outbox row + sends `pg_notify` in same transaction
+- [ ] Relay receives notification via asyncpg-listen and publishes within 100ms
+- [ ] Startup scan picks up events created while relay was offline
+- [ ] Failed publishes retry up to 5 times, then dead-letter
 - [ ] Dead-lettered events are logged and replayable
 - [ ] Relay drains on graceful shutdown
 - [ ] No breaking changes to existing API contracts
@@ -64,3 +94,4 @@ CREATE INDEX idx_outbox_unpublished ON outbox_events (created_at)
 - Separate relay service deployment
 - Event sourcing
 - Kafka/RabbitMQ transactional outbox
+- Periodic polling fallback (pure LISTEN + startup scan only)

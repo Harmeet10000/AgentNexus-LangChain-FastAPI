@@ -42,7 +42,8 @@ async def preprocess_legal_document(
 ) -> CleanLegalDocument:
     """Async wrapper around Docling (CPU-heavy)."""
     if not url.lower().endswith(".pdf"):
-        raise ValidationException("Only PDF URLs supported for legal preprocessing")
+        msg = "Only PDF URLs supported for legal preprocessing"
+        raise ValidationException(msg)
 
     # Run blocking Docling in thread pool
     def _sync_process() -> CleanLegalDocument:

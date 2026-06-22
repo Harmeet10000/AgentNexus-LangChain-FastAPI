@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.connections import celery_app, init_db
+from app.connections import init_db
 from app.features.search import (
     ANALYZE_THRESHOLD_CHUNKS,
     DEFAULT_SEARCH_CACHE_TTL_SECONDS,
@@ -38,7 +38,7 @@ from app.shared.langgraph_layer.retrieval_kb import (
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.result import app_error_to_exception, log_expected_failure
 from app.shared.services.storage import StorageService, build_s3_key, key_from_s3_uri
-from app.utils import NotFoundException, ServiceUnavailableException, ValidationException, logger
+from app.utils import NotFoundException, ValidationException, logger
 from app.utils.json_serializer import from_json_float_list, to_float_list_str, to_sorted_key_bytes
 
 from .classification import classify_document, segment_chunks
@@ -163,28 +163,27 @@ class DocumentCommandService:
                 log_expected_failure(error, operation="document_upload")
                 raise app_error_to_exception(error)
 
-        try:
-            task = celery_app.send_task(
-                "tasks.documents_ingest",
-                kwargs={
-                    "document_id": str(document.id),
-                    "user_id": user_id,
-                    "filename": filename,
-                    "content_type": content_type,
-                    "object_uri": object_uri,
-                },
-            )
-        except Exception as exc:
-            raise ServiceUnavailableException(
-                detail="Task queue unavailable",
-                data={"document_id": str(document.id)},
-            ) from exc
+        from app.shared.outbox import with_outbox  # noqa: PLC0415
 
-        logger.bind(document_id=str(document.id), task_id=task.id).info("documents_ingest_queued")
+        await with_outbox(
+            session=self.repo.session,
+            aggregate_type="user_document",
+            aggregate_id=str(document.id),
+            event_type="tasks.documents_ingest",
+            payload={
+                "document_id": str(document.id),
+                "user_id": user_id,
+                "filename": filename,
+                "content_type": content_type,
+                "object_uri": object_uri,
+            },
+        )
+
+        logger.bind(document_id=str(document.id)).info("documents_ingest_queued")
         return DocumentUploadResponse(
             doc_id=str(document.id),
             status="queued",
-            task_id=task.id,
+            task_id=None,
             object_uri=object_uri,
             document_kind=document.document_kind,
             warning_count=0,

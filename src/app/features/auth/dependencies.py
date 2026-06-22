@@ -53,7 +53,8 @@ async def _extract_raw_token(
     cookie_token: str | None = request.cookies.get("access_token")
     if cookie_token:
         return cookie_token
-    raise UnauthorizedException("Not authenticated")
+    msg = "Not authenticated"
+    raise UnauthorizedException(msg)
 
 
 def _read_authorization_header_token(connection: HTTPConnection) -> str | None:
@@ -77,7 +78,8 @@ def extract_raw_token_from_connection(connection: HTTPConnection) -> str:
     if cookie_token:
         return cookie_token
 
-    raise UnauthorizedException("Not authenticated")
+    msg = "Not authenticated"
+    raise UnauthorizedException(msg)
 
 
 async def get_token_claims(
@@ -86,7 +88,8 @@ async def get_token_claims(
     """Decode and validate JWT claims. Zero database round trips."""
     claims: TokenClaims = decode_token(raw_token)
     if claims.token_type != _ACCESS_TOKEN_TYPE:
-        raise UnauthorizedException("Expected an access token")
+        msg = "Expected an access token"
+        raise UnauthorizedException(msg)
     return claims
 
 
@@ -95,7 +98,8 @@ async def get_websocket_token_claims(websocket: WebSocket) -> TokenClaims:
     raw_token = extract_raw_token_from_connection(websocket)
     claims = decode_token(raw_token)
     if claims.token_type != _ACCESS_TOKEN_TYPE:
-        raise UnauthorizedException("Expected an access token")
+        msg = "Expected an access token"
+        raise UnauthorizedException(msg)
     return claims
 
 
@@ -108,14 +112,16 @@ async def get_current_user(
         case Success(user) if user is not None:
             return user
         case _:
-            raise UnauthorizedException("User not found")
+            msg = "User not found"
+            raise UnauthorizedException(msg)
 
 
 async def get_current_active_user(
     user: Annotated[User, Depends(get_current_user)],
 ) -> User:
     if not user.is_active:
-        raise UnauthorizedException("Account is disabled")
+        msg = "Account is disabled"
+        raise UnauthorizedException(msg)
     return user
 
 
@@ -123,7 +129,8 @@ async def get_current_verified_user(
     user: Annotated[User, Depends(get_current_active_user)],
 ) -> User:
     if not user.is_verified:
-        raise UnauthorizedException("Email not verified")
+        msg = "Email not verified"
+        raise UnauthorizedException(msg)
     return user
 
 
@@ -142,7 +149,8 @@ def require_permission(*permissions: Permission) -> Callable[[TokenClaims], Awai
         user_perms = set(claims.permissions)
         for perm in permissions:
             if perm.value not in user_perms:
-                raise ForbiddenException(f"Missing required permission: {perm.value}")
+                msg = f"Missing required permission: {perm.value}"
+                raise ForbiddenException(msg)
         return claims
 
     return _guard
@@ -158,7 +166,8 @@ def require_role(*roles: UserRole) -> Callable[[TokenClaims], Awaitable[TokenCla
         claims: Annotated[TokenClaims, Depends(get_token_claims)],
     ) -> TokenClaims:
         if claims.role not in {r.value for r in roles}:
-            raise ForbiddenException("Insufficient role for this operation")
+            msg = "Insufficient role for this operation"
+            raise ForbiddenException(msg)
         return claims
 
     return _guard

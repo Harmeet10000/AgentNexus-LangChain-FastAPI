@@ -6,8 +6,9 @@ The current architecture has a reliability gap: the service layer writes to the 
 
 ### Transactional Outbox
 - New `outbox_events` table: `id`, `aggregate_type`, `aggregate_id`, `event_type`, `payload`, `created_at`, `published_at`
-- `with_outbox(tx, aggregate, event)` helper that writes the outbox row inside the same DB transaction as the business write
-- Relay process: polls `outbox_events` every 250ms, publishes to Celery, marks as published
+- `with_outbox(tx, aggregate, event)` helper that writes the outbox row inside the same DB transaction as the business write, then calls `pg_notify('outbox_channel', event_id)` in the same transaction
+- Relay process: uses PostgreSQL NOTIFY/LISTEN via `asyncpg-listen` library — subscribes to `outbox_channel`, publishes to Celery on notification
+- Startup scan: relay catches any unpublished events created while offline
 - Dead-letter after 5 failed publish attempts
 
 ### Affected Call Sites
@@ -38,7 +39,7 @@ The current architecture has a reliability gap: the service layer writes to the 
 - Ingestion endpoints now return immediately (task is async via outbox)
 
 ### Dependencies Added
-- None (uses existing asyncpg + SQLAlchemy)
+- `asyncpg-listen` — asyncpg LISTEN connection management with auto-reconnect
 
 ### Systems
 - CI: new migration must pass `alembic upgrade head`

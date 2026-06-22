@@ -17,9 +17,11 @@ class RegisterRequest(BaseModel):
     @classmethod
     def password_strong_enough(cls, v: str) -> str:
         if not any(c.isupper() for c in v):
-            raise ValueError("Must contain at least one uppercase letter")
+            msg = "Must contain at least one uppercase letter"
+            raise ValueError(msg)
         if not any(c.isdigit() for c in v):
-            raise ValueError("Must contain at least one digit")
+            msg = "Must contain at least one digit"
+            raise ValueError(msg)
         return v
 
 
@@ -71,9 +73,11 @@ class ResetPasswordRequest(BaseModel):
     @classmethod
     def password_strong_enough(cls, v: str) -> str:
         if not any(c.isupper() for c in v):
-            raise ValueError("Must contain at least one uppercase letter")
+            msg = "Must contain at least one uppercase letter"
+            raise ValueError(msg)
         if not any(c.isdigit() for c in v):
-            raise ValueError("Must contain at least one digit")
+            msg = "Must contain at least one digit"
+            raise ValueError(msg)
         return v
 
 

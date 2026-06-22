@@ -72,7 +72,8 @@ class ToolRegistry:
 
     def get(self, name: str) -> BaseTool:
         if name not in self._tools:
-            raise KeyError(f"Tool not found: {name}")
+            msg = f"Tool not found: {name}"
+            raise KeyError(msg)
         return self._tools[name]
 
     def all(self) -> list[BaseTool]:

@@ -1,10 +1,14 @@
 """Crawler feature dependencies."""
 
+from typing import TYPE_CHECKING
+
 from fastapi import Request
-from redis.asyncio import Redis
 
 from app.features.crawler.service import CrawlerService
 from app.shared.services.rate_limiter import RateLimiter
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
 
 
 async def get_crawler_service(request: Request) -> CrawlerService:

@@ -15,7 +15,8 @@ from .client import (
 
 
 def _raise_non_iterable_stream_response() -> None:
-    raise TypeError("Expected iterable response from streamed chat_completions.")
+    msg = "Expected iterable response from streamed chat_completions."
+    raise TypeError(msg)
 
 
 async def apage_index(

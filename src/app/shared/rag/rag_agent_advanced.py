@@ -79,7 +79,7 @@ Return only the 3 variations, one per line, without numbers or bullets."""
         variations = [v.strip() for v in variations_text.split("\n") if v.strip()]
 
         # Return original + variations
-        return [query] + variations[:3]
+        return [query, *variations[:3]]
 
     except Exception as e:
         logger.error(f"Query expansion failed: {e}")
@@ -534,9 +534,7 @@ async def run_cli():
             try:
                 async with agent.run_stream(user_input, message_history=message_history) as result:
                     async for text in result.stream_text(delta=True):
-                        print(
-                            text, end="", flush=True
-                        )  # ponytail: stdout streaming, loguru can't stream per-token
+                        pass  # ponytail: stdout streaming, loguru can't stream per-token
 
                     logger.info("Stream complete")
                     message_history = result.all_messages()

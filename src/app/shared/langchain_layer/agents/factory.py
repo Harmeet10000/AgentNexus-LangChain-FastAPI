@@ -295,7 +295,8 @@ class ProductionAgent(BaseModel):
         """
 
         if len(messages) != len(thread_ids):
-            raise ValueError("messages and thread_ids must have the same length")
+            msg = "messages and thread_ids must have the same length"
+            raise ValueError(msg)
 
         max_c = max_concurrency or _settings.model.max_concurrency
         semaphore = asyncio.Semaphore(max_c)

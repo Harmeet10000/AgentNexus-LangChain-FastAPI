@@ -1,5 +1,7 @@
 """Crawler feature API endpoints."""
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Request
 
 from app.features.crawler.constants import CRAWLER_PREFIX, CRAWLER_TAG
@@ -31,12 +33,12 @@ def get_client_identifier(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-@router.post(path="/crawl", response_model=CrawlResponse)
+@router.post(path="/crawl")
 async def crawl_url(
     request_data: CrawlRequest,
     request: Request,
-    service: CrawlerService = Depends(get_crawler_service),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    service: Annotated[CrawlerService, Depends(get_crawler_service)],
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
 ) -> CrawlResponse:
     """
     Crawl a URL and optionally extract structured data.
@@ -69,7 +71,7 @@ async def crawl_url(
     return response
 
 
-@router.get(path="/search", response_model=SearchResponse)
+@router.get(path="/search")
 async def search_web(
     query: str,
     max_results: int = 10,
@@ -110,10 +112,10 @@ async def search_web(
     return response
 
 
-@router.get(path="/rate-limit", response_model=RateLimitInfo)
+@router.get(path="/rate-limit")
 async def get_rate_limit_info(
     request: Request,
-    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
 ) -> RateLimitInfo:
     """Get current rate limit information."""
     client_id = get_client_identifier(request)

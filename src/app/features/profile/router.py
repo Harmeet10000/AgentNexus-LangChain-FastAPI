@@ -104,7 +104,8 @@ async def upload_avatar(
     file: Annotated[UploadFile, File()],
 ) -> APIResponse[AvatarResponse]:
     if not file.content_type:
-        raise ValidationException("Content-Type header is required for file upload")
+        msg = "Content-Type header is required for file upload"
+        raise ValidationException(msg)
 
     contents = await file.read()
     service = await _get_profile_service(request)

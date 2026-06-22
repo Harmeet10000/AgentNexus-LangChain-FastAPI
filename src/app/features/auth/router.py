@@ -253,11 +253,13 @@ async def oauth_callback(
         return RedirectResponse(url=f"{frontend_url}/auth/error?reason={error}")
 
     if not code or not state:
-        raise ValidationException("Missing code or state in OAuth callback")
+        msg = "Missing code or state in OAuth callback"
+        raise ValidationException(msg)
 
     signed_state: str | None = request.cookies.get(OAUTH_STATE_COOKIE)
     if not signed_state:
-        raise UnauthorizedException("Missing OAuth state cookie")
+        msg = "Missing OAuth state cookie"
+        raise UnauthorizedException(msg)
 
     # Resolve service manually — can't use AuthServiceDep with mixed Response return types
 

@@ -24,27 +24,27 @@ The outbox pattern solves this by writing the event to a DB row in the SAME tran
 
 ## Decisions
 
-### D1: Outbox table design — simple polling, not CDC
+### D1: Outbox table design — NOTIFY/LISTEN, not polling
 
-**Decision:** Single `outbox_events` table with `published_at` column. Relay polls every 250ms with `SELECT ... WHERE published_at IS NULL ORDER BY created_at LIMIT 10 FOR UPDATE SKIP LOCKED`.
+**Decision:** Single `outbox_events` table. Relay uses PostgreSQL NOTIFY/LISTEN via the `asyncpg-listen` library instead of polling. After writing the outbox row, `with_outbox()` calls `pg_notify('outbox_channel', event_id)` inside the same transaction.
 
-**Rationale:** Polling is simple, battle-tested, and sufficient for the volume (~100 tasks/day). CDC (Debezium) adds operational complexity. `FOR UPDATE SKIP LOCKED` prevents duplicate publishing across relay instances.
+**Rationale:** pg_notify() is transactional — the notification is queued and only delivered when the containing transaction commits. This gives zero-latency wakeup with zero idle query overhead. No periodic polling needed.
 
 **Alternatives considered:**
+- *250ms polling*: ~4 idle queries/sec at current volume (~100 tasks/day) — negligible overhead but inelegant — rejected
 - *CDC (Debezium)*: overkill for this volume — rejected
-- *RabbitMQ transactions*: coupling to broker — rejected
 - *In-memory outbox*: lost on restart — rejected
 
 ### D2: Relay lifecycle — started in lifespan, runs in background task
 
-**Decision:** Relay runs as an `asyncio.Task` started in `lifespan.py` shutdown hook. It polls every 250ms, publishes pending events, marks as published. On shutdown, it drains remaining events (best-effort).
+**Decision:** Relay runs as an `asyncio.Task` started in `lifespan.py`. On start: run a one-time scan for unpublished events (catch events created while offline), then subscribe to `outbox_channel` via asyncpg-listen. On shutdown: drain remaining events (best-effort, 5s window).
 
-**Rationale:** Running the relay in the FastAPI process avoids deploying a separate service. The relay is lightweight (one SELECT + one publish per tick). On graceful shutdown, it has a 5s window to drain.
+**Rationale:** Running the relay in the FastAPI process avoids deploying a separate service. The asyncpg-listen connection is idle until a notification arrives. On graceful shutdown, it has a 5s window to finish in-flight publishes.
 
 **Alternatives considered:**
 - *Separate relay service*: adds deployment complexity — rejected for now
-- *Celery beat schedule*: too coarse (1min minimum) — rejected
-- *Sync in request path*: blocks the response — rejected
+- *Celery beat schedule*: too coarse for notification-driven — rejected
+- *250ms polling timer*: extra queries against database — rejected in favor of LISTEN
 
 ### D3: Dead-letter after 5 failures
 
@@ -58,8 +58,29 @@ The outbox pattern solves this by writing the event to a DB row in the SAME tran
 
 **Rationale:** Prevents duplicate events if the same document is ingested twice (idempotency lock already handles this at the Celery level, but the outbox should also be safe).
 
+### D5: NOTIFY timing — inside the INSERT transaction
+
+**Decision:** `with_outbox()` calls `SELECT pg_notify('outbox_channel', :event_id)` inside the same transaction as the outbox INSERT. `pg_notify` is transactional — the notification is queued in memory and only delivered to listening sessions after the transaction commits.
+
+**Rationale:** Zero crash window. If the transaction rolls back (e.g. business write fails), the notification is never sent — no orphan NOTIFY. If the transaction commits, the row is visible and the notification arrives. No edge case where the row exists but nobody knows about it.
+
+**Alternatives considered:**
+- *Two-step (INSERT then NOTIFY after commit)*: crash window between commit and NOTIFY — rejected
+- *NOTIFY-only (no outbox table)*: no persistence, fail on crash — rejected
+
+### D6: Connection management via asyncpg-listen
+
+**Decision:** Use the `asyncpg-listen` PyPI library to manage the LISTEN connection. It connects to the same DATABASE_URL as the app, subscribes to `outbox_channel`, and delivers notifications via an async generator. Automatic reconnection on connection drops.
+
+**Rationale:** asyncpg-listen handles the edge cases (reconnect after DB restart, cleanup of stale connections) that a raw connection doesn't. A raw asyncpg connection outside the pool would need manual reconnection logic.
+
+**Alternatives considered:**
+- *Raw asyncpg connection*: no reconnection handling — rejected
+- *SQLAlchemy pool connection*: can't LISTEN on a pooled connection (channel state leaks) — rejected
+
 ## Risks / Trade-offs
 
-- **[Polling overhead]** 250ms polling = ~4 queries/second. **Mitigation:** `FOR UPDATE SKIP LOCKED` is lightweight; idle polls return 0 rows in <1ms.
-- [**Relay crash**] If the relay crashes mid-publish, the event stays in "processing" state. **Mitigation:** Add a `processing_timeout_seconds` (30s) — events stuck in processing are re-queued.
-- **[DB connection pool]** Relay uses one async session from the pool. **Mitigation:** Relay session is short-lived (SELECT + UPDATE + COMMIT in <10ms).
+- **[Pure LISTEN — no fallback poll]** If the relay misses a notification (connection drop, buffer overflow), the event is stuck until relay restart. **Mitigation:** The startup scan catches all unpublished events. Between restarts, the window is bounded. Acceptable at current volume (~100 tasks/day).
+- **[Relay crash mid-publish]** The event stays in "processing" state. **Mitigation:** SELECT uses `FOR UPDATE SKIP LOCKED` so a crashed transaction releases the lock. Next relay start picks it up via startup scan.
+- **[asyncpg-listen dependency]** Adds one external library. **Mitigation:** Lightweight, well-maintained, wraps standard asyncpg connect/listen/notify API.
+- **[DB connection usage]:** asyncpg-listen maintains its own connection (not from the pool). **Mitigation:** One idle connection per relay instance. Negligible.

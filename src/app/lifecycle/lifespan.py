@@ -187,7 +187,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     try:
         app.state.crawl4ai_crawler = await create_crawl4ai_crawler()
         logger.info("Crawl4AI browser initialized")
-    except Exception:
+    except Exception:  # noqa: BLE001 — graceful degradation for optional dep
         logger.exception("Crawl4AI browser startup failed, continuing without crawl capability")
         app.state.crawl4ai_crawler = None
     settings = get_settings()
@@ -207,6 +207,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     except ServiceUnavailableException as e:
         logger.error("Celery setup failed", error=str(e))
         app.state.celery = None
+
+    # Outbox relay (uses existing database session factory)
+    try:
+        from app.connections.postgres import get_database_url  # noqa: PLC0415
+        from app.shared.outbox import OutboxRelay  # noqa: PLC0415
+
+        dsn = get_database_url().replace("+asyncpg", "")
+        relay = OutboxRelay(
+            database_url=dsn,
+            celery_app=celery_app or app.state.celery,
+            session_factory=app.state.db_session_local,
+        )
+        await relay.run_startup_scan()
+        app.state.outbox_relay_task = asyncio.create_task(relay.run_listener())
+        app.state.outbox_relay = relay
+        logger.info("Outbox relay started")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Outbox relay startup failed, continuing without outbox", error=str(exc))
+        app.state.outbox_relay = None
 
     # FastAPI-Guard setup (depends on Redis, but non-blocking)
     await initialize_fastapi_guard(app=app, settings=settings)
@@ -242,6 +261,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     # Close LangGraph checkpointer connection pool
     if hasattr(app.state, "langgraph_checkpointer"):
         await teardown_langgraph_checkpointer(app.state.langgraph_checkpointer)
+
+    # Stop outbox relay
+    if hasattr(app.state, "outbox_relay") and app.state.outbox_relay is not None:
+        await app.state.outbox_relay.shutdown()
+        app.state.outbox_relay_task.cancel()
+        logger.info("Outbox relay stopped")
 
     # Close HTTPX client
     if hasattr(app.state, "httpx_client"):

@@ -20,6 +20,9 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import all models here for autogenerate support
+import app.features.documents.model  # noqa: F401
+import app.features.search.model  # noqa: F401
+import app.shared.outbox.model  # noqa: F401
 try:
     target_metadata = Base.metadata
 except ImportError as e:
