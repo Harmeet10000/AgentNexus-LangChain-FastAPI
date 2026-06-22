@@ -18,7 +18,9 @@ if TYPE_CHECKING:
     from starlette.responses import Response
 
 # Paths that should never get deprecation headers
-_DEFAULT_EXEMPT_PREFIXES = frozenset({"/health", "/metrics", "/api-docs", "/api-redoc", "/swagger.json"})
+_DEFAULT_EXEMPT_PREFIXES = frozenset(
+    {"/health", "/metrics", "/api-docs", "/api-redoc", "/swagger.json"}
+)
 
 
 class ApiDeprecationMiddleware(BaseHTTPMiddleware):
@@ -54,5 +56,7 @@ class ApiDeprecationMiddleware(BaseHTTPMiddleware):
 
         response.headers["Deprecation"] = "true"
         response.headers["Sunset"] = self._sunset_date
-        response.headers["Link"] = f'<{self._v2_base_path}{path[len("/api/v1"):]}>; rel="successor-version"'
+        response.headers["Link"] = (
+            f'<{self._v2_base_path}{path[len("/api/v1") :]}>; rel="successor-version"'
+        )
         return response

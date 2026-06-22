@@ -104,6 +104,6 @@ class TypedCeleryTask(Task):
     ) -> None:
         super().on_success(retval, task_id, args, kwargs)
         if self._validated_payload is not None:
-            logger.bind(task=self.name, task_id=task_id, payload_type=type(self._validated_payload).__name__).info(
-                "Typed task completed"
-            )
+            logger.bind(
+                task=self.name, task_id=task_id, payload_type=type(self._validated_payload).__name__
+            ).info("Typed task completed")

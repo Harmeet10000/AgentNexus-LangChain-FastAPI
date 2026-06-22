@@ -46,4 +46,4 @@ rg -n "fastmcp\\.server\\.|fastmcp\\.client\\." .github/skills/fastmcp-skill/ref
 - The original 49k-line documentation dump was split into bounded reference files so agents do not need to load the whole source at once.
 - If the question is package- or symbol-specific, search first, then open the matching API reference chunk.
 - If the question is implementation- or workflow-oriented, start with the guide references and only fall back to API reference files when needed.
-    
+

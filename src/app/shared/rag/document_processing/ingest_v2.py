@@ -116,9 +116,7 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
         try:
             from docling.document_converter import DocumentConverter
 
-            loguru_logger.info(
-                f"Converting {file_ext} file using Docling: {Path(file_path).name}"
-            )
+            loguru_logger.info(f"Converting {file_ext} file using Docling: {Path(file_path).name}")
 
             converter = DocumentConverter()
             result = converter.convert(file_path)

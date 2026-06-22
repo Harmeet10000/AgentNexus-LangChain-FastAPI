@@ -47,9 +47,7 @@ class ProfileService:
                 "Password cannot be changed on an OAuth-only account. "
                 "Link a password via account settings."
             )
-            raise ConflictException(
-                msg
-            )
+            raise ConflictException(msg)
         if not verify_password(user.hashed_password, current_password):
             msg = "Current password is incorrect"
             raise UnauthorizedException(msg)

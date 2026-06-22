@@ -186,10 +186,22 @@ The second trap: the docs say BM25 indexes are single-column and that the implic
 Most developers treat the Model Context Protocol (MCP) as a simple data bridge. The real alpha is in the Dual-State Channel Pattern: using one state for the LLM's reasoning loop and a separate, immutable state for the tool-execution results. This prevents "context drift" where the model starts hallucinating tool outputs into its own thought process. Keeping these execution traces strictly decoupled is how you build agents that actually scale without losing their minds.
 
 
-
+# Actors
 Actors should are useful in managing a shared IO resource (WebSocket or DB Connection)
 in Rust no lifetime annotations on actor types - antipattern because the message shouldnt be destroyed after the owner 
+actors are persistent, encapsulates internal state, are async
+future dont have state, actors, coroutines, thread have states
+actors can create new actors, receive messages and in response make local decisions, perform arbitrary side effecting actions, send messages, respond to the sender 0 or more times, process only one message at a time
+mailboxes are persisted outside the actor instance
+actor and mailbox are inside an address
+messages flow through the address into the mailbox then the actor processes the messages from the mailbox
+actor do not communicate by sharing memory instead they share memory by communicating 
+address identifies an actor, contains location and trnasport info, location transparency, addresses do not change during restarts
+how error handling is done - Supervision
+the running state of an actor is constantly monitored by an another actor, can perform action based on the state of the actor
+who supervises the supervisor - there are supervision trees
 
+<<<<<<< Updated upstream
 
 
 # Main Risks
@@ -297,3 +309,18 @@ The **"hook, buffer, read"** mental model (1:28) is a foundational conceptual fr
 2. **Buffer:** Once an event is hooked, the data is placed into a **lockless ring buffer** (known as the *traceFS* buffer). This stage is critical because it ensures that the tracing machinery can capture and store event records highly efficiently without blocking or slowing down the primary kernel producers (1:04 - 1:14).
 3. **Read:** Finally, the captured data is surfaced to user space via the *traceFS* file system. User space tools (like *trace-cmd* or custom applications) then "read" this data from the file system to perform analysis and visualization (1:17 - 1:25).]
 4. According to the video (2:15 - 2:25), **Fprobes** are specialized tools that leverage *Ftrace* mechanisms to provide optimized tracing specifically for **function entry and exit**. They are designed to efficiently monitor when a kernel function starts executing and when it finishes, making them a targeted option within the broader scope of dynamic instrumentation.
+=======
+use cases
+1. processing pipeline
+2. streaming data
+3. multi user concurrency
+4. system with high uptime req
+5. application with shared state
+anti use cases
+1. a non-concurrent system
+2. performance critical system
+3. no concurrent communication is involved
+drawbacks
+1. too many actors 
+2. 
+>>>>>>> Stashed changes

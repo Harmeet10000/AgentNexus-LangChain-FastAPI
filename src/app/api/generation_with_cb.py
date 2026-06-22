@@ -17,7 +17,9 @@ def get_circuit_breaker(request: Request) -> CircuitBreakerService:
 
 
 @router.post("/generate-text")
-async def generate_text(cb_service: Annotated[CircuitBreakerService, Depends(get_circuit_breaker)]) -> dict:
+async def generate_text(
+    cb_service: Annotated[CircuitBreakerService, Depends(get_circuit_breaker)],
+) -> dict:
     # If the breaker is OPEN, this context manager immediately raises ServiceUnavailableException
     async with cb_service.protect(
         service_name="openai_api", failure_threshold=3, recovery_timeout_seconds=30

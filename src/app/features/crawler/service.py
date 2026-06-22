@@ -1,4 +1,5 @@
 """Crawler feature service."""
+
 import asyncio
 import time
 from typing import TYPE_CHECKING
@@ -49,29 +50,22 @@ class CrawlerService:
     @property
     def crawler(self) -> WebCrawler:
         if self._crawler is None:
-
-
             self._crawler = asyncio.run(get_crawler(redis_client=self._redis_client))
         return self._crawler
 
     @property
     def processor(self) -> GeminiProcessor:
         if self._processor is None:
-
-
             self._processor = asyncio.run(get_processor())
         return self._processor
 
     @property
     def rate_limiter(self) -> RateLimiter:
         if self._rate_limiter is None:
-
-
             self._rate_limiter = asyncio.run(self._get_rate_limiter())
         return self._rate_limiter
 
     async def _get_rate_limiter(self) -> RateLimiter:
-
 
         return get_rate_limiter()
 

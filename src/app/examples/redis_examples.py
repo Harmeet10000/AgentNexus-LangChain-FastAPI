@@ -190,7 +190,9 @@ router = APIRouter(prefix="/api/v1/users", tags=["Users"])
 
 
 @router.get("/{user_id}")
-async def get_user_endpoint(user_id: str, redis: Annotated[Redis, Depends(get_redis)]) -> UserProfile:
+async def get_user_endpoint(
+    user_id: str, redis: Annotated[Redis, Depends(get_redis)]
+) -> UserProfile:
     """Get user profile with Redis caching.
 
     Endpoint example:
@@ -329,7 +331,9 @@ async def get_activity_endpoint(
 
 
 @router.get("/batch/users")
-async def get_multiple_users(user_ids: list[str], redis: Annotated[Redis, Depends(get_redis)]) -> dict:
+async def get_multiple_users(
+    user_ids: list[str], redis: Annotated[Redis, Depends(get_redis)]
+) -> dict:
     """Get multiple users efficiently.
 
     Query example:

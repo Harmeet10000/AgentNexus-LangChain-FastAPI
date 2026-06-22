@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 
 from fastapi.requests import HTTPConnection
 
-from app.shared.mcp import get_mcp_client_manager as _get_mcp_client_manager
+from mcp_core import get_mcp_client_manager as _get_mcp_client_manager
 
 if TYPE_CHECKING:
-    from app.shared.mcp import MCPClientManager
+    from mcp_core import MCPClientManager
 
 
 def get_shared_mcp_client_manager() -> MCPClientManager:

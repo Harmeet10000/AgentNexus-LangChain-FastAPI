@@ -7,6 +7,8 @@ from fastapi.responses import Response
 from fastmcp.utilities.lifespan import combine_lifespans
 from guard import SecurityMiddleware
 
+from mcp_core import get_mcp_http_app, parse_mcp_http_transport
+
 from .api import v1_router, v2_router
 from .config import get_settings
 from .lifecycle import lifespan
@@ -20,7 +22,6 @@ from .middleware import (
 from .middleware.api_versioning import ApiDeprecationMiddleware
 from .middleware.health_check import ALL_PROBES
 from .shared.langchain_layer import configure_langsmith
-from .shared.mcp import get_mcp_http_app, parse_mcp_http_transport
 from .utils import APIResponse, ErrorCode, http_error, logger
 from .utils.response_type import DependencyHealth, HealthResponse, HealthStatus
 
@@ -123,7 +124,11 @@ def create_app() -> FastAPI:
             overall = HealthStatus.HEALTHY
 
         body = HealthResponse(status=overall, dependencies=deps)
-        code = status.HTTP_503_SERVICE_UNAVAILABLE if overall == HealthStatus.UNHEALTHY else status.HTTP_200_OK
+        code = (
+            status.HTTP_503_SERVICE_UNAVAILABLE
+            if overall == HealthStatus.UNHEALTHY
+            else status.HTTP_200_OK
+        )
         return Response(
             content=body.model_dump_json(),
             status_code=code,

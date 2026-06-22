@@ -53,7 +53,7 @@
       "cd *": "allow",
       "pwd": "allow",
       "python3 *": "allow",
-      
+
     },
     "edit": "allow",
     "read": "allow",
@@ -67,6 +67,6 @@
     "webfetch": "allow"
   },
   "compaction": {
-    "auto": false
+    "auto": true,
   }
 }

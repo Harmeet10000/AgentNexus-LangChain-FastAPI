@@ -186,9 +186,7 @@ class SearchService:
             k=RRF_K,
             limit=payload.limit,
         )
-        match await self.repo.fetch_chunks_by_ids(
-            [item.chunk_id for item in fused_results]
-        ):
+        match await self.repo.fetch_chunks_by_ids([item.chunk_id for item in fused_results]):
             case Success(chunk_lookup):
                 items = _build_search_items(fused_results, chunk_lookup)
             case Failure(error):
