@@ -236,24 +236,12 @@ class AuthService:
                 log_expected_failure(error, operation="save_user")
                 raise app_error_to_exception(error)
 
-        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: PLC0415
-
-        from app.connections.postgres import get_database_url  # noqa: PLC0415
-        from app.shared.outbox import with_outbox  # noqa: PLC0415
-
-        _engine = create_async_engine(get_database_url())
-        try:
-            async with _engine.begin() as _conn:
-                _session = AsyncSession(bind=_conn)
-                await with_outbox(
-                    session=_session,
-                    aggregate_type="auth_email",
-                    aggregate_id=str(resolved.id),
-                    event_type="auth.send_verification_email",
-                    payload={"user_id": str(resolved.id), "email": resolved.email, "token": new_token},
-                )
-        finally:
-            await _engine.dispose()
+        await self._publish_outbox_event(
+            aggregate_type="auth_email",
+            aggregate_id=str(resolved.id),
+            event_type="auth.send_verification_email",
+            payload={"user_id": str(resolved.id), "email": resolved.email, "token": new_token},
+        )
 
     async def forgot_password(self, email: str) -> None:
         match await self._user_repo.find_by_email(email):
@@ -274,24 +262,12 @@ class AuthService:
             case Failure(error):
                 log_expected_failure(error, operation="save_user")
                 raise app_error_to_exception(error)
-        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: PLC0415
-
-        from app.connections.postgres import get_database_url  # noqa: PLC0415
-        from app.shared.outbox import with_outbox  # noqa: PLC0415
-
-        _engine = create_async_engine(get_database_url())
-        try:
-            async with _engine.begin() as _conn:
-                _session = AsyncSession(bind=_conn)
-                await with_outbox(
-                    session=_session,
-                    aggregate_type="auth_email",
-                    aggregate_id=str(resolved.id),
-                    event_type="auth.send_password_reset_email",
-                    payload={"user_id": str(resolved.id), "email": resolved.email, "token": reset_token},
-                )
-        finally:
-            await _engine.dispose()
+        await self._publish_outbox_event(
+            aggregate_type="auth_email",
+            aggregate_id=str(resolved.id),
+            event_type="auth.send_password_reset_email",
+            payload={"user_id": str(resolved.id), "email": resolved.email, "token": reset_token},
+        )
 
     async def reset_password(self, token: str, new_password: str) -> None:
         match await self._user_repo.find_by_reset_token_hash(hash_token(token)):
@@ -497,3 +473,29 @@ class AuthService:
             token_type="bearer",
             expires_in=expires_in,
         )
+
+    async def _publish_outbox_event(
+        self,
+        aggregate_type: str,
+        aggregate_id: str,
+        event_type: str,
+        payload: dict[str, object],
+    ) -> None:
+        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: PLC0415
+
+        from app.connections.postgres import get_database_url  # noqa: PLC0415
+        from app.shared.outbox import with_outbox  # noqa: PLC0415
+
+        _engine = create_async_engine(get_database_url())
+        try:
+            async with _engine.begin() as _conn:
+                _session = AsyncSession(bind=_conn)
+                await with_outbox(
+                    session=_session,
+                    aggregate_type=aggregate_type,
+                    aggregate_id=aggregate_id,
+                    event_type=event_type,
+                    payload=payload,
+                )
+        finally:
+            await _engine.dispose()

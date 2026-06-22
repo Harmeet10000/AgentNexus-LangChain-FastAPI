@@ -1,14 +1,18 @@
 """Standalone tests for outbox helper — no shared conftest needed."""
 
 import asyncio
+import sys
+import types
 from unittest.mock import AsyncMock
 
-# Mock app.utils before any app import to avoid circular import
-import sys
-sys.modules["app.utils"] = AsyncMock()
+# Bypass circular import: app.utils.cache.redis_func → app.utils.
+# The app.utils module triggers an import cycle on load; this minimal proxy
+# prevents that cycle while keeping the import surface explicit via @patch.
+_app_utils = types.ModuleType("app.utils")
+_app_utils.logger = AsyncMock()
+sys.modules["app.utils"] = _app_utils
 
-
-from app.shared.outbox.helper import OUTBOX_CHANNEL, with_outbox
+from app.shared.outbox.helper import OUTBOX_CHANNEL, with_outbox  # noqa: E402
 
 
 class TestWithOutbox:
