@@ -1,5 +1,6 @@
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from authlib.integrations.httpx_client import AsyncOAuth2Client
@@ -13,6 +14,9 @@ from app.utils import (
     UnauthorizedException,
     logger,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .dto import (
     LoginRequest,
@@ -60,9 +64,11 @@ class AuthService:
         self,
         user_repo: UserRepository,
         token_repo: RefreshTokenRepository,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
         self._user_repo = user_repo
         self._token_repo = token_repo
+        self._session_factory = session_factory
 
     async def register(self, dto: RegisterRequest) -> UserResponse:
         match await self._user_repo.email_exists(dto.email):
@@ -481,10 +487,22 @@ class AuthService:
         event_type: str,
         payload: dict[str, object],
     ) -> None:
+        from app.shared.outbox import with_outbox  # noqa: PLC0415
+
+        if self._session_factory is not None:
+            async with self._session_factory() as session:
+                await with_outbox(
+                    session=session,
+                    aggregate_type=aggregate_type,
+                    aggregate_id=aggregate_id,
+                    event_type=event_type,
+                    payload=payload,
+                )
+            return
+
         from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: PLC0415
 
         from app.connections.postgres import get_database_url  # noqa: PLC0415
-        from app.shared.outbox import with_outbox  # noqa: PLC0415
 
         _engine = create_async_engine(get_database_url())
         try:
