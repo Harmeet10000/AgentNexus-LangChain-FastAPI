@@ -17,12 +17,7 @@ from app.features.search.constants import (
     DISKANN_QUERY_SEARCH_LIST_SIZE,
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
-from app.shared.result import (
-    ConflictAppError,
-    InfrastructureAppError,
-    NotFoundAppError,
-    app_error_to_exception,
-)
+from app.shared.result import ConflictAppError, InfrastructureAppError, NotFoundAppError
 from app.utils import ErrorCode
 
 from .model import UnifiedChunk, UnifiedDocument
@@ -314,24 +309,6 @@ class DocumentRepository:
         query: str,
         candidate_limit: int,
         filter_params: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        result = await self.bm25_search_result(
-            user_id=user_id,
-            query=query,
-            candidate_limit=candidate_limit,
-            filter_params=filter_params,
-        )
-        if isinstance(result, Failure):
-            raise app_error_to_exception(result.failure())
-        return result.unwrap()
-
-    async def bm25_search_result(
-        self,
-        *,
-        user_id: str,
-        query: str,
-        candidate_limit: int,
-        filter_params: dict[str, Any],
     ) -> AppResult[list[dict[str, Any]]]:
         try:
             statement = text(
@@ -371,24 +348,6 @@ class DocumentRepository:
             )
 
     async def vector_search(
-        self,
-        *,
-        user_id: str,
-        embedding: list[float],
-        candidate_limit: int,
-        filter_params: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        result = await self.vector_search_result(
-            user_id=user_id,
-            embedding=embedding,
-            candidate_limit=candidate_limit,
-            filter_params=filter_params,
-        )
-        if isinstance(result, Failure):
-            raise app_error_to_exception(result.failure())
-        return result.unwrap()
-
-    async def vector_search_result(
         self,
         *,
         user_id: str,
@@ -440,24 +399,6 @@ class DocumentRepository:
             )
 
     async def trigram_search(
-        self,
-        *,
-        user_id: str,
-        query: str,
-        candidate_limit: int,
-        filter_params: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        result = await self.trigram_search_result(
-            user_id=user_id,
-            query=query,
-            candidate_limit=candidate_limit,
-            filter_params=filter_params,
-        )
-        if isinstance(result, Failure):
-            raise app_error_to_exception(result.failure())
-        return result.unwrap()
-
-    async def trigram_search_result(
         self,
         *,
         user_id: str,

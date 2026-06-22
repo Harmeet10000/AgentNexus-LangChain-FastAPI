@@ -87,7 +87,7 @@ class SearchService:
                 log_expected_failure(error, operation="search_ingest")
                 raise app_error_to_exception(error)
 
-        match await self.repo.create_document_result(
+        match await self.repo.create_document(
             title=payload.title,
             source_uri=payload.source_uri,
             content_hash=content_hash,
@@ -187,10 +187,14 @@ class SearchService:
             k=RRF_K,
             limit=payload.limit,
         )
-        chunk_lookup = await self.repo.fetch_chunks_by_ids(
+        match await self.repo.fetch_chunks_by_ids(
             [item.chunk_id for item in fused_results]
-        )
-        items = _build_search_items(fused_results, chunk_lookup)
+        ):
+            case Success(chunk_lookup):
+                items = _build_search_items(fused_results, chunk_lookup)
+            case Failure(error):
+                log_expected_failure(error, operation="hybrid_search_chunk_lookup")
+                items = _build_search_items(fused_results, {})
         response = SearchResponse(items=items, cache_hit=False)
 
         if not payload.bypass_cache and self.redis is not None:
@@ -319,12 +323,17 @@ async def process_ingestion_document(
                 }
             )
 
-    await repo.upsert_chunks(
+    match await repo.upsert_chunks(
         build_chunk_rows(
             document_id=document_id,
             chunks=chunk_payloads,
         )
-    )
+    ):
+        case Success():
+            pass
+        case Failure(error):
+            log_expected_failure(error, operation="search_ingest_upsert")
+            raise app_error_to_exception(error)
     if len(chunk_payloads) > ANALYZE_THRESHOLD_CHUNKS:
         await repo.analyze_chunks()
 
