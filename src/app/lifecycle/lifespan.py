@@ -1,4 +1,5 @@
 """Application lifespan management."""
+
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -28,20 +29,17 @@ from app.features.auth import TokenAuditLog, User, build_websocket_security_serv
 from app.features.documents import run_document_startup_checks
 from app.middleware import initialize_fastapi_guard
 from app.shared.langchain_layer.agents.memory import setup_cognee
-
-from app.mcp import get_mcp_client_manager
 from app.shared.langgraph_layer.checkpointer import teardown_langgraph_checkpointer
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.services.storage import StorageService
 from app.utils import ServiceUnavailableException, logger
+from mcp_core import get_mcp_client_manager
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
     from httpx._client import AsyncClient
 
     from app.features.auth.websocket_security import WebSocketSecurityService
-    from app.mcp import MCPClientManager
-
 
 
 async def setup_redis(url: str) -> redis.asyncio.Redis:
@@ -264,7 +262,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
         await teardown_langgraph_checkpointer(app.state.langgraph_checkpointer)
 
     # Stop outbox relay
-    if hasattr(app.state, "outbox_relay_task"):
+    if hasattr(app.state, "outbox_relay_task") and app.state.outbox_relay_task is not None:
         app.state.outbox_relay_task.cancel()
         logger.info("Outbox relay stopped")
 

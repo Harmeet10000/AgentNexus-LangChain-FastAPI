@@ -51,7 +51,7 @@ class ValidationException(APIException):
     def __init__(
         self,
         detail: str = "Validation error",
-        error_code: ErrorCode = ErrorCode.VALIDATION_ERROR,
+        error_code: str = ErrorCode.VALIDATION_ERROR,
         data: dict | None = None,  # ← very useful: field → error messages
     ):
         super().__init__(
@@ -69,7 +69,7 @@ class NotFoundException(APIException):
         self,
         resource: str,
         identifier: str | int | None = None,
-        error_code: ErrorCode = ErrorCode.NOT_FOUND,
+        error_code: str = ErrorCode.NOT_FOUND,
     ):
         if identifier is not None:
             msg = f"{resource} with ID '{identifier}' not found"
@@ -88,7 +88,7 @@ class UnauthorizedException(APIException):
     def __init__(
         self,
         detail: str = "Authentication failed",
-        error_code: ErrorCode = ErrorCode.UNAUTHORIZED,
+        error_code: str = ErrorCode.UNAUTHORIZED,
     ):
         super().__init__(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -104,7 +104,7 @@ class ForbiddenException(APIException):
     def __init__(
         self,
         detail: str = "Insufficient permissions",
-        error_code: ErrorCode = ErrorCode.FORBIDDEN,
+        error_code: str = ErrorCode.FORBIDDEN,
     ):
         super().__init__(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -119,7 +119,7 @@ class ConflictException(APIException):
     def __init__(
         self,
         detail: str,
-        error_code: ErrorCode = ErrorCode.CONFLICT,
+        error_code: str = ErrorCode.CONFLICT,
         data: dict | None = None,
     ):
         super().__init__(
@@ -136,7 +136,7 @@ class TooManyRequestsException(APIException):
     def __init__(
         self,
         detail: str = "Too many requests",
-        error_code: ErrorCode = ErrorCode.TOO_MANY_REQUESTS,
+        error_code: str = ErrorCode.TOO_MANY_REQUESTS,
         headers: dict[str, str] | None = None,
         data: dict | None = None,
     ):
@@ -155,7 +155,7 @@ class ServiceUnavailableException(APIException):
     def __init__(
         self,
         detail: str = "Service temporarily unavailable",
-        error_code: ErrorCode = ErrorCode.SERVICE_UNAVAILABLE,
+        error_code: str = ErrorCode.SERVICE_UNAVAILABLE,
         headers: dict[str, str] | None = None,
         data: dict | None = None,
     ):
@@ -179,7 +179,7 @@ class DatabaseException(APIException):
     def __init__(
         self,
         detail: str = "Database operation failed",
-        error_code: ErrorCode = ErrorCode.DATABASE_ERROR,
+        error_code: str = ErrorCode.DATABASE_ERROR,
         original_exc: Exception | None = None,
     ):
         data = None
@@ -200,7 +200,7 @@ class ExternalServiceException(APIException):
         self,
         service: str,
         detail: str,
-        error_code: ErrorCode = ErrorCode.EXTERNAL_SERVICE_ERROR,
+        error_code: str = ErrorCode.EXTERNAL_SERVICE_ERROR,
         status_code: int = status.HTTP_502_BAD_GATEWAY,
     ):
         msg = f"{service} request failed: {detail}"

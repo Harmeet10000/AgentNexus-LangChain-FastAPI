@@ -36,8 +36,10 @@ async def get_refresh_token_repository(
 async def get_auth_service(
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     token_repo: Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)],
+    connection: HTTPConnection,
 ) -> AuthService:
-    return AuthService(user_repo, token_repo)
+    session_factory = getattr(connection.app.state, "db_session_local", None)
+    return AuthService(user_repo, token_repo, session_factory=session_factory)
 
 
 # ── Token extraction ──────────────────────────────────────────────────────────

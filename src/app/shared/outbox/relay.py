@@ -53,13 +53,12 @@ class OutboxRelay:
                 .all()
             )
 
-        if rows:
-            logger.info("outbox_startup_scan", found=len(rows))
-            async with self._session_factory() as session:
+            if rows:
+                logger.info("outbox_startup_scan", found=len(rows))
                 for row in rows:
                     await self._publish(dict(row), session=session)
-        else:
-            logger.info("outbox_startup_scan", found=0)
+            else:
+                logger.info("outbox_startup_scan", found=0)
 
     async def run_listener(self) -> None:
         """Long-running listen loop. Subscribe to outbox_channel, handle notifications."""
