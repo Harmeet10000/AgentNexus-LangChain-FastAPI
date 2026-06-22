@@ -1,0 +1,70 @@
+"""Standalone tests for outbox helper — no shared conftest needed."""
+
+import asyncio
+from unittest.mock import AsyncMock
+
+# Mock app.utils before any app import to avoid circular import
+import sys
+sys.modules["app.utils"] = AsyncMock()
+
+
+from app.shared.outbox.helper import OUTBOX_CHANNEL, with_outbox
+
+
+class TestWithOutbox:
+    def test_inserts_row_and_notifies(self) -> None:
+        calls = []
+
+        async def fake_execute(*args, **kwargs):
+            calls.append((args, kwargs))
+            return AsyncMock()
+
+        session = AsyncMock()
+        session.execute = fake_execute
+
+        event_id = asyncio.run(
+            with_outbox(
+                session=session,
+                aggregate_type="search_document",
+                aggregate_id="doc-123",
+                event_type="tasks.search_ingest",
+                payload={"doc_id": "doc-123"},
+            )
+        )
+
+        assert event_id is not None
+        assert len(calls) == 2
+
+        # First call: INSERT into outbox_events
+        insert_sql = calls[0][0][0].text
+        insert_params = calls[0][0][1]
+        assert "INSERT INTO outbox_events" in insert_sql
+        assert insert_params["aggregate_type"] == "search_document"
+        assert insert_params["aggregate_id"] == "doc-123"
+        assert insert_params["event_type"] == "tasks.search_ingest"
+        assert insert_params["id"] == event_id
+
+        # Second call: pg_notify
+        notify_sql = calls[1][0][0].text
+        notify_params = calls[1][0][1]
+        assert "pg_notify" in notify_sql
+        assert notify_params["channel"] == OUTBOX_CHANNEL
+        assert notify_params["event_id"] == event_id
+
+    def test_rollback_on_exception(self) -> None:
+        session = AsyncMock()
+        session.execute.side_effect = [AsyncMock(), RuntimeError("pg_notify failed")]
+
+        try:
+            asyncio.run(
+                with_outbox(
+                    session=session,
+                    aggregate_type="search_document",
+                    aggregate_id="doc-123",
+                    event_type="tasks.search_ingest",
+                    payload={},
+                )
+            )
+            assert False, "Expected RuntimeError"
+        except RuntimeError as exc:
+            assert "pg_notify failed" in str(exc)
