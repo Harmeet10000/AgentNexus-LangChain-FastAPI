@@ -6,8 +6,23 @@ import asyncio
 
 from app.connections import celery_app
 from app.connections.celery import ResilientTask
+from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
 from app.features.search.service import run_ingestion_task
 from app.utils import logger
+
+
+class SearchIngestPayload(CeleryTaskPayload):
+    """Typed payload for tasks.search_ingest."""
+
+    document_id: str
+    content: str
+    content_hash: str
+    title: str
+    source_uri: str | None = None
+    doc_metadata: dict[str, object] | None = None
+
+
+CeleryTaskRegistry.register("tasks.search_ingest", SearchIngestPayload)
 
 
 @celery_app.task(

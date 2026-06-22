@@ -6,8 +6,22 @@ import asyncio
 
 from app.connections import celery_app
 from app.connections.celery import ResilientTask
+from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
 from app.features.documents.service import run_document_ingestion_task
 from app.utils import logger
+
+
+class DocumentIngestPayload(CeleryTaskPayload):
+    """Typed payload for tasks.documents_ingest."""
+
+    document_id: str
+    user_id: str
+    filename: str
+    content_type: str
+    object_uri: str
+
+
+CeleryTaskRegistry.register("tasks.documents_ingest", DocumentIngestPayload)
 
 
 @celery_app.task(

@@ -51,14 +51,16 @@ def create_app() -> FastAPI:
     #
     # Execution order (outermost → innermost):
     #   1. RequestStateLoggingMiddleware — correlation ID, request state
-    #   2. SecurityMiddleware (Guard) — IP checks, rate limiting, pen-test detection
+    #   2. SecurityMiddleware (Guard) — IP checks, rate limiting, pen-test detection, CORS headers
     #   3. GZipMiddleware — response compression
     #   4. ApiDeprecationMiddleware — Deprecation/Sunset headers on v1
-    #   5. CORSMiddleware (via Guard.configure_cors) — CORS headers
+    #   5. CORSMiddleware (injected by SecurityMiddleware.configure_cors())
+    #      Guard's SecurityMiddleware deduplicates CORS headers internally.
+    #      Do NOT add another CORSMiddleware directly.
     #   6. Route handler
     # ============================================================================
 
-    # 1. CORS (managed by FastAPI Guard's helper)
+    # 1. CORS (managed by FastAPI Guard's helper — injects CORSMiddleware internally)
     SecurityMiddleware.configure_cors(app=app, config=guard_config)
 
     # 3. Compression (Performance optimization)

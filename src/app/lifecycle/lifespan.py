@@ -1,4 +1,6 @@
 """Application lifespan management."""
+from _asyncio import Task
+from crawl4ai.async_webcrawler import AsyncWebCrawler
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -148,7 +150,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
 
     # Setup Graphiti for legal knowledge graph (optional)
     try:
-        graphiti = await setup_graphiti(
+        graphiti: Graphiti = await setup_graphiti(
             neo4j_uri=settings.NEO4J_URI,
             neo4j_user=settings.NEO4J_USERNAME,
             neo4j_password=settings.NEO4J_PASSWORD.get_secret_value(),
@@ -159,6 +161,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     except Exception as exc:  # noqa: BLE001 — graceful degradation for optional dep
         logger.warning("Graphiti startup failed, continuing without graph features", error=str(exc))
         app.state.graphiti = None  # type: ignore[assignment]
+
+    # Warn on Neo4j/Graphiti state inconsistency
+    neo4j_ok = getattr(app.state, "neo4j_driver", None) is not None
+    graphiti_ok = getattr(app.state, "graphiti", None) is not None
+    if not neo4j_ok and graphiti_ok:
+        logger.warning("State inconsistency: Neo4j driver unavailable but Graphiti initialised independently")
+    elif neo4j_ok and not graphiti_ok:
+        logger.warning("State inconsistency: Neo4j driver available but Graphiti not initialised")
 
     # ingestion_llm = ChatGoogleGenerativeAI(
     #     model=settings.GEMINI_FLASH_MODEL,
@@ -184,13 +194,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
 
     # Initialize Crawl4AI browser
     try:
-        app.state.crawl4ai_crawler = await create_crawl4ai_crawler()
+        app.state.crawl4ai_crawler: AsyncWebCrawler = await create_crawl4ai_crawler()
         logger.info("Crawl4AI browser initialized")
     except Exception:  # noqa: BLE001 — graceful degradation for optional dep
         logger.exception("Crawl4AI browser startup failed, continuing without crawl capability")
         app.state.crawl4ai_crawler = None
     settings = get_settings()
-    app.state.object_store = StorageService.from_settings(settings=settings)
+    app.state.object_store: StorageService = StorageService.from_settings(settings=settings)
     await run_document_startup_checks(
         engine=app.state.db_engine,
         object_store=app.state.object_store,
@@ -219,8 +229,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
             session_factory=app.state.db_session_local,
         )
         await relay.run_startup_scan()
-        app.state.outbox_relay_task = asyncio.create_task(relay.run_listener())
-        app.state.outbox_relay = relay
+        app.state.outbox_relay_task: Task[None] = asyncio.create_task(relay.run_listener())
+        app.state.outbox_relay: OutboxRelay = relay
         logger.info("Outbox relay started")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Outbox relay startup failed, continuing without outbox", error=str(exc))

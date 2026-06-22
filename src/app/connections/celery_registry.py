@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 from celery import Task
 from pydantic import BaseModel, ValidationError
 
+from app.connections import celery_app
 from app.utils import logger
 
 if TYPE_CHECKING:
@@ -60,6 +61,15 @@ class CeleryTaskRegistry:
     @classmethod
     def get(cls, task_name: str) -> type[CeleryTaskPayload] | None:
         return cls._registry.get(task_name)
+
+    @classmethod
+    def typed_send(cls, task_name: str, kwargs: dict[str, object], **send_task_opts: object) -> object:
+        """Validate kwargs against registered model, then send.
+
+        Falls back to LegacyTaskPayload (accepts any kwargs) if task is not registered.
+        """
+        cls.validate(task_name, kwargs)
+        return celery_app.send_task(task_name, kwargs=kwargs, **send_task_opts)
 
     @classmethod
     def validate(cls, task_name: str, kwargs: dict[str, Any]) -> CeleryTaskPayload:

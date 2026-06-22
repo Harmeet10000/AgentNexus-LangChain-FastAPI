@@ -29,6 +29,7 @@ from app.shared.rag.graphiti.schemas import (
 )
 from app.shared.result import ValidationAppError, log_expected_failure
 from app.utils import logger
+from app.utils.embedding import normalize_embedding
 
 from .prompts import (
     _CLASSIFY_EXTRACT_SYSTEM_PROMPT,
@@ -718,7 +719,7 @@ async def _cached_embedding(
         lambda: _call_embedding_fn(embedding_fn, text_to_embed),
         label="gemini_embedding",
     )
-    embedding = _normalize_embedding(embedding)
+    embedding = normalize_embedding(embedding)
     if redis is not None:
         await redis.setex(key, 60 * 60 * 24, json.dumps(embedding))
     return embedding
@@ -733,16 +734,6 @@ async def _call_embedding_fn(embedding_fn: EmbeddingFunction, text_to_embed: str
     if hasattr(result, "__await__"):
         return cast("list[float]", await result)
     return cast("list[float]", result)
-
-
-def _normalize_embedding(embedding: list[float], expected_dim: int | None = None) -> list[float]:
-    if expected_dim is None:
-        expected_dim = get_settings().EMBEDDING_DIMENSION
-    if len(embedding) == expected_dim:
-        return embedding
-    if len(embedding) > expected_dim:
-        return embedding[:expected_dim]
-    return [*embedding, *([0.0] * (expected_dim - len(embedding)))]
 
 
 async def _force_merge_bm25(session: AsyncSession) -> None:

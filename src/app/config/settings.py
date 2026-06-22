@@ -1,10 +1,11 @@
 # src/settings.py
 
+import warnings
 from functools import cache
 from pathlib import Path
 
 from loguru import logger
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PRODUCTION_SECRET_FIELDS: dict[str, list[str]] = {
@@ -35,6 +36,26 @@ class Settings(BaseSettings):
         frozen=True,  # Immutable configuration
         extra="ignore",  # Prevents "pollution" from unknown env vars
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_embedding_dimension(cls, values: dict[str, object]) -> dict[str, object]:
+        dim = values.get("EMBEDDING_DIMENSION")
+        model = values.get("GEMINI_EMBEDDING_MODEL", "")
+        _embedding_model_dimensions: dict[str, int] = {
+            "gemini-embedding-2-preview": 768,
+            "text-embedding-004": 768,
+            "text-embedding-3-small": 1536,
+            "text-embedding-3-large": 3072,
+        }
+        if isinstance(model, str) and model in _embedding_model_dimensions:
+            expected = _embedding_model_dimensions[model]
+            if dim is not None and dim != expected:
+                warnings.warn(
+                    f"EMBEDDING_DIMENSION={dim} but {model} expects {expected}",
+                    stacklevel=2,
+                )
+        return values
 
     # --- Application Settings ---
     APP_NAME: str = Field(default="LangChain FastAPI Production")
