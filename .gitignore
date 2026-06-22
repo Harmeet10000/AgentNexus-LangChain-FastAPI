@@ -1,3 +1,6 @@
+# Auto-generated graphify knowledge graph
+graphify-out/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
