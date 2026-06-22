@@ -19,8 +19,8 @@
 - [x] 2.3 `with_outbox()` writes `OutboxEvent` row, then calls `SELECT pg_notify('outbox_channel', :event_id)` in the same session
 - [x] 2.4 Build the `pg_notify` call as `text("SELECT pg_notify('outbox_channel', :event_id)")` with `{"event_id": str(event.id)}`
 - [x] 2.5 Each `with_outbox()` call in the same transaction sends a separate notification
-- [ ] 2.6 Add unit test: `with_outbox()` creates outbox row with correct fields
-- [ ] 2.7 Add unit test: outbox row + notification are rolled back if business write fails
+- [x] 2.6 Add unit test: `with_outbox()` creates outbox row with correct fields
+- [x] 2.7 Add unit test: outbox row + notification are rolled back if business write fails
 
 ## 3. Relay Process
 
@@ -51,8 +51,8 @@
 
 ## 6. Dead Letter Replay
 
-- [ ] 6.1 Create `scripts/replay_outbox.py` CLI: reads dead-lettered events, re-publishes to Celery
-- [ ] 6.2 Add `uv run outbox:replay` script entry in `pyproject.toml`
+- [x] 6.1 Create `scripts/replay_outbox.py` CLI: reads dead-lettered events, re-publishes to Celery
+- [x] 6.2 Add `uv run outbox:replay` script entry in `pyproject.toml`
 
 ## 7. Testing
 

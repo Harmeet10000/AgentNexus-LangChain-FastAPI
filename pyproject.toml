@@ -150,6 +150,7 @@ type-check = "ty:check"
 # precommit = "pre-commit:run"
 migrate = "alembic:upgrade"
 test = "pytest:main"
+replay-outbox = "scripts.replay_outbox:main"
 
 
 [project.optional-dependencies]
