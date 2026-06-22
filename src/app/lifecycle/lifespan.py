@@ -29,7 +29,7 @@ from app.features.documents import run_document_startup_checks
 from app.middleware import initialize_fastapi_guard
 from app.shared.langchain_layer.agents.memory import setup_cognee
 
-# from app.shared.mcp import get_mcp_client_manager
+from app.mcp import get_mcp_client_manager
 from app.shared.langgraph_layer.checkpointer import teardown_langgraph_checkpointer
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.services.storage import StorageService
@@ -40,7 +40,8 @@ if TYPE_CHECKING:
     from httpx._client import AsyncClient
 
     from app.features.auth.websocket_security import WebSocketSecurityService
-    # from app.shared.mcp import MCPClientManager
+    from app.mcp import MCPClientManager
+
 
 
 async def setup_redis(url: str) -> redis.asyncio.Redis:
@@ -244,12 +245,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     #     app.state.langgraph_checkpointer = None
 
     # MCPClientManager lifecycle (lazy-connects to upstream MCP servers)
-    # try:
-    #     app.state.mcp_manager = get_mcp_client_manager()
-    #     logger.info("MCP client manager initialized")
-    # except Exception:
-    #     logger.exception("MCP client manager startup failed, continuing without MCP tools")
-    #     app.state.mcp_manager = None
+    try:
+        app.state.mcp_manager = get_mcp_client_manager()
+        logger.info("MCP client manager initialized")
+    except Exception:  # noqa: BLE001
+        logger.exception("MCP client manager startup failed, continuing without MCP tools")
+        app.state.mcp_manager = None
 
     logger.info("Application ready", status="running")
 
@@ -263,8 +264,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
         await teardown_langgraph_checkpointer(app.state.langgraph_checkpointer)
 
     # Stop outbox relay
-    if hasattr(app.state, "outbox_relay") and app.state.outbox_relay is not None:
-        await app.state.outbox_relay.shutdown()
+    if hasattr(app.state, "outbox_relay_task"):
         app.state.outbox_relay_task.cancel()
         logger.info("Outbox relay stopped")
 
@@ -293,8 +293,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
             tg.create_task(coro=app.state.db_engine.dispose())
         if hasattr(app.state, "neo4j_driver"):
             tg.create_task(coro=close_neo4j_driver(driver=app.state.neo4j_driver))
-        # mcp_manager: MCPClientManager = get_mcp_client_manager()
-        # if mcp_manager is not None:
-        # tg.create_task(coro=mcp_manager.close())
+        if hasattr(app.state, "mcp_manager") and app.state.mcp_manager is not None:
+            tg.create_task(coro=app.state.mcp_manager.close())
 
     logger.info("Application shutdown complete", status="stopped")
