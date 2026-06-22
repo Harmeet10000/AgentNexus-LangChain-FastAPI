@@ -1,12 +1,13 @@
 """Transactional outbox relay using PostgreSQL NOTIFY/LISTEN."""
 
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import asyncpg
 import asyncpg_listen
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.connections.celery_registry import CeleryTaskRegistry
 from app.utils import logger
 
 _MAX_RETRIES: Final[int] = 5
@@ -115,7 +116,7 @@ class OutboxRelay:
         event_type = str(row["event_type"])
         payload = row["payload"]
         try:
-            self._celery_app.send_task(event_type, kwargs=payload)
+            CeleryTaskRegistry.typed_send(event_type, kwargs=cast("dict[str, object]", payload))
             await self._mark_published(event_id, session=session)
             logger.info("outbox_published", event_id=event_id, event_type=event_type)
         except Exception as exc:  # noqa: BLE001 — dead-letter on any publish failure

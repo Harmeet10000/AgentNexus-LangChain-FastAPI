@@ -39,6 +39,7 @@ from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphi
 from app.shared.result import app_error_to_exception, log_expected_failure
 from app.shared.services.storage import StorageService, build_s3_key, key_from_s3_uri
 from app.utils import NotFoundException, ValidationException, logger
+from app.utils.embedding import normalize_embedding
 from app.utils.json_serializer import from_json_float_list, to_float_list_str, to_sorted_key_bytes
 
 from .classification import classify_document, segment_chunks
@@ -226,11 +227,26 @@ class DocumentQueryService:
 
     async def search(self, *, user_id: str, payload: UnifiedSearchRequest) -> UnifiedSearchResponse:
         cache_key = _build_cache_key("documents:search", payload)
+        lock_key = f"{cache_key}:lock"
+        lock_acquired = False
         if not payload.bypass_cache and self.redis is not None:
             cached = await self.redis.get(cache_key)
             if cached is not None:
                 response = UnifiedSearchResponse.model_validate_json(cached)
                 return response.model_copy(update={"cache_hit": True})
+
+            # ponytail: setnx lock prevents concurrent duplicate compute for same query
+            lock_acquired = await self.redis.setnx(lock_key, "1")
+            if not lock_acquired:
+                for _ in range(30):
+                    await asyncio.sleep(0.05)
+                    cached = await self.redis.get(cache_key)
+                    if cached is not None:
+                        return UnifiedSearchResponse.model_validate_json(cached).model_copy(
+                            update={"cache_hit": True}
+                        )
+            else:
+                await self.redis.expire(lock_key, 15)
 
         embedding_client: GoogleGenerativeAIEmbeddings = build_embedding_client()
         query_embedding = await embedding_client.aembed_query(
@@ -281,6 +297,8 @@ class DocumentQueryService:
             await self.redis.setex(
                 cache_key, DEFAULT_SEARCH_CACHE_TTL_SECONDS, response.model_dump_json()
             )
+            if lock_acquired:
+                await self.redis.delete(lock_key)
         return response
 
     async def rag(
@@ -798,17 +816,7 @@ async def _cached_embedding(
     )
     if redis is not None:
         await redis.setex(cache_key, 60 * 60 * 24, to_float_list_str(embedding))
-    return _normalize_embedding(list(embedding))
-
-
-def _normalize_embedding(embedding: list[float], expected_dim: int | None = None) -> list[float]:
-    if expected_dim is None:
-        expected_dim = get_settings().EMBEDDING_DIMENSION
-    if len(embedding) == expected_dim:
-        return embedding
-    if len(embedding) > expected_dim:
-        return embedding[:expected_dim]
-    return [*embedding, *([0.0] * (expected_dim - len(embedding)))]
+    return normalize_embedding(list(embedding))
 
 
 def _to_ranked_rows(rows: list[dict[str, object]]) -> list[RankedResultRow]:
