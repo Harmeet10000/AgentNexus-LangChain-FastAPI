@@ -38,12 +38,13 @@ class UserAdminService:
         self._token_repo = token_repo
 
     async def _get_user_or_raise(self, user_id: str) -> User:
-        result = await self._user_repo.find_by_id_result(user_id)
+        result = await self._user_repo.find_by_id(user_id)
         match result:
             case Success(user) if user is not None:
                 return user
             case Success():
-                raise NotFoundException("User", user_id)
+                msg = "User"
+                raise NotFoundException(msg, user_id)
             case Failure(error):
                 log_expected_failure(error, operation="user_admin_lookup")
                 raise app_error_to_exception(error)

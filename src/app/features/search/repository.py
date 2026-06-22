@@ -12,11 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.shared.result import (
-    InfrastructureAppError,
-    NotFoundAppError,
-    app_error_to_exception,
-)
+from app.shared.result import InfrastructureAppError, NotFoundAppError
 from app.utils import ErrorCode
 
 from .constants import (
@@ -106,24 +102,6 @@ class SearchRepository:
         source_uri: str | None,
         content_hash: str,
         doc_metadata: dict[str, Any],
-    ) -> SearchDocument:
-        result = await self.create_document_result(
-            title=title,
-            source_uri=source_uri,
-            content_hash=content_hash,
-            doc_metadata=doc_metadata,
-        )
-        if isinstance(result, Failure):
-            raise app_error_to_exception(result.failure())
-        return result.unwrap()
-
-    async def create_document_result(
-        self,
-        *,
-        title: str,
-        source_uri: str | None,
-        content_hash: str,
-        doc_metadata: dict[str, Any],
     ) -> AppResult[SearchDocument]:
         try:
             document = SearchDocument(
@@ -146,15 +124,6 @@ class SearchRepository:
             )
 
     async def upsert_chunks(
-        self,
-        rows: list[dict[str, Any]],
-    ) -> None:
-        result = await self.upsert_chunks_result(rows=rows)
-        if isinstance(result, Failure):
-            raise app_error_to_exception(result.failure())
-        return result.unwrap()
-
-    async def upsert_chunks_result(
         self,
         rows: list[dict[str, Any]],
     ) -> AppResult[None]:
@@ -283,15 +252,6 @@ class SearchRepository:
             )
 
     async def fetch_chunks_by_ids(
-        self,
-        chunk_ids: Sequence[str],
-    ) -> dict[str, SearchChunkRecord]:
-        result = await self.fetch_chunks_by_ids_result(chunk_ids=chunk_ids)
-        if isinstance(result, Failure):
-            raise app_error_to_exception(result.failure())
-        return result.unwrap()
-
-    async def fetch_chunks_by_ids_result(
         self,
         chunk_ids: Sequence[str],
     ) -> AppResult[dict[str, SearchChunkRecord]]:

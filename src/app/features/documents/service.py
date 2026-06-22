@@ -240,7 +240,7 @@ class DocumentQueryService:
         filter_params = build_search_filter_params(
             metadata_filter=payload.metadata_filter.model_dump()
         )
-        bm25_results, vector_results, trigram_results = await asyncio.gather(
+        results = await asyncio.gather(
             self.repo.bm25_search(
                 user_id=user_id,
                 query=payload.query,
@@ -260,10 +260,16 @@ class DocumentQueryService:
                 filter_params=filter_params,
             ),
         )
+        row_sets: list[list[RankedResultRow]] = []
+        for r in results:
+            match r:
+                case Success(v):
+                    row_sets.append(_to_ranked_rows(v))
+                case Failure(error):
+                    log_expected_failure(error, operation="hybrid_search")
+                    row_sets.append([])
         fused_results = reciprocal_rank_fusion(
-            _to_ranked_rows(bm25_results),
-            _to_ranked_rows(vector_results),
-            _to_ranked_rows(trigram_results),
+            *row_sets,
             k=RRF_K,
             limit=payload.limit,
         )
