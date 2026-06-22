@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, cast
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, model_validator
 
-from app.config import get_settings
 from app.utils import ValidationException
 
 if TYPE_CHECKING:
@@ -83,39 +81,13 @@ class MCPClientCircuitState(BaseModel):
         return self.opened_until_epoch is not None and self.opened_until_epoch > now
 
 
-def load_mcp_client_server_configs() -> list[MCPClientServerConfig]:
-    raw = get_settings().MCP_CLIENT_SERVER_CONFIGS
-    if not raw.strip():
-        return []
-
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        msg = "MCP client server config JSON is invalid"
-        raise ValidationException(msg) from exc
-
-    if not isinstance(payload, list):
-        msg = "MCP client server config must be a JSON array"
-        raise ValidationException(msg)
-
-    try:
-        return [MCPClientServerConfig.model_validate(item) for item in payload]
-    except ValidationError as exc:
-        msg = "MCP client server config validation failed"
-        raise ValidationException(
-            msg,
-            data={"errors": exc.errors()},
-        ) from exc
-
-
 MCPHTTPTransport = Literal["http", "streamable-http", "sse"]
+MCPTransport = Literal["stdio", "http", "streamable-http", "sse"]
 
 
 def parse_mcp_http_transport(value: str) -> MCPHTTPTransport:
     allowed_values: tuple[MCPHTTPTransport, ...] = ("http", "streamable-http", "sse")
     if value not in allowed_values:
         msg = f"Unsupported MCP HTTP transport '{value}'. Expected one of: {', '.join(allowed_values)}"
-        raise ValidationException(
-            msg
-        )
+        raise ValidationException(msg)
     return cast("MCPHTTPTransport", value)

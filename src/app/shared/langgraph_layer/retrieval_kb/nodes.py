@@ -361,9 +361,7 @@ async def _call_embedding_fn(embedding_fn: EmbeddingFunction, text_to_embed: str
     return cast("list[float]", result)
 
 
-def _normalize_embedding(
-    embedding: list[float], expected_dim: int | None = None
-) -> list[float]:
+def _normalize_embedding(embedding: list[float], expected_dim: int | None = None) -> list[float]:
     if expected_dim is None:
         expected_dim = get_settings().EMBEDDING_DIMENSION
     if len(embedding) == expected_dim:

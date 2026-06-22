@@ -1,8 +1,9 @@
-"""Reusable MCP client best-practice helpers.
+"""MCP client best-practice helpers.
 
-These helpers are intentionally not imported by the deep research graph. They
-preserve useful MCP patterns at the MCP boundary: OAuth token exchange, durable
-token storage through LangGraph's store, and user-friendly MCP tool errors.
+These helpers are intentionally not part of the server tool surface. They
+preserve useful MCP patterns at the client boundary: OAuth token exchange,
+durable token storage through LangGraph's store, and user-friendly MCP tool
+errors that surface interaction-required scenarios to the agent.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from app.utils import logger
 if TYPE_CHECKING:
     from typing import Any
 
+    from httpx._client import AsyncClient
     from langchain_core.runnables import RunnableConfig
     from langchain_core.tools import StructuredTool
 
@@ -30,9 +32,8 @@ async def exchange_subject_token_for_mcp_token(
     *,
     http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any] | None:
-    """Exchange an application access token for an MCP access token."""
-    close_client = http_client is None
-    client = http_client or httpx.AsyncClient(timeout=httpx.Timeout(15.0))
+    close_client: bool = http_client is None
+    client: AsyncClient = http_client or httpx.AsyncClient(timeout=httpx.Timeout(15.0))
     token_url = f"{base_mcp_url.rstrip('/')}/oauth/token"
     form_data = {
         "client_id": "mcp_default",
@@ -59,7 +60,6 @@ async def exchange_subject_token_for_mcp_token(
 
 
 async def get_stored_mcp_tokens(config: RunnableConfig) -> dict[str, Any] | None:
-    """Retrieve non-expired MCP tokens from the LangGraph store."""
     store = get_store()
     thread_id = config.get("configurable", {}).get("thread_id")
     user_id = config.get("metadata", {}).get("owner")
@@ -83,7 +83,6 @@ async def get_stored_mcp_tokens(config: RunnableConfig) -> dict[str, Any] | None
 
 
 async def set_stored_mcp_tokens(config: RunnableConfig, tokens: dict[str, Any]) -> None:
-    """Store MCP tokens in the LangGraph store."""
     store = get_store()
     thread_id = config.get("configurable", {}).get("thread_id")
     user_id = config.get("metadata", {}).get("owner")
@@ -93,7 +92,6 @@ async def set_stored_mcp_tokens(config: RunnableConfig, tokens: dict[str, Any]) 
 
 
 def wrap_mcp_interaction_errors(tool: StructuredTool) -> StructuredTool:
-    """Convert MCP interaction-required errors into model-visible tool errors."""
     original_coroutine = tool.coroutine
     if original_coroutine is None:
         return tool
@@ -124,7 +122,6 @@ def wrap_mcp_interaction_errors(tool: StructuredTool) -> StructuredTool:
 
 
 def _find_mcp_error(exc: BaseException) -> McpError | None:
-    """Search nested exception groups for an MCP error."""
     if isinstance(exc, McpError):
         return exc
     nested = getattr(exc, "exceptions", None)

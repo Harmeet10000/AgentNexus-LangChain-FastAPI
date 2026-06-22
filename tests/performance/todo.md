@@ -273,10 +273,10 @@ _normalize_embedding() assumes 768-dim (Gemini). If you g switch models, this si
 4. CELERY TASK DEFINITIONS SCATTERED                                
 Tasks in `src/tasks/*.py` but invoked via string names          (`"tasks.documents_ingest"`). No type safety, no IDE            support. Consider `@celery_app.task` decorators in same         module or a task registry with typed signatures.             
 5. MIDDLEWARE ORDER SUBTLE BUG                                      
-main.py: CORS (Guard)  GZip  Security  Metrics  Logging    But Guard's CORS helper adds middleware *internally*.           If SecurityMiddleware also adds CORS headers, they conflict.    Verify with `curl -H "Origin: x" -v`  check for duplicate      `Access-Control-Allow-
+main.py: CORS (Guard)  GZip  Security  Metrics  Logging    But Guard's CORS helper adds middleware *internally*.           If SecurityMiddleware also adds CORS headers, they conflict.    Verify with `curl -H "Origin: x" -v`  check for duplicate      `Access-Control-Allow-    DONE
 
-200. need a new superpower/brainstorming skill with openspec, graphify, ast-grep, poytail, firecrawl, with proper git workflows, and stop using grep and older tools 
-203. 
+200. need a new superpower/brainstorming skill with openspec, graphify, ast-grep, poytail, firecrawl, with proper git workflows, and stop using grep and older tools  make it using create skill
+203. split MCP from main app/ and then write it using the skill
 ```
 
 summarise these chapters in great detail and take video's transcript as reference for summarising

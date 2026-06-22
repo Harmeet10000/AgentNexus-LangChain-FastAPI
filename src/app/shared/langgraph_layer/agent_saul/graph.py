@@ -92,7 +92,9 @@ def build_saul_graph(
     )
 
     state_graph_factory = cast("Any", StateGraph)
-    graph: Any = state_graph_factory(LegalAgentState, input_schema=LegalAgentInputState, output_schema=LegalAgentOutputState)
+    graph: Any = state_graph_factory(
+        LegalAgentState, input_schema=LegalAgentInputState, output_schema=LegalAgentOutputState
+    )
     _wire_graph(graph=graph, nodes=nodes)
 
     return cast("CompiledStateGraph", graph.compile(checkpointer=checkpointer))

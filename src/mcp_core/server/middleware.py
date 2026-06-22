@@ -9,9 +9,9 @@ from starlette.middleware import Middleware
 
 from app.config import get_settings
 from app.features.auth.security import decode_token
-from app.middleware import observe_mcp_http_request
 from app.utils import UnauthorizedException, logger
 from app.utils.rate_limit.service import RateLimitService
+from mcp_core.common.metrics import observe_mcp_http_request
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -121,7 +121,7 @@ class MCPRateLimitMiddleware:
                 rate=self.rate,
                 period_seconds=self.period_seconds,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             status_code = getattr(exc, "status_code", 429)
             payload = getattr(exc, "detail", {"message": "Rate limit exceeded"})
             if not isinstance(payload, dict):

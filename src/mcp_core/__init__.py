@@ -1,21 +1,25 @@
-from .best_practices import (
+from mcp_core.client.auth import (
     exchange_subject_token_for_mcp_token,
     get_stored_mcp_tokens,
     set_stored_mcp_tokens,
     wrap_mcp_interaction_errors,
 )
-from .client import MCPClientManager, get_mcp_client_manager
-from .models import (
+from mcp_core.client.manager import MCPClientManager, get_mcp_client_manager
+from mcp_core.common.models import (
     MCPClientServerConfig,
+    MCPHTTPTransport,
     MCPToolCatalogEntry,
     MCPToolResponse,
     parse_mcp_http_transport,
 )
-from .registry import bind_mcp_parent_app, get_mcp_http_app, get_mcp_server, run_mcp_server
+from mcp_core.server.factory import get_mcp_server
+from mcp_core.server.http import get_mcp_http_app, run_mcp_server
+from mcp_core.server.tools import bind_mcp_parent_app
 
 __all__ = [
     "MCPClientManager",
     "MCPClientServerConfig",
+    "MCPHTTPTransport",
     "MCPToolCatalogEntry",
     "MCPToolResponse",
     "bind_mcp_parent_app",

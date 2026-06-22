@@ -2,26 +2,22 @@ from __future__ import annotations
 
 import json
 import time
-from functools import cache
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
-from fastmcp import FastMCP
-from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 
 from app.config import get_settings
-from app.middleware import observe_mcp_tool_invocation
 from app.utils import NotFoundException, logger
-
-from .client import get_mcp_client_manager
-from .models import MCPToolCatalogEntry, MCPToolResponse
-from .security import build_mcp_http_middleware
+from mcp_core.client.manager import get_mcp_client_manager
+from mcp_core.common.metrics import observe_mcp_tool_invocation
+from mcp_core.common.models import MCPToolCatalogEntry, MCPToolResponse
+from mcp_core.server.factory import _server_name
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Any
 
-MCPTransport = Literal["stdio", "http", "streamable-http", "sse"]
+
 _mcp_runtime: dict[str, FastAPI | None] = {"parent_app": None}
 
 
@@ -31,33 +27,6 @@ def bind_mcp_parent_app(app: FastAPI | None) -> None:
 
 def get_bound_mcp_parent_app() -> FastAPI | None:
     return _mcp_runtime["parent_app"]
-
-
-def _server_name() -> str:
-    settings = get_settings()
-    return settings.MCP_SERVER_NAME or f"{settings.APP_NAME} MCP"
-
-
-def _instructions() -> str:
-    settings = get_settings()
-    return (
-        f"{settings.APP_NAME} curated MCP server. "
-        "Use exposed tools only. Prefer read-only inspection tools before expensive operations."
-    )
-
-
-def _paginate(items: list[Any], limit: int, offset: int) -> tuple[list[Any], dict[str, int | bool]]:
-    settings = get_settings()
-    safe_limit = max(1, min(limit, settings.MCP_MAX_PAGE_SIZE))
-    safe_offset = max(0, offset)
-    page = items[safe_offset : safe_offset + safe_limit]
-    metadata = {
-        "limit": safe_limit,
-        "offset": safe_offset,
-        "total": len(items),
-        "has_more": safe_offset + safe_limit < len(items),
-    }
-    return page, metadata
 
 
 def _truncate_payload(data: Any) -> Any:
@@ -164,10 +133,6 @@ def _tool_catalog() -> list[MCPToolCatalogEntry]:
     ]
 
 
-def _catalog_by_name() -> dict[str, MCPToolCatalogEntry]:
-    return {entry.name: entry for entry in _tool_catalog()}
-
-
 async def _timed_tool(
     tool_name: str,
     fn: Callable[[], Any],
@@ -182,7 +147,7 @@ async def _timed_tool(
         status = "not_found"
         logger.bind(tool=tool_name, error=str(exc.detail)).warning("MCP tool failed")
         return _error(str(exc.detail))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         status = "error"
         logger.bind(tool=tool_name, error=str(exc)).exception("MCP tool failed")
         return _error("MCP tool execution failed", detail=str(exc))
@@ -198,7 +163,7 @@ async def _timed_tool(
 
 def _register_tools(server: Any) -> None:
     settings = get_settings()
-    catalog = _catalog_by_name()
+    catalog = {entry.name: entry for entry in _tool_catalog()}
 
     if "health_check" in catalog:
 
@@ -301,7 +266,15 @@ def _register_tools(server: Any) -> None:
                     for entry in capability_matches
                 ] + upstream_matches
 
-                page, metadata = _paginate(results, limit=limit, offset=offset)
+                safe_limit = max(1, min(limit, settings.MCP_MAX_PAGE_SIZE))
+                safe_offset = max(0, offset)
+                page = results[safe_offset : safe_offset + safe_limit]
+                metadata = {
+                    "limit": safe_limit,
+                    "offset": safe_offset,
+                    "total": len(results),
+                    "has_more": safe_offset + safe_limit < len(results),
+                }
                 return _ok({"ids": [item["id"] for item in page], "results": page}, **metadata)
 
             return await _timed_tool("search", _handler)
@@ -334,57 +307,15 @@ def _register_tools(server: Any) -> None:
         async def list_upstream_servers(limit: int = 10, offset: int = 0) -> dict[str, Any]:
             async def _handler() -> dict[str, Any]:
                 servers = await get_mcp_client_manager().discover_servers()
-                page, metadata = _paginate(servers, limit=limit, offset=offset)
+                safe_limit = max(1, min(limit, settings.MCP_MAX_PAGE_SIZE))
+                safe_offset = max(0, offset)
+                page = servers[safe_offset : safe_offset + safe_limit]
+                metadata = {
+                    "limit": safe_limit,
+                    "offset": safe_offset,
+                    "total": len(servers),
+                    "has_more": safe_offset + safe_limit < len(servers),
+                }
                 return _ok(page, **metadata)
 
             return await _timed_tool("list_upstream_servers", _handler)
-
-
-@cache
-def get_mcp_server() -> Any:
-    server = FastMCP(name=_server_name(), instructions=_instructions())
-    _register_tools(server)
-    return server
-
-
-def get_mcp_http_app(
-    *,
-    parent_app: FastAPI | None = None,
-    path: str = "/",
-    transport: Literal["http", "streamable-http", "sse"] | None = None,
-) -> Any:
-    settings = get_settings()
-    bind_mcp_parent_app(parent_app)
-    middleware = [
-        *build_mcp_http_middleware(parent_app=parent_app),
-        ResponseLimitingMiddleware(max_size=settings.MCP_MAX_RESULT_BYTES),
-    ]
-    return get_mcp_server().http_app(
-        path=path,
-        transport=transport or settings.MCP_HTTP_TRANSPORT,
-        middleware=middleware,
-    )
-
-
-def run_mcp_server(
-    *,
-    transport: MCPTransport | None = None,
-    host: str | None = None,
-    port: int | None = None,
-    path: str | None = None,
-) -> None:
-    settings = get_settings()
-    server = get_mcp_server()
-    resolved_transport = transport or settings.MCP_RUN_TRANSPORT
-
-    if resolved_transport == "stdio":
-        server.run(transport="stdio", log_level=settings.MCP_LOG_LEVEL)
-        return
-
-    server.run(
-        transport=resolved_transport,
-        host=host or settings.MCP_HOST,
-        port=port or settings.MCP_PORT,
-        path=path or settings.MCP_HTTP_PATH,
-        log_level=settings.MCP_LOG_LEVEL,
-    )
