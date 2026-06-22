@@ -59,9 +59,11 @@ class MCPClientServerConfig(BaseModel):
     @model_validator(mode="after")
     def validate_transport(self) -> MCPClientServerConfig:
         if self.transport == MCPClientTransport.HTTP and not self.url:
-            raise ValueError("HTTP transport requires 'url'")
+            msg = "HTTP transport requires 'url'"
+            raise ValueError(msg)
         if self.transport == MCPClientTransport.STDIO and not self.command:
-            raise ValueError("STDIO transport requires 'command'")
+            msg = "STDIO transport requires 'command'"
+            raise ValueError(msg)
         return self
 
     @property
@@ -89,16 +91,19 @@ def load_mcp_client_server_configs() -> list[MCPClientServerConfig]:
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ValidationException("MCP client server config JSON is invalid") from exc
+        msg = "MCP client server config JSON is invalid"
+        raise ValidationException(msg) from exc
 
     if not isinstance(payload, list):
-        raise ValidationException("MCP client server config must be a JSON array")
+        msg = "MCP client server config must be a JSON array"
+        raise ValidationException(msg)
 
     try:
         return [MCPClientServerConfig.model_validate(item) for item in payload]
     except ValidationError as exc:
+        msg = "MCP client server config validation failed"
         raise ValidationException(
-            "MCP client server config validation failed",
+            msg,
             data={"errors": exc.errors()},
         ) from exc
 
@@ -109,7 +114,8 @@ MCPHTTPTransport = Literal["http", "streamable-http", "sse"]
 def parse_mcp_http_transport(value: str) -> MCPHTTPTransport:
     allowed_values: tuple[MCPHTTPTransport, ...] = ("http", "streamable-http", "sse")
     if value not in allowed_values:
+        msg = f"Unsupported MCP HTTP transport '{value}'. Expected one of: {', '.join(allowed_values)}"
         raise ValidationException(
-            f"Unsupported MCP HTTP transport '{value}'. Expected one of: {', '.join(allowed_values)}"
+            msg
         )
     return cast("MCPHTTPTransport", value)

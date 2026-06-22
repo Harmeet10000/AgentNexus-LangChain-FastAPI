@@ -14,11 +14,13 @@ async def db_create_payment(user_id: int, amount: float, currency: str) -> dict:
         logger.bind(amount=amount, error_code="NEGATIVE_AMOUNT").error(
             "Invalid payment amount requested"
         )
-        raise ValueError("Amount cannot be negative")
+        msg = "Amount cannot be negative"
+        raise ValueError(msg)
 
     if amount > 10000:
         # Simulating a catastrophic DB crash (e.g., timeout or connection drop)
-        raise ConnectionError("Database connection lost during transaction")
+        msg = "Database connection lost during transaction"
+        raise ConnectionError(msg)
 
     payment_record = {"id": "txn_998877", "status": "success", "amount": amount}
 

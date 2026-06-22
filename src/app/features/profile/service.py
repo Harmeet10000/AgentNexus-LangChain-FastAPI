@@ -43,14 +43,19 @@ class ProfileService:
         revoke_other_sessions: bool,
     ) -> None:
         if user.hashed_password is None:
-            raise ConflictException(
+            msg = (
                 "Password cannot be changed on an OAuth-only account. "
                 "Link a password via account settings."
             )
+            raise ConflictException(
+                msg
+            )
         if not verify_password(user.hashed_password, current_password):
-            raise UnauthorizedException("Current password is incorrect")
+            msg = "Current password is incorrect"
+            raise UnauthorizedException(msg)
         if current_password == new_password:
-            raise ConflictException("New password must differ from current password")
+            msg = "New password must differ from current password"
+            raise ConflictException(msg)
 
         user.hashed_password = hash_password(new_password)
         await self._user_repo.save(user)

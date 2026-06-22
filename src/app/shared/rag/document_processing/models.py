@@ -134,7 +134,8 @@ class Chunk(BaseModel):
     def validate_embedding(cls, v: list[float] | None) -> list[float] | None:
         """Validate embedding is not empty if provided."""
         if v is not None and len(v) == 0:
-            raise ValueError("Embedding cannot be empty")
+            msg = "Embedding cannot be empty"
+            raise ValueError(msg)
         return v
 
 
@@ -201,7 +202,8 @@ class IngestionConfig(BaseModel):
         """Ensure overlap is less than chunk size."""
         chunk_size = info.data.get("chunk_size", 1000)
         if v >= chunk_size:
-            raise ValueError(f"Chunk overlap ({v}) must be less than chunk size ({chunk_size})")
+            msg = f"Chunk overlap ({v}) must be less than chunk size ({chunk_size})"
+            raise ValueError(msg)
         return v
 
 

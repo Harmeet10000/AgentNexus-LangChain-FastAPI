@@ -332,7 +332,8 @@ class DocumentIngestionPipeline:
 
             # Verify file exists
             if not audio_path.exists():
-                raise FileNotFoundError(f"Audio file not found: {audio_path}")
+                msg = f"Audio file not found: {audio_path}"
+                raise FileNotFoundError(msg)
 
             # Configure ASR pipeline with Whisper Turbo model
             pipeline_options = AsrPipelineOptions()

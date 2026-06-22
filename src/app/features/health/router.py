@@ -1,5 +1,7 @@
 """Health feature API router."""
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.utils import APIResponse, http_response
@@ -11,10 +13,10 @@ from .service import HealthService
 router = APIRouter(prefix="/health", tags=["health"])
 
 
-@router.get("/self", response_model=APIResponse[SelfInfoDTO])
+@router.get("/self")
 async def get_self(
     request: Request,
-    service: HealthService = Depends(get_health_service),
+    service: Annotated[HealthService, Depends(get_health_service)],
 ) -> APIResponse[SelfInfoDTO]:
     self_info = await service.get_self_info(
         server_name=request.app.title or "unknown",
@@ -28,10 +30,10 @@ async def get_self(
     )
 
 
-@router.get("/", response_model=APIResponse[HealthDataDTO])
+@router.get("/")
 async def get_health(
     response: Response,
-    service: HealthService = Depends(get_health_service),
+    service: Annotated[HealthService, Depends(get_health_service)],
 ) -> APIResponse[HealthDataDTO]:
     result = await service.get_health()
     response.status_code = result.status_code

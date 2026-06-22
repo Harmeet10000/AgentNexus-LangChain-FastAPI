@@ -172,9 +172,11 @@ def decode_token(token: str) -> TokenClaims:
         claims = jwt.decode(token.encode("utf-8"), _jwt_key())
         claims.validate()
     except ExpiredTokenError as exc:
-        raise UnauthorizedException("Token has expired") from exc
+        msg = "Token has expired"
+        raise UnauthorizedException(msg) from exc
     except JoseError as exc:
-        raise UnauthorizedException("Invalid token") from exc
+        msg = "Invalid token"
+        raise UnauthorizedException(msg) from exc
 
     return TokenClaims(
         sub=claims["sub"],
@@ -231,7 +233,8 @@ class OAuthProviderConfig(BaseModel):
 
 def get_oauth_config(provider: str) -> OAuthProviderConfig:
     if provider not in _SUPPORTED_PROVIDERS:
-        raise ValidationException(f"Unsupported OAuth provider: {provider}")
+        msg = f"Unsupported OAuth provider: {provider}"
+        raise ValidationException(msg)
 
     settings = get_settings()
     base = settings.BACKEND_URL.rstrip("/")
@@ -256,7 +259,8 @@ def get_oauth_config(provider: str) -> OAuthProviderConfig:
                 redirect_uri=f"{base}/api/v1/auth/oauth/github/callback",
             )
         case _:
-            raise ValidationException(f"Unsupported OAuth provider: {provider}")
+            msg = f"Unsupported OAuth provider: {provider}"
+            raise ValidationException(msg)
 
 
 # ── OAuth2 userinfo normalization ─────────────────────────────────────────────
@@ -319,7 +323,8 @@ async def fetch_oauth_userinfo(
             )
 
         if not email:
-            raise ValidationException("GitHub account has no verified primary email")
+            msg = "GitHub account has no verified primary email"
+            raise ValidationException(msg)
 
         return OAuthUserInfo(
             email=email,

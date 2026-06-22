@@ -1,16 +1,16 @@
-# Graph Report - langchain-fastapi-production  (2026-06-21)
+# Graph Report - langchain-fastapi-production  (2026-06-22)
 
 ## Corpus Check
-- 375 files · ~276,471 words
+- 337 files · ~260,230 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 853 nodes · 1475 edges · 41 communities (39 shown, 2 thin omitted)
-- Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 158 edges (avg confidence: 0.52)
+- 1015 nodes · 1851 edges · 64 communities (61 shown, 3 thin omitted)
+- Extraction: 86% EXTRACTED · 14% INFERRED · 0% AMBIGUOUS · INFERRED: 260 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e4d019e0`
+- Built from commit: `9c275d56`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -52,59 +52,82 @@
 - [[_COMMUNITY_Community 36|Community 36]]
 - [[_COMMUNITY_Community 37|Community 37]]
 - [[_COMMUNITY_Community 38|Community 38]]
+- [[_COMMUNITY_Community 39|Community 39]]
+- [[_COMMUNITY_Community 40|Community 40]]
+- [[_COMMUNITY_Community 41|Community 41]]
 - [[_COMMUNITY_Community 42|Community 42]]
 - [[_COMMUNITY_Community 43|Community 43]]
+- [[_COMMUNITY_Community 44|Community 44]]
+- [[_COMMUNITY_Community 45|Community 45]]
+- [[_COMMUNITY_Community 46|Community 46]]
+- [[_COMMUNITY_Community 47|Community 47]]
+- [[_COMMUNITY_Community 48|Community 48]]
+- [[_COMMUNITY_Community 49|Community 49]]
+- [[_COMMUNITY_Community 50|Community 50]]
+- [[_COMMUNITY_Community 51|Community 51]]
+- [[_COMMUNITY_Community 52|Community 52]]
+- [[_COMMUNITY_Community 53|Community 53]]
+- [[_COMMUNITY_Community 54|Community 54]]
+- [[_COMMUNITY_Community 55|Community 55]]
+- [[_COMMUNITY_Community 56|Community 56]]
+- [[_COMMUNITY_Community 58|Community 58]]
+- [[_COMMUNITY_Community 64|Community 64]]
+- [[_COMMUNITY_Community 82|Community 82]]
+- [[_COMMUNITY_Community 88|Community 88]]
+- [[_COMMUNITY_Community 89|Community 89]]
+- [[_COMMUNITY_Community 90|Community 90]]
+- [[_COMMUNITY_Community 91|Community 91]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `Settings` - 30 edges
-2. `UserRepository` - 28 edges
-3. `RefreshTokenRepository` - 23 edges
-4. `_build_graph_nodes()` - 22 edges
-5. `WebCrawler` - 21 edges
-6. `CrawlResult` - 20 edges
-7. `SessionData` - 20 edges
-8. `AuthService` - 19 edges
-9. `DocumentQueryService` - 19 edges
-10. `SearchService` - 19 edges
+1. `DocumentRepository` - 44 edges
+2. `SearchRepository` - 35 edges
+3. `UserRepository` - 35 edges
+4. `AuthService` - 34 edges
+5. `RefreshTokenRepository` - 33 edges
+6. `Settings` - 33 edges
+7. `WebCrawler` - 29 edges
+8. `CrawlResult` - 23 edges
+9. `_build_graph_nodes()` - 22 edges
+10. `DocumentQueryService` - 20 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `WebCrawler` --uses--> `AsyncWebCrawler`  [INFERRED]
-  src/app/features/crawler/service.py → src/app/connections/crawl4ai.py
-- `Any` --uses--> `Settings`  [INFERRED]
-  src/app/connections/celery_registry.py → src/app/config/settings.py
-- `DocumentSearchResultItem` --uses--> `Settings`  [INFERRED]
-  src/app/features/documents/service.py → src/app/config/settings.py
-- `DocumentStatusResponse` --uses--> `Settings`  [INFERRED]
-  src/app/features/documents/service.py → src/app/config/settings.py
-- `DocumentUploadResponse` --uses--> `Settings`  [INFERRED]
-  src/app/features/documents/service.py → src/app/config/settings.py
+- `LegalAskRequest` --uses--> `SearchRepository`  [INFERRED]
+  src/app/features/search/service.py → src/app/features/search/repository.py
+- `LegalAskResponse` --uses--> `SearchRepository`  [INFERRED]
+  src/app/features/search/service.py → src/app/features/search/repository.py
+- `RagSearchRequest` --uses--> `SearchRepository`  [INFERRED]
+  src/app/features/search/service.py → src/app/features/search/repository.py
+- `RagSearchResponse` --uses--> `SearchRepository`  [INFERRED]
+  src/app/features/search/service.py → src/app/features/search/repository.py
+- `SearchResultItem` --uses--> `SearchRepository`  [INFERRED]
+  src/app/features/search/service.py → src/app/features/search/repository.py
 
 ## Import Cycles
 - 1-file cycle: `src/app/lifecycle/lifespan.py -> src/app/lifecycle/lifespan.py`
 - 1-file cycle: `src/app/main.py -> src/app/main.py`
 - 1-file cycle: `src/app/middleware/health_check.py -> src/app/middleware/health_check.py`
 
-## Communities (41 total, 2 thin omitted)
+## Communities (64 total, 3 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.05
 Nodes (52): BaseModel, AgentContext, AgentDependencies, ChatResponse, Chunk, ChunkResult, DoclingEnhancementConfig, DoclingExtractionResult (+44 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.06
-Nodes (47): HybridSearchRequest, LegalAskRequest, LegalAskResponse, RagSearchRequest, RagSearchResponse, get_current_user_id(), _get_search_llm(), get_search_repository() (+39 more)
+Cohesion: 0.23
+Nodes (16): get_current_user_id(), _get_search_llm(), get_search_repository(), get_search_service(), Dependency wiring for the search feature., Request-scoped orchestration for the search feature., SearchService, SearchService (+8 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.05
-Nodes (69): BaseSettings, get_settings(), Application settings loaded from environment variables., Returns a cached instance of the application settings., Settings, ContextGrade, DocumentCommandService, DocumentQueryService (+61 more)
+Cohesion: 0.14
+Nodes (22): ContextGrade, _build_answer_cache_key(), _build_query_plan(), _cached_embedding(), _flatten_warnings(), _generate_answer(), _grade_context(), _merge_warning_lists() (+14 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.08
-Nodes (19): Redis-serializable session record. Frozen for safe pipeline use., Redis-primary, MongoDB-audit session store., RefreshTokenRepository, SessionData, UserRepository, AuthService, Return (authorization_url, signed_state_for_cookie)., _to_user_response() (+11 more)
+Cohesion: 0.24
+Nodes (20): DocumentCommandService, DocumentQueryService, get_current_user_id(), get_document_command_service(), _get_document_llm(), get_document_query_service(), get_document_repository(), Dependency wiring for unified document feature. (+12 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.08
-Nodes (61): AgentRegistry, build_agent_registry(), _build_graph_nodes(), Startup-time Agent Saul graph composition helpers., Instantiate all agents + LLM chains once.     Called from build_saul_graph — nev, Holds all pre-built agents and structured-output LLM chains.     Created once at, SaulGraphNodes, _build_analysis_context() (+53 more)
+Cohesion: 0.21
+Nodes (26): _build_graph_nodes(), Startup-time Agent Saul graph composition helpers., make_compliance_node(), make_deep_research_node(), make_entity_extraction_node(), make_finalization_node(), make_gateway_node(), make_grounding_verification_node() (+18 more)
 
 ### Community 5 - "Community 5"
 Cohesion: 0.09
@@ -124,31 +147,31 @@ Nodes (20): close_db(), expand_query_variations(), initialize_db(), initialize_r
 
 ### Community 9 - "Community 9"
 Cohesion: 0.11
-Nodes (22): Any, CeleryTaskPayload, CeleryTaskRegistry, LegacyTaskPayload, Typed Celery task registry.  Provides a ``CeleryTaskRegistry`` that maps task na, Base for all typed Celery task payloads.      Subclass this for each task to def, Fallback payload for untyped tasks during incremental migration.      Accepts an, Maps task names → Pydantic payload models for validation. (+14 more)
+Nodes (21): CeleryTaskPayload, CeleryTaskRegistry, LegacyTaskPayload, Typed Celery task registry.  Provides a ``CeleryTaskRegistry`` that maps task na, Base for all typed Celery task payloads.      Subclass this for each task to def, Fallback payload for untyped tasks during incremental migration.      Accepts an, Maps task names → Pydantic payload models for validation., Validate kwargs against registered model, or fall back to LegacyTaskPayload. (+13 more)
 
 ### Community 10 - "Community 10"
-Cohesion: 0.07
-Nodes (39): AsyncDriver, AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncWebCrawler, Celery, close_crawl4ai_crawler(), create_crawl4ai_crawler(), get_crawl4ai_crawler() (+31 more)
+Cohesion: 0.40
+Nodes (3): get_settings(), Returns a cached instance of the application settings., run_document_ingestion_task()
 
 ### Community 11 - "Community 11"
-Cohesion: 0.07
-Nodes (33): CrawlResult, Core crawler module using Crawl4AI., Crawl a single URL.          Args:             url: URL to crawl             use, Recursively crawl internal links from starting URLs.          Args:, Result from crawling a URL., Web crawler using Crawl4AI with caching., Generate cache key for URL., Get cached crawl result. (+25 more)
+Cohesion: 0.14
+Nodes (10): CrawlerService, Crawler feature service., Close all connections., Service for web crawling and searching., Check if rate limit is exceeded., Increment rate limit counter., GeminiProcessor, RateLimiter (+2 more)
 
 ### Community 13 - "Community 13"
 Cohesion: 0.08
-Nodes (48): AppError, AsyncSession, ClauseSegment, ContractMetadata, Failure, _build_preamble(), _cached_embedding(), _call_embedding_fn() (+40 more)
+Nodes (48): ClauseSegment, ContractMetadata, EmbeddingFunction, _build_preamble(), _cached_embedding(), _call_embedding_fn(), _chunk_metadata_json(), _contract_events() (+40 more)
 
 ### Community 14 - "Community 14"
-Cohesion: 0.18
-Nodes (18): CrossEncoderReranker, _cached_embedding(), _call_embedding_fn(), make_context_grader_node(), make_generator_node(), make_graph_retrieval_node(), make_hybrid_retrieval_node(), make_query_analyzer_node() (+10 more)
+Cohesion: 0.19
+Nodes (17): CrossEncoderReranker, _cached_embedding(), _call_embedding_fn(), make_context_grader_node(), make_generator_node(), make_graph_retrieval_node(), make_hybrid_retrieval_node(), make_query_analyzer_node() (+9 more)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.14
-Nodes (29): APIResponse, forgot_password(), get_me(), list_sessions(), login(), logout(), oauth_authorize(), oauth_callback() (+21 more)
+Cohesion: 0.22
+Nodes (17): AgentRegistry, build_agent_registry(), Instantiate all agents + LLM chains once.     Called from build_saul_graph — nev, Holds all pre-built agents and structured-output LLM chains.     Created once at, SaulGraphNodes, ClauseSegmentationOutput, EntityExtractionOutput, PlannerOutput (+9 more)
 
 ### Community 16 - "Community 16"
-Cohesion: 0.27
-Nodes (10): CompiledStateGraph, build_document_ingestion_graph(), DocumentIngestionState, _make_ingest_document_node(), Document ingestion graph wrapper., Build the per-job ingestion graph., IngestDocumentFn, BaseChatModel (+2 more)
+Cohesion: 0.26
+Nodes (11): CompiledStateGraph, build_document_ingestion_graph(), DocumentIngestionState, _make_ingest_document_node(), Document ingestion graph wrapper., Build the per-job ingestion graph., IngestDocumentFn, BaseChatModel (+3 more)
 
 ### Community 17 - "Community 17"
 Cohesion: 0.22
@@ -159,8 +182,8 @@ Cohesion: 0.10
 Nodes (21): 5.1 Core Model: Cyclic State Machine, 5.2 Node Definitions, 5.3 Execution Pipeline (Legal Processing), 5.4 Parallelization Strategy (CRITICAL), 5.5 Evaluator Node (QA Gate), 5.6 HITL (Interrupt + Resume), 5. Phase 2: LangGraph Orchestration Pipeline, Behavior: (+13 more)
 
 ### Community 20 - "Community 20"
-Cohesion: 0.15
-Nodes (12): 11.1 Recovery Model, 11. Persistence Layer, 12. Observability, 13. Security Model, 14. Failure Modes & Recovery, 15. Final System Guarantees, 22.1 Schema, 22.2 Identifiers (+4 more)
+Cohesion: 0.12
+Nodes (15): 10.1 Rules, 10.2 Execution Model, 10. State & Execution Model, 11.1 Recovery Model, 11. Persistence Layer, 12. Observability, 13. Security Model, 14. Failure Modes & Recovery (+7 more)
 
 ### Community 21 - "Community 21"
 Cohesion: 0.17
@@ -230,29 +253,117 @@ Nodes (4): 6.1 State Schema, 6.2 Memory Processing Pipeline, 6.3 Long-Term Memor
 Cohesion: 0.50
 Nodes (4): 7.1 Structured Outputs, 7.2 Validation Pipeline, 7. Phase 4: Tooling & Schema Enforcement, BEST PRACTICES for tool calling:
 
+### Community 39 - "Community 39"
+Cohesion: 0.13
+Nodes (16): BaseSettings, Application settings loaded from environment variables., Settings, _build_cache_key(), _build_search_items(), _graphiti_filter_chunk_ids(), _to_ranked_rows(), DocumentSearchResultItem (+8 more)
+
+### Community 40 - "Community 40"
+Cohesion: 0.39
+Nodes (7): DocumentRepository, build_chunk_rows(), process_document_ingestion(), _verify_legal_chunks(), BaseChatModel, Graphiti, StorageService
+
+### Community 41 - "Community 41"
+Cohesion: 0.43
+Nodes (6): _extract_postgres_chunk_ids(), _extract_search_blob(), GraphitiVerificationResult, Graphiti write and verification helpers for legal chunks., write_and_verify_chunk(), Graphiti
+
 ### Community 43 - "Community 43"
-Cohesion: 0.67
-Nodes (3): 10.1 Rules, 10.2 Execution Model, 10. State & Execution Model
+Cohesion: 0.06
+Nodes (52): _extract_raw_token(), extract_raw_token_from_connection(), get_auth_service(), get_current_active_user(), get_current_user(), get_current_verified_user(), get_refresh_token_repository(), get_token_claims() (+44 more)
+
+### Community 44 - "Community 44"
+Cohesion: 0.16
+Nodes (9): build_search_filter_params(), DocumentRepository, Persistence and retrieval operations for unified documents/chunks., Repository for unified document lifecycle and retrieval., _vector_literal(), Any, AppResult, AsyncSession (+1 more)
+
+### Community 45 - "Community 45"
+Cohesion: 0.13
+Nodes (18): _infrastructure_failure(), make_apply_changes_node(), make_fetch_existing_node(), make_reconcile_node(), make_write_versions_node(), _parse_reconciliation_decision(), Reconciliation graph nodes for background entity deduplication and conflict reso, _read_llm_content() (+10 more)
+
+### Community 46 - "Community 46"
+Cohesion: 0.21
+Nodes (9): ImpersonateResponse, PaginatedData, RefreshTokenRepository, User, UserAdminRepository, UserAdminResponse, UserRole, _to_admin_response() (+1 more)
+
+### Community 47 - "Community 47"
+Cohesion: 0.08
+Nodes (32): AsyncDriver, AsyncIOMotorClient, AsyncIOMotorDatabase, Celery, close_crawl4ai_crawler(), get_crawl4ai_crawler(), Crawl4AI browser initialization and dependency injection., Close the Crawl4AI browser during lifespan shutdown. (+24 more)
+
+### Community 48 - "Community 48"
+Cohesion: 0.14
+Nodes (13): Database operations for the search feature., SearchRepository, Create or deduplicate a document, then enqueue chunk/embed work., _run_parallel_search(), SearchIngestRequest, SearchIngestResponse, SearchRepository, AsyncSession (+5 more)
+
+### Community 49 - "Community 49"
+Cohesion: 0.19
+Nodes (12): _build_bm25_statement(), _build_trigram_statement(), _build_vector_statement(), _rank_rows(), Persistence layer for search ingestion and retrieval., Bulk upsert chunk rows using the document/chunk unique key., Run weighted in-database RRF over canonical clauses., _vector_literal() (+4 more)
+
+### Community 50 - "Community 50"
+Cohesion: 0.19
+Nodes (12): _build_analysis_context(), dispatch_entity_extraction(), _extract_compliance_output(), _extract_risk_output(), Agent Saul node implementations and routing helpers., route_after_qna(), route_deep_research(), route_from_orchestrator() (+4 more)
+
+### Community 51 - "Community 51"
+Cohesion: 0.23
+Nodes (10): HybridSearchRequest, RagSearchRequest, RagSearchResponse, _build_cache_key(), _build_search_items(), Run BM25 and vector retrieval, fuse the results, and hydrate ranked chunks., Return ranked hits plus ordered context sections for RAG use., SearchResultItem (+2 more)
+
+### Community 52 - "Community 52"
+Cohesion: 0.24
+Nodes (10): build_chunk_rows(), Create row payloads for repository upsert calls., _batched(), process_ingestion_document(), Service layer for hybrid search and ingestion., Chunk, embed, and upsert search chunks for a document., Create a task-local async DB session and execute search ingestion., run_ingestion_task() (+2 more)
+
+### Community 53 - "Community 53"
+Cohesion: 0.29
+Nodes (6): CrawlResult, Result from crawling a URL., Shared crawler module., Search the web using Tavily.          Args:             request: Search request, SearchRequest, SearchResponse
+
+### Community 54 - "Community 54"
+Cohesion: 0.29
+Nodes (6): build_tool_registry(), ToolRegistry: all LangChain tools assembled once at lifespan startup.  build_too, Build all tools once.  Call at lifespan startup only., GraphitiService, IdempotencyGuard, AsyncEngine
+
+### Community 55 - "Community 55"
+Cohesion: 0.50
+Nodes (3): LegalAskRequest, LegalAskResponse, Run the clauses-backed retrieval graph and return a grounded answer.
+
+### Community 56 - "Community 56"
+Cohesion: 0.40
+Nodes (5): _batched(), _embed_chunks(), PreparedChunk, QualityWarning, T
+
+### Community 64 - "Community 64"
+Cohesion: 0.15
+Nodes (28): APIResponse, forgot_password(), get_me(), list_sessions(), login(), logout(), oauth_authorize(), oauth_callback() (+20 more)
+
+### Community 82 - "Community 82"
+Cohesion: 0.14
+Nodes (14): CrawlerConfig, get_crawler_config(), Crawler configuration and settings., Convert to Crawl4AI CrawlerRunConfig kwargs., Configuration for the web crawler., Get DefaultMarkdownGenerator with configured options and optional content filter, Get crawler configuration from settings., Get proxy configuration for Crawl4AI. (+6 more)
+
+### Community 88 - "Community 88"
+Cohesion: 0.33
+Nodes (5): Process a single crawl result with optional Gemini processing., Crawl a URL or URLs based on request.          Args:             request: Crawl, CrawlRequest, CrawlResponse, CrawlResultItem
+
+### Community 89 - "Community 89"
+Cohesion: 0.32
+Nodes (7): AsyncWebCrawler, create_crawl4ai_crawler(), get_crawler(), Create and start a Crawl4AI browser for lifespan management.      Uses full Craw, Get a WebCrawler domain service instance.      Creates a new WebCrawler with opt, Redis, WebCrawler
+
+### Community 90 - "Community 90"
+Cohesion: 0.13
+Nodes (14): 1. Current State Summary, 2. Missing Specs, 3. Environment Variables to Add, 4. Bug: Lifespan Singleton vs Per-Call Browser, 5. Priority Order, Crawl4AI Configuration Spec, SPEC-01: Content Noise Filtering, SPEC-02: Lifespan Crawler Config Parity (+6 more)
+
+### Community 91 - "Community 91"
+Cohesion: 0.14
+Nodes (12): Convert crawl4ai result to domain CrawlResult., Discover URLs for a domain via sitemap without full crawl., Check if URL points to a PDF., Build dispatcher with optional CrawlerMonitor., Recursively crawl internal links using native BFS deep crawl strategy., Web crawler using Crawl4AI with caching., Generate cache key for URL., Get cached crawl result. (+4 more)
 
 ## Knowledge Gaps
-- **171 isolated node(s):** `LogoutRequest`, `RefreshRequest`, `VerifyEmailRequest`, `ResendVerificationRequest`, `ForgotPasswordRequest` (+166 more)
+- **179 isolated node(s):** `AsyncSession`, `AsyncSession`, `SearchChunkRecord`, `UserAdminRepository`, `RefreshTokenRepository` (+174 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **2 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **3 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `CrawlResult` connect `Community 11` to `Community 0`?**
-  _High betweenness centrality (0.140) - this node is a cross-community bridge._
-- **Why does `SessionData` connect `Community 3` to `Community 0`?**
-  _High betweenness centrality (0.105) - this node is a cross-community bridge._
-- **Why does `Any` connect `Community 9` to `Community 2`, `Community 5`?**
-  _High betweenness centrality (0.078) - this node is a cross-community bridge._
-- **Are the 25 inferred relationships involving `Settings` (e.g. with `Any` and `ContextGrade`) actually correct?**
-  _`Settings` has 25 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 9 inferred relationships involving `UserRepository` (e.g. with `AuthService` and `LoginRequest`) actually correct?**
-  _`UserRepository` has 9 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 9 inferred relationships involving `RefreshTokenRepository` (e.g. with `AuthService` and `LoginRequest`) actually correct?**
-  _`RefreshTokenRepository` has 9 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `LogoutRequest`, `RefreshRequest`, `VerifyEmailRequest` to the rest of the system?**
-  _314 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Why does `CrawlResult` connect `Community 53` to `Community 0`, `Community 39`, `Community 11`, `Community 82`, `Community 88`, `Community 89`, `Community 91`?**
+  _High betweenness centrality (0.149) - this node is a cross-community bridge._
+- **Why does `Settings` connect `Community 39` to `Community 2`, `Community 3`, `Community 40`, `Community 10`, `Community 82`, `Community 53`, `Community 56`, `Community 91`?**
+  _High betweenness centrality (0.120) - this node is a cross-community bridge._
+- **Why does `SearchResponse` connect `Community 53` to `Community 48`, `Community 91`, `Community 51`?**
+  _High betweenness centrality (0.106) - this node is a cross-community bridge._
+- **Are the 27 inferred relationships involving `DocumentRepository` (e.g. with `ContextGrade` and `DocumentRepository`) actually correct?**
+  _`DocumentRepository` has 27 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 20 inferred relationships involving `SearchRepository` (e.g. with `HybridSearchRequest` and `LegalAskRequest`) actually correct?**
+  _`SearchRepository` has 20 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 22 inferred relationships involving `UserRepository` (e.g. with `AuthService` and `AuthService`) actually correct?**
+  _`UserRepository` has 22 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 16 inferred relationships involving `AuthService` (e.g. with `RefreshTokenRepository` and `SessionData`) actually correct?**
+  _`AuthService` has 16 INFERRED edges - model-reasoned connections that need verification._

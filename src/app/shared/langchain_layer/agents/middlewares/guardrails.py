@@ -236,7 +236,8 @@ class GuardrailMiddleware(BaseModel):
                     result.get("severity"),
                 )
                 if raise_on:
-                    raise ValueError(f"Guardrail violation: {result.get('reason')}")
+                    msg = f"Guardrail violation: {result.get('reason')}"
+                    raise ValueError(msg)
 
                 safe_response = AIMessage(content=fallback)
                 return response.override(

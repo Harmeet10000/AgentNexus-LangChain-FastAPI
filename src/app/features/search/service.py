@@ -12,7 +12,7 @@ from returns.result import Failure, Success
 from app.connections import celery_app, init_db
 from app.shared.langgraph_layer.retrieval_kb import GeneratedAnswer, build_retrieval_graph
 from app.shared.result import app_error_to_exception, log_expected_failure
-from app.utils import ServiceUnavailableException, logger
+from app.utils import logger
 from app.utils.json_serializer import to_sorted_key_bytes
 
 from .chunking import chunk_text
@@ -99,28 +99,27 @@ class SearchService:
                 log_expected_failure(error, operation="search_ingest")
                 raise app_error_to_exception(error)
 
-        try:
-            task = celery_app.send_task(
-                "tasks.search_ingest",
-                kwargs={
-                    "document_id": str(document.id),
-                    "content": canonical_content,
-                    "content_hash": content_hash,
-                    "title": payload.title,
-                    "source_uri": payload.source_uri,
-                    "doc_metadata": payload.doc_metadata,
-                },
-            )
-        except Exception as exc:
-            raise ServiceUnavailableException(
-                detail="Task queue unavailable",
-                data={"document_id": str(document.id)},
-            ) from exc
+        from app.shared.outbox import with_outbox  # noqa: PLC0415
 
-        logger.bind(document_id=str(document.id), task_id=task.id).info("search_ingest_queued")
+        await with_outbox(
+            session=self.repo.session,
+            aggregate_type="search_document",
+            aggregate_id=str(document.id),
+            event_type="tasks.search_ingest",
+            payload={
+                "document_id": str(document.id),
+                "content": canonical_content,
+                "content_hash": content_hash,
+                "title": payload.title,
+                "source_uri": payload.source_uri,
+                "doc_metadata": payload.doc_metadata,
+            },
+        )
+
+        logger.bind(document_id=str(document.id)).info("search_ingest_queued")
         return SearchIngestResponse(
             document_id=str(document.id),
-            task_id=task.id,
+            task_id=None,
             status="queued",
             duplicate=False,
         )

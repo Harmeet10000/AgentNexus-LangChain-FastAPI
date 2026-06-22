@@ -101,6 +101,7 @@ async def run_legal_extraction_batch(
 
     except Exception as e:
         logger.error("LangExtract batch failed", exc_info=True)
-        raise APIException("Batch extraction failed") from e
+        msg = "Batch extraction failed"
+        raise APIException(msg) from e
 
     return results

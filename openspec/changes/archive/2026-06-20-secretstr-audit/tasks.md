@@ -1,8 +1,8 @@
 ## 1. Audit str() Calls
 
-- [ ] 1.1 Extract `SECRET_FIELDS` list from `src/app/config/settings.py`
+- [x] 1.1 Extract `SECRET_FIELDS` list from `src/app/config/settings.py`
 - [ ] 1.2 Run `rg 'str\(settings\.' src/` and catalog matches against SECRET_FIELDS
-- [ ] 1.3 Run `rg 'str\(.*\)' src/ | grep -E 'token|key|secret|password|api'` for broader secret-related str() calls
+- [ ] 1.3 Run `rg 'str\(.*\)' src/ | grep -E 'token|key|secret|password|api'` for broader secret-related                                                                 calls
 - [ ] 1.4 Create a list of files and line numbers needing fix
 
 ## 2. Fix Each File

@@ -1,5 +1,6 @@
 """LangChain tool for web crawling."""
 
+import contextlib
 from typing import Any
 
 from langchain_core.tools import BaseTool
@@ -81,10 +82,8 @@ class CrawlUrlTool(BaseTool):
             processor = await get_processor()
             proc_schema_type = None
             if schema_type:
-                try:
+                with contextlib.suppress(ValueError):
                     proc_schema_type = ProcessorSchemaType(schema_type)
-                except ValueError:
-                    pass
 
             extraction = await processor.extract_structured(
                 content=markdown,

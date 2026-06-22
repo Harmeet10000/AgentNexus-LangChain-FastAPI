@@ -58,7 +58,8 @@ def _get_sdk_client() -> pageindex.PageIndexClient:
     """Cached SDK client (handles pooling internally)."""
     settings = get_settings()  # or get_settings()
     if not settings.PAGEINDEX_API_KEY.get_secret_value():
-        raise ValidationException("PAGEINDEX_API_KEY is required")
+        msg = "PAGEINDEX_API_KEY is required"
+        raise ValidationException(msg)
     return pageindex.PageIndexClient(api_key=settings.PAGEINDEX_API_KEY.get_secret_value())
 
 
@@ -78,7 +79,8 @@ class PageIndexClient:
             logger.info("document_submitted", doc_id=doc_id)
         except Exception as exc:
             logger.exception("submit_failed")
-            raise ExternalServiceException("PageIndex", "submit failed") from exc
+            msg = "PageIndex"
+            raise ExternalServiceException(msg, "submit failed") from exc
         else:
             return doc_id
 

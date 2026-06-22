@@ -1,6 +1,6 @@
 """Rate limiting using fastapi-limiter and Redis."""
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel
 from redis.asyncio import Redis
@@ -8,7 +8,7 @@ from redis.asyncio import Redis
 from app.config import get_settings
 
 
-class RateLimitScope(str, Enum):
+class RateLimitScope(StrEnum):
     """Rate limit scope types."""
 
     CRAWL = "crawl"

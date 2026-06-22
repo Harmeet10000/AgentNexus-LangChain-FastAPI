@@ -13,7 +13,6 @@ from app.utils import (
     UnauthorizedException,
     logger,
 )
-from tasks.auth_email_tasks import send_password_reset_email, send_verification_email
 
 from .dto import (
     LoginRequest,
@@ -68,7 +67,8 @@ class AuthService:
     async def register(self, dto: RegisterRequest) -> UserResponse:
         match await self._user_repo.email_exists(dto.email):
             case Success(exists) if exists:
-                raise ConflictException("Email already registered")
+                msg = "Email already registered"
+                raise ConflictException(msg)
             case Success():
                 pass
             case Failure(error):
@@ -108,16 +108,20 @@ class AuthService:
                 resolved = found
             case _:
                 verify_password(_DUMMY_HASH, dto.password)
-                raise UnauthorizedException("Invalid credentials")
+                msg = "Invalid credentials"
+                raise UnauthorizedException(msg)
 
         if not verify_password(resolved.hashed_password, dto.password):
-            raise UnauthorizedException("Invalid credentials")
+            msg = "Invalid credentials"
+            raise UnauthorizedException(msg)
 
         if not resolved.is_active:
-            raise UnauthorizedException("Account is disabled")
+            msg = "Account is disabled"
+            raise UnauthorizedException(msg)
 
         if not resolved.is_verified:
-            raise UnauthorizedException("Email not verified. Check your inbox.")
+            msg = "Email not verified. Check your inbox."
+            raise UnauthorizedException(msg)
 
         # Transparent rehash: argon2 params may have been upgraded since this hash was created
         if needs_rehash(resolved.hashed_password):
@@ -139,7 +143,8 @@ class AuthService:
     async def logout(self, refresh_token: str) -> None:
         claims = decode_token(refresh_token)
         if claims.token_type != "refresh":
-            raise UnauthorizedException("Not a refresh token")
+            msg = "Not a refresh token"
+            raise UnauthorizedException(msg)
         match await self._token_repo.revoke_session(
             session_id=claims.jti,
             user_id=claims.sub,
@@ -155,26 +160,31 @@ class AuthService:
     async def refresh(self, refresh_token: str) -> TokenResponse:
         claims = decode_token(refresh_token)
         if claims.token_type != "refresh":
-            raise UnauthorizedException("Not a refresh token")
+            msg = "Not a refresh token"
+            raise UnauthorizedException(msg)
 
         # Redis lookup is the revocation gate — if the session was deleted, deny
         match await self._token_repo.get_session(claims.jti):
             case Success(session) if session is not None:
                 pass  # session is valid
             case _:
-                raise UnauthorizedException("Session expired or revoked")
+                msg = "Session expired or revoked"
+                raise UnauthorizedException(msg)
 
         match await self._user_repo.find_by_id(claims.sub):
             case Success(user) if user is not None:
                 resolved_user = user
             case Success():
-                raise UnauthorizedException("User not found or disabled")
+                msg = "User not found or disabled"
+                raise UnauthorizedException(msg)
             case Failure(error):
                 log_expected_failure(error, operation="refresh_user_lookup")
-                raise UnauthorizedException("Invalid token subject")
+                msg = "Invalid token subject"
+                raise UnauthorizedException(msg)
 
         if not resolved_user.is_active:
-            raise UnauthorizedException("User not found or disabled")
+            msg = "User not found or disabled"
+            raise UnauthorizedException(msg)
 
         access_token, expires_in = create_access_token(
             user_id=str(resolved_user.id),
@@ -194,7 +204,8 @@ class AuthService:
             case Success(found) if found is not None:
                 resolved = found
             case _:
-                raise NotFoundException("Invalid or expired verification token")
+                msg = "Invalid or expired verification token"
+                raise NotFoundException(msg)
         resolved.is_verified = True
         resolved.verification_token_hash = None
         match await self._user_repo.save(resolved):
@@ -213,7 +224,8 @@ class AuthService:
                 return  # silent — don't reveal email existence
 
         if resolved.is_verified:
-            raise ConflictException("Email already verified")
+            msg = "Email already verified"
+            raise ConflictException(msg)
 
         new_token = generate_token()
         resolved.verification_token_hash = hash_token(new_token)
@@ -224,11 +236,24 @@ class AuthService:
                 log_expected_failure(error, operation="save_user")
                 raise app_error_to_exception(error)
 
-        send_verification_email.delay(
-            user_id=str(resolved.id),
-            email=resolved.email,
-            token=new_token,
-        )
+        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: PLC0415
+
+        from app.connections.postgres import get_database_url  # noqa: PLC0415
+        from app.shared.outbox import with_outbox  # noqa: PLC0415
+
+        _engine = create_async_engine(get_database_url())
+        try:
+            async with _engine.begin() as _conn:
+                _session = AsyncSession(bind=_conn)
+                await with_outbox(
+                    session=_session,
+                    aggregate_type="auth_email",
+                    aggregate_id=str(resolved.id),
+                    event_type="auth.send_verification_email",
+                    payload={"user_id": str(resolved.id), "email": resolved.email, "token": new_token},
+                )
+        finally:
+            await _engine.dispose()
 
     async def forgot_password(self, email: str) -> None:
         match await self._user_repo.find_by_email(email):
@@ -249,24 +274,39 @@ class AuthService:
             case Failure(error):
                 log_expected_failure(error, operation="save_user")
                 raise app_error_to_exception(error)
-        send_password_reset_email.delay(
-            user_id=str(resolved.id),
-            email=resolved.email,
-            token=reset_token,
-        )
+        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: PLC0415
+
+        from app.connections.postgres import get_database_url  # noqa: PLC0415
+        from app.shared.outbox import with_outbox  # noqa: PLC0415
+
+        _engine = create_async_engine(get_database_url())
+        try:
+            async with _engine.begin() as _conn:
+                _session = AsyncSession(bind=_conn)
+                await with_outbox(
+                    session=_session,
+                    aggregate_type="auth_email",
+                    aggregate_id=str(resolved.id),
+                    event_type="auth.send_password_reset_email",
+                    payload={"user_id": str(resolved.id), "email": resolved.email, "token": reset_token},
+                )
+        finally:
+            await _engine.dispose()
 
     async def reset_password(self, token: str, new_password: str) -> None:
         match await self._user_repo.find_by_reset_token_hash(hash_token(token)):
             case Success(found) if found is not None:
                 resolved = found
             case _:
-                raise NotFoundException("Invalid or expired reset token")
+                msg = "Invalid or expired reset token"
+                raise NotFoundException(msg)
 
         if (
             resolved.reset_token_expires_at is None
             or resolved.reset_token_expires_at < datetime.now(UTC)
         ):
-            raise UnauthorizedException("Reset token has expired")
+            msg = "Reset token has expired"
+            raise UnauthorizedException(msg)
 
         resolved.hashed_password = hash_password(new_password)
         resolved.reset_token_hash = None
@@ -316,7 +356,8 @@ class AuthService:
         user_agent: str | None = None,
     ) -> TokenResponse:
         if not verify_oauth_state(signed_state, state, provider):
-            raise UnauthorizedException("Invalid OAuth state — possible CSRF attack")
+            msg = "Invalid OAuth state — possible CSRF attack"
+            raise UnauthorizedException(msg)
 
         config = get_oauth_config(provider)
         userinfo = await fetch_oauth_userinfo(provider, config, code)
@@ -335,7 +376,8 @@ class AuthService:
                 raise app_error_to_exception(error)
 
         if not resolved_user.is_active:
-            raise UnauthorizedException("Account is disabled")
+            msg = "Account is disabled"
+            raise UnauthorizedException(msg)
 
         logger.bind(user_id=str(resolved_user.id), provider=provider, created=was_created).info(
             "OAuth login"
@@ -364,7 +406,8 @@ class AuthService:
             case Failure(error):
                 log_expected_failure(error, operation="get_user_sessions")
                 raise app_error_to_exception(error)
-        raise AssertionError("unreachable")  # AppResult is Success | Failure
+        msg = "unreachable"
+        raise AssertionError(msg)  # AppResult is Success | Failure
 
     async def revoke_session(
         self,
@@ -375,9 +418,11 @@ class AuthService:
             case Success(session) if session is not None:
                 resolved_session = session
             case _:
-                raise NotFoundException("Session not found")
+                msg = "Session not found"
+                raise NotFoundException(msg)
         if resolved_session.user_id != user_id:
-            raise UnauthorizedException("Cannot revoke another user's session")
+            msg = "Cannot revoke another user's session"
+            raise UnauthorizedException(msg)
         match await self._token_repo.revoke_session(
             session_id=session_id,
             user_id=user_id,

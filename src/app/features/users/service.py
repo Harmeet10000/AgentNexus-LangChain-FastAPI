@@ -86,7 +86,8 @@ class UserAdminService:
         requesting_admin_id: str,
     ) -> UserAdminResponse:
         if user_id == requesting_admin_id:
-            raise ConflictException("Admins cannot update their own role")
+            msg = "Admins cannot update their own role"
+            raise ConflictException(msg)
         user = await self._get_user_or_raise(user_id)
         user = await self._user_repo.update_role(user, new_role)
         logger.bind(
@@ -104,7 +105,8 @@ class UserAdminService:
         requesting_admin_id: str,
     ) -> UserAdminResponse:
         if user_id == requesting_admin_id:
-            raise ConflictException("Admins cannot deactivate themselves")
+            msg = "Admins cannot deactivate themselves"
+            raise ConflictException(msg)
         user = await self._get_user_or_raise(user_id)
         user = await self._user_repo.set_active(user, is_active=is_active)
         if not is_active:
@@ -126,7 +128,8 @@ class UserAdminService:
         requesting_admin_id: str,
     ) -> None:
         if user_id == requesting_admin_id:
-            raise ConflictException("Admins cannot delete themselves")
+            msg = "Admins cannot delete themselves"
+            raise ConflictException(msg)
         user = await self._get_user_or_raise(user_id)
         # Revoke sessions before deletion so Redis doesn't hold orphaned keys
         await self._token_repo.revoke_all_user_sessions(
@@ -142,10 +145,12 @@ class UserAdminService:
         admin_user_id: str,
     ) -> ImpersonateResponse:
         if target_user_id == admin_user_id:
-            raise ForbiddenException("Cannot impersonate yourself")
+            msg = "Cannot impersonate yourself"
+            raise ForbiddenException(msg)
         user = await self._get_user_or_raise(target_user_id)
         if not user.is_active:
-            raise ForbiddenException("Cannot impersonate a disabled account")
+            msg = "Cannot impersonate a disabled account"
+            raise ForbiddenException(msg)
 
         access_token, expires_in = create_impersonation_token(
             target_user_id=str(user.id),
