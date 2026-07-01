@@ -38,7 +38,7 @@ from app.shared.langgraph_layer.retrieval_kb import (
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.result import app_error_to_exception, log_expected_failure
 from app.shared.services.storage import StorageService, build_s3_key, key_from_s3_uri
-from app.utils import NotFoundException, ValidationException, logger
+from app.utils import NotFoundException, ServiceUnavailableException, ValidationException, logger
 from app.utils.embedding import normalize_embedding
 from app.utils.json_serializer import from_json_float_list, to_float_list_str, to_sorted_key_bytes
 
@@ -101,7 +101,7 @@ class DocumentCommandService:
     def __init__(
         self,
         repo: DocumentRepository,
-        object_store: StorageService,
+        object_store: StorageService | None,
     ):
         self.repo = repo
         self.object_store = object_store
@@ -139,6 +139,8 @@ class DocumentCommandService:
             content_hash=content_hash,
             filename=filename,
         )
+        if self.object_store is None:
+            raise ServiceUnavailableException(detail="Object storage is not configured")
         object_uri = await self.object_store.put_object(
             key=object_key,
             data=raw_bytes,
@@ -808,8 +810,7 @@ async def _cached_embedding(
     if redis is not None:
         cached = await redis.get(cache_key)
         if cached:
-            raw = cached.decode("utf-8") if isinstance(cached, bytes) else str(cached)
-            return from_json_float_list(raw)
+            return from_json_float_list(str(cached))
     embedding = await retry_immediate(
         lambda: embedding_fn.aembed_query(text_to_embed, task_type="RETRIEVAL_QUERY"),
         label="documents_query_embedding",
@@ -900,9 +901,7 @@ def _batched[T](values: Sequence[T], batch_size: int) -> list[Sequence[T]]:
     return [values[index : index + batch_size] for index in range(0, len(values), batch_size)]
 
 
-def _flatten_warnings(raw_groups: object) -> list[QualityWarningDTO]:
-    if not isinstance(raw_groups, list):
-        return []
+def _flatten_warnings(raw_groups: list) -> list[QualityWarningDTO]:  # ponytail: SQL results are untyped dicts
     warnings: list[QualityWarningDTO] = []
     for group in raw_groups:
         if isinstance(group, list):

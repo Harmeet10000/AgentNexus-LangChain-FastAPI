@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
 from app.config import get_settings
-from app.connections import get_mongodb, get_redis
+from app.connections.mongodb import get_mongodb
+from app.connections.redis import get_redis
 from app.utils import APIResponse, UnauthorizedException, ValidationException, http_response
 from app.utils.rate_limit.dependencies import get_rate_limiter
 

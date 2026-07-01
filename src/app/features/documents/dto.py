@@ -1,15 +1,10 @@
 """DTOs for unified document ingestion and retrieval."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.features.search.constants import DEFAULT_PAGE_SIZE, DEFAULT_RAG_TOKEN_BUDGET, MAX_PAGE_SIZE
-
-if TYPE_CHECKING:
-    from typing import Literal
 
 _STRICT_CONFIG = ConfigDict(extra="forbid")
 _READ_MODEL_CONFIG = ConfigDict(extra="forbid", frozen=True, from_attributes=True)

@@ -11,6 +11,7 @@ from app.shared.services.tavily import (
     SearchResponse,
     SearchResult,
     get_context,
+    get_tavily_client,
     search,
 )
 
@@ -23,6 +24,7 @@ __all__ = [
     "SearchResult",
     "get_context",
     "get_rate_limiter",
+    "get_tavily_client",
     "search",
     "send_template",
 ]

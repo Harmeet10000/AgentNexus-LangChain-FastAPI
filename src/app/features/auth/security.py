@@ -7,9 +7,12 @@ from uuid import uuid4
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from authlib.integrations.httpx_client import AsyncOAuth2Client
-from authlib.jose import jwt
-from authlib.jose.errors import ExpiredTokenError, JoseError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from joserfc._rfc7518.oct_key import OctKey
+from joserfc.errors import ExpiredTokenError, JoseError
+from joserfc.jwt import JWTClaimsRegistry
+from joserfc.jwt import decode as jwt_decode
+from joserfc.jwt import encode as jwt_encode
 from pydantic import BaseModel, ConfigDict
 
 from app.config import get_settings
@@ -81,6 +84,11 @@ def _jwt_key() -> bytes:
     return get_settings().JWT_SECRET_KEY.get_secret_value().encode()
 
 
+def _jwt_oct_key() -> OctKey:
+    k = _jwt_key()
+    return OctKey(k, k)
+
+
 def create_access_token(
     user_id: str,
     session_id: str,
@@ -105,8 +113,8 @@ def create_access_token(
         "permissions": [p.value for p in permissions],
         "type": "access",
     }
-    token: bytes = jwt.encode(_JWT_HEADER, claims, _jwt_key())
-    return token.decode("utf-8"), expire_secs
+    token = jwt_encode(_JWT_HEADER, claims, _jwt_oct_key())
+    return token, expire_secs
 
 
 def create_refresh_token(
@@ -130,8 +138,8 @@ def create_refresh_token(
         "device_id": device_id,
         "type": "refresh",
     }
-    token: bytes = jwt.encode(_JWT_HEADER, claims, _jwt_key())
-    return token.decode("utf-8"), expire_secs
+    token = jwt_encode(_JWT_HEADER, claims, _jwt_oct_key())
+    return token, expire_secs
 
 
 def create_impersonation_token(
@@ -162,15 +170,15 @@ def create_impersonation_token(
         "type": "access",
         "impersonated_by": admin_user_id,
     }
-    token: bytes = jwt.encode(_JWT_HEADER, claims, _jwt_key())
-    return token.decode("utf-8"), expire_secs
+    token = jwt_encode(_JWT_HEADER, claims, _jwt_oct_key())
+    return token, expire_secs
 
 
 def decode_token(token: str) -> TokenClaims:
     """Decode and validate a JWT. Raises UnauthorizedException on any failure."""
     try:
-        claims = jwt.decode(token.encode("utf-8"), _jwt_key())
-        claims.validate()
+        token_obj = jwt_decode(token, _jwt_oct_key())
+        JWTClaimsRegistry().validate(token_obj.claims)
     except ExpiredTokenError as exc:
         msg = "Token has expired"
         raise UnauthorizedException(msg) from exc
@@ -179,14 +187,14 @@ def decode_token(token: str) -> TokenClaims:
         raise UnauthorizedException(msg) from exc
 
     return TokenClaims(
-        sub=claims["sub"],
-        jti=claims["jti"],
-        sid=claims.get("sid"),
-        role=claims.get("role", UserRole.USER.value),
-        permissions=claims.get("permissions", []),
-        token_type=claims.get("type", "access"),
-        device_id=claims.get("device_id"),
-        impersonated_by=claims.get("impersonated_by"),  # ← new
+        sub=token_obj.claims["sub"],
+        jti=token_obj.claims["jti"],
+        sid=token_obj.claims.get("sid"),
+        role=token_obj.claims.get("role", UserRole.USER.value),
+        permissions=token_obj.claims.get("permissions", []),
+        token_type=token_obj.claims.get("type", "access"),
+        device_id=token_obj.claims.get("device_id"),
+        impersonated_by=token_obj.claims.get("impersonated_by"),  # ← new
     )
 
 

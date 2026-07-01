@@ -190,6 +190,19 @@ When sub-agents return results, they're raw strings. There's no typed contract f
 199. ANN001/002/003/204 ignored globally  understandable for AI-heavy code but weakens type safety PLR0913 (too-many-arguments) ignored  some service methods have 8+ params; consider context objects DocumentQueryService.__init__ uses object | None for redis/graphiti  should be Redis | None and Graphiti | None Some TYPE_CHECKING blocks are verbose; PEP 695 generics would clean up (type Alias[T] = ...)     DONE
 197. The codebase has a `_result` dual-method pattern in repositories (Success/Failure). A service method calls `find_by_email_result(...)` and gets a `Failure`. What should it do next?
 The project uses `combine_lifespans(...)` to merge the FastMCP lifespan with the existing FastAPI lifespan. Why can't you just call `app.add_lifespan_handler(fastmcp_lifespan)` instead?  DONE
+203. split MCP from main app/ and then write it using the skill    DONE
+198.  
+1. HYBRID SEARCH CACHING RACE CONDITION                            
+In DocumentQueryService.search(): cache check  embed          search  cache set. Two concurrent requests for same query      both miss cache, both embed, both search. Fix: use              `redis.setnx` with short TTL as "computing" lock, or            `async-cache-dedupe` (already in tier-2 observability plan). 
+2. GRAPHITI INITIALIZATION ORDER                                    
+lifespan.py: Graphiti setup AFTER Cognee, but Graphiti          needs Neo4j indices. If Neo4j driver fails, Graphiti setup      crashes but TaskGroup already succeeded (PG/Mongo/Redis         ok). App starts in degraded state silently. Add **health**          check endpoint that verifies all clients.                    
+3. EMBEDDING DIMENSION HARDCODING                                   
+_normalize_embedding() assumes 768-dim (Gemini). If you g switch models, this silently truncates/pads. Make it            configurable via settings or derive from embedding client.   
+4. CELERY TASK DEFINITIONS SCATTERED                                
+Tasks in `src/tasks/*.py` but invoked via string names          (`"tasks.documents_ingest"`). No type safety, no IDE            support. Consider `@celery_app.task` decorators in same         module or a task registry with typed signatures.             
+5. MIDDLEWARE ORDER SUBTLE BUG                                      
+main.py: CORS (Guard)  GZip  Security  Metrics  Logging    But Guard's CORS helper adds middleware *internally*.           If SecurityMiddleware also adds CORS headers, they conflict.    Verify with `curl -H "Origin: x" -v`  check for duplicate      `Access-Control-Allow-    DONE
+200. need a new superpower/brainstorming skill with openspec, graphify, ast-grep, ponytail, firecrawl, with proper git workflows, and stop using grep and older tools  make it using create skill   DONE
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses     DELAYED    
@@ -263,20 +276,15 @@ def compose(*functions: Composable) -> Composable:
 195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
 196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node 
 
-198.  
-1. HYBRID SEARCH CACHING RACE CONDITION                            
-In DocumentQueryService.search(): cache check  embed          search  cache set. Two concurrent requests for same query      both miss cache, both embed, both search. Fix: use              `redis.setnx` with short TTL as "computing" lock, or            `async-cache-dedupe` (already in tier-2 observability plan). 
-2. GRAPHITI INITIALIZATION ORDER                                    
-lifespan.py: Graphiti setup AFTER Cognee, but Graphiti          needs Neo4j indices. If Neo4j driver fails, Graphiti setup      crashes but TaskGroup already succeeded (PG/Mongo/Redis         ok). App starts in degraded state silently. Add **health**          check endpoint that verifies all clients.                    
-3. EMBEDDING DIMENSION HARDCODING                                   
-_normalize_embedding() assumes 768-dim (Gemini). If you g switch models, this silently truncates/pads. Make it            configurable via settings or derive from embedding client.   
-4. CELERY TASK DEFINITIONS SCATTERED                                
-Tasks in `src/tasks/*.py` but invoked via string names          (`"tasks.documents_ingest"`). No type safety, no IDE            support. Consider `@celery_app.task` decorators in same         module or a task registry with typed signatures.             
-5. MIDDLEWARE ORDER SUBTLE BUG                                      
-main.py: CORS (Guard)  GZip  Security  Metrics  Logging    But Guard's CORS helper adds middleware *internally*.           If SecurityMiddleware also adds CORS headers, they conflict.    Verify with `curl -H "Origin: x" -v`  check for duplicate      `Access-Control-Allow-    DONE
 
-200. need a new superpower/brainstorming skill with openspec, graphify, ast-grep, poytail, firecrawl, with proper git workflows, and stop using grep and older tools  make it using create skill
-203. split MCP from main app/ and then write it using the skill
+204. /home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/auth/security.py:10: AuthlibDeprecationWarning: authlib.jose module is deprecated, please use joserfc instead.
+It will be compatible before version 2.0.0.
+ [info     ] Database storage: /home/harmeet/Desktop/Projects/langchain-fastapi-production/.venv/lib/python3.12/site-packages/cognee/.cognee_system/databases [cognee.shared.logging_utils]
+/home/harmeet/Desktop/Projects/langchain-fastapi-production/.venv/lib/python3.12/site-packages/cognee/exceptions/exceptions.py:52: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  class CogneeValidationError(CogneeApiError):
+ [warning  ] Cognee 1.0 changes: New API — remember/recall/forget/improve (V1 add/cognify/search still work). Session memory enabled by default (CACHING=false to disable). Multi-user access control on by default (ENABLE_BACKEND_ACCESS_CONTROL=false to disable). Agents (@cognee.agent) auto-verified on registration. See https://docs.cognee.ai/ [cognee.shared.logging_utils]
+205. what is PYCODE and other frequently used in python projects, dockerfiles, uv and other places
+206. customise openspec and learn in depth about pattern matching
 ```
 
 summarise these chapters in great detail and take video's transcript as reference for summarising
@@ -299,6 +307,34 @@ c hoose to build this thing? How has it benefited them? Are they still working o
 
 
 bit packing, texture atlasting, delta encoding, deduplication
+
+Google's Open Knowledge Format (OKF). She explains how this standardized structure allows AI agents to efficiently process her notes, research, and workflows to automate complex tasks.
+
+0:00 - 5:00: Introduction to OKF and Standardized Structure
+Marie introduces the concept of the OKF, which acts as a structured repository of information that any AI agent can interpret. She emphasizes that while the concept of organizing files in markdown for AI isn't new, Google's OKF provides a standardized framework that makes data interoperable. Key elements discussed include:
+
+YAML front matter: The mandatory metadata at the top of markdown files that tells an agent what the content represents (type, title, description, and tags).
+The Goal: Moving beyond simple RAG (Retrieval-Augmented Generation) to a structured knowledge graph where agents can logically navigate between concepts, playbooks, and references.
+The Structure: Her system uses specific types: Concepts, Playbooks, References, and Systems to categorize information effectively.
+5:00 - 10:00: OKF in Practice and AI Productivity
+In this segment, Marie demonstrates how her brain functions. Unlike traditional RAG, which might dump vast amounts of data into a context window, the OKF allows her agent to browse a directory to retrieve specific, relevant information.
+
+Playbooks: She highlights the power of "playbooks," which are sets of instructions that automate specific tasks, such as generating client proposals or analyzing Google search updates.
+Productivity: Marie argues that AI will not replace jobs but will instead augment human productivity. By offloading the need to remember every detail to her AI-managed brain, she becomes significantly more efficient in her professional SEO work.
+10:00 - 15:00: Knowledge Graphs and Ingesting Information
+Marie dives into the visual side of her brain, showing a "knowledge graph" where nodes represent interconnected markdown files.
+
+Documentation: She stores official Google SEO documentation as References within her system, allowing her to cite accurate sources instantly when generating reports.
+Visualizing connections: She explains how the agent identifies relationships between topics (e.g., AI overviews linking to historical SGE data).
+The Agent Workflow: She demonstrates the process of "ingesting" new information—such as a new Google search feature—into her OKF, where the agent proposes a plan to categorize and integrate the new data into existing topics.
+15:00 - 20:00: Approving Updates and Querying the Brain
+Marie provides a live demonstration of her agent’s workflow:
+
+Human-in-the-loop: Before the brain makes updates, it presents a plan for her to approve or modify.
+Automated Curation: The agent successfully updates multiple related files and creates new concepts based on the provided documentation.
+Querying: She demonstrates asking the brain to summarize complex information (like new AI controls in Search Console) into a format suitable for a client report. The system efficiently pulls data from the specific files it created, showcasing the speed and accuracy of the OKF approach.
+
+
 
 <!-- memory usage of FastAPI app -->
 "memoryUsage": {

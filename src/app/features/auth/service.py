@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -14,9 +16,6 @@ from app.utils import (
     UnauthorizedException,
     logger,
 )
-
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .dto import (
     LoginRequest,

@@ -38,4 +38,4 @@ class RedisProtocolAdapter:
 
     async def keys(self, pattern: str) -> list[str] | None:
         keys = await self._redis.keys(f"{self.config.redis_prefix}{pattern}")
-        return [key.decode() if isinstance(key, bytes) else str(key) for key in keys]
+        return [str(key) for key in keys]

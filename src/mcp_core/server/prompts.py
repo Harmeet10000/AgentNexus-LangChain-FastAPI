@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.config import get_settings
-from mcp_core.server.tools import _tool_catalog
 
 if TYPE_CHECKING:
     from typing import Any
@@ -13,6 +12,8 @@ def register_prompts(server: Any) -> None:
     @server.prompt()
     async def explain_system() -> str:
         """Describe the application architecture and available MCP surface."""
+        from mcp_core.server.tools import _tool_catalog
+
         settings = get_settings()
         catalog = _tool_catalog()
         lines = [

@@ -17,9 +17,14 @@ Dependency injection:
 
 """
 
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from app.utils import logger
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 
 async def setup_langgraph_checkpointer(conn_string: str) -> AsyncPostgresSaver:
@@ -38,6 +43,8 @@ async def setup_langgraph_checkpointer(conn_string: str) -> AsyncPostgresSaver:
     Raises:
         Exception: If connection string is invalid or database is unreachable.
     """
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
     logger.info("Initializing LangGraph async checkpointer")
 
     try:

@@ -34,7 +34,6 @@ from app.shared.rag.document_processing.entity_extractor import (
     extract_with_fallback,
     extract_with_graphiti,
 )
-from app.shared.rag.document_processing.ingest import DocumentIngestionPipeline
 from app.shared.rag.document_processing.models import (
     AgentContext,
     AgentDependencies,
@@ -60,7 +59,6 @@ __all__ = [
     "DoclingEnhancementConfig",
     "DoclingExtractionResult",
     "Document",
-    "DocumentIngestionPipeline",
     "DocumentMetadata",
     "Entity",
     "ExtractedCodeBlock",

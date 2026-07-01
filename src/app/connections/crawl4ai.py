@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig
 from fastapi.requests import HTTPConnection
 
+from app.shared.crawler import get_crawler_config
+
 if TYPE_CHECKING:
     from redis.asyncio import Redis
 
     from app.shared.crawler import WebCrawler
+    from app.shared.crawler.config import CrawlerConfig
 
 
 async def create_crawl4ai_crawler() -> AsyncWebCrawler:
@@ -21,9 +25,8 @@ async def create_crawl4ai_crawler() -> AsyncWebCrawler:
     Raises:
         Exception: Propagates any browser-launch error to lifespan caller.
     """
-    from app.shared.crawler import get_crawler_config  # noqa: PLC0415
 
-    config = get_crawler_config()
+    config: CrawlerConfig = get_crawler_config()
     crawler = AsyncWebCrawler(
         config=BrowserConfig(**config.to_browser_config()),
     )
@@ -34,7 +37,8 @@ async def create_crawl4ai_crawler() -> AsyncWebCrawler:
 async def close_crawl4ai_crawler(crawler: AsyncWebCrawler | None) -> None:
     """Close the Crawl4AI browser during lifespan shutdown."""
     if crawler is not None:
-        await crawler.close()
+        with suppress(RuntimeError):
+            await crawler.close()
 
 
 def get_crawl4ai_crawler(connection: HTTPConnection) -> AsyncWebCrawler | None:

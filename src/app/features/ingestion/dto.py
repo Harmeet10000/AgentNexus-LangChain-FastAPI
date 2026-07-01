@@ -11,9 +11,6 @@ Flow:
   agent_saul's ingestion_node does a simple SELECT raw_text WHERE doc_id=X.
 """
 
-from __future__ import annotations
-
-# === dto.py content ===
 from pydantic import BaseModel
 
 

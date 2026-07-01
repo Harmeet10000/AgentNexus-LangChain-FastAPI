@@ -108,7 +108,7 @@ def deserialize_data(value: str | bytes) -> Any:
         DatabaseException: If deserialization fails
     """
     try:
-        return from_json(value) if isinstance(value, (str, bytes)) else value
+        return from_json(value) if isinstance(value, str) else value
     except Exception as exc:
         raise _build_database_exception(
             detail=f"Failed to deserialize data: {exc!s}",

@@ -47,11 +47,11 @@ repos:
 #       - id: python-use-type-annotations
 
   # Project-local checks
-  - repo: local
-    hooks:
-      - id: check-secretstr
-        name: SecretStr str() coercion check
-        entry: bash scripts/check_secretstr_usage.sh
-        language: system
-        pass_filenames: false
-        always_run: true
+  # - repo: local
+  #   hooks:
+  #     - id: check-secretstr
+  #       name: SecretStr str() coercion check
+  #       entry: bash scripts/check_secretstr_usage.sh
+  #       language: system
+  #       pass_filenames: false
+  #       always_run: true

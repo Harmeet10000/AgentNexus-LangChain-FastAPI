@@ -108,3 +108,7 @@ class CrawlUrlTool(BaseTool):
         await crawler.close()
 
         return "\n\n".join(parts)
+
+
+def get_crawl_url_tool() -> CrawlUrlTool:
+    return CrawlUrlTool()

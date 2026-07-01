@@ -31,6 +31,7 @@ from .cache import (
     update_hash,
     update_list_item,
 )
+from .embedding import normalize_embedding
 from .exceptions import (
     APIException,
     ConflictException,
@@ -80,6 +81,7 @@ __all__ = [
     "http_error",
     "http_response",
     "logger",
+    "normalize_embedding",
     "request_state",
     "to_float_list_bytes",
     "to_float_list_str",

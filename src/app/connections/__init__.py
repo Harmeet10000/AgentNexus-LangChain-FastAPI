@@ -1,5 +1,6 @@
 """Database connection dependencies."""
 
+from .redis import create_redis_client, get_redis
 from .celery import ResilientTask, celery_app, create_celery_app
 from .celery_reliability import (
     CircuitBreakerOpenError,
@@ -42,7 +43,6 @@ from .neo4j import (
     init_neo4j,
 )
 from .postgres import get_postgres_db, init_db
-from .redis import create_redis_client, get_redis
 from .tavily import (
     close_tavily_http_client,
     create_tavily_http_client,

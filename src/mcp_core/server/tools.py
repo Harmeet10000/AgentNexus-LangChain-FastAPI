@@ -11,7 +11,7 @@ from app.utils import NotFoundException, logger
 from mcp_core.client.manager import get_mcp_client_manager
 from mcp_core.common.metrics import observe_mcp_tool_invocation
 from mcp_core.common.models import MCPToolCatalogEntry, MCPToolResponse
-from mcp_core.server.factory import _server_name
+# ponytail: local import in _invoke_tool_with_timeout to break 3-way cycle
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -209,6 +209,8 @@ def _register_tools(server: Any) -> None:
 
         @server.tool(annotations={"readOnlyHint": True})
         async def get_server_metadata() -> dict[str, Any]:
+            from mcp_core.server.factory import _server_name
+
             async def _handler() -> dict[str, Any]:
                 return _ok(
                     {

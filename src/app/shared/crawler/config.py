@@ -82,7 +82,6 @@ class CrawlerConfig(BaseModel):
         """Convert to Crawl4AI BrowserConfig kwargs."""
         config: dict[str, Any] = {
             "headless": self.headless,
-            "timeout": self.timeout,
             "viewport_width": self.viewport_width,
             "viewport_height": self.viewport_height,
             "extra_args": [

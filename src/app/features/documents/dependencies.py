@@ -34,9 +34,11 @@ async def get_document_command_service(
     repo: Annotated[DocumentRepository, Depends(get_document_repository)],
     request: Request,
 ) -> DocumentCommandService:
-    object_store = getattr(request.app.state, "object_store", None)
+    object_store: StorageService | None = getattr(request.app.state, "object_store", None)
     if object_store is None:
-        object_store = StorageService.from_settings(settings=get_settings())
+        settings = get_settings()
+        if settings.S3_BUCKET_NAME:
+            object_store = StorageService.from_settings(settings=settings)
     return DocumentCommandService(repo=repo, object_store=object_store)
 
 

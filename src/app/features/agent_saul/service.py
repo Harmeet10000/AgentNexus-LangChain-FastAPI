@@ -197,7 +197,7 @@ class AgentSaulService:
         event: object,
         current_step: int,
     ) -> WSOutbound | None:
-        if not isinstance(event, dict):
+        if not isinstance(event, dict):  # ponytail: LangGraph events are untyped objects
             return None
 
         event_data = cast("dict[str, Any]", event)

@@ -5,6 +5,7 @@ Document embedding generation for vector search using Gemini.
 import asyncio
 import hashlib
 from datetime import datetime
+from collections.abc import Callable
 from typing import Any
 
 from google import genai
@@ -182,7 +183,7 @@ async def embed_chunks(
     chunks: list[Chunk],
     model: str = GEMINI_EMBEDDING_MODEL,
     batch_size: int = 100,
-    progress_callback: None | callable = None,
+    progress_callback: Callable[..., None] | None = None,
 ) -> list[Chunk]:
     """
     Generate embeddings for document chunks.
@@ -267,6 +268,14 @@ async def embed_query(query: str, model: str = GEMINI_EMBEDDING_MODEL) -> list[f
         Query embedding
     """
     return await generate_embedding(query, model=model)
+
+
+class _Embedder:
+    embed_chunks = staticmethod(embed_chunks)
+
+
+def create_embedder() -> _Embedder:
+    return _Embedder()
 
 
 def get_embedding_dimension(model: str = GEMINI_EMBEDDING_MODEL) -> int:
