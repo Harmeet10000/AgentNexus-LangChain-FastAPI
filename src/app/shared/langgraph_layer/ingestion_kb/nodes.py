@@ -712,7 +712,7 @@ async def _cached_embedding(
     if redis is not None:
         cached = await redis.get(key)
         if cached:
-            raw = cached.decode("utf-8") if isinstance(cached, bytes) else str(cached)
+            raw = str(cached)
             return cast("list[float]", json.loads(raw))
 
     embedding = await retry_immediate(

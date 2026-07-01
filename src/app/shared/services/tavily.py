@@ -196,6 +196,23 @@ async def search(
     )
 
 
+class _TavilyClient:
+    async def search(
+        self, query: str, max_results: int = 10, include_answer: bool = True
+    ) -> SearchResponse:
+        return await search(query=query, max_results=max_results, include_answer=include_answer)
+
+
+_tavily_client: _TavilyClient | None = None
+
+
+async def get_tavily_client() -> _TavilyClient:
+    global _tavily_client
+    if _tavily_client is None:
+        _tavily_client = _TavilyClient()
+    return _tavily_client
+
+
 async def get_context(
     query: str,
     max_results: int = 5,

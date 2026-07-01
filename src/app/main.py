@@ -1,13 +1,11 @@
 import asyncio
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
-from fastmcp.utilities.lifespan import combine_lifespans
 from guard import SecurityMiddleware
-
-from mcp_core import get_mcp_http_app, parse_mcp_http_transport
 
 from .api import v1_router, v2_router
 from .config import get_settings
@@ -25,6 +23,13 @@ from .shared.langchain_layer import configure_langsmith
 from .utils import APIResponse, ErrorCode, http_error, logger
 from .utils.response_type import DependencyHealth, HealthResponse, HealthStatus
 
+if TYPE_CHECKING:
+    from typing import Literal
+
+    from guard.models import SecurityConfig
+
+    from app.config.settings import Settings
+
 configure_langsmith()
 # Load environment variables
 load_dotenv(dotenv_path=".env.development")
@@ -33,8 +38,8 @@ load_dotenv(dotenv_path=".env.development")
 def create_app() -> FastAPI:
     """Create and configure FastAPI application with proper middleware order."""
 
-    settings = get_settings()
-    guard_config = build_fastapi_guard_config(settings)
+    settings: Settings = get_settings()
+    guard_config: SecurityConfig = build_fastapi_guard_config(settings)
 
     app: FastAPI = FastAPI(
         title="Langchain FastAPI Server",
@@ -106,7 +111,7 @@ def create_app() -> FastAPI:
     @app.get(path="/health", tags=["Monitoring"])
     async def health() -> Response:
         """Deep health check — probes all critical dependencies in parallel."""
-        results = await asyncio.gather(
+        results: list[DependencyHealth | BaseException] = await asyncio.gather(
             *[probe(app) for probe in ALL_PROBES],
             return_exceptions=True,
         )
@@ -119,11 +124,11 @@ def create_app() -> FastAPI:
 
         failed = sum(1 for d in deps if d.status == HealthStatus.UNHEALTHY)
         if failed >= 3:
-            overall = HealthStatus.UNHEALTHY
+            overall: Literal[HealthStatus.UNHEALTHY] = HealthStatus.UNHEALTHY
         elif failed >= 1:
-            overall = HealthStatus.DEGRADED
+            overall: Literal[HealthStatus.DEGRADED] = HealthStatus.DEGRADED
         else:
-            overall = HealthStatus.HEALTHY
+            overall: Literal[HealthStatus.HEALTHY] = HealthStatus.HEALTHY
 
         body = HealthResponse(status=overall, dependencies=deps)
         code = (
@@ -146,16 +151,6 @@ def create_app() -> FastAPI:
     # Include feature routers
     app.include_router(router=v1_router)
     app.include_router(router=v2_router)
-
-    if settings.MCP_ENABLE_HTTP:
-        mcp_transport = parse_mcp_http_transport(settings.MCP_HTTP_TRANSPORT)
-        mcp_app = get_mcp_http_app(
-            parent_app=app,
-            path="/",
-            transport=mcp_transport,
-        )
-        app.router.lifespan_context = combine_lifespans(lifespan, mcp_app.lifespan)
-        app.mount(settings.MCP_HTTP_PATH, mcp_app)
 
     # 404 handler (Catch-all route)
     @app.api_route(

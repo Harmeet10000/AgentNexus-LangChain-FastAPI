@@ -60,3 +60,4 @@
 - Use `NotFoundException`, `ValidationException`, `UnauthorizedException`, `ConflictException` from `src/app/utils/exceptions.py` instead of raw `HTTPException`.
 - Use `logger.bind(...)` or structured logging patterns.
 - Do not put HTTP response formatting inside repositories.
+- Pattern matching: see `RESULT-PATTERN.md` for the decision matrix on when to use `match`/`case` vs `isinstance` vs Result unwrapping.

@@ -7,7 +7,6 @@ from fastmcp import FastMCP
 
 from app.config import get_settings
 
-from .prompts import register_prompts
 from .resources import register_resources
 from .tools import _register_tools
 
@@ -34,9 +33,10 @@ def get_mcp_server() -> Any:
     server = FastMCP(
         name=_server_name(),
         instructions=_instructions(),
-        list_max_results=settings.MCP_MAX_PAGE_SIZE,
+        list_page_size=settings.MCP_MAX_PAGE_SIZE,
     )
     _register_tools(server)
     register_resources(server)
+    from .prompts import register_prompts
     register_prompts(server)
     return server

@@ -15,6 +15,7 @@ import base64
 import csv
 import hashlib
 import re
+from collections.abc import Callable
 from io import BytesIO, StringIO
 
 from docling.datamodel.base_models import InputFormat
@@ -388,7 +389,7 @@ async def process_documents_batch(
     sources: list[str],
     config: DoclingEnhancementConfig | None = None,
     max_concurrent: int = 4,
-    progress_callback: None | callable = None,
+    progress_callback: Callable[..., None] | None = None,
 ) -> list[DoclingExtractionResult]:
     """Process multiple documents concurrently."""
     if config is None:

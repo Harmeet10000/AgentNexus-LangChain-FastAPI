@@ -7,19 +7,18 @@ Passes uploaded bytes to IngestionGraph; the graph performs Docling parsing.
 Dependencies read from app.state — same pattern as agent_saul.
 """
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 from fastapi import APIRouter, UploadFile
 
 from app.utils import APIResponse, http_response, logger
 
+from .dependencies import IngestionGraphDep, UserIdDep
 from .dto import DocumentUploadResponse
 from .service import IngestionService
 
-if TYPE_CHECKING:
-    from .dependencies import IngestionGraphDep, UserIdDep
+# Concrete response type for OpenAPI schema generation
+IngestionUploadResponse = APIResponse[DocumentUploadResponse]
+IngestionUploadResponse.model_rebuild()
+
 
 router = APIRouter(
     prefix="/ingestion",
@@ -34,7 +33,7 @@ router = APIRouter(
 
 @router.post(
     "/documents/upload",
-    response_model=APIResponse[DocumentUploadResponse],
+    response_model=IngestionUploadResponse,
     summary="Upload a legal document for ingestion. Returns doc_id for use with the Agent Saul WS.",
 )
 async def upload_document(
@@ -43,7 +42,7 @@ async def upload_document(
     user_id: UserIdDep,
     document_type: str = "unknown",
     jurisdiction: str = "India",
-) -> APIResponse[DocumentUploadResponse]:
+) -> IngestionUploadResponse:
     """
     Upload flow:
       1. Read raw bytes from uploaded file.

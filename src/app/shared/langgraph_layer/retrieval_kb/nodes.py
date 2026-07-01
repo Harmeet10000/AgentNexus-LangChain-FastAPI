@@ -9,12 +9,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from app.config import get_settings
 from app.shared.langchain_layer.models import serialize_to_toon
 from app.shared.langchain_layer.prompts import render_prompt_sections
 from app.shared.langgraph_layer.kb_retry import retry_immediate
-from app.utils import logger
-from app.utils.embedding import normalize_embedding
+from app.utils import logger, normalize_embedding
 
 from .reranker import CrossEncoderReranker
 from .state import ContextGrade, GeneratedAnswer, QueryPlan, RetrievedChunk
@@ -106,7 +104,7 @@ def make_query_analyzer_node(
                 ),
             }
         )
-        messages = [
+        messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(content=_QUERY_ANALYZER_SYSTEM_PROMPT),
             HumanMessage(content=plan_input),
         ]
@@ -124,7 +122,7 @@ def make_query_analyzer_node(
         if redis is not None:
             cached = await redis.get(cache_key)
             if cached:
-                raw = cached.decode("utf-8") if isinstance(cached, bytes) else str(cached)
+                raw = str(cached)
                 return {
                     "query_plan": plan,
                     "cache_hit": True,
@@ -202,9 +200,9 @@ def make_reranker_node(
     resolved = reranker or CrossEncoderReranker()
 
     async def reranker_node(state: RetrievalState) -> dict[str, object]:
-        plan = state["query_plan"]
-        chunks = state.get("retrieved_chunks", [])[:20]
-        reranked = await resolved.rerank(plan.rewritten_query, chunks, limit=5)
+        plan: QueryPlan = state["query_plan"]
+        chunks: list[RetrievedChunk] = state.get("retrieved_chunks", [])[:20]
+        reranked: list[RetrievedChunk] = await resolved.rerank(plan.rewritten_query, chunks, limit=5)
         return {"reranked_chunks": reranked}
 
     return reranker_node
@@ -222,7 +220,7 @@ def make_context_grader_node(
                 "chunks": [chunk.model_dump() for chunk in chunks],
             }
         )
-        messages = [
+        messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(content=_CONTEXT_GRADER_SYSTEM_PROMPT),
             HumanMessage(content=payload),
         ]
@@ -339,7 +337,7 @@ async def _cached_embedding(
     if redis is not None:
         cached = await redis.get(key)
         if cached:
-            raw = cached.decode("utf-8") if isinstance(cached, bytes) else str(cached)
+            raw = str(cached)
             return cast("list[float]", json.loads(raw))
     embedding = await retry_immediate(
         lambda: _call_embedding_fn(embedding_fn, text_to_embed),

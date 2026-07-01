@@ -8,6 +8,7 @@ import json
 from datetime import datetime
 from os.path import relpath
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from app.utils.logger import logger as loguru_logger
@@ -291,7 +292,7 @@ async def ingest_documents(
     documents_folder: str = "documents",
     db_pool: Any = None,
     clean_before_ingest: bool = True,
-    progress_callback: None | callable = None,
+    progress_callback: Callable[..., None] | None = None,
 ) -> list[IngestionResult]:
     """
     Ingest all documents from the documents folder.
@@ -395,7 +396,7 @@ def create_ingestion_pipeline(
         Tuple of (ingest_all, ingest_one, clean) functions
     """
 
-    async def ingest_all(progress_callback: None | callable = None) -> list[IngestionResult]:
+    async def ingest_all(progress_callback: Callable[..., None] | None = None) -> list[IngestionResult]:
         return await ingest_documents(
             config,
             documents_folder=documents_folder,

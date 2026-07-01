@@ -1,15 +1,23 @@
 """Agent Saul LangGraph assembly entrypoint."""
 
-from typing import Any, cast
+from __future__ import annotations
 
-from langchain_core.language_models import BaseChatModel
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from typing import TYPE_CHECKING, cast
+
 from langgraph.graph import END, StateGraph
-from langgraph.graph.state import CompiledStateGraph
 
-from app.shared.rag.graphiti.registry import ToolRegistry
+if TYPE_CHECKING:
+    from typing import Any
 
-from .factory import SaulGraphNodes, _build_graph_nodes, build_agent_registry
+    from langchain_core.language_models import BaseChatModel
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from langgraph.graph.state import CompiledStateGraph
+
+    from app.shared.rag.graphiti.registry import ToolRegistry
+
+    from .factory import SaulGraphNodes
+
+from .factory import _build_graph_nodes, build_agent_registry
 from .nodes import (
     dispatch_entity_extraction,
     route_after_qna,

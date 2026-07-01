@@ -1,13 +1,13 @@
 """Unified document ingestion, search, and QA endpoints."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
+from typing import Annotated
 
 from fastapi import APIRouter, File, Path, UploadFile, status
 
 from app.utils import APIResponse, ValidationException, http_response
 
+from . import dependencies as documents_dependencies
+from . import dto as documents_dto
 from .dto import (
     DocumentStatusResponse,
     DocumentUploadResponse,
@@ -15,12 +15,6 @@ from .dto import (
     UnifiedRagResponse,
     UnifiedSearchResponse,
 )
-
-if TYPE_CHECKING:
-    from typing import Annotated
-
-    from . import dependencies as documents_dependencies
-    from . import dto as documents_dto
 
 router = APIRouter(tags=["documents"])
 

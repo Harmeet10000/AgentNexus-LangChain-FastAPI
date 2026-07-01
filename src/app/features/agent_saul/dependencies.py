@@ -10,25 +10,24 @@ Lifespan callers must set:
     app.state.redis                 → redis.asyncio.Redis
 """
 
-from typing import Annotated
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Annotated
 from uuid import uuid4
 
 from fastapi import Depends, Request, WebSocket, WebSocketException, status
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
-from redis.asyncio import Redis
 
-from app.features.auth import (
-    RefreshTokenRepository,
-    WebSocketSecurityContext,
-    WebSocketSecurityService,
-)
-from app.features.auth.dependencies import (
-    WebSocketClaims,
-    get_refresh_token_repository,
-)
+from app.features.auth import WebSocketSecurityContext, WebSocketSecurityService
+from app.features.auth.dependencies import WebSocketClaims, get_refresh_token_repository
 from app.utils import ServiceUnavailableException
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from langgraph.graph.state import CompiledStateGraph
+    from redis.asyncio import Redis
+
+    from app.features.auth import RefreshTokenRepository
 
 # ---------------------------------------------------------------------------
 # Individual dependency extractors

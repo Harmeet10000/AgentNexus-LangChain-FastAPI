@@ -10,6 +10,7 @@ import os
 import re
 import time
 from datetime import UTC, datetime
+from collections.abc import Callable
 from typing import Any
 
 from app.utils.logger import logger as loguru_logger
@@ -220,7 +221,7 @@ def _extract_relationships_simple(text: str, entities: list[Entity]) -> list[Rel
 async def extract_entities_batch(
     documents: list[tuple[str, str]],
     use_graphiti: bool = True,
-    progress_callback: None | callable = None,
+    progress_callback: Callable[..., None] | None = None,
     neo4j_config: dict[str, Any] | None = None,
 ) -> list[ExtractionResult]:
     """

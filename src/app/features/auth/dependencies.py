@@ -6,7 +6,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from returns.result import Success
 from starlette.requests import HTTPConnection
 
-from app.connections import get_mongodb, get_redis
+from app.connections.mongodb import get_mongodb
+from app.connections.redis import get_redis
 from app.utils import ForbiddenException, UnauthorizedException
 
 from .model import Permission, User, UserRole

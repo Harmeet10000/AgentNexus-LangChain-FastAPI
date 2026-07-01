@@ -1,6 +1,4 @@
 """Application lifespan management."""
-from _asyncio import Task
-from crawl4ai.async_webcrawler import AsyncWebCrawler
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -28,16 +26,17 @@ from app.connections import (
     init_neo4j,
 )
 from app.features.auth import TokenAuditLog, User, build_websocket_security_service
-from app.features.documents import run_document_startup_checks
 from app.middleware import initialize_fastapi_guard
 from app.shared.langchain_layer.agents.memory import setup_cognee
 from app.shared.langgraph_layer.checkpointer import teardown_langgraph_checkpointer
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.services.storage import StorageService
 from app.utils import ServiceUnavailableException, logger
-from mcp_core import get_mcp_client_manager
 
 if TYPE_CHECKING:
+    from _asyncio import Task
+
+    from crawl4ai.async_webcrawler import AsyncWebCrawler
     from graphiti_core import Graphiti
     from httpx._client import AsyncClient
 
@@ -166,7 +165,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     neo4j_ok = getattr(app.state, "neo4j_driver", None) is not None
     graphiti_ok = getattr(app.state, "graphiti", None) is not None
     if not neo4j_ok and graphiti_ok:
-        logger.warning("State inconsistency: Neo4j driver unavailable but Graphiti initialised independently")
+        logger.warning(
+            "State inconsistency: Neo4j driver unavailable but Graphiti initialised independently"
+        )
     elif neo4j_ok and not graphiti_ok:
         logger.warning("State inconsistency: Neo4j driver available but Graphiti not initialised")
 
@@ -200,11 +201,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
         logger.exception("Crawl4AI browser startup failed, continuing without crawl capability")
         app.state.crawl4ai_crawler = None
     settings = get_settings()
-    app.state.object_store: StorageService = StorageService.from_settings(settings=settings)
-    await run_document_startup_checks(
-        engine=app.state.db_engine,
-        object_store=app.state.object_store,
-    )
+    # Initialize object storage (S3/R2) — optional, graceful degradation
+    try:
+        if settings.S3_BUCKET_NAME:
+            app.state.object_store: StorageService = StorageService.from_settings(settings=settings)
+            await app.state.object_store.verify_access()
+            logger.info("Object storage initialized: bucket={}", settings.S3_BUCKET_NAME)
+        else:
+            app.state.object_store = None
+            logger.info("Object storage not configured, skipping")
+    except Exception:  # noqa: BLE001 — graceful degradation for optional storage
+        logger.exception("Object storage startup failed, continuing without")
+        app.state.object_store = None
 
     # Celery setup (optional, non-blocking)
     try:
@@ -222,7 +230,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
         from app.connections.postgres import get_database_url  # noqa: PLC0415
         from app.shared.outbox import OutboxRelay  # noqa: PLC0415
 
-        dsn = get_database_url().replace("+asyncpg", "")
+        dsn: str = get_database_url().replace("+asyncpg", "")
         relay = OutboxRelay(
             database_url=dsn,
             celery_app=celery_app or app.state.celery,
@@ -251,14 +259,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     #         "LangGraph checkpointer setup failed, continuing without persistence", error=str(e)
     #     )
     #     app.state.langgraph_checkpointer = None
-
-    # MCPClientManager lifecycle (lazy-connects to upstream MCP servers)
-    try:
-        app.state.mcp_manager = get_mcp_client_manager()
-        logger.info("MCP client manager initialized")
-    except Exception:  # noqa: BLE001
-        logger.exception("MCP client manager startup failed, continuing without MCP tools")
-        app.state.mcp_manager = None
 
     logger.info("Application ready", status="running")
 
@@ -301,7 +301,4 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
             tg.create_task(coro=app.state.db_engine.dispose())
         if hasattr(app.state, "neo4j_driver"):
             tg.create_task(coro=close_neo4j_driver(driver=app.state.neo4j_driver))
-        if hasattr(app.state, "mcp_manager") and app.state.mcp_manager is not None:
-            tg.create_task(coro=app.state.mcp_manager.close())
-
     logger.info("Application shutdown complete", status="stopped")

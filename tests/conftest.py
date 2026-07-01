@@ -9,6 +9,7 @@ from fakeredis.aioredis import FakeRedis
 
 # Break circular/broken imports before any app module loads
 sys.modules["app.connections.mcp"] = MagicMock()
+sys.modules["app.connections.celery"] = MagicMock()
 sys.modules["mcp_core"] = MagicMock()
 sys.modules["mcp_core.server.middleware"] = MagicMock()
 sys.modules["tasks"] = MagicMock()

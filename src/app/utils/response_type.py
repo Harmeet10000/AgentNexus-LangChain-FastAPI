@@ -97,3 +97,6 @@ class HealthResponse(BaseModel):
     status: HealthStatus
     version: str = Field(default="1.0.0")
     dependencies: list[DependencyHealth] = Field(default_factory=list)
+
+
+APIResponse.model_rebuild(force=True)

@@ -13,7 +13,7 @@ class ToonParser(BaseOutputParser):
 
 
 # 1. Instruct the model to use TOON
-prompt = ChatPromptTemplate.from_messages(
+prompt: ChatPromptTemplate = ChatPromptTemplate.from_messages(
     [
         ("system", "You are a data extractor. Output ONLY in TOON format."),
         ("human", "Extract these users: {input}"),
