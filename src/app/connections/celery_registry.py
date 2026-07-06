@@ -63,7 +63,9 @@ class CeleryTaskRegistry:
         return cls._registry.get(task_name)
 
     @classmethod
-    def typed_send(cls, task_name: str, kwargs: dict[str, object], **send_task_opts: object) -> object:
+    def typed_send(
+        cls, task_name: str, kwargs: dict[str, object], **send_task_opts: object
+    ) -> object:
         """Validate kwargs against registered model, then send.
 
         Falls back to LegacyTaskPayload (accepts any kwargs) if task is not registered.

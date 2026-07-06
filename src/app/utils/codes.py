@@ -30,7 +30,6 @@ class ErrorCode(StrEnum):
     USER_NOT_FOUND = "USER_NOT_FOUND"
 
 
-
 class Environment(StrEnum):
     """Application environment."""
 

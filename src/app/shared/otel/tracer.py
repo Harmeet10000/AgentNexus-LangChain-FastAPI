@@ -1,4 +1,4 @@
-import opentelemetry.trace as trace
+from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -9,9 +9,7 @@ from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 def _setup_tracer_provider(resource: Resource, sample_rate: float = 1.0) -> TracerProvider:
     provider = TracerProvider(
         resource=resource,
-        sampler=ParentBased(root=TraceIdRatioBased(sample_rate))
-        if sample_rate < 1.0
-        else None,
+        sampler=ParentBased(root=TraceIdRatioBased(sample_rate)) if sample_rate < 1.0 else None,
     )
     processor = BatchSpanProcessor(
         OTLPSpanExporter(),

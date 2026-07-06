@@ -130,9 +130,6 @@ class MCPRateLimitMiddleware:
         await self.app(scope, receive, send)
 
 
-
-
-
 def _client_ip(scope: dict[str, Any]) -> str:
     client = scope.get("client")
     if not client:
