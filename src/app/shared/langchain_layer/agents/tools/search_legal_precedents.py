@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.tools import tool
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.utils import logger
 
@@ -222,6 +223,6 @@ async def _search_statutes_postgres(
                 }
                 for row in rows
             ]
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         logger.warning("statute_postgres_search_failed", error=str(exc))
         return []

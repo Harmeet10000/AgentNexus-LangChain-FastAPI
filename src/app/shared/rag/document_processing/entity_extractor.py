@@ -102,7 +102,7 @@ async def extract_with_graphiti(
     except ImportError:
         loguru_logger.warning("graphiti_graph not available, using fallback extraction")
         return await extract_with_fallback(text, document_id, start_time)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         loguru_logger.error(f"Graphiti extraction failed: {e}")
         return await extract_with_fallback(text, document_id, start_time)
 

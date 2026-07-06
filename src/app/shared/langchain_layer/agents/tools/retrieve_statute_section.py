@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.tools import tool
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.utils import logger
 
@@ -165,6 +166,6 @@ async def _fetch_statute_section(
                 "jurisdiction": row[5],
                 "year": row[6],
             }
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         logger.warning("statute_fetch_failed", error=str(exc))
         return None

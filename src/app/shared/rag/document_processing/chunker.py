@@ -104,7 +104,7 @@ async def chunk_document(
         loguru_logger.info(f"Created {len(document_chunks)} chunks using HybridChunker")
         return document_chunks
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         loguru_logger.error(f"HybridChunker failed: {e}, falling back to simple chunking")
         return _simple_fallback_chunk(content, base_metadata, config, tokenizer)
 

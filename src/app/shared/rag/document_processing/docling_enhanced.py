@@ -98,7 +98,7 @@ def extract_tables(doc: DoclingDocument) -> list[ExtractedTable]:
                         metadata={"source_table": idx},
                     )
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 loguru_logger.warning(f"Failed to extract table {idx}: {e}")
 
     except ImportError:
@@ -133,7 +133,7 @@ def extract_code_blocks(doc: DoclingDocument) -> list[ExtractedCodeBlock]:
                                 metadata={"source_block": idx},
                             )
                         )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 loguru_logger.warning(f"Failed to extract code block {idx}: {e}")
 
     except ImportError:
@@ -229,7 +229,7 @@ async def extract_images(
                             metadata={"source_image": idx},
                         )
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 loguru_logger.warning(f"Failed to extract image {idx}: {e}")
 
     except ImportError:
@@ -253,7 +253,7 @@ async def _generate_vlm_caption(image_data) -> str | None:
 
         return response.text if response.text else None
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         loguru_logger.warning(f"VLM captioning failed: {e}")
         return None
 
@@ -338,7 +338,7 @@ async def convert_document(
     try:
         result = converter.convert(source)
         doc = result.document
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         loguru_logger.error(f"Docling conversion failed: {e}")
         return DoclingExtractionResult(
             document_id=document_id,
@@ -351,7 +351,7 @@ async def convert_document(
     if config.generate_doctags:
         try:
             doctags_content = doc.export_to_doc_tags()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             loguru_logger.warning(f"DocTags export failed: {e}")
 
     tables = []

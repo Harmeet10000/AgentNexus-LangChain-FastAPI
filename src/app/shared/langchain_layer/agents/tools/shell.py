@@ -62,7 +62,7 @@ async def shell_tool(command: str, cwd: str | None = None, timeout: int = 30) ->
         return result.model_dump_json()
     except TimeoutError:
         return ToolOutput.fail(f"Command timed out after {timeout}s").to_agent_string()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return ToolOutput.fail(str(exc)).to_agent_string()
 
 
@@ -101,7 +101,7 @@ async def read_file(path: str, encoding: str = "utf-8") -> str:
         return ToolOutput.ok(content).to_agent_string()
     except FileNotFoundError:
         return ToolOutput.fail(f"File not found: {path}").to_agent_string()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return ToolOutput.fail(str(exc)).to_agent_string()
 
 
@@ -118,7 +118,7 @@ async def write_file(path: str, content: str, mode: str = "w") -> str:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
         return ToolOutput.ok(f"Written {len(content)} bytes to {path}").to_agent_string()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return ToolOutput.fail(str(exc)).to_agent_string()
 
 
@@ -146,7 +146,7 @@ async def list_directory(
             all_files = [f for f in all_files if fnmatch.fnmatch(Path(f).name, pattern)]
 
         return ToolOutput.ok(sorted(all_files)).to_agent_string()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return ToolOutput.fail(str(exc)).to_agent_string()
 
 
@@ -201,11 +201,11 @@ async def file_search(
                         )
                         if len(results) >= max_results:
                             break
-            except Exception:
+            except Exception:  # noqa: BLE001
                 continue
             if len(results) >= max_results:
                 break
 
         return ToolOutput.ok(results, total=len(results)).to_agent_string()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return ToolOutput.fail(str(exc)).to_agent_string()
