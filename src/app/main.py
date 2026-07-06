@@ -138,7 +138,7 @@ def create_app() -> FastAPI:
             overall: Literal[HealthStatus.HEALTHY] = HealthStatus.HEALTHY
 
         body = HealthResponse(status=overall, dependencies=deps)
-        code = (
+        code: Literal[503, 200] = (
             status.HTTP_503_SERVICE_UNAVAILABLE
             if overall == HealthStatus.UNHEALTHY
             else status.HTTP_200_OK

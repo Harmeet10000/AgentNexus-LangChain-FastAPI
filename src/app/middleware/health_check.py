@@ -13,8 +13,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.utils import logger
-from app.utils.response_type import DependencyHealth
+from app.utils import DependencyHealth, logger
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
