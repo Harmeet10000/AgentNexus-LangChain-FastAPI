@@ -203,6 +203,13 @@ Tasks in `src/tasks/*.py` but invoked via string names          (`"tasks.documen
 5. MIDDLEWARE ORDER SUBTLE BUG                                      
 main.py: CORS (Guard)  GZip  Security  Metrics  Logging    But Guard's CORS helper adds middleware *internally*.           If SecurityMiddleware also adds CORS headers, they conflict.    Verify with `curl -H "Origin: x" -v`  check for duplicate      `Access-Control-Allow-    DONE
 200. need a new superpower/brainstorming skill with openspec, graphify, ast-grep, ponytail, firecrawl, with proper git workflows, and stop using grep and older tools  make it using create skill   DONE
+204. /home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/auth/security.py:10: AuthlibDeprecationWarning: authlib.jose module is deprecated, please use joserfc instead.
+It will be compatible before version 2.0.0.
+ [info     ] Database storage: /home/harmeet/Desktop/Projects/langchain-fastapi-production/.venv/lib/python3.12/site-packages/cognee/.cognee_system/databases [cognee.shared.logging_utils]
+/home/harmeet/Desktop/Projects/langchain-fastapi-production/.venv/lib/python3.12/site-packages/cognee/exceptions/exceptions.py:52: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  class CogneeValidationError(CogneeApiError):
+ [warning  ] Cognee 1.0 changes: New API — remember/recall/forget/improve (V1 add/cognify/search still work). Session memory enabled by default (CACHING=false to disable). Multi-user access control on by default (ENABLE_BACKEND_ACCESS_CONTROL=false to disable). Agents (@cognee.agent) auto-verified on registration. See https://docs.cognee.ai/ [cognee.shared.logging_utils]    DONE
+205. what is PYCODE and other frequently used in python projects, dockerfiles, uv and other places   DONE
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses     DELAYED    
@@ -277,13 +284,7 @@ def compose(*functions: Composable) -> Composable:
 196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node 
 
 
-204. /home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/auth/security.py:10: AuthlibDeprecationWarning: authlib.jose module is deprecated, please use joserfc instead.
-It will be compatible before version 2.0.0.
- [info     ] Database storage: /home/harmeet/Desktop/Projects/langchain-fastapi-production/.venv/lib/python3.12/site-packages/cognee/.cognee_system/databases [cognee.shared.logging_utils]
-/home/harmeet/Desktop/Projects/langchain-fastapi-production/.venv/lib/python3.12/site-packages/cognee/exceptions/exceptions.py:52: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
-  class CogneeValidationError(CogneeApiError):
- [warning  ] Cognee 1.0 changes: New API — remember/recall/forget/improve (V1 add/cognify/search still work). Session memory enabled by default (CACHING=false to disable). Multi-user access control on by default (ENABLE_BACKEND_ACCESS_CONTROL=false to disable). Agents (@cognee.agent) auto-verified on registration. See https://docs.cognee.ai/ [cognee.shared.logging_utils]
-205. what is PYCODE and other frequently used in python projects, dockerfiles, uv and other places
+
 206. customise openspec and learn in depth about pattern matching
 ```
 

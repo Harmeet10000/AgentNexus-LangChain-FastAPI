@@ -98,9 +98,13 @@ dependencies = [
     "fastapi-pagination==0.12.1",
     # --- MONITORING ---
     "opentelemetry-api>=1.39.1",
+    "opentelemetry-instrumentation-asgi>=0.60b0",
+    "opentelemetry-instrumentation-celery>=0.60b0",
+    "opentelemetry-instrumentation-httpx>=0.60b0",
+    "opentelemetry-instrumentation-redis>=0.60b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.60b1",
+    "opentelemetry-exporter-prometheus>=0.60b0",
     "opentelemetry-sdk>=1.39.1",
-    "prometheus-client>=0.23.1",
     # --- MCP ---
     "fastmcp>=3.4.2",
     # --- DEVELOPMENT & EVALUATION ---
@@ -140,6 +144,7 @@ dependencies = [
     "redisvl>=0.18.0",
     "headroom-ai[all]>=0.25.0",
     "mypy-boto3-s3>=1.43.14",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.40.0",
 ]
 
 [project.scripts]

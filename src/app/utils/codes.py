@@ -28,3 +28,12 @@ class ErrorCode(StrEnum):
     STATUS_NOT_FOUND = "STATUS_NOT_FOUND"
     SEARCH_DOCUMENT_NOT_FOUND = "SEARCH_DOCUMENT_NOT_FOUND"
     USER_NOT_FOUND = "USER_NOT_FOUND"
+
+
+
+class Environment(StrEnum):
+    """Application environment."""
+
+    DEVELOPMENT = "development"
+    PRODUCTION = "production"
+    TESTING = "testing"

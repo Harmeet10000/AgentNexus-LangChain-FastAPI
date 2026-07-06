@@ -29,6 +29,7 @@ from app.features.auth import TokenAuditLog, User, build_websocket_security_serv
 from app.middleware import initialize_fastapi_guard
 from app.shared.langchain_layer.agents.memory import setup_cognee
 from app.shared.langgraph_layer.checkpointer import teardown_langgraph_checkpointer
+from app.shared.otel import shutdown_otel
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.services.storage import StorageService
 from app.utils import ServiceUnavailableException, logger
@@ -301,4 +302,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
             tg.create_task(coro=app.state.db_engine.dispose())
         if hasattr(app.state, "neo4j_driver"):
             tg.create_task(coro=close_neo4j_driver(driver=app.state.neo4j_driver))
+    # Shutdown OpenTelemetry (flush remaining spans/metrics/logs)
+    shutdown_otel()
+
     logger.info("Application shutdown complete", status="stopped")

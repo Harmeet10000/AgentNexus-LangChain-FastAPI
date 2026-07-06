@@ -4,13 +4,19 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
+import opentelemetry.trace as otel_trace
 from fastapi import FastAPI
+from opentelemetry import metrics
 
 from app.config import get_settings
 from app.utils import NotFoundException, logger
 from mcp_core.client.manager import get_mcp_client_manager
-from mcp_core.common.metrics import observe_mcp_tool_invocation
 from mcp_core.common.models import MCPToolCatalogEntry, MCPToolResponse
+
+_tracer = otel_trace.get_tracer(__name__)
+_meter = metrics.get_meter(__name__)
+mcp_tool_calls_total = _meter.create_counter("mcp.tool.calls_total", unit="1")
+mcp_tool_duration = _meter.create_histogram("mcp.tool.duration_seconds", unit="s")
 # ponytail: local import in _invoke_tool_with_timeout to break 3-way cycle
 
 if TYPE_CHECKING:
@@ -137,28 +143,32 @@ async def _timed_tool(
     tool_name: str,
     fn: Callable[[], Any],
 ) -> dict[str, Any]:
-    start = time.perf_counter()
-    status = "success"
-    try:
-        result = fn()
-        if hasattr(result, "__await__"):
-            result = await result
-    except NotFoundException as exc:
-        status = "not_found"
-        logger.bind(tool=tool_name, error=str(exc.detail)).warning("MCP tool failed")
-        return _error(str(exc.detail))
-    except Exception as exc:  # noqa: BLE001
-        status = "error"
-        logger.bind(tool=tool_name, error=str(exc)).exception("MCP tool failed")
-        return _error("MCP tool execution failed", detail=str(exc))
-    else:
-        return result
-    finally:
-        observe_mcp_tool_invocation(
-            tool_name=tool_name,
-            status=status,
-            duration_seconds=time.perf_counter() - start,
-        )
+    with _tracer.start_as_current_span(f"mcp.tool.{tool_name}") as span:
+        span.set_attribute("mcp.tool.name", tool_name)
+        start = time.perf_counter()
+        status = "success"
+        try:
+            result = fn()
+            if hasattr(result, "__await__"):
+                result = await result
+        except NotFoundException as exc:
+            status = "not_found"
+            span.record_exception(exc)
+            logger.bind(tool=tool_name, error=str(exc.detail)).warning("MCP tool failed")
+            return _error(str(exc.detail))
+        except Exception as exc:  # noqa: BLE001
+            status = "error"
+            span.record_exception(exc)
+            logger.bind(tool=tool_name, error=str(exc)).exception("MCP tool failed")
+            return _error("MCP tool execution failed", detail=str(exc))
+        else:
+            return result
+        finally:
+            duration = time.perf_counter() - start
+            span.set_attribute("mcp.tool.status", status)
+            span.set_attribute("mcp.tool.duration_ms", round(duration * 1000, 2))
+            mcp_tool_calls_total.add(1, {"tool": tool_name, "status": status})
+            mcp_tool_duration.record(duration, {"tool": tool_name, "status": status})
 
 
 def _register_tools(server: Any) -> None:

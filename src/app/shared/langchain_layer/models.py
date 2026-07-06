@@ -44,6 +44,7 @@ Public helpers in this module are async-only.
 # ```
 
 from __future__ import annotations
+from langchain_core.messages.ai import AIMessage
 
 import asyncio
 import base64
@@ -151,13 +152,13 @@ async def acreate_gemini_context_cache(
     Use this for shared context that would otherwise be re-sent on every request,
     such as long system instructions, logs, code snapshots, or uploaded file refs.
     """
-    llm = cast(
+    llm: ChatGoogleGenerativeAI = cast(
         "ChatGoogleGenerativeAI",
         model
         if isinstance(model, ChatGoogleGenerativeAI)
         else _build_chat_model(implementation="google_genai"),
     )
-    resolved_ttl = ttl or settings.GEMINI_CONTEXT_CACHE_TTL
+    resolved_ttl: str = ttl or settings.GEMINI_CONTEXT_CACHE_TTL
     return await asyncio.to_thread(
         create_context_cache,
         model=llm,
@@ -241,12 +242,12 @@ async def ainvoke_text(
     model: BaseChatModel | None = None,
 ) -> str:
     """Single async text call, returns plain string."""
-    llm = model or _build_chat_model()
+    llm: BaseChatModel = model or _build_chat_model()
     messages: list[BaseMessage] = []
     if system:
         messages.append(SystemMessage(content=system))
     messages.append(HumanMessage(content=prompt))
-    result = await llm.ainvoke(messages)
+    result: AIMessage = await llm.ainvoke(messages)
     return str(result.content)
 
 
@@ -261,7 +262,7 @@ async def abatch_text(
     Batch async text calls.
     Uses LangChain's native abatch which honours max_concurrency.
     """
-    llm = model or _build_chat_model()
+    llm: BaseChatModel = model or _build_chat_model()
     max_c = max_concurrency or 5
 
     def _build(prompt: str) -> list[BaseMessage]:
@@ -271,8 +272,8 @@ async def abatch_text(
         msgs.append(HumanMessage(content=prompt))
         return msgs
 
-    message_batches = [_build(p) for p in prompts]
-    results = await llm.abatch(cast("Any", message_batches), config={"max_concurrency": max_c})
+    message_batches: list[list[BaseMessage]] = [_build(p) for p in prompts]
+    results: list[AIMessage] = await llm.abatch(cast("Any", message_batches), config={"max_concurrency": max_c})
     return [str(r.content) for r in results]
 
 
@@ -291,7 +292,7 @@ async def astream_text(
             async for chunk in astream_text("Hello"):
                 yield f"data: {chunk}\\n\\n"
     """
-    llm = model or _build_chat_model(streaming=True)
+    llm: BaseChatModel = model or _build_chat_model(streaming=True)
     parser = StrOutputParser()
     chain = llm | parser
     messages: list[BaseMessage] = []
@@ -380,7 +381,7 @@ async def ainvoke_multimodal(
             image_b64=image_b64,
         )
     )
-    result = await llm.ainvoke(messages)
+    result: AIMessage = await llm.ainvoke(messages)
     return str(result.content)
 
 

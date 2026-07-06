@@ -118,8 +118,8 @@ async def summarize_history(
     Returns a new, shorter list of messages.
     """
 
-    system_msgs = [m for m in messages if isinstance(m, SystemMessage)]
-    non_system = [m for m in messages if not isinstance(m, SystemMessage)]
+    system_msgs: list[SystemMessage] = [m for m in messages if isinstance(m, SystemMessage)]
+    non_system: list[BaseMessage] = [m for m in messages if not isinstance(m, SystemMessage)]
 
     if len(non_system) <= keep_last:
         return messages  # nothing to summarize

@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
-from .error_codes import ErrorCode
+from .codes import ErrorCode
 
 
 class APIException(HTTPException):
@@ -55,7 +55,7 @@ class ValidationException(APIException):
         data: dict | None = None,  # ← very useful: field → error messages
     ):
         super().__init__(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=detail,
             error_code=error_code,
             data=data,

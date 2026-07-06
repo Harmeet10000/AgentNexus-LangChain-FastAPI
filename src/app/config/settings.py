@@ -364,6 +364,9 @@ class Settings(BaseSettings):
     OTEL_SERVICE_NAME: str = Field(default="langchain-fastapi")
     OTEL_TRACES_EXPORTER: str = Field(default="otlp")
     OTEL_METRICS_EXPORTER: str = Field(default="otlp")
+    OTEL_LOGS_EXPORTER: str = Field(default="otlp")
+    OTEL_ENABLED: bool = Field(default=True)
+    OTEL_SAMPLE_RATE: float = Field(default=1.0, ge=0.0, le=1.0)
 
     def model_post_init(self, __context: object) -> None:
         bad_fields: list[str] = []

@@ -1,23 +1,14 @@
-# import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import opentelemetry.trace as otel_trace
 from fastapi import FastAPI, Response
 from fastapi.responses import StreamingResponse
 from guard import IPInfoManager, SecurityMiddleware
 from guard.models import SecurityConfig
 from nanoid import generate
-from prometheus_client import (
-    CONTENT_TYPE_LATEST,
-    CollectorRegistry,
-    Counter,
-    Gauge,
-    Histogram,
-    generate_latest,
-)
 
 from app.utils import RedisProtocolAdapter, execution_path, logger, request_state
 
@@ -26,66 +17,8 @@ if TYPE_CHECKING:
 
     from app.config import Settings
 
-# Context variable for correlation ID (thread-safe)
-correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
-
-# Prometheus metrics registry
-metrics_registry = CollectorRegistry()
-
-# Metrics
-http_requests_total = Counter(
-    name="http_requests_total",
-    documentation="Total HTTP requests",
-    labelnames=["method", "endpoint", "status_code", "project"],
-    registry=metrics_registry,
-)
-
-http_request_duration_seconds = Histogram(
-    name="http_request_duration_seconds",
-    documentation="HTTP request duration in seconds",
-    labelnames=["method", "endpoint", "status_code", "project"],
-    buckets=(0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0),
-    registry=metrics_registry,
-)
-
-http_requests_in_progress = Gauge(
-    name="http_requests_in_progress",
-    documentation="HTTP requests in progress",
-    labelnames=["method", "endpoint", "project"],
-    registry=metrics_registry,
-)
-
-app_up = Gauge(
-    name="app_up",
-    documentation="Application up status",
-    labelnames=["project"],
-    registry=metrics_registry,
-)
-
 RATE_LIMIT_EXCLUDED_PATH_PREFIXES = ("/api-docs", "/api-redoc")
 RATE_LIMIT_EXCLUDED_PATHS = {"/metrics", "/swagger.json"}
-PROJECT = "langchain-fastapi"
-
-
-def _normalize_path(path: str) -> str:
-    """
-    Normalize path for metrics to avoid high cardinality.
-    Converts /users/123 -> /users/{id}
-    """
-    # Skip normalization for common paths
-    if path in {"/", "/health", "/metrics", "/docs", "/redoc", "/openapi.json"}:
-        return path
-
-    # Simple normalization: replace UUIDs and numeric IDs
-    parts = path.split("/")
-    normalized = []
-    for part in parts:
-        if part.isdigit() or (len(part) == 36 and part.count("-") == 4):  # UUID
-            normalized.append("{id}")
-        else:
-            normalized.append(part)
-
-    return "/".join(normalized)
 
 
 class RequestStateLoggingMiddleware:
@@ -120,6 +53,11 @@ class RequestStateLoggingMiddleware:
         response_started = False
         response_finished = False
         status_code = 500
+
+        span = otel_trace.get_current_span()
+        span_context = span.get_span_context()
+        if span_context.is_valid:
+            state["trace_id"] = format(span_context.trace_id, "032x")
 
         with logger.contextualize(**state):
 
@@ -169,83 +107,6 @@ class RequestStateLoggingMiddleware:
             if key == b"x-correlation-id":
                 return value.decode()
         return None
-
-
-class MetricsMiddleware:
-    """Pure ASGI middleware for Prometheus metrics."""
-
-    def __init__(
-        self,
-        app: Callable[[dict, Callable, Callable], Awaitable],
-        project_name: str = "langchain-fastapi",
-    ):
-        self.app = app
-        self.project_name = project_name
-        # Set app up status on creation
-        app_up.labels(project=project_name).set(1)
-
-    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
-        """ASGI interface."""
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        # Skip metrics endpoint to avoid infinite loop
-        path = scope["path"]
-        if path == "/metrics":
-            await self.app(scope, receive, send)
-            return
-
-        method = scope["method"]
-        endpoint = _normalize_path(path)
-
-        # Track in-progress requests
-        http_requests_in_progress.labels(
-            method=method, endpoint=endpoint, project=self.project_name
-        ).inc()
-
-        start_time = time.perf_counter()
-        status_code = 500  # Default to 500 in case of exception
-
-        async def send_wrapper(message: dict) -> None:
-            """Wrapper to capture status code and add headers."""
-            nonlocal status_code
-
-            if message["type"] == "http.response.start":
-                status_code = message["status"]
-
-                # Add process time header
-                process_time = time.perf_counter() - start_time
-                headers = list(message.get("headers", []))
-                headers.append((b"x-process-time", f"{process_time:.3f}".encode()))
-                message["headers"] = headers
-
-            await send(message)
-
-        try:
-            await self.app(scope, receive, send_wrapper)
-        finally:
-            duration = time.perf_counter() - start_time
-
-            # Record metrics
-            http_requests_total.labels(
-                method=method,
-                endpoint=endpoint,
-                status_code=status_code,
-                project=self.project_name,
-            ).inc()
-
-            http_request_duration_seconds.labels(
-                method=method,
-                endpoint=endpoint,
-                status_code=status_code,
-                project=self.project_name,
-            ).observe(duration)
-
-            # Decrement in-progress
-            http_requests_in_progress.labels(
-                method=method, endpoint=endpoint, project=self.project_name
-            ).dec()
 
 
 def _is_streaming_response(response: Response) -> bool:
@@ -385,5 +246,7 @@ def build_fastapi_guard_config(settings: "Settings") -> SecurityConfig:
 
 
 def get_metrics() -> tuple[bytes, str]:
-    """Get Prometheus metrics in text format."""
-    return generate_latest(metrics_registry), CONTENT_TYPE_LATEST
+    """Get Prometheus metrics via OTel PrometheusMetricReader."""
+    from app.shared.otel_integrations import get_prometheus_metrics  # noqa: PLC0415
+
+    return get_prometheus_metrics()

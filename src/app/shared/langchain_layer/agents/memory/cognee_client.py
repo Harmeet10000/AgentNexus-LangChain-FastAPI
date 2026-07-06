@@ -27,7 +27,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import cognee
-from cognee import SearchType
 from langgraph.store.base import BaseStore
 
 from app.utils import logger
@@ -128,8 +127,8 @@ async def store_final_report(
     """Store a human-approved final report in Cognee's episodic memory.
 
     Dataset name: {user_id}.legal_reports
-    After add() + cognify(), the report becomes queryable via
-    search(SearchType.INSIGHTS, ...) for future context retrieval.
+    After remember() + improve(), the report becomes queryable via
+    recall() for future context retrieval.
 
     Args:
         report_json: JSON-serialized final report.
@@ -147,8 +146,8 @@ async def store_final_report(
     ).info("Storing final report in Cognee")
 
     try:
-        await cognee.add(report_json, dataset_name=dataset_name)
-        await cognee.cognify(datasets=[dataset_name])
+        await cognee.remember(report_json, dataset_name=dataset_name)
+        await cognee.improve(dataset=dataset_name)
     except Exception:
         logger.bind(
             service="cognee",
@@ -163,7 +162,7 @@ async def store_final_report(
             dataset_name=dataset_name,
             doc_id=doc_id,
             thread_id=thread_id,
-        ).info("Cognee cognify completed successfully")
+        ).info("Cognee improve completed successfully")
 
 
 # ---------------------------------------------------------------------------
@@ -195,8 +194,8 @@ async def store_relationships(
     ).info("Storing relationships in Cognee")
 
     try:
-        await cognee.add(relationships_text, dataset_name=dataset_name)
-        await cognee.cognify(datasets=[dataset_name])
+        await cognee.remember(relationships_text, dataset_name=dataset_name)
+        await cognee.improve(dataset=dataset_name)
     except Exception:
         logger.bind(
             service="cognee",
@@ -213,7 +212,7 @@ async def store_relationships(
 
 
 # ---------------------------------------------------------------------------
-# READ: search episodic memory
+# READ: recall episodic memory
 # ---------------------------------------------------------------------------
 
 
@@ -223,7 +222,7 @@ async def search_episodic_memory(
 ) -> list[dict[str, Any]]:
     """Retrieve relevant past decisions from Cognee's episodic memory.
 
-    Uses INSIGHTS search type — returns structured knowledge,
+    Uses recall() with auto-routing — returns structured knowledge,
     not raw chunks. Returns empty list on any failure so callers
     can degrade gracefully.
 
@@ -243,9 +242,8 @@ async def search_episodic_memory(
             dataset_name=dataset_name,
         ).info("Searching Cognee episodic memory")
 
-        results = await cognee.search(  # type: ignore[attr-defined]
-            SearchType.INSIGHTS,  # type: ignore[attr-defined]
-            query=query,  # type: ignore[call-arg]
+        results = await cognee.recall(
+            query_text=query,
             datasets=[dataset_name],
         )
     except Exception:  # noqa: BLE001
@@ -253,7 +251,7 @@ async def search_episodic_memory(
             service="cognee",
             query=query,
             user_id=user_id,
-        ).exception("Cognee search failed")
+        ).exception("Cognee recall failed")
         return []
     else:
         result_list = [dict(r) for r in (results or [])]
@@ -261,7 +259,7 @@ async def search_episodic_memory(
             service="cognee",
             result_count=len(result_list),
             user_id=user_id,
-        ).info("Cognee search completed successfully")
+        ).info("Cognee recall completed successfully")
         return result_list
 
 
