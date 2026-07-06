@@ -56,7 +56,7 @@ from .json_serializer import (
     to_sorted_key_bytes,
 )
 from .logger import execution_path, logger, request_state, trace_layer
-from .response_type import APIResponse, ErrorDetail, RequestMeta
+from .response_type import APIResponse, DependencyHealth, ErrorDetail, RequestMeta
 
 __all__ = [
     "APIException",
@@ -64,6 +64,7 @@ __all__ = [
     "APIResponse",
     "ConflictException",
     "DatabaseException",
+    "DependencyHealth",
     "Environment",
     "ErrorCode",
     "ErrorDetail",
