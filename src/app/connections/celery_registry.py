@@ -105,7 +105,8 @@ class TypedCeleryTask(Task):
 
     def before_start(self, task_id: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
         super().before_start(task_id, args, kwargs)
-        self._validated_payload = CeleryTaskRegistry.validate(self.name, kwargs)
+        task_name = self.name or ""
+        self._validated_payload = CeleryTaskRegistry.validate(task_name, kwargs)
 
     def on_success(
         self,

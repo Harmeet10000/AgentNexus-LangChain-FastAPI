@@ -44,7 +44,6 @@ Public helpers in this module are async-only.
 # ```
 
 from __future__ import annotations
-from langchain_core.messages.ai import AIMessage
 
 import asyncio
 import base64
@@ -55,6 +54,7 @@ from typing import TYPE_CHECKING, cast
 import toons
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages.ai import AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import (
     ChatGoogleGenerativeAI,

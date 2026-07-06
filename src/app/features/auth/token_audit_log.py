@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import ClassVar
 
 from beanie import Document, PydanticObjectId
 from pydantic import Field
@@ -27,7 +28,7 @@ class TokenAuditLog(Document):
 
     class Settings:
         name = "token_audit_logs"
-        indexes = [
+        indexes: ClassVar[list[IndexModel]] = [
             IndexModel([("user_id", ASCENDING)]),
             IndexModel([("session_id", ASCENDING)], unique=True),
             IndexModel(

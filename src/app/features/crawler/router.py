@@ -66,19 +66,17 @@ async def crawl_url(
 
     await rate_limiter.increment_rate_limit(client_id, RateLimitScope.CRAWL)
 
-    response = await service.crawl(request_data)
-
-    return response
+    return await service.crawl(request_data)
 
 
 @router.get(path="/search")
 async def search_web(
+    request: Request,
+    service: Annotated[CrawlerService, Depends(get_crawler_service)],
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     query: str,
     max_results: int = 10,
     include_answer: bool = True,
-    request: Request = None,
-    service: CrawlerService = Depends(get_crawler_service),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> SearchResponse:
     """
     Search the web using Tavily.
@@ -87,9 +85,6 @@ async def search_web(
     - **max_results**: Maximum number of results (max 20)
     - **include_answer**: Include AI-generated answer
     """
-    if request is None:
-        request = Request
-
     client_id = get_client_identifier(request)
 
     is_allowed, rate_info = await rate_limiter.check_rate_limit(client_id, RateLimitScope.SEARCH)
@@ -107,9 +102,7 @@ async def search_web(
         include_answer=include_answer,
     )
 
-    response = await service.search(search_request)
-
-    return response
+    return await service.search(search_request)
 
 
 @router.get(path="/rate-limit")

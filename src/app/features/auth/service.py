@@ -17,15 +17,15 @@ from app.utils import (
     logger,
 )
 
-from .dto import (
-    LoginRequest,
-    RegisterRequest,
-    SessionResponse,
-    TokenResponse,
-    UserResponse,
-)
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from .dto import LoginRequest, RegisterRequest
+    from .repository import RefreshTokenRepository, UserRepository
+
+from .dto import SessionResponse, TokenResponse, UserResponse
 from .model import User
-from .repository import RefreshTokenRepository, SessionData, UserRepository
+from .repository import SessionData
 from .security import (
     create_access_token,
     create_refresh_token,
@@ -258,7 +258,7 @@ class AuthService:
         settings = get_settings()
         reset_token = generate_token()
         resolved.reset_token_hash = hash_token(reset_token)
-        resolved.reset_token_expires_at = datetime.now(datetime.timezone.utc) + timedelta(
+        resolved.reset_token_expires_at = datetime.now(UTC) + timedelta(
             minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES,
         )
         match await self._user_repo.save(resolved):
@@ -441,7 +441,7 @@ class AuthService:
         settings = get_settings()
         session_id = str(uuid4())
         device_id = str(uuid4())
-        now = datetime.now(datetime.timezone.utc)
+        now = datetime.now(UTC)
 
         access_token, expires_in = create_access_token(
             user_id=str(user.id),

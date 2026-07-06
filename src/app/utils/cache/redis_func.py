@@ -15,7 +15,7 @@ Use Case | Recommended Redis Type:
 - Caching leaderboard scores | Sorted Set
 """
 
-from typing import Any
+from typing import Any, cast
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -41,6 +41,12 @@ def _redis_error_contains(exc: RedisError, message: str) -> bool:
     """Case-insensitive Redis error matching for command capability checks."""
 
     return message.lower() in str(exc).lower()
+
+
+def _redis_any(redis: Redis) -> Any:
+    """Treat Redis client variants uniformly for runtime command execution."""
+
+    return cast(Any, redis)
 
 
 def get_key_name(object_type: str, *args: CacheKeyPart) -> str:
@@ -147,7 +153,7 @@ async def set_cache(
 
     try:
         string_value = serialize_data(value)
-        await redis.set(cache_key, string_value, ex=expire_seconds)
+        await _redis_any(redis).set(cache_key, string_value, ex=expire_seconds)
     except DatabaseException:
         raise
     except Exception as exc:
@@ -188,7 +194,7 @@ async def get_cache(
     cache_key = get_cache_key(object_type, key)
 
     try:
-        result = await redis.get(cache_key)
+        result = await _redis_any(redis).get(cache_key)
     except DatabaseException:
         raise
     except Exception as exc:
@@ -232,7 +238,7 @@ async def delete_cache(
     cache_key = get_cache_key(object_type, key)
 
     try:
-        result = await redis.delete(cache_key)
+        result = await _redis_any(redis).delete(cache_key)
     except Exception as exc:
         logger.error(
             f"Failed to delete cache: {cache_key}",
@@ -275,7 +281,7 @@ async def execute_pipeline(
         DatabaseException: If pipeline execution fails
     """
     try:
-        pipeline = redis.pipeline()
+        pipeline = _redis_any(redis).pipeline()
 
         for op in operations:
             command = op["command"]
@@ -330,7 +336,7 @@ async def set_hash(
         # Serialize nested objects to prevent data loss
         serialized_data = {k: serialize_data(v) for k, v in data.items()}
 
-        await redis.hset(cache_key, mapping=serialized_data)  # type: ignore[union-attr]
+        await _redis_any(redis).hset(cache_key, mapping=serialized_data)
 
         if expire_seconds:
             await redis.expire(cache_key, expire_seconds)
@@ -377,7 +383,7 @@ async def get_hash(
     cache_key = get_cache_key(object_type, key)
 
     try:
-        result = await redis.hgetall(cache_key)  # type: ignore[union-attr]
+        result = await _redis_any(redis).hgetall(cache_key)
     except DatabaseException:
         raise
     except Exception as exc:
@@ -427,7 +433,7 @@ async def update_hash(
 
     try:
         serialized_data = {k: serialize_data(v) for k, v in data.items()}
-        await redis.hset(cache_key, mapping=serialized_data)  # type: ignore[union-attr]
+        await _redis_any(redis).hset(cache_key, mapping=serialized_data)
     except DatabaseException:
         raise
     except Exception as exc:
@@ -472,7 +478,7 @@ async def delete_hash_field(
     cache_key = get_cache_key(object_type, key)
 
     try:
-        result = await redis.hdel(cache_key, field)  # type: ignore[union-attr]
+        result = await _redis_any(redis).hdel(cache_key, field)
     except Exception as exc:
         logger.error(
             f"Failed to delete hash field: {cache_key}",
@@ -513,7 +519,7 @@ async def delete_hash(
     cache_key = get_cache_key(object_type, key)
 
     try:
-        result = await redis.delete(cache_key)
+        result = await _redis_any(redis).delete(cache_key)
     except Exception as exc:
         logger.error(
             f"Failed to delete hash: {cache_key}",
@@ -569,9 +575,9 @@ async def push_to_list(
 
         # LPUSH for prepending, RPUSH for appending
         if prepend:
-            result = await redis.lpush(cache_key, *string_values)  # type: ignore[union-attr]
+            result = await _redis_any(redis).lpush(cache_key, *string_values)
         else:
-            result = await redis.rpush(cache_key, *string_values)  # type: ignore[union-attr]
+            result = await _redis_any(redis).rpush(cache_key, *string_values)
 
         if expire_seconds:
             await redis.expire(cache_key, expire_seconds)
@@ -625,7 +631,7 @@ async def get_list_items(
     cache_key = get_cache_key(object_type, key)
 
     try:
-        items = await redis.lrange(cache_key, start, end)  # type: ignore[union-attr]
+        items = await _redis_any(redis).lrange(cache_key, start, end)
     except DatabaseException:
         raise
     except Exception as exc:
@@ -681,7 +687,7 @@ async def get_list_length(
     cache_key = get_cache_key(object_type, key)
 
     try:
-        length = await redis.llen(cache_key)  # type: ignore[union-attr]
+        length = await _redis_any(redis).llen(cache_key)
     except Exception as exc:
         logger.error(
             f"Failed to get list length: {cache_key}",
@@ -725,7 +731,7 @@ async def remove_from_list(
 
     try:
         string_value = serialize_data(value)
-        result = await redis.lrem(cache_key, count, string_value)  # type: ignore[union-attr]
+        result = await _redis_any(redis).lrem(cache_key, count, string_value)
     except DatabaseException:
         raise
     except Exception as exc:
@@ -773,7 +779,7 @@ async def update_list_item(
 
     try:
         string_value = serialize_data(new_value)
-        await redis.lset(cache_key, index, string_value)  # type: ignore[union-attr]
+        await _redis_any(redis).lset(cache_key, index, string_value)
     except DatabaseException:
         raise
     except Exception as exc:
@@ -820,7 +826,7 @@ async def trim_list(
     cache_key = get_cache_key(object_type, key)
 
     try:
-        await redis.ltrim(cache_key, start, end)  # type: ignore[union-attr]
+        await _redis_any(redis).ltrim(cache_key, start, end)
     except Exception as exc:
         logger.error(
             f"Failed to trim list: {cache_key}",
