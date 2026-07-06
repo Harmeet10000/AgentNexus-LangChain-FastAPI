@@ -2,6 +2,7 @@ import math
 import time
 
 from loguru import logger
+from redis import RedisError
 from redis.asyncio import Redis
 
 from app.utils.exceptions import TooManyRequestsException
@@ -78,6 +79,6 @@ class RateLimitService:
 
         except TooManyRequestsException:
             raise
-        except Exception as e:
+        except (RedisError, ConnectionError, TimeoutError) as e:
             # Fail open to prevent a Redis outage from taking down the API
             logger.bind(error=str(e)).error("Redis rate limiting failed, bypassing.")

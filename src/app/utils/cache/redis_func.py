@@ -647,7 +647,7 @@ async def get_list_items(
             for idx, item in enumerate(items):
                 try:
                     result.append(deserialize_data(item))
-                except Exception as exc:
+                except (TypeError, ValueError) as exc:
                     logger.warning(
                         "Failed to deserialize list item",
                         cache_key=cache_key,

@@ -107,7 +107,7 @@ class IdempotencyGuard:
                 result_json,
                 ex=_REDIS_TTL_SECONDS,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             self._log.bind(error=str(exc), tool_name=tool_name).warning(
                 "Idempotency Redis write failed; continuing with Postgres."
             )
@@ -130,7 +130,7 @@ class IdempotencyGuard:
                 result.model_dump_json(),
                 ex=_REDIS_TTL_SECONDS,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             self._log.bind(error=str(exc), key_prefix=key[:16]).warning(
                 "Idempotency Redis cache warm failed."
             )
@@ -148,7 +148,7 @@ class IdempotencyGuard:
         try:
             async with self._db_engine.connect() as connection:
                 row = (await connection.execute(query, {"key": key})).fetchone()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             self._log.bind(error=str(exc), key_prefix=key[:16]).warning(
                 "Idempotency Postgres read failed."
             )
@@ -191,7 +191,7 @@ class IdempotencyGuard:
                         "expires_at": expires_at,
                     },
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             self._log.bind(
                 error=str(exc),
                 key_prefix=key[:16],

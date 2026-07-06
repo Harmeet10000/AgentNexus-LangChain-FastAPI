@@ -225,7 +225,7 @@ class GuardrailMiddleware(BaseModel):
                         "output": ai_msg.content,
                     }
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.error("Guardrail check failed: %s", exc)
                 return response
 
