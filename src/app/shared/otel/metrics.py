@@ -12,7 +12,7 @@ def _setup_meter_provider(
     resource: Resource,
     export_interval_ms: int = 15000,
 ) -> MeterProvider:
-    global _otel_prometheus_reader
+    global _otel_prometheus_reader  # noqa: PLW0603
 
     readers: list = [
         PeriodicExportingMetricReader(

@@ -65,6 +65,7 @@ if TYPE_CHECKING:
         StructuredRunnable,
     )
 
+
 def _state_failure(error: AppError) -> dict[str, object]:
     """Construct a state dict from a failure error (node boundary)."""
     return {"failure": error, "ingestion_complete": False}
@@ -137,7 +138,9 @@ def make_extract_schema_node(
         )
         metadata: ContractMetadata = ContractMetadata.model_validate(metadata)
         if metadata.jurisdiction is None:
-            metadata: ContractMetadata = metadata.model_copy(update={"jurisdiction": state.jurisdiction})
+            metadata: ContractMetadata = metadata.model_copy(
+                update={"jurisdiction": state.jurisdiction}
+            )
         return {"contract_metadata": metadata}
 
     return extract_schema_node
@@ -188,7 +191,9 @@ def make_segment_document_node(
 
 def dispatch_contextualize_chunks(state: IngestionState) -> list[Send]:
     metadata: ContractMetadata = state.contract_metadata or ContractMetadata()
-    parsed: ParsedDocument = state.parsed_document or ParsedDocument(markdown="", title="", source=state.source)
+    parsed: ParsedDocument = state.parsed_document or ParsedDocument(
+        markdown="", title="", source=state.source
+    )
     return [
         Send(
             "contextualize_chunks",
@@ -312,7 +317,9 @@ def make_embed_store_node(
                 label="postgres_upsert_parent_document",
             )
             stored_entities: dict[str, str] = await _store_entities(session, state)
-            stored_relationships: list[str] = await _store_relationships(session, state, stored_entities)
+            stored_relationships: list[str] = await _store_relationships(
+                session, state, stored_entities
+            )
             stored_chunks: list[StoredChunk] = await _store_chunks(
                 session=session,
                 state=state,

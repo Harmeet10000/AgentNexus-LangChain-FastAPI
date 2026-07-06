@@ -3,7 +3,7 @@ from opentelemetry._logs import SeverityNumber
 from opentelemetry._logs import set_logger_provider as set_global_logger_provider
 from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
 from opentelemetry.sdk._logs import LoggerProvider as SDKLoggerProvider
-from opentelemetry.sdk._logs import LogRecord as OTelLogRecord
+from opentelemetry.sdk._logs import LogRecord as OTelLogRecord  # type: ignore
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.trace import TraceFlags
@@ -58,7 +58,7 @@ def _patch_loguru_sink(logger_provider: SDKLoggerProvider) -> None:
             resource=logger_provider.resource,
             attributes=dict(record.get("extra", {})),
         )
-        logger_provider.emit(otel_record)
+        logger_provider.emit(otel_record)  # type: ignore
 
     sink_id = getattr(_patch_loguru_sink, "_sink_id", None)
     if sink_id is not None:
@@ -69,4 +69,4 @@ def _patch_loguru_sink(logger_provider: SDKLoggerProvider) -> None:
         level=0,
         format="{message}",
     )
-    _patch_loguru_sink._sink_id = new_sink_id
+    setattr(_patch_loguru_sink, "_sink_id", new_sink_id)

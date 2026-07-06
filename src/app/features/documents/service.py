@@ -901,7 +901,9 @@ def _batched[T](values: Sequence[T], batch_size: int) -> list[Sequence[T]]:
     return [values[index : index + batch_size] for index in range(0, len(values), batch_size)]
 
 
-def _flatten_warnings(raw_groups: list) -> list[QualityWarningDTO]:  # ponytail: SQL results are untyped dicts
+def _flatten_warnings(
+    raw_groups: list,
+) -> list[QualityWarningDTO]:  # ponytail: SQL results are untyped dicts
     warnings: list[QualityWarningDTO] = []
     for group in raw_groups:
         if isinstance(group, list):

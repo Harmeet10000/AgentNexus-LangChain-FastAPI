@@ -262,12 +262,8 @@ _otel_celery_meter = metrics.get_meter("celery")
 celery_task_completed_total = _otel_celery_meter.create_counter(
     "celery.task.completed_total", unit="1"
 )
-celery_task_duration = _otel_celery_meter.create_histogram(
-    "celery.task.duration_seconds", unit="s"
-)
-celery_task_retries_total = _otel_celery_meter.create_counter(
-    "celery.task.retries_total", unit="1"
-)
+celery_task_duration = _otel_celery_meter.create_histogram("celery.task.duration_seconds", unit="s")
+celery_task_retries_total = _otel_celery_meter.create_counter("celery.task.retries_total", unit="1")
 
 
 @worker_shutting_down.connect

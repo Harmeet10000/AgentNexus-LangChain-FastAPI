@@ -13,7 +13,6 @@ from app.shared.otel import setup_otel
 from mcp_core.server.http import get_mcp_http_app
 
 if TYPE_CHECKING:
-
     from fastapi import FastAPI
 
 

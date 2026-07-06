@@ -128,8 +128,6 @@ class MCPClientManager:
         attempts = max(1, config.retry_attempts or self._settings.MCP_CLIENT_RETRY_ATTEMPTS)
         last_error: Exception | None = None
 
-        span_attrs = {"server": server_name, "tool": tool_name}
-
         async with self._semaphore:
             with _tracer.start_as_current_span(f"mcp.client.{server_name}.{tool_name}") as span:
                 span.set_attribute("mcp.client.server", server_name)
@@ -147,7 +145,8 @@ class MCPClientManager:
                             return self._normalize_tool_result(server_name, tool_name, result)
                     status = "error"
                     span.set_attribute("mcp.client.status", "error")
-                    span.record_exception(last_error)
+                    if last_error is not None:
+                        span.record_exception(last_error)
                     self._record_failure(
                         server_name, str(last_error) if last_error else "tool call failed"
                     )

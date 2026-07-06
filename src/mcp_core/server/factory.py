@@ -38,5 +38,6 @@ def get_mcp_server() -> Any:
     _register_tools(server)
     register_resources(server)
     from .prompts import register_prompts
+
     register_prompts(server)
     return server

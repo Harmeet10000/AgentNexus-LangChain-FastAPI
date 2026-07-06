@@ -273,7 +273,9 @@ async def abatch_text(
         return msgs
 
     message_batches: list[list[BaseMessage]] = [_build(p) for p in prompts]
-    results: list[AIMessage] = await llm.abatch(cast("Any", message_batches), config={"max_concurrency": max_c})
+    results: list[AIMessage] = await llm.abatch(
+        cast("Any", message_batches), config={"max_concurrency": max_c}
+    )
     return [str(r.content) for r in results]
 
 

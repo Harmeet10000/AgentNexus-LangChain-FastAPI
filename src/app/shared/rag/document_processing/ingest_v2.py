@@ -396,7 +396,9 @@ def create_ingestion_pipeline(
         Tuple of (ingest_all, ingest_one, clean) functions
     """
 
-    async def ingest_all(progress_callback: Callable[..., None] | None = None) -> list[IngestionResult]:
+    async def ingest_all(
+        progress_callback: Callable[..., None] | None = None,
+    ) -> list[IngestionResult]:
         return await ingest_documents(
             config,
             documents_folder=documents_folder,

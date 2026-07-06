@@ -201,7 +201,9 @@ def make_reranker_node(
     async def reranker_node(state: RetrievalState) -> dict[str, object]:
         plan: QueryPlan = state["query_plan"]
         chunks: list[RetrievedChunk] = state.get("retrieved_chunks", [])[:20]
-        reranked: list[RetrievedChunk] = await resolved.rerank(plan.rewritten_query, chunks, limit=5)
+        reranked: list[RetrievedChunk] = await resolved.rerank(
+            plan.rewritten_query, chunks, limit=5
+        )
         return {"reranked_chunks": reranked}
 
     return reranker_node
@@ -268,7 +270,10 @@ def make_generator_node(
                 "chunks": [chunk.model_dump() for chunk in chunks],
             }
         )
-        messages: list[SystemMessage | HumanMessage] = [SystemMessage(content=_GENERATOR_SYSTEM_PROMPT), HumanMessage(content=payload)]
+        messages: list[SystemMessage | HumanMessage] = [
+            SystemMessage(content=_GENERATOR_SYSTEM_PROMPT),
+            HumanMessage(content=payload),
+        ]
         try:
             raw_answer = await retry_immediate(
                 lambda: generator_llm.ainvoke(cast("list[Any]", messages)),
@@ -280,7 +285,9 @@ def make_generator_node(
             answer = GeneratedAnswer(answer=FALLBACK_ANSWER, citations=[], confidence="uncertain")
 
         if answer.confidence == "uncertain" and FALLBACK_ANSWER not in answer.answer:
-            answer: GeneratedAnswer = answer.model_copy(update={"answer": f"{answer.answer}\n\n{FALLBACK_ANSWER}"})
+            answer: GeneratedAnswer = answer.model_copy(
+                update={"answer": f"{answer.answer}\n\n{FALLBACK_ANSWER}"}
+            )
 
         if redis is not None:
             cache_key = _answer_cache_key(plan.rewritten_query, state.get("doc_ids_filter", []))

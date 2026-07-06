@@ -124,8 +124,10 @@ def trace_layer(layer_name: str) -> Any:
 
             span_name = f"layer.{layer_name}"
             attrs = {"layer.name": layer_name, "function.name": func.__name__}
-            with _tracer.start_as_current_span(span_name, attributes=attrs) as span, \
-                    logger.contextualize(layer=layer_name, flow=flow_str):
+            with (
+                _tracer.start_as_current_span(span_name, attributes=attrs) as span,
+                logger.contextualize(layer=layer_name, flow=flow_str),
+            ):
                 try:
                     result = await func(*args, **kwargs)
                     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
