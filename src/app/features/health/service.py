@@ -8,8 +8,12 @@ import psutil
 from celery import Celery
 from motor.motor_asyncio import AsyncIOMotorClient
 from neo4j import AsyncDriver
+from neo4j.exceptions import Neo4jError
+from pymongo.errors import PyMongoError
+from redis import RedisError
 from redis.asyncio import Redis
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.utils import logger
@@ -108,7 +112,7 @@ class HealthService:
                 "responseTime": f"{response_time:.2f}ms",
                 "version": server_info.get("version", "unknown"),
             }
-        except Exception as exc:
+        except PyMongoError as exc:
             logger.bind(error=str(exc)).warning("MongoDB health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
 
@@ -128,7 +132,7 @@ class HealthService:
                 "version": info.get("redis_version", "unknown"),
                 "connectedClients": info.get("connected_clients", 0),
             }
-        except Exception as exc:
+        except RedisError as exc:
             logger.bind(error=str(exc)).warning("Redis health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
 
@@ -149,7 +153,7 @@ class HealthService:
                 "responseTime": f"{response_time:.2f}ms",
                 "version": str(version),
             }
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             logger.bind(error=str(exc)).warning("Postgres health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
 
@@ -169,7 +173,7 @@ class HealthService:
                 "responseTime": f"{response_time:.2f}ms",
                 "ok": bool(record and record.get("ok") == 1),
             }
-        except Exception as exc:
+        except Neo4jError as exc:
             logger.bind(error=str(exc)).warning("Neo4j health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
 
@@ -182,7 +186,7 @@ class HealthService:
             conn.ensure_connection(max_retries=1, timeout=2)
             conn.release()
             response_time = (time.perf_counter() - start) * 1000
-        except Exception as exc:
+        except (ConnectionRefusedError, TimeoutError, OSError) as exc:
             logger.bind(error=str(exc)).warning("Celery health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
         else:
@@ -222,7 +226,8 @@ class HealthService:
                 "free": f"{disk.free / 1024 / 1024 / 1024:.2f} GB",
                 "percent": f"{disk.percent:.1f}%",
             }
-        except Exception as exc:
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            logger.bind(error=str(exc)).warning("Disk health check failed")
             return {"status": "unhealthy", "accessible": False, "error": str(exc)}
 
     @staticmethod
@@ -267,6 +272,7 @@ class HealthService:
         try:
             load_avg = list(os.getloadavg())
         except (AttributeError, OSError):
+            logger.warning("System load average unavailable")
             load_avg = [0.0, 0.0, 0.0]
         return {
             "cpuUsage": load_avg,
