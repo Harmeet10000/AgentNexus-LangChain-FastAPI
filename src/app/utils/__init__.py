@@ -31,12 +31,12 @@ from .cache import (
     update_hash,
     update_list_item,
 )
+from .codes import Environment, ErrorCode
 from .embedding import normalize_embedding
 from .exceptions import (
     APIException,
     ConflictException,
     DatabaseException,
-    ErrorCode,
     ExternalServiceException,
     ForbiddenException,
     NotFoundException,
@@ -64,6 +64,7 @@ __all__ = [
     "APIResponse",
     "ConflictException",
     "DatabaseException",
+    "Environment",
     "ErrorCode",
     "ErrorDetail",
     "ExternalServiceException",

@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 
 from fastapi.requests import HTTPConnection
 
-# from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -92,10 +91,6 @@ async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
         #     }
         # }
     )
-
-    # Instrument SQLAlchemy engine for distributed tracing
-    # SQLAlchemyInstrumentor().instrument(engine=engine)
-    # logger.info("SQLAlchemy instrumentation enabled for OpenTelemetry")
 
     session_local: async_sessionmaker[AsyncSession] = async_sessionmaker(
         bind=engine,

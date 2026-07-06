@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import TYPE_CHECKING, cast
 
-from nanoid import generate
+from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
 from starlette.middleware import Middleware
 
 from app.config import get_settings
 from app.features.auth.security import decode_token
-from app.utils import UnauthorizedException, logger
+from app.utils import UnauthorizedException
 from app.utils.rate_limit.service import RateLimitService
-from mcp_core.common.metrics import observe_mcp_http_request
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -132,46 +130,7 @@ class MCPRateLimitMiddleware:
         await self.app(scope, receive, send)
 
 
-class MCPObservabilityMiddleware:
-    def __init__(self, app: Any) -> None:
-        self.app = app
 
-    async def __call__(self, scope: dict[str, Any], receive: Callable, send: Callable) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        correlation_id = scope.setdefault("state", {}).get("correlation_id") or generate(size=21)
-        scope["state"]["correlation_id"] = correlation_id
-        path = scope.get("path", "/mcp")
-        subject = scope.get("state", {}).get("mcp_subject", "anonymous")
-        start = time.perf_counter()
-        status_code = 500
-
-        async def send_wrapper(message: dict[str, Any]) -> None:
-            nonlocal status_code
-            if message["type"] == "http.response.start":
-                status_code = message["status"]
-                headers = list(message.get("headers", []))
-                headers.append((b"x-correlation-id", correlation_id.encode()))
-                message["headers"] = headers
-            await send(message)
-
-        logger.bind(path=path, subject=subject, correlation_id=correlation_id).info(
-            "MCP request started"
-        )
-        try:
-            await self.app(scope, receive, send_wrapper)
-        finally:
-            duration = time.perf_counter() - start
-            observe_mcp_http_request(path=path, status_code=status_code, duration_seconds=duration)
-            logger.bind(
-                path=path,
-                subject=subject,
-                correlation_id=correlation_id,
-                status_code=status_code,
-                duration_ms=round(duration * 1000, 2),
-            ).info("MCP request completed")
 
 
 def _client_ip(scope: dict[str, Any]) -> str:
@@ -190,7 +149,7 @@ def build_mcp_http_middleware(parent_app: Any | None) -> list[Middleware]:
         return getattr(parent_app.state, "redis", None)
 
     return [
-        Middleware(cast("Any", MCPObservabilityMiddleware)),
+        Middleware(cast("Any", OpenTelemetryMiddleware)),
         Middleware(cast("Any", MCPAuthMiddleware), enabled=settings.MCP_REQUIRE_AUTH),
         Middleware(
             cast("Any", MCPRateLimitMiddleware),

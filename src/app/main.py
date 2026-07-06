@@ -6,12 +6,12 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
 from guard import SecurityMiddleware
+from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
 
 from .api import v1_router, v2_router
 from .config import get_settings
 from .lifecycle import lifespan
 from .middleware import (
-    # MetricsMiddleware,
     RequestStateLoggingMiddleware,
     build_fastapi_guard_config,
     get_metrics,
@@ -19,7 +19,9 @@ from .middleware import (
 )
 from .middleware.api_versioning import ApiDeprecationMiddleware
 from .middleware.health_check import ALL_PROBES
+from .middleware.otel import default_span_details
 from .shared.langchain_layer import configure_langsmith
+from .shared.otel import setup_otel
 from .utils import APIResponse, ErrorCode, http_error, logger
 from .utils.response_type import DependencyHealth, HealthResponse, HealthStatus
 
@@ -33,6 +35,9 @@ if TYPE_CHECKING:
 configure_langsmith()
 # Load environment variables
 load_dotenv(dotenv_path=".env.development")
+
+if get_settings().OTEL_ENABLED:
+    setup_otel(service_name="langchain-fastapi")
 
 
 def create_app() -> FastAPI:
@@ -78,17 +83,19 @@ def create_app() -> FastAPI:
         v2_base_path=settings.API_V2_BASE_PATH,
     )
 
-    # 5. Timeout (Prevent hanging requests)
-    # app.add_middleware(TimeoutMiddleware, timeout_seconds=30)
-
     # 5. Security middleware (headers, rate limiting, penetration detection)
     app.add_middleware(SecurityMiddleware, config=guard_config)
 
-    # 6. Metrics collection (Monitor requests, including guard-blocked traffic)
-    # app.add_middleware(MetricsMiddleware, project_name="langchain-fastapi")
-
-    # 7. Request state logging (Keep tracing context alive for streaming responses)
+    # 6. Request state logging (Keep tracing context alive for streaming responses)
     app.add_middleware(RequestStateLoggingMiddleware)
+
+    # 7. OTel ASGI instrumentation (auto-creates HTTP server spans)
+    if settings.OTEL_ENABLED:
+        app.add_middleware(
+            OpenTelemetryMiddleware,
+            default_span_details=default_span_details,
+            excluded_urls="healthz,readyz,metrics",
+        )
 
     # ============================================================================
     # EXCEPTION HANDLERS (Register after middleware, before routes)
@@ -144,7 +151,7 @@ def create_app() -> FastAPI:
 
     @app.get(path="/metrics", tags=["Monitoring"])
     async def metrics() -> Response:
-        """Prometheus metrics endpoint."""
+        """Prometheus metrics endpoint — served via OTel PrometheusMetricReader."""
         data, content_type = get_metrics()
         return Response(content=data, media_type=content_type)
 

@@ -5,6 +5,8 @@ from contextvars import ContextVar
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
+import opentelemetry.trace as otel_trace
+from loguru import Logger
 from loguru import logger as loguru_logger
 
 if TYPE_CHECKING:
@@ -27,7 +29,7 @@ def console_format(record: dict[str, Any]) -> str:
     time_str = time_utc.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     message = record["message"]
 
-    colors = {
+    colors: dict[str, str] = {
         "DEBUG": "<cyan>",
         "INFO": "<green>",
         "WARNING": "<yellow>",
@@ -41,8 +43,12 @@ def console_format(record: dict[str, Any]) -> str:
 
     extra_data = {k: v for k, v in record["extra"].items() if not k.startswith("_")}
 
+    trace_id_str = record.get("extra", {}).get("trace_id", "")
+    if trace_id_str:
+        fmt += f" <green><b>trace_id</b>=<cyan>{trace_id_str[:16]}...</cyan></green>"
+
     if extra_data:
-        meta_parts = [f"<cyan>{k}</>={v!r}" for k, v in extra_data.items()]
+        meta_parts = [f"<cyan>{k}</>={v!r}" for k, v in extra_data.items() if k != "trace_id"]
         meta_str = " ".join(meta_parts)
         fmt += f" <dim>|</dim> {meta_str}"
 
@@ -95,7 +101,7 @@ def redact_sensitive_data(record) -> None:
 
 
 setup_logging()
-logger = loguru_logger.patch(patcher=redact_sensitive_data)
+logger: Logger = loguru_logger.patch(patcher=redact_sensitive_data)
 
 
 # 3. The Trace Decorator (With Timing & State Isolation)
@@ -106,6 +112,7 @@ def trace_layer(layer_name: str) -> Any:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs) -> Any:
             start_time = time.perf_counter()
+            _tracer = otel_trace.get_tracer(__name__)
 
             # 1. Update Breadcrumbs (Copy to avoid mutating parent state)
             current_flow = execution_path.get().copy()
@@ -115,26 +122,28 @@ def trace_layer(layer_name: str) -> Any:
             token: Token[list[str]] = execution_path.set(current_flow)
             flow_str = " -> ".join(current_flow)
 
-            # 2. Execute with Context
-            with logger.contextualize(layer=layer_name, flow=flow_str):
+            span_name = f"layer.{layer_name}"
+            attrs = {"layer.name": layer_name, "function.name": func.__name__}
+            with _tracer.start_as_current_span(span_name, attributes=attrs) as span, \
+                    logger.contextualize(layer=layer_name, flow=flow_str):
                 try:
                     result = await func(*args, **kwargs)
                     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                    span.set_attribute("layer.duration_ms", duration_ms)
 
-                    # Log successful completion of the layer with timing
                     logger.bind(layer_duration_ms=duration_ms).debug(f"Exiting {func.__name__}")
                     return result  # noqa: TRY300
 
                 except Exception as e:
-                    # Log failure timing before raising
                     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                    span.record_exception(e)
+                    span.set_attribute("layer.duration_ms", duration_ms)
                     logger.bind(layer_duration_ms=duration_ms).error(
                         f"Failed in {func.__name__} with error: {e}"
                     )
                     raise
 
                 finally:
-                    # 3. Reset the context so sibling functions don't inherit this path
                     execution_path.reset(token)
 
         return wrapper

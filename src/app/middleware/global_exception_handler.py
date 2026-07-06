@@ -51,7 +51,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     # 2. Pydantic / FastAPI validation errors (422)
     # ────────────────────────────────────────────────
     if isinstance(exc, RequestValidationError):
-        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+        status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
         error_code = ErrorCode.VALIDATION_ERROR
         message = "Request validation failed"
 

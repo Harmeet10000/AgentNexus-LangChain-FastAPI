@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from app.shared.langchain_layer.models import serialize_to_toon
-from app.shared.langchain_layer.prompts import render_prompt_sections
+from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
 from app.shared.langgraph_layer.kb_retry import retry_immediate
 from app.utils import logger, normalize_embedding
 
@@ -197,7 +196,7 @@ def make_hybrid_retrieval_node(
 def make_reranker_node(
     reranker: CrossEncoderReranker | None = None,
 ) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
-    resolved = reranker or CrossEncoderReranker()
+    resolved: CrossEncoderReranker = reranker or CrossEncoderReranker()
 
     async def reranker_node(state: RetrievalState) -> dict[str, object]:
         plan: QueryPlan = state["query_plan"]
@@ -212,9 +211,9 @@ def make_context_grader_node(
     grader_llm: Any,
 ) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
     async def context_grader_node(state: RetrievalState) -> dict[str, object]:
-        plan = state["query_plan"]
-        chunks = state.get("reranked_chunks", [])
-        payload = serialize_to_toon(
+        plan: QueryPlan = state["query_plan"]
+        chunks: list[RetrievedChunk] = state.get("reranked_chunks", [])
+        payload: str = serialize_to_toon(
             {
                 "query": plan.rewritten_query,
                 "chunks": [chunk.model_dump() for chunk in chunks],
@@ -236,7 +235,7 @@ def make_context_grader_node(
                 lambda: grader_llm.ainvoke(cast("list[Any]", messages)),
                 label="gemini_context_grader",
             )
-            grade = ContextGrade.model_validate(raw_grade)
+            grade: ContextGrade = ContextGrade.model_validate(raw_grade)
         except Exception as exc:  # noqa: BLE001 - fall back to chunk-presence heuristic.
             logger.bind(error=str(exc)).warning("context_grader_failed_using_chunk_presence")
             grade = ContextGrade(sufficient=bool(chunks), missing_aspects=[])
@@ -256,32 +255,32 @@ def make_generator_node(
                 "messages": [AIMessage(content=state["cached_answer"].answer)],
             }
 
-        grade = state.get("context_grade")
+        grade: ContextGrade | None = state.get("context_grade")
         if grade is not None and not grade.sufficient and state.get("iteration_count", 0) >= 2:
             answer = GeneratedAnswer(answer=FALLBACK_ANSWER, citations=[], confidence="uncertain")
             return {"generated_answer": answer, "messages": [AIMessage(content=answer.answer)]}
 
-        plan = state["query_plan"]
-        chunks = state.get("reranked_chunks", [])
+        plan: QueryPlan = state["query_plan"]
+        chunks: list[RetrievedChunk] = state.get("reranked_chunks", [])
         payload = serialize_to_toon(
             {
                 "query": plan.rewritten_query,
                 "chunks": [chunk.model_dump() for chunk in chunks],
             }
         )
-        messages = [SystemMessage(content=_GENERATOR_SYSTEM_PROMPT), HumanMessage(content=payload)]
+        messages: list[SystemMessage | HumanMessage] = [SystemMessage(content=_GENERATOR_SYSTEM_PROMPT), HumanMessage(content=payload)]
         try:
             raw_answer = await retry_immediate(
                 lambda: generator_llm.ainvoke(cast("list[Any]", messages)),
                 label="gemini_grounded_generator",
             )
-            answer = GeneratedAnswer.model_validate(raw_answer)
+            answer: GeneratedAnswer = GeneratedAnswer.model_validate(raw_answer)
         except Exception as exc:  # noqa: BLE001 - generator failure must return hard fallback.
             logger.bind(error=str(exc)).warning("generator_failed_using_fallback")
             answer = GeneratedAnswer(answer=FALLBACK_ANSWER, citations=[], confidence="uncertain")
 
         if answer.confidence == "uncertain" and FALLBACK_ANSWER not in answer.answer:
-            answer = answer.model_copy(update={"answer": f"{answer.answer}\n\n{FALLBACK_ANSWER}"})
+            answer: GeneratedAnswer = answer.model_copy(update={"answer": f"{answer.answer}\n\n{FALLBACK_ANSWER}"})
 
         if redis is not None:
             cache_key = _answer_cache_key(plan.rewritten_query, state.get("doc_ids_filter", []))

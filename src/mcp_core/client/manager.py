@@ -6,15 +6,22 @@ from contextlib import suppress
 from functools import cache
 from typing import TYPE_CHECKING
 
+import opentelemetry.trace as otel_trace
 from fastmcp import Client
 from fastmcp.client.auth import BearerAuth
+from opentelemetry import metrics
 
 from app.config import get_settings
 from app.utils import ExternalServiceException, ServiceUnavailableException, logger
 from mcp_core.client.settings import load_mcp_client_server_configs
 from mcp_core.common.errors import McpErrorCode
-from mcp_core.common.metrics import observe_mcp_client_call, set_mcp_upstream_health
 from mcp_core.common.models import MCPClientCircuitState
+
+_tracer = otel_trace.get_tracer(__name__)
+_meter = metrics.get_meter(__name__)
+mcp_client_calls_total = _meter.create_counter("mcp.client.calls_total", unit="1")
+mcp_client_duration = _meter.create_histogram("mcp.client.duration_seconds", unit="s")
+mcp_upstream_health = _meter.create_gauge("mcp.upstream.server.health", unit="1")
 
 if TYPE_CHECKING:
     from typing import Any
@@ -75,7 +82,7 @@ class MCPClientManager:
                 last_error = exc
                 continue
             else:
-                set_mcp_upstream_health(server_name, True)
+                mcp_upstream_health.set(1, {"server": server_name})
                 self._record_success(server_name)
                 return bool(result)
 
@@ -117,36 +124,42 @@ class MCPClientManager:
 
         self._raise_if_circuit_open(server_name)
         client = await self._connect(server_name)
-        start = time.perf_counter()
         status = "success"
         attempts = max(1, config.retry_attempts or self._settings.MCP_CLIENT_RETRY_ATTEMPTS)
         last_error: Exception | None = None
 
+        span_attrs = {"server": server_name, "tool": tool_name}
+
         async with self._semaphore:
-            try:
-                for _ in range(attempts):
-                    try:
-                        result = await client.call_tool(tool_name, arguments or {}, meta=meta)
-                    except Exception as exc:  # noqa: BLE001
-                        last_error = exc
-                        continue
-                    else:
-                        self._record_success(server_name)
-                        return self._normalize_tool_result(server_name, tool_name, result)
-                status = "error"
-                self._record_failure(
-                    server_name, str(last_error) if last_error else "tool call failed"
-                )
-                raise ExternalServiceException(
-                    server_name, f"Tool call '{tool_name}' failed"
-                ) from last_error
-            finally:
-                observe_mcp_client_call(
-                    server_name=server_name,
-                    tool_name=tool_name,
-                    status=status,
-                    duration_seconds=time.perf_counter() - start,
-                )
+            with _tracer.start_as_current_span(f"mcp.client.{server_name}.{tool_name}") as span:
+                span.set_attribute("mcp.client.server", server_name)
+                span.set_attribute("mcp.client.tool", tool_name)
+                start = time.perf_counter()
+                try:
+                    for _ in range(attempts):
+                        try:
+                            result = await client.call_tool(tool_name, arguments or {}, meta=meta)
+                        except Exception as exc:  # noqa: BLE001
+                            last_error = exc
+                            continue
+                        else:
+                            self._record_success(server_name)
+                            return self._normalize_tool_result(server_name, tool_name, result)
+                    status = "error"
+                    span.set_attribute("mcp.client.status", "error")
+                    span.record_exception(last_error)
+                    self._record_failure(
+                        server_name, str(last_error) if last_error else "tool call failed"
+                    )
+                    raise ExternalServiceException(
+                        server_name, f"Tool call '{tool_name}' failed"
+                    ) from last_error
+                finally:
+                    duration = time.perf_counter() - start
+                    span.set_attribute("mcp.client.duration_ms", round(duration * 1000, 2))
+                    attrs = {"server": server_name, "tool": tool_name, "status": status}
+                    mcp_client_calls_total.add(1, attrs)
+                    mcp_client_duration.record(duration, attrs)
 
     def get_tool_adapter(self, server_name: str, tool_name: str) -> dict[str, Any]:
         config = self._get_config(server_name)
@@ -167,7 +180,7 @@ class MCPClientManager:
         for name, client in list(self._clients.items()):
             with suppress(Exception):
                 await client.__aexit__(None, None, None)
-            set_mcp_upstream_health(name, False)
+            mcp_upstream_health.set(0, {"server": name})
         self._clients.clear()
 
     def _get_config(self, server_name: str) -> MCPClientServerConfig:
@@ -267,7 +280,7 @@ class MCPClientManager:
                 or self._settings.MCP_CLIENT_CIRCUIT_BREAKER_COOLDOWN_SECONDS
             )
             circuit.opened_until_epoch = time.time() + cooldown
-        set_mcp_upstream_health(server_name, False)
+        mcp_upstream_health.set(0, {"server": server_name})
         logger.bind(server=server_name, error=error, failures=circuit.failures).warning(
             "MCP upstream failure recorded"
         )
@@ -276,7 +289,7 @@ class MCPClientManager:
         circuit = self._circuits[server_name]
         circuit.failures = 0
         circuit.opened_until_epoch = None
-        set_mcp_upstream_health(server_name, True)
+        mcp_upstream_health.set(1, {"server": server_name})
 
 
 @cache

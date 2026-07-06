@@ -1,14 +1,25 @@
 """Celery connection and production reliability configuration."""
 
+import time
 from typing import Any, ClassVar, cast
 
+import opentelemetry.trace as otel_trace
 from celery import Celery, Task
-from celery.signals import after_task_publish, task_failure, task_postrun, task_prerun, task_retry
+from celery.signals import (
+    after_task_publish,
+    task_failure,
+    task_postrun,
+    task_prerun,
+    task_retry,
+    worker_shutting_down,
+)
 from kombu import Exchange, Queue
+from opentelemetry import metrics
 from redis.asyncio import Redis
 
 from app.config import get_settings
 from app.connections import create_redis_client
+from app.shared.otel import setup_otel, shutdown_otel
 from app.utils import logger
 
 from .celery_reliability import (
@@ -123,6 +134,7 @@ class ResilientTask(Task):
         einfo: Any,
     ) -> None:
         _ = (args, kwargs, einfo)
+        celery_task_retries_total.add(1, {"task_name": str(self.name)})
         logger.bind(
             task=self.name,
             task_id=task_id,
@@ -138,6 +150,10 @@ class ResilientTask(Task):
         einfo: Any,
     ) -> None:
         _ = (args, kwargs, einfo)
+        attrs = {"task_name": str(self.name), "status": "failure"}
+        celery_task_completed_total.add(1, attrs)
+        celery_task_duration.record(time.time() - self.request.started or time.time(), attrs)
+        celery_task_retries_total.add(1, {"task_name": str(self.name)})
         logger.bind(
             task=self.name,
             task_id=task_id,
@@ -152,6 +168,9 @@ class ResilientTask(Task):
         kwargs: Any,
     ) -> None:
         _ = (retval, args, kwargs)
+        attrs = {"task_name": str(self.name), "status": "success"}
+        celery_task_completed_total.add(1, attrs)
+        celery_task_duration.record(time.time() - self.request.started or time.time(), attrs)
         logger.bind(
             task=self.name,
             task_id=task_id,
@@ -235,6 +254,26 @@ def create_celery_app() -> Celery:
 
 celery_app = create_celery_app()
 
+# OTel setup for Celery worker
+if settings.OTEL_ENABLED:
+    setup_otel(service_name="langchain-fastapi-celery")
+
+_otel_celery_meter = metrics.get_meter("celery")
+celery_task_completed_total = _otel_celery_meter.create_counter(
+    "celery.task.completed_total", unit="1"
+)
+celery_task_duration = _otel_celery_meter.create_histogram(
+    "celery.task.duration_seconds", unit="s"
+)
+celery_task_retries_total = _otel_celery_meter.create_counter(
+    "celery.task.retries_total", unit="1"
+)
+
+
+@worker_shutting_down.connect
+def _celery_shutdown_otel(**_: Any) -> None:
+    shutdown_otel()
+
 
 @after_task_publish.connect
 def log_task_published(
@@ -260,12 +299,17 @@ def log_task_prerun(
     kwargs: dict[str, Any] | None = None,
     **_: Any,
 ) -> None:
-    logger.bind(
-        task=task.name if task else None,
-        task_id=task_id,
-        args_count=len(args or ()),
-        kwargs_keys=sorted((kwargs or {}).keys()),
-    ).info("Celery task started")
+    span_ctx = otel_trace.get_current_span().get_span_context()
+    trace_id = format(span_ctx.trace_id, "032x") if span_ctx.is_valid else None
+    extra = {
+        "task": task.name if task else None,
+        "task_id": task_id,
+        "args_count": len(args or ()),
+        "kwargs_keys": sorted((kwargs or {}).keys()),
+    }
+    if trace_id:
+        extra["trace_id"] = trace_id
+    logger.bind(**extra).info("Celery task started")
 
 
 @task_postrun.connect
@@ -275,11 +319,12 @@ def log_task_postrun(
     state: str | None = None,
     **_: Any,
 ) -> None:
-    logger.bind(
-        task=task.name if task else None,
-        task_id=task_id,
-        state=state,
-    ).info("Celery task finished")
+    span_ctx = otel_trace.get_current_span().get_span_context()
+    trace_id = format(span_ctx.trace_id, "032x") if span_ctx.is_valid else None
+    extra = {"task": task.name if task else None, "task_id": task_id, "state": state}
+    if trace_id:
+        extra["trace_id"] = trace_id
+    logger.bind(**extra).info("Celery task finished")
 
 
 @task_retry.connect
@@ -288,11 +333,16 @@ def log_task_retry(
     reason: BaseException | None = None,
     **_: Any,
 ) -> None:
-    logger.bind(
-        task=getattr(request, "task", None),
-        task_id=getattr(request, "id", None),
-        retry_count=getattr(request, "retries", None),
-    ).warning(f"Celery task retry emitted: {reason!s}")
+    span_ctx = otel_trace.get_current_span().get_span_context()
+    trace_id = format(span_ctx.trace_id, "032x") if span_ctx.is_valid else None
+    extra = {
+        "task": getattr(request, "task", None),
+        "task_id": getattr(request, "id", None),
+        "retry_count": getattr(request, "retries", None),
+    }
+    if trace_id:
+        extra["trace_id"] = trace_id
+    logger.bind(**extra).warning(f"Celery task retry emitted: {reason!s}")
 
 
 @task_failure.connect
@@ -302,7 +352,9 @@ def log_task_failure(
     sender: Task | None = None,
     **_: Any,
 ) -> None:
-    logger.bind(
-        task=sender.name if sender else None,
-        task_id=task_id,
-    ).error(f"Celery task failed signal: {exception!s}")
+    span_ctx = otel_trace.get_current_span().get_span_context()
+    trace_id = format(span_ctx.trace_id, "032x") if span_ctx.is_valid else None
+    extra = {"task": sender.name if sender else None, "task_id": task_id}
+    if trace_id:
+        extra["trace_id"] = trace_id
+    logger.bind(**extra).error(f"Celery task failed signal: {exception!s}")

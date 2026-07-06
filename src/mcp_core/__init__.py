@@ -33,7 +33,7 @@ __all__ = [
     "parse_mcp_http_transport",
     "run_mcp_server",
     "serve_mcp",
-    "stop_mcp",
     "set_stored_mcp_tokens",
+    "stop_mcp",
     "wrap_mcp_interaction_errors",
 ]

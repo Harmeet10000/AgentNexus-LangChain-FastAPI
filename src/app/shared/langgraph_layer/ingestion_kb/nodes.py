@@ -19,7 +19,6 @@ from returns.result import Failure
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.shared.langchain_layer.models import serialize_to_toon
 from app.shared.langgraph_layer.kb_retry import retry_immediate
 from app.shared.rag.graphiti.schemas import (
@@ -53,6 +52,7 @@ if TYPE_CHECKING:
 
     from docling_core.types.doc.document import DoclingDocument
     from redis.asyncio import Redis
+    from sqlalchemy.engine.result import Result
     from sqlalchemy.ext.asyncio import AsyncEngine
     from sqlalchemy.sql.elements import TextClause
     from ty_extensions import Unknown
@@ -64,9 +64,6 @@ if TYPE_CHECKING:
         IngestionState,
         StructuredRunnable,
     )
-
-_DEFAULT_LIMIT = 20
-
 
 def _state_failure(error: AppError) -> dict[str, object]:
     """Construct a state dict from a failure error (node boundary)."""
@@ -112,9 +109,9 @@ def make_extract_schema_node(
     schema_llm: StructuredRunnable,
 ) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def extract_schema_node(state: IngestionState) -> dict[str, object]:
-        parsed = state.parsed_document
+        parsed: ParsedDocument | None = state.parsed_document
         if parsed is None:
-            result = _validation_failure(
+            result: Failure[AppError] = _validation_failure(
                 "MISSING_PARSED_DOCUMENT",
                 "Parsed document is required before schema extraction",
                 doc_id=state.doc_id,
@@ -130,7 +127,7 @@ def make_extract_schema_node(
                 "markdown": parsed.markdown[:40_000],
             }
         )
-        messages = [
+        messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(content=_EXTRACT_SCHEMA_SYSTEM_PROMPT),
             HumanMessage(content=payload),
         ]
@@ -138,9 +135,9 @@ def make_extract_schema_node(
             lambda: schema_llm.ainvoke(cast("list[Any]", messages)),
             label="gemini_extract_schema",
         )
-        metadata = ContractMetadata.model_validate(metadata)
+        metadata: ContractMetadata = ContractMetadata.model_validate(metadata)
         if metadata.jurisdiction is None:
-            metadata = metadata.model_copy(update={"jurisdiction": state.jurisdiction})
+            metadata: ContractMetadata = metadata.model_copy(update={"jurisdiction": state.jurisdiction})
         return {"contract_metadata": metadata}
 
     return extract_schema_node
@@ -150,10 +147,10 @@ def make_segment_document_node(
     segmentation_llm: StructuredRunnable,
 ) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def segment_document_node(state: IngestionState) -> dict[str, object]:
-        parsed = state.parsed_document
-        metadata = state.contract_metadata
+        parsed: ParsedDocument | None = state.parsed_document
+        metadata: ContractMetadata | None = state.contract_metadata
         if parsed is None or metadata is None:
-            result = _validation_failure(
+            result: Failure[AppError] = _validation_failure(
                 "MISSING_DOCUMENT_OR_METADATA",
                 "Parsed document and metadata are required before segmentation",
                 doc_id=state.doc_id,
@@ -168,7 +165,7 @@ def make_segment_document_node(
                 "markdown": parsed.markdown[:50_000],
             }
         )
-        messages = [
+        messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(content=_SEGMENT_DOCUMENT_SYSTEM_PROMPT),
             HumanMessage(content=payload),
         ]
@@ -177,12 +174,12 @@ def make_segment_document_node(
                 lambda: segmentation_llm.ainvoke(cast("list[Any]", messages)),
                 label="gemini_segment_document",
             )
-            segments = ClauseSegmentationResult.model_validate(result).segments
+            segments: list[ClauseSegment] = ClauseSegmentationResult.model_validate(result).segments
         except Exception as exc:  # noqa: BLE001 - fallback segmentation keeps ingestion usable.
             logger.bind(doc_id=state.doc_id, error=str(exc)).warning(
                 "structured_segmentation_failed_using_fallback"
             )
-            segments = _fallback_segments(parsed.markdown)
+            segments: list[ClauseSegment] = _fallback_segments(parsed.markdown)
 
         return {"segments": _ensure_chunk_enrichment(segments)}
 
@@ -190,8 +187,8 @@ def make_segment_document_node(
 
 
 def dispatch_contextualize_chunks(state: IngestionState) -> list[Send]:
-    metadata = state.contract_metadata or ContractMetadata()
-    parsed = state.parsed_document or ParsedDocument(markdown="", title="", source=state.source)
+    metadata: ContractMetadata = state.contract_metadata or ContractMetadata()
+    parsed: ParsedDocument = state.parsed_document or ParsedDocument(markdown="", title="", source=state.source)
     return [
         Send(
             "contextualize_chunks",
@@ -209,9 +206,9 @@ def make_contextualize_chunk_node(
     contextualize_llm: StructuredRunnable,
 ) -> Callable[[dict[str, Any]], Awaitable[dict[str, object]]]:
     async def contextualize_chunk_node(state: dict[str, Any]) -> dict[str, object]:
-        segment = ClauseSegment.model_validate(state["segment"])
+        segment: ClauseSegment = ClauseSegment.model_validate(state["segment"])
         metadata: ContractMetadata = ContractMetadata.model_validate(state["contract_metadata"])
-        preamble = _build_preamble(segment, metadata)
+        preamble: str = _build_preamble(segment, metadata)
         payload = serialize_to_toon(
             {
                 "required_preamble": preamble,
@@ -228,12 +225,12 @@ def make_contextualize_chunk_node(
                 lambda: contextualize_llm.ainvoke(cast("list[Any]", messages)),
                 label="gemini_contextualize_chunk",
             )
-            chunk = ContextualizedChunk.model_validate(result)
+            chunk: ContextualizedChunk = ContextualizedChunk.model_validate(result)
         except Exception as exc:  # noqa: BLE001 - deterministic preamble is a safe fallback.
             logger.bind(clause_id=segment.clause_id, error=str(exc)).warning(
                 "contextualize_failed_using_deterministic_preamble"
             )
-            chunk = ContextualizedChunk(
+            chunk: ContextualizedChunk = ContextualizedChunk(
                 clause_id=segment.clause_id,
                 chunk_index=segment.chunk_index,
                 clause_type=segment.clause_type,
@@ -255,7 +252,7 @@ def make_classify_extract_node(
     async def classify_extract_node(state: IngestionState) -> dict[str, object]:
         metadata: ContractMetadata | None = state.contract_metadata
         if metadata is None:
-            result = _validation_failure(
+            result: Failure[AppError] = _validation_failure(
                 "MISSING_CONTRACT_METADATA",
                 "Contract metadata is required before entity extraction",
                 doc_id=state.doc_id,
@@ -269,7 +266,7 @@ def make_classify_extract_node(
                 "chunks": [chunk.model_dump() for chunk in state.contextualized_chunks],
             }
         )
-        messages = [
+        messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(content=_CLASSIFY_EXTRACT_SYSTEM_PROMPT),
             HumanMessage(content=payload[:80_000]),
         ]
@@ -301,7 +298,7 @@ def make_embed_store_node(
         parsed: ParsedDocument | None = state.parsed_document
         metadata: ContractMetadata | None = state.contract_metadata
         if parsed is None or metadata is None:
-            result = _validation_failure(
+            result: Failure[AppError] = _validation_failure(
                 "MISSING_PARSED_DOCUMENT_OR_METADATA",
                 "Parsed document and metadata are required before storage",
                 doc_id=state.doc_id,
@@ -314,9 +311,9 @@ def make_embed_store_node(
                 lambda: _upsert_parent_document(session, state, parsed, metadata),
                 label="postgres_upsert_parent_document",
             )
-            stored_entities = await _store_entities(session, state)
-            stored_relationships = await _store_relationships(session, state, stored_entities)
-            stored_chunks = await _store_chunks(
+            stored_entities: dict[str, str] = await _store_entities(session, state)
+            stored_relationships: list[str] = await _store_relationships(session, state, stored_entities)
+            stored_chunks: list[StoredChunk] = await _store_chunks(
                 session=session,
                 state=state,
                 parsed=parsed,
@@ -350,7 +347,7 @@ def make_graphiti_upsert_node(
 
         episode_ids: list[str] = []
         for chunk in state.contextualized_chunks:
-            postgres_chunk_id = _stored_chunk_id(state, chunk.clause_id)
+            postgres_chunk_id: str | None = _stored_chunk_id(state, chunk.clause_id)
             if postgres_chunk_id is None:
                 continue
             body = (
@@ -366,7 +363,7 @@ def make_graphiti_upsert_node(
                     "edge_type": "REFERENCES_CLAUSE",
                 }
             )
-            episode_id = await _graphiti_add_episode(
+            episode_id: str | None = await _graphiti_add_episode(
                 graphiti=graphiti,
                 name=f"clause:{state.doc_id}:{chunk.clause_id}",
                 body=body,
@@ -575,8 +572,8 @@ async def _store_relationships(
 ) -> list[str]:
     stored: list[str] = []
     for relationship in state.extracted_relationships:
-        from_id = entity_id_map.get(relationship.from_entity)
-        to_id = entity_id_map.get(relationship.to_entity)
+        from_id: str | None = entity_id_map.get(relationship.from_entity)
+        to_id: str | None = entity_id_map.get(relationship.to_entity)
         if from_id is None or to_id is None:
             continue
         relationship_id = str(uuid4())
@@ -645,7 +642,7 @@ async def _store_chunks(
             "chunk_faqs": chunk.chunk_faqs,
             "chunk_keywords": chunk.chunk_keywords,
         }
-        query = text(
+        query: TextClause = text(
             """
                     INSERT INTO clauses
                         (id, chunk_id, parent_doc_id, contract_id, doc_id, user_id,
@@ -686,7 +683,7 @@ async def _store_chunks(
             "metadata": json.dumps(metadata_json),
             "custom_metadata": json.dumps(custom_metadata),
         }
-        result = await retry_immediate(
+        result: Result[Any] = await retry_immediate(
             lambda query=query, params=params: session.execute(query, params),
             label="postgres_store_clause",
         )
