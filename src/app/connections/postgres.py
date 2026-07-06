@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from fastapi.requests import HTTPConnection
-
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,

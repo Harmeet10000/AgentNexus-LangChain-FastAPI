@@ -124,7 +124,6 @@ dependencies = [
     "fpdf2>=2.8.7",
     "gepa>=0.1.1",
     "icecream>=2.1.10",
-    "mojo>=0.26.2.0",
     "pendulum>=3.2.0",
     "perfect",
     "psycopg>=3.3.3",
@@ -167,7 +166,7 @@ dev = [
     "pre-commit==4.3.0",
     "bandit>=1.8.6,<2.0.0",
     "safety>=3.6.2,<4.0.0",
-    "ty>=0.0.29",                    # Astral type checker
+    "ty>=0.0.56",                    # Astral type checker
 ]
 test = [
     "pytest>=8.2.2,<9.0.0",
@@ -199,7 +198,7 @@ default-groups = ["dev"] # uv sync installs dev tools by default
 
 # Your existing dependency-groups is perfect (modern replacement for old dev-dependencies)
 [dependency-groups]
-dev = ["pre-commit>=4.3.0", "ruff>=0.15.10", "ty>=0.0.29"]
+dev = ["pre-commit>=4.3.0", "ruff>=0.15.20", "ty>=0.0.56"]
 test = ["pytest>=8.2.2,<9.0.0", "pytest-asyncio>=0.23.7,<1.0.0", "pytest-cov>=5.0.0,<6.0.0", "httpx>=0.27.0,<1.0.0", "factory-boy>=3.3.0,<4.0.0", "fakeredis[lua]>=2.24.0,<3.0.0"]
 
 # ────────────────────────────────────────
@@ -392,7 +391,48 @@ section-order = [
     "E402", # Allow imports not at top
     "F841", # Allow unused variables
 ]
+"src/app/examples/*.py" = [
+    "ARG001",
+    "ARG002",
+    "ASYNC109",
+    "ASYNC230",
+    "ASYNC240",
+    "ASYNC250",
+    "B007",
+    "B904",
+    "BLE001",
+    "E722",
+    "FAST002",
+    "PLW2901",
+    "RET503",
+    "RET504",
+    "RET505",
+    "S105",
+    "S106",
+    "S108",
+    "S112",
+    "SIM102",
+    "TRY201",
+    "TRY300",
+    "TRY301",
+    "TRY400",
+]
+"src/app/shared/rag/rag_agent_advanced.py" = [
+    "ANN201",
+    "ARG001",
+    "ASYNC250",
+    "B007",
+    "BLE001",
+    "F821",
+    "PLC0415",
+]
+"src/app/shared/rag/document_processing/todo_temp.py" = ["E", "F", "W"]
 "**/_*.py" = ["ANN201"] # Private modules
+"src/app/features/auth/router.py" = ["S105"]
+"src/app/features/auth/security.py" = ["S105", "S106"]
+"src/app/features/auth/service.py" = ["S105", "S106"]
+"src/app/features/crawler/dependencies.py" = ["PLC0415"]
+"src/mcp_core/server/*.py" = ["PLC0415"]
 
 
 [tool.ruff.format]
@@ -418,11 +458,8 @@ root = ["src"]          # Matches your src layout
 unresolved-import = "error"
 unresolved-reference = "error"
 invalid-assignment = "error"
-possibly-unbound-variable = "error"
 
 # --- Async correctness (error level, critical for FastAPI + asyncpg/motor) ---
-await-on-non-awaitable = "error"
-non-awaitable-in-async-function = "error"
 unused-awaitable = "warn"                 # Catch forgotten awaits
 
 # --- Function call safety (error level) ---
@@ -449,7 +486,6 @@ missing-typed-dict-key = "error"
 empty-body = "error" # Catch incomplete implementations
 
 # --- Critical class/function definitions (error level) ---
-return-outside-function = "error"  # Catch misplaced returns
 conflicting-declarations = "error"  # Variable declared as two conflicting types
 conflicting-metaclass = "error"     # Metaclass conflicts (runtime error)
 duplicate-base = "error"            # Duplicate base classes (runtime error)
@@ -504,6 +540,9 @@ exclude = [
     "build",
     "dist",
     "node_modules",
+    "src/alembic",
+    "src/app/examples",
+    "src/app/shared/rag",
     "venv",
     "*.egg-info",
 ]

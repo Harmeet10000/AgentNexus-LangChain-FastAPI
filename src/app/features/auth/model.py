@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 from beanie import Document, Indexed
 from pydantic import BaseModel, Field
@@ -79,7 +79,7 @@ class User(Document):
 
     class Settings:
         name = "users"
-        indexes = [
+        indexes: ClassVar[list[IndexModel]] = [
             IndexModel([("email", ASCENDING)], unique=True),
             IndexModel([("reset_token_hash", ASCENDING)], sparse=True),
             IndexModel([("verification_token_hash", ASCENDING)], sparse=True),

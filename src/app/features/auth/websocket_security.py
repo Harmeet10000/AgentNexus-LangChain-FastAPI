@@ -3,7 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import suppress
-from typing import TYPE_CHECKING
+from typing import (
+    TYPE_CHECKING,
+    Any,  # noqa: TC003
+    cast,
+)
 
 from fastapi import WebSocket, WebSocketException, status
 from fastapi_limiter.depends import WebSocketRateLimiter
@@ -33,7 +37,7 @@ class WebSocketSecurityContext(BaseModel):
     connection_rate_limit_key: str
 
 
-class WebSocketSecurityViolation(Exception):
+class WebSocketSecurityViolationError(Exception):
     def __init__(
         self,
         *,
@@ -49,7 +53,7 @@ class WebSocketSecurityViolation(Exception):
         self.retryable = retryable
 
 
-class WebSocketRateLimitExceeded(WebSocketSecurityViolation):
+class WebSocketRateLimitExceededError(WebSocketSecurityViolationError):
     def __init__(self) -> None:
         super().__init__(
             error_code="RATE_LIMIT_EXCEEDED",
@@ -58,7 +62,7 @@ class WebSocketRateLimitExceeded(WebSocketSecurityViolation):
         )
 
 
-class WebSocketIdleTimeout(WebSocketSecurityViolation):
+class WebSocketIdleTimeoutError(WebSocketSecurityViolationError):
     def __init__(self) -> None:
         super().__init__(
             error_code="IDLE_TIMEOUT",
@@ -72,7 +76,7 @@ async def _websocket_rate_identifier(websocket: WebSocket) -> str:
 
 
 def _raise_websocket_rate_limit(*_: object, **__: object) -> None:
-    raise WebSocketRateLimitExceeded
+    raise WebSocketRateLimitExceededError
 
 
 async def build_websocket_security_service(
@@ -210,7 +214,8 @@ class WebSocketSecurityService:
 
     async def get_active_connection_count(self, user_id: str) -> int:
         user_key = _USER_CONNECTIONS_KEY.format(user_id)
-        connection_ids = await self._redis.smembers(user_key)
+        redis = cast("Any", self._redis)
+        connection_ids = await redis.smembers(user_key)
         if not connection_ids:
             return 0
 
@@ -226,7 +231,7 @@ class WebSocketSecurityService:
             if not exists
         ]
         if stale_connections:
-            await self._redis.srem(user_key, *stale_connections)
+            await redis.srem(user_key, *stale_connections)
 
         return len(connection_list) - len(stale_connections)
 
@@ -241,7 +246,7 @@ class WebSocketSecurityService:
                 timeout=self._settings.WEBSOCKET_IDLE_TIMEOUT_SECONDS,
             )
         except TimeoutError as exc:
-            raise WebSocketIdleTimeout from exc
+            raise WebSocketIdleTimeoutError from exc
 
         await self._apply_rate_limits(websocket, context)
         await self.touch_connection(context)
@@ -260,7 +265,7 @@ class WebSocketSecurityService:
         self,
         websocket: WebSocket,
         context: WebSocketSecurityContext,
-        violation: WebSocketSecurityViolation,
+        violation: WebSocketSecurityViolationError,
     ) -> None:
         with suppress(Exception):
             await self.send_json(

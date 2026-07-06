@@ -4,8 +4,8 @@ Document embedding generation for vector search using Gemini.
 
 import asyncio
 import hashlib
-from datetime import datetime
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 from google import genai

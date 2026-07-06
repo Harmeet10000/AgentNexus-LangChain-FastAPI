@@ -2,7 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.config import Environment, get_settings
+from app.config import get_settings
 
 from .logger import request_state
 from .response_type import APIResponse, ErrorDetail, RequestMeta
@@ -23,7 +23,7 @@ def _build_request_meta() -> RequestMeta:
     ctx = request_state.get()
 
     ip = ctx.get("ip")
-    if settings.ENVIRONMENT == Environment.PRODUCTION:
+    if settings.ENVIRONMENT.lower() == "production":
         ip = None
 
     return RequestMeta(

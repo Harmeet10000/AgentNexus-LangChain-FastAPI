@@ -165,13 +165,13 @@ class S3ClientWrapper(BaseModel):
         self._client.delete_object(Bucket=self.bucket, Key=key)
 
     def head_object(self, *, key: str) -> dict[str, Any]:
-        return self._client.head_object(Bucket=self.bucket, Key=key)  # type: ignore
+        return self._client.head_object(Bucket=self.bucket, Key=key)
 
     def head_bucket(self) -> None:
         self._client.head_bucket(Bucket=self.bucket)
 
     def list_objects(self, *, prefix: str, max_keys: int) -> dict[str, Any]:
-        return self._client.list_objects_v2(  # type: ignore
+        return self._client.list_objects_v2(
             Bucket=self.bucket,
             Prefix=prefix,
             MaxKeys=max_keys,
@@ -191,7 +191,7 @@ class S3ClientWrapper(BaseModel):
         content_type: str,
         metadata: dict[str, str],
     ) -> dict[str, Any]:
-        return self._client.create_multipart_upload(  # type: ignore
+        return self._client.create_multipart_upload(
             Bucket=self.bucket,
             Key=key,
             ContentType=content_type,
@@ -206,7 +206,7 @@ class S3ClientWrapper(BaseModel):
         part_number: int,
         body: bytes,
     ) -> dict[str, Any]:
-        return self._client.upload_part(  # type: ignore
+        return self._client.upload_part(
             Bucket=self.bucket,
             Key=key,
             UploadId=upload_id,
@@ -221,7 +221,7 @@ class S3ClientWrapper(BaseModel):
         upload_id: str,
         parts: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        return self._client.complete_multipart_upload(  # type: ignore
+        return self._client.complete_multipart_upload(
             Bucket=self.bucket,
             Key=key,
             UploadId=upload_id,
@@ -236,7 +236,7 @@ class S3ClientWrapper(BaseModel):
         )
 
     def list_parts(self, *, key: str, upload_id: str) -> dict[str, Any]:
-        return self._client.list_parts(  # type: ignore
+        return self._client.list_parts(
             Bucket=self.bucket,
             Key=key,
             UploadId=upload_id,

@@ -31,6 +31,12 @@ class MailerConfig(BaseModel):
     from_email: str = Field(default=settings.RESEND_FROM_EMAIL)
 
 
+def config_from_settings(settings_obj: object | None = None) -> MailerConfig:
+    """Build a MailerConfig from the current application settings."""
+    _ = settings_obj
+    return MailerConfig()
+
+
 def send_template(
     config: MailerConfig,
     *,

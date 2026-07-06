@@ -21,7 +21,6 @@ router = APIRouter(tags=["documents"])
 
 @router.post(
     "/documents/upload",
-    response_model=APIResponse[DocumentUploadResponse],
     status_code=status.HTTP_201_CREATED,
 )
 async def upload_document(
@@ -47,7 +46,6 @@ async def upload_document(
 
 @router.get(
     "/documents/{doc_id}/status",
-    response_model=APIResponse[DocumentStatusResponse],
 )
 async def get_document_status(
     doc_id: Annotated[str, Path(min_length=1)],
@@ -60,7 +58,6 @@ async def get_document_status(
 
 @router.post(
     "/search",
-    response_model=APIResponse[UnifiedSearchResponse],
 )
 async def unified_search(
     payload: documents_dto.UnifiedSearchRequest,
@@ -73,7 +70,6 @@ async def unified_search(
 
 @router.post(
     "/search/rag",
-    response_model=APIResponse[UnifiedRagResponse],
 )
 async def unified_rag(
     payload: documents_dto.UnifiedRagRequest,
@@ -86,7 +82,6 @@ async def unified_rag(
 
 @router.post(
     "/search/ask",
-    response_model=APIResponse[UnifiedAskResponse],
 )
 async def ask_corpus(
     payload: documents_dto.UnifiedAskRequest,
@@ -101,7 +96,6 @@ async def ask_corpus(
 
 @router.post(
     "/legal/ask",
-    response_model=APIResponse[UnifiedAskResponse],
 )
 async def ask_legal(
     payload: documents_dto.UnifiedAskRequest,
