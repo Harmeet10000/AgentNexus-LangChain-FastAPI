@@ -7,6 +7,8 @@ import json
 import re
 from typing import TYPE_CHECKING, Any, cast
 
+from graphiti_core.errors import GraphitiError
+from langchain_core.exceptions import LangChainException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
@@ -113,7 +115,8 @@ def make_query_analyzer_node(
                 label="gemini_query_analyzer",
             )
             plan = _normalize_plan(QueryPlan.model_validate(raw_plan))
-        except Exception as exc:  # noqa: BLE001 - default plan keeps retrieval available.
+        except LangChainException as exc:
+            exc.add_note(f"query={query[:80]}, operation=query_analyzer")
             logger.bind(error=str(exc)).warning("query_analyzer_failed_using_default")
             plan = QueryPlan(rewritten_query=query, sub_queries=[query])
 
@@ -149,7 +152,8 @@ def make_graph_retrieval_node(
                 ),
                 label="graphiti_retrieval_search",
             )
-        except Exception as exc:  # noqa: BLE001 - graph route is optional enrichment.
+        except GraphitiError as exc:
+            exc.add_note(f"query={plan.rewritten_query[:80]}, operation=graph_retrieval")
             logger.bind(error=str(exc)).warning("graph_retrieval_failed")
             return {"graph_chunk_ids": []}
 
@@ -238,7 +242,8 @@ def make_context_grader_node(
                 label="gemini_context_grader",
             )
             grade: ContextGrade = ContextGrade.model_validate(raw_grade)
-        except Exception as exc:  # noqa: BLE001 - fall back to chunk-presence heuristic.
+        except Exception as exc:  # noqa: BLE001 — fall back to chunk-presence heuristic
+            exc.add_note("operation=context_grader")
             logger.bind(error=str(exc)).warning("context_grader_failed_using_chunk_presence")
             grade = ContextGrade(sufficient=bool(chunks), missing_aspects=[])
         return {"context_grade": grade, "iteration_count": state.get("iteration_count", 0) + 1}
@@ -280,7 +285,8 @@ def make_generator_node(
                 label="gemini_grounded_generator",
             )
             answer: GeneratedAnswer = GeneratedAnswer.model_validate(raw_answer)
-        except Exception as exc:  # noqa: BLE001 - generator failure must return hard fallback.
+        except Exception as exc:  # noqa: BLE001 — generator failure must return hard fallback
+            exc.add_note("operation=generator")
             logger.bind(error=str(exc)).warning("generator_failed_using_fallback")
             answer = GeneratedAnswer(answer=FALLBACK_ANSWER, citations=[], confidence="uncertain")
 

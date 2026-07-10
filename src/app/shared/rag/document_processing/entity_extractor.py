@@ -13,6 +13,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from graphiti_core.errors import GraphitiError
+
 from app.utils.logger import logger as loguru_logger
 
 from .models import Entity, ExtractionResult, Relationship
@@ -102,7 +104,8 @@ async def extract_with_graphiti(
     except ImportError:
         loguru_logger.warning("graphiti_graph not available, using fallback extraction")
         return await extract_with_fallback(text, document_id, start_time)
-    except Exception as e:  # noqa: BLE001
+    except GraphitiError as e:
+        e.add_note(f"document_id={document_id}, operation=extract_entities")
         loguru_logger.error(f"Graphiti extraction failed: {e}")
         return await extract_with_fallback(text, document_id, start_time)
 

@@ -10,7 +10,9 @@ from uuid import UUID
 from returns.result import Failure, Success
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.engine.result import Result
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.sql.selectable import Select
 
 from app.features.search.constants import (
     DISKANN_QUERY_RESCORE,
@@ -56,12 +58,12 @@ class DocumentRepository:
         content_hash: str,
     ) -> AppResult[UnifiedDocument | None]:
         try:
-            statement = select(UnifiedDocument).where(
+            statement: Select[tuple[UnifiedDocument]] = select(UnifiedDocument).where(
                 UnifiedDocument.user_id == user_id,
                 UnifiedDocument.content_hash == content_hash,
             )
-            result = await self.session.execute(statement)
-            doc = result.scalar_one_or_none()
+            result: Result[tuple[UnifiedDocument]] = await self.session.execute(statement)
+            doc: UnifiedDocument | None = result.scalar_one_or_none()
             if doc is None:
                 return Failure(
                     NotFoundAppError(
@@ -89,12 +91,12 @@ class DocumentRepository:
         document_id: str,
     ) -> AppResult[UnifiedDocument | None]:
         try:
-            statement = select(UnifiedDocument).where(
+            statement: Select[tuple[UnifiedDocument]] = select(UnifiedDocument).where(
                 UnifiedDocument.user_id == user_id,
                 UnifiedDocument.id == UUID(document_id),
             )
-            result = await self.session.execute(statement)
-            doc = result.scalar_one_or_none()
+            result: Result[tuple[UnifiedDocument]] = await self.session.execute(statement)
+            doc: UnifiedDocument | None = result.scalar_one_or_none()
             if doc is None:
                 return Failure(
                     NotFoundAppError(

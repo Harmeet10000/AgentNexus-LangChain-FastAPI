@@ -119,7 +119,8 @@ class MCPRateLimitMiddleware:
                 rate=self.rate,
                 period_seconds=self.period_seconds,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — rate limit check, must not crash request
+            exc.add_note(f"identifier={key}, operation=rate_limit_check")
             status_code = getattr(exc, "status_code", 429)
             payload = getattr(exc, "detail", {"message": "Rate limit exceeded"})
             if not isinstance(payload, dict):

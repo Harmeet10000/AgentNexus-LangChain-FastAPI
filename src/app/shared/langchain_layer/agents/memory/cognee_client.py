@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import cognee
+from cognee.exceptions import CogneeApiError
 from langgraph.store.base import BaseStore
 
 from app.utils import logger
@@ -246,7 +247,8 @@ async def search_episodic_memory(
             query_text=query,
             datasets=[dataset_name],
         )
-    except Exception:  # noqa: BLE001
+    except CogneeApiError as exc:
+        exc.add_note(f"query={query[:80]}, user_id={user_id}")
         logger.bind(
             service="cognee",
             query=query,
@@ -291,7 +293,7 @@ class CogneeStore(BaseStore):
     async def get(  # type: ignore[override]
         self,
         namespace: Sequence[str | None],
-        key: str,  # noqa: ARG002
+        key: str,  # noqa: ARG002 — protocol-mandated signature
     ) -> Any | None:
         """Retrieve a value by namespace + key."""
         return None
@@ -300,9 +302,9 @@ class CogneeStore(BaseStore):
         self,
         _namespace: Sequence[str | None],
         *,
-        filter: dict | None = None,  # noqa: A002, ARG002
-        query: str | None = None,  # noqa: ARG002
-        **kwargs: Any,  # noqa: ARG002
+        filter_query: dict | None = None,  # noqa: ARG002 — protocol-mandated signature
+        query: str | None = None,  # noqa: ARG002 — protocol-mandated signature
+        **kwargs: Any,  # noqa: ARG002 — protocol-mandated signature
     ) -> list[Any]:
         """Semantic search within a namespace with optional filtering."""
         return []
@@ -317,7 +319,7 @@ class CogneeStore(BaseStore):
 
     async def list_keys(  # type: ignore[override]
         self,
-        namespace: Sequence[str | None],  # noqa: ARG002
+        namespace: Sequence[str | None],  # noqa: ARG002 — protocol-mandated signature
     ) -> list[str]:
         """List all keys in a namespace."""
         return []

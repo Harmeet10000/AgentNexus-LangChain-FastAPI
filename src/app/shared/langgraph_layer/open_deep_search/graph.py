@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Literal, cast
 
+from langchain_core.exceptions import LangChainException
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
@@ -324,7 +325,8 @@ async def execute_tool_safely(tool_to_call, args: dict[str, object], config: Run
     """Execute a research tool and convert failures into model-visible observations."""
     try:
         return str(await tool_to_call.ainvoke(args, config))
-    except Exception as exc:  # noqa: BLE001 - LangChain tools may wrap arbitrary provider errors.
+    except LangChainException as exc:
+        exc.add_note(f"tool={tool_to_call.name}")
         return f"Error executing tool: {exc!s}"
 
 
@@ -439,7 +441,8 @@ async def compress_research(
                 for message in filter_messages(researcher_messages, include_types=["tool", "ai"])
             )
             return {"compressed_research": str(response.content), "raw_notes": [raw_notes_content]}
-        except Exception as exc:  # noqa: BLE001 - model providers expose varied exception classes.
+        except Exception as exc:  # noqa: BLE001 — model providers expose varied exception classes
+            exc.add_note("operation=compress_research")
             if is_token_limit_exceeded(exc, configurable.compression_model):
                 researcher_messages = remove_up_to_last_ai_message(researcher_messages)
                 continue
@@ -493,7 +496,8 @@ async def final_report_generation(
                 date=get_today_str(),
             )
             final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt)])
-        except Exception as exc:  # noqa: BLE001 - model providers expose varied exception classes.
+        except Exception as exc:  # noqa: BLE001 — model providers expose varied exception classes
+            exc.add_note("operation=final_report_generation")
             if not is_token_limit_exceeded(exc, configurable.final_report_model):
                 return {
                     "final_report": f"Error generating final report: {exc}",

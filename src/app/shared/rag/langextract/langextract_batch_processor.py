@@ -56,7 +56,8 @@ async def run_legal_extraction_batch(
             doc = await preprocess_legal_document(url, preprocess_ctx)
             clean_docs.append(doc)
             logger.info(f"Preprocessed {url} → {doc.char_count:,} chars")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — docling preprocessing, unknown failure modes
+            e.add_note(f"url={url}, operation=preprocess_legal_document")
             logger.error(f"Preprocessing failed for {url}", exc_info=True)
             results.append(
                 BatchExtractionResult(

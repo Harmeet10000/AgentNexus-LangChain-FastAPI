@@ -72,7 +72,8 @@ async def generate_embedding(  # noqa: RET503
             logger.warning(f"Rate limit hit, retrying in {delay}s")
             await asyncio.sleep(delay)
 
-        except Exception as e:  # noqa: BLE001
+        except genai_errors.APIError as e:
+            e.add_note(f"model={model}, operation=generate_embedding")
             logger.error(f"Unexpected error generating embedding: {e}")
             if attempt == max_retries - 1:
                 raise
@@ -135,7 +136,8 @@ async def generate_embeddings_batch(  # noqa: RET503
                 return await _process_embeddings_individually(processed_texts, model, retry_delay)
             await asyncio.sleep(retry_delay)
 
-        except Exception as e:  # noqa: BLE001
+        except genai_errors.APIError as e:
+            e.add_note(f"model={model}, operation=generate_embeddings_batch")
             logger.error(f"Unexpected error in batch embedding: {e}")
             if attempt == max_retries - 1:
                 return await _process_embeddings_individually(processed_texts, model, retry_delay)
@@ -171,7 +173,8 @@ async def _process_embeddings_individually(
             # Small delay to avoid overwhelming the API
             await asyncio.sleep(0.1)
 
-        except Exception as e:  # noqa: BLE001
+        except genai_errors.APIError as e:
+            e.add_note(f"model={model}, operation=process_embeddings_individually")
             logger.error(f"Failed to embed text: {e}")
             # Use zero vector as fallback
             embeddings.append([0.0] * config["dimensions"])
@@ -238,7 +241,8 @@ async def embed_chunks(
 
             logger.info(f"Processed batch {current_batch}/{total_batches}")
 
-        except Exception as e:  # noqa: BLE001
+        except genai_errors.APIError as e:
+            e.add_note(f"model={model}, operation=embed_chunks, batch={i // batch_size + 1}")
             logger.error(f"Failed to process batch {i // batch_size + 1}: {e}")
 
             # Add chunks without embeddings as fallback

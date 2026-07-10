@@ -21,6 +21,7 @@ from io import BytesIO, StringIO
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.exceptions import BaseError as DoclingError
 from docling_core.types.doc import DoclingDocument
 from google import genai
 from PIL import Image
@@ -98,7 +99,8 @@ def extract_tables(doc: DoclingDocument) -> list[ExtractedTable]:
                         metadata={"source_table": idx},
                     )
                 )
-            except Exception as e:  # noqa: BLE001
+            except DoclingError as e:
+                e.add_note(f"table_index={idx}, operation=extract_table")
                 loguru_logger.warning(f"Failed to extract table {idx}: {e}")
 
     except ImportError:
@@ -133,7 +135,8 @@ def extract_code_blocks(doc: DoclingDocument) -> list[ExtractedCodeBlock]:
                                 metadata={"source_block": idx},
                             )
                         )
-            except Exception as e:  # noqa: BLE001
+            except DoclingError as e:
+                e.add_note(f"block_index={idx}, operation=extract_code_block")
                 loguru_logger.warning(f"Failed to extract code block {idx}: {e}")
 
     except ImportError:
@@ -229,7 +232,8 @@ async def extract_images(
                             metadata={"source_image": idx},
                         )
                     )
-            except Exception as e:  # noqa: BLE001
+            except DoclingError as e:
+                e.add_note(f"image_index={idx}, operation=extract_image")
                 loguru_logger.warning(f"Failed to extract image {idx}: {e}")
 
     except ImportError:
@@ -253,7 +257,8 @@ async def _generate_vlm_caption(image_data) -> str | None:
 
         return response.text if response.text else None
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 — VLM API can raise varied provider errors
+        e.add_note("operation=vlm_caption")
         loguru_logger.warning(f"VLM captioning failed: {e}")
         return None
 
@@ -338,7 +343,8 @@ async def convert_document(
     try:
         result = converter.convert(source)
         doc = result.document
-    except Exception as e:  # noqa: BLE001
+    except DoclingError as e:
+        e.add_note(f"document={source}, operation=convert")
         loguru_logger.error(f"Docling conversion failed: {e}")
         return DoclingExtractionResult(
             document_id=document_id,
@@ -351,7 +357,8 @@ async def convert_document(
     if config.generate_doctags:
         try:
             doctags_content = doc.export_to_doc_tags()
-        except Exception as e:  # noqa: BLE001
+        except DoclingError as e:
+            e.add_note(f"document={source}, operation=export_doctags")
             loguru_logger.warning(f"DocTags export failed: {e}")
 
     tables = []

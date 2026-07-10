@@ -486,7 +486,9 @@ class AuthService:
         event_type: str,
         payload: dict[str, object],
     ) -> None:
-        from app.shared.outbox import with_outbox  # noqa: PLC0415
+        from app.shared.outbox import (
+            with_outbox,
+        )
 
         if self._session_factory is not None:
             async with self._session_factory() as session:
@@ -499,9 +501,14 @@ class AuthService:
                 )
             return
 
-        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: PLC0415
+        from sqlalchemy.ext.asyncio import (  # noqa: PLC0415 — lazy import inside method for outbox pattern
+            AsyncSession,
+            create_async_engine,
+        )
 
-        from app.connections.postgres import get_database_url  # noqa: PLC0415
+        from app.connections.postgres import (
+            get_database_url,
+        )
 
         _engine = create_async_engine(get_database_url())
         try:

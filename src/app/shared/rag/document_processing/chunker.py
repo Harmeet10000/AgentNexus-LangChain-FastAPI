@@ -11,6 +11,7 @@ Features:
 from typing import Any
 
 from docling.chunking import HybridChunker
+from docling.exceptions import BaseError as DoclingError
 from docling_core.types.doc import DoclingDocument
 from transformers import AutoTokenizer
 
@@ -104,7 +105,8 @@ async def chunk_document(
         loguru_logger.info(f"Created {len(document_chunks)} chunks using HybridChunker")
         return document_chunks
 
-    except Exception as e:  # noqa: BLE001
+    except DoclingError as e:
+        e.add_note("operation=hybrid_chunk")
         loguru_logger.error(f"HybridChunker failed: {e}, falling back to simple chunking")
         return _simple_fallback_chunk(content, base_metadata, config, tokenizer)
 

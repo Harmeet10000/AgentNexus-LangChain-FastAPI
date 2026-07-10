@@ -32,7 +32,6 @@
     "opencode-scheduler",
     "@lyculs/opencode-firecrawl",
     "opencode-handoff",
-    "opencode-agent-memory",
     "opencode-ponytail"
   ],
   "permission": {
@@ -53,7 +52,15 @@
       "cd *": "allow",
       "pwd": "allow",
       "python3 *": "allow",
-
+      "python -c *": "allow",
+      "rg *": "allow",
+      "Select-String *": "allow",
+      "Test-Path *": "allow",
+      "Get-ChildItem *": "allow",
+      "Get-Command *": "allow",
+      "openspec *": "allow",
+      "New-Item *": "allow",
+      "findstr *": "allow"
     },
     "edit": "allow",
     "read": "allow",

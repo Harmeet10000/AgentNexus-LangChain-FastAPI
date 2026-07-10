@@ -210,6 +210,7 @@ It will be compatible before version 2.0.0.
   class CogneeValidationError(CogneeApiError):
  [warning  ] Cognee 1.0 changes: New API — remember/recall/forget/improve (V1 add/cognify/search still work). Session memory enabled by default (CACHING=false to disable). Multi-user access control on by default (ENABLE_BACKEND_ACCESS_CONTROL=false to disable). Agents (@cognee.agent) auto-verified on registration. See https://docs.cognee.ai/ [cognee.shared.logging_utils]    DONE
 205. what is PYCODE and other frequently used in python projects, dockerfiles, uv and other places   DONE
+206. customise openspec and learn in depth about pattern matching  DONE
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses     DELAYED    
@@ -285,7 +286,6 @@ def compose(*functions: Composable) -> Composable:
 
 
 
-206. customise openspec and learn in depth about pattern matching
 ```
 
 summarise these chapters in great detail and take video's transcript as reference for summarising

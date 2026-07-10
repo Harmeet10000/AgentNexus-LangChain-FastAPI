@@ -5,14 +5,23 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast  # noqa: TC003
+from typing import (  # noqa: TC003 — Annotated, Any, Literal used at runtime by Pydantic/LangChain
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Literal,
+    cast,
+)
 
 import httpx
 from crawl4ai import CacheMode, CrawlerRunConfig
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from langchain_core.messages import AIMessage, HumanMessage, filter_messages
-from langchain_core.runnables import RunnableConfig  # noqa: TC002
+from langchain_core.runnables import (
+    RunnableConfig,  # noqa: TC002 — RunnableConfig used at runtime by LangChain tool
+)
 from langchain_core.tools import InjectedToolArg, tool
+from playwright.async_api import Error as PlaywrightError
 
 from app.shared.crawler import sanitize_url, validate_url
 from app.shared.langchain_layer import _build_chat_model
@@ -174,7 +183,7 @@ async def summarize_webpage(model: Any, webpage_content: str) -> str:
                 timeout=60.0,
             ),
         )
-        return (  # noqa: TRY300
+        return (  # noqa: TRY300 — return must be inside try for timeout handling
             f"<summary>\n{summary.summary}\n</summary>\n\n"
             f"<key_excerpts>\n{summary.key_excerpts}\n</key_excerpts>"
         )
@@ -217,7 +226,8 @@ async def crawl_webpage(
         result = await crawler.arun(url=url, config=run_config)
     except TimeoutError:
         return f"Error crawling {url}: Crawl timeout"
-    except Exception as exc:  # noqa: BLE001 - Crawl4AI may wrap varied browser/network errors.
+    except (httpx.HTTPError, PlaywrightError) as exc:
+        exc.add_note(f"url={url}")
         return f"Error crawling {url}: {exc!s}"
 
     elapsed = int((time.time() - start_time) * 1000)

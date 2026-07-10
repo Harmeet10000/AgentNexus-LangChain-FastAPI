@@ -5,7 +5,7 @@ import json
 from contextlib import suppress
 from typing import (
     TYPE_CHECKING,
-    Any,  # noqa: TC003
+    Any,  # noqa: TC003 — Any used at runtime in type annotations
     cast,
 )
 

@@ -78,7 +78,8 @@ class MCPClientManager:
         for _ in range(attempts):
             try:
                 result = await client.ping()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — MCP ping, unknown transport errors
+                exc.add_note(f"server={server_name}, operation=ping")
                 last_error = exc
                 continue
             else:
@@ -137,7 +138,8 @@ class MCPClientManager:
                     for _ in range(attempts):
                         try:
                             result = await client.call_tool(tool_name, arguments or {}, meta=meta)
-                        except Exception as exc:  # noqa: BLE001
+                        except Exception as exc:  # noqa: BLE001 — MCP tool call, unknown transport errors
+                            exc.add_note(f"server={server_name}, tool={tool_name}, operation=call_tool")
                             last_error = exc
                             continue
                         else:

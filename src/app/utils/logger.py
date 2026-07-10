@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 # from string_utils import generate  # Wherever your generate() comes from
 
 # 1. Context Variables
-request_state: ContextVar[dict[str, Any]] = ContextVar("request_state", default={})  # noqa: B039
-execution_path: ContextVar[list[str]] = ContextVar("execution_path", default=[])  # noqa: B039
+request_state: ContextVar[dict[str, Any]] = ContextVar("request_state", default={})  # noqa: B039 — ContextVar default evaluated once at module load, safe
+execution_path: ContextVar[list[str]] = ContextVar("execution_path", default=[])  # noqa: B039 — ContextVar default evaluated once at module load, safe
 
 
 # 2. Console Formatter (Unchanged - Your logic here is perfect)
@@ -134,7 +134,7 @@ def trace_layer(layer_name: str) -> Any:
                     span.set_attribute("layer.duration_ms", duration_ms)
 
                     logger.bind(layer_duration_ms=duration_ms).debug(f"Exiting {func.__name__}")
-                    return result  # noqa: TRY300
+                    return result  # noqa: TRY300 — return must be inside try for trace layer span recording
 
                 except Exception as e:
                     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
