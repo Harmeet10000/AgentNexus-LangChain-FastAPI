@@ -166,7 +166,9 @@ class DocumentCommandService:
                 log_expected_failure(error, operation="document_upload")
                 raise app_error_to_exception(error)
 
-        from app.shared.outbox import with_outbox  # noqa: PLC0415
+        from app.shared.outbox import (
+            with_outbox,
+        )
 
         await with_outbox(
             session=self.repo.session,

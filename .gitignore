@@ -214,6 +214,6 @@ celerybeat-schedule.db
 .cursor/rules/byterover-rules.mdc
 .qoder/rules/byterover-rules.md
 .augment/rules/byterover-rules.md
-.kiro/*
+# .kiro/*
 .clinerules/*
 .amazonq/*

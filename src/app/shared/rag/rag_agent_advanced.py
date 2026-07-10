@@ -15,6 +15,8 @@ import os
 import sys
 
 from dotenv import load_dotenv
+from google.api_core.exceptions import GoogleAPIError
+from openai import OpenAIError
 
 from app.utils.logger import logger
 
@@ -81,7 +83,8 @@ Return only the 3 variations, one per line, without numbers or bullets."""
         # Return original + variations
         return [query, *variations[:3]]
 
-    except Exception as e:  # noqa: BLE001
+    except (OpenAIError, GoogleAPIError) as e:
+        e.add_note("operation=expand_query")
         logger.error(f"Query expansion failed: {e}")
         return [query]  # Fallback to original query
 
@@ -161,7 +164,8 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
 
         return f"Found {len(response_parts)} relevant results:\n\n" + "\n---\n".join(response_parts)
 
-    except Exception as e:  # noqa: BLE001
+    except (OpenAIError, GoogleAPIError) as e:
+        e.add_note("operation=search_with_multi_query")
         logger.error(f"Multi-query search failed: {e}", exc_info=True)
         return f"Search error: {e!s}"
 
@@ -230,7 +234,8 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
             response_parts
         )
 
-    except Exception as e:  # noqa: BLE001
+    except (OpenAIError, GoogleAPIError) as e:
+        e.add_note("operation=search_with_reranking")
         logger.error(f"Re-ranking search failed: {e}", exc_info=True)
         return f"Search error: {e!s}"
 
@@ -279,7 +284,8 @@ async def search_knowledge_base(ctx: RunContext[None], query: str, limit: int = 
 
         return f"Found {len(response_parts)} relevant results:\n\n" + "\n---\n".join(response_parts)
 
-    except Exception as e:  # noqa: BLE001
+    except (OpenAIError, GoogleAPIError) as e:
+        e.add_note("operation=search_knowledge_base")
         logger.error(f"Knowledge base search failed: {e}", exc_info=True)
         return f"Search error: {e!s}"
 
@@ -330,7 +336,8 @@ async def retrieve_full_document(ctx: RunContext[None], document_title: str) -> 
             f"**Document: {result['title']}**\n\nSource: {result['source']}\n\n{result['content']}"
         )
 
-    except Exception as e:  # noqa: BLE001
+    except (OpenAIError, GoogleAPIError) as e:
+        e.add_note("operation=retrieve_full_document")
         logger.error(f"Full document retrieval failed: {e}", exc_info=True)
         return f"Error retrieving document: {e!s}"
 
@@ -407,7 +414,8 @@ Respond with only a single number (1-5) and a brief reason."""
             grade_text = grade_response.choices[0].message.content.strip()
             grade_score = int(grade_text.split()[0])
 
-        except Exception as e:  # noqa: BLE001
+        except (OpenAIError, GoogleAPIError) as e:
+            e.add_note("operation=self_reflection_grading")
             logger.warning(f"Grading failed, proceeding with results: {e}")
             grade_score = 3  # Assume moderate relevance
 
@@ -446,7 +454,8 @@ Respond with only the improved query, nothing else."""
                     f"\n[Reflection: Refined query from '{query}' to '{refined_query}']\n"
                 )
 
-            except Exception as e:  # noqa: BLE001
+            except (OpenAIError, GoogleAPIError) as e:
+                e.add_note("operation=self_reflection_refine_query")
                 logger.warning(f"Query refinement failed: {e}")
                 reflection_note = "\n[Reflection: Initial results had low relevance]\n"
         else:
@@ -463,7 +472,8 @@ Respond with only the improved query, nothing else."""
             + "\n---\n".join(response_parts)
         )
 
-    except Exception as e:  # noqa: BLE001
+    except (OpenAIError, GoogleAPIError) as e:
+        e.add_note("operation=search_with_self_reflection")
         logger.error(f"Self-reflective search failed: {e}", exc_info=True)
         return f"Search error: {e!s}"
 
@@ -542,7 +552,8 @@ async def run_cli():
             except KeyboardInterrupt:
                 logger.info("\n[Interrupted]")
                 break
-            except Exception as e:  # noqa: BLE001
+            except (OpenAIError, GoogleAPIError) as e:
+                e.add_note("operation=run_cli_agent")
                 logger.error(f"Agent error: {e}", exc_info=True)
 
     except KeyboardInterrupt:

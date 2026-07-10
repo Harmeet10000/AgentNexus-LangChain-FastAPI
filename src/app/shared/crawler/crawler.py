@@ -5,6 +5,7 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
+import httpx
 from crawl4ai import (
     AsyncUrlSeeder,
     AsyncWebCrawler,
@@ -17,8 +18,10 @@ from crawl4ai import (
 from crawl4ai.async_dispatcher import RateLimiter
 from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
 from crawl4ai.processors.pdf import PDFContentScrapingStrategy
+from playwright.async_api import Error as PlaywrightError
 from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from app.config import get_settings
 from app.utils import logger
@@ -86,7 +89,8 @@ class WebCrawler:
                     word_count=data.get("word_count"),
                     cached=True,
                 )
-        except Exception:  # noqa: BLE001 — cache read can fail for any reason
+        except RedisError as exc:
+            exc.add_note(f"url={url}, operation=cache_read")
             logger.bind(operation="cache_read", url=url).exception("Cache read failed")
         return None
 
@@ -116,7 +120,8 @@ class WebCrawler:
                 settings.REDIS_CRAWL_CACHE_TTL,
                 json.dumps(data),
             )
-        except Exception:  # noqa: BLE001 — cache write can fail for any reason
+        except RedisError as exc:
+            exc.add_note(f"url={url}, operation=cache_write")
             logger.bind(operation="cache_write", url=url).exception("Cache write failed")
 
     @staticmethod
@@ -241,7 +246,8 @@ class WebCrawler:
                 success=False,
                 error_message="Crawl timeout",
             )
-        except Exception as e:  # noqa: BLE001 — Crawl4AI wraps varied browser/network errors
+        except (httpx.HTTPError, PlaywrightError) as e:
+            e.add_note(f"url={url}")
             return CrawlResult(
                 url=url,
                 success=False,

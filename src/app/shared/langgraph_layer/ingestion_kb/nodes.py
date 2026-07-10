@@ -13,6 +13,7 @@ import asyncer
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
 from graphiti_core.nodes import EpisodeType
+from langchain_core.exceptions import LangChainException
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.types import Send
 from returns.result import Failure
@@ -178,7 +179,8 @@ def make_segment_document_node(
                 label="gemini_segment_document",
             )
             segments: list[ClauseSegment] = ClauseSegmentationResult.model_validate(result).segments
-        except Exception as exc:  # noqa: BLE001 - fallback segmentation keeps ingestion usable.
+        except LangChainException as exc:
+            exc.add_note(f"doc_id={state.doc_id}, operation=segmentation")
             logger.bind(doc_id=state.doc_id, error=str(exc)).warning(
                 "structured_segmentation_failed_using_fallback"
             )
@@ -231,7 +233,8 @@ def make_contextualize_chunk_node(
                 label="gemini_contextualize_chunk",
             )
             chunk: ContextualizedChunk = ContextualizedChunk.model_validate(result)
-        except Exception as exc:  # noqa: BLE001 - deterministic preamble is a safe fallback.
+        except LangChainException as exc:
+            exc.add_note(f"doc_id={state.doc_id}, clause_id={segment.clause_id}, operation=contextualize")
             logger.bind(clause_id=segment.clause_id, error=str(exc)).warning(
                 "contextualize_failed_using_deterministic_preamble"
             )
@@ -281,7 +284,8 @@ def make_classify_extract_node(
                 label="gemini_entity_extraction",
             )
             extraction: EntityExtractionResult = EntityExtractionResult.model_validate(result)
-        except Exception as exc:  # noqa: BLE001 - entity extraction is non-critical enrichment.
+        except LangChainException as exc:
+            exc.add_note(f"doc_id={state.doc_id}, operation=entity_extraction")
             logger.bind(doc_id=state.doc_id, error=str(exc)).warning(
                 "entity_extraction_failed_continuing_without_entities"
             )
@@ -743,7 +747,8 @@ async def _call_embedding_fn(embedding_fn: EmbeddingFunction, text_to_embed: str
 async def _force_merge_bm25(session: AsyncSession) -> None:
     try:
         await session.execute(text("SELECT bm25_force_merge('clauses_bm25_idx')"))
-    except Exception as exc:  # noqa: BLE001 - extension/index may be absent in local/dev DBs.
+    except Exception as exc:  # noqa: BLE001 — extension/index may be absent in local/dev DBs
+        exc.add_note("operation=bm25_force_merge")
         logger.bind(error=str(exc)).warning("bm25_force_merge_skipped")
 
 
@@ -771,7 +776,8 @@ async def _graphiti_add_episode(
             label="graphiti_add_episode",
         )
         return str(getattr(result, "uuid", name))
-    except Exception as exc:  # noqa: BLE001 - graph write failures should not roll back Postgres ingestion.
+    except Exception as exc:  # noqa: BLE001 — graph write failure must not roll back Postgres ingestion
+        exc.add_note(f"name={name}, operation=graphiti_add_episode")
         logger.bind(name=name, error=str(exc)).warning("graphiti_episode_upsert_failed")
         return None
 

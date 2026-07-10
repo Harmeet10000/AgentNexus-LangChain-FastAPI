@@ -156,7 +156,8 @@ async def _timed_tool(
             span.record_exception(exc)
             logger.bind(tool=tool_name, error=str(exc.detail)).warning("MCP tool failed")
             return _error(str(exc.detail))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — MCP tools may raise arbitrary exceptions
+            exc.add_note(f"tool={tool_name}, operation=invoke_tool")
             status = "error"
             span.record_exception(exc)
             logger.bind(tool=tool_name, error=str(exc)).exception("MCP tool failed")

@@ -46,7 +46,7 @@ def _redis_error_contains(exc: RedisError, message: str) -> bool:
 def _redis_any(redis: Redis) -> Any:
     """Treat Redis client variants uniformly for runtime command execution."""
 
-    return cast(Any, redis)
+    return cast("Any", redis)
 
 
 def get_key_name(object_type: str, *args: CacheKeyPart) -> str:

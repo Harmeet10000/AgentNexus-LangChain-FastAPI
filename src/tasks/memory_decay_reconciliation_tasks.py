@@ -166,7 +166,8 @@ async def _run_reconciliation_async(
             }
             results[user_id] = user_result
             logger.bind(user_id=user_id, **user_result).info("User reconciliation completed")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — task must not crash on single user failure
+            exc.add_note(f"user_id={user_id}")
             error_message = str(exc)
             results[user_id] = {"error": error_message}
             logger.bind(user_id=user_id, error=error_message).exception(

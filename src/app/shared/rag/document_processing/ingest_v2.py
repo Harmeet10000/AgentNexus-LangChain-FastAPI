@@ -83,7 +83,8 @@ def extract_document_metadata(content: str, file_path: str) -> dict[str, Any]:
                     metadata.update(yaml_metadata)
         except ImportError:
             loguru_logger.warning("PyYAML not installed, skipping frontmatter extraction")
-        except Exception as e:  # noqa: BLE001
+        except yaml.YAMLError as e:
+            e.add_note(f"file={file_path}, operation=parse_frontmatter")
             loguru_logger.warning(f"Failed to parse frontmatter: {e}")
 
     lines = content.split("\n")
@@ -127,12 +128,13 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
 
             return (markdown_content, result.document)
 
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — Docling conversion, fallback to raw text
+            e.add_note(f"file={file_path}, operation=docling_conversion")
             loguru_logger.error(f"Failed to convert {file_path} with Docling: {e}")
             try:
                 with open(file_path, encoding="utf-8") as f:
                     return (f.read(), None)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 — raw text fallback, must not crash
                 return (f"[Error: Could not read file {Path(file_path).name}]", None)
 
     # Text-based formats
@@ -345,7 +347,8 @@ async def ingest_documents(
             if progress_callback:
                 progress_callback(i + 1, len(document_files))
 
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — per-file processing, varied failure modes
+            e.add_note(f"file={file_path}, operation=process_document")
             loguru_logger.error(f"Failed to process {file_path}: {e}")
             results.append(
                 IngestionResult(

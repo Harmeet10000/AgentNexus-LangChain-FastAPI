@@ -12,7 +12,7 @@ def _setup_meter_provider(
     resource: Resource,
     export_interval_ms: int = 15000,
 ) -> MeterProvider:
-    global _otel_prometheus_reader  # noqa: PLW0603
+    global _otel_prometheus_reader  # noqa: PLW0603 — intentional module-level state for OTEL metrics
 
     readers: list = [
         PeriodicExportingMetricReader(
@@ -25,7 +25,7 @@ def _setup_meter_provider(
         prometheus_reader = PrometheusMetricReader()
         readers.append(prometheus_reader)
         _otel_prometheus_reader = prometheus_reader
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — metrics setup must not crash app
         _otel_prometheus_reader = None
 
     provider = MeterProvider(resource=resource, metric_readers=readers)

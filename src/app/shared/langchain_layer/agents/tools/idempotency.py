@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncEngine
 
+from redis.exceptions import RedisError
+
 _REDIS_TTL_SECONDS = 86_400
 _POSTGRES_TTL_DAYS = 30
 _REDIS_KEY_PREFIX = "idempotency:"
@@ -107,7 +109,8 @@ class IdempotencyGuard:
                 result_json,
                 ex=_REDIS_TTL_SECONDS,
             )
-        except Exception as exc:  # noqa: BLE001
+        except RedisError as exc:
+            exc.add_note(f"key={key[:16]}, tool={tool_name}")
             self._log.bind(error=str(exc), tool_name=tool_name).warning(
                 "Idempotency Redis write failed; continuing with Postgres."
             )
@@ -130,7 +133,8 @@ class IdempotencyGuard:
                 result.model_dump_json(),
                 ex=_REDIS_TTL_SECONDS,
             )
-        except Exception as exc:  # noqa: BLE001
+        except RedisError as exc:
+            exc.add_note(f"key={key[:16]}, operation=cache_warm")
             self._log.bind(error=str(exc), key_prefix=key[:16]).warning(
                 "Idempotency Redis cache warm failed."
             )
@@ -148,7 +152,8 @@ class IdempotencyGuard:
         try:
             async with self._db_engine.connect() as connection:
                 row = (await connection.execute(query, {"key": key})).fetchone()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — Postgres read, unknown driver exceptions possible
+            exc.add_note(f"key={key[:16]}, operation=postgres_read")
             self._log.bind(error=str(exc), key_prefix=key[:16]).warning(
                 "Idempotency Postgres read failed."
             )
@@ -191,7 +196,8 @@ class IdempotencyGuard:
                         "expires_at": expires_at,
                     },
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — Postgres write, unknown driver exceptions possible
+            exc.add_note(f"key={key[:16]}, tool={tool_name}, operation=postgres_write")
             self._log.bind(
                 error=str(exc),
                 key_prefix=key[:16],

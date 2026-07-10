@@ -11,6 +11,7 @@ import json
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
+from asyncpg.exceptions import PostgresError
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 from returns.result import Failure
@@ -108,7 +109,8 @@ def make_fetch_existing_node(
             new_entities = [_row_to_record(row) for row in new_rows]
             existing_entities = [_row_to_record(row) for row in similar_rows]
             log.info("fetch_done", new=len(new_entities), existing=len(existing_entities))
-        except Exception as exc:  # noqa: BLE001
+        except PostgresError as exc:
+            exc.add_note(f"user_id={state.user_id}, operation=fetch_existing")
             log.bind(error=str(exc)).exception("fetch_failed")
             error_result = _infrastructure_failure(
                 "RECONCILIATION_FETCH_FAILED",
@@ -181,7 +183,8 @@ def make_reconcile_node(
                 "reconciliation_decision": ReconciliationDecision(),
                 "failures": [error_result.failure()],
             }
-        except Exception as exc:  # noqa: BLE001
+        except PostgresError as exc:
+            exc.add_note(f"user_id={state.user_id}, operation=reconcile")
             log.bind(error=str(exc)).exception("reconcile_failed")
             error_result = _infrastructure_failure(
                 "RECONCILIATION_LLM_FAILED",
@@ -248,7 +251,8 @@ def make_apply_changes_node(
                     updated_count += 1
 
             log.info("apply_done", merged=merged_count, updated=updated_count)
-        except Exception as exc:  # noqa: BLE001
+        except PostgresError as exc:
+            exc.add_note(f"user_id={state.user_id}, operation=apply_changes")
             log.bind(error=str(exc)).exception("apply_failed")
             error_result = _infrastructure_failure(
                 "RECONCILIATION_APPLY_FAILED",
@@ -331,7 +335,8 @@ def make_write_versions_node(
                     versions_written += 1
 
             log.info("versions_written", count=versions_written)
-        except Exception as exc:  # noqa: BLE001
+        except PostgresError as exc:
+            exc.add_note(f"user_id={state.user_id}, operation=write_versions")
             log.bind(error=str(exc)).exception("write_versions_failed")
             error_result = _infrastructure_failure(
                 "RECONCILIATION_VERSION_WRITE_FAILED",

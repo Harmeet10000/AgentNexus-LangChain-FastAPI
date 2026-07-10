@@ -4,6 +4,8 @@ from typing import Any, Final, cast
 
 import asyncpg
 import asyncpg_listen
+from asyncpg.exceptions import PostgresError
+from celery.exceptions import CeleryError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -119,7 +121,8 @@ class OutboxRelay:
             CeleryTaskRegistry.typed_send(event_type, kwargs=cast("dict[str, object]", payload))
             await self._mark_published(event_id, session=session)
             logger.info("outbox_published", event_id=event_id, event_type=event_type)
-        except Exception as exc:  # noqa: BLE001 — dead-letter on any publish failure
+        except (CeleryError, PostgresError) as exc:
+            exc.add_note(f"event_id={event_id}, event_type={event_type}")
             await self._mark_failed(event_id, str(exc), session=session)
             logger.error("outbox_publish_failed", event_id=event_id, error=str(exc))
 

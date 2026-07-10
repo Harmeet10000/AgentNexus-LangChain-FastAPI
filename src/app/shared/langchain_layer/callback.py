@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 from typing import TYPE_CHECKING
-from uuid import UUID  # noqa: TC003
+from uuid import UUID  # noqa: TC003 — UUID used at runtime in callback metadata
 
 from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
 from langsmith import Client

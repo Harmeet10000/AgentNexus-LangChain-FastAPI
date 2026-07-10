@@ -16,7 +16,9 @@ class MCPTestClient:
         self._client: Any = None
 
     async def __aenter__(self) -> MCPTestClient:
-        from fastmcp import Client  # noqa: PLC0415
+        from fastmcp import (
+            Client,
+        )
 
         self._client = Client(self._server)
         await self._client.__aenter__()

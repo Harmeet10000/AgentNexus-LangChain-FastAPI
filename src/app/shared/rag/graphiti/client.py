@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Protocol
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
+from graphiti_core.errors import GraphitiError
 from graphiti_core.llm_client.gemini_client import GeminiClient, LLMConfig
 from graphiti_core.nodes import EpisodeType
 
@@ -194,7 +195,8 @@ async def close_graphiti(graphiti: Graphiti | None) -> None:
     try:
         await graphiti.close()
         logger.bind(service="graphiti").info("Graphiti closed")
-    except Exception as e:  # noqa: BLE001
+    except GraphitiError as e:
+        e.add_note("operation=close_graphiti")
         logger.bind(service="graphiti").warning(
             "Error closing Graphiti", error=str(e), error_type=type(e).__name__
         )
@@ -392,7 +394,8 @@ async def search_for_risk_context(
             group_ids=group_ids,
             num_results=num_results,
         )
-    except Exception:  # noqa: BLE001
+    except GraphitiError as exc:
+        exc.add_note(f"query={query[:80]}, task=risk_analysis")
         logger.bind(service="graphiti").exception("Graphiti risk context search failed")
         return []
     else:
@@ -444,7 +447,8 @@ async def search_for_precedent_chains(
         filtered = [r for r in (raw_results or []) if _has_jurisdiction(r, jurisdiction)][
             :num_results
         ]
-    except Exception:  # noqa: BLE001
+    except GraphitiError as exc:
+        exc.add_note(f"query={query[:80]}, task=precedent_chains")
         logger.bind(service="graphiti").exception("Graphiti precedent search failed")
         return []
     else:
@@ -497,7 +501,8 @@ async def get_obligation_chain(
             group_ids=group_ids,
             num_results=depth * 5,
         )
-    except Exception:  # noqa: BLE001
+    except GraphitiError as exc:
+        exc.add_note(f"query={obligation_query[:80]}, task=obligation_chain")
         logger.bind(service="graphiti").exception("Graphiti obligation chain search failed")
         return []
     else:

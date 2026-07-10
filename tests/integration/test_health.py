@@ -14,7 +14,7 @@ class TestHealthEndpoint:
     """Verify /health returns correct status codes and dependency info."""
 
     @pytest.fixture(autouse=True)
-    def _setup(self, client):  # noqa: ANN001
+    def _setup(self, client):  # noqa: ANN001 — test fixture, annotation not required
         self.client = client
 
     def test_healthy_returns_200(self) -> None:

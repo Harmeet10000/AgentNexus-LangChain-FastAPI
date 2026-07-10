@@ -16,7 +16,7 @@ from .security import TokenClaims, decode_token
 from .service import AuthService
 
 _http_bearer = HTTPBearer(auto_error=False)
-_ACCESS_TOKEN_TYPE = "access"  # noqa: S105
+_ACCESS_TOKEN_TYPE = "access"  # noqa: S105 — token type constant, not a password
 
 
 # ── Repository and service wiring ─────────────────────────────────────────────

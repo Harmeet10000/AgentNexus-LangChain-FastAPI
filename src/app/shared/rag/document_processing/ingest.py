@@ -112,7 +112,8 @@ class DocumentIngestionPipeline:
                 if progress_callback:
                     progress_callback(i + 1, len(document_files))
 
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001 — per-file processing, varied failure modes
+                e.add_note(f"file={file_path}, operation=process_document")
                 logger.error(f"Failed to process {file_path}: {e}")
                 results.append(
                     IngestionResult(
@@ -293,7 +294,8 @@ class DocumentIngestionPipeline:
                 # Return both markdown and DoclingDocument for HybridChunker
                 return (markdown_content, result.document)
 
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001 — Docling conversion, fallback to raw text
+                e.add_note(f"file={file_path}, operation=docling_conversion")
                 logger.error(f"Failed to convert {file_path} with Docling: {e}")
                 # Fall back to raw text if Docling fails
                 logger.warning(f"Falling back to raw text extraction for {file_path}")
@@ -356,7 +358,8 @@ class DocumentIngestionPipeline:
             logger.info(f"Successfully transcribed {Path(file_path).name}")
             return markdown_content
 
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — Whisper ASR failure
+            e.add_note(f"file={file_path}, operation=transcribe_audio")
             logger.error(f"Failed to transcribe {file_path} with Whisper ASR: {e}")
             return f"[Error: Could not transcribe audio file {Path(file_path).name}]"
 
@@ -393,7 +396,8 @@ class DocumentIngestionPipeline:
                         metadata.update(yaml_metadata)
             except ImportError:
                 logger.warning("PyYAML not installed, skipping frontmatter extraction")
-            except Exception as e:  # noqa: BLE001
+            except yaml.YAMLError as e:
+                e.add_note(f"file={file_path}, operation=parse_frontmatter")
                 logger.warning(f"Failed to parse frontmatter: {e}")
 
         # Extract some basic metadata from content
@@ -531,7 +535,8 @@ async def main():
 
     except KeyboardInterrupt:
         logger.info("Ingestion interrupted by user")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # top-level ingestion failure, re-raised
+        e.add_note("operation=main_ingestion")
         logger.error(f"Ingestion failed: {e}")
         raise
     finally:

@@ -6,6 +6,8 @@ import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from graphiti_core.errors import GraphitiError
+from graphiti_core.graphiti import AddEpisodeResults
 from graphiti_core.nodes import EpisodeType
 from pydantic import BaseModel, ConfigDict
 
@@ -45,7 +47,7 @@ async def write_and_verify_chunk(
         "}"
     )
     try:
-        result = await graphiti.add_episode(  # type: ignore[attr-defined]
+        result: AddEpisodeResults = await graphiti.add_episode(  # type: ignore[attr-defined]
             name=f"chunk:{document_id}:{chunk_id}",
             episode_body=body,
             source=EpisodeType.text,
@@ -54,7 +56,8 @@ async def write_and_verify_chunk(
             group_id=document_id,
         )
         episode_id = str(getattr(result, "uuid", "")) or None
-    except Exception as exc:  # noqa: BLE001
+    except GraphitiError as exc:
+        exc.add_note(f"document_id={document_id}, chunk_id={chunk_id}")
         logger.bind(document_id=document_id, chunk_id=chunk_id).warning(
             "graphiti_chunk_write_failed",
             error=str(exc),
@@ -67,7 +70,8 @@ async def write_and_verify_chunk(
             group_ids=[user_id, document_id],
             num_results=10,
         )
-    except Exception as exc:  # noqa: BLE001
+    except GraphitiError as exc:
+        exc.add_note(f"document_id={document_id}, chunk_id={chunk_id}, operation=search")
         logger.bind(document_id=document_id, chunk_id=chunk_id).warning(
             "graphiti_chunk_verify_failed",
             error=str(exc),

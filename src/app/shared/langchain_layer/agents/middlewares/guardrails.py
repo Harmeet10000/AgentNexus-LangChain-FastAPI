@@ -14,6 +14,7 @@ from langchain.agents.middleware import (
     wrap_model_call,
     # wrap_tool_call,
 )
+from langchain_core.exceptions import LangChainException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -225,7 +226,8 @@ class GuardrailMiddleware(BaseModel):
                         "output": ai_msg.content,
                     }
                 )
-            except Exception as exc:  # noqa: BLE001
+            except LangChainException as exc:
+                exc.add_note("operation=guardrail_check")
                 logger.error("Guardrail check failed: %s", exc)
                 return response
 

@@ -90,7 +90,9 @@ class Settings(BaseSettings):
     CORS_MAX_AGE: int = Field(default=3600)
 
     # --- Server Configuration ---
-    HOST: str = Field(default="0.0.0.0")  # noqa: S104
+    HOST: str = Field(default="0.0.0.0")  # noqa: S104 — bind address, not a hardcoded secret
+
+    # --- Server Configuration ---
     PORT: int = Field(default=5000)
     WORKERS: int = Field(default=1)
 
@@ -105,7 +107,7 @@ class Settings(BaseSettings):
     MCP_HTTP_PATH: str = Field(default="/mcp")
     MCP_HTTP_TRANSPORT: str = Field(default="http")
     MCP_RUN_TRANSPORT: str = Field(default="stdio")
-    MCP_HOST: str = Field(default="0.0.0.0")  # noqa: S104
+    MCP_HOST: str = Field(default="0.0.0.0")  # noqa: S104 — bind address, not a hardcoded secret
     MCP_PORT: int = Field(default=8001)
     MCP_LOG_LEVEL: str = Field(default="INFO")
     MCP_REQUIRE_AUTH: bool = Field(default=True)

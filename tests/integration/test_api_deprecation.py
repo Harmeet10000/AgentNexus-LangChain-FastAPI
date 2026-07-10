@@ -10,7 +10,7 @@ class TestDeprecationHeaders:
     """Verify v1 routes get Deprecation/Sunset headers, v2 does not."""
 
     @pytest.fixture(autouse=True)
-    def _setup(self, client):  # noqa: ANN001
+    def _setup(self, client):  # noqa: ANN001 — test fixture, annotation not required
         self.client = client
 
     def test_v1_route_has_deprecation_header(self) -> None:

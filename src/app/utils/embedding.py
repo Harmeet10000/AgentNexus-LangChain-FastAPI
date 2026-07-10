@@ -10,7 +10,7 @@ def normalize_embedding(embedding: list[float], expected_dim: int | None = None)
 
     Logs a warning if the actual dimension differs from the expected dimension.
     """
-    from app.config import get_settings  # noqa: PLC0415 — circular import guard
+    from app.config import get_settings  # noqa: PLC0415 — lazy import to avoid circular dependency
 
     if expected_dim is None:
         expected_dim = get_settings().EMBEDDING_DIMENSION

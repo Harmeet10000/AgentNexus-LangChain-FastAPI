@@ -53,6 +53,8 @@ async def get_crawler(redis_client: Redis | None = None) -> WebCrawler:
     The underlying AsyncWebCrawler browser is created per-crawl call
     (context-managed), not from the lifespan-managed instance.
     """
-    from app.shared.crawler import WebCrawler  # noqa: PLC0415
+    from app.shared.crawler import (
+        WebCrawler,
+    )
 
     return WebCrawler(redis_client=redis_client)

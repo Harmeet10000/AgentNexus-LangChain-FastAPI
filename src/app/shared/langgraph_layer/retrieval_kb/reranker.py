@@ -51,7 +51,8 @@ class CrossEncoderReranker:
 
         try:
             return await asyncer.asyncify(_sync_rerank)()
-        except Exception as exc:  # noqa: BLE001 - retrieval can continue without reranking.
+        except (OSError, ValueError, RuntimeError) as exc:
+            exc.add_note(f"model={self.model_name}, operation=rerank")
             logger.bind(error=str(exc)).warning("cross_encoder_rerank_failed")
             return chunks[:limit]
 
@@ -61,7 +62,8 @@ class CrossEncoderReranker:
 
         try:
             self._model = CrossEncoder(self.model_name)
-        except Exception:  # noqa: BLE001 - configured fallback model is intentional.
+        except (OSError, ValueError) as exc:
+            exc.add_note(f"model={self.model_name}, operation=load_model")
             logger.bind(model=self.model_name).warning("default_reranker_load_failed")
             self._model = CrossEncoder(_FALLBACK_RERANKER_MODEL)
         return self._model

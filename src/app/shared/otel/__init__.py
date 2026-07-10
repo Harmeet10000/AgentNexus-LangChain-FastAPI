@@ -21,7 +21,7 @@ def _build_resource(service_name: str | None = None) -> Resource:
 
 
 def setup_otel(service_name: str | None = None) -> None:
-    global _otel_initialized, _otel_tracer_provider, _otel_meter_provider, _otel_logger_provider  # noqa: PLW0603
+    global _otel_initialized, _otel_tracer_provider, _otel_meter_provider, _otel_logger_provider  # noqa: PLW0603 — intentional module-level state for OTEL providers
 
     settings = get_settings()
     if not settings.OTEL_ENABLED or _otel_initialized:
@@ -29,15 +29,18 @@ def setup_otel(service_name: str | None = None) -> None:
 
     resource = _build_resource(service_name)
 
-    from .tracer import _setup_tracer_provider  # noqa: PLC0415
+    from .tracer import _setup_tracer_provider  # noqa: PLC0415 — lazy import inside setup function
 
     _otel_tracer_provider = _setup_tracer_provider(resource, settings.OTEL_SAMPLE_RATE)
 
-    from .metrics import _setup_meter_provider  # noqa: PLC0415
+    from .metrics import _setup_meter_provider  # noqa: PLC0415 — lazy import inside setup function
 
     _otel_meter_provider = _setup_meter_provider(resource)
 
-    from .logs import _patch_loguru_sink, _setup_logger_provider  # noqa: PLC0415
+    from .logs import (  # noqa: PLC0415 — lazy import inside setup function
+        _patch_loguru_sink,
+        _setup_logger_provider,
+    )
 
     if settings.OTEL_LOGS_EXPORTER != "none":
         logger_provider = _setup_logger_provider(resource)
@@ -45,7 +48,9 @@ def setup_otel(service_name: str | None = None) -> None:
             _patch_loguru_sink(logger_provider)
             _otel_logger_provider = logger_provider
 
-    from .instrument import _setup_auto_instrumentation  # noqa: PLC0415
+    from .instrument import (
+        _setup_auto_instrumentation,
+    )
 
     _setup_auto_instrumentation()
 
@@ -53,27 +58,27 @@ def setup_otel(service_name: str | None = None) -> None:
 
 
 def shutdown_otel() -> None:
-    global _otel_initialized  # noqa: PLW0603
+    global _otel_initialized  # noqa: PLW0603 — intentional module-level state for OTEL providers
 
     if _otel_tracer_provider is not None:
         try:
             _otel_tracer_provider.force_flush(timeout_millis=10000)
             _otel_tracer_provider.shutdown()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — shutdown must not crash even if provider fails
             logger.warning("OTel tracer provider shutdown failed")
 
     if _otel_meter_provider is not None:
         try:
             _otel_meter_provider.force_flush(timeout_millis=10000)
             _otel_meter_provider.shutdown()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — shutdown must not crash even if provider fails
             logger.warning("OTel meter provider shutdown failed")
 
     if _otel_logger_provider is not None:
         try:
             _otel_logger_provider.force_flush(timeout_millis=10000)
             _otel_logger_provider.shutdown()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — shutdown must not crash even if provider fails
             logger.warning("OTel logger provider shutdown failed")
 
     _otel_initialized = False

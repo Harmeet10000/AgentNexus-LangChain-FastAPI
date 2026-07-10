@@ -3,6 +3,7 @@
 import argparse
 from collections.abc import AsyncGenerator
 
+from celery.exceptions import CeleryError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -42,7 +43,8 @@ async def replay(limit: int = 50) -> int:
     async for event in _fetch_dead_letters(session_factory, limit=limit):
         try:
             celery_app.send_task(event["event_type"], kwargs=event["payload"])
-        except Exception as exc:  # noqa: BLE001
+        except CeleryError as exc:
+            exc.add_note(f"event_type={event['event_type']}")
             logger.error("replay_failed", event_type=event["event_type"], error=str(exc))
             continue
         async with session_factory.begin() as session:

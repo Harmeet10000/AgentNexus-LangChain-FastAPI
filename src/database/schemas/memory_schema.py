@@ -36,7 +36,12 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship  # noqa: TC002
+from sqlalchemy.orm import (  # noqa: TC002 — Mapped, mapped_column used at runtime by SQLAlchemy mapper
+    DeclarativeBase,
+    Mapped,
+    mapped_column,
+    relationship,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime

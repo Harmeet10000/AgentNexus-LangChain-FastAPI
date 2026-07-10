@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from docling.document_converter import DocumentConverter
+from docling_core.types.doc.document import DoclingDocument
+
 from app.shared.rag.document_processing import create_document_converter
 
 from .classification import ParsedDocument
@@ -17,9 +20,9 @@ async def parse_document(*, raw_bytes: bytes, filename: str, content_type: str) 
     if not raw_bytes:
         return ParsedDocument(title=filename or "uploaded-document", markdown="", page_count=0)
 
-    converter = create_document_converter(gpu_available=False)
+    converter: DocumentConverter = create_document_converter(gpu_available=False)
     result: ConversionResult = converter.convert(raw_bytes)
-    document = result.document
+    document: DoclingDocument = result.document
     markdown = document.export_to_markdown()
     return ParsedDocument(
         title=_extract_title(markdown, filename),
@@ -31,7 +34,7 @@ async def parse_document(*, raw_bytes: bytes, filename: str, content_type: str) 
 
 def _extract_title(markdown: str, filename: str) -> str:
     for line in markdown.splitlines():
-        stripped = line.strip("# ").strip()
+        stripped: str = line.strip("# ").strip()
         if stripped:
             return stripped[:500]
     return filename[:500] or "uploaded-document"

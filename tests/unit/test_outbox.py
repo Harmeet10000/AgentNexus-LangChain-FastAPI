@@ -12,7 +12,7 @@ _app_utils = types.ModuleType("app.utils")
 _app_utils.logger = AsyncMock()
 sys.modules["app.utils"] = _app_utils
 
-from app.shared.outbox.helper import OUTBOX_CHANNEL, with_outbox  # noqa: E402
+from app.shared.outbox.helper import OUTBOX_CHANNEL, with_outbox  # noqa: E402 — test import order, fixture dependency
 
 
 class TestWithOutbox:

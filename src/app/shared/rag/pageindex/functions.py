@@ -52,7 +52,7 @@ async def apage_index(
     try:
         result = await asyncio.to_thread(pageindex.page_index, **kwargs)
         logger.bind(doc=doc).info("PageIndex indexing completed successfully")
-    except Exception:  # noqa: BLE001
+    except Exception:  # PageIndex SDK, unknown failure modes
         logger.bind(doc=doc, model=runtime.model).exception("PageIndex indexing failed")
         raise
     else:
@@ -121,7 +121,7 @@ async def achat_completion(
     try:
         result = await asyncio.to_thread(client.chat_completions, **kwargs)
         logger.bind(doc_id=doc_id).info("PageIndex chat completion successful")
-    except Exception:  # noqa: BLE001
+    except Exception:  # PageIndex SDK, unknown failure modes
         logger.bind(doc_id=doc_id).exception("PageIndex chat completion failed")
         raise
     else:
@@ -167,7 +167,8 @@ async def astream_chat_completions(
                 _raise_non_iterable_stream_response()
             for chunk in response:
                 await queue.put(chunk)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — PageIndex SDK, must not crash producer
+            exc.add_note(f"doc_id={doc_id}, operation=stream_chat_completions")
             logger.bind(doc_id=doc_id).exception("PageIndex streaming chat completion failed")
             await queue.put(exc)
         finally:

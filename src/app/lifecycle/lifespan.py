@@ -94,7 +94,7 @@ def setup_celery() -> Celery | None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR0912
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR0912 — lifespan initializes 15+ optional dependencies
     """Manage application startup and shutdown with parallel execution."""
     settings = get_settings()
     logger.info("Application starting", app_name=app.title, version=app.version)
@@ -134,7 +134,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     # Optional deps: Neo4j, Graphiti — log warning, set None on failure
     try:
         app.state.neo4j_driver: AsyncDriver = neo_task.result()
-    except Exception as exc:  # noqa: BLE001 — graceful degradation for optional dep
+    except Exception as exc:  # noqa: BLE001 — Neo4j is optional, must not crash startup
+        exc.add_note("operation=setup_neo4j")
         logger.warning("Neo4j startup failed, continuing without graph features", error=str(exc))
         app.state.neo4j_driver = None  # type: ignore[assignment]
 
@@ -158,7 +159,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
         await setup_graphiti_indices(graphiti)
         app.state.graphiti: Graphiti = graphiti
         logger.info("Graphiti initialized")
-    except Exception as exc:  # noqa: BLE001 — graceful degradation for optional dep
+    except Exception as exc:  # noqa: BLE001 — Graphiti is optional, must not crash startup
+        exc.add_note("operation=setup_graphiti")
         logger.warning("Graphiti startup failed, continuing without graph features", error=str(exc))
         app.state.graphiti = None  # type: ignore[assignment]
 
@@ -198,7 +200,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     try:
         app.state.crawl4ai_crawler: AsyncWebCrawler = await create_crawl4ai_crawler()
         logger.info("Crawl4AI browser initialized")
-    except Exception:  # noqa: BLE001 — graceful degradation for optional dep
+    except Exception:  # noqa: BLE001 — Crawl4AI is optional, must not crash startup
         logger.exception("Crawl4AI browser startup failed, continuing without crawl capability")
         app.state.crawl4ai_crawler = None
     settings = get_settings()
@@ -211,7 +213,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
         else:
             app.state.object_store = None
             logger.info("Object storage not configured, skipping")
-    except Exception:  # noqa: BLE001 — graceful degradation for optional storage
+    except Exception:  # noqa: BLE001 — Object storage is optional, must not crash startup
         logger.exception("Object storage startup failed, continuing without")
         app.state.object_store = None
 
@@ -228,9 +230,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
 
     # Outbox relay (uses existing database session factory)
     try:
-        from app.connections.postgres import get_database_url  # noqa: PLC0415
-        from app.shared.outbox import OutboxRelay  # noqa: PLC0415
-
+        from app.connections.postgres import (
+            get_database_url,
+        )
+        from app.shared.outbox import (
+            OutboxRelay,
+        )
         dsn: str = get_database_url().replace("+asyncpg", "")
         relay = OutboxRelay(
             database_url=dsn,
@@ -241,7 +246,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
         app.state.outbox_relay_task: Task[None] = asyncio.create_task(relay.run_listener())
         app.state.outbox_relay: OutboxRelay = relay
         logger.info("Outbox relay started")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — Celery is optional, must not crash startup
+        exc.add_note("operation=setup_outbox_relay")
         logger.warning("Outbox relay startup failed, continuing without outbox", error=str(exc))
         app.state.outbox_relay = None
 

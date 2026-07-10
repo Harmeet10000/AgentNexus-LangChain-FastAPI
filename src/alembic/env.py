@@ -22,7 +22,7 @@ if config.config_file_name is not None:
 # Import all models here for autogenerate support
 import app.features.documents.model
 import app.features.search.model
-import app.shared.outbox.model  # noqa: F401
+import app.shared.outbox.model  # noqa: F401 — registers model with Base.metadata for Alembic autogenerate
 
 try:
     target_metadata = Base.metadata

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID, uuid4  # noqa: TC003
+from uuid import UUID, uuid4  # noqa: TC003 — UUID used at runtime by SQLAlchemy column type
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Computed, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship  # noqa: TC002
+from sqlalchemy.orm import (  # noqa: TC002 — Mapped, mapped_column used at runtime by SQLAlchemy mapper
+    Mapped,
+    mapped_column,
+    relationship,
+)
 
 from app.shared import Base
 
