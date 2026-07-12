@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import asyncer
@@ -107,25 +107,6 @@ class S3ListObjectsResponse(BaseModel):
     key_count: int = 0
 
 
-class ObjectStore(Protocol):
-    async def put_object(
-        self,
-        *,
-        key: str,
-        data: bytes,
-        content_type: str,
-        metadata: dict[str, str],
-    ) -> str: ...
-
-    async def get_object(self, *, key: str) -> bytes: ...
-
-    async def delete_object(self, *, key: str) -> None: ...
-
-    async def get_by_uri(self, *, uri: str) -> bytes: ...
-
-    async def delete_by_uri(self, *, uri: str) -> None: ...
-
-    async def verify_access(self) -> None: ...
 
 
 class S3ClientWrapper(BaseModel):

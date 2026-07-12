@@ -65,11 +65,11 @@ async def generate_embedding(  # noqa: RET503
             return response.embedding.values
 
         except genai_errors.ClientError as e:
-            logger.error(f"Gemini API error: {e}")
+            logger.error("Gemini API error: {}", e)
             if attempt == max_retries - 1:
                 raise
             delay = retry_delay * (2**attempt)
-            logger.warning(f"Rate limit hit, retrying in {delay}s")
+            logger.warning("Rate limit hit, retrying in {}s", delay)
             await asyncio.sleep(delay)
 
         except genai_errors.APIError as e:
@@ -131,7 +131,7 @@ async def generate_embeddings_batch(  # noqa: RET503
             return embeddings
 
         except genai_errors.ClientError as e:
-            logger.error(f"Gemini API error in batch: {e}")
+            logger.error("Gemini API error in batch: {}", e)
             if attempt == max_retries - 1:
                 return await _process_embeddings_individually(processed_texts, model, retry_delay)
             await asyncio.sleep(retry_delay)
@@ -204,7 +204,7 @@ async def embed_chunks(
         return chunks
 
     config = get_model_config(model)
-    logger.info(f"Generating embeddings for {len(chunks)} chunks")
+    logger.info("Generating embeddings for {} chunks", len(chunks))
 
     embedded_chunks = []
     total_batches = (len(chunks) + batch_size - 1) // batch_size
@@ -239,7 +239,7 @@ async def embed_chunks(
             if progress_callback:
                 progress_callback(current_batch, total_batches)
 
-            logger.info(f"Processed batch {current_batch}/{total_batches}")
+            logger.info("Processed batch {}/{}", current_batch, total_batches)
 
         except genai_errors.APIError as e:
             e.add_note(f"model={model}, operation=embed_chunks, batch={i // batch_size + 1}")
@@ -256,7 +256,7 @@ async def embed_chunks(
                 chunk.embedding = [0.0] * config["dimensions"]
                 embedded_chunks.append(chunk)
 
-    logger.info(f"Generated embeddings for {len(embedded_chunks)} chunks")
+    logger.info("Generated embeddings for {} chunks", len(embedded_chunks))
     return embedded_chunks
 
 

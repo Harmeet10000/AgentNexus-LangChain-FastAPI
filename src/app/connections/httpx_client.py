@@ -9,7 +9,7 @@ from fastapi.requests import HTTPConnection
 from app.config import get_settings
 
 if TYPE_CHECKING:
-    from app.config.settings import Settings
+    from app.config import Settings
 
 
 def create_httpx_client() -> httpx.AsyncClient:

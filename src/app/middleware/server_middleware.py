@@ -10,7 +10,7 @@ from guard import IPInfoManager, SecurityMiddleware
 from guard.models import SecurityConfig
 from nanoid import generate
 
-from app.utils import RedisProtocolAdapter, execution_path, logger, request_state
+from app.utils import RedisGuardAdapter, execution_path, logger, request_state
 
 if TYPE_CHECKING:
     from typing import Any
@@ -153,7 +153,7 @@ async def initialize_fastapi_guard(app: "FastAPI", settings: "Settings") -> None
         return
 
     if settings.FASTAPI_GUARD_ENABLE_REDIS and hasattr(app.state, "redis"):
-        redis_adapter = RedisProtocolAdapter(redis=app.state.redis)
+        redis_adapter = RedisGuardAdapter(redis=app.state.redis)
         guard_middleware.redis_handler = redis_adapter
         guard_middleware.rate_limit_handler.redis_handler = redis_adapter
         guard_middleware.handler_initializer.redis_handler = redis_adapter

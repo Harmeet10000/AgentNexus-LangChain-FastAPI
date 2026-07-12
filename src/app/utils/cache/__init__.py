@@ -36,10 +36,10 @@ from app.utils.cache.redis_func import (
     update_hash,
     update_list_item,
 )
-from app.utils.cache.redis_protocol_adapter import RedisProtocolAdapter
+from app.utils.cache.redis_guard_adapter import RedisGuardAdapter
 
 __all__ = [
-    "RedisProtocolAdapter",
+    "RedisGuardAdapter",
     "add_to_bloom_filter",
     "check_bloom_filter",
     # Bloom filter operations

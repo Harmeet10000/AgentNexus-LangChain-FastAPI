@@ -5,7 +5,7 @@ from typing import Any
 from redis.asyncio import Redis
 
 
-class RedisProtocolAdapter:
+class RedisGuardAdapter:
     """Adapt a project Redis client to FastAPI Guard's Redis handler protocol."""
 
     def __init__(self, redis: Redis, redis_prefix: str = "fastapi_guard:") -> None:

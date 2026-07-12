@@ -2,7 +2,7 @@
 
 from .api_features import APIFeatures
 from .cache import (
-    RedisProtocolAdapter,
+    RedisGuardAdapter,
     add_to_bloom_filter,
     check_bloom_filter,
     create_bloom_filter,
@@ -71,7 +71,7 @@ __all__ = [
     "ExternalServiceException",
     "ForbiddenException",
     "NotFoundException",
-    "RedisProtocolAdapter",
+    "RedisGuardAdapter",
     "RequestMeta",
     "ServiceUnavailableException",
     "TooManyRequestsException",

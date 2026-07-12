@@ -98,7 +98,7 @@ class RateLimiter:
         self,
         identifier: str,
         scope: RateLimitScope,
-    ):
+    ) -> None:
         """Increment rate limit counter."""
         if not self.redis_client:
             return

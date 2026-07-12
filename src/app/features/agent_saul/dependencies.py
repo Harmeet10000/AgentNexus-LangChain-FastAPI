@@ -18,8 +18,8 @@ from uuid import uuid4
 from fastapi import Depends, Request, WebSocket, WebSocketException, status
 from pydantic import BaseModel, ConfigDict
 
-from app.features.auth import WebSocketSecurityContext, WebSocketSecurityService
-from app.features.auth.dependencies import WebSocketClaims, get_refresh_token_repository
+from app.features.auth import WebSocketSecurityContext
+from app.features.auth.dependencies import get_refresh_token_repository
 from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
@@ -27,7 +27,8 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
     from redis.asyncio import Redis
 
-    from app.features.auth import RefreshTokenRepository
+    from app.features.auth import RefreshTokenRepository, WebSocketSecurityService
+    from app.features.auth.dependencies import WebSocketClaims
 
 # ---------------------------------------------------------------------------
 # Individual dependency extractors

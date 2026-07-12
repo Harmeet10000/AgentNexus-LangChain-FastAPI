@@ -30,12 +30,12 @@ db_pool = None
 reranker = None
 
 
-async def initialize_db():
+async def initialize_db() -> None:
 
     logger.info("Database connection pool initialized")
 
 
-async def close_db():
+async def close_db() -> None:
 
     logger.info("Database connection pool closed")
 
@@ -113,7 +113,7 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
 
         # Generate query variations
         queries = await expand_query_variations(ctx, query)
-        logger.info(f"Multi-query search with {len(queries)} variations")
+        logger.info("Multi-query search with {} variations", len(queries))
 
         # Generate embeddings for all queries
         from ingestion.embedder import create_embedder
@@ -215,7 +215,7 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
             return "No relevant information found."
 
         # Stage 2: Re-rank with cross-encoder
-        logger.info(f"Re-ranking {len(results)} candidates")
+        logger.info("Re-ranking {} candidates", len(results))
 
         pairs = [[query, row["content"]] for row in results]
         scores = reranker.predict(pairs)
@@ -421,7 +421,7 @@ Respond with only a single number (1-5) and a brief reason."""
 
         # If relevance is low, refine query
         if grade_score < 3:
-            logger.info(f"Low relevance score ({grade_score}), refining query")
+            logger.info("Low relevance score ({}), refining query", grade_score)
 
             refine_prompt = f"""The query "{query}" returned low-relevance results.
 Suggest an improved, more specific query that might find better results.
@@ -435,7 +435,7 @@ Respond with only the improved query, nothing else."""
                 )
 
                 refined_query = refine_response.choices[0].message.content.strip()
-                logger.info(f"Refined query: {refined_query}")
+                logger.info("Refined query: {}", refined_query)
 
                 # Search again with refined query
                 refined_embedding = await embedder.embed_query(refined_query)
@@ -511,7 +511,7 @@ You can use multiple tools in sequence if needed. Be concise but thorough.""",
 )
 
 
-async def run_cli():
+async def run_cli() -> None:
     """Run the agent in an interactive CLI with streaming."""
 
     await initialize_db()
@@ -562,7 +562,7 @@ async def run_cli():
         await close_db()
 
 
-async def main():
+async def main() -> None:
     """Main entry point."""
 
     if not os.getenv("DATABASE_URL"):
