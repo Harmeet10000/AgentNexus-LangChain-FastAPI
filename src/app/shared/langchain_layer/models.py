@@ -54,7 +54,6 @@ from typing import TYPE_CHECKING, cast
 import toons
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.messages.ai import AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import (
     ChatGoogleGenerativeAI,
@@ -73,6 +72,7 @@ if TYPE_CHECKING:
     from langchain_core.embeddings import Embeddings
     from langchain_core.language_models import BaseChatModel
     from langchain_core.messages import BaseMessage
+    from langchain_core.messages.ai import AIMessage
     from langchain_core.tools import BaseTool
 
     from app.config import Settings

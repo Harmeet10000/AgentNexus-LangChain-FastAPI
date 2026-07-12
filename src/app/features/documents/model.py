@@ -21,13 +21,10 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import mapped_column
-
 from app.shared import Base
 
 if TYPE_CHECKING:
     from uuid import UUID
-
-    from sqlalchemy.orm import Mapped, relationship
 
 
 class UnifiedDocument(Base):

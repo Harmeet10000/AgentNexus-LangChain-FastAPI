@@ -45,10 +45,10 @@ class ModelRetryMiddleware(BaseModel):
 
     def model_post_init(self, __context: object) -> None:
         @wrap_model_call
-        async def _retry_wrapper(request, handler):
+        async def _retry_wrapper(request: object, handler: object) -> Any:
             for attempt in range(self.max_retries + 1):
                 try:
-                    return await handler(request)
+                    return await handler(request)  # type: ignore[misc]
                 except self.retryable_exceptions as exc:
                     if attempt == self.max_retries:
                         raise
@@ -154,8 +154,8 @@ class ContextEditingMiddleware(BaseModel):
         inject_fn = self.inject_context_fn
 
         @wrap_model_call
-        async def edit_context(request, handler):
-            msgs = list(request.messages)
+        async def edit_context(request: object, handler: object) -> Any:
+            msgs = list(request.messages)  # type: ignore[union-attr]
 
             # Redact PII
             if patterns:
@@ -210,8 +210,8 @@ class GuardrailMiddleware(BaseModel):
         raise_on = self.raise_on_violation
 
         @after_model
-        async def check_safety(state, response):
-            ai_msg = response.message
+        async def check_safety(state: object, response: object) -> Any:
+            ai_msg = response.message  # type: ignore[union-attr]
             if not isinstance(ai_msg.content, str):
                 return response
 

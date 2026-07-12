@@ -1,0 +1,15 @@
+{
+    "name": "Review Write Operations",
+    "version": "1.0.0",
+    "description": "Ask agent to verify write operations follow coding standards",
+    "when": {
+        "type": "preToolUse",
+        "toolTypes": [
+            "write"
+        ]
+    },
+    "then": {
+        "type": "askAgent",
+        "prompt": "Review this write operation to ensure it follows our FastAPI/LangChain architecture patterns, quality gates, and typing standards. Check for: proper layering (router/service/repo), async correctness, structured logging, typed exceptions, and Pydantic v2 best practices."
+    }
+}

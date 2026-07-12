@@ -22,6 +22,9 @@
       "/home/harmeet/Desktop/prompts/skills"
     ]
   },
+  "tools": {
+    "skill": false
+  },
   "agent": {},
   "command": {},
   "plugin": [

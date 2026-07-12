@@ -176,7 +176,7 @@ def _extract_entities_simple(text: str, document_id: str) -> list[Entity]:
         )
         entity_id += 1
 
-    loguru_logger.info(f"Fallback extraction found {len(entities)} entities")
+    loguru_logger.info("Fallback extraction found {} entities", len(entities))
     return entities
 
 

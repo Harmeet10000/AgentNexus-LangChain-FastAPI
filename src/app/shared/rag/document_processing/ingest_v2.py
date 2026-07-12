@@ -21,7 +21,7 @@ from .models import IngestionConfig, IngestionResult
 def find_document_files(documents_folder: str) -> list[str]:
     """Find all supported document files in the documents folder."""
     if not Path(documents_folder).exists():
-        loguru_logger.error(f"Documents folder not found: {documents_folder}")
+        loguru_logger.error("Documents folder not found: {}", documents_folder)
         return []
 
     # Supported file patterns - Docling + text formats + audio
@@ -118,13 +118,13 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
         try:
             from docling.document_converter import DocumentConverter
 
-            loguru_logger.info(f"Converting {file_ext} file using Docling: {Path(file_path).name}")
+            loguru_logger.info("Converting {} file using Docling: {}", file_ext, Path(file_path).name)
 
             converter = DocumentConverter()
             result = converter.convert(file_path)
 
             markdown_content = result.document.export_to_markdown()
-            loguru_logger.info(f"Successfully converted {Path(file_path).name} to markdown")
+            loguru_logger.info("Successfully converted {} to markdown", Path(file_path).name)
 
             return (markdown_content, result.document)
 
@@ -174,7 +174,7 @@ async def ingest_single_document(
     document_source = relpath(file_path, "documents")
     document_metadata = extract_document_metadata(document_content, file_path)
 
-    loguru_logger.info(f"Processing document: {document_title}")
+    loguru_logger.info("Processing document: {}", document_title)
 
     # Chunk the document
     if config.use_semantic_chunking:
@@ -203,7 +203,7 @@ async def ingest_single_document(
         )
 
     if not chunks:
-        loguru_logger.warning(f"No chunks created for {document_title}")
+        loguru_logger.warning("No chunks created for {}", document_title)
         return IngestionResult(
             document_id="",
             title=document_title,
@@ -212,11 +212,11 @@ async def ingest_single_document(
             errors=["No chunks created"],
         )
 
-    loguru_logger.info(f"Created {len(chunks)} chunks")
+    loguru_logger.info("Created {} chunks", len(chunks))
 
     # Generate embeddings
     embedded_chunks = await embed_chunks(chunks)
-    loguru_logger.info(f"Generated embeddings for {len(embedded_chunks)} chunks")
+    loguru_logger.info("Generated embeddings for {} chunks", len(embedded_chunks))
 
     # Save to database (if pool provided)
     document_id = ""
@@ -229,7 +229,7 @@ async def ingest_single_document(
             embedded_chunks,
             document_metadata,
         )
-        loguru_logger.info(f"Saved document to PostgreSQL with ID: {document_id}")
+        loguru_logger.info("Saved document to PostgreSQL with ID: {}", document_id)
 
     processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
@@ -317,10 +317,10 @@ async def ingest_documents(
     document_files = find_document_files(documents_folder)
 
     if not document_files:
-        loguru_logger.warning(f"No supported document files found in {documents_folder}")
+        loguru_logger.warning("No supported document files found in {}", documents_folder)
         return []
 
-    loguru_logger.info(f"Found {len(document_files)} document files to process")
+    loguru_logger.info("Found {} document files to process", len(document_files))
 
     results = []
 
@@ -333,7 +333,7 @@ async def ingest_documents(
 
     for i, file_path in enumerate(document_files):
         try:
-            loguru_logger.info(f"Processing file {i + 1}/{len(document_files)}: {file_path}")
+            loguru_logger.info("Processing file {}/{}: {}", i + 1, len(document_files), file_path)
 
             result = await ingest_single_document(
                 file_path,
@@ -371,7 +371,7 @@ async def ingest_documents(
     return results
 
 
-async def clean_databases(db_pool: Any):
+async def clean_databases(db_pool: Any) -> None:
     """Clean existing data from databases."""
     loguru_logger.warning("Cleaning existing data from databases...")
 

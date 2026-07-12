@@ -81,7 +81,7 @@ class CrawlerService:
         self,
         identifier: str,
         scope: RateLimitScope,
-    ):
+    ) -> None:
         """Increment rate limit counter."""
         await self.rate_limiter.increment_rate_limit(identifier, scope)
 
@@ -97,7 +97,7 @@ class CrawlerService:
         """
         start_time = time.time()
 
-        logger.info(f"Starting crawl for: {request.url}")
+        logger.info("Starting crawl for: {}", request.url)
 
         if request.max_depth > 1:
             crawl_results = await self.crawler.crawl_recursive(
@@ -213,7 +213,7 @@ class CrawlerService:
         Returns:
             SearchResponse with results
         """
-        logger.info(f"Searching for: {request.query}")
+        logger.info("Searching for: {}", request.query)
 
         tavily_response = await search(
             query=request.query,
@@ -240,7 +240,7 @@ class CrawlerService:
             total_results=tavily_response.total_results,
         )
 
-    async def close(self):
+    async def close(self) -> None:
         """Close all connections."""
         if self._crawler:
             await self._crawler.close()

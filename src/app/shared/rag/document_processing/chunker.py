@@ -22,13 +22,13 @@ from .models import Chunk, IngestionConfig
 
 def get_tokenizer(model_id: str = "sentence-transformers/all-MiniLM-L6-v2") -> AutoTokenizer:
     """Initialize tokenizer for token-aware chunking."""
-    loguru_logger.info(f"Initializing tokenizer: {model_id}")
+    loguru_logger.info("Initializing tokenizer: {}", model_id)
     return AutoTokenizer.from_pretrained(model_id)
 
 
 def create_hybrid_chunker(tokenizer: AutoTokenizer, config: IngestionConfig) -> HybridChunker:
     """Create HybridChunker instance."""
-    loguru_logger.info(f"HybridChunker initialized (max_tokens={config.max_tokens})")
+    loguru_logger.info("HybridChunker initialized (max_tokens={})", config.max_tokens)
     return HybridChunker(
         tokenizer=tokenizer,
         max_tokens=config.max_tokens,
@@ -102,7 +102,7 @@ async def chunk_document(
                 )
             )
 
-        loguru_logger.info(f"Created {len(document_chunks)} chunks using HybridChunker")
+        loguru_logger.info("Created {} chunks using HybridChunker", len(document_chunks))
         return document_chunks
 
     except DoclingError as e:
@@ -172,7 +172,7 @@ def _simple_fallback_chunk(
     for chunk in chunks:
         chunk.metadata["total_chunks"] = len(chunks)
 
-    loguru_logger.info(f"Created {len(chunks)} chunks using simple fallback")
+    loguru_logger.info("Created {} chunks using simple fallback", len(chunks))
     return chunks
 
 

@@ -55,7 +55,7 @@ class DocumentIngestionPipeline:
 
         self._initialized = False
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize database connections."""
         if self._initialized:
             return
@@ -68,7 +68,7 @@ class DocumentIngestionPipeline:
         self._initialized = True
         logger.info("Ingestion pipeline initialized")
 
-    async def close(self):
+    async def close(self) -> None:
         """Close database connections."""
         if self._initialized:
             await close_database()
@@ -95,16 +95,16 @@ class DocumentIngestionPipeline:
         document_files = self._find_document_files()
 
         if not document_files:
-            logger.warning(f"No supported document files found in {self.documents_folder}")
+            logger.warning("No supported document files found in {}", self.documents_folder)
             return []
 
-        logger.info(f"Found {len(document_files)} document files to process")
+        logger.info("Found {} document files to process", len(document_files))
 
         results = []
 
         for i, file_path in enumerate(document_files):
             try:
-                logger.info(f"Processing file {i + 1}/{len(document_files)}: {file_path}")
+                logger.info("Processing file {}/{}: {}", i + 1, len(document_files), file_path)
 
                 result = await self._ingest_single_document(file_path)
                 results.append(result)
@@ -157,7 +157,7 @@ class DocumentIngestionPipeline:
         # Extract metadata from content
         document_metadata = self._extract_document_metadata(document_content, file_path)
 
-        logger.info(f"Processing document: {document_title}")
+        logger.info("Processing document: {}", document_title)
 
         # Chunk the document - pass DoclingDocument for HybridChunker
         chunks = await self.chunker.chunk_document(
@@ -169,7 +169,7 @@ class DocumentIngestionPipeline:
         )
 
         if not chunks:
-            logger.warning(f"No chunks created for {document_title}")
+            logger.warning("No chunks created for {}", document_title)
             return IngestionResult(
                 document_id="",
                 title=document_title,
@@ -180,14 +180,14 @@ class DocumentIngestionPipeline:
                 errors=["No chunks created"],
             )
 
-        logger.info(f"Created {len(chunks)} chunks")
+        logger.info("Created {} chunks", len(chunks))
 
         # Entity extraction removed (graph-related functionality)
         entities_extracted = 0
 
         # Generate embeddings
         embedded_chunks = await self.embedder.embed_chunks(chunks)
-        logger.info(f"Generated embeddings for {len(embedded_chunks)} chunks")
+        logger.info("Generated embeddings for {} chunks", len(embedded_chunks))
 
         # Save to PostgreSQL
         document_id = await self._save_to_postgres(
@@ -198,7 +198,7 @@ class DocumentIngestionPipeline:
             document_metadata,
         )
 
-        logger.info(f"Saved document to PostgreSQL with ID: {document_id}")
+        logger.info("Saved document to PostgreSQL with ID: {}", document_id)
 
         # Knowledge graph functionality removed
         relationships_created = 0
@@ -220,7 +220,7 @@ class DocumentIngestionPipeline:
     def _find_document_files(self) -> list[str]:
         """Find all supported document files in the documents folder."""
         if not Path(self.documents_folder).exists():
-            logger.error(f"Documents folder not found: {self.documents_folder}")
+            logger.error("Documents folder not found: {}", self.documents_folder)
             return []
 
         # Supported file patterns - Docling + text formats + audio
@@ -282,14 +282,14 @@ class DocumentIngestionPipeline:
             try:
                 from docling.document_converter import DocumentConverter
 
-                logger.info(f"Converting {file_ext} file using Docling: {Path(file_path).name}")
+                logger.info("Converting {} file using Docling: {}", file_ext, Path(file_path).name)
 
                 converter = DocumentConverter()
                 result = converter.convert(file_path)
 
                 # Export to markdown for consistent processing
                 markdown_content = result.document.export_to_markdown()
-                logger.info(f"Successfully converted {Path(file_path).name} to markdown")
+                logger.info("Successfully converted {} to markdown", Path(file_path).name)
 
                 # Return both markdown and DoclingDocument for HybridChunker
                 return (markdown_content, result.document)
@@ -298,11 +298,11 @@ class DocumentIngestionPipeline:
                 e.add_note(f"file={file_path}, operation=docling_conversion")
                 logger.error(f"Failed to convert {file_path} with Docling: {e}")
                 # Fall back to raw text if Docling fails
-                logger.warning(f"Falling back to raw text extraction for {file_path}")
+                logger.warning("Falling back to raw text extraction for {}", file_path)
                 try:
                     with open(file_path, encoding="utf-8") as f:
                         return (f.read(), None)
-                except:
+                except Exception:
                     return (
                         f"[Error: Could not read file {Path(file_path).name}]",
                         None,
@@ -329,8 +329,8 @@ class DocumentIngestionPipeline:
 
             # Use Path object - Docling expects this
             audio_path = Path(file_path).resolve()
-            logger.info(f"Transcribing audio file using Whisper Turbo: {audio_path.name}")
-            logger.info(f"Audio file absolute path: {audio_path}")
+            logger.info("Transcribing audio file using Whisper Turbo: {}", audio_path.name)
+            logger.info("Audio file absolute path: {}", audio_path)
 
             # Verify file exists
             if not audio_path.exists():
@@ -355,7 +355,7 @@ class DocumentIngestionPipeline:
 
             # Export to markdown with timestamps
             markdown_content = result.document.export_to_markdown()
-            logger.info(f"Successfully transcribed {Path(file_path).name}")
+            logger.info("Successfully transcribed {}", Path(file_path).name)
             return markdown_content
 
         except Exception as e:  # noqa: BLE001 — Whisper ASR failure
@@ -456,7 +456,7 @@ class DocumentIngestionPipeline:
 
                 return document_id
 
-    async def _clean_databases(self):
+    async def _clean_databases(self) -> None:
         """Clean existing data from databases."""
         logger.warning("Cleaning existing data from databases...")
 
@@ -468,7 +468,7 @@ class DocumentIngestionPipeline:
         logger.info("Cleaned PostgreSQL database")
 
 
-async def main():
+async def main() -> None:
     """Main function for running ingestion."""
     parser = argparse.ArgumentParser(description="Ingest documents into vector DB")
     parser.add_argument("--documents", "-d", default="documents", help="Documents folder path")
@@ -505,7 +505,7 @@ async def main():
     )
 
     def progress_callback(current: int, total: int):
-        logger.info(f"Progress: {current}/{total} documents processed")
+        logger.info("Progress: {}/{} documents processed", current, total)
 
     try:
         start_time = datetime.now()
@@ -519,19 +519,19 @@ async def main():
         logger.info("=" * 50)
         logger.info("INGESTION SUMMARY")
         logger.info("=" * 50)
-        logger.info(f"Documents processed: {len(results)}")
-        logger.info(f"Total chunks created: {sum(r.chunks_created for r in results)}")
-        logger.info(f"Total errors: {sum(len(r.errors) for r in results)}")
-        logger.info(f"Total processing time: {total_time:.2f} seconds")
+        logger.info("Documents processed: {}", len(results))
+        logger.info("Total chunks created: {}", sum(r.chunks_created for r in results))
+        logger.info("Total errors: {}", sum(len(r.errors) for r in results))
+        logger.info("Total processing time: {:.2f} seconds", total_time)
 
         # Individual results
         for result in results:
             status = "✓" if not result.errors else "✗"
-            logger.info(f"{status} {result.title}: {result.chunks_created} chunks")
+            logger.info("{} {}: {} chunks", status, result.title, result.chunks_created)
 
             if result.errors:
                 for error in result.errors:
-                    logger.error(f"  Error: {error}")
+                    logger.error("  Error: {}", error)
 
     except KeyboardInterrupt:
         logger.info("Ingestion interrupted by user")

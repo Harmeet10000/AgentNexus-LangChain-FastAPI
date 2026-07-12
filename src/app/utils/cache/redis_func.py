@@ -167,7 +167,7 @@ async def set_cache(
             exc=exc,
         ) from exc
     else:
-        logger.info(f"Cache set: {cache_key}", object_type=object_type, ttl=expire_seconds)
+        logger.info("Cache set: {}", cache_key, object_type=object_type, ttl=expire_seconds)
         return True
 
 
@@ -250,7 +250,7 @@ async def delete_cache(
             exc=exc,
         ) from exc
     else:
-        logger.info(f"Cache deleted: {cache_key}", deleted_count=result)
+        logger.info("Cache deleted: {}", cache_key, deleted_count=result)
         return result > 0
 
 
@@ -299,7 +299,7 @@ async def execute_pipeline(
             exc=exc,
         ) from exc
     else:
-        logger.info(f"Pipeline executed: {len(operations)} operations")
+        logger.info("Pipeline executed: {} operations", len(operations))
         return results
 
 
@@ -531,7 +531,7 @@ async def delete_hash(
             exc=exc,
         ) from exc
     else:
-        logger.info(f"Hash deleted: {cache_key}", deleted_count=result)
+        logger.info("Hash deleted: {}", cache_key, deleted_count=result)
         return result > 0
 
 
@@ -879,7 +879,7 @@ async def delete_list(
             exc=exc,
         ) from exc
     else:
-        logger.info(f"List deleted: {cache_key}", deleted_count=result)
+        logger.info("List deleted: {}", cache_key, deleted_count=result)
         return result > 0
 
 
@@ -1132,7 +1132,7 @@ async def create_search_index(
         ) from exc
     else:
         if index_exists:
-            logger.info(f"Search index already exists: {index_name}")
+            logger.info("Search index already exists: {}", index_name)
             return {"created": False, "indexName": index_name}
 
         logger.info(
@@ -1229,7 +1229,7 @@ async def delete_search_index(
             exc=exc,
         ) from exc
     else:
-        logger.info(f"Search index deleted: {index_name}")
+        logger.info("Search index deleted: {}", index_name)
         return {"deleted": True, "indexName": index_name}
 
 
@@ -1282,7 +1282,7 @@ async def create_bloom_filter(
         ) from exc
     else:
         if filter_exists:
-            logger.info(f"Bloom filter already exists: {filter_name}")
+            logger.info("Bloom filter already exists: {}", filter_name)
             return {"created": False, "filterName": filter_name}
 
         logger.info(

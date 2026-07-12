@@ -1,0 +1,15 @@
+{
+    "name": "Security Scan on Save",
+    "version": "1.0.0",
+    "description": "Scan for security issues when Python files are saved",
+    "when": {
+        "type": "fileEdited",
+        "patterns": [
+            "src/**/*.py"
+        ]
+    },
+    "then": {
+        "type": "askAgent",
+        "prompt": "Scan this file for potential security issues including: hardcoded secrets, API keys, credentials, SQL injection vulnerabilities, XSS vulnerabilities, insecure configurations, and unsafe async patterns. Provide specific recommendations for fixes."
+    }
+}
