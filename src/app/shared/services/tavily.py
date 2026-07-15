@@ -100,6 +100,7 @@ async def search(
     query: str,
     max_results: int = 10,
     topic: str = "general",
+    *,
     include_answer: bool = True,
     include_raw_content: bool = False,
     include_images: bool = False,
@@ -197,8 +198,9 @@ async def search(
 
 
 class _TavilyClient:
+    @staticmethod
     async def search(
-        self, query: str, max_results: int = 10, include_answer: bool = True
+        query: str, max_results: int = 10, include_answer: bool = True
     ) -> SearchResponse:
         return await search(query=query, max_results=max_results, include_answer=include_answer)
 
@@ -207,7 +209,7 @@ _tavily_client: _TavilyClient | None = None
 
 
 async def get_tavily_client() -> _TavilyClient:
-    global _tavily_client
+    global _tavily_client  # noqa: PLW0603
     if _tavily_client is None:
         _tavily_client = _TavilyClient()
     return _tavily_client

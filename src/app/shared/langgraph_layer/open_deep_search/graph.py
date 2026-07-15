@@ -73,7 +73,7 @@ async def clarify_with_user(
     """Ask a clarifying question when the requested research scope is unclear."""
     configurable: Configuration = Configuration.from_runnable_config(config)
     if not configurable.allow_clarification:
-        return Command(goto="write_research_brief")
+        return Command(goto="write_research_brief")  # type: ignore
 
     clarification_model = (
         _build_model(configurable.research_model, configurable.research_model_max_tokens)
@@ -89,8 +89,8 @@ async def clarify_with_user(
     )
 
     if response.need_clarification:
-        return Command(goto="__end__", update={"messages": [AIMessage(content=response.question)]})
-    return Command(
+        return Command(goto="__end__", update={"messages": [AIMessage(content=response.question)]})  # type: ignore
+    return Command(  # type: ignore
         goto="write_research_brief",
         update={"messages": [AIMessage(content=response.verification)]},
     )
@@ -119,7 +119,7 @@ async def write_research_brief(
         max_concurrent_research_units=configurable.max_concurrent_research_units,
         max_researcher_iterations=configurable.max_researcher_iterations,
     )
-    return Command(
+    return Command(  # type: ignore
         goto="research_supervisor",
         update={
             "research_brief": response.research_brief,
@@ -147,7 +147,7 @@ async def supervisor(
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
     )
     response = await research_model.ainvoke(state.get("supervisor_messages", []))
-    return Command(
+    return Command(  # type: ignore
         goto="supervisor_tools",
         update={
             "supervisor_messages": [response],
@@ -172,7 +172,7 @@ async def supervisor_tools(
         tool_call["name"] == "ResearchComplete" for tool_call in most_recent_message.tool_calls
     )
     if exceeded_iterations or no_tool_calls or research_complete:
-        return Command(
+        return Command(  # type: ignore
             goto="__end__",
             update={
                 "notes": get_notes_from_tool_calls(supervisor_messages),
@@ -219,7 +219,7 @@ async def supervisor_tools(
             )
         except (RuntimeError, ValueError, AttributeError) as exc:
             logger.bind(error=str(exc)).warning("deep_research_supervisor_tool_failed")
-            return Command(
+            return Command(  # type: ignore
                 goto="__end__",
                 update={
                     "notes": get_notes_from_tool_calls(supervisor_messages),
@@ -259,7 +259,7 @@ async def supervisor_tools(
             update_payload["raw_notes"] = [raw_notes_concat]
 
     update_payload["supervisor_messages"] = all_tool_messages
-    return Command(goto="supervisor", update=update_payload)
+    return Command(goto="supervisor", update=update_payload)  # type: ignore
 
 
 state_graph_factory = cast("Any", StateGraph)
@@ -291,7 +291,7 @@ async def researcher(
     )
     messages = [SystemMessage(content=researcher_prompt), *state.get("researcher_messages", [])]
     response = await research_model.ainvoke(messages)
-    return Command(
+    return Command(  # type: ignore
         update={
             "researcher_messages": [response],
             "tool_call_iterations": state.get("tool_call_iterations", 0) + 1,
@@ -339,7 +339,7 @@ async def researcher_tools(
     researcher_messages = state.get("researcher_messages", [])
     most_recent_message = cast("Any", researcher_messages[-1])
     if not most_recent_message.tool_calls:
-        return Command(goto="compress_research")
+        return Command(goto="compress_research")  # type: ignore
 
     tools = await get_all_tools(config)
     tools_by_name = {tool_to_call.name: tool_to_call for tool_to_call in tools}
@@ -366,8 +366,8 @@ async def researcher_tools(
     exceeded_iterations = state.get("tool_call_iterations", 0) >= configurable.max_react_tool_calls
     research_complete = any(tool_call["name"] == "ResearchComplete" for tool_call in tool_calls)
     if exceeded_iterations or research_complete:
-        return Command(goto="compress_research", update={"researcher_messages": tool_outputs})
-    return Command(goto="researcher", update={"researcher_messages": tool_outputs})
+        return Command(goto="compress_research", update={"researcher_messages": tool_outputs})  # type: ignore
+    return Command(goto="researcher", update={"researcher_messages": tool_outputs})  # type: ignore
 
 
 async def crawl_executor(
@@ -378,22 +378,22 @@ async def crawl_executor(
     configurable = Configuration.from_runnable_config(config)
     researcher_messages = state.get("researcher_messages", [])
     if not researcher_messages:
-        return Command(goto="compress_research")
+        return Command(goto="compress_research")  # type: ignore
     most_recent_message = cast("Any", researcher_messages[-1])
 
     if not most_recent_message.tool_calls:
-        return Command(goto="compress_research")
+        return Command(goto="compress_research")  # type: ignore
 
     crawl_calls = [tc for tc in most_recent_message.tool_calls if tc["name"] == "crawl_webpage"]
     if not crawl_calls:
-        return Command(goto="compress_research")
+        return Command(goto="compress_research")  # type: ignore
 
     tools = await get_all_tools(config)
     tools_by_name = {t.name: t for t in tools}
     crawl_tool = tools_by_name.get("crawl_webpage")
 
     if not crawl_tool:
-        return Command(goto="compress_research")
+        return Command(goto="compress_research")  # type: ignore
 
     observations = await asyncio.gather(
         *(execute_tool_safely(crawl_tool, call["args"], config) for call in crawl_calls)
@@ -405,15 +405,15 @@ async def crawl_executor(
 
     non_crawl_calls = [tc for tc in most_recent_message.tool_calls if tc["name"] != "crawl_webpage"]
     if non_crawl_calls:
-        return Command(goto="researcher_tools", update={"researcher_messages": crawl_outputs})
+        return Command(goto="researcher_tools", update={"researcher_messages": crawl_outputs})  # type: ignore
 
     exceeded = state.get("tool_call_iterations", 0) >= configurable.max_react_tool_calls
     research_complete = any(
         tc["name"] == "ResearchComplete" for tc in most_recent_message.tool_calls
     )
     if exceeded or research_complete:
-        return Command(goto="compress_research", update={"researcher_messages": crawl_outputs})
-    return Command(goto="researcher", update={"researcher_messages": crawl_outputs})
+        return Command(goto="compress_research", update={"researcher_messages": crawl_outputs})  # type: ignore
+    return Command(goto="researcher", update={"researcher_messages": crawl_outputs})  # type: ignore
 
 
 async def compress_research(

@@ -53,6 +53,9 @@ class WebSocketSecurityViolationError(Exception):
         self.retryable = retryable
 
 
+WebSocketSecurityViolation = WebSocketSecurityViolationError
+
+
 class WebSocketRateLimitExceededError(WebSocketSecurityViolationError):
     def __init__(self) -> None:
         super().__init__(
@@ -69,6 +72,9 @@ class WebSocketIdleTimeoutError(WebSocketSecurityViolationError):
             message="Connection closed due to inactivity.",
             retryable=True,
         )
+
+
+WebSocketIdleTimeout = WebSocketIdleTimeoutError
 
 
 async def _websocket_rate_identifier(websocket: WebSocket) -> str:
@@ -150,8 +156,9 @@ class WebSocketSecurityService:
                 reason="Origin not allowed",
             )
 
+    @staticmethod
     def build_context(
-        self, *, claims: TokenClaims, origin: str | None, connection_id: str
+        *, claims: TokenClaims, origin: str | None, connection_id: str
     ) -> WebSocketSecurityContext:
         return WebSocketSecurityContext(
             claims=claims,

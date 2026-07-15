@@ -55,8 +55,8 @@ def extract_title(content: str, file_path: str) -> str:
     """Extract title from document content or filename."""
     lines = content.split("\n")
     for line in lines[:10]:
-        line = line.strip()
-        if line.startswith("# "):
+        stripped_line = line.strip()
+        if stripped_line.startswith("# "):
             return line[2:].strip()
 
     return Path(file_path).stem
@@ -67,7 +67,7 @@ def extract_document_metadata(content: str, file_path: str) -> dict[str, Any]:
     metadata = {
         "file_path": file_path,
         "file_size": len(content),
-        "ingestion_date": datetime.now().isoformat(),
+        "ingestion_date": datetime.now(tz=datetime.timezone.utc).isoformat(),
     }
 
     # Try to extract YAML frontmatter
@@ -118,7 +118,9 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
         try:
             from docling.document_converter import DocumentConverter
 
-            loguru_logger.info("Converting {} file using Docling: {}", file_ext, Path(file_path).name)
+            loguru_logger.info(
+                "Converting {} file using Docling: {}", file_ext, Path(file_path).name
+            )
 
             converter = DocumentConverter()
             result = converter.convert(file_path)
@@ -126,24 +128,24 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
             markdown_content = result.document.export_to_markdown()
             loguru_logger.info("Successfully converted {} to markdown", Path(file_path).name)
 
-            return (markdown_content, result.document)
-
         except Exception as e:  # noqa: BLE001 — Docling conversion, fallback to raw text
             e.add_note(f"file={file_path}, operation=docling_conversion")
             loguru_logger.error(f"Failed to convert {file_path} with Docling: {e}")
             try:
-                with open(file_path, encoding="utf-8") as f:
+                with Path(file_path).open(encoding="utf-8") as f:  # noqa: ASYNC230
                     return (f.read(), None)
             except Exception:  # noqa: BLE001 — raw text fallback, must not crash
                 return (f"[Error: Could not read file {Path(file_path).name}]", None)
+        else:
+            return (markdown_content, result.document)
 
     # Text-based formats
     else:
         try:
-            with open(file_path, encoding="utf-8") as f:
+            with Path(file_path).open(encoding="utf-8") as f:  # noqa: ASYNC230
                 return (f.read(), None)
         except UnicodeDecodeError:
-            with open(file_path, encoding="latin-1") as f:
+            with Path(file_path).open(encoding="latin-1") as f:  # noqa: ASYNC230
                 return (f.read(), None)
 
 
@@ -167,11 +169,11 @@ async def ingest_single_document(
     Returns:
         Ingestion result
     """
-    start_time = datetime.now()
+    start_time = datetime.now(tz=datetime.timezone.utc)
 
     document_content, docling_doc = await read_document(file_path)
     document_title = extract_title(document_content, file_path)
-    document_source = relpath(file_path, "documents")
+    document_source = relpath(file_path, "documents")  # noqa: ASYNC240
     document_metadata = extract_document_metadata(document_content, file_path)
 
     loguru_logger.info("Processing document: {}", document_title)
@@ -208,7 +210,8 @@ async def ingest_single_document(
             document_id="",
             title=document_title,
             chunks_created=0,
-            processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000,
+            processing_time_ms=(datetime.now(tz=datetime.timezone.utc) - start_time).total_seconds()
+            * 1000,
             errors=["No chunks created"],
         )
 
@@ -226,12 +229,12 @@ async def ingest_single_document(
             document_title,
             document_source,
             document_content,
-            embedded_chunks,
-            document_metadata,
+            chunks=embedded_chunks,
+            metadata=document_metadata,
         )
         loguru_logger.info("Saved document to PostgreSQL with ID: {}", document_id)
 
-    processing_time = (datetime.now() - start_time).total_seconds() * 1000
+    processing_time = (datetime.now(tz=datetime.timezone.utc) - start_time).total_seconds() * 1000
 
     return IngestionResult(
         document_id=document_id,
@@ -246,47 +249,47 @@ async def save_to_postgres(
     title: str,
     source: str,
     content: str,
+    *,
     chunks: list,
     metadata: dict[str, Any],
 ) -> str:
     """Save document and chunks to PostgreSQL."""
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            # Insert document
-            document_result = await conn.fetchrow(
+    async with db_pool.acquire() as conn, conn.transaction():
+        # Insert document
+        document_result = await conn.fetchrow(
+            """
+            INSERT INTO documents (title, source, content, metadata)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id::text
+            """,
+            title,
+            source,
+            content,
+            json.dumps(metadata),
+        )
+
+        document_id = document_result["id"]
+
+        # Insert chunks
+        for chunk in chunks:
+            embedding_data = None
+            if hasattr(chunk, "embedding") and chunk.embedding:
+                embedding_data = "[" + ",".join(map(str, chunk.embedding)) + "]"
+
+            await conn.execute(
                 """
-                INSERT INTO documents (title, source, content, metadata)
-                VALUES ($1, $2, $3, $4)
-                RETURNING id::text
+                INSERT INTO chunks (document_id, content, embedding, chunk_index, metadata, token_count)
+                VALUES ($1::uuid, $2, $3::vector, $4, $5, $6)
                 """,
-                title,
-                source,
-                content,
-                json.dumps(metadata),
+                document_id,
+                chunk.content,
+                embedding_data,
+                chunk.chunk_index,
+                json.dumps(chunk.metadata),
+                chunk.token_count,
             )
 
-            document_id = document_result["id"]
-
-            # Insert chunks
-            for chunk in chunks:
-                embedding_data = None
-                if hasattr(chunk, "embedding") and chunk.embedding:
-                    embedding_data = "[" + ",".join(map(str, chunk.embedding)) + "]"
-
-                await conn.execute(
-                    """
-                    INSERT INTO chunks (document_id, content, embedding, chunk_index, metadata, token_count)
-                    VALUES ($1::uuid, $2, $3::vector, $4, $5, $6)
-                    """,
-                    document_id,
-                    chunk.content,
-                    embedding_data,
-                    chunk.chunk_index,
-                    json.dumps(chunk.metadata),
-                    chunk.token_count,
-                )
-
-            return document_id
+        return document_id
 
 
 async def ingest_documents(

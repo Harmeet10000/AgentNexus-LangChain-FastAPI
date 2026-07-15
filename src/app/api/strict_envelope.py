@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import get_origin
+from typing import get_origin, override
 
 from fastapi import APIRouter
 
@@ -15,6 +15,7 @@ class StrictEnvelopeAPIRouter(APIRouter):
 
     strict_enforce: bool = os.getenv("STRICT_ENVELOPE_ENFORCE", "false").lower() == "true"
 
+    @override
     def add_api_route(self, path: str, endpoint, **kwargs) -> None:
         response_model = kwargs.get("response_model")
 

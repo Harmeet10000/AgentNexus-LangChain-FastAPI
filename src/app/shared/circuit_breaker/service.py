@@ -87,7 +87,8 @@ class CircuitBreakerService:
         else:
             await self._record_success(service_name, keys)
 
-    def _build_keys(self, service_name: str) -> CircuitBreakerKeys:
+    @staticmethod
+    def _build_keys(service_name: str) -> CircuitBreakerKeys:
         return CircuitBreakerKeys(
             state=f"cb:state:{service_name}",
             failures=f"cb:failures:{service_name}",
@@ -111,8 +112,8 @@ class CircuitBreakerService:
             )
             return AcquireStatus.ALLOW
 
+    @staticmethod
     def _raise_if_rejected(
-        self,
         settings: CircuitBreakerSettings,
         status: AcquireStatus,
     ) -> None:
@@ -161,5 +162,6 @@ class CircuitBreakerService:
                 "Circuit breaker Redis failure update failed."
             )
 
-    def _now_ms(self) -> int:
+    @staticmethod
+    def _now_ms() -> int:
         return int(time.time() * 1000)

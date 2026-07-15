@@ -1,5 +1,7 @@
 """Dependency wiring for health feature."""
 
+from typing import Any
+
 from celery import Celery
 from fastapi import Depends, Request
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -10,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from .service import HealthService
 
 
-def get_health_mongodb_client(request: Request) -> AsyncIOMotorClient | None:
+def get_health_mongodb_client(request: Request) -> AsyncIOMotorClient[Any] | None:
     return getattr(request.app.state, "mongo_client", None)
 
 
@@ -33,7 +35,7 @@ def get_health_celery_app(request: Request) -> Celery | None:
 
 
 def get_health_service(
-    mongo_client: AsyncIOMotorClient | None = Depends(get_health_mongodb_client),
+    mongo_client: AsyncIOMotorClient[Any] | None = Depends(get_health_mongodb_client),
     redis_client: Redis | None = Depends(get_health_redis_client),
     postgres_session_factory: async_sessionmaker[AsyncSession] | None = Depends(
         get_health_postgres_session_factory

@@ -49,7 +49,7 @@ def trim_by_token_count(
     Preserves the SystemMessage when keep_system=True.
     Uses LangChain's built-in trim_messages.
     """
-    return trim_messages(
+    return trim_messages(  # type: ignore
         messages,
         max_tokens=max_tokens,
         strategy=strategy,

@@ -1,7 +1,7 @@
 """LangChain tool for web crawling."""
 
 import contextlib
-from typing import Any
+from typing import Any, override
 
 from langchain_core.tools import BaseTool
 
@@ -35,6 +35,7 @@ class CrawlUrlTool(BaseTool):
     """
     args_schema: type[CrawlUrlInput] = CrawlUrlInput
 
+    @override
     async def _arun(
         self,
         url: str,

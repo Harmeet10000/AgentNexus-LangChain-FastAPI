@@ -1,6 +1,7 @@
 """Chat messages schema for storing user-LLM conversations."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, Enum, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -22,7 +23,9 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)  # LLM model used
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    extra_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Additional context
+    extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )  # Additional context
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
@@ -37,7 +40,7 @@ class ChatSession(Base):
     session_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
     user_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    extra_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

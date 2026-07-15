@@ -1,7 +1,7 @@
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import opentelemetry.trace as otel_trace
 from fastapi import FastAPI, Response
@@ -13,8 +13,6 @@ from nanoid import generate
 from app.utils import RedisGuardAdapter, execution_path, logger, request_state
 
 if TYPE_CHECKING:
-    from typing import Any
-
     from app.config import Settings
 
 RATE_LIMIT_EXCLUDED_PATH_PREFIXES = ("/api-docs", "/api-redoc")
@@ -24,10 +22,20 @@ RATE_LIMIT_EXCLUDED_PATHS = {"/metrics", "/swagger.json"}
 class RequestStateLoggingMiddleware:
     """Pure ASGI middleware that keeps request context alive through streaming."""
 
-    def __init__(self, app: Callable[[dict, Callable, Callable], Awaitable]) -> None:
+    def __init__(
+        self,
+        app: Callable[
+            [dict[str, Any], Callable[..., Any], Callable[..., Awaitable[None]]], Awaitable[None]
+        ],
+    ) -> None:
         self.app = app
 
-    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+    async def __call__(
+        self,
+        scope: dict[str, Any],
+        receive: Callable[..., Any],
+        send: Callable[..., Awaitable[None]],
+    ) -> None:
         """Track request-scoped logging state for the full ASGI response lifecycle."""
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -61,7 +69,7 @@ class RequestStateLoggingMiddleware:
 
         with logger.contextualize(**state):
 
-            async def send_wrapper(message: dict) -> None:
+            async def send_wrapper(message: dict[str, Any]) -> None:
                 nonlocal response_started, response_finished, status_code
 
                 if message["type"] == "http.response.start":
@@ -73,7 +81,7 @@ class RequestStateLoggingMiddleware:
 
                 if (
                     message["type"] == "http.response.body"
-                    and not message.get("more_body", False)
+                    and not message.get("more_body")
                     and not response_finished
                 ):
                     response_finished = True
@@ -102,7 +110,7 @@ class RequestStateLoggingMiddleware:
                 execution_path.reset(flow_token)
 
     @staticmethod
-    def _read_correlation_id(scope: dict) -> str | None:
+    def _read_correlation_id(scope: dict[str, Any]) -> str | None:
         for key, value in scope.get("headers", []):
             if key == b"x-correlation-id":
                 return value.decode()
@@ -154,7 +162,7 @@ async def initialize_fastapi_guard(app: "FastAPI", settings: "Settings") -> None
 
     if settings.FASTAPI_GUARD_ENABLE_REDIS and hasattr(app.state, "redis"):
         redis_adapter = RedisGuardAdapter(redis=app.state.redis)
-        guard_middleware.redis_handler = redis_adapter
+        guard_middleware.redis_handler = redis_adapter  # type: ignore
         guard_middleware.rate_limit_handler.redis_handler = redis_adapter
         guard_middleware.handler_initializer.redis_handler = redis_adapter
 

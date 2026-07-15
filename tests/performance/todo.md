@@ -211,7 +211,15 @@ It will be compatible before version 2.0.0.
  [warning  ] Cognee 1.0 changes: New API — remember/recall/forget/improve (V1 add/cognify/search still work). Session memory enabled by default (CACHING=false to disable). Multi-user access control on by default (ENABLE_BACKEND_ACCESS_CONTROL=false to disable). Agents (@cognee.agent) auto-verified on registration. See https://docs.cognee.ai/ [cognee.shared.logging_utils]    DONE
 205. what is PYCODE and other frequently used in python projects, dockerfiles, uv and other places   DONE
 206. customise openspec and learn in depth about pattern matching  DONE
+167. how systemPromptPaarts, chatPromptTemplate, systemmessage, humanMessage, AImessage,ToolMessage look like while passing it in graph and how should i serialise these with toons before sending to LLM, find which parts should be removed from system prompt parts, how are system/human/ai/toolMessage are sent to LLM   DONE
 
+161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
+type Composable = Callable[[Any], Any]
+def compose(*functions: Composable) -> Composable:
+    def apply(value: Any, fn: Composable) -> Any:add headroom-ai for comrpression
+        return fn(value)
+
+    return lambda data: reduce(apply, functions, data)   DELAYED
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses     DELAYED    
 156. check the page https://docs.langchain.com/langsmith/deployments#
@@ -269,22 +277,15 @@ todos:-
     h. research for RAG pipeline with Gemini
     i. use MessagesState to standardise the moving of data between Agent A and Agent 
     j. use tenacity for retries, new capabilities, output format from chatpromptparts, check newer things F-S-A-T-O-F as capabilites, output format can be outside System Prompt
-161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
-type Composable = Callable[[Any], Any]
-def compose(*functions: Composable) -> Composable:
-    def apply(value: Any, fn: Composable) -> Any:add headroom-ai for comrpression
-        return fn(value)
 
-    return lambda data: reduce(apply, functions, data)
 148. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
-167. how systemPromptPaarts, chatPromptTemplate, systemmessage, humanMessage, AImessage,ToolMessage look like while passing it in graph and how should i serialise these with toons before sending to LLM, find which parts should be removed from system prompt parts, how are system/human/ai/toolMessage are sent to LLM
 57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
 165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384     
 136. use LangExtract outputs to build rich graph knowledge from your legal documents.
 195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
 196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node 
-
-
+207. only enable OTEL in prod and not in dev 
+208. check if the patterm matching is usefull as written after ruff rules with raise keyword
 
 ```
 
@@ -642,3 +643,4 @@ Memcached vs. Redis (16:53-18:08): Technology selection should come last. Memcac
 |$out        |Write result to new collection (older)          |Similar to $merge but drops & recreates collection       |Less flexible than $merge                              |
 
 ```
+

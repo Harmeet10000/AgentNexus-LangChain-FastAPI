@@ -7,11 +7,13 @@ from motor.motor_asyncio import AsyncIOMotorCollection
 class APIFeatures:
     """MongoDB query builder with filtering, sorting, and pagination."""
 
-    def __init__(self, collection: AsyncIOMotorCollection, query_params: dict[str, Any]):
+    def __init__(
+        self, collection: AsyncIOMotorCollection[Any], query_params: dict[str, Any]
+    ) -> None:
         self.collection = collection
         self.query_params = query_params
         self.filter_query: dict[str, Any] = {}
-        self.sort_query: list = [("createdAt", -1)]
+        self.sort_query: list[tuple[str, int]] = [("createdAt", -1)]
         self.projection: dict[str, int] | None = None
         self.skip_count: int = 0
         self.limit_count: int = 100
@@ -107,7 +109,7 @@ class APIFeatures:
 
         return self
 
-    async def execute(self) -> list:
+    async def execute(self) -> list[dict[str, Any]]:
         """Execute the query and return results."""
         cursor = self.collection.find(self.filter_query, self.projection)
 

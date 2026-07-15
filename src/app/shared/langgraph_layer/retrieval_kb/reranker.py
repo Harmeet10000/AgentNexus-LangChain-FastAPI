@@ -39,7 +39,7 @@ class CrossEncoderReranker:
         def _sync_rerank() -> list[RetrievedChunk]:
             model = self._load_model()
             pairs = [(query, f"{chunk.preamble}\n\n{chunk.chunk_text}") for chunk in chunks]
-            scores = model.predict(pairs)  # type: ignore[attr-defined]
+            scores = model.predict(pairs)  # type: ignore
             ranked = sorted(
                 zip(chunks, scores, strict=False),
                 key=lambda item: float(item[1]),

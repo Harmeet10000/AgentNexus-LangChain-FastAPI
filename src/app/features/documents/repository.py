@@ -10,9 +10,7 @@ from uuid import UUID
 from returns.result import Failure, Success
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.engine.result import Result
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.sql.selectable import Select
 
 from app.features.search.constants import (
     DISKANN_QUERY_RESCORE,
@@ -28,7 +26,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Any
 
+    from sqlalchemy.engine.result import Result
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.selectable import Select
 
     from app.shared.result import AppResult
 
@@ -610,7 +610,7 @@ def build_search_filter_params(*, metadata_filter: dict[str, Any]) -> dict[str, 
         "jurisdiction": metadata_filter.get("jurisdiction"),
         "contract_type": metadata_filter.get("contract_type"),
         "clause_type": metadata_filter.get("clause_type"),
-        "require_graphiti_verified": bool(metadata_filter.get("require_graphiti_verified", False)),
+        "require_graphiti_verified": bool(metadata_filter.get("require_graphiti_verified")),
         "metadata_filter": json.dumps(metadata_filter.get("metadata_", {})),
         "parties_filter": json.dumps(parties),
     }

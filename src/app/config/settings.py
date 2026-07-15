@@ -3,6 +3,7 @@
 import warnings
 from functools import cache
 from pathlib import Path
+from typing import override
 
 from loguru import logger
 from pydantic import Field, SecretStr, model_validator
@@ -42,14 +43,14 @@ class Settings(BaseSettings):
     def validate_embedding_dimension(cls, values: dict[str, object]) -> dict[str, object]:
         dim = values.get("EMBEDDING_DIMENSION")
         model = values.get("GEMINI_EMBEDDING_MODEL", "")
-        _embedding_model_dimensions: dict[str, int] = {
+        embedding_model_dimensions: dict[str, int] = {
             "gemini-embedding-2-preview": 768,
             "text-embedding-004": 768,
             "text-embedding-3-small": 1536,
             "text-embedding-3-large": 3072,
         }
-        if isinstance(model, str) and model in _embedding_model_dimensions:
-            expected = _embedding_model_dimensions[model]
+        if isinstance(model, str) and model in embedding_model_dimensions:
+            expected = embedding_model_dimensions[model]
             if dim is not None and dim != expected:
                 warnings.warn(
                     f"EMBEDDING_DIMENSION={dim} but {model} expects {expected}",
@@ -370,6 +371,7 @@ class Settings(BaseSettings):
     OTEL_ENABLED: bool = Field(default=True)
     OTEL_SAMPLE_RATE: float = Field(default=1.0, ge=0.0, le=1.0)
 
+    @override
     def model_post_init(self, __context: object) -> None:
         bad_fields: list[str] = []
         for field_name, bad_defaults in PRODUCTION_SECRET_FIELDS.items():

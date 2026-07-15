@@ -11,7 +11,6 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
-from app.config import Settings
 from app.utils import ServiceUnavailableException, ValidationException, logger
 
 if TYPE_CHECKING:
@@ -107,8 +106,6 @@ class S3ListObjectsResponse(BaseModel):
     key_count: int = 0
 
 
-
-
 class S3ClientWrapper(BaseModel):
     """Thin synchronous wrapper around the boto3 S3 client.
 
@@ -146,7 +143,7 @@ class S3ClientWrapper(BaseModel):
         self._client.delete_object(Bucket=self.bucket, Key=key)
 
     def head_object(self, *, key: str) -> dict[str, Any]:
-        return self._client.head_object(Bucket=self.bucket, Key=key)
+        return self._client.head_object(Bucket=self.bucket, Key=key)  # type: ignore
 
     def head_bucket(self) -> None:
         self._client.head_bucket(Bucket=self.bucket)
@@ -156,7 +153,7 @@ class S3ClientWrapper(BaseModel):
             Bucket=self.bucket,
             Prefix=prefix,
             MaxKeys=max_keys,
-        )
+        )  # type: ignore
 
     def copy_object(self, *, source_key: str, destination_key: str) -> None:
         self._client.copy_object(
@@ -172,7 +169,7 @@ class S3ClientWrapper(BaseModel):
         content_type: str,
         metadata: dict[str, str],
     ) -> dict[str, Any]:
-        return self._client.create_multipart_upload(
+        return self._client.create_multipart_upload(  # type: ignore
             Bucket=self.bucket,
             Key=key,
             ContentType=content_type,
@@ -187,7 +184,7 @@ class S3ClientWrapper(BaseModel):
         part_number: int,
         body: bytes,
     ) -> dict[str, Any]:
-        return self._client.upload_part(
+        return self._client.upload_part(  # type: ignore
             Bucket=self.bucket,
             Key=key,
             UploadId=upload_id,
@@ -202,11 +199,11 @@ class S3ClientWrapper(BaseModel):
         upload_id: str,
         parts: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        return self._client.complete_multipart_upload(
+        return self._client.complete_multipart_upload(  # type: ignore
             Bucket=self.bucket,
             Key=key,
             UploadId=upload_id,
-            MultipartUpload={"Parts": parts},
+            MultipartUpload={"Parts": parts},  # type: ignore
         )
 
     def abort_multipart_upload(self, *, key: str, upload_id: str) -> None:
@@ -217,7 +214,7 @@ class S3ClientWrapper(BaseModel):
         )
 
     def list_parts(self, *, key: str, upload_id: str) -> dict[str, Any]:
-        return self._client.list_parts(
+        return self._client.list_parts(  # type: ignore
             Bucket=self.bucket,
             Key=key,
             UploadId=upload_id,
@@ -231,7 +228,7 @@ class S3ClientWrapper(BaseModel):
     @classmethod
     def from_boto_client(cls, *, bucket: str, client: S3Client) -> S3ClientWrapper:
         wrapper = cls(bucket=bucket)
-        object.__setattr__(wrapper, "_client", client)
+        wrapper._client = client
         return wrapper
 
 
@@ -259,7 +256,7 @@ class StorageService(BaseModel):
         )
         public_url = settings.S3_PUBLIC_URL.rstrip("/") if settings.S3_PUBLIC_URL else None
         service = cls(bucket=settings.S3_BUCKET_NAME, public_url=public_url)
-        object.__setattr__(service, "_wrapper", wrapper)
+        service._wrapper = wrapper
         return service
 
     async def put_object(

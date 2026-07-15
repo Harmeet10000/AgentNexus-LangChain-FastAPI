@@ -1,6 +1,7 @@
 """Rate limiting using fastapi-limiter and Redis."""
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel
 from redis.asyncio import Redis
@@ -44,7 +45,7 @@ class RateLimiter:
         self,
         identifier: str,
         scope: RateLimitScope,
-    ) -> tuple[bool, dict]:
+    ) -> tuple[bool, dict[str, Any]]:
         """
         Check if rate limit is exceeded.
 
@@ -117,7 +118,7 @@ class RateLimiter:
         self,
         identifier: str,
         scope: RateLimitScope,
-    ) -> dict:
+    ) -> dict[str, int]:
         """Get remaining rate limit quota."""
         if not self.redis_client:
             return {"remaining_minute": 0, "remaining_hour": 0}
@@ -146,7 +147,7 @@ _rate_limiter: RateLimiter | None = None
 
 def get_rate_limiter(redis_client: Redis | None = None) -> RateLimiter:
     """Get rate limiter instance."""
-    global _rate_limiter
+    global _rate_limiter  # noqa: PLW0603
     if _rate_limiter is None:
         _rate_limiter = RateLimiter(redis_client)
     elif redis_client is not None:

@@ -3,7 +3,7 @@ Model helpers for Google Gemini.
 
 Public helpers in this module are async-only.
 """
-## Architecture
+# Architecture
 
 # ```
 # ┌─────────────────────────────────────────────────────────────┐
@@ -83,7 +83,7 @@ settings: Settings = get_settings()
 # ---------------------------------------------------------------------------
 # Model factory
 # ---------------------------------------------------------------------------
-# TODO: Add langchain specific middlewares here LLMToolSelectMiddleware, GuardrailMiddleware, etc.
+# TODO: Add langchain specific middlewares here LLMToolSelectMiddleware, GuardrailMiddleware, etc.  # noqa: FIX002
 
 
 def _build_chat_model(

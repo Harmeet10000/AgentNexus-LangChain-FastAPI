@@ -89,7 +89,7 @@ def build_saul_graph(
     flash_llm: BaseChatModel,
     cognee_client: Any,
     tool_registry: ToolRegistry,
-) -> CompiledStateGraph:
+) -> CompiledStateGraph[Any]:
     """Build and compile the Agent Saul LangGraph."""
     registry = build_agent_registry(pro_llm, flash_llm)
     nodes = _build_graph_nodes(
@@ -105,4 +105,4 @@ def build_saul_graph(
     )
     _wire_graph(graph=graph, nodes=nodes)
 
-    return cast("CompiledStateGraph", graph.compile(checkpointer=checkpointer))
+    return cast("CompiledStateGraph[Any]", graph.compile(checkpointer=checkpointer))

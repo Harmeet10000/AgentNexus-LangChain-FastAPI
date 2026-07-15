@@ -52,7 +52,7 @@ class ValidationException(APIException):
         self,
         detail: str = "Validation error",
         error_code: str = ErrorCode.VALIDATION_ERROR,
-        data: dict | None = None,  # ← very useful: field → error messages
+        data: dict[str, Any] | None = None,  # ← very useful: field → error messages
     ):
         super().__init__(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -120,7 +120,7 @@ class ConflictException(APIException):
         self,
         detail: str,
         error_code: str = ErrorCode.CONFLICT,
-        data: dict | None = None,
+        data: dict[str, Any] | None = None,
     ):
         super().__init__(
             status_code=status.HTTP_409_CONFLICT,
@@ -138,7 +138,7 @@ class TooManyRequestsException(APIException):
         detail: str = "Too many requests",
         error_code: str = ErrorCode.TOO_MANY_REQUESTS,
         headers: dict[str, str] | None = None,
-        data: dict | None = None,
+        data: dict[str, Any] | None = None,
     ):
         super().__init__(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -157,7 +157,7 @@ class ServiceUnavailableException(APIException):
         detail: str = "Service temporarily unavailable",
         error_code: str = ErrorCode.SERVICE_UNAVAILABLE,
         headers: dict[str, str] | None = None,
-        data: dict | None = None,
+        data: dict[str, Any] | None = None,
     ):
         super().__init__(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

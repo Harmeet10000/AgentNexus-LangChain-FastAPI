@@ -1,6 +1,7 @@
 """LangChain tool for web search."""
 
 import asyncio
+from typing import override
 
 from langchain_core.tools import BaseTool
 
@@ -24,6 +25,7 @@ class WebSearchTool(BaseTool):
     """
     args_schema: type[WebSearchInput] = WebSearchInput
 
+    @override
     async def _arun(
         self,
         query: str,
@@ -57,13 +59,18 @@ class WebSearchTool(BaseTool):
         parts.append("# Search Results\n")
 
         for i, result in enumerate(response.results, 1):
-            parts.append(f"## {i}. {result.title}")
-            parts.append(f"**URL**: {result.url}")
-            parts.append(f"**Relevance**: {result.score:.2f}")
-            parts.append(f"\n{result.content}\n")
+            parts.extend(
+                [
+                    f"## {i}. {result.title}",
+                    f"**URL**: {result.url}",
+                    f"**Relevance**: {result.score:.2f}",
+                    f"\n{result.content}\n",
+                ]
+            )
 
         return "\n\n".join(parts)
 
+    @override
     def _run(self, *args, **kwargs) -> str:
         """Synchronous fallback."""
 

@@ -43,6 +43,7 @@ def make_query_knowledge_graph_tool(
         doc_id: str,
         thread_id: str,
         step_id: str,
+        *,
         num_results: int = 8,
     ) -> dict[str, Any]:
         """Query the legal knowledge graph for risk-relevant context.

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from typing import TYPE_CHECKING
 
-from docling.document_converter import DocumentConverter
-from docling_core.types.doc.document import DoclingDocument
+from docling.document_converter import DocumentConverter, DocumentStream
 
 from app.shared.rag.document_processing import create_document_converter
 
@@ -13,6 +13,7 @@ from .classification import ParsedDocument
 
 if TYPE_CHECKING:
     from docling.datamodel.document import ConversionResult
+    from docling_core.types.doc.document import DoclingDocument
 
 
 async def parse_document(*, raw_bytes: bytes, filename: str, content_type: str) -> ParsedDocument:
@@ -21,7 +22,9 @@ async def parse_document(*, raw_bytes: bytes, filename: str, content_type: str) 
         return ParsedDocument(title=filename or "uploaded-document", markdown="", page_count=0)
 
     converter: DocumentConverter = create_document_converter(gpu_available=False)
-    result: ConversionResult = converter.convert(raw_bytes)
+    result: ConversionResult = converter.convert(
+        DocumentStream(name=filename, stream=BytesIO(raw_bytes))
+    )
     document: DoclingDocument = result.document
     markdown = document.export_to_markdown()
     return ParsedDocument(

@@ -7,14 +7,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from graphiti_core.errors import GraphitiError
-from graphiti_core.graphiti import AddEpisodeResults
 from graphiti_core.nodes import EpisodeType
 from pydantic import BaseModel, ConfigDict
 
 from app.utils import logger
 
 if TYPE_CHECKING:
-    from graphiti_core.graphiti import Graphiti
+    from graphiti_core.graphiti import AddEpisodeResults, Graphiti
 
 
 class GraphitiVerificationResult(BaseModel):
@@ -47,7 +46,7 @@ async def write_and_verify_chunk(
         "}"
     )
     try:
-        result: AddEpisodeResults = await graphiti.add_episode(  # type: ignore[attr-defined]
+        result: AddEpisodeResults = await graphiti.add_episode(  # type: ignore
             name=f"chunk:{document_id}:{chunk_id}",
             episode_body=body,
             source=EpisodeType.text,
@@ -65,7 +64,7 @@ async def write_and_verify_chunk(
         return GraphitiVerificationResult(chunk_id=chunk_id, episode_id=None, verified=False)
 
     try:
-        raw_results = await graphiti.search(  # type: ignore[attr-defined]
+        raw_results = await graphiti.search(  # type: ignore
             query=chunk_id,
             group_ids=[user_id, document_id],
             num_results=10,

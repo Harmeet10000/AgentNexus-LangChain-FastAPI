@@ -1,6 +1,7 @@
 """SQLAlchemy models for the transactional outbox."""
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 import sqlalchemy.dialects.postgresql  # noqa: F401 — used for JSONB type reference
@@ -17,7 +18,7 @@ class OutboxEvent(Base):
     aggregate_type: Mapped[str] = mapped_column(String(64), nullable=False)
     aggregate_id: Mapped[str] = mapped_column(String(128), nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload: Mapped[dict] = mapped_column(dialects.postgresql.JSONB, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(dialects.postgresql.JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
@@ -34,7 +35,7 @@ class DeadLetterEvent(Base):
     aggregate_type: Mapped[str] = mapped_column(String(64), nullable=False)
     aggregate_id: Mapped[str] = mapped_column(String(128), nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload: Mapped[dict] = mapped_column(dialects.postgresql.JSONB, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(dialects.postgresql.JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     dead_letter_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)

@@ -43,6 +43,7 @@ def make_retrieve_statute_section_tool(
         act_name: str,
         section_ref: str,
         jurisdiction: str,
+        *,
         user_id: str,
         thread_id: str,
         step_id: str,

@@ -12,6 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.features.search.fusion import RankedResultRow
 from app.shared.result import InfrastructureAppError, NotFoundAppError
 from app.utils import ErrorCode
 
@@ -20,7 +21,6 @@ from .constants import (
     DISKANN_QUERY_SEARCH_LIST_SIZE,
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
-from .fusion import RankedResultRow
 from .model import SearchChunk, SearchDocument
 from .rag import SearchChunkRecord
 
@@ -31,6 +31,27 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.shared.result import AppResult
+
+
+async def _execute_vector_search(
+    session: Any,
+    embedding: list[float],
+    candidate_limit: int,
+    metadata_filter: dict[str, Any],
+) -> AppResult[list[RankedResultRow]]:
+    statement, filter_params = _build_vector_statement(metadata_filter)
+    vector_literal = _vector_literal(embedding)
+    await session.execute(
+        text(f"SET LOCAL diskann.query_search_list_size = {DISKANN_QUERY_SEARCH_LIST_SIZE}")
+    )
+    await session.execute(text(f"SET LOCAL diskann.query_rescore = {DISKANN_QUERY_RESCORE}"))
+    params = {
+        "embedding": vector_literal,
+        "candidate_limit": candidate_limit,
+        **filter_params,
+    }
+    result = await session.execute(statement, params)
+    return Success(_rank_rows(result.mappings().all()))
 
 
 class SearchRepository:
@@ -199,21 +220,9 @@ class SearchRepository:
         metadata_filter: dict[str, Any],
     ) -> AppResult[list[RankedResultRow]]:
         try:
-            statement, filter_params = _build_vector_statement(metadata_filter)
-            vector_literal = _vector_literal(embedding)
-            await self.session.execute(
-                text(f"SET LOCAL diskann.query_search_list_size = {DISKANN_QUERY_SEARCH_LIST_SIZE}")
+            return await _execute_vector_search(
+                self.session, embedding, candidate_limit, metadata_filter
             )
-            await self.session.execute(
-                text(f"SET LOCAL diskann.query_rescore = {DISKANN_QUERY_RESCORE}")
-            )
-            params = {
-                "embedding": vector_literal,
-                "candidate_limit": candidate_limit,
-                **filter_params,
-            }
-            result = await self.session.execute(statement, params)
-            return Success(_rank_rows(result.mappings().all()))
         except SQLAlchemyError as exc:
             return Failure(
                 InfrastructureAppError(

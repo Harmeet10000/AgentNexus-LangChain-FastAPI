@@ -1,4 +1,5 @@
 """Neo4j database configuration with driver management."""
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 

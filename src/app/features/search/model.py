@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4  # noqa: TC003 — UUID used at runtime by SQLAlchemy column type
 
 from pgvector.sqlalchemy import Vector
@@ -16,6 +17,9 @@ from sqlalchemy.orm import (  # noqa: TC002 — Mapped, mapped_column used at ru
 )
 
 from app.shared import Base
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 class SearchDocument(Base):
@@ -31,7 +35,7 @@ class SearchDocument(Base):
     source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str] = mapped_column(String(length=500), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(length=64), unique=True, nullable=False)
-    doc_metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    doc_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -70,7 +74,7 @@ class SearchChunk(Base):
     chunk_index: Mapped[int] = mapped_column(nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
-    chunk_metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    chunk_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     content_tsv: Mapped[str] = mapped_column(
         TSVECTOR,
         Computed("to_tsvector('english', content)", persisted=True),

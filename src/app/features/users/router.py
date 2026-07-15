@@ -26,6 +26,7 @@ _require_users_read = Depends(require_permission(Permission.USERS_READ))
 )
 async def list_users(
     service: UserAdminServiceDep,
+    *,
     page: Annotated[int, Query(ge=1)] = 1,
     per_page: Annotated[int, Query(ge=1, le=100)] = 20,
     role: Annotated[UserRole | None, Query()] = None,

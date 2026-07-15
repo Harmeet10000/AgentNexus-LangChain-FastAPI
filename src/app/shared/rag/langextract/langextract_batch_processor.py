@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from app.utils import APIException, logger
 
 from .docling_preprocessor import (
+    DoclingProcessingContext,
     preprocess_legal_document,
 )
 
@@ -48,7 +49,7 @@ async def run_legal_extraction_batch(
     results: list[BatchExtractionResult] = []
 
     # Preprocess phase (parallel but bounded)
-    preprocess_ctx = DoclingProcessingContext(output_dir=Path("/tmp/legal_parsed"))
+    preprocess_ctx = DoclingProcessingContext(output_dir=Path("/tmp/legal_parsed"))  # noqa: S108
 
     clean_docs: list[CleanLegalDocument] = []
     for url in urls:
@@ -89,7 +90,7 @@ async def run_legal_extraction_batch(
         # Normalize to list
         annotated_docs = raw_results if isinstance(raw_results, list) else [raw_results]
 
-        for doc_url, ann_doc, clean_doc in zip(urls, annotated_docs, clean_docs):
+        for doc_url, ann_doc, _clean_doc in zip(urls, annotated_docs, clean_docs, strict=True):
             grounded = sum(1 for e in ann_doc.extractions if e.char_interval is not None)
             results.append(
                 BatchExtractionResult(

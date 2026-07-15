@@ -8,6 +8,7 @@ project exception boundary before returning to FastAPI.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from langgraph.graph.state import CompiledStateGraph
@@ -22,9 +23,12 @@ from app.utils import logger
 
 from .dto import DocumentUploadResponse
 
+if TYPE_CHECKING:
+    from typing import Any
+
 
 class IngestionService:
-    def __init__(self, ingestion_graph: CompiledStateGraph) -> None:
+    def __init__(self, ingestion_graph: CompiledStateGraph[Any]) -> None:
         self._graph = ingestion_graph
 
     async def ingest_document(
@@ -33,6 +37,7 @@ class IngestionService:
         user_id: str,
         filename: str,
         source: str,
+        *,
         document_type: str = "unknown",
         jurisdiction: str = "India",
         doc_id: str | None = None,

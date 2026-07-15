@@ -20,7 +20,9 @@ from typing import Any, cast
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from app.utils import DatabaseException, from_json, logger, to_json_str
+from app.utils.exceptions import DatabaseException
+from app.utils.json_serializer import from_json, to_json_str
+from app.utils.logger import logger
 
 type CacheKeyPart = str | int
 type CacheKey = CacheKeyPart | list[CacheKeyPart]
@@ -545,6 +547,7 @@ async def push_to_list(
     object_type: str,
     key: CacheKey,
     value: Any | list[Any],
+    *,
     prepend: bool = False,
     expire_seconds: int | None = None,
 ) -> int:
@@ -565,20 +568,15 @@ async def push_to_list(
         DatabaseException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
+    values = value if isinstance(value, list) else [value]
+    string_values = [serialize_data(v) for v in values]
 
     try:
-        # Handle multiple values
-        values = value if isinstance(value, list) else [value]
-
-        # Serialize objects, keep primitives as-is
-        string_values = [serialize_data(v) for v in values]
-
-        # LPUSH for prepending, RPUSH for appending
-        if prepend:
-            result = await _redis_any(redis).lpush(cache_key, *string_values)
-        else:
-            result = await _redis_any(redis).rpush(cache_key, *string_values)
-
+        result = (
+            await _redis_any(redis).lpush(cache_key, *string_values)
+            if prepend
+            else await _redis_any(redis).rpush(cache_key, *string_values)
+        )
         if expire_seconds:
             await redis.expire(cache_key, expire_seconds)
     except DatabaseException:
@@ -593,21 +591,22 @@ async def push_to_list(
             detail=f"Failed to push to list for {object_type}",
             exc=exc,
         ) from exc
-    else:
-        direction = "Prepended" if prepend else "Appended"
-        logger.info(
-            f"{direction} to list: {cache_key}",
-            object_type=object_type,
-            items_added=len(string_values),
-            list_length=result,
-        )
-        return result
+
+    direction = "Prepended" if prepend else "Appended"
+    logger.info(
+        f"{direction} to list: {cache_key}",
+        object_type=object_type,
+        items_added=len(string_values),
+        list_length=result,
+    )
+    return result
 
 
 async def get_list_items(
     redis: Redis,
     object_type: str,
     key: CacheKey,
+    *,
     start: int = 0,
     end: int = -1,
     parse_json: bool = True,
@@ -1311,34 +1310,33 @@ async def add_to_bloom_filter(
     Raises:
         DatabaseException: If operation fails
     """
-    result_value: bool | list[bool]
+    if isinstance(value, list):
+        try:
+            result = await redis.execute_command("BF.MADD", filter_name, *value)
+        except Exception as exc:
+            logger.error(f"Failed to add to bloom filter: {filter_name}", error=str(exc))
+            raise _build_database_exception(
+                detail=f"Failed to add to bloom filter {filter_name}",
+                exc=exc,
+            ) from exc
+        logger.info(
+            f"Added multiple items to bloom filter: {filter_name}",
+            items_added=sum(1 for r in result if r == 1),
+        )
+        return [r == 1 for r in result]
 
     try:
-        if isinstance(value, list):
-            result = await redis.execute_command("BF.MADD", filter_name, *value)
-            logger.info(
-                f"Added multiple items to bloom filter: {filter_name}",
-                items_added=sum(1 for r in result if r == 1),
-            )
-            result_value = [r == 1 for r in result]
-        else:
-            result = await redis.execute_command("BF.ADD", filter_name, value)
-            result_value = result == 1
-            logger.info(
-                f"Added to bloom filter: {filter_name}",
-                is_new=result_value,
-            )
+        result = await redis.execute_command("BF.ADD", filter_name, value)
     except Exception as exc:
-        logger.error(
-            f"Failed to add to bloom filter: {filter_name}",
-            error=str(exc),
-        )
+        logger.error(f"Failed to add to bloom filter: {filter_name}", error=str(exc))
         raise _build_database_exception(
             detail=f"Failed to add to bloom filter {filter_name}",
             exc=exc,
         ) from exc
-    else:
-        return result_value
+
+    result_value = result == 1
+    logger.info(f"Added to bloom filter: {filter_name}", is_new=result_value)
+    return result_value
 
 
 async def check_bloom_filter(
@@ -1359,34 +1357,33 @@ async def check_bloom_filter(
     Raises:
         DatabaseException: If operation fails
     """
-    result_value: bool | list[bool]
+    if isinstance(value, list):
+        try:
+            result = await redis.execute_command("BF.MEXISTS", filter_name, *value)
+        except Exception as exc:
+            logger.error(f"Failed to check bloom filter: {filter_name}", error=str(exc))
+            raise _build_database_exception(
+                detail=f"Failed to check bloom filter {filter_name}",
+                exc=exc,
+            ) from exc
+        logger.info(
+            f"Checked multiple items in bloom filter: {filter_name}",
+            exists_count=sum(1 for r in result if r == 1),
+        )
+        return [r == 1 for r in result]
 
     try:
-        if isinstance(value, list):
-            result = await redis.execute_command("BF.MEXISTS", filter_name, *value)
-            logger.info(
-                f"Checked multiple items in bloom filter: {filter_name}",
-                exists_count=sum(1 for r in result if r == 1),
-            )
-            result_value = [r == 1 for r in result]
-        else:
-            result = await redis.execute_command("BF.EXISTS", filter_name, value)
-            result_value = result == 1
-            logger.info(
-                f"Checked bloom filter: {filter_name}",
-                exists=result_value,
-            )
+        result = await redis.execute_command("BF.EXISTS", filter_name, value)
     except Exception as exc:
-        logger.error(
-            f"Failed to check bloom filter: {filter_name}",
-            error=str(exc),
-        )
+        logger.error(f"Failed to check bloom filter: {filter_name}", error=str(exc))
         raise _build_database_exception(
             detail=f"Failed to check bloom filter {filter_name}",
             exc=exc,
         ) from exc
-    else:
-        return result_value
+
+    result_value = result == 1
+    logger.info(f"Checked bloom filter: {filter_name}", exists=result_value)
+    return result_value
 
 
 async def get_bloom_filter_info(

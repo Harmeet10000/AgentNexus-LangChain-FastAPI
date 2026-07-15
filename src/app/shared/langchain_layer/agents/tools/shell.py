@@ -10,11 +10,15 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from .base import ToolOutput, build_validation_error_handler, register_tool
+
+if TYPE_CHECKING:
+    from typing import Any
 
 # ---------------------------------------------------------------------------
 # Shell tool
@@ -40,7 +44,7 @@ class ShellOutput(BaseModel):
     handle_tool_error=True,
     handle_validation_error=build_validation_error_handler(ShellInput),
 )  # ty:ignore[no-matching-overload]
-async def shell_tool(command: str, cwd: str | None = None, timeout: int = 30) -> str:
+async def shell_tool(command: str, cwd: str | None = None, _timeout: int = 30) -> str:
     """
     Execute a shell command and return stdout/stderr.
     Use carefully — only for trusted, sandboxed environments.
@@ -52,7 +56,7 @@ async def shell_tool(command: str, cwd: str | None = None, timeout: int = 30) ->
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_timeout)
         result = ShellOutput(
             stdout=stdout.decode(errors="replace"),
             stderr=stderr.decode(errors="replace"),
@@ -61,7 +65,7 @@ async def shell_tool(command: str, cwd: str | None = None, timeout: int = 30) ->
         )
         return result.model_dump_json()
     except TimeoutError:
-        return ToolOutput.fail(f"Command timed out after {timeout}s").to_agent_string()
+        return ToolOutput.fail(f"Command timed out after {_timeout}s").to_agent_string()
     except Exception as exc:  # noqa: BLE001 — subprocess can raise varied exceptions
         exc.add_note(f"command={command}, operation=execute_shell")
         return ToolOutput.fail(str(exc)).to_agent_string()
@@ -113,7 +117,7 @@ async def read_file(path: str, encoding: str = "utf-8") -> str:
     handle_tool_error=True,
     handle_validation_error=build_validation_error_handler(WriteFileInput),
 )  # ty:ignore[no-matching-overload]
-async def write_file(path: str, content: str, mode: str = "w") -> str:
+async def write_file(path: str, content: str, _mode: str = "w") -> str:
     """Write content to a file. Creates parent directories if needed."""
     try:
         p = Path(path)
@@ -183,34 +187,30 @@ async def file_search(
     """Search for a string or regex pattern across files in a directory."""
     import re as _re
 
-    try:
-        base = Path(directory)
-        results: list[dict] = []
-        pattern = _re.compile(query) if use_regex else None
+    base = Path(directory)
+    results: list[dict[str, Any]] = []
+    pattern = _re.compile(query) if use_regex else None
 
-        for file_path in base.rglob(file_pattern):
-            if not file_path.is_file():
-                continue
-            try:
-                lines = file_path.read_text(errors="replace").splitlines()
-                for lineno, line in enumerate(lines, 1):
-                    matched = bool(pattern.search(line)) if pattern else query in line
-                    if matched:
-                        results.append(
-                            {
-                                "file": str(file_path),
-                                "line": lineno,
-                                "content": line.strip(),
-                            }
-                        )
-                        if len(results) >= max_results:
-                            break
-            except Exception:  # noqa: BLE001 — file read per-file in search, skip unreadable
-                continue
-            if len(results) >= max_results:
-                break
+    for file_path in base.rglob(file_pattern):
+        if not file_path.is_file():
+            continue
+        try:
+            lines = file_path.read_text(errors="replace").splitlines()
+        except Exception:  # noqa: BLE001, S112 — file read per-file in search, skip unreadable
+            continue
+        for lineno, line in enumerate(lines, 1):
+            matched = bool(pattern.search(line)) if pattern else query in line
+            if matched:
+                results.append(
+                    {
+                        "file": str(file_path),
+                        "line": lineno,
+                        "content": line.strip(),
+                    }
+                )
+                if len(results) >= max_results:
+                    break
+        if len(results) >= max_results:
+            break
 
-        return ToolOutput.ok(results, total=len(results)).to_agent_string()
-    except Exception as exc:  # noqa: BLE001 — file search, unknown filesystem errors
-        exc.add_note(f"directory={directory}, operation=search_files")
-        return ToolOutput.fail(str(exc)).to_agent_string()
+    return ToolOutput.ok(results, total=len(results)).to_agent_string()

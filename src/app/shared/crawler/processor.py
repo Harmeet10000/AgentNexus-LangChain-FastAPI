@@ -199,39 +199,38 @@ class GeminiProcessor:
                 return ExtractionResult(success=False, error=error.message)
 
         try:
-            schema_json = json.dumps(schema, indent=2)
-
-            prompt = f"""You are a data extraction assistant. Extract information from the
-            following content and format it as JSON according to the provided schema.
-
-            Schema:
-            {schema_json}
-
-            Content:
-            {content[:15000]}
-
-            Output ONLY valid JSON, no other text. If a field cannot be found, use null.
-            JSON:"""
-
-            response = self.model.invoke(prompt)
-            response_text = _response_text(response)
-
-            extraction_result = _parse_extraction_json(response_text)
-            match extraction_result:
-                case Success(extracted_data):
-                    pass
-                case Failure(error):
-                    return ExtractionResult(success=False, error=error.message)
-
-            return ExtractionResult(
-                success=True,
-                extracted_data=extracted_data,
-            )
+            return self._do_extract_structured(content, schema)  # type: ignore
         except Exception as e:  # noqa: BLE001 - DTO boundary preserves crawler error contract.
             return ExtractionResult(
                 success=False,
                 error=str(e),
             )
+
+    def _do_extract_structured(self, content: str, schema: dict[str, Any]) -> ExtractionResult:
+        schema_json = json.dumps(schema, indent=2)
+        prompt = f"""You are a data extraction assistant. Extract information from the
+        following content and format it as JSON according to the provided schema.
+
+        Schema:
+        {schema_json}
+
+        Content:
+        {content[:15000]}
+
+        Output ONLY valid JSON, no other text. If a field cannot be found, use null.
+        JSON:"""
+        response = self.model.invoke(prompt)
+        response_text = _response_text(response)
+        extraction_result = _parse_extraction_json(response_text)
+        match extraction_result:
+            case Success(extracted_data):
+                pass
+            case Failure(error):
+                return ExtractionResult(success=False, error=error.message)
+        return ExtractionResult(
+            success=True,
+            extracted_data=extracted_data,  # type: ignore
+        )
 
     async def extract_and_summarize(
         self,

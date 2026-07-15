@@ -99,20 +99,8 @@ async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
         autoflush=False,
     )
 
-    # Test connection and log version info
     try:
-        async with engine.begin() as conn:
-            result: CursorResult[Any] = await conn.execute(text("SELECT version()"))
-            version: Unknown = result.scalar()
-            parsed_url: ParseResult = urlparse(settings.POSTGRES_URL)
-            host: str | None = parsed_url.hostname
-
-            logger.info(
-                "PostgreSQL connected",
-                host=host,
-                database=settings.POSTGRES_URL.split("/")[-1],
-                version=version,
-            )
+        await _verify_postgres_connection(engine)
     except Exception as e:
         logger.error("PostgreSQL initialization failed: {}", e, exc_info=True)
         await engine.dispose()
@@ -121,12 +109,26 @@ async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     return engine, session_local
 
 
+async def _verify_postgres_connection(engine: AsyncEngine) -> None:
+    async with engine.begin() as conn:
+        result: CursorResult[Any] = await conn.execute(text("SELECT version()"))
+        version: Unknown = result.scalar()
+        parsed_url: ParseResult = urlparse(settings.POSTGRES_URL)
+        host: str | None = parsed_url.hostname
+        logger.info(
+            "PostgreSQL connected",
+            host=host,
+            database=settings.POSTGRES_URL.split("/")[-1],
+            version=version,
+        )
+
+
 async def get_postgres_db(connection: HTTPConnection) -> AsyncGenerator[AsyncSession, None]:
     """Dependency for database sessions retrieved from app.state."""
     session_local: Any = connection.app.state.db_session_local
     async with session_local() as session:
         try:
-            yield session
+            yield session  # noqa: ASYNC119
             await session.commit()
         except Exception:
             await session.rollback()

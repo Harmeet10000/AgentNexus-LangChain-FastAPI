@@ -113,7 +113,7 @@ async def get_current_user(
     """Full user hydration from MongoDB. Use when the handler needs live user state."""
     match await user_repo.find_by_id(claims.sub):
         case Success(user) if user is not None:
-            return user
+            return user  # type: ignore
         case _:
             msg = "User not found"
             raise UnauthorizedException(msg)

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.utils.error_codes import ErrorCode
+from app.utils.codes import ErrorCode
 
 type ErrorDetails = dict[str, object]
 

@@ -75,6 +75,7 @@ async def search_web(
     service: Annotated[CrawlerService, Depends(get_crawler_service)],
     rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     query: str,
+    *,
     max_results: int = 10,
     include_answer: bool = True,
 ) -> SearchResponse:

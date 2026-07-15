@@ -18,7 +18,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from celery import Task
 from pydantic import BaseModel, ValidationError
@@ -103,11 +103,13 @@ class TypedCeleryTask(Task):
             raise RuntimeError(msg)
         return self._validated_payload
 
+    @override
     def before_start(self, task_id: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
         super().before_start(task_id, args, kwargs)
         task_name = self.name or ""
         self._validated_payload = CeleryTaskRegistry.validate(task_name, kwargs)
 
+    @override
     def on_success(
         self,
         retval: Any,

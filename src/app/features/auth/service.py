@@ -9,7 +9,13 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client  # ty:ignore[unr
 from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.shared.result import app_error_to_exception, log_expected_failure
+from app.shared.result import (
+    app_error_to_exception,
+    log_expected_failure,
+    match_app_result,
+    unwrap_app_failure,
+    unwrap_app_success,
+)
 from app.utils import (
     ConflictException,
     NotFoundException,
@@ -70,15 +76,17 @@ class AuthService:
         self._session_factory = session_factory
 
     async def register(self, dto: RegisterRequest) -> UserResponse:
-        match await self._user_repo.email_exists(dto.email):
-            case Success(exists) if exists:
-                msg = "Email already registered"
-                raise ConflictException(msg)
-            case Success():
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="email_exists")
-                raise app_error_to_exception(error)
+        email_exists_result = await self._user_repo.email_exists(dto.email)
+        exists = match_app_result(
+            email_exists_result,
+            on_success=lambda e: e,
+            on_failure=lambda e: (_ for _ in ()).throw(
+                log_expected_failure(e, operation="email_exists") or app_error_to_exception(e)
+            ),
+        )
+        if exists:
+            msg = "Email already registered"
+            raise ConflictException(msg)
 
         verification_token = generate_token()
         user = User(
@@ -87,12 +95,14 @@ class AuthService:
             hashed_password=hash_password(dto.password),
             verification_token_hash=hash_token(verification_token),
         )
-        match await self._user_repo.create(user):
-            case Success(created):
-                resolved = created
-            case Failure(error):
-                log_expected_failure(error, operation="create_user")
-                raise app_error_to_exception(error)
+        create_result = await self._user_repo.create(user)
+        resolved = match_app_result(
+            create_result,
+            on_success=lambda u: u,
+            on_failure=lambda e: (_ for _ in ()).throw(
+                log_expected_failure(e, operation="create_user") or app_error_to_exception(e)
+            ),
+        )
 
         # send_verification_email.delay(
         #     user_id=str(resolved.id),
@@ -108,13 +118,18 @@ class AuthService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> TokenResponse:
-        match await self._user_repo.find_by_email(dto.email):
-            case Success(found) if found is not None and found.hashed_password is not None:
-                resolved = found
-            case _:
-                verify_password(_DUMMY_HASH, dto.password)
-                msg = "Invalid credentials"
-                raise UnauthorizedException(msg)
+        find_result = await self._user_repo.find_by_email(dto.email)
+        resolved = match_app_result(
+            find_result,
+            on_success=lambda f: (
+                f
+                if f is not None and f.hashed_password is not None
+                else (_ for _ in ()).throw(UnauthorizedException("Invalid credentials"))
+            ),
+            on_failure=lambda e: (_ for _ in ()).throw(
+                log_expected_failure(e, operation="find_user") or app_error_to_exception(e)
+            ),
+        )
 
         if not verify_password(resolved.hashed_password, dto.password):
             msg = "Invalid credentials"
@@ -131,7 +146,8 @@ class AuthService:
         # Transparent rehash: argon2 params may have been upgraded since this hash was created
         if needs_rehash(resolved.hashed_password):
             resolved.hashed_password = hash_password(dto.password)
-            match await self._user_repo.save(resolved):
+            save_result = await self._user_repo.save(resolved)
+            match save_result:
                 case Success():
                     pass
                 case Failure(error):
@@ -150,16 +166,14 @@ class AuthService:
         if claims.token_type != "refresh":
             msg = "Not a refresh token"
             raise UnauthorizedException(msg)
-        match await self._token_repo.revoke_session(
+        revoke_result = await self._token_repo.revoke_session(
             session_id=claims.jti,
             user_id=claims.sub,
             reason="logout",
-        ):
-            case Success():
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="revoke_session")
-                raise app_error_to_exception(error)
+        )
+        if isinstance(revoke_result, Failure):
+            log_expected_failure(revoke_result.failure(), operation="revoke_session")
+            raise app_error_to_exception(revoke_result.failure())
         logger.bind(user_id=claims.sub, session_id=claims.jti).info("Session revoked")
 
     async def refresh(self, refresh_token: str) -> TokenResponse:
@@ -169,23 +183,26 @@ class AuthService:
             raise UnauthorizedException(msg)
 
         # Redis lookup is the revocation gate — if the session was deleted, deny
-        match await self._token_repo.get_session(claims.jti):
-            case Success(session) if session is not None:
-                pass  # session is valid
-            case _:
-                msg = "Session expired or revoked"
-                raise UnauthorizedException(msg)
+        session_result = await self._token_repo.get_session(claims.jti)
+        if isinstance(session_result, Success) and session_result.unwrap() is not None:
+            pass  # session is valid
+        else:
+            msg = "Session expired or revoked"
+            raise UnauthorizedException(msg)
 
-        match await self._user_repo.find_by_id(claims.sub):
-            case Success(user) if user is not None:
-                resolved_user = user
-            case Success():
-                msg = "User not found or disabled"
-                raise UnauthorizedException(msg)
-            case Failure(error):
-                log_expected_failure(error, operation="refresh_user_lookup")
-                msg = "Invalid token subject"
-                raise UnauthorizedException(msg)
+        user_result = await self._user_repo.find_by_id(claims.sub)
+        resolved_user = match_app_result(
+            user_result,
+            on_success=lambda u: (
+                u
+                if u is not None
+                else (_ for _ in ()).throw(UnauthorizedException("User not found or disabled"))
+            ),
+            on_failure=lambda e: (_ for _ in ()).throw(
+                log_expected_failure(e, operation="refresh_user_lookup")
+                or app_error_to_exception(e)
+            ),
+        )
 
         if not resolved_user.is_active:
             msg = "User not found or disabled"
@@ -205,15 +222,24 @@ class AuthService:
         )
 
     async def verify_email(self, token: str) -> None:
-        match await self._user_repo.find_by_verification_token_hash(hash_token(token)):
-            case Success(found) if found is not None:
-                resolved = found
-            case _:
-                msg = "Invalid or expired verification token"
-                raise NotFoundException(msg)
+        verify_result = await self._user_repo.find_by_verification_token_hash(hash_token(token))
+        resolved = match_app_result(
+            verify_result,
+            on_success=lambda f: (
+                f
+                if f is not None
+                else (_ for _ in ()).throw(
+                    NotFoundException("Invalid or expired verification token")
+                )
+            ),
+            on_failure=lambda e: (_ for _ in ()).throw(
+                log_expected_failure(e, operation="verify_email") or app_error_to_exception(e)
+            ),
+        )
         resolved.is_verified = True
         resolved.verification_token_hash = None
-        match await self._user_repo.save(resolved):
+        save_result = await self._user_repo.save(resolved)
+        match save_result:
             case Success():
                 pass
             case Failure(error):
@@ -222,38 +248,39 @@ class AuthService:
         logger.bind(user_id=str(resolved.id)).info("Email verified")
 
     async def resend_verification(self, email: str) -> None:
-        match await self._user_repo.find_by_email(email):
-            case Success(found) if found is not None:
-                resolved = found
-            case _:
-                return  # silent — don't reveal email existence
+        find_result = await self._user_repo.find_by_email(email)
+        if isinstance(find_result, Success):
+            resolved = find_result.unwrap()
+        else:
+            return  # silent — don't reveal email existence
 
         if resolved.is_verified:
             msg = "Email already verified"
             raise ConflictException(msg)
 
         new_token = generate_token()
-        resolved.verification_token_hash = hash_token(new_token)
-        match await self._user_repo.save(resolved):
-            case Success():
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="save_user")
-                raise app_error_to_exception(error)
+        resolved.verification_token_hash = hash_token(new_token)  # type: ignore
+        save_result = await self._user_repo.save(resolved)  # type: ignore
+        if isinstance(save_result, Failure):
+            log_expected_failure(save_result.failure(), operation="save_user")
+            raise app_error_to_exception(save_result.failure())
 
         await self._publish_outbox_event(
             aggregate_type="auth_email",
             aggregate_id=str(resolved.id),
             event_type="auth.send_verification_email",
-            payload={"user_id": str(resolved.id), "email": resolved.email, "token": new_token},
+            payload={"user_id": str(resolved.id), "email": resolved.email, "token": new_token},  # type: ignore
         )
 
     async def forgot_password(self, email: str) -> None:
-        match await self._user_repo.find_by_email(email):
-            case Success(found) if found is not None and found.is_verified:
-                resolved = found
-            case _:
-                return  # silent — identical response regardless of outcome
+        find_result = await self._user_repo.find_by_email(email)
+        if isinstance(find_result, Success):
+            resolved = find_result.unwrap()
+        else:
+            return  # silent — identical response regardless of outcome
+
+        if not resolved or not resolved.is_verified:
+            return  # silent — identical response regardless of outcome
 
         settings = get_settings()
         reset_token = generate_token()
@@ -261,12 +288,10 @@ class AuthService:
         resolved.reset_token_expires_at = datetime.now(UTC) + timedelta(
             minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES,
         )
-        match await self._user_repo.save(resolved):
-            case Success():
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="save_user")
-                raise app_error_to_exception(error)
+        save_result = await self._user_repo.save(resolved)
+        if isinstance(save_result, Failure):
+            log_expected_failure(save_result.failure(), operation="save_user")
+            raise app_error_to_exception(save_result.failure())
         await self._publish_outbox_event(
             aggregate_type="auth_email",
             aggregate_id=str(resolved.id),
@@ -275,12 +300,18 @@ class AuthService:
         )
 
     async def reset_password(self, token: str, new_password: str) -> None:
-        match await self._user_repo.find_by_reset_token_hash(hash_token(token)):
-            case Success(found) if found is not None:
-                resolved = found
-            case _:
-                msg = "Invalid or expired reset token"
-                raise NotFoundException(msg)
+        reset_result = await self._user_repo.find_by_reset_token_hash(hash_token(token))
+        resolved = match_app_result(
+            reset_result,
+            on_success=lambda f: (
+                f
+                if f is not None
+                else (_ for _ in ()).throw(NotFoundException("Invalid or expired reset token"))
+            ),
+            on_failure=lambda e: (_ for _ in ()).throw(
+                log_expected_failure(e, operation="reset_password") or app_error_to_exception(e)
+            ),
+        )
 
         if (
             resolved.reset_token_expires_at is None
@@ -292,26 +323,23 @@ class AuthService:
         resolved.hashed_password = hash_password(new_password)
         resolved.reset_token_hash = None
         resolved.reset_token_expires_at = None
-        match await self._user_repo.save(resolved):
-            case Success():
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="save_user")
-                raise app_error_to_exception(error)
+        save_result = await self._user_repo.save(resolved)
+        if isinstance(save_result, Failure):
+            log_expected_failure(save_result.failure(), operation="save_user")
+            raise app_error_to_exception(save_result.failure())
 
         # Force all sessions offline after a password reset
-        match await self._token_repo.revoke_all_user_sessions(
+        revoke_result = await self._token_repo.revoke_all_user_sessions(
             user_id=str(resolved.id),
             reason="password_reset",
-        ):
-            case Success():
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="revoke_all_user_sessions")
-                raise app_error_to_exception(error)
+        )
+        if isinstance(revoke_result, Failure):
+            log_expected_failure(revoke_result.failure(), operation="revoke_all_user_sessions")
+            raise app_error_to_exception(revoke_result.failure())
         logger.bind(user_id=str(resolved.id)).info("Password reset — all sessions revoked")
 
-    async def oauth_get_authorization_url(self, provider: str) -> tuple[str, str]:
+    @staticmethod
+    async def oauth_get_authorization_url(provider: str) -> tuple[str, str]:
         """Return (authorization_url, signed_state_for_cookie)."""
 
         config = get_oauth_config(provider)
@@ -333,6 +361,7 @@ class AuthService:
         code: str,
         state: str,
         signed_state: str,
+        *,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> TokenResponse:
@@ -343,18 +372,21 @@ class AuthService:
         config = get_oauth_config(provider)
         userinfo = await fetch_oauth_userinfo(provider, config, code)
 
-        match await self._user_repo.find_or_create_oauth_user(
+        oauth_result = await self._user_repo.find_or_create_oauth_user(
             email=userinfo.email,
             provider=provider,
             provider_user_id=userinfo.provider_user_id,
             provider_email=userinfo.email,
             full_name=userinfo.full_name,
-        ):
-            case Success((resolved_user, was_created)):
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="find_or_create_oauth_user")
-                raise app_error_to_exception(error)
+        )
+        resolved_user, was_created = match_app_result(
+            oauth_result,
+            on_success=lambda t: t,
+            on_failure=lambda e: (_ for _ in ()).throw(
+                log_expected_failure(e, operation="find_or_create_oauth_user")
+                or app_error_to_exception(e)
+            ),
+        )
 
         if not resolved_user.is_active:
             msg = "Account is disabled"
@@ -370,23 +402,25 @@ class AuthService:
         user_id: str,
         current_session_id: str | None = None,
     ) -> list[SessionResponse]:
-        match await self._token_repo.get_user_sessions(user_id):
-            case Success(sessions):
-                return [
-                    SessionResponse(
-                        session_id=s.session_id,
-                        device_id=s.device_id,
-                        device_name=s.device_name,
-                        ip_address=s.ip_address,
-                        created_at=s.created_at,
-                        expires_at=s.expires_at,
-                        is_current=s.session_id == current_session_id,
-                    )
-                    for s in sessions
-                ]
-            case Failure(error):
-                log_expected_failure(error, operation="get_user_sessions")
-                raise app_error_to_exception(error)
+        sessions_result = await self._token_repo.get_user_sessions(user_id)
+        return match_app_result(
+            sessions_result,
+            on_success=lambda sessions: [
+                SessionResponse(
+                    session_id=s.session_id,
+                    device_id=s.device_id,
+                    device_name=s.device_name,
+                    ip_address=s.ip_address,
+                    created_at=s.created_at,
+                    expires_at=s.expires_at,
+                    is_current=s.session_id == current_session_id,
+                )
+                for s in sessions
+            ],
+            on_failure=lambda e: (_ for _ in ()).throw(
+                log_expected_failure(e, operation="get_user_sessions") or app_error_to_exception(e)
+            ),
+        )
         msg = "unreachable"
         raise AssertionError(msg)  # AppResult is Success | Failure
 
@@ -395,41 +429,43 @@ class AuthService:
         session_id: str,
         user_id: str,
     ) -> None:
-        match await self._token_repo.get_session(session_id):
-            case Success(session) if session is not None:
-                resolved_session = session
-            case _:
-                msg = "Session not found"
-                raise NotFoundException(msg)
+        session_result = await self._token_repo.get_session(session_id)
+        resolved_session = match_app_result(
+            session_result,
+            on_success=lambda s: (
+                s
+                if s is not None
+                else (_ for _ in ()).throw(NotFoundException("Session not found"))
+            ),
+            on_failure=lambda e: (_ for _ in ()).throw(
+                log_expected_failure(e, operation="get_session") or app_error_to_exception(e)
+            ),
+        )
         if resolved_session.user_id != user_id:
             msg = "Cannot revoke another user's session"
             raise UnauthorizedException(msg)
-        match await self._token_repo.revoke_session(
+        revoke_result = await self._token_repo.revoke_session(
             session_id=session_id,
             user_id=user_id,
             reason="manual_revoke",
-        ):
-            case Success():
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="revoke_session")
-                raise app_error_to_exception(error)
+        )
+        if isinstance(revoke_result, Failure):
+            log_expected_failure(revoke_result.failure(), operation="revoke_session")
+            raise app_error_to_exception(revoke_result.failure())
 
     async def revoke_all_sessions(
         self,
         user_id: str,
         except_session_id: str | None = None,
     ) -> None:
-        match await self._token_repo.revoke_all_user_sessions(
+        revoke_result = await self._token_repo.revoke_all_user_sessions(
             user_id=user_id,
             except_session_id=except_session_id,
             reason="revoke_all",
-        ):
-            case Success():
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="revoke_all_user_sessions")
-                raise app_error_to_exception(error)
+        )
+        if isinstance(revoke_result, Failure):
+            log_expected_failure(revoke_result.failure(), operation="revoke_all_user_sessions")
+            raise app_error_to_exception(revoke_result.failure())
 
     async def _create_session(
         self,
@@ -454,7 +490,7 @@ class AuthService:
             session_id=session_id,
             device_id=device_id,
         )
-        match await self._token_repo.store_session(
+        store_result = await self._token_repo.store_session(
             SessionData(
                 session_id=session_id,
                 user_id=str(user.id),
@@ -466,12 +502,10 @@ class AuthService:
                 expires_at=now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
                 ttl=refresh_ttl,
             )
-        ):
-            case Success():
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="store_session")
-                raise app_error_to_exception(error)
+        )
+        if isinstance(store_result, Failure):
+            log_expected_failure(store_result.failure(), operation="store_session")
+            raise app_error_to_exception(store_result.failure())
         return TokenResponse(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -501,7 +535,7 @@ class AuthService:
                 )
             return
 
-        from sqlalchemy.ext.asyncio import (  # noqa: PLC0415 — lazy import inside method for outbox pattern
+        from sqlalchemy.ext.asyncio import (
             AsyncSession,
             create_async_engine,
         )
@@ -510,16 +544,16 @@ class AuthService:
             get_database_url,
         )
 
-        _engine = create_async_engine(get_database_url())
+        engine = create_async_engine(get_database_url())
         try:
-            async with _engine.begin() as _conn:
-                _session = AsyncSession(bind=_conn)
+            async with engine.begin() as conn:
+                session_ = AsyncSession(bind=conn)
                 await with_outbox(
-                    session=_session,
+                    session=session_,
                     aggregate_type=aggregate_type,
                     aggregate_id=aggregate_id,
                     event_type=event_type,
                     payload=payload,
                 )
         finally:
-            await _engine.dispose()
+            await engine.dispose()

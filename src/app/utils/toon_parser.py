@@ -1,12 +1,13 @@
 # Imagine a community library 'toon_python' exists in 2026
-from typing import Any
+from typing import Any, override
 
 import toons
 from langchain_core.output_parsers import BaseOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 
-class ToonParser(BaseOutputParser):
+class ToonParser(BaseOutputParser[Any]):
+    @override
     def parse(self, text: str) -> Any:
 
         return toons.dumps(text)
