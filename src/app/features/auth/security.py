@@ -2,13 +2,14 @@ import hashlib
 import secrets
 import time
 from datetime import timedelta
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from joserfc._rfc7518.oct_key import OctKey
+from joserfc._rfc7518.oct_key import OctKey  # noqa: PLC2701
 from joserfc.errors import ExpiredTokenError, JoseError
 from joserfc.jwt import JWTClaimsRegistry
 from joserfc.jwt import decode as jwt_decode
@@ -19,6 +20,9 @@ from app.config import get_settings
 from app.utils import UnauthorizedException, ValidationException
 
 from .model import Permission, UserRole
+
+if TYPE_CHECKING:
+    from typing import Any
 
 # ── Password hashing ──────────────────────────────────────────────────────────
 
@@ -219,7 +223,7 @@ def verify_oauth_state(
     max_age: int = 300,
 ) -> bool:
     try:
-        data: dict = _state_signer().loads(signed, max_age=max_age)
+        data: dict[str, Any] = _state_signer().loads(signed, max_age=max_age)
         return data.get("state") == state and data.get("provider") == provider
     except (BadSignature, SignatureExpired):
         return False
@@ -292,7 +296,7 @@ async def fetch_oauth_userinfo(
         client_id=config.client_id,
         client_secret=config.client_secret,
     ) as client:
-        fetch_kwargs: dict = {
+        fetch_kwargs: dict[str, Any] = {
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": config.redirect_uri,
@@ -305,7 +309,7 @@ async def fetch_oauth_userinfo(
 
         if provider == "google":
             resp = await client.get("https://openidconnect.googleapis.com/v1/userinfo")
-            data: dict = resp.json()
+            data: dict[str, Any] = resp.json()
             return OAuthUserInfo(
                 email=data["email"],
                 provider_user_id=data["sub"],
@@ -317,7 +321,7 @@ async def fetch_oauth_userinfo(
             "https://api.github.com/user",
             headers={"Accept": "application/vnd.github+json"},
         )
-        user_data: dict = resp.json()
+        user_data: dict[str, Any] = resp.json()
         email: str | None = user_data.get("email")
 
         if not email:

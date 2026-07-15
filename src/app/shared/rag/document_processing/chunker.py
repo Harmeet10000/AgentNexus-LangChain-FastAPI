@@ -42,6 +42,7 @@ async def chunk_document(
     source: str,
     config: IngestionConfig,
     tokenizer: AutoTokenizer,
+    *,
     hybrid_chunker: HybridChunker | None = None,
     metadata: dict[str, Any] | None = None,
     docling_doc: DoclingDocument | None = None,
@@ -79,36 +80,45 @@ async def chunk_document(
         return _simple_fallback_chunk(content, base_metadata, config, tokenizer)
 
     try:
-        chunk_iter = hybrid_chunker.chunk(dl_doc=docling_doc)
-        chunks = list(chunk_iter)
-
-        document_chunks = []
-        for i, chunk in enumerate(chunks):
-            contextualized_text = hybrid_chunker.contextualize(chunk=chunk)
-            token_count = len(tokenizer.encode(contextualized_text))
-
-            document_chunks.append(
-                Chunk(
-                    content=contextualized_text.strip(),
-                    chunk_index=i,
-                    document_id="",
-                    metadata={
-                        **base_metadata,
-                        "total_chunks": len(chunks),
-                        "token_count": token_count,
-                        "has_context": True,
-                    },
-                    token_count=token_count,
-                )
-            )
-
-        loguru_logger.info("Created {} chunks using HybridChunker", len(document_chunks))
-        return document_chunks
-
+        document_chunks = _hybrid_chunk_documents(
+            hybrid_chunker, docling_doc, tokenizer, base_metadata
+        )
     except DoclingError as e:
         e.add_note("operation=hybrid_chunk")
         loguru_logger.error(f"HybridChunker failed: {e}, falling back to simple chunking")
         return _simple_fallback_chunk(content, base_metadata, config, tokenizer)
+
+    loguru_logger.info("Created {} chunks using HybridChunker", len(document_chunks))
+    return document_chunks
+
+
+def _hybrid_chunk_documents(
+    hybrid_chunker: HybridChunker,
+    docling_doc: DoclingDocument,
+    tokenizer: AutoTokenizer,
+    base_metadata: dict[str, Any],
+) -> list[Chunk]:
+    chunk_iter = hybrid_chunker.chunk(dl_doc=docling_doc)
+    chunks = list(chunk_iter)
+    document_chunks = []
+    for i, chunk in enumerate(chunks):
+        contextualized_text = hybrid_chunker.contextualize(chunk=chunk)
+        token_count = len(tokenizer.encode(contextualized_text))
+        document_chunks.append(
+            Chunk(
+                content=contextualized_text.strip(),
+                chunk_index=i,
+                document_id="",
+                metadata={
+                    **base_metadata,
+                    "total_chunks": len(chunks),
+                    "token_count": token_count,
+                    "has_context": True,
+                },
+                token_count=token_count,
+            )
+        )
+    return document_chunks
 
 
 def _simple_fallback_chunk(
@@ -215,11 +225,11 @@ async def chunk_document_simple(
     current_chunk = ""
 
     for paragraph in paragraphs:
-        paragraph = paragraph.strip()
-        if not paragraph:
+        para = paragraph.strip()
+        if not para:
             continue
 
-        potential_chunk = current_chunk + "\n\n" + paragraph if current_chunk else paragraph
+        potential_chunk = current_chunk + "\n\n" + para if current_chunk else para
 
         if len(potential_chunk) <= config.chunk_size:
             current_chunk = potential_chunk

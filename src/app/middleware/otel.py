@@ -1,6 +1,7 @@
 """OTel-specific hooks and middleware for FastAPI."""
 
 import re
+from typing import Any
 
 from opentelemetry import trace
 
@@ -21,7 +22,7 @@ def _normalize_path_otel(path: str) -> str:
     return "/" + "/".join(normalized)
 
 
-def default_span_details(scope: dict) -> tuple[str, trace.SpanKind]:
+def default_span_details(scope: dict[str, Any]) -> tuple[str, trace.SpanKind]:
     path = scope.get("path", "/")
     route = _normalize_path_otel(path)
     return route, trace.SpanKind.SERVER

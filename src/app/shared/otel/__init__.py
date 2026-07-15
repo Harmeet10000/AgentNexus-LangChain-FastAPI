@@ -29,15 +29,15 @@ def setup_otel(service_name: str | None = None) -> None:
 
     resource = _build_resource(service_name)
 
-    from .tracer import _setup_tracer_provider  # noqa: PLC0415 — lazy import inside setup function
+    from .tracer import _setup_tracer_provider
 
     _otel_tracer_provider = _setup_tracer_provider(resource, settings.OTEL_SAMPLE_RATE)
 
-    from .metrics import _setup_meter_provider  # noqa: PLC0415 — lazy import inside setup function
+    from .metrics import _setup_meter_provider
 
     _otel_meter_provider = _setup_meter_provider(resource)
 
-    from .logs import (  # noqa: PLC0415 — lazy import inside setup function
+    from .logs import (
         _patch_loguru_sink,
         _setup_logger_provider,
     )

@@ -126,8 +126,8 @@ class OutboxRelay:
             await self._mark_failed(event_id, str(exc), session=session)
             logger.error("outbox_publish_failed", event_id=event_id, error=str(exc))
 
+    @staticmethod
     async def _mark_published(
-        self,
         event_id: str,
         session: AsyncSession,
     ) -> None:
@@ -137,8 +137,8 @@ class OutboxRelay:
         )
         await session.commit()
 
+    @staticmethod
     async def _mark_failed(
-        self,
         event_id: str,
         error: str,
         session: AsyncSession,

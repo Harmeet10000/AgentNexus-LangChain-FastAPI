@@ -56,6 +56,7 @@ def make_search_legal_precedents_tool(
         query: str,
         clause_id: str,
         jurisdiction: str,
+        *,
         user_id: str,
         thread_id: str,
         step_id: str,

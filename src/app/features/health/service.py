@@ -26,7 +26,7 @@ class HealthService:
 
     def __init__(
         self,
-        mongo_client: AsyncIOMotorClient | None,
+        mongo_client: AsyncIOMotorClient[Any] | None,
         redis_client: Redis | None,
         postgres_session_factory: async_sessionmaker[AsyncSession] | None,
         neo4j_driver: AsyncDriver | None,
@@ -39,8 +39,8 @@ class HealthService:
         self.celery_app = celery_app
         self.start_time = time.time()
 
+    @staticmethod
     async def get_self_info(
-        self,
         server_name: str,
         server_version: str,
         client_host: str,
@@ -140,22 +140,22 @@ class HealthService:
         session_factory = self.postgres_session_factory
         if session_factory is None:
             return self._not_configured()
+        start = time.perf_counter()
         try:
-            start = time.perf_counter()
             async with session_factory() as session:
                 await session.execute(text("SELECT 1"))
                 version_result = await session.execute(text("SELECT version()"))
                 version = version_result.scalar() or "unknown"
-            response_time = (time.perf_counter() - start) * 1000
-            return {
-                "status": "healthy",
-                "state": "connected",
-                "responseTime": f"{response_time:.2f}ms",
-                "version": str(version),
-            }
         except SQLAlchemyError as exc:
             logger.bind(error=str(exc)).warning("Postgres health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
+        response_time = (time.perf_counter() - start) * 1000
+        return {
+            "status": "healthy",
+            "state": "connected",
+            "responseTime": f"{response_time:.2f}ms",
+            "version": str(version),
+        }
 
     async def _check_neo4j(self) -> dict[str, Any]:
         driver = self.neo4j_driver

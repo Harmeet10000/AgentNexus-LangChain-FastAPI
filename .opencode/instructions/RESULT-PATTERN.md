@@ -213,11 +213,64 @@ if failure is not None:
 
 ---
 
+### Pattern 7: `flow()` / `bind()` / `map()` — **ALTERNATIVE (linear/sync only)**
+
+**0 blocks in this codebase.** These are available from `returns.pipeline` and `returns.result` but deliberately unused in current service code. Documented here for reference during refactors where the linear-sync conditions are met.
+
+```python
+from returns.pipeline import flow
+from returns.result import Success, Failure, Result
+
+# map — transform inner value, pass-through on Failure
+result: Result[int, str] = Success(42)
+doubled: Result[int, str] = result.map(lambda x: x * 2)
+# Success(84)
+
+# bind — chain another Result-returning function
+def validate(x: int) -> Result[str, str]:
+    return Success(str(x)) if x > 0 else Failure("negative")
+
+result: Result[str, str] = Success(42).bind(validate)
+# Success("42")
+
+# flow — compose a pipeline of functions
+def clean(raw: str) -> str: ...
+def parse(cleaned: str) -> Result[int, str]: ...
+def validate(n: int) -> Result[int, str]: ...
+
+result = flow(raw_input, clean, parse, validate)
+# Result[int, str]
+```
+
+**When to use (all must hold):**
+1. **Sync only** — `flow()`/`bind()`/`map()` don't compose with `async`. Use `FutureResult` only if you need async and accept the complexity cost.
+2. **No branching** — every step follows the same path. No guards, no early returns, no per-step error mapping.
+3. **Same error type** — all steps share `E` in `Result[T, E]`. Different error types require mapping at each boundary.
+4. **Pure sequential** — no gathered/fanned-out results to merge.
+
+**When NOT to use (use `match`/`case` instead):**
+- Any `case ... if ...` guard condition is needed
+- Error types differ between steps
+- You need fine-grained logging per step
+- Async call sites (all service and repository code in this project)
+
+```python
+# DON'T — has guard + different error mapping per step
+flow(
+    raw_input,
+    validate,     # guard needed here → match/case
+    enrich,       # different error → match/case
+)
+```
+
+---
+
 ## Project Standard: Decision Matrix
 
 | Scenario | Pattern | Example |
 |---|---|---|
-| Unwrapping `AppResult[T]` in service layer | `match`/`case` Success/Failure | Pattern 1 |
+| Unwrapping `AppResult[T]` with guards/branching | `match`/`case` Success/Failure | Pattern 1 |
+| Unwrapping `AppResult[T]` — linear, sync, no guards | `flow()` / `bind()` / `map()` | Pattern 7 |
 | Routing on enum or closed string set | `match`/`case` on literals | Pattern 2 |
 | Translating typed error hierarchy | `match`/`case` with structural binding | Pattern 3 |
 | Exception handler (external hierarchy) | `isinstance` if/elif chain | Pattern 4 |

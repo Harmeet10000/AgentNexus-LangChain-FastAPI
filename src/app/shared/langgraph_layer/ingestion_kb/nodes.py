@@ -234,7 +234,9 @@ def make_contextualize_chunk_node(
             )
             chunk: ContextualizedChunk = ContextualizedChunk.model_validate(result)
         except LangChainException as exc:
-            exc.add_note(f"doc_id={state.doc_id}, clause_id={segment.clause_id}, operation=contextualize")
+            exc.add_note(
+                f"doc_id={state.doc_id}, clause_id={segment.clause_id}, operation=contextualize"
+            )
             logger.bind(clause_id=segment.clause_id, error=str(exc)).warning(
                 "contextualize_failed_using_deterministic_preamble"
             )

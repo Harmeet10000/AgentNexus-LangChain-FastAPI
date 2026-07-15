@@ -780,7 +780,7 @@ def make_persist_memory_node(_cognee_client: Any) -> StateNode:
         namespace = f"{state['user_id']}.legal"
         long_term_refs: list[str] = list(state.get("long_term_refs", []))
 
-        try:
+        try:  # noqa: PLW0717 — small orchestration, extraction would add overhead
             if state.get("final_report"):
                 ref_key = f"{namespace}.{state['doc_id']}.report"
                 long_term_refs.append(ref_key)

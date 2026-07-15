@@ -93,15 +93,12 @@ async def saul_ws_endpoint(
         correlation_id=correlation_id,
     )
 
-    try:
+    async def _handle_ws_session() -> None:
         security_service = websocket.app.state.websocket_security
         await websocket.accept()
         await security_service.register_connection(security_context)
-
-        # ---- First frame validation ----------------------------------------
         raw = await security_service.receive_json(websocket, security_context)
         first_msg = ws_inbound_adapter.validate_python(raw)
-
         if not isinstance(first_msg, WSStartMessage):
             await security_service.send_json(
                 websocket,
@@ -115,9 +112,6 @@ async def saul_ws_endpoint(
             )
             await websocket.close(code=4000)
             return
-
-        # Thread ID from URL takes precedence; client may also embed it in
-        # WSStartMessage.thread_id for validation, but URL param is canonical.
         if first_msg.thread_id and first_msg.thread_id != thread_id:
             await security_service.send_json(
                 websocket,
@@ -131,10 +125,7 @@ async def saul_ws_endpoint(
             )
             await websocket.close(code=4001)
             return
-
         log.info("saul_ws_session_started", doc_id=first_msg.doc_id)
-
-        # ---- Delegate to service -------------------------------------------
         service = AgentSaulService(
             graph=deps.graph,
             redis=deps.redis,
@@ -149,6 +140,8 @@ async def saul_ws_endpoint(
             user_id=security_context.user_id,
         )
 
+    try:
+        await _handle_ws_session()
     except WebSocketSecurityViolation as exc:
         security_service = websocket.app.state.websocket_security
         await security_service.close_with_violation(websocket, security_context, exc)

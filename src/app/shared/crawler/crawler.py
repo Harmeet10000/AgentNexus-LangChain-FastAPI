@@ -61,7 +61,8 @@ class WebCrawler:
         self.config = config or get_crawler_config()
         self.redis_client = redis_client
 
-    def _get_cache_key(self, url: str) -> str:
+    @staticmethod
+    def _get_cache_key(url: str) -> str:
         """Generate cache key for URL."""
         url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
         return f"crawl:cache:{url_hash}"
@@ -103,7 +104,7 @@ class WebCrawler:
             settings: Settings = get_settings()
             cache_key = self._get_cache_key(url)
 
-            data: dict[str, str | int | None | list[dict[str, Any]]] = {
+            data: dict[str, str | int | list[dict[str, Any]] | None] = {
                 "url": result.url,
                 "success": result.success,
                 "markdown": result.markdown,
@@ -150,8 +151,8 @@ class WebCrawler:
             crawl_time_ms=crawl_time_ms,
         )
 
+    @staticmethod
     async def discover_urls(
-        self,
         domain: str,
         pattern: str | None = None,
         max_urls: int = 50,
@@ -169,7 +170,8 @@ class WebCrawler:
             )
         return [row["url"] for row in seeded if row.get("status") == "valid"]
 
-    def _is_pdf_url(self, url: str) -> bool:
+    @staticmethod
+    def _is_pdf_url(url: str) -> bool:
         """Check if URL points to a PDF."""
         return url.lower().rstrip("/").endswith(".pdf")
 

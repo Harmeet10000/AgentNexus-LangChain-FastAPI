@@ -118,18 +118,20 @@ class DocumentCommandService:
             message = "Uploaded document is empty"
             raise ValidationException(message)
         content_hash = hashlib.sha256(raw_bytes).hexdigest()
-        match await self.repo.get_document_by_user_hash(user_id=user_id, content_hash=content_hash):
-            case Success(existing) if existing is not None:
+        existing_result = await self.repo.get_document_by_user_hash(
+            user_id=user_id, content_hash=content_hash
+        )
+        if isinstance(existing_result, Success):
+            existing = existing_result.unwrap()
+            if existing is not None:
                 return DocumentUploadResponse(
                     doc_id=str(existing.id),
                     status=existing.status,
                     duplicate=True,
                 )
-            case Success():
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="document_upload")
-                raise app_error_to_exception(error)
+        elif isinstance(existing_result, Failure):
+            log_expected_failure(existing_result.failure(), operation="document_upload")
+            raise app_error_to_exception(existing_result.failure())
 
         document_id = str(uuid4())
         object_key = build_s3_key(
@@ -147,7 +149,7 @@ class DocumentCommandService:
             content_type=content_type,
             metadata={"user_id": user_id, "document_id": document_id, "content_hash": content_hash},
         )
-        match await self.repo.create_document(
+        create_result = await self.repo.create_document(
             user_id=user_id,
             title=filename,
             source_uri=filename,
@@ -159,12 +161,12 @@ class DocumentCommandService:
             contract_type=None,
             parties=[],
             metadata_={"content_type": content_type, "filename": filename},
-        ):
-            case Success(document):
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="document_upload")
-                raise app_error_to_exception(error)
+        )
+        if isinstance(create_result, Success):
+            document = create_result.unwrap()
+        elif isinstance(create_result, Failure):
+            log_expected_failure(create_result.failure(), operation="document_upload")
+            raise app_error_to_exception(create_result.failure())
 
         from app.shared.outbox import (
             with_outbox,
@@ -195,8 +197,10 @@ class DocumentCommandService:
         )
 
     async def get_status(self, *, user_id: str, document_id: str) -> DocumentStatusResponse:
-        match await self.repo.fetch_status(user_id=user_id, document_id=document_id):
-            case Success(record) if record is not None:
+        status_result = await self.repo.fetch_status(user_id=user_id, document_id=document_id)
+        if isinstance(status_result, Success):
+            record = status_result.unwrap()
+            if record is not None:
                 warnings = _flatten_warnings(record.get("warnings", []))
                 return DocumentStatusResponse(
                     doc_id=str(record["document_id"]),
@@ -209,9 +213,8 @@ class DocumentCommandService:
                     warning_count=len(warnings),
                     warnings=warnings,
                 )
-            case _:
-                resource = "Document"
-                raise NotFoundException(resource, document_id)
+        resource = "Document"
+        raise NotFoundException(resource, document_id)
 
 
 class DocumentQueryService:
@@ -281,12 +284,11 @@ class DocumentQueryService:
         )
         row_sets: list[list[RankedResultRow]] = []
         for r in results:
-            match r:
-                case Success(v):
-                    row_sets.append(_to_ranked_rows(v))
-                case Failure(error):
-                    log_expected_failure(error, operation="hybrid_search")
-                    row_sets.append([])
+            if isinstance(r, Success):
+                row_sets.append(_to_ranked_rows(r.unwrap()))
+            elif isinstance(r, Failure):
+                log_expected_failure(r.failure(), operation="hybrid_search")
+                row_sets.append([])
         fused_results = reciprocal_rank_fusion(
             *row_sets,
             k=RRF_K,
@@ -343,7 +345,7 @@ class DocumentQueryService:
             cache_hit=response.cache_hit,
         )
 
-    async def ask(
+    async def ask(  # noqa: PLR0914
         self,
         *,
         user_id: str,
@@ -493,7 +495,7 @@ async def process_document_ingestion(
             **(legal_metadata.model_dump(exclude_none=True) if legal_metadata else {}),
         },
     )
-    chunks, segmentation_warnings = segment_chunks(parsed=parsed, classified=classified)
+    chunks, segmentation_warnings = await segment_chunks(parsed=parsed, classified=classified)
     if legal_metadata is not None:
         chunks = enrich_legal_chunks(
             chunks=chunks,
@@ -506,14 +508,12 @@ async def process_document_ingestion(
         chunks=chunks,
         extra_warnings=segmentation_warnings + classified.warnings + metadata_warnings,
     )
-    match await repo.upsert_chunks(
+    upsert_result = await repo.upsert_chunks(
         build_chunk_rows(document_id=document_id, user_id=user_id, chunks=chunk_rows)
-    ):
-        case Success():
-            pass
-        case Failure(error):
-            log_expected_failure(error, operation="document_ingestion")
-            raise app_error_to_exception(error)
+    )
+    if isinstance(upsert_result, Failure):
+        log_expected_failure(upsert_result.failure(), operation="document_ingestion")
+        raise app_error_to_exception(upsert_result.failure())
     if len(chunk_rows) > ANALYZE_THRESHOLD_CHUNKS:
         await repo.analyze_chunks()
     await repo.update_document_status(document_id=document_id, status="stored_postgres")
@@ -521,7 +521,7 @@ async def process_document_ingestion(
         if graphiti is not None and legal_metadata is not None:
             for event_name, event_date in contract_event_dates(legal_metadata):
                 try:
-                    await graphiti.add_episode(  # type: ignore[attr-defined]
+                    await graphiti.add_episode(  # type: ignore
                         name=f"{event_name}:{document_id}:{event_date}",
                         episode_body=f"{event_name} for {document_id} occurs on {event_date}.",
                         source_description=(
@@ -531,7 +531,7 @@ async def process_document_ingestion(
                             f'"event_date":"{event_date}"'
                             "}"
                         ),
-                        reference_time=None,
+                        reference_time=None,  # type: ignore
                         group_id=document_id,
                     )
                 except (AttributeError, TypeError, ValueError) as exc:
@@ -674,14 +674,12 @@ async def _verify_legal_chunks(
         chunk["graphiti_verified"] = result.verified
         if result.verified:
             verified_count += 1
-    match await repo.upsert_chunks(
+    upsert_result = await repo.upsert_chunks(
         build_chunk_rows(document_id=document_id, user_id=user_id, chunks=chunk_rows)
-    ):
-        case Success():
-            pass
-        case Failure(error):
-            log_expected_failure(error, operation="verify_legal_chunks")
-            raise app_error_to_exception(error)
+    )
+    if isinstance(upsert_result, Failure):
+        log_expected_failure(upsert_result.failure(), operation="verify_legal_chunks")
+        raise app_error_to_exception(upsert_result.failure())
     return verified_count
 
 
@@ -744,7 +742,7 @@ async def _graphiti_filter_chunk_ids(
         raw_results = await retry_immediate(
             lambda: graphiti.search(
                 query=query, group_ids=[user_id, *doc_ids_filter], num_results=20
-            ),  # type: ignore[attr-defined]
+            ),  # type: ignore
             label="documents_graphiti_filter",
         )
     except (ValueError, TypeError):
@@ -853,7 +851,7 @@ def _build_search_items(
                 chunk_kind=str(row["chunk_kind"]),
                 clause_type=str(row["clause_type"]) if row["clause_type"] is not None else None,
                 chunk_metadata=cast("dict[str, object]", row["chunk_metadata"] or {}),
-                quality_warnings=_flatten_warnings(row.get("quality_warnings", [])),
+                quality_warnings=_flatten_warnings(row.get("quality_warnings", [])),  # type: ignore
                 graphiti_verified=bool(row.get("graphiti_verified", False)),
                 score=ranked_chunk.score,
                 rank=ranked_chunk.rank,
@@ -904,7 +902,7 @@ def _batched[T](values: Sequence[T], batch_size: int) -> list[Sequence[T]]:
 
 
 def _flatten_warnings(
-    raw_groups: list,
+    raw_groups: list[Any],
 ) -> list[QualityWarningDTO]:  # ponytail: SQL results are untyped dicts
     warnings: list[QualityWarningDTO] = []
     for group in raw_groups:
@@ -923,7 +921,7 @@ def _merge_warning_lists(groups: list[list[QualityWarningDTO]]) -> list[QualityW
     merged: dict[tuple[str, str, str, str], QualityWarningDTO] = {}
     for group in groups:
         for warning in group:
-            merged[(warning.stage, warning.code, warning.message, warning.severity)] = warning
+            merged[warning.stage, warning.code, warning.message, warning.severity] = warning
     return list(merged.values())
 
 
@@ -941,7 +939,7 @@ def _row_to_chunk(row: dict[str, object]) -> RetrievedChunk:
         metadata_={
             **cast("dict[str, object]", row.get("metadata_") or {}),
             "quality_warnings": row.get("quality_warnings", []),
-            "graphiti_verified": bool(row.get("graphiti_verified", False)),
+            "graphiti_verified": bool(row.get("graphiti_verified")),
         },
         custom_metadata=cast("dict[str, object]", row.get("custom_metadata") or {}),
         score=float(cast("float | int | str", row["rrf_score"])),

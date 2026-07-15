@@ -38,7 +38,7 @@ class CleanLegalDocument(BaseModel):
 
 async def preprocess_legal_document(
     url: str,
-    ctx: DoclingProcessingContext,
+    _ctx: DoclingProcessingContext,
 ) -> CleanLegalDocument:
     """Async wrapper around Docling (CPU-heavy)."""
     if not url.lower().endswith(".pdf"):

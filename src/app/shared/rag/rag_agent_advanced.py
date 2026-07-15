@@ -155,12 +155,14 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
             if chunk_id not in seen or row["similarity"] > seen[chunk_id]["similarity"]:
                 seen[chunk_id] = row
 
-        unique_results = sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)[:limit]
+        from operator import itemgetter
+
+        unique_results = sorted(seen.values(), key=itemgetter("similarity"), reverse=True)[:limit]
 
         # Format results
-        response_parts = []
-        for i, row in enumerate(unique_results, 1):
-            response_parts.append(f"[Source: {row['document_title']}]\n{row['content']}\n")
+        response_parts = [
+            f"[Source: {row['document_title']}]\n{row['content']}\n" for row in unique_results
+        ]
 
         return f"Found {len(response_parts)} relevant results:\n\n" + "\n---\n".join(response_parts)
 
@@ -221,11 +223,13 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
         scores = reranker.predict(pairs)
 
         # Combine results with new scores
-        reranked = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)[:limit]
+        reranked = sorted(zip(results, scores, strict=True), key=itemgetter(1), reverse=True)[
+            :limit
+        ]
 
         # Format results
         response_parts = []
-        for i, (row, score) in enumerate(reranked, 1):
+        for row, score in reranked:
             response_parts.append(
                 f"[Source: {row['document_title']} | Relevance: {score:.2f}]\n{row['content']}\n"
             )
@@ -277,10 +281,9 @@ async def search_knowledge_base(ctx: RunContext[None], query: str, limit: int = 
 
         if not results:
             return "No relevant information found in the knowledge base for your query."
-
-        response_parts = []
-        for i, row in enumerate(results, 1):
-            response_parts.append(f"[Source: {row['document_title']}]\n{row['content']}\n")
+        response_parts = [
+            f"[Source: {row['document_title']}]\n{row['content']}\n" for row in results
+        ]
 
         return f"Found {len(response_parts)} relevant results:\n\n" + "\n---\n".join(response_parts)
 
@@ -347,7 +350,7 @@ async def retrieve_full_document(ctx: RunContext[None], document_title: str) -> 
 # ======================
 
 
-async def search_with_self_reflection(ctx: RunContext[None], query: str, limit: int = 5) -> str:
+async def search_with_self_reflection(ctx: RunContext[None], query: str, limit: int = 5) -> str:  # noqa: PLR0914
     """
     Self-reflective search: evaluate results and refine if needed.
 
@@ -462,9 +465,9 @@ Respond with only the improved query, nothing else."""
             reflection_note = f"\n[Reflection: Results deemed relevant (score: {grade_score}/5)]\n"
 
         # Format final results
-        response_parts = []
-        for i, row in enumerate(results, 1):
-            response_parts.append(f"[Source: {row['document_title']}]\n{row['content']}\n")
+        response_parts = [
+            f"[Source: {row['document_title']}]\n{row['content']}\n" for row in results
+        ]
 
         return (
             reflection_note
@@ -535,7 +538,7 @@ async def run_cli() -> None:
             if not user_input:
                 continue
 
-            if user_input.lower() in ["quit", "exit", "bye"]:
+            if user_input.lower() in {"quit", "exit", "bye"}:
                 logger.info("Assistant: Thank you for using the knowledge assistant. Goodbye!")
                 break
 

@@ -47,10 +47,11 @@ def check_gpu_available() -> bool:
             loguru_logger.info(f"GPU detected: {torch.cuda.get_device_name(0)}")
         else:
             loguru_logger.info("No GPU detected, using CPU pipeline")
-        return gpu_available
     except ImportError:
         loguru_logger.warning("PyTorch not available, using CPU pipeline")
         return False
+    else:
+        return gpu_available
 
 
 def create_document_converter(gpu_available: bool) -> DocumentConverter:
@@ -120,21 +121,24 @@ def extract_code_blocks(doc: DoclingDocument) -> list[ExtractedCodeBlock]:
 
         for idx, item in enumerate(doc._iterate_nodes()):
             try:
-                if hasattr(item, "meta") and hasattr(item.meta, "text_type"):
-                    if item.meta.text_type == "code":
-                        code_text = item.text or ""
-                        language = _detect_language(item, code_text)
+                if (
+                    hasattr(item, "meta")
+                    and hasattr(item.meta, "text_type")
+                    and item.meta.text_type == "code"
+                ):
+                    code_text = item.text or ""
+                    language = _detect_language(item, code_text)
 
-                        code_blocks.append(
-                            ExtractedCodeBlock(
-                                block_index=idx,
-                                code=code_text,
-                                language=language,
-                                start_line=getattr(item, "start_line", 0),
-                                end_line=getattr(item, "end_line", 0),
-                                metadata={"source_block": idx},
-                            )
+                    code_blocks.append(
+                        ExtractedCodeBlock(
+                            block_index=idx,
+                            code=code_text,
+                            language=language,
+                            start_line=getattr(item, "start_line", 0),
+                            end_line=getattr(item, "end_line", 0),
+                            metadata={"source_block": idx},
                         )
+                    )
             except DoclingError as e:
                 e.add_note(f"block_index={idx}, operation=extract_code_block")
                 loguru_logger.warning(f"Failed to extract code block {idx}: {e}")
@@ -156,15 +160,15 @@ def _detect_language(item, code_text: str) -> str:
 
     if "def " in code_text and ":" in code_text:
         return "python"
-    elif "function " in code_text or "const " in code_text or "let " in code_text:
+    if "function " in code_text or "const " in code_text or "let " in code_text:
         return "javascript"
-    elif "class " in code_text and "{" in code_text:
+    if "class " in code_text and "{" in code_text:
         return "java"
-    elif "#include" in code_text or "int main" in code_text:
+    if "#include" in code_text or "int main" in code_text:
         return "c"
-    elif "package " in code_text and "func " in code_text:
+    if "package " in code_text and "func " in code_text:
         return "go"
-    elif "fn " in code_text and "->" in code_text:
+    if "fn " in code_text and "->" in code_text:
         return "rust"
 
     code_upper = code_text.upper()
@@ -200,7 +204,7 @@ def _extract_code_fallback(markdown: str) -> list[ExtractedCodeBlock]:
 
 
 async def extract_images(
-    doc: DoclingDocument, source_path: str, use_vlm_captioning: bool = True
+    doc: DoclingDocument, _source_path: str, use_vlm_captioning: bool = True
 ) -> list[ExtractedImage]:
     """Extract images from document."""
     images = []
@@ -255,12 +259,12 @@ async def _generate_vlm_caption(image_data) -> str | None:
             contents=[image, "Describe this image in detail for document understanding."],
         )
 
-        return response.text if response.text else None
-
     except Exception as e:  # noqa: BLE001 — VLM API can raise varied provider errors
         e.add_note("operation=vlm_caption")
         loguru_logger.warning(f"VLM captioning failed: {e}")
         return None
+    else:
+        return response.text or None
 
 
 def _encode_base64(data: bytes) -> str:
@@ -304,17 +308,13 @@ def _markdown_to_html(md_table: str) -> str:
 
     html = ['<table border="1">']
     html.append("<thead><tr>")
-    for cell in header:
-        html.append(f"<th>{cell}</th>")
-    html.append("</tr></thead>")
-    html.append("<tbody>")
+    html.extend(f"<th>{cell}</th>" for cell in header)
+    html.extend(["</tr></thead>", "<tbody>"])
     for row in rows:
         html.append("<tr>")
-        for cell in row:
-            html.append(f"<td>{cell}</td>")
+        html.extend(f"<td>{cell}</td>" for cell in row)
         html.append("</tr>")
-    html.append("</tbody>")
-    html.append("</table>")
+    html.extend(["</tbody>", "</table>"])
     return "\n".join(html)
 
 
@@ -330,7 +330,7 @@ async def convert_document(
         config = DoclingEnhancementConfig()
 
     if document_id is None:
-        document_id = hashlib.md5(source.encode()).hexdigest()[:12]
+        document_id = hashlib.md5(source.encode(), usedforsecurity=False).hexdigest()[:12]
 
     if gpu_available is None:
         gpu_available = check_gpu_available()

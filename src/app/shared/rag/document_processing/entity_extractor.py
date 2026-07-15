@@ -26,7 +26,7 @@ async def extract_with_graphiti(
     neo4j_uri: str | None = None,
     neo4j_user: str | None = None,
     neo4j_password: str | None = None,
-    config: dict[str, Any] | None = None,
+    _config: dict[str, Any] | None = None,
 ) -> ExtractionResult:
     """
     Extract entities and relationships using Graphiti.
@@ -49,58 +49,14 @@ async def extract_with_graphiti(
     neo4j_password = neo4j_password or os.getenv("NEO4J_PASSWORD", "password")
 
     try:
-        from graphiti_graph import Graphiti
-
-        client = Graphiti(
+        return await _do_extract_graph_entities(
+            text,
+            document_id,
+            start_time,
             neo4j_uri=neo4j_uri,
-            neo4j_auth=(neo4j_user, neo4j_password),
+            neo4j_user=neo4j_user,
+            neo4j_password=neo4j_password,
         )
-        loguru_logger.info("Graphiti client initialized")
-
-        episode = await client.add_episode(
-            name=f"document_{document_id}",
-            text=text,
-        )
-
-        entities = []
-        relationships = []
-
-        if hasattr(episode, "nodes"):
-            for node in episode.nodes:
-                entity = Entity(
-                    id=getattr(node, "id", None),
-                    name=getattr(node, "name", ""),
-                    entity_type=getattr(node, "type", "UNKNOWN"),
-                    description=getattr(node, "description", None),
-                    properties=getattr(node, "properties", {}),
-                    source_document_id=document_id,
-                )
-                entities.append(entity)
-
-        if hasattr(episode, "edges"):
-            for edge in episode.edges:
-                relationship = Relationship(
-                    id=getattr(edge, "id", None),
-                    source_entity_id=str(getattr(edge, "source", "")),
-                    target_entity_id=str(getattr(edge, "target", "")),
-                    relationship_type=getattr(edge, "name", "RELATED_TO"),
-                    properties=getattr(edge, "properties", {}),
-                    source_document_id=document_id,
-                )
-                relationships.append(relationship)
-
-        loguru_logger.info(
-            f"Extracted {len(entities)} entities and {len(relationships)} relationships"
-        )
-
-        processing_time = (time.time() - start_time) * 1000
-        return ExtractionResult(
-            document_id=document_id,
-            entities=entities,
-            relationships=relationships,
-            processing_time_ms=processing_time,
-        )
-
     except ImportError:
         loguru_logger.warning("graphiti_graph not available, using fallback extraction")
         return await extract_with_fallback(text, document_id, start_time)
@@ -108,6 +64,60 @@ async def extract_with_graphiti(
         e.add_note(f"document_id={document_id}, operation=extract_entities")
         loguru_logger.error(f"Graphiti extraction failed: {e}")
         return await extract_with_fallback(text, document_id, start_time)
+
+
+async def _do_extract_graph_entities(
+    text: str,
+    document_id: str,
+    start_time: float,
+    *,
+    neo4j_uri: str | None,
+    neo4j_user: str | None,
+    neo4j_password: str | None,
+) -> ExtractionResult:
+    from graphiti_graph import Graphiti
+
+    client = Graphiti(
+        neo4j_uri=neo4j_uri,
+        neo4j_auth=(neo4j_user, neo4j_password),
+    )
+    loguru_logger.info("Graphiti client initialized")
+    episode = await client.add_episode(
+        name=f"document_{document_id}",
+        text=text,
+    )
+    entities = []
+    relationships = []
+    if hasattr(episode, "nodes"):
+        for node in episode.nodes:
+            entity = Entity(
+                id=getattr(node, "id", None),
+                name=getattr(node, "name", ""),
+                entity_type=getattr(node, "type", "UNKNOWN"),
+                description=getattr(node, "description", None),
+                properties=getattr(node, "properties", {}),
+                source_document_id=document_id,
+            )
+            entities.append(entity)
+    if hasattr(episode, "edges"):
+        for edge in episode.edges:
+            relationship = Relationship(
+                id=getattr(edge, "id", None),
+                source_entity_id=str(getattr(edge, "source", "")),
+                target_entity_id=str(getattr(edge, "target", "")),
+                relationship_type=getattr(edge, "name", "RELATED_TO"),
+                properties=getattr(edge, "properties", {}),
+                source_document_id=document_id,
+            )
+            relationships.append(relationship)
+    loguru_logger.info(f"Extracted {len(entities)} entities and {len(relationships)} relationships")
+    processing_time = (time.time() - start_time) * 1000
+    return ExtractionResult(
+        document_id=document_id,
+        entities=entities,
+        relationships=relationships,
+        processing_time_ms=processing_time,
+    )
 
 
 async def extract_with_fallback(
@@ -186,37 +196,35 @@ def _extract_relationships_simple(text: str, entities: list[Entity]) -> list[Rel
     rel_id = 0
 
     for entity in entities:
-        if entity.entity_type == "PERSON":
-            if " works at " in text or " employed by " in text:
-                for org in entities:
-                    if org.entity_type == "ORGANIZATION":
-                        relationships.append(
-                            Relationship(
-                                id=f"rel_{rel_id}",
-                                source_entity_id=entity.id,
-                                target_entity_id=org.id,
-                                relationship_type="WORKS_AT",
-                                source_document_id=entity.source_document_id,
-                                created_at=datetime.now(UTC),
-                            )
+        if entity.entity_type == "PERSON" and (" works at " in text or " employed by " in text):
+            for org in entities:
+                if org.entity_type == "ORGANIZATION":
+                    relationships.append(
+                        Relationship(
+                            id=f"rel_{rel_id}",
+                            source_entity_id=entity.id,
+                            target_entity_id=org.id,
+                            relationship_type="WORKS_AT",
+                            source_document_id=entity.source_document_id,
+                            created_at=datetime.now(UTC),
                         )
-                        rel_id += 1
+                    )
+                    rel_id += 1
 
-        if entity.entity_type == "TECHNOLOGY":
-            if " uses " in text or " built with " in text:
-                for org in entities:
-                    if org.entity_type == "ORGANIZATION":
-                        relationships.append(
-                            Relationship(
-                                id=f"rel_{rel_id}",
-                                source_entity_id=org.id,
-                                target_entity_id=entity.id,
-                                relationship_type="USES",
-                                source_document_id=entity.source_document_id,
-                                created_at=datetime.now(UTC),
-                            )
+        if entity.entity_type == "TECHNOLOGY" and (" uses " in text or " built with " in text):
+            for org in entities:
+                if org.entity_type == "ORGANIZATION":
+                    relationships.append(
+                        Relationship(
+                            id=f"rel_{rel_id}",
+                            source_entity_id=org.id,
+                            target_entity_id=entity.id,
+                            relationship_type="USES",
+                            source_document_id=entity.source_document_id,
+                            created_at=datetime.now(UTC),
                         )
-                        rel_id += 1
+                    )
+                    rel_id += 1
 
     return relationships
 
@@ -342,8 +350,7 @@ async def extract(
             neo4j_user=neo4j_config.get("user"),
             neo4j_password=neo4j_config.get("password"),
         )
-    else:
-        return extract_entities_simple(text, document_id)
+    return extract_entities_simple(text, document_id)
 
 
 def create_extractor(

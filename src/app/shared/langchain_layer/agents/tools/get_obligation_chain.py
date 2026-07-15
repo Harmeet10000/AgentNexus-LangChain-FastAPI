@@ -49,6 +49,7 @@ def make_get_obligation_chain_tool(
         doc_id: str,
         thread_id: str,
         step_id: str,
+        *,
         depth: int = 3,
     ) -> dict[str, object]:
         """Trace obligations and consequences connected to a named entity.

@@ -86,6 +86,7 @@ async def write_clause_episodes_to_graphiti(
     doc_id: str,
     user_id: str,
     thread_id: str,
+    *,
     jurisdiction: str,
     document_type: str,
     human_reviewed: bool,
@@ -155,6 +156,7 @@ async def _write_single_clause_episode(
     user_id: str,
     thread_id: str,
     jurisdiction: str,
+    *,
     document_type: str,
     human_reviewed: bool,
     graphiti_service: GraphitiService,
@@ -226,6 +228,7 @@ async def _write_single_relationship_edge(
     doc_id: str,
     user_id: str,
     thread_id: str,
+    *,
     graphiti_service: GraphitiService,
     idempotency: IdempotencyGuard,
 ) -> RelationshipWriteResult:

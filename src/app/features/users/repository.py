@@ -15,7 +15,8 @@ class UserAdminRepository:
     Beanie manages the connection at the document class level after init.
     """
 
-    async def find_by_id(self, user_id: str) -> AppResult[User | None]:
+    @staticmethod
+    async def find_by_id(user_id: str) -> AppResult[User | None]:
         if not PydanticObjectId.is_valid(user_id):
             return Failure(
                 ValidationAppError(
@@ -27,8 +28,8 @@ class UserAdminRepository:
             )
         return Success(await User.get(PydanticObjectId(user_id)))
 
+    @staticmethod
     async def list_users(
-        self,
         page: int,
         per_page: int,
         role: UserRole | None = None,
@@ -56,15 +57,18 @@ class UserAdminRepository:
         items = await query.skip(skip).limit(per_page).to_list()
         return items, total
 
-    async def update_role(self, user: User, role: UserRole) -> User:
+    @staticmethod
+    async def update_role(user: User, role: UserRole) -> User:
         await user.update(Set({User.role: role, User.updated_at: datetime.now(UTC)}))
-        user.role: UserRole = role
+        user.role = role
         return user
 
-    async def set_active(self, user: User, *, is_active: bool) -> User:
+    @staticmethod
+    async def set_active(user: User, *, is_active: bool) -> User:
         await user.update(Set({User.is_active: is_active, User.updated_at: datetime.now(UTC)}))
-        user.is_active: bool = is_active
+        user.is_active = is_active
         return user
 
-    async def hard_delete(self, user: User) -> None:
+    @staticmethod
+    async def hard_delete(user: User) -> None:
         await user.delete()

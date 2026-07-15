@@ -15,7 +15,8 @@ class RedisGuardAdapter:
     async def initialize(self) -> None:
         await self._redis.ping()
 
-    async def initialize_agent(self, agent_handler: Any) -> None:
+    @staticmethod
+    async def initialize_agent(agent_handler: Any) -> None:
         _ = agent_handler
 
     @asynccontextmanager

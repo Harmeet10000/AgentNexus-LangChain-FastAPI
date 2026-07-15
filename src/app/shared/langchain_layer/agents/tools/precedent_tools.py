@@ -29,12 +29,12 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from app.shared.rag.graphiti.client import GraphitiService
-    from app.shared.rag.graphiti.subgraph import Neo4jSubgraphExpander
+    from app.shared.rag.graphiti.subgraph import Neo4jSubgraphConfig
 
 
 def make_hybrid_retrieve_precedents_tool(
     graphiti_service: GraphitiService,
-    subgraph_expander: Neo4jSubgraphExpander,
+    subgraph_expander: Neo4jSubgraphConfig,
     db_engine: AsyncEngine,
     idempotency: IdempotencyGuard,
 ) -> BaseTool:
@@ -53,6 +53,7 @@ def make_hybrid_retrieve_precedents_tool(
         doc_id: str,
         thread_id: str,
         step_id: str,
+        *,
         num_results: int = 5,
     ) -> dict[str, Any]:
         """Retrieve legal precedents using hybrid vector + knowledge graph search.
@@ -92,7 +93,7 @@ def make_hybrid_retrieve_precedents_tool(
             _user_id=user_id,
             _query=query,
             _num_results=num_results,
-            _time_filter=time_filter,
+            _time_filter="all",
         )
 
         # Layer 2: Graphiti semantic entity search
@@ -151,7 +152,7 @@ def make_hybrid_retrieve_precedents_tool(
 
 
 def make_detect_graph_conflicts_tool(
-    subgraph_expander: Neo4jSubgraphExpander,
+    subgraph_expander: Neo4jSubgraphConfig,
     idempotency: IdempotencyGuard,
 ) -> BaseTool:
     """Tool: detect contradicting obligations in the knowledge graph.
@@ -230,7 +231,7 @@ async def _vector_search_clauses(
     TODO: embed query using same model as ingestion and pass as vector.
     Until then returns empty — prevents hallucinated precedents.
     """
-    # TODO: embed query and use <=> cosine operator
+    # TODO: embed query and use <=> cosine operator  # noqa: FIX002
     # query_vector = await embedding_fn(query)
     # Currently returns empty — safe default
     return []

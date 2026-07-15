@@ -73,7 +73,7 @@ def validate_url(url: str) -> tuple[bool, str]:
     if not parsed.scheme:
         return False, "URL must include a scheme (http:// or https://)"
 
-    if parsed.scheme not in ("http", "https"):
+    if parsed.scheme not in {"http", "https"}:
         return False, "Only http and https schemes are allowed"
 
     if not parsed.netloc:
@@ -90,11 +90,11 @@ def validate_url(url: str) -> tuple[bool, str]:
         if re.match(pattern, hostname):
             return False, f"Hostname '{hostname}' is not allowed"
 
-    if is_private_ip(parsed.hostname):
+    if parsed.hostname is not None and is_private_ip(parsed.hostname):
         return False, f"Private IP addresses are not allowed: {parsed.hostname}"
 
     port = parsed.port
-    if port and port in (22, 23, 25, 3306, 5432, 6379, 27017, 11211):
+    if port and port in {22, 23, 25, 3306, 5432, 6379, 27017, 11211}:
         return False, f"Port {port} is not allowed for security reasons"
 
     return True, ""

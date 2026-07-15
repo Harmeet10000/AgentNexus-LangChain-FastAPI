@@ -10,6 +10,8 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from graphiti_core.graphiti import Graphiti
     from langchain_core.language_models import BaseChatModel
 
@@ -41,7 +43,7 @@ def build_document_ingestion_graph(
     graphiti: Graphiti | None,
     ingest_document_fn: IngestDocumentFn,
     llm: BaseChatModel,
-) -> CompiledStateGraph:
+) -> CompiledStateGraph[Any]:
     """Build the per-job ingestion graph."""
 
     graph = StateGraph(DocumentIngestionState)

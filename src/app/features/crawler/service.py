@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from typing import TYPE_CHECKING
+from typing import Any
 
 from redis.asyncio import Redis
 
@@ -27,9 +27,6 @@ from .dto import (
     SearchResponse,
     SearchResultItem,
 )
-
-if TYPE_CHECKING:
-    from typing import Any
 
 
 class CrawlerService:
@@ -65,7 +62,8 @@ class CrawlerService:
             self._rate_limiter = asyncio.run(self._get_rate_limiter())
         return self._rate_limiter
 
-    async def _get_rate_limiter(self) -> RateLimiter:
+    @staticmethod
+    async def _get_rate_limiter() -> RateLimiter:
 
         return get_rate_limiter()
 
@@ -73,7 +71,7 @@ class CrawlerService:
         self,
         identifier: str,
         scope: RateLimitScope,
-    ) -> tuple[bool, dict]:
+    ) -> tuple[bool, dict[str, Any]]:
         """Check if rate limit is exceeded."""
         return await self.rate_limiter.check_rate_limit(identifier, scope)
 
@@ -203,7 +201,8 @@ class CrawlerService:
             links=links,
         )
 
-    async def search(self, request: SearchRequest) -> SearchResponse:
+    @staticmethod
+    async def search(request: SearchRequest) -> SearchResponse:
         """
         Search the web using Tavily.
 

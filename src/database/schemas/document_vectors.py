@@ -1,6 +1,7 @@
 """Document vectors schema for storing embeddings."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,7 +22,7 @@ class DocumentVector(Base):
     vector_id: Mapped[str | None] = mapped_column(
         String(100), nullable=True
     )  # Pinecone/external vector DB ID
-    doc_metadata: Mapped[dict | None] = mapped_column(
+    doc_metadata: Mapped[dict[str, Any] | None] = mapped_column(
         JSON, name="metadata", nullable=True
     )  # Additional metadata
     created_at: Mapped[datetime] = mapped_column(

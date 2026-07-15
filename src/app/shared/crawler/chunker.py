@@ -27,6 +27,23 @@ def split_by_header(md: str, header_pattern: str) -> list[str]:
     ]
 
 
+def _chunk_recursive(sections: list[str], pattern: str, max_len: int) -> list[str]:
+    """Recursively split sections by sub-headers."""
+    result: list[str] = []
+    for section in sections:
+        if len(section) > max_len:
+            sub_pattern = r"^#{}\s.+$".format(pattern.count("#") + 1)
+            if sub_pattern.count("#") <= 3:
+                subs = split_by_header(section, sub_pattern)
+                if len(subs) > 1:
+                    result.extend(_chunk_recursive(subs, sub_pattern, max_len))
+                    continue
+            result.extend(section[i : i + max_len].strip() for i in range(0, len(section), max_len))
+        else:
+            result.append(section)
+    return result
+
+
 def smart_chunk_markdown(markdown: str, max_len: int = 1000) -> list[Chunk]:
     """
     Hierarchically split markdown by #, ##, ### headers, then by characters.
@@ -40,25 +57,10 @@ def smart_chunk_markdown(markdown: str, max_len: int = 1000) -> list[Chunk]:
     Returns:
         List of Chunk objects
     """
-    chunks = []
-
-    for h1 in split_by_header(markdown, r"^# .+$"):
-        if len(h1) > max_len:
-            for h2 in split_by_header(h1, r"^## .+$"):
-                if len(h2) > max_len:
-                    for h3 in split_by_header(h2, r"^### .+$"):
-                        if len(h3) > max_len:
-                            for i in range(0, len(h3), max_len):
-                                chunks.append(h3[i : i + max_len].strip())
-                        else:
-                            chunks.append(h3)
-                else:
-                    chunks.append(h2)
-        else:
-            chunks.append(h1)
+    chunks = _chunk_recursive(split_by_header(markdown, r"^# .+$"), r"^# .+$", max_len)
 
     result_chunks = []
-    for idx, text in enumerate([c for c in final_chunks if c]):
+    for idx, text in enumerate([c for c in chunks if c]):
         headers = extract_headers(text)
         result_chunks.append(
             Chunk(
@@ -103,8 +105,7 @@ def clean_markdown(markdown: str) -> str:
     """Clean and normalize markdown content."""
     markdown = re.sub(r"\n{3,}", "\n\n", markdown)
     markdown = re.sub(r" {2,}", " ", markdown)
-    markdown = markdown.strip()
-    return markdown
+    return markdown.strip()
 
 
 def get_chunk_summary(chunk: Chunk) -> dict[str, Any]:

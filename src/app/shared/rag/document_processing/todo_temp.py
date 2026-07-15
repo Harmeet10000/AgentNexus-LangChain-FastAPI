@@ -391,9 +391,6 @@ def create_extraction_tools(
     }
 
 
-
-
-
 # Backward compatibility: Import from tools for old class-based code
 __all__ = [
     "ToolResult",

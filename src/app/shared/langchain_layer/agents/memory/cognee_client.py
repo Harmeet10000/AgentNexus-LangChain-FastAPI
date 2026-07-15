@@ -24,7 +24,7 @@ Initialization (in lifespan.py):
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import cognee
 from cognee.exceptions import CogneeApiError
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 # Factory: Setup Cognee with Neo4j + Postgres
 # ---------------------------------------------------------------------------
 
-#  TODO: add this VECTOR_DB_PROVIDER=pgvector
+#  TODO: add this VECTOR_DB_PROVIDER=pgvector  # noqa: FIX002
 # # LLM
 # LLM_PROVIDER = "gemini"
 # LLM_MODEL = "gemini/gemini-flash-latest"
@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 # EMBEDDING_API_KEY = "your_gemini_api_key"
 
 
-async def setup_cognee(settings: Settings) -> dict:
+async def setup_cognee(settings: Settings) -> dict[str, Any]:
     """Configure Cognee to use the same Neo4j + Postgres as the app.
 
     Cognee creates its own internal connection pools — these are separate
@@ -104,7 +104,7 @@ async def setup_cognee(settings: Settings) -> dict:
         logger.bind(service="cognee").exception("Failed to configure Cognee")
         raise
     else:
-        config = {
+        config: dict[str, Any] = {
             "service": "cognee",
             "llm_model": settings.GEMINI_FLASH_MODEL,
             "neo4j_uri": settings.NEO4J_URI,
@@ -282,7 +282,8 @@ class CogneeStore(BaseStore):
     def __init__(self, cognee_client: Any) -> None:
         self.client = cognee_client
 
-    async def put(  # type: ignore[override]
+    @override
+    async def put(  # type: ignore
         self,
         namespace: Sequence[str | None],
         key: str,
@@ -290,26 +291,29 @@ class CogneeStore(BaseStore):
     ) -> None:
         """Store a value in the graph with embeddings."""
 
-    async def get(  # type: ignore[override]
+    @override
+    async def get(  # type: ignore
         self,
         namespace: Sequence[str | None],
-        key: str,  # noqa: ARG002 — protocol-mandated signature
+        key: str,
     ) -> Any | None:
         """Retrieve a value by namespace + key."""
         return None
 
-    async def search(  # type: ignore[override]
+    @override
+    async def search(  # type: ignore
         self,
         _namespace: Sequence[str | None],
         *,
-        filter_query: dict | None = None,  # noqa: ARG002 — protocol-mandated signature
-        query: str | None = None,  # noqa: ARG002 — protocol-mandated signature
-        **kwargs: Any,  # noqa: ARG002 — protocol-mandated signature
+        filter_query: dict[str, Any] | None = None,
+        query: str | None = None,
+        **kwargs: Any,
     ) -> list[Any]:
         """Semantic search within a namespace with optional filtering."""
         return []
 
-    async def delete(  # type: ignore[override]
+    @override
+    async def delete(  # type: ignore
         self,
         namespace: Sequence[str | None],
         *,
@@ -317,18 +321,20 @@ class CogneeStore(BaseStore):
     ) -> None:
         """Delete a single key or entire namespace."""
 
-    async def list_keys(  # type: ignore[override]
+    async def list_keys(
         self,
-        namespace: Sequence[str | None],  # noqa: ARG002 — protocol-mandated signature
+        namespace: Sequence[str | None],
     ) -> list[str]:
         """List all keys in a namespace."""
         return []
 
-    def _make_key(self, namespace: Sequence[str | None], key: str) -> str:
+    @staticmethod
+    def _make_key(namespace: Sequence[str | None], key: str) -> str:
         """Construct a full key from namespace hierarchy + key."""
         return "/".join(filter(None, [*namespace, key]))
 
-    def _matches_filter(self, data: Any, filter_dict: dict) -> bool:  # type: ignore[name-defined]
+    @staticmethod
+    def _matches_filter(data: Any, filter_dict: dict[str, Any]) -> bool:  # type: ignore
         """Check if data matches the filter criteria."""
         if not isinstance(data, dict):
             return False

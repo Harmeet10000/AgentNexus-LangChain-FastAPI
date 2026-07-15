@@ -73,31 +73,31 @@ class SearchService:
         """Create or deduplicate a document, then enqueue chunk/embed work."""
         canonical_content = payload.content.strip()
         content_hash = hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
-        match await self.repo.get_document_by_content_hash(content_hash):
-            case Success(existing) if existing is not None:
+        existing_result = await self.repo.get_document_by_content_hash(content_hash)
+        if isinstance(existing_result, Success):
+            existing = existing_result.unwrap()
+            if existing is not None:
                 return SearchIngestResponse(
                     document_id=str(existing.id),
                     task_id=None,
                     status="completed",
                     duplicate=True,
                 )
-            case Success():
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="search_ingest")
-                raise app_error_to_exception(error)
+        elif isinstance(existing_result, Failure):
+            log_expected_failure(existing_result.failure(), operation="search_ingest")
+            raise app_error_to_exception(existing_result.failure())
 
-        match await self.repo.create_document(
+        create_result = await self.repo.create_document(
             title=payload.title,
             source_uri=payload.source_uri,
             content_hash=content_hash,
             doc_metadata=payload.doc_metadata,
-        ):
-            case Success(document):
-                pass
-            case Failure(error):
-                log_expected_failure(error, operation="search_ingest")
-                raise app_error_to_exception(error)
+        )
+        if isinstance(create_result, Success):
+            document = create_result.unwrap()
+        elif isinstance(create_result, Failure):
+            log_expected_failure(create_result.failure(), operation="search_ingest")
+            raise app_error_to_exception(create_result.failure())
 
         from app.shared.outbox import (
             with_outbox,
@@ -140,15 +140,15 @@ class SearchService:
             error = str(task_result.result)
 
         if document_id is not None:
-            match await self.repo.get_document_by_id(document_id):
-                case Success(doc) if doc is not None:
+            doc_result = await self.repo.get_document_by_id(document_id)
+            if isinstance(doc_result, Success):
+                doc = doc_result.unwrap()
+                if doc is not None:
                     result_payload = {
                         **(result_payload or {}),
                         "title": doc.title,
                         "source_uri": doc.source_uri,
                     }
-                case _:
-                    pass
 
         return SearchTaskStatusResponse(
             task_id=task_id,
@@ -188,12 +188,17 @@ class SearchService:
             k=RRF_K,
             limit=payload.limit,
         )
-        match await self.repo.fetch_chunks_by_ids([item.chunk_id for item in fused_results]):
-            case Success(chunk_lookup):
-                items = _build_search_items(fused_results, chunk_lookup)
-            case Failure(error):
-                log_expected_failure(error, operation="hybrid_search_chunk_lookup")
-                items = _build_search_items(fused_results, {})
+        chunk_lookup_result = await self.repo.fetch_chunks_by_ids(
+            [item.chunk_id for item in fused_results]
+        )
+        if isinstance(chunk_lookup_result, Success):
+            chunk_lookup = chunk_lookup_result.unwrap()
+            items = _build_search_items(fused_results, chunk_lookup)
+        elif isinstance(chunk_lookup_result, Failure):
+            log_expected_failure(
+                chunk_lookup_result.failure(), operation="hybrid_search_chunk_lookup"
+            )
+            items = _build_search_items(fused_results, {})
         response = SearchResponse(items=items, cache_hit=False)
 
         if not payload.bypass_cache and self.redis is not None:
@@ -322,17 +327,15 @@ async def process_ingestion_document(
                 }
             )
 
-    match await repo.upsert_chunks(
+    upsert_result = await repo.upsert_chunks(
         build_chunk_rows(
             document_id=document_id,
             chunks=chunk_payloads,
         )
-    ):
-        case Success():
-            pass
-        case Failure(error):
-            log_expected_failure(error, operation="search_ingest_upsert")
-            raise app_error_to_exception(error)
+    )
+    if isinstance(upsert_result, Failure):
+        log_expected_failure(upsert_result.failure(), operation="search_ingest_upsert")
+        raise app_error_to_exception(upsert_result.failure())
     if len(chunk_payloads) > ANALYZE_THRESHOLD_CHUNKS:
         await repo.analyze_chunks()
 
@@ -387,10 +390,9 @@ async def _run_parallel_search(
         ),
     )
     for r in results:
-        match r:
-            case Failure(error):
-                log_expected_failure(error, operation="parallel_search")
-                raise app_error_to_exception(error)
+        if isinstance(r, Failure):
+            log_expected_failure(r.failure(), operation="parallel_search")
+            raise app_error_to_exception(r.failure())
     return (results[0].unwrap(), results[1].unwrap(), results[2].unwrap())
 
 

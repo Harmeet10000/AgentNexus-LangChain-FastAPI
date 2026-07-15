@@ -12,12 +12,12 @@ from app.utils import UnauthorizedException
 from app.utils.rate_limit.service import RateLimitService
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
     from typing import Any
 
 
 async def _send_json_response(
-    send: Callable[[dict[str, Any]], Any],
+    send: Callable[[dict[str, Any]], Awaitable[None]],
     *,
     status_code: int,
     payload: dict[str, Any],
@@ -42,7 +42,12 @@ class MCPAuthMiddleware:
         self.app = app
         self.enabled = enabled
 
-    async def __call__(self, scope: dict[str, Any], receive: Callable, send: Callable) -> None:
+    async def __call__(
+        self,
+        scope: dict[str, Any],
+        receive: Callable[[], Awaitable[dict[str, Any]]],
+        send: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
         if scope["type"] != "http" or not self.enabled:
             await self.app(scope, receive, send)
             return
@@ -98,7 +103,12 @@ class MCPRateLimitMiddleware:
         self.rate = rate
         self.period_seconds = period_seconds
 
-    async def __call__(self, scope: dict[str, Any], receive: Callable, send: Callable) -> None:
+    async def __call__(
+        self,
+        scope: dict[str, Any],
+        receive: Callable[[], Awaitable[dict[str, Any]]],
+        send: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return

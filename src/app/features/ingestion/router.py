@@ -33,7 +33,6 @@ router = APIRouter(
 
 @router.post(
     "/documents/upload",
-    response_model=IngestionUploadResponse,
     summary="Upload a legal document for ingestion. Returns doc_id for use with the Agent Saul WS.",
 )
 async def upload_document(

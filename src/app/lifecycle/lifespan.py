@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import redis
 from celery import Celery
@@ -35,8 +35,6 @@ from app.shared.services.storage import StorageService
 from app.utils import ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
-    from _asyncio import Task
-
     from crawl4ai.async_webcrawler import AsyncWebCrawler
     from graphiti_core import Graphiti
     from httpx._client import AsyncClient
@@ -53,8 +51,8 @@ async def setup_redis(url: str) -> redis.asyncio.Redis:
 
 
 async def setup_mongodb(
-    uri: str, db_name: str, document_models: list
-) -> tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
+    uri: str, db_name: str, document_models: list[type]
+) -> tuple[AsyncIOMotorClient[Any], AsyncIOMotorDatabase[Any]]:
     """Initialize MongoDB with health check."""
     mongo_client, db = await create_mongo_client(
         uri=uri,
@@ -93,6 +91,36 @@ def setup_celery() -> Celery | None:
         return celery_app
 
 
+async def _init_object_storage(app: FastAPI, settings: Any) -> None:
+    if settings.S3_BUCKET_NAME:
+        app.state.object_store = StorageService.from_settings(settings=settings)
+        await app.state.object_store.verify_access()
+        logger.info("Object storage initialized: bucket={}", settings.S3_BUCKET_NAME)
+    else:
+        app.state.object_store = None
+        logger.info("Object storage not configured, skipping")
+
+
+async def _init_outbox_relay(app: FastAPI, celery_app: Celery | None) -> None:
+    from app.connections.postgres import (
+        get_database_url,
+    )
+    from app.shared.outbox import (
+        OutboxRelay,
+    )
+
+    dsn = get_database_url().replace("+asyncpg", "")
+    relay = OutboxRelay(
+        database_url=dsn,
+        celery_app=celery_app or app.state.celery,
+        session_factory=app.state.db_session_local,
+    )
+    await relay.run_startup_scan()
+    app.state.outbox_relay_task = asyncio.create_task(relay.run_listener())  # type: ignore
+    app.state.outbox_relay = relay
+    logger.info("Outbox relay started")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR0912 — lifespan initializes 15+ optional dependencies
     """Manage application startup and shutdown with parallel execution."""
@@ -126,20 +154,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
         raise ServiceUnavailableException(msg) from exc
 
     try:
-        app.state.redis: redis.asyncio.Redis = redis_task.result()
+        app.state.redis = redis_task.result()
     except Exception as exc:
         msg = f"Redis startup failed: {exc}"
         raise ServiceUnavailableException(msg) from exc
 
     # Optional deps: Neo4j, Graphiti — log warning, set None on failure
     try:
-        app.state.neo4j_driver: AsyncDriver = neo_task.result()
+        app.state.neo4j_driver = neo_task.result()
     except Exception as exc:  # noqa: BLE001 — Neo4j is optional, must not crash startup
         exc.add_note("operation=setup_neo4j")
         logger.warning("Neo4j startup failed, continuing without graph features", error=str(exc))
-        app.state.neo4j_driver = None  # type: ignore[assignment]
+        app.state.neo4j_driver = None  # type: ignore
 
-    app.state.websocket_security: WebSocketSecurityService = await build_websocket_security_service(
+    app.state.websocket_security = await build_websocket_security_service(
         redis=app.state.redis,
         settings=settings,
     )
@@ -157,12 +185,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
             neo4j_password=settings.NEO4J_PASSWORD.get_secret_value(),
         )
         await setup_graphiti_indices(graphiti)
-        app.state.graphiti: Graphiti = graphiti
+        app.state.graphiti = graphiti
         logger.info("Graphiti initialized")
     except Exception as exc:  # noqa: BLE001 — Graphiti is optional, must not crash startup
         exc.add_note("operation=setup_graphiti")
         logger.warning("Graphiti startup failed, continuing without graph features", error=str(exc))
-        app.state.graphiti = None  # type: ignore[assignment]
+        app.state.graphiti = None  # type: ignore
 
     # Warn on Neo4j/Graphiti state inconsistency
     neo4j_ok = getattr(app.state, "neo4j_driver", None) is not None
@@ -190,15 +218,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     # logger.info("Contract KB ingestion graph initialized")
     # app.state.pageindex_client = PageIndexClient()
     # Initialize HTTPX client (HTTP/2 + connection pooling)
-    app.state.httpx_client: AsyncClient = get_shared_httpx_client()
+    app.state.httpx_client = get_shared_httpx_client()
     logger.info("HTTPX client initialized with HTTP/2")
     # Initialize Tavily HTTP client
-    app.state.tavily_http_client: AsyncClient = await create_tavily_http_client()
+    app.state.tavily_http_client = await create_tavily_http_client()
     logger.info("Tavily HTTP client initialized")
 
     # Initialize Crawl4AI browser
     try:
-        app.state.crawl4ai_crawler: AsyncWebCrawler = await create_crawl4ai_crawler()
+        app.state.crawl4ai_crawler = await create_crawl4ai_crawler()
         logger.info("Crawl4AI browser initialized")
     except Exception:  # noqa: BLE001 — Crawl4AI is optional, must not crash startup
         logger.exception("Crawl4AI browser startup failed, continuing without crawl capability")
@@ -206,13 +234,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     settings = get_settings()
     # Initialize object storage (S3/R2) — optional, graceful degradation
     try:
-        if settings.S3_BUCKET_NAME:
-            app.state.object_store: StorageService = StorageService.from_settings(settings=settings)
-            await app.state.object_store.verify_access()
-            logger.info("Object storage initialized: bucket={}", settings.S3_BUCKET_NAME)
-        else:
-            app.state.object_store = None
-            logger.info("Object storage not configured, skipping")
+        await _init_object_storage(app, settings)
     except Exception:  # noqa: BLE001 — Object storage is optional, must not crash startup
         logger.exception("Object storage startup failed, continuing without")
         app.state.object_store = None
@@ -220,7 +242,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     # Celery setup (optional, non-blocking)
     try:
         celery: Celery | None = await asyncio.wait_for(asyncio.to_thread(setup_celery), timeout=3.0)
-        app.state.celery: Celery | None = celery
+        app.state.celery = celery
     except TimeoutError:
         logger.warning("Celery setup timed out, continuing without task queue")
         app.state.celery = None
@@ -230,22 +252,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
 
     # Outbox relay (uses existing database session factory)
     try:
-        from app.connections.postgres import (
-            get_database_url,
-        )
-        from app.shared.outbox import (
-            OutboxRelay,
-        )
-        dsn: str = get_database_url().replace("+asyncpg", "")
-        relay = OutboxRelay(
-            database_url=dsn,
-            celery_app=celery_app or app.state.celery,
-            session_factory=app.state.db_session_local,
-        )
-        await relay.run_startup_scan()
-        app.state.outbox_relay_task: Task[None] = asyncio.create_task(relay.run_listener())
-        app.state.outbox_relay: OutboxRelay = relay
-        logger.info("Outbox relay started")
+        await _init_outbox_relay(app, celery_app)
     except Exception as exc:  # noqa: BLE001 — Celery is optional, must not crash startup
         exc.add_note("operation=setup_outbox_relay")
         logger.warning("Outbox relay startup failed, continuing without outbox", error=str(exc))
@@ -269,46 +276,49 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
 
     logger.info("Application ready", status="running")
 
-    yield
+    try:
+        yield
+    finally:
+        # SHUTDOWN: Parallel graceful cleanup
+        logger.info("Application shutting down", status="stopping")
 
-    # SHUTDOWN: Parallel graceful cleanup
-    logger.info("Application shutting down", status="stopping")
+        # Close LangGraph checkpointer connection pool
+        if hasattr(app.state, "langgraph_checkpointer"):
+            await teardown_langgraph_checkpointer(app.state.langgraph_checkpointer)
 
-    # Close LangGraph checkpointer connection pool
-    if hasattr(app.state, "langgraph_checkpointer"):
-        await teardown_langgraph_checkpointer(app.state.langgraph_checkpointer)
+        # Stop outbox relay
+        if hasattr(app.state, "outbox_relay_task") and app.state.outbox_relay_task is not None:
+            app.state.outbox_relay_task.cancel()
+            logger.info("Outbox relay stopped")
 
-    # Stop outbox relay
-    if hasattr(app.state, "outbox_relay_task") and app.state.outbox_relay_task is not None:
-        app.state.outbox_relay_task.cancel()
-        logger.info("Outbox relay stopped")
+        # Close HTTPX client
+        if hasattr(app.state, "httpx_client"):
+            await app.state.httpx_client.aclose()
 
-    # Close HTTPX client
-    if hasattr(app.state, "httpx_client"):
-        await app.state.httpx_client.aclose()
+        # Close Tavily HTTP client
+        if hasattr(app.state, "tavily_http_client"):
+            await close_tavily_http_client(app.state.tavily_http_client)
 
-    # Close Tavily HTTP client
-    if hasattr(app.state, "tavily_http_client"):
-        await close_tavily_http_client(app.state.tavily_http_client)
+        if hasattr(app.state, "graphiti"):
+            await close_graphiti(app.state.graphiti)
 
-    if hasattr(app.state, "graphiti"):
-        await close_graphiti(app.state.graphiti)
+        if hasattr(app.state, "crawl4ai_crawler"):
+            await close_crawl4ai_crawler(app.state.crawl4ai_crawler)
 
-    if hasattr(app.state, "crawl4ai_crawler"):
-        await close_crawl4ai_crawler(app.state.crawl4ai_crawler)
+        # MongoDB close is synchronous - run outside TaskGroup
+        if hasattr(app.state, "mongo_client"):
+            app.state.mongo_client.close()
 
-    # MongoDB close is synchronous - run outside TaskGroup
-    if hasattr(app.state, "mongo_client"):
-        app.state.mongo_client.close()
+        async with asyncio.TaskGroup() as tg:
+            if hasattr(app.state, "redis"):
+                tg.create_task(coro=app.state.redis.aclose(close_connection_pool=True))
+            if hasattr(app.state, "db_engine"):
+                tg.create_task(coro=app.state.db_engine.dispose())
+            if hasattr(app.state, "neo4j_driver"):
+                driver = app.state.neo4j_driver
+                if driver is not None:
+                    tg.create_task(coro=close_neo4j_driver(driver=driver))
+        # Shutdown OpenTelemetry (flush remaining spans/metrics/logs)
+        shutdown_otel()
 
-    async with asyncio.TaskGroup() as tg:
-        if hasattr(app.state, "redis"):
-            tg.create_task(coro=app.state.redis.aclose(close_connection_pool=True))
-        if hasattr(app.state, "db_engine"):
-            tg.create_task(coro=app.state.db_engine.dispose())
-        if hasattr(app.state, "neo4j_driver"):
-            tg.create_task(coro=close_neo4j_driver(driver=app.state.neo4j_driver))
-    # Shutdown OpenTelemetry (flush remaining spans/metrics/logs)
-    shutdown_otel()
-
-    logger.info("Application shutdown complete", status="stopped")
+        logger.info("Application shutdown complete", status="stopped")

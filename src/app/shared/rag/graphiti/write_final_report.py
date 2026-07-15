@@ -67,6 +67,7 @@ async def write_final_report_to_memory(
     relationships: list[LegalRelationship],
     user_id: str,
     thread_id: str,
+    *,
     human_approved: bool,
     overall_risk_label: str,
     overall_compliant: bool,

@@ -1,7 +1,7 @@
 """Celery connection and production reliability configuration."""
 
 import time
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, cast, override
 
 import opentelemetry.trace as otel_trace
 from celery import Celery, Task
@@ -18,7 +18,7 @@ from opentelemetry import metrics
 from redis.asyncio import Redis
 
 from app.config import get_settings
-from app.connections import create_redis_client
+from app.connections.redis import create_redis_client
 from app.shared.otel import setup_otel, shutdown_otel
 from app.utils import logger
 
@@ -125,6 +125,7 @@ class ResilientTask(Task):
             recovery_timeout_seconds=settings.CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT,
         )
 
+    @override
     def on_retry(
         self,
         exc: Any,
@@ -141,6 +142,7 @@ class ResilientTask(Task):
             retry_count=self.request.retries,
         ).warning(f"Task scheduled for retry: {exc!s}")
 
+    @override
     def on_failure(
         self,
         exc: Any,
@@ -160,6 +162,7 @@ class ResilientTask(Task):
             retry_count=self.request.retries,
         ).error(f"Task failed: {exc!s}")
 
+    @override
     def on_success(
         self,
         retval: Any,

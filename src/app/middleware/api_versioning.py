@@ -7,7 +7,7 @@ skipped.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -34,11 +34,12 @@ class ApiDeprecationMiddleware(BaseHTTPMiddleware):
         v2_base_path: str = "/api/v2",
         exempt_prefixes: frozenset[str] | None = None,
     ) -> None:
-        super().__init__(app)  # type: ignore[arg-type]
+        super().__init__(app)  # type: ignore
         self._sunset_date = sunset_date
         self._v2_base_path = v2_base_path
         self._exempt = exempt_prefixes or _DEFAULT_EXEMPT_PREFIXES
 
+    @override
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:

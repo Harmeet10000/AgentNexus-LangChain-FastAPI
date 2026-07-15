@@ -79,6 +79,7 @@ async def build_agent_context(
     graphiti_service: GraphitiService,
     task: str,
     base_system_prompt: str,
+    *,
     max_tokens: int = _DEFAULT_MAX_TOKENS,
     include_long_term_memory: bool = True,
 ) -> list[BaseMessage]:
@@ -180,7 +181,7 @@ def _build_context_prefix(
     risk_analysis = state.get("risk_analysis")
     if risk_analysis is not None:
         critical_risks = [
-            f.title for f in risk_analysis.findings if f.label in ("critical", "high")
+            f.title for f in risk_analysis.findings if f.label in {"critical", "high"}
         ]
         if critical_risks:
             risk_warnings = "HIGH PRIORITY RISKS DETECTED: " + ", ".join(critical_risks[:5])
@@ -200,6 +201,41 @@ def _build_context_prefix(
     return SystemMessage(content=full_system)
 
 
+async def _do_retrieve_graphiti_context(
+    state: LegalAgentState,
+    graphiti_service: GraphitiService,
+    task: str,
+    query: str,
+    *,
+    user_id: str,
+    doc_id: str,
+) -> str:
+    if task in {"risk_analysis", "obligation_chain"}:
+        results = await graphiti_service.search_for_risk_context(
+            query=query,
+            user_id=user_id,
+            doc_id=doc_id,
+            num_results=_GRAPHITI_CONTEXT_RESULTS,
+        )
+    elif task == "compliance":
+        jurisdiction = state.get("working_memory", {}).get("jurisdiction", "India")
+        results = await graphiti_service.search_for_precedent_chains(
+            query=query,
+            user_id=user_id,
+            jurisdiction=jurisdiction,
+            num_results=_GRAPHITI_CONTEXT_RESULTS,
+        )
+    else:
+        return ""
+    if not results:
+        return ""
+    lines: list[str] = []
+    for r in results:
+        score_pct = f"{r.relevance_score:.0%}"
+        lines.append(f"[{score_pct}] {r.name}: {r.content[:300]}")
+    return "\n".join(lines)
+
+
 async def _retrieve_graphiti_context(
     state: LegalAgentState,
     graphiti_service: GraphitiService,
@@ -211,34 +247,14 @@ async def _retrieve_graphiti_context(
     doc_id = state["doc_id"]
 
     try:
-        if task in ("risk_analysis", "obligation_chain"):
-            results = await graphiti_service.search_for_risk_context(
-                query=query,
-                user_id=user_id,
-                doc_id=doc_id,
-                num_results=_GRAPHITI_CONTEXT_RESULTS,
-            )
-        elif task == "compliance":
-            jurisdiction = state.get("working_memory", {}).get("jurisdiction", "India")
-            results = await graphiti_service.search_for_precedent_chains(
-                query=query,
-                user_id=user_id,
-                jurisdiction=jurisdiction,
-                num_results=_GRAPHITI_CONTEXT_RESULTS,
-            )
-        else:
-            return ""
-
-        if not results:
-            return ""
-
-        lines: list[str] = []
-        for r in results:
-            score_pct = f"{r.relevance_score:.0%}"
-            lines.append(f"[{score_pct}] {r.name}: {r.content[:300]}")
-
-        return "\n".join(lines)
-
+        return await _do_retrieve_graphiti_context(
+            state,
+            graphiti_service,
+            task,
+            query,
+            user_id=user_id,
+            doc_id=doc_id,
+        )
     except (RuntimeError, ValueError, AttributeError) as exc:
         logger.bind(error=str(exc), task=task).warning("memory_pipeline_graphiti_failed")
         return ""

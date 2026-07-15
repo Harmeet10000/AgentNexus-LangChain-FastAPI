@@ -40,7 +40,7 @@ def build_ingestion_graph(
     embedding_fn: EmbeddingFunction,
     graphiti_service: Any,
     redis: Redis | None = None,
-) -> CompiledStateGraph:
+) -> CompiledStateGraph[Any]:
     """Build the contract ingestion graph once during application startup."""
     graph = StateGraph(IngestionState)
     graph.add_node("parse_document", cast("Any", make_parse_document_node()))

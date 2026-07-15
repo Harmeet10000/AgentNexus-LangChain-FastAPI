@@ -160,9 +160,9 @@ async def _run_reconciliation_async(
                 }
             )
             user_result: ReconciliationSummary = {
-                "merged": int(result.get("merged_count", 0)),
-                "updated": int(result.get("updated_count", 0)),
-                "versions": int(result.get("versions_written", 0)),
+                "merged": int(result.get("merged_count", 0)),  # type: ignore
+                "updated": int(result.get("updated_count", 0)),  # type: ignore
+                "versions": int(result.get("versions_written", 0)),  # type: ignore
             }
             results[user_id] = user_result
             logger.bind(user_id=user_id, **user_result).info("User reconciliation completed")

@@ -1,12 +1,18 @@
 # src/app/shared/document_processing/langextract_to_graph.py
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
     import langextract as lx
+
+
+class Neo4jClient(Protocol):
+    """Minimal protocol for Neo4j operations."""
+
+    async def merge_node(self, label: str, props: dict) -> None: ...
 
 
 class GraphIngestionContext(BaseModel):
@@ -56,7 +62,7 @@ async def ingest_extractions_to_graph(
 
 #     Best Practice Prompt Strategy for Graphs:
 
-# TODO: Design a multi-pass LangExtract prompting strategy to first extract entities/attributes, then feed those back in a second pass to extract typed relationships with grounding. This will yield a richer, more accurate graph compared to a single-pass approach.
+# TODO: Design a multi-pass LangExtract prompting strategy to first extract entities/attributes, then feed those back in a second pass to extract typed relationships with grounding. This will yield a richer, more accurate graph compared to a single-pass approach.  # noqa: FIX002
 # Run two passes with LangExtract:
 # Entity + attribute extraction (what you already have).
 # Dedicated relationship extraction pass, where you feed back the entities and ask for typed relationships with grounding.

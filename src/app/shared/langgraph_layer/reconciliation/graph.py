@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 def build_reconciliation_graph(
     reconcile_llm: ReconciliationRunnable,
     db_engine: AsyncEngine,
-) -> CompiledStateGraph:
+) -> CompiledStateGraph[Any]:
     """Build the reconciliation graph once during application startup."""
     state_graph_factory = cast("Any", StateGraph)
     graph: Any = state_graph_factory(ReconciliationState)

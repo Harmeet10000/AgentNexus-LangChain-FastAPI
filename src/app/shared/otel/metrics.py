@@ -1,9 +1,14 @@
+from typing import TYPE_CHECKING
+
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
+
+if TYPE_CHECKING:
+    from typing import Any
 
 _otel_prometheus_reader: PrometheusMetricReader | None = None
 
@@ -14,7 +19,7 @@ def _setup_meter_provider(
 ) -> MeterProvider:
     global _otel_prometheus_reader  # noqa: PLW0603 — intentional module-level state for OTEL metrics
 
-    readers: list = [
+    readers: list[Any] = [
         PeriodicExportingMetricReader(
             OTLPMetricExporter(),
             export_interval_millis=export_interval_ms,

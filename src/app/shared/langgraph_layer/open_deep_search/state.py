@@ -65,7 +65,7 @@ def override_reducer(current_value: object, new_value: object) -> object:
         override_value = cast("Mapping[str, object]", new_value)
         if override_value.get("type") == "override":
             return override_value.get("value", new_value)
-    return operator.add(current_value, new_value)
+    return operator.add(current_value, new_value)  # type: ignore
 
 
 class AgentInputState(MessagesState):

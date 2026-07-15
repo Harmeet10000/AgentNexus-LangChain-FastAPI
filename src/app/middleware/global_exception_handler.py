@@ -19,7 +19,7 @@ def _json_error_response(
     )
 
 
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def global_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
     settings = get_settings()
 
     # Extract the current function chain from our ContextVar
@@ -45,7 +45,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             error_code=error_code,
             flow=current_flow,
         )
-        return _json_error_response(payload, status_code, headers=exc.headers)
+        return _json_error_response(payload, status_code, headers=exc.headers)  # type: ignore
 
     # ────────────────────────────────────────────────
     # 2. Pydantic / FastAPI validation errors (422)
@@ -97,7 +97,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             error_code=error_code,
             flow=current_flow,
         )
-        return _json_error_response(payload, status_code, headers=exc.headers)
+        return _json_error_response(payload, status_code, headers=exc.headers)  # type: ignore
 
     # ────────────────────────────────────────────────
     # 4. Catch-all — unexpected server errors (500)

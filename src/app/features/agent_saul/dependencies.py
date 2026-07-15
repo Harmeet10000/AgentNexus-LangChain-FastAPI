@@ -23,6 +23,8 @@ from app.features.auth.dependencies import get_refresh_token_repository
 from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     from langgraph.graph.state import CompiledStateGraph
     from redis.asyncio import Redis
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-async def get_saul_graph(request: Request) -> CompiledStateGraph:
+async def get_saul_graph(request: Request) -> CompiledStateGraph[Any]:
     return request.app.state.saul_graph
 
 
@@ -79,13 +81,13 @@ class AgentSaulDeps(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    graph: CompiledStateGraph
+    graph: CompiledStateGraph[Any]
     checkpointer: AsyncPostgresSaver
     redis: Redis
 
 
 async def get_agent_saul_deps(
-    graph: Annotated[CompiledStateGraph, Depends(get_saul_graph)],
+    graph: Annotated[CompiledStateGraph[Any], Depends(get_saul_graph)],
     checkpointer: Annotated[AsyncPostgresSaver, Depends(get_saul_checkpointer)],
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> AgentSaulDeps:

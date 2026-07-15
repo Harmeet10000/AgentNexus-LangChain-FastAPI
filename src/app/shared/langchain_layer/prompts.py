@@ -109,8 +109,12 @@ class SystemPromptParts(BaseModel):
             parts.append(f"CONTEXT POLICY\n{self.context_policy}")
         if self.execution_policy:
             parts.append(f"EXECUTION POLICY\n{self.execution_policy}")
-        parts.append(f"CONSTRAINTS\n{self.constraints}")
-        parts.append(f"UNCERTAINTY POLICY\n{self.uncertainty_policy}")
+        parts.extend(
+            [
+                f"CONSTRAINTS\n{self.constraints}",
+                f"UNCERTAINTY POLICY\n{self.uncertainty_policy}",
+            ]
+        )
         if self.examples:
             parts.append(f"EXAMPLES\n{self.examples}")
 

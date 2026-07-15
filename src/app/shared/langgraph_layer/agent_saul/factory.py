@@ -113,19 +113,19 @@ def build_agent_registry(
     # --- create_agent nodes (Pro LLM + tool stubs) -------------------------
     orchestrator_agent = create_agent(
         model=pro_llm,
-        tools=[],  # TODO: add delegation tools when available
+        tools=[],  # TODO: add delegation tools when available  # noqa: FIX002
         system_prompt=_ORCHESTRATOR_SYSTEM_PROMPT,
     )
 
     risk_agent = create_agent(
         model=pro_llm,
-        tools=[],  # TODO: add search_caselaw, retrieve_statute tools
+        tools=[],  # TODO: add search_caselaw, retrieve_statute tools  # noqa: FIX002
         system_prompt=_RISK_ANALYSIS_SYSTEM_PROMPT,
     )
 
     compliance_agent = create_agent(
         model=pro_llm,
-        tools=[],  # TODO: add retrieve_precedent, check_statute tools
+        tools=[],  # TODO: add retrieve_precedent, check_statute tools  # noqa: FIX002
         system_prompt=_COMPLIANCE_SYSTEM_PROMPT,
     )
 

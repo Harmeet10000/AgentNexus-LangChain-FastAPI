@@ -17,9 +17,9 @@
   },
   "skills": {
     "paths": [
-      ".opencode/skills",
-      ".github/skills",
-      "/home/harmeet/Desktop/prompts/skills"
+    //   ".opencode/skills",
+    //   ".github/skills",
+    //   "/home/harmeet/Desktop/prompts/skills"
     ]
   },
   "tools": {
@@ -31,7 +31,7 @@
     ".opencode/plugins/graphify.js",
     "@warp-dot-dev/opencode-warp@0.1.5",
     "@mohak34/opencode-notifier@latest",
-    "@zenobius/opencode-skillful",
+    // "@zenobius/opencode-skillful",
     "opencode-scheduler",
     "@lyculs/opencode-firecrawl",
     "opencode-handoff",

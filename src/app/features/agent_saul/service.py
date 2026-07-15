@@ -91,7 +91,7 @@ class AgentSaulService:
 
     def __init__(
         self,
-        graph: CompiledStateGraph,
+        graph: CompiledStateGraph[Any],
         redis: Redis,
         correlation_id: str,
         ws_security: WebSocketSecurityService,
@@ -192,8 +192,8 @@ class AgentSaulService:
     # Event mapping: astream_events v2 → WS frames
     # ------------------------------------------------------------------
 
-    def _map_event_to_frame(
-        self,
+    @staticmethod
+    def _map_event_to_frame(  # noqa: PLR0914
         event: object,
         current_step: int,
     ) -> WSOutbound | None:
@@ -269,7 +269,7 @@ class AgentSaulService:
         ws: WebSocket,
         thread_id: str,
         interrupt_value: dict[str, Any],
-    ) -> Command | None:
+    ) -> Command[Any] | None:
         """Emit HITL frame, wait for WSResumeMessage, return Command(resume=...)."""
         interrupt_type_raw = interrupt_value.get("type", HITLInterruptType.PLAN_APPROVAL)
         try:

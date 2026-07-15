@@ -3,7 +3,12 @@ import math
 from returns.result import Failure, Success
 
 from app.features.auth import RefreshTokenRepository, User, UserRole, create_impersonation_token
-from app.shared.result import app_error_to_exception, log_expected_failure
+from app.shared.result import (
+    app_error_to_exception,
+    log_expected_failure,
+    match_app_result,
+    unwrap_app_success,
+)
 from app.utils import ConflictException, ForbiddenException, NotFoundException, logger
 
 from .dto import (
@@ -39,17 +44,15 @@ class UserAdminService:
 
     async def _get_user_or_raise(self, user_id: str) -> User:
         result = await self._user_repo.find_by_id(user_id)
-        match result:
-            case Success(user) if user is not None:
-                return user
-            case Success():
-                msg = "User"
-                raise NotFoundException(msg, user_id)
-            case Failure(error):
-                log_expected_failure(error, operation="user_admin_lookup")
-                raise app_error_to_exception(error)
-        resource = "User"
-        raise NotFoundException(resource, user_id)
+        return match_app_result(
+            result,
+            on_success=lambda u: (
+                u if u is not None else (_ for _ in ()).throw(NotFoundException("User", user_id))
+            ),
+            on_failure=lambda e: (_ for _ in ()).throw(
+                log_expected_failure(e, operation="user_admin_lookup") or app_error_to_exception(e)
+            ),
+        )
 
     async def list_users(
         self,
@@ -164,7 +167,7 @@ class UserAdminService:
         ).warning("Admin impersonation session created")  # warning level — always audit this
         return ImpersonateResponse(
             access_token=access_token,
-            token_type="bearer",
+            token_type="bearer",  # noqa: S106
             expires_in=expires_in,
             impersonating_user_id=admin_user_id,
         )

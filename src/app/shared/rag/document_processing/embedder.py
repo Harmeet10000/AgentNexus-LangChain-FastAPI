@@ -62,8 +62,6 @@ async def generate_embedding(  # noqa: RET503
                 contents=text,
                 config={"task_type": GEMINI_TASK_TYPE},
             )
-            return response.embedding.values
-
         except genai_errors.ClientError as e:
             logger.error("Gemini API error: {}", e)
             if attempt == max_retries - 1:
@@ -78,6 +76,8 @@ async def generate_embedding(  # noqa: RET503
             if attempt == max_retries - 1:
                 raise
             await asyncio.sleep(retry_delay)
+        else:
+            return response.embedding.values
 
 
 async def generate_embeddings_batch(  # noqa: RET503
@@ -110,10 +110,11 @@ async def generate_embeddings_batch(  # noqa: RET503
             processed_texts.append("")
             continue
 
-        if len(text) > config["max_tokens"] * 4:
-            text = text[: config["max_tokens"] * 4]
+        truncated = (
+            text[: config["max_tokens"] * 4] if len(text) > config["max_tokens"] * 4 else text
+        )
 
-        processed_texts.append(text)
+        processed_texts.append(truncated)
 
     for attempt in range(max_retries):
         try:
@@ -128,8 +129,6 @@ async def generate_embeddings_batch(  # noqa: RET503
                 )
                 embeddings.append(response.embedding.values)
 
-            return embeddings
-
         except genai_errors.ClientError as e:
             logger.error("Gemini API error in batch: {}", e)
             if attempt == max_retries - 1:
@@ -142,10 +141,12 @@ async def generate_embeddings_batch(  # noqa: RET503
             if attempt == max_retries - 1:
                 return await _process_embeddings_individually(processed_texts, model, retry_delay)
             await asyncio.sleep(retry_delay)
+        else:
+            return embeddings
 
 
 async def _process_embeddings_individually(
-    texts: list[str], model: str, retry_delay: float
+    texts: list[str], model: str, _retry_delay: float
 ) -> list[list[float]]:
     """
     Process texts individually as fallback.
@@ -162,21 +163,17 @@ async def _process_embeddings_individually(
     config = get_model_config(model)
 
     for text in texts:
-        try:
-            if not text or not text.strip():
-                embeddings.append([0.0] * config["dimensions"])
-                continue
+        if not text or not text.strip():
+            embeddings.append([0.0] * config["dimensions"])
+            continue
 
+        try:
             embedding = await generate_embedding(text, model=model)
             embeddings.append(embedding)
-
-            # Small delay to avoid overwhelming the API
             await asyncio.sleep(0.1)
-
         except genai_errors.APIError as e:
             e.add_note(f"model={model}, operation=process_embeddings_individually")
             logger.error(f"Failed to embed text: {e}")
-            # Use zero vector as fallback
             embeddings.append([0.0] * config["dimensions"])
 
     return embeddings
@@ -214,50 +211,53 @@ async def embed_chunks(
         batch_texts = [chunk.content for chunk in batch_chunks]
 
         try:
-            # Generate embeddings for this batch
             embeddings = await generate_embeddings_batch(batch_texts, model=model)
-
-            # Add embeddings to chunks
-            for chunk, embedding in zip(batch_chunks, embeddings):
-                # Create a new chunk with embedding
-                embedded_chunk = Chunk(
-                    content=chunk.content,
-                    chunk_index=chunk.chunk_index,
-                    document_id=chunk.document_id,
-                    metadata={
-                        **chunk.metadata,
-                        "embedding_model": model,
-                        "embedding_generated_at": datetime.now().isoformat(),
-                    },
-                    token_count=chunk.token_count,
-                    embedding=embedding,
-                )
-                embedded_chunks.append(embedded_chunk)
-
-            # Progress update
-            current_batch = (i // batch_size) + 1
-            if progress_callback:
-                progress_callback(current_batch, total_batches)
-
-            logger.info("Processed batch {}/{}", current_batch, total_batches)
-
+            _attach_embeddings_to_chunks(batch_chunks, embeddings, model, embedded_chunks)
         except genai_errors.APIError as e:
             e.add_note(f"model={model}, operation=embed_chunks, batch={i // batch_size + 1}")
             logger.error(f"Failed to process batch {i // batch_size + 1}: {e}")
-
-            # Add chunks without embeddings as fallback
             for chunk in batch_chunks:
                 chunk.metadata.update(
                     {
                         "embedding_error": str(e),
-                        "embedding_generated_at": datetime.now().isoformat(),
+                        "embedding_generated_at": datetime.now(
+                            tz=datetime.timezone.utc
+                        ).isoformat(),
                     }
                 )
                 chunk.embedding = [0.0] * config["dimensions"]
                 embedded_chunks.append(chunk)
+        else:
+            current_batch = (i // batch_size) + 1
+            if progress_callback:
+                progress_callback(current_batch, total_batches)
+            logger.info("Processed batch {}/{}", current_batch, total_batches)
 
     logger.info("Generated embeddings for {} chunks", len(embedded_chunks))
     return embedded_chunks
+
+
+def _attach_embeddings_to_chunks(
+    batch_chunks: list[Chunk],
+    embeddings: list[list[float]],
+    model: str,
+    embedded_chunks: list[Chunk],
+) -> None:
+    for chunk, embedding in zip(batch_chunks, embeddings, strict=True):
+        embedded_chunks.append(
+            Chunk(
+                content=chunk.content,
+                chunk_index=chunk.chunk_index,
+                document_id=chunk.document_id,
+                metadata={
+                    **chunk.metadata,
+                    "embedding_model": model,
+                    "embedding_generated_at": datetime.now(tz=datetime.timezone.utc).isoformat(),
+                },
+                token_count=chunk.token_count,
+                embedding=embedding,
+            )
+        )
 
 
 async def embed_query(query: str, model: str = GEMINI_EMBEDDING_MODEL) -> list[float]:
@@ -309,11 +309,11 @@ class EmbeddingCache:
         """Get embedding from cache."""
         text_hash = self._hash_text(text)
         if text_hash in self.cache:
-            self.access_times[text_hash] = datetime.now()
+            self.access_times[text_hash] = datetime.now(tz=datetime.timezone.utc)
             return self.cache[text_hash]
         return None
 
-    def put(self, text: str, embedding: list[float]):
+    def put(self, text: str, embedding: list[float]) -> None:
         """Store embedding in cache."""
         text_hash = self._hash_text(text)
 
@@ -324,11 +324,12 @@ class EmbeddingCache:
             del self.access_times[oldest_key]
 
         self.cache[text_hash] = embedding
-        self.access_times[text_hash] = datetime.now()
+        self.access_times[text_hash] = datetime.now(tz=datetime.timezone.utc)
 
-    def _hash_text(self, text: str) -> str:
+    @staticmethod
+    def _hash_text(text: str) -> str:
         """Generate hash for text."""
-        return hashlib.md5(text.encode()).hexdigest()
+        return hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()
 
 
 def create_embedding_cache(max_size: int = 1000) -> EmbeddingCache:

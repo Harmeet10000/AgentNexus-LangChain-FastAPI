@@ -260,6 +260,7 @@ exclude = [
 ]
 
 [tool.ruff.lint]
+preview = true
 select = [
     # --- Core rules (existing) ---
     "E",
@@ -293,6 +294,10 @@ select = [
     "PIE",  # flake8-pie (various micro-optimizations)
     "ICN",  # import conventions (consistency)
     "FURB", # modern Python patterns & refurb suggestions
+    # --- New: blanket suppression + debt tracking ---
+    "PGH",  # blanket noqa/type-ignore (PGH003, PGH004)
+    "FIX",  # FIXME/XXX/HACK tracking (complements TD)
+    "T10",  # debugger left in code (T100)
     # --- High-value for production ---
     "N",   # pep8-naming (class/function/variable naming consistency)
     "SLF", # private member access (enforces encapsulation)
@@ -335,6 +340,9 @@ fixable = [
     "EM103",  # Fix .format() in exception
     "RSE102", # Remove unnecessary parentheses on raise
     "FBT001", # Signal boolean parameter trap (for awareness)
+    "PGH004", # Fix blanket noqa → specific rule codes
+    "RUF068", # Fix duplicate entries in __all__
+    "PLR6104", # Fix non-augmented assignment to augmented
 ]
 unfixable = [
     "B",   # bugbear (needs review)
@@ -364,6 +372,7 @@ ignore = [
     "FBT003",  # Boolean positional value in call (noisy)
     "COM812",  # Trailing comma missing (conflicts with formatter in some cases)
     "SLF001",  # Private member access (occasionally needed in tests)
+    "RUF029",  # unused-async: FastAPI deps are async by convention
 ]
 
 [tool.ruff.lint.flake8-type-checking]
@@ -398,6 +407,7 @@ section-order = [
     "SLF001",  # Private member access allowed in tests
     "N802",    # Allow invalid function names in tests
     "N806",    # Allow invalid variable names in test fixtures
+    "T100",    # Allow debugger calls in test code
 ]
 "src/alembic/migrations/*.py" = [
     "ANN",
@@ -408,6 +418,7 @@ section-order = [
 "**/__init__.py" = [
     "ANN",  # No type annotations required in __init__.py
     "F401", # Allow unused imports (re-exports)
+    "RUF067", # Non-empty __init__.py is intentional for re-exports
     # "E402",      # Allow imports not at top
 ]
 "**/generated/**.py" = [
@@ -440,6 +451,7 @@ section-order = [
     "TRY300",
     "TRY301",
     "TRY400",
+    "T100",    # Allow debugger calls in examples
 ]
 "src/app/shared/rag/rag_agent_advanced.py" = [
     "ANN201",
@@ -449,12 +461,81 @@ section-order = [
     "BLE001",
     "F821",
     "PLC0415",
+    "PLW0717", # Complex agent orchestration in single try
 ]
-"src/app/shared/rag/document_processing/todo_temp.py" = ["E", "F", "W"]
+"src/app/shared/rag/document_processing/ingest.py" = [
+    "PLC0415", # Late imports to break circular deps
+    "PLW0717", # Complex pipeline orchestration
+]
+"src/app/shared/rag/document_processing/ingest_v2.py" = [
+    "PLC0415", # Late imports to break circular deps
+    "PLW0717", # Complex pipeline orchestration
+]
+"src/app/shared/rag/document_processing/embedder.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/app/shared/rag/document_processing/docling_enhanced.py" = [
+    "PLC0415", # Late imports to break circular deps
+    "PLW0717", # Complex document processing
+]
+"src/app/shared/rag/document_processing/chunker.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/app/shared/rag/document_processing/entity_extractor.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/app/shared/otel/instrument.py" = [
+    "PLC0415", # Late imports conditional on instrumentation availability
+]
+"src/app/shared/otel/__init__.py" = [
+    "PLC0415", # Late imports conditional on instrumentation availability
+]
+"src/app/shared/langchain_layer/callback.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/app/shared/langchain_layer/chains.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/app/shared/langchain_layer/agents/middlewares/guardrails.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/app/shared/langchain_layer/agents/tools/crawl.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/app/lifecycle/lifespan.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/app/features/search/service.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/app/features/documents/service.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/app/middleware/server_middleware.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/app/connections/crawl4ai.py" = [
+    "PLC0415", # Late imports to break circular deps
+]
+"src/mcp_core/testing.py" = [
+    "PLC0415", # Late imports to avoid startup overhead
+]
+"src/app/shared/langchain_layer/agents/tools/shell.py" = [
+    "ASYNC240", # Blocking path methods in async — uses os.path intentionally
+    "PLC0415",  # Local import re to avoid name collision
+    "PLW0717",  # Complex shell orchestration
+]
+"src/app/shared/langgraph_layer/reconciliation/nodes.py" = [
+    "PLW0717", # Graph node orchestration
+]
 "**/_*.py" = ["ANN201"] # Private modules
 "src/app/features/auth/router.py" = ["S105"]
 "src/app/features/auth/security.py" = ["S105", "S106"]
-"src/app/features/auth/service.py" = ["S105", "S106"]
+"src/app/features/auth/service.py" = [
+    "PLC0415", # Late imports to break circular deps
+    "S105",
+    "S106",
+]
 "src/app/features/crawler/dependencies.py" = ["PLC0415"]
 "src/mcp_core/server/*.py" = ["PLC0415"]
 
@@ -537,6 +618,65 @@ ambiguous-protocol-member = "warn" # If you use Protocol
 override-of-final-method = "warn"  # If you use @final methods
 invalid-explicit-override = "warn" # @override without parent method (PEP 698)
 
+# --- NEW: High-impact rules (error level) ---
+missing-override-decorator = "error"      # Require @override on all overrides (catches silent breakage)
+missing-type-argument = "error"           # Require explicit type args on generics (list[str] not list)
+shadowed-type-variable = "error"          # Prevent PEP 695 type var shadowing in nested generics
+invalid-match-pattern = "error"           # Validate match/case patterns at compile time (heavy Result usage)
+isinstance-against-protocol = "error"     # Prevent isinstance(x, Protocol) runtime TypeError
+isinstance-against-typed-dict = "error"   # Prevent isinstance(x, TypedDict) runtime TypeError
+unbound-type-variable = "error"           # Catch type vars used outside generic scope
+parameter-already-assigned = "error"      # Catch duplicate keyword args (func(x=1, x=2))
+positional-only-parameter-as-kwarg = "error"  # Catch kwarg on positional-only (def f(x, /): f(x=1))
+
+# --- NEW: Medium-impact rules (warn level) ---
+mismatched-type-name = "warn"             # TypeVar("U") assigned to T, TypedDict("Film") to Movie
+experimental-syntax = "warn"              # Flag A & B, ~A intersections/negations (non-standard)
+subclass-of-dataclass-with-order = "warn" # Guard LSP violation with @dataclass(order=True)
+useless-overload-body = "warn"            # @overload bodies are dead code
+undefined-reveal = "warn"                 # reveal_type() without import
+
+# --- NEW: Guardrail rules (error level, near-zero false positives) ---
+cyclic-type-alias-definition = "error"
+cyclic-class-definition = "error"
+invalid-type-variable-bound = "error"
+invalid-type-variable-constraints = "error"
+invalid-type-variable-default = "error"
+invalid-type-alias-type = "error"
+invalid-type-arguments = "error"
+invalid-newtype = "error"
+invalid-legacy-positional-parameter = "warn"
+invalid-legacy-type-variable = "error"
+invalid-metaclass = "error"
+invalid-named-tuple = "error"
+invalid-type-checking-constant = "error"
+invalid-type-guard-call = "error"
+invalid-type-guard-definition = "error"
+non-callable-init-subclass = "error"
+override-of-final-variable = "error"
+unavailable-implicit-super-arguments = "error"
+unsupported-base = "warn"
+unsupported-bool-conversion = "error"
+static-assert-error = "error"
+
+# --- Additional guardrails (error level) ---
+call-abstract-method = "error"
+invalid-overload = "error"
+invalid-yield = "error"
+invalid-typed-dict-field = "error"
+invalid-typed-dict-header = "error"
+invalid-typed-dict-statement = "error"
+abstract-method-in-final-class = "error"
+invalid-super-argument = "error"
+invalid-paramspec = "error"
+invalid-generic-class = "error"
+invalid-generic-enum = "error"
+invalid-frozen-dataclass-subclass = "error"
+duplicate-kw-only = "error"
+
+# --- Quality of life (warn level) ---
+ineffective-final = "warn"           # Catch final(type(...)) misuse
+
 [tool.ty.terminal]
 output-format = "full"
 
@@ -566,7 +706,7 @@ exclude = [
     "node_modules",
     "src/alembic",
     "src/app/examples",
-    "src/app/shared/rag",
+    "src/app/shared/rag",  # ponytail: vendored LangChain internals, not our code
     "venv",
     "*.egg-info",
 ]

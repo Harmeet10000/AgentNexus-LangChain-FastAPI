@@ -327,8 +327,8 @@ def _normalize_plan(plan: QueryPlan) -> QueryPlan:
         vector_weight = 0.4
         keyword_weight = 0.6
     else:
-        vector_weight = vector_weight / total
-        keyword_weight = keyword_weight / total
+        vector_weight /= total
+        keyword_weight /= total
     if plan.query_type == "exact":
         vector_weight = 0.25
         keyword_weight = 0.75

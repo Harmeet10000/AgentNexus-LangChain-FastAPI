@@ -6,7 +6,6 @@ from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
 import opentelemetry.trace as otel_trace
-from loguru import Logger
 from loguru import logger as loguru_logger
 
 if TYPE_CHECKING:
@@ -101,7 +100,7 @@ def redact_sensitive_data(record) -> None:
 
 
 setup_logging()
-logger: Logger = loguru_logger.patch(patcher=redact_sensitive_data)
+logger = loguru_logger.patch(patcher=redact_sensitive_data)
 
 
 # 3. The Trace Decorator (With Timing & State Isolation)
@@ -112,7 +111,7 @@ def trace_layer(layer_name: str) -> Any:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs) -> Any:
             start_time = time.perf_counter()
-            _tracer = otel_trace.get_tracer(__name__)
+            tracer = otel_trace.get_tracer(__name__)
 
             # 1. Update Breadcrumbs (Copy to avoid mutating parent state)
             current_flow = execution_path.get().copy()
@@ -125,7 +124,7 @@ def trace_layer(layer_name: str) -> Any:
             span_name = f"layer.{layer_name}"
             attrs = {"layer.name": layer_name, "function.name": func.__name__}
             with (
-                _tracer.start_as_current_span(span_name, attributes=attrs) as span,
+                tracer.start_as_current_span(span_name, attributes=attrs) as span,
                 logger.contextualize(layer=layer_name, flow=flow_str),
             ):
                 try:

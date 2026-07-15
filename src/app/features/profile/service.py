@@ -88,7 +88,7 @@ class ProfileService:
         if old_avatar:
             # Extract key from old URL and delete asynchronously
             old_key = old_avatar.removeprefix(self._storage.public_url + "/")
-            await self._storage.delete_object(old_key)
+            await self._storage.delete_object(key=old_key)
 
         logger.bind(user_id=str(user.id)).info("Avatar uploaded")
         return AvatarResponse(avatar_url=public_url)

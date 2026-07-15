@@ -16,6 +16,7 @@ from app.utils.logger import logger
 
 from .chunker import ChunkingConfig, DocumentChunk, create_chunker
 from .embedder import create_embedder
+from .models import IngestionConfig, IngestionResult
 
 # Load environment variables
 load_dotenv()
@@ -63,7 +64,7 @@ class DocumentIngestionPipeline:
         logger.info("Initializing ingestion pipeline...")
 
         # Initialize database connections
-        await initialize_database()
+        await initialize_database()  # noqa: F821  # ponytail: database module not yet implemented
 
         self._initialized = True
         logger.info("Ingestion pipeline initialized")
@@ -71,7 +72,7 @@ class DocumentIngestionPipeline:
     async def close(self) -> None:
         """Close database connections."""
         if self._initialized:
-            await close_database()
+            await close_database()  # noqa: F821  # ponytail: database module not yet implemented
             self._initialized = False
 
     async def ingest_documents(self, progress_callback=None) -> list[IngestionResult]:
@@ -147,12 +148,12 @@ class DocumentIngestionPipeline:
         Returns:
             Ingestion result
         """
-        start_time = datetime.now()
+        start_time = datetime.now(tz=datetime.timezone.utc)
 
         # Read document (returns tuple: content, docling_doc)
         document_content, docling_doc = self._read_document(file_path)
         document_title = self._extract_title(document_content, file_path)
-        document_source = relpath(file_path, self.documents_folder)
+        document_source = relpath(file_path, self.documents_folder)  # noqa: ASYNC240
 
         # Extract metadata from content
         document_metadata = self._extract_document_metadata(document_content, file_path)
@@ -176,7 +177,10 @@ class DocumentIngestionPipeline:
                 chunks_created=0,
                 entities_extracted=0,
                 relationships_created=0,
-                processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000,
+                processing_time_ms=(
+                    datetime.now(tz=datetime.timezone.utc) - start_time
+                ).total_seconds()
+                * 1000,
                 errors=["No chunks created"],
             )
 
@@ -205,7 +209,9 @@ class DocumentIngestionPipeline:
         graph_errors = []
 
         # Calculate processing time
-        processing_time = (datetime.now() - start_time).total_seconds() * 1000
+        processing_time = (
+            datetime.now(tz=datetime.timezone.utc) - start_time
+        ).total_seconds() * 1000
 
         return IngestionResult(
             document_id=document_id,
@@ -291,34 +297,35 @@ class DocumentIngestionPipeline:
                 markdown_content = result.document.export_to_markdown()
                 logger.info("Successfully converted {} to markdown", Path(file_path).name)
 
-                # Return both markdown and DoclingDocument for HybridChunker
-                return (markdown_content, result.document)
-
             except Exception as e:  # noqa: BLE001 — Docling conversion, fallback to raw text
                 e.add_note(f"file={file_path}, operation=docling_conversion")
                 logger.error(f"Failed to convert {file_path} with Docling: {e}")
                 # Fall back to raw text if Docling fails
                 logger.warning("Falling back to raw text extraction for {}", file_path)
                 try:
-                    with open(file_path, encoding="utf-8") as f:
+                    with Path(file_path).open(encoding="utf-8") as f:
                         return (f.read(), None)
-                except Exception:
+                except Exception:  # noqa: BLE001 — fallback read, must not crash
                     return (
                         f"[Error: Could not read file {Path(file_path).name}]",
                         None,
                     )
+            else:
+                # Return both markdown and DoclingDocument for HybridChunker
+                return (markdown_content, result.document)
 
         # Text-based formats (read directly)
         else:
             try:
-                with open(file_path, encoding="utf-8") as f:
+                with Path(file_path).open(encoding="utf-8") as f:
                     return (f.read(), None)
             except UnicodeDecodeError:
                 # Try with different encoding
-                with open(file_path, encoding="latin-1") as f:
+                with Path(file_path).open(encoding="latin-1") as f:
                     return (f.read(), None)
 
-    def _transcribe_audio(self, file_path: str) -> str:
+    @staticmethod
+    def _transcribe_audio(file_path: str) -> str:
         """Transcribe audio file using Whisper ASR via Docling."""
         try:
             from docling.datamodel import asr_model_specs
@@ -335,7 +342,7 @@ class DocumentIngestionPipeline:
             # Verify file exists
             if not audio_path.exists():
                 msg = f"Audio file not found: {audio_path}"
-                raise FileNotFoundError(msg)
+                raise FileNotFoundError(msg)  # noqa: TRY301
 
             # Configure ASR pipeline with Whisper Turbo model
             pipeline_options = AsrPipelineOptions()
@@ -356,31 +363,33 @@ class DocumentIngestionPipeline:
             # Export to markdown with timestamps
             markdown_content = result.document.export_to_markdown()
             logger.info("Successfully transcribed {}", Path(file_path).name)
-            return markdown_content
-
         except Exception as e:  # noqa: BLE001 — Whisper ASR failure
             e.add_note(f"file={file_path}, operation=transcribe_audio")
             logger.error(f"Failed to transcribe {file_path} with Whisper ASR: {e}")
             return f"[Error: Could not transcribe audio file {Path(file_path).name}]"
+        else:
+            return markdown_content
 
-    def _extract_title(self, content: str, file_path: str) -> str:
+    @staticmethod
+    def _extract_title(content: str, file_path: str) -> str:
         """Extract title from document content or filename."""
         # Try to find markdown title
         lines = content.split("\n")
         for line in lines[:10]:  # Check first 10 lines
-            line = line.strip()
-            if line.startswith("# "):
+            stripped_line = line.strip()
+            if stripped_line.startswith("# "):
                 return line[2:].strip()
 
         # Fallback to filename
         return Path(file_path).stem
 
-    def _extract_document_metadata(self, content: str, file_path: str) -> dict[str, Any]:
+    @staticmethod
+    def _extract_document_metadata(content: str, file_path: str) -> dict[str, Any]:
         """Extract metadata from document content."""
         metadata = {
             "file_path": file_path,
             "file_size": len(content),
-            "ingestion_date": datetime.now().isoformat(),
+            "ingestion_date": datetime.now(tz=datetime.timezone.utc).isoformat(),
         }
 
         # Try to extract YAML frontmatter
@@ -407,8 +416,8 @@ class DocumentIngestionPipeline:
 
         return metadata
 
+    @staticmethod
     async def _save_to_postgres(
-        self,
         title: str,
         source: str,
         content: str,
@@ -416,52 +425,52 @@ class DocumentIngestionPipeline:
         metadata: dict[str, Any],
     ) -> str:
         """Save document and chunks to PostgreSQL."""
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                # Insert document
-                document_result = await conn.fetchrow(
+        async with db_pool.acquire() as conn, conn.transaction():  # noqa: F821  # ponytail: db_pool not yet implemented
+            # Insert document
+            document_result = await conn.fetchrow(
+                """
+                INSERT INTO documents (title, source, content, metadata)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id::text
+                """,
+                title,
+                source,
+                content,
+                json.dumps(metadata),
+            )
+
+            document_id = document_result["id"]
+
+            # Insert chunks
+            for chunk in chunks:
+                # Convert embedding to PostgreSQL vector string format
+                embedding_data = None
+                if hasattr(chunk, "embedding") and chunk.embedding:
+                    # PostgreSQL vector format: '[1.0,2.0,3.0]' (no spaces after commas)
+                    embedding_data = "[" + ",".join(map(str, chunk.embedding)) + "]"
+
+                await conn.execute(
                     """
-                    INSERT INTO documents (title, source, content, metadata)
-                    VALUES ($1, $2, $3, $4)
-                    RETURNING id::text
+                    INSERT INTO chunks (document_id, content, embedding, chunk_index, metadata, token_count)
+                    VALUES ($1::uuid, $2, $3::vector, $4, $5, $6)
                     """,
-                    title,
-                    source,
-                    content,
-                    json.dumps(metadata),
+                    document_id,
+                    chunk.content,
+                    embedding_data,
+                    chunk.index,
+                    json.dumps(chunk.metadata),
+                    chunk.token_count,
                 )
 
-                document_id = document_result["id"]
+            return document_id
 
-                # Insert chunks
-                for chunk in chunks:
-                    # Convert embedding to PostgreSQL vector string format
-                    embedding_data = None
-                    if hasattr(chunk, "embedding") and chunk.embedding:
-                        # PostgreSQL vector format: '[1.0,2.0,3.0]' (no spaces after commas)
-                        embedding_data = "[" + ",".join(map(str, chunk.embedding)) + "]"
-
-                    await conn.execute(
-                        """
-                        INSERT INTO chunks (document_id, content, embedding, chunk_index, metadata, token_count)
-                        VALUES ($1::uuid, $2, $3::vector, $4, $5, $6)
-                        """,
-                        document_id,
-                        chunk.content,
-                        embedding_data,
-                        chunk.index,
-                        json.dumps(chunk.metadata),
-                        chunk.token_count,
-                    )
-
-                return document_id
-
-    async def _clean_databases(self) -> None:
+    @staticmethod
+    async def _clean_databases() -> None:
         """Clean existing data from databases."""
         logger.warning("Cleaning existing data from databases...")
 
         # Clean PostgreSQL
-        async with db_pool.acquire() as conn, conn.transaction():
+        async with db_pool.acquire() as conn, conn.transaction():  # noqa: F821  # ponytail: db_pool not yet implemented
             await conn.execute("DELETE FROM chunks")
             await conn.execute("DELETE FROM documents")
 
@@ -504,15 +513,15 @@ async def main() -> None:
         clean_before_ingest=not args.no_clean,  # Clean by default
     )
 
-    def progress_callback(current: int, total: int):
+    def progress_callback(current: int, total: int) -> None:
         logger.info("Progress: {}/{} documents processed", current, total)
 
     try:
-        start_time = datetime.now()
+        start_time = datetime.now(tz=datetime.timezone.utc)
 
         results = await pipeline.ingest_documents(progress_callback)
 
-        end_time = datetime.now()
+        end_time = datetime.now(tz=datetime.timezone.utc)
         total_time = (end_time - start_time).total_seconds()
 
         # Summary

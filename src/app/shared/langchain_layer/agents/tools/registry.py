@@ -28,11 +28,13 @@ class ToolRegistry:
                 return tool
         return None
 
-    def get_search_tool(self) -> WebSearchTool:
+    @staticmethod
+    def get_search_tool() -> WebSearchTool:
         """Get the web search tool."""
         return get_web_search_tool()
 
-    def get_crawl_tool(self) -> CrawlUrlTool:
+    @staticmethod
+    def get_crawl_tool() -> CrawlUrlTool:
         """Get the crawl URL tool."""
         return get_crawl_url_tool()
 
@@ -42,7 +44,7 @@ _tool_registry: ToolRegistry | None = None
 
 def get_tool_registry() -> ToolRegistry:
     """Get the tool registry instance."""
-    global _tool_registry
+    global _tool_registry  # noqa: PLW0603
     if _tool_registry is None:
         _tool_registry = ToolRegistry()
     return _tool_registry

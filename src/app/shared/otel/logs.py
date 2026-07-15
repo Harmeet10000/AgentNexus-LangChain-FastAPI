@@ -1,10 +1,10 @@
 from opentelemetry import trace as otel_trace
-from opentelemetry._logs import SeverityNumber
-from opentelemetry._logs import set_logger_provider as set_global_logger_provider
-from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
-from opentelemetry.sdk._logs import LoggerProvider as SDKLoggerProvider
-from opentelemetry.sdk._logs import LogRecord as OTelLogRecord  # type: ignore
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry._logs import LogRecord as OTelLogRecord  # noqa: PLC2701
+from opentelemetry._logs import SeverityNumber  # noqa: PLC2701
+from opentelemetry._logs import set_logger_provider as set_global_logger_provider  # noqa: PLC2701
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter  # noqa: PLC2701
+from opentelemetry.sdk._logs import LoggerProvider as SDKLoggerProvider  # noqa: PLC2701
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor  # noqa: PLC2701
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.trace import TraceFlags
 
@@ -35,6 +35,8 @@ def _setup_logger_provider(resource: Resource) -> SDKLoggerProvider | None:
 
 
 def _patch_loguru_sink(logger_provider: SDKLoggerProvider) -> None:
+    otel_logger = logger_provider.get_logger("loguru")
+
     def otel_sink(message) -> None:
         record = message.record
         span = otel_trace.get_current_span()
@@ -51,14 +53,13 @@ def _patch_loguru_sink(logger_provider: SDKLoggerProvider) -> None:
             timestamp=int(record["time"].timestamp() * 1_000_000_000),
             trace_id=trace_id,
             span_id=span_id,
-            trace_flags=trace_flags,
+            trace_flags=trace_flags,  # type: ignore
             severity_number=_SEVERITY_MAP.get(record["level"].name.upper(), SeverityNumber.INFO),
             severity_text=record["level"].name,
             body=record["message"],
-            resource=logger_provider.resource,
             attributes=dict(record.get("extra", {})),
         )
-        logger_provider.emit(otel_record)  # type: ignore
+        otel_logger.emit(otel_record)
 
     sink_id = getattr(_patch_loguru_sink, "_sink_id", None)
     if sink_id is not None:
@@ -69,4 +70,4 @@ def _patch_loguru_sink(logger_provider: SDKLoggerProvider) -> None:
         level=0,
         format="{message}",
     )
-    setattr(_patch_loguru_sink, "_sink_id", new_sink_id)
+    _patch_loguru_sink._sink_id = new_sink_id  # type: ignore

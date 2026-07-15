@@ -20,9 +20,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import all models here for autogenerate support
-import app.features.documents.model
-import app.features.search.model
-import app.shared.outbox.model  # noqa: F401 — registers model with Base.metadata for Alembic autogenerate
+import app.shared.outbox.model  # noqa: F401, E402 — registers model with Base.metadata for Alembic autogenerate
 
 try:
     target_metadata = Base.metadata
@@ -73,23 +71,21 @@ def do_run_migrations(connection: Connection) -> None:
         context.run_migrations()
 
 
+async def _run_migrations() -> None:
+    logger.info("Starting database migrations")
+    engine, _ = await init_db()
+    logger.info("Database engine initialized for migrations")
+    async with engine.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+        logger.info("Database migrations completed successfully")
+    await engine.dispose()
+    logger.info("Database engine disposed")
+
+
 async def run_async_migrations() -> None:
     """Run migrations in async mode using init_db() to get the engine."""
     try:
-        logger.info("Starting database migrations")
-
-        # Use init_db() to get the configured engine
-        engine, _ = await init_db()
-
-        logger.info("Database engine initialized for migrations")
-
-        async with engine.connect() as connection:
-            await connection.run_sync(do_run_migrations)
-            logger.info("Database migrations completed successfully")
-
-        await engine.dispose()
-        logger.info("Database engine disposed")
-
+        await _run_migrations()
     except Exception as e:
         logger.error(f"Migration failed: {e}", exc_info=True)
         raise

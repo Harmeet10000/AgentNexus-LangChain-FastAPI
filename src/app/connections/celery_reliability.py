@@ -20,7 +20,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
-type JsonValue = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
 type RedisOperationResult = object | Awaitable[object]
 
 
@@ -31,7 +31,7 @@ class RedisClientProtocol(Protocol):
 
 
 type IdempotencyStatus = Literal["processing", "completed", "failed_permanent"]
-type JsonMetadata = dict[str, "JsonValue"]
+type JsonMetadata = dict[str, JsonValue]
 
 PROCESSING_STATUS: IdempotencyStatus = "processing"
 COMPLETED_STATUS: IdempotencyStatus = "completed"

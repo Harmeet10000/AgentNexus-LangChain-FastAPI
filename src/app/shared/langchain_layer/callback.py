@@ -6,7 +6,7 @@ Must be imported before any LangChain/LangGraph objects are created.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 from uuid import UUID  # noqa: TC003 — UUID used at runtime in callback metadata
 
 from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
@@ -35,15 +35,18 @@ class LatencyCallbackHandler(BaseCallbackHandler):
     def __init__(self) -> None:
         self._start: dict[UUID, float] = {}
 
+    @override
     def on_llm_start(self, *args: Any, run_id: UUID, **kwargs: Any) -> None:
         self._start[run_id] = time.perf_counter()
 
+    @override
     def on_llm_end(self, *args: Any, run_id: UUID, **kwargs: Any) -> None:
         elapsed = time.perf_counter() - self._start.pop(run_id, time.perf_counter())
         import logging
 
         logging.getLogger(__name__).info("llm_latency_ms=%.1f", elapsed * 1000)
 
+    @override
     def on_llm_error(self, *args: Any, run_id: UUID, **kwargs: Any) -> None:
         self._start.pop(run_id, None)
 
@@ -59,6 +62,7 @@ class TokenUsageCallbackHandler(BaseCallbackHandler):
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
+    @override
     def on_llm_end(self, response: Any, **kwargs: Any) -> None:
         for gen in response.generations:
             for g in gen:
@@ -85,12 +89,15 @@ class AsyncStreamingCallbackHandler(AsyncCallbackHandler):
 
         self._queue: asyncio.Queue[str | None] = asyncio.Queue()
 
+    @override
     async def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
         await self._queue.put(token)
 
+    @override
     async def on_llm_end(self, *args: Any, **kwargs: Any) -> None:
         await self._queue.put(None)  # sentinel
 
+    @override
     async def on_llm_error(self, *args: Any, **kwargs: Any) -> None:
         await self._queue.put(None)
 

@@ -127,7 +127,7 @@ def create_app() -> FastAPI:
             if isinstance(r, Exception):
                 deps.append(DependencyHealth.fail("unknown", str(r)))
             else:
-                deps.append(r)
+                deps.append(r)  # type: ignore
 
         failed = sum(1 for d in deps if d.status == HealthStatus.UNHEALTHY)
         if failed >= 3:

@@ -5,8 +5,6 @@ from .service import ProfileService
 __all__ = [
     "AvatarResponse",
     "ChangePasswordRequest",
-    "ProfileCreateRequest",
-    "ProfileResponse",
     "UpdateProfileRequest",
     "router",
 ]

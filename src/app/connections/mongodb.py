@@ -1,17 +1,19 @@
 """MongoDB connection and database management."""
 
+from typing import Any
+
 from beanie import init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from starlette.requests import HTTPConnection
 
 
 async def create_mongo_client(
-    uri: str, db_name: str, document_models: list
-) -> tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
+    uri: str, db_name: str, document_models: list[type]
+) -> tuple[AsyncIOMotorClient[Any], AsyncIOMotorDatabase[Any]]:
     """
     Initialize database connection using Beanie's recommended approach.
     """
-    client = AsyncIOMotorClient(
+    client = AsyncIOMotorClient[Any](
         host=uri,  # Connection pool
         maxPoolSize=10,
         minPoolSize=2,
@@ -30,15 +32,15 @@ async def create_mongo_client(
         retryWrites=True,
         tz_aware=True,
     )
-    database = client[db_name]
+    database: AsyncIOMotorDatabase[Any] = client[db_name]
 
     await init_beanie(
         database=database,  # type: ignore
-        document_models=document_models,
+        document_models=document_models,  # type: ignore
     )
 
     return client, database
 
 
-async def get_mongodb(connection: HTTPConnection) -> AsyncIOMotorDatabase:
+async def get_mongodb(connection: HTTPConnection) -> AsyncIOMotorDatabase[Any]:
     return connection.app.state.db

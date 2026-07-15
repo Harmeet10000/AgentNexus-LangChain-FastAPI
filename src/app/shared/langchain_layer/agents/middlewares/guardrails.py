@@ -1,24 +1,25 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+import logging
+from typing import TYPE_CHECKING, override
 
-from langchain.agents.middleware import (
+logger = logging.getLogger(__name__)
+
+from langchain.agents.middleware import (  # noqa: E402
     HumanInTheLoopMiddleware,
-    # LLMToolEmulatorMiddleware,
     LLMToolSelectorMiddleware,
     SummarizationMiddleware,
     ToolRetryMiddleware,
     after_model,
     before_model,
     wrap_model_call,
-    # wrap_tool_call,
 )
-from langchain_core.exceptions import LangChainException
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from pydantic import BaseModel, ConfigDict, Field
+from langchain_core.exceptions import LangChainException  # noqa: E402
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage  # noqa: E402
+from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
-from app.shared.langchain_layer.chains import build_guardrail_chain
+from app.shared.langchain_layer.chains import build_guardrail_chain  # noqa: E402
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -43,12 +44,13 @@ class ModelRetryMiddleware(BaseModel):
     base_delay: float = 1.0
     retryable_exceptions: tuple[type[Exception], ...] = (Exception,)
 
+    @override
     def model_post_init(self, __context: object) -> None:
-        @wrap_model_call
+        @wrap_model_call  # type: ignore
         async def _retry_wrapper(request: object, handler: object) -> Any:
             for attempt in range(self.max_retries + 1):
                 try:
-                    return await handler(request)  # type: ignore[misc]
+                    return await handler(request)  # type: ignore
                 except self.retryable_exceptions as exc:
                     if attempt == self.max_retries:
                         raise
@@ -61,6 +63,7 @@ class ModelRetryMiddleware(BaseModel):
                         exc,
                     )
                     await asyncio.sleep(delay)
+            return None
 
         self._middleware = _retry_wrapper
 
@@ -69,7 +72,7 @@ class ModelRetryMiddleware(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Todo list middleware
+# TODO: list middleware  # noqa: FIX002
 # ---------------------------------------------------------------------------
 
 
@@ -87,9 +90,9 @@ class TodoListMiddleware(BaseModel):
 
     todo_header: str = "## Current To-Do List"
 
-    def build(self):
-        @before_model
-        def inject_todos(state, request):
+    def build(self) -> list[Any]:
+        @before_model  # type: ignore
+        def inject_todos(state, request) -> Any:
             todos = state.get("todo_list", [])
             if not todos:
                 return request
@@ -108,8 +111,8 @@ class TodoListMiddleware(BaseModel):
 
             return request.override(messages=msgs)
 
-        @after_model
-        def parse_todo_commands(state, response):
+        @after_model  # type: ignore
+        def parse_todo_commands(state, response) -> Any:
             ai_msg = response.message
             if not isinstance(ai_msg.content, str):
                 return response
@@ -118,14 +121,14 @@ class TodoListMiddleware(BaseModel):
             content = ai_msg.content
 
             for line in content.splitlines():
-                line = line.strip()
-                if line.startswith("[TODO:ADD]"):
-                    item = line[len("[TODO:ADD]") :].strip()
+                stripped = line.strip()
+                if stripped.startswith("[TODO:ADD]"):
+                    item = stripped[len("[TODO:ADD]") :].strip()
                     if item and item not in todos:
                         todos.append(item)
-                elif line.startswith("[TODO:DONE]") or line.startswith("[TODO:REMOVE]"):
-                    prefix = "[TODO:DONE]" if "[TODO:DONE]" in line else "[TODO:REMOVE]"
-                    item = line[len(prefix) :].strip()
+                elif stripped.startswith(("[TODO:DONE]", "[TODO:REMOVE]")):
+                    prefix = "[TODO:DONE]" if "[TODO:DONE]" in stripped else "[TODO:REMOVE]"
+                    item = stripped[len(prefix) :].strip()
                     todos = [t for t in todos if t != item]
 
             return response.override(state_update={"todo_list": todos})
@@ -147,15 +150,15 @@ class ContextEditingMiddleware(BaseModel):
     redact_patterns: list[str] = Field(default_factory=list)  # regex patterns
     inject_context_fn: Callable[[Any], dict[str, str]] | None = None
 
-    def build(self):
+    def build(self) -> Any:
         import re
 
         patterns = [re.compile(p) for p in self.redact_patterns]
         inject_fn = self.inject_context_fn
 
-        @wrap_model_call
+        @wrap_model_call  # type: ignore
         async def edit_context(request: object, handler: object) -> Any:
-            msgs = list(request.messages)  # type: ignore[union-attr]
+            msgs = list(request.messages)  # type: ignore
 
             # Redact PII
             if patterns:
@@ -184,7 +187,7 @@ class ContextEditingMiddleware(BaseModel):
                         new_msgs.append(msg)
                 msgs = new_msgs
 
-            return await handler(request.override(messages=msgs))
+            return await handler(request.override(messages=msgs))  # type: ignore
 
         return edit_context
 
@@ -203,15 +206,15 @@ class GuardrailMiddleware(BaseModel):
     fallback_message: str = "I'm unable to provide that response due to safety guidelines."
     raise_on_violation: bool = False
 
-    def build(self):
+    def build(self) -> Any:
 
         guardrail_chain = build_guardrail_chain()
         fallback = self.fallback_message
         raise_on = self.raise_on_violation
 
-        @after_model
+        @after_model  # type: ignore
         async def check_safety(state: object, response: object) -> Any:
-            ai_msg = response.message  # type: ignore[union-attr]
+            ai_msg = response.message  # type: ignore
             if not isinstance(ai_msg.content, str):
                 return response
 
@@ -228,7 +231,7 @@ class GuardrailMiddleware(BaseModel):
                 )
             except LangChainException as exc:
                 exc.add_note("operation=guardrail_check")
-                logger.error("Guardrail check failed: %s", exc)
+                logger.exception("Guardrail check failed: %s")
                 return response
 
             if not result.get("safe", True):
@@ -269,11 +272,11 @@ class DynamicSystemPromptMiddleware(BaseModel):
 
     prompt_fn: Callable[[Any, Any], str]  # (state, context) -> system_prompt
 
-    def build(self):
+    def build(self) -> Any:
         fn = self.prompt_fn
 
-        @before_model
-        def inject_dynamic_prompt(state, request):
+        @before_model  # type: ignore
+        def inject_dynamic_prompt(state, request) -> Any:
             ctx = request.runtime.context if request.runtime else None
             new_system = fn(state, ctx)
             msgs = list(request.messages)
@@ -336,15 +339,17 @@ def build_default_middleware_stack(
     if enable_tool_selector:
         stack.append(LLMToolSelectorMiddleware(model=fast_model_name))
 
-    # 3. Tool retry
-    stack.append(ToolRetryMiddleware(max_retries=3, backoff_factor=1.5))
-
-    # 4. Model retry
-    stack.append(ModelRetryMiddleware(max_retries=2))
+    # 3. Tool retry / 4. Model retry
+    stack.extend(
+        [
+            ToolRetryMiddleware(max_retries=3, backoff_factor=1.5),
+            ModelRetryMiddleware(max_retries=2),
+        ]
+    )
 
     # 5. Human in the loop
     if enable_human_loop:
-        stack.append(HumanInTheLoopMiddleware(interrupt_on=human_loop_tools or {}))
+        stack.append(HumanInTheLoopMiddleware(interrupt_on=human_loop_tools or {}))  # type: ignore
 
     # 6. Guardrails (after_model — runs last in after-model chain)
     if enable_guardrails:

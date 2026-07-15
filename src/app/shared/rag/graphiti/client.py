@@ -243,7 +243,7 @@ async def write_clause_episode(
             reference_time=datetime.now(tz=UTC),
             group_id=metadata.doc_id,
         )
-        return str(result.uuid) if hasattr(result, "uuid") else episode_name  # type: ignore[return-value]
+        return str(result.uuid) if hasattr(result, "uuid") else episode_name  # type: ignore
     except Exception:
         logger.bind(service="graphiti").exception("Failed to write clause episode")
         raise
@@ -297,7 +297,7 @@ async def write_relationship_edge(
             reference_time=datetime.now(tz=UTC),
             group_id=edge.doc_id,
         )
-        return str(result.uuid) if hasattr(result, "uuid") else episode_name  # type: ignore[return-value]
+        return str(result.uuid) if hasattr(result, "uuid") else episode_name  # type: ignore
     except Exception:
         logger.bind(service="graphiti").exception("Failed to write relationship edge")
         raise
@@ -344,7 +344,7 @@ async def write_final_report_episode(
             reference_time=datetime.now(tz=UTC),
             group_id=metadata.user_id,
         )
-        return str(result.uuid) if hasattr(result, "uuid") else episode_name  # type: ignore[return-value]
+        return str(result.uuid) if hasattr(result, "uuid") else episode_name  # type: ignore
     except Exception:
         logger.bind(service="graphiti").exception("Failed to write final report episode")
         raise

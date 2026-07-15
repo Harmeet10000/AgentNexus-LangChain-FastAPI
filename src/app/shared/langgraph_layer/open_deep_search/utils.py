@@ -239,9 +239,13 @@ async def crawl_webpage(
         parts = [f"Crawl result for: {result.url}"]
         if title:
             parts.append(f"Title: {title}")
-        parts.append(f"Words: {word_count} | Time: {elapsed}ms")
-        parts.append("")
-        parts.append(markdown or "(no content extracted)")
+        parts.extend(
+            [
+                f"Words: {word_count} | Time: {elapsed}ms",
+                "",
+                markdown or "(no content extracted)",
+            ]
+        )
         return "\n".join(parts)
 
     return f"Error crawling {url}: {result.error_message or 'Unknown error'} ({elapsed}ms)"

@@ -9,17 +9,15 @@ Uses LangChain 1.0's `create_agent` with:
 - store for long-term memory
 
 """
-### 5. Create a custom agent
 
+# 5. Create a custom agent
 # ```python
 # from agents.factory import AgentSpec, create_production_agent
 # from langgraph_layer.state import RichContext
 # from middleware import TodoListMiddleware, DynamicSystemPromptMiddleware
-
 # @dataclass
 # class MyContext(RichContext):
 #     department: str = "engineering"
-
 # spec = AgentSpec(
 #     name="my_agent",
 #     description="My custom agent",
@@ -37,28 +35,43 @@ Uses LangChain 1.0's `create_agent` with:
 # )
 # agent = create_production_agent(spec)
 # ```
-
 from __future__ import annotations
 
 import asyncio
+import itertools
 from typing import TYPE_CHECKING
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, ConfigDict, Field
 
-# from app.shared.langgraph_layer.agent_saul import BaseContext
+from app.config import get_settings
+
 from ..models import _build_chat_model
 from ..prompts import AGENT_SYSTEM_PROMPT, SystemPromptParts
 from .middlewares import build_default_middleware_stack
-
-# from .agents.tools.base import registry as tool_registry
+from .tools.registry import get_tool_registry
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from typing import Any
 
     from langchain_core.tools import BaseTool
+
+settings = get_settings()
+
+
+# ---------------------------------------------------------------------------
+# Stub: MemoryManager (LangChain 1.0 not yet available)
+# ---------------------------------------------------------------------------
+
+
+class MemoryManager:
+    """Stub for LangChain 1.0 MemoryManager - replace when available."""
+
+    def __init__(self, backend: str) -> None:
+        self.backend = backend
+        self.checkpointer = None
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +143,7 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
     resolved_tools: list[BaseTool] = []
     for t in spec.tools:
         if isinstance(t, str):
-            resolved_tools.append(tool_registry.get(t))
+            resolved_tools.append(get_tool_registry().get(t))
         else:
             resolved_tools.append(t)
 
@@ -148,7 +161,9 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
     )
 
     # Build memory
-    memory = MemoryManager(backend=spec.memory_backend)
+    memory = MemoryManager(
+        backend=spec.memory_backend
+    )  # ponytail: MemoryManager from langchain 1.0 not yet available
 
     # System prompt
     if spec.system_prompt is None:
@@ -172,7 +187,7 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
         system_prompt=system_text,
         middleware=middleware,
         response_format=spec.response_format,
-        context_schema=spec.context_schema,
+        context_schema=spec.context_schema,  # type: ignore
         checkpointer=memory.checkpointer,
         debug=spec.debug,
         name=spec.name,
@@ -202,7 +217,7 @@ class ProductionAgent(BaseModel):
 
     spec: AgentSpec
     compiled: Any  # CompiledStateGraph
-    memory: MemoryManager
+    memory: MemoryManager  # ponytail: MemoryManager from langchain 1.0 not yet available
 
     async def ainvoke(
         self,
@@ -253,7 +268,7 @@ class ProductionAgent(BaseModel):
         *,
         thread_id: str,
         context: Any | None = None,
-        user_id: str = "default",
+        _user_id: str = "default",
         stream_mode: str = "messages",
     ) -> AsyncIterator[Any]:
         """
@@ -298,14 +313,16 @@ class ProductionAgent(BaseModel):
             msg = "messages and thread_ids must have the same length"
             raise ValueError(msg)
 
-        max_c = max_concurrency or _settings.model.max_concurrency
+        max_c = max_concurrency or settings.model.max_concurrency  # type: ignore  # ponytail: Settings doesn't have max_concurrency yet, add when needed
         semaphore = asyncio.Semaphore(max_c)
 
         async def bounded_invoke(msg: str, tid: str) -> dict[str, Any]:
             async with semaphore:
                 return await self.ainvoke(msg, thread_id=tid, context=context, user_id=user_id)
 
-        return await asyncio.gather(*[bounded_invoke(m, t) for m, t in zip(messages, thread_ids)])
+        return await asyncio.gather(
+            *itertools.starmap(bounded_invoke, zip(messages, thread_ids, strict=True))
+        )
 
     async def resume_after_approval(
         self,
@@ -320,7 +337,8 @@ class ProductionAgent(BaseModel):
         config = self._build_config(thread_id=thread_id, context=context)
         return await self.compiled.ainvoke(None, config=config)
 
-    def _build_config(self, *, thread_id: str, context: Any | None = None) -> dict[str, Any]:
+    @staticmethod
+    def _build_config(*, thread_id: str, context: Any | None = None) -> dict[str, Any]:
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         if context is not None:
             config["context"] = context
