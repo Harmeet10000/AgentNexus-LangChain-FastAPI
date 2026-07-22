@@ -35,16 +35,13 @@ from app.shared.services.storage import StorageService
 from app.utils import ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
-    from crawl4ai.async_webcrawler import AsyncWebCrawler
     from graphiti_core import Graphiti
-    from httpx._client import AsyncClient
-
-    from app.features.auth.websocket_security import WebSocketSecurityService
+    from redis.asyncio.client import Redis
 
 
 async def setup_redis(url: str) -> redis.asyncio.Redis:
     """Initialize Redis with health check."""
-    redis = create_redis_client(url)
+    redis: Redis = create_redis_client(url)
     await redis.ping()
     logger.info("Redis connected")
     return redis
@@ -116,7 +113,7 @@ async def _init_outbox_relay(app: FastAPI, celery_app: Celery | None) -> None:
         session_factory=app.state.db_session_local,
     )
     await relay.run_startup_scan()
-    app.state.outbox_relay_task = asyncio.create_task(relay.run_listener())  # type: ignore
+    app.state.outbox_relay_task = asyncio.create_task(coro=relay.run_listener())  # type: ignore
     app.state.outbox_relay = relay
     logger.info("Outbox relay started")
 
@@ -162,7 +159,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     # Optional deps: Neo4j, Graphiti — log warning, set None on failure
     try:
         app.state.neo4j_driver = neo_task.result()
-    except Exception as exc:  # noqa: BLE001 — Neo4j is optional, must not crash startup
+    except (ConnectionError, TimeoutError, OSError) as exc:
         exc.add_note("operation=setup_neo4j")
         logger.warning("Neo4j startup failed, continuing without graph features", error=str(exc))
         app.state.neo4j_driver = None  # type: ignore
@@ -187,10 +184,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
         await setup_graphiti_indices(graphiti)
         app.state.graphiti = graphiti
         logger.info("Graphiti initialized")
-    except Exception as exc:  # noqa: BLE001 — Graphiti is optional, must not crash startup
+    except (ConnectionError, TimeoutError, OSError) as exc:
         exc.add_note("operation=setup_graphiti")
         logger.warning("Graphiti startup failed, continuing without graph features", error=str(exc))
-        app.state.graphiti = None  # type: ignore
+        app.state.graphiti = None
 
     # Warn on Neo4j/Graphiti state inconsistency
     neo4j_ok = getattr(app.state, "neo4j_driver", None) is not None
@@ -228,14 +225,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     try:
         app.state.crawl4ai_crawler = await create_crawl4ai_crawler()
         logger.info("Crawl4AI browser initialized")
-    except Exception:  # noqa: BLE001 — Crawl4AI is optional, must not crash startup
+    except (ConnectionError, TimeoutError, OSError):
         logger.exception("Crawl4AI browser startup failed, continuing without crawl capability")
         app.state.crawl4ai_crawler = None
     settings = get_settings()
     # Initialize object storage (S3/R2) — optional, graceful degradation
     try:
         await _init_object_storage(app, settings)
-    except Exception:  # noqa: BLE001 — Object storage is optional, must not crash startup
+    except (ConnectionError, TimeoutError, OSError):
         logger.exception("Object storage startup failed, continuing without")
         app.state.object_store = None
 
@@ -253,7 +250,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     # Outbox relay (uses existing database session factory)
     try:
         await _init_outbox_relay(app, celery_app)
-    except Exception as exc:  # noqa: BLE001 — Celery is optional, must not crash startup
+    except (ConnectionError, TimeoutError, OSError) as exc:
         exc.add_note("operation=setup_outbox_relay")
         logger.warning("Outbox relay startup failed, continuing without outbox", error=str(exc))
         app.state.outbox_relay = None

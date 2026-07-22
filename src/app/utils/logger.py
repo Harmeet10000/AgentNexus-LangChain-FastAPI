@@ -11,13 +11,9 @@ from loguru import logger as loguru_logger
 if TYPE_CHECKING:
     from _contextvars import Token
 
-# Assuming you have these from your existing codebase
-# from app.config.settings import get_settings
-# from string_utils import generate  # Wherever your generate() comes from
-
 # 1. Context Variables
-request_state: ContextVar[dict[str, Any]] = ContextVar("request_state", default={})  # noqa: B039 — ContextVar default evaluated once at module load, safe
-execution_path: ContextVar[list[str]] = ContextVar("execution_path", default=[])  # noqa: B039 — ContextVar default evaluated once at module load, safe
+request_state: ContextVar[dict[str, Any]] = ContextVar(name="request_state")
+execution_path: ContextVar[list[str]] = ContextVar(name="execution_path")
 
 
 # 2. Console Formatter (Unchanged - Your logic here is perfect)

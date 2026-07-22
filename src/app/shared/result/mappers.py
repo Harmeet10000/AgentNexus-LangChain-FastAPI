@@ -3,10 +3,9 @@
 from app.utils import (
     APIException,
     ConflictException,
-    DatabaseException,
     ExternalServiceException,
+    InfrastructureException,
     NotFoundException,
-    ServiceUnavailableException,
     ValidationException,
 )
 
@@ -47,16 +46,12 @@ def app_error_to_exception(error: AppError) -> APIException:
                 detail=error.message,
                 error_code=error.code,
             )
-        case InfrastructureAppError(retryable=True):
-            return ServiceUnavailableException(
+        case InfrastructureAppError(retryable=retryable):
+            return InfrastructureException(
                 detail=error.message,
                 error_code=error.code,
+                retryable=retryable,
                 data=error.details,
-            )
-        case InfrastructureAppError():
-            return DatabaseException(
-                detail=error.message,
-                error_code=error.code,
             )
         case AppError():
             return ValidationException(
