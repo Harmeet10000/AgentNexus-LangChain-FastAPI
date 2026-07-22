@@ -104,11 +104,12 @@ Do NOT use `add_note` when:
 Repositories return `AppResult[T]` (`Result[T, AppError]` from `returns`). Service boundaries unwrap:
 
 ```python
-match await repo.find_by_email_result(email):
-    case Success(user):
-        return user
-    case Failure(error):
-        raise app_error_to_exception(error)
+result = await repo.find_by_email(email)
+if isinstance(result, Failure):
+    error = result.failure()
+    log_expected_failure(error, operation="find_by_email")
+    raise app_error_to_exception(error)
+user = result.unwrap()
 ```
 
 The mapper (`app_error_to_exception` in `shared/result/mappers.py`) converts `AppError` subtypes to `APIException` subclasses without losing error code or detail. See `RESULT-PATTERN.md` for the full dual-method pattern.

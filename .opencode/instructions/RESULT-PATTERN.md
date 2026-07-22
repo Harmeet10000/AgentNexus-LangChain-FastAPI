@@ -2,46 +2,55 @@
 
 ## Pattern Matching Taxonomy
 
-This codebase uses **5 distinct pattern matching approaches**. This document catalogs each, declares the project standard, and marks which patterns to retire.
+This codebase uses **3 pattern matching approaches**. This document catalogs each, declares the project standard, and marks which patterns are retired.
 
 ---
 
-### Pattern 1: `match`/`case` on `returns.Result` (Success/Failure) — **STANDARD**
+### Pattern 1: `isinstance` + `raise` — **STANDARD**
 
-**~50+ blocks across the service layer.** This is the dominant and canonical pattern.
+The single canonical pattern for unwrapping `AppResult[T]` in service-layer code.
 
 ```python
-match await self._user_repo.find_by_email(dto.email):
-    case Success(found) if found is not None and found.hashed_password is not None:
-        resolved = found
-    case Success():
-        verify_password(_DUMMY_HASH, dto.password)
-        raise UnauthorizedException("Invalid credentials")
-    case Failure(error):
-        log_expected_failure(error, operation="find_by_email")
-        raise app_error_to_exception(error)
+result = await self._user_repo.find_by_email(dto.email)
+if isinstance(result, Failure):
+    error = result.failure()
+    log_expected_failure(error, operation="find_by_email")
+    raise app_error_to_exception(error)
+resolved = result.unwrap()
+```
+
+**Guard conditions** (null check after unwrap):
+```python
+result = await self._user_repo.find_by_id(user_id)
+if isinstance(result, Failure):
+    error = result.failure()
+    log_expected_failure(error, operation="find_by_id")
+    raise app_error_to_exception(error)
+user = result.unwrap()
+if user is None:
+    raise NotFoundException("User not found")
+```
+
+**Return-value pattern** (when the success value is the return):
+```python
+result = await self._token_repo.get_user_sessions(user_id)
+if isinstance(result, Failure):
+    error = result.failure()
+    log_expected_failure(error, operation="get_user_sessions")
+    raise app_error_to_exception(error)
+sessions = result.unwrap()
+return [SessionResponse(...) for s in sessions]
 ```
 
 **Used in:**
-- `features/auth/service.py` — ~30 match/case blocks (register, login, logout, refresh, verify_email, forgot_password, reset_password, oauth_callback, list_sessions, revoke_session, etc.)
-- `features/documents/service.py` — ~10 blocks (upload_document, get_status, search, ingestion, verification)
-- `features/search/service.py` — ~10 blocks (ingest_document, get_ingest_status, hybrid_search, rag_search)
-- `features/users/service.py` — 2 blocks (_get_user_or_raise)
-- `shared/crawler/processor.py` — 2 blocks (schema resolution, extraction parsing)
+- `features/auth/service.py` — all Result unwrapping (register, login, logout, refresh, verify_email, forgot_password, reset_password, oauth_callback, list_sessions, revoke_session, etc.)
+- `features/documents/service.py` — upload_document, get_status, search, ingestion, verification
+- `features/search/service.py` — ingest_document, get_ingest_status, hybrid_search, rag_search
+- `features/users/service.py` — _get_user_or_raise
+- `features/auth/dependencies.py` — get_current_user
+- `features/ingestion/service.py` — ingestion failure mapping
 
-**Guard conditions** are used heavily to combine unwrap + validation:
-```python
-case Success(existing) if existing is not None:    # unwrap + null check
-case Success(session) if session is not None:       # unwrap + null check
-case Success(found) if found is not None and found.is_verified:  # unwrap + multi-check
-```
-
-**Wildcard fallback** for "anything else" (including `Success()` with unexpected shape):
-```python
-case _:   # catches Success() with None, unexpected values, anything not matched above
-```
-
-**When to use:** All service-layer code unwrapping repository/helper `AppResult[T]` values. This is the project standard.
+**When to use:** All service-layer and dependency code unwrapping repository/helper `AppResult[T]` values. This is the project standard.
 
 ---
 
@@ -73,10 +82,6 @@ match provider:
         raise ValidationException(f"Unsupported OAuth provider: {provider}")
 ```
 
-**Used in:**
-- `shared/langgraph_layer/agent_saul/nodes.py` — orchestrator routing
-- `features/auth/security.py` — OAuth provider config dispatch
-
 **When to use:** Dispatching on a closed set of enum members or string literals. Prefer over if/elif chains when the set is finite and the compiler can check exhaustiveness.
 
 ---
@@ -89,19 +94,33 @@ match provider:
 def app_error_to_exception(error: AppError) -> APIException:
     match error:
         case ValidationAppError():
-            return ValidationException(detail=error.message, error_code=error.code, data=error.details)
+            return ValidationException(
+                detail=error.message, error_code=error.code, data=error.details,
+            )
         case NotFoundAppError(resource=resource, identifier=identifier):
-            return NotFoundException(resource=resource, identifier=identifier, error_code=error.code)
+            return NotFoundException(
+                resource=resource, identifier=identifier, error_code=error.code,
+            )
         case ConflictAppError():
-            return ConflictException(detail=error.message, error_code=error.code, data=error.details)
+            return ConflictException(
+                detail=error.message, error_code=error.code, data=error.details,
+            )
         case ExternalServiceAppError(service=service):
-            return ExternalServiceException(service=service, detail=error.message, error_code=error.code)
+            return ExternalServiceException(
+                service=service, detail=error.message, error_code=error.code,
+            )
         case InfrastructureAppError(retryable=True):
-            return ServiceUnavailableException(detail=error.message, error_code=error.code, data=error.details)
+            return ServiceUnavailableException(
+                detail=error.message, error_code=error.code, data=error.details,
+            )
         case InfrastructureAppError():
-            return DatabaseException(detail=error.message, error_code=error.code)
+            return DatabaseException(
+                detail=error.message, error_code=error.code,
+            )
         case AppError():
-            return ValidationException(detail=error.message, error_code=error.code, data=error.details)
+            return ValidationException(
+                detail=error.message, error_code=error.code, data=error.details,
+            )
 ```
 
 **Key features:**
@@ -182,101 +201,16 @@ if isinstance(raw_groups, list)     # field: list[...] = ...
 
 ---
 
-### Pattern 6: `isinstance` + `model_validate` hybrid — **REPLACE**
-
-**1 occurrence** in `features/ingestion/service.py:76`.
-
-```python
-failure = result.get("failure")
-if failure is not None:
-    error = failure if isinstance(failure, AppError) else AppError.model_validate(failure)
-    log_expected_failure(error, operation="ingest_document")
-    raise app_error_to_exception(error)
-```
-
-**Problem:** LangGraph state stores dicts, not typed objects. The `isinstance` check is a workaround for not knowing whether the value is already an `AppError` or a raw dict. This should use match/case or explicit conversion at the state boundary.
-
-**Replace with:**
-```python
-failure = result.get("failure")
-if failure is not None:
-    match failure:
-        case AppError() as error:
-            pass
-        case dict() as raw:
-            error = AppError.model_validate(raw)
-        case _:
-            error = AppError(code="UNKNOWN", message=str(failure))
-    log_expected_failure(error, operation="ingest_document")
-    raise app_error_to_exception(error)
-```
-
----
-
-### Pattern 7: `flow()` / `bind()` / `map()` — **ALTERNATIVE (linear/sync only)**
-
-**0 blocks in this codebase.** These are available from `returns.pipeline` and `returns.result` but deliberately unused in current service code. Documented here for reference during refactors where the linear-sync conditions are met.
-
-```python
-from returns.pipeline import flow
-from returns.result import Success, Failure, Result
-
-# map — transform inner value, pass-through on Failure
-result: Result[int, str] = Success(42)
-doubled: Result[int, str] = result.map(lambda x: x * 2)
-# Success(84)
-
-# bind — chain another Result-returning function
-def validate(x: int) -> Result[str, str]:
-    return Success(str(x)) if x > 0 else Failure("negative")
-
-result: Result[str, str] = Success(42).bind(validate)
-# Success("42")
-
-# flow — compose a pipeline of functions
-def clean(raw: str) -> str: ...
-def parse(cleaned: str) -> Result[int, str]: ...
-def validate(n: int) -> Result[int, str]: ...
-
-result = flow(raw_input, clean, parse, validate)
-# Result[int, str]
-```
-
-**When to use (all must hold):**
-1. **Sync only** — `flow()`/`bind()`/`map()` don't compose with `async`. Use `FutureResult` only if you need async and accept the complexity cost.
-2. **No branching** — every step follows the same path. No guards, no early returns, no per-step error mapping.
-3. **Same error type** — all steps share `E` in `Result[T, E]`. Different error types require mapping at each boundary.
-4. **Pure sequential** — no gathered/fanned-out results to merge.
-
-**When NOT to use (use `match`/`case` instead):**
-- Any `case ... if ...` guard condition is needed
-- Error types differ between steps
-- You need fine-grained logging per step
-- Async call sites (all service and repository code in this project)
-
-```python
-# DON'T — has guard + different error mapping per step
-flow(
-    raw_input,
-    validate,     # guard needed here → match/case
-    enrich,       # different error → match/case
-)
-```
-
----
-
 ## Project Standard: Decision Matrix
 
 | Scenario | Pattern | Example |
 |---|---|---|
-| Unwrapping `AppResult[T]` with guards/branching | `match`/`case` Success/Failure | Pattern 1 |
-| Unwrapping `AppResult[T]` — linear, sync, no guards | `flow()` / `bind()` / `map()` | Pattern 7 |
+| Unwrapping `AppResult[T]` | `isinstance(result, Failure)` + `raise` | Pattern 1 |
 | Routing on enum or closed string set | `match`/`case` on literals | Pattern 2 |
 | Translating typed error hierarchy | `match`/`case` with structural binding | Pattern 3 |
 | Exception handler (external hierarchy) | `isinstance` if/elif chain | Pattern 4 |
 | Guarding data from Redis/LangChain/WS | `isinstance` type guard | Pattern 5a |
 | Checking already-typed Python data | **REMOVE** — trust the type system | Pattern 5b |
-| LangGraph state dict → typed object | `match`/`case` + `model_validate` | Pattern 6 (fixed) |
 
 ---
 
@@ -288,8 +222,8 @@ flow(
 - LangGraph node helpers returning typed `AppResult`, mapped to state-dicts at node boundary with `log_expected_failure()`.
 
 **Yes — ownership boundaries (unwrapping `Failure`):**
-- Service-layer: `match result: case Failure(error): raise app_error_to_exception(error)`.
-- LangGraph node entrypoints: `match result: case Failure(error): log_expected_failure(...); return {...error_state...}`.
+- Service-layer: `if isinstance(result, Failure): raise app_error_to_exception(result.failure())`.
+- LangGraph node entrypoints: `if isinstance(result, Failure): log_expected_failure(...); return {...error_state...}`.
 
 ## When NOT to Use `returns.Result`
 
@@ -335,13 +269,11 @@ async def find_by_email(self, email: str) -> User | None:
 - Map internal `Failure(...)` to project exceptions before leaving the service layer.
 - Match specific typed errors before generic ones; keep one final `Failure(error)` fallback at boundary.
 - Do not pattern-match to swallow unexpected exceptions — unexpected failures should still raise.
-- Use `FutureResult` only when async composition is materially clearer than ordinary async code.
-- Import `Failure` and `Success` from `returns.result`.
 
 ## Anti-Patterns to Eliminate
 
 1. **`isinstance` on Pydantic model outputs** — trust the type system. If the model says `list[dict]`, it's `list[dict]`.
-2. **`isinstance(result, Failure)` in service code** — use `match`/`case` instead for consistency.
-3. **Bare `except Exception` swallowing typed failures** — catch specific exceptions, convert to `Failure()` at the adapter boundary.
-4. **`if/elif` chains on error types** — use `match`/`case` with structural binding (Pattern 3) for typed error translation.
-5. **混合 isinstance + model_validate** — use `match`/`case` with `case dict() as raw:` + `model_validate` for clarity.
+2. **`match`/`case` on `returns.Result` Success/Failure** — use `isinstance` + `raise` instead. Match/case on Result creates no-op branches (`case Success(): pass`) and doesn't narrow types for `ty`.
+3. **`(_ for _ in ()).throw(...)` generator hack** — use `isinstance` + `raise` directly. Lambda throw hacks are obscure and untestable.
+4. **`log_expected_failure(e, ...) or app_error_to_exception(e)`** — the `or` relies on `log_expected_failure` returning `None` (side effect). Use two separate statements instead.
+5. **`if/elif` chains on error types** — use `match`/`case` with structural binding (Pattern 3) for typed error translation at system boundaries only.

@@ -1,13 +1,11 @@
 import math
 
-from returns.result import Failure, Success
+from returns.result import Failure
 
 from app.features.auth import RefreshTokenRepository, User, UserRole, create_impersonation_token
 from app.shared.result import (
     app_error_to_exception,
     log_expected_failure,
-    match_app_result,
-    unwrap_app_success,
 )
 from app.utils import ConflictException, ForbiddenException, NotFoundException, logger
 
@@ -44,15 +42,15 @@ class UserAdminService:
 
     async def _get_user_or_raise(self, user_id: str) -> User:
         result = await self._user_repo.find_by_id(user_id)
-        return match_app_result(
-            result,
-            on_success=lambda u: (
-                u if u is not None else (_ for _ in ()).throw(NotFoundException("User", user_id))
-            ),
-            on_failure=lambda e: (_ for _ in ()).throw(
-                log_expected_failure(e, operation="user_admin_lookup") or app_error_to_exception(e)
-            ),
-        )
+        if isinstance(result, Failure):
+            error = result.failure()
+            log_expected_failure(error, operation="user_admin_lookup")
+            raise app_error_to_exception(error)
+        user = result.unwrap()
+        if user is None:
+            msg = "User not found"
+            raise NotFoundException(msg)
+        return user
 
     async def list_users(
         self,
