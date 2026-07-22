@@ -192,11 +192,9 @@ class GeminiProcessor:
             ExtractionResult with extracted data
         """
         schema_result = _resolve_extraction_schema(schema_type, custom_schema)
-        match schema_result:
-            case Success((schema, _schema_name)):
-                pass
-            case Failure(error):
-                return ExtractionResult(success=False, error=error.message)
+        if isinstance(schema_result, Failure):
+            return ExtractionResult(success=False, error=schema_result.failure().message)
+        schema, _schema_name = schema_result.unwrap()
 
         try:
             return self._do_extract_structured(content, schema)  # type: ignore
@@ -222,11 +220,9 @@ class GeminiProcessor:
         response = self.model.invoke(prompt)
         response_text = _response_text(response)
         extraction_result = _parse_extraction_json(response_text)
-        match extraction_result:
-            case Success(extracted_data):
-                pass
-            case Failure(error):
-                return ExtractionResult(success=False, error=error.message)
+        if isinstance(extraction_result, Failure):
+            return ExtractionResult(success=False, error=extraction_result.failure().message)
+        extracted_data = extraction_result.unwrap()
         return ExtractionResult(
             success=True,
             extracted_data=extracted_data,  # type: ignore

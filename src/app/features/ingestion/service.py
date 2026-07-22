@@ -78,13 +78,12 @@ class IngestionService:
 
         failure = result.get("failure")
         if failure is not None:
-            match failure:
-                case AppError() as error:
-                    pass
-                case dict() as raw:
-                    error = AppError.model_validate(raw)
-                case _:
-                    error = AppError(code="UNKNOWN", message=str(failure))
+            if isinstance(failure, AppError):
+                error = failure
+            elif isinstance(failure, dict):
+                error = AppError.model_validate(failure)
+            else:
+                error = AppError(code="UNKNOWN", message=str(failure))
             log_expected_failure(error, operation="ingest_document")
             raise app_error_to_exception(error)
 
