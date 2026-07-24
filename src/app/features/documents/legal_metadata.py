@@ -46,7 +46,7 @@ async def extract_legal_metadata(
         structured_llm = cast("StructuredOutputLLM", llm).with_structured_output(
             LegalMetadataExtraction
         )
-        messages = [
+        messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(
                 content=(
                     "Extract legal metadata from the document. Return only contract type, parties, "
@@ -68,7 +68,7 @@ async def extract_legal_metadata(
         ]
         try:
             raw = await retry_immediate(
-                lambda: structured_llm.ainvoke(messages),
+                operation=lambda: structured_llm.ainvoke(messages),
                 label="documents_extract_legal_metadata",
             )
             extracted = LegalMetadataExtraction.model_validate(raw)
@@ -150,17 +150,17 @@ def _heuristic_metadata(
         contract_type=classified.contract_type,
         parties=classified.parties,
         jurisdiction=classified.jurisdiction,
-        governing_law=_extract_text_after_label(markdown, r"govern(?:ed|ing) law"),
-        effective_date=_extract_text_after_label(markdown, r"effective date"),
-        contract_signed=_extract_text_after_label(markdown, r"signed on"),
-        amendment_effective=_extract_text_after_label(markdown, r"amendment effective"),
-        expiry_date=_extract_text_after_label(markdown, r"expiry date|expiration date|expires on"),
+        governing_law=_extract_text_after_label(markdown, label_regex=r"govern(?:ed|ing) law"),
+        effective_date=_extract_text_after_label(markdown, label_regex=r"effective date"),
+        contract_signed=_extract_text_after_label(markdown, label_regex=r"signed on"),
+        amendment_effective=_extract_text_after_label(markdown, label_regex=r"amendment effective"),
+        expiry_date=_extract_text_after_label(markdown, label_regex=r"expiry date|expiration date|expires on"),
         document_summary=_first_nonempty_paragraph(markdown),
     )
 
 
 def _extract_text_after_label(markdown: str, label_regex: str) -> str | None:
-    match = re.search(rf"{label_regex}[^\n:]*[:\-]?\s*([^\n]+)", markdown, re.IGNORECASE)
+    match: re.Match[str] | None = re.search(pattern=rf"{label_regex}[^\n:]*[:\-]?\s*([^\n]+)", string=markdown, flags=re.IGNORECASE)
     if not match:
         return None
     return match.group(1).strip()[:255]

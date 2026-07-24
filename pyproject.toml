@@ -295,7 +295,7 @@ select = [
     "ICN",  # import conventions (consistency)
     "FURB", # modern Python patterns & refurb suggestions
     # --- New: blanket suppression + debt tracking ---
-    "PGH",  # blanket noqa/type-ignore (PGH003, PGH004)
+    "PGH",  # blanket /type-ignore (PGH003, PGH004)
     "FIX",  # FIXME/XXX/HACK tracking (complements TD)
     "T10",  # debugger left in code (T100)
     # --- High-value for production ---
@@ -340,7 +340,7 @@ fixable = [
     "EM103",  # Fix .format() in exception
     "RSE102", # Remove unnecessary parentheses on raise
     "FBT001", # Signal boolean parameter trap (for awareness)
-    "PGH004", # Fix blanket noqa → specific rule codes
+    "PGH004", # Fix blanket  → specific rule codes
     "RUF068", # Fix duplicate entries in __all__
     "PLR6104", # Fix non-augmented assignment to augmented
 ]

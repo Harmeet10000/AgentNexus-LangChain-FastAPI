@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -48,17 +48,14 @@ def build_document_ingestion_graph(
 
     graph = StateGraph(DocumentIngestionState)
     graph.add_node(
-        "ingest_document",
-        cast(
-            "IngestDocumentFn",
-            _make_ingest_document_node(
+        node="ingest_document",
+        action=_make_ingest_document_node(
                 object_store=object_store,
                 repo=repo,
                 graphiti=graphiti,
                 ingest_document_fn=ingest_document_fn,
                 llm=llm,
             ),
-        ),
     )
     graph.set_entry_point("ingest_document")
     graph.add_edge("ingest_document", END)

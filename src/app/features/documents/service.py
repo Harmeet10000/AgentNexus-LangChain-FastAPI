@@ -38,9 +38,16 @@ from app.shared.langgraph_layer.retrieval_kb import (
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.result import app_error_to_exception, log_expected_failure
 from app.shared.services.storage import StorageService, build_s3_key, key_from_s3_uri
-from app.utils import NotFoundException, ServiceUnavailableException, ValidationException, logger
-from app.utils.embedding import normalize_embedding
-from app.utils.json_serializer import from_json_float_list, to_float_list_str, to_sorted_key_bytes
+from app.utils import (
+    NotFoundException,
+    ServiceUnavailableException,
+    ValidationException,
+    from_json_float_list,
+    logger,
+    normalize_embedding,
+    to_float_list_str,
+    to_sorted_key_bytes,
+)
 
 from .classification import classify_document, segment_chunks
 from .dto import (
@@ -76,6 +83,8 @@ if TYPE_CHECKING:
     from ty_extensions import Unknown
 
     from app.config.settings import Settings
+    from app.features.search.rag import ContextSection
+    from app.shared.result import AppResult
 
     from . import dto as documents_dto
     from .classification import ClassifiedDocument, ParsedDocument, PreparedChunk, QualityWarning
@@ -103,8 +112,8 @@ class DocumentCommandService:
         repo: DocumentRepository,
         object_store: StorageService | None,
     ):
-        self.repo = repo
-        self.object_store = object_store
+        self.repo: DocumentRepository = repo
+        self.object_store: StorageService | None = object_store
 
     async def upload_document(
         self,
@@ -130,10 +139,10 @@ class DocumentCommandService:
                     duplicate=True,
                 )
         elif isinstance(existing_result, Failure):
-            log_expected_failure(existing_result.failure(), operation="document_upload")
+            log_expected_failure(error=existing_result.failure(), operation="document_upload")
             raise app_error_to_exception(existing_result.failure())
 
-        document_id = str(uuid4())
+        document_id = str(object=uuid4())
         object_key = build_s3_key(
             prefix="documents",
             user_id=user_id,
@@ -143,7 +152,7 @@ class DocumentCommandService:
         )
         if self.object_store is None:
             raise ServiceUnavailableException(detail="Object storage is not configured")
-        object_uri = await self.object_store.put_object(
+        object_uri: str = await self.object_store.put_object(
             key=object_key,
             data=raw_bytes,
             content_type=content_type,
@@ -165,8 +174,8 @@ class DocumentCommandService:
         if isinstance(create_result, Success):
             document = create_result.unwrap()
         elif isinstance(create_result, Failure):
-            log_expected_failure(create_result.failure(), operation="document_upload")
-            raise app_error_to_exception(create_result.failure())
+            log_expected_failure(error=create_result.failure(), operation="document_upload")
+            raise app_error_to_exception(error=create_result.failure())
 
         from app.shared.outbox import (
             with_outbox,
@@ -175,10 +184,10 @@ class DocumentCommandService:
         await with_outbox(
             session=self.repo.session,
             aggregate_type="user_document",
-            aggregate_id=str(document.id),
+            aggregate_id=str(object=document.id),
             event_type="tasks.documents_ingest",
             payload={
-                "document_id": str(document.id),
+                "document_id": str(object=document.id),
                 "user_id": user_id,
                 "filename": filename,
                 "content_type": content_type,
@@ -186,9 +195,9 @@ class DocumentCommandService:
             },
         )
 
-        logger.bind(document_id=str(document.id)).info("documents_ingest_queued")
+        logger.bind(document_id=str(object=document.id)).info("documents_ingest_queued")
         return DocumentUploadResponse(
-            doc_id=str(document.id),
+            doc_id=str(object=document.id),
             status="queued",
             task_id=None,
             object_uri=object_uri,
@@ -197,17 +206,17 @@ class DocumentCommandService:
         )
 
     async def get_status(self, *, user_id: str, document_id: str) -> DocumentStatusResponse:
-        status_result = await self.repo.fetch_status(user_id=user_id, document_id=document_id)
+        status_result: AppResult[dict[str, Any] | None] = await self.repo.fetch_status(user_id=user_id, document_id=document_id)
         if isinstance(status_result, Success):
-            record = status_result.unwrap()
+            record: dict[str, Any] | None = status_result.unwrap()
             if record is not None:
-                warnings = _flatten_warnings(record.get("warnings", []))
+                warnings: list[QualityWarningDTO] = _flatten_warnings(record.get("warnings", []))
                 return DocumentStatusResponse(
-                    doc_id=str(record["document_id"]),
-                    status=str(record["status"]),
-                    object_uri=str(record["object_uri"]),
-                    title=str(record["title"]),
-                    document_kind=str(record["document_kind"]),
+                    doc_id=str(object=record["document_id"]),
+                    status=str(object=record["status"]),
+                    object_uri=str(object=record["object_uri"]),
+                    title=str(object=record["title"]),
+                    document_kind=str(object=record["document_kind"]),
                     chunk_count=int(record["chunk_count"]),
                     verified_chunk_count=int(record["verified_chunk_count"]),
                     warning_count=len(warnings),
@@ -227,10 +236,10 @@ class DocumentQueryService:
         redis: Redis | None,
         graphiti: Graphiti | None,
     ):
-        self.repo = repo
-        self._llm = llm
-        self.redis = redis
-        self.graphiti = graphiti
+        self.repo: DocumentRepository = repo
+        self._llm: BaseChatModel = llm
+        self.redis: Redis | None = redis
+        self.graphiti: Graphiti | None = graphiti
 
     async def search(self, *, user_id: str, payload: UnifiedSearchRequest) -> UnifiedSearchResponse:
         cache_key = _build_cache_key("documents:search", payload)
@@ -239,7 +248,7 @@ class DocumentQueryService:
         if not payload.bypass_cache and self.redis is not None:
             cached = await self.redis.get(cache_key)
             if cached is not None:
-                response = UnifiedSearchResponse.model_validate_json(cached)
+                response: UnifiedSearchResponse = UnifiedSearchResponse.model_validate_json(cached)
                 return response.model_copy(update={"cache_hit": True})
 
             # ponytail: setnx lock prevents concurrent duplicate compute for same query
@@ -289,7 +298,7 @@ class DocumentQueryService:
             elif isinstance(r, Failure):
                 log_expected_failure(r.failure(), operation="hybrid_search")
                 row_sets.append([])
-        fused_results = reciprocal_rank_fusion(
+        fused_results: list[RankedChunk] = reciprocal_rank_fusion(
             *row_sets,
             k=RRF_K,
             limit=payload.limit,
@@ -297,11 +306,11 @@ class DocumentQueryService:
         chunk_lookup = await self.repo.fetch_chunks_by_ids(
             [item.chunk_id for item in fused_results]
         )
-        items = _build_search_items(fused_results=fused_results, chunk_lookup=chunk_lookup)
+        items: list[DocumentSearchResultItem] = _build_search_items(fused_results=fused_results, chunk_lookup=chunk_lookup)
         response = UnifiedSearchResponse(items=items, cache_hit=False)
         if not payload.bypass_cache and self.redis is not None:
             await self.redis.setex(
-                cache_key, DEFAULT_SEARCH_CACHE_TTL_SECONDS, response.model_dump_json()
+                name=cache_key, time=DEFAULT_SEARCH_CACHE_TTL_SECONDS, value=response.model_dump_json()
             )
             if lock_acquired:
                 await self.redis.delete(lock_key)
@@ -323,11 +332,11 @@ class DocumentQueryService:
             )
             for item in response.items
         }
-        ranked_chunks = [
+        ranked_chunks: list[RankedChunk] = [
             RankedChunk(chunk_id=item.chunk_id, score=item.score, rank=item.rank)
             for item in response.items
         ]
-        context_sections = assemble_rag_context(
+        context_sections: list[ContextSection] = assemble_rag_context(
             ranked_chunks, chunk_lookup, max_tokens=payload.max_tokens
         )
         return UnifiedRagResponse(

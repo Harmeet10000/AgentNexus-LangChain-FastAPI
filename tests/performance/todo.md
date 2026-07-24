@@ -212,6 +212,9 @@ It will be compatible before version 2.0.0.
 205. what is PYCODE and other frequently used in python projects, dockerfiles, uv and other places   DONE
 206. customise openspec and learn in depth about pattern matching  DONE
 167. how systemPromptPaarts, chatPromptTemplate, systemmessage, humanMessage, AImessage,ToolMessage look like while passing it in graph and how should i serialise these with toons before sending to LLM, find which parts should be removed from system prompt parts, how are system/human/ai/toolMessage are sent to LLM   DONE
+208. check if the patterm matching is usefull as written after ruff rules with raise keyword   DONE
+209. make a new skill for codebase search  DONE
+207. only enable OTEL in prod and not in dev    DONE
 
 161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
 type Composable = Callable[[Any], Any]
@@ -284,9 +287,7 @@ todos:-
 136. use LangExtract outputs to build rich graph knowledge from your legal documents.
 195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
 196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node 
-207. only enable OTEL in prod and not in dev 
-208. check if the patterm matching is usefull as written after ruff rules with raise keyword
-
+210. fix ingestion -> docuements -> tools -> cognee
 ```
 
 summarise these chapters in great detail and take video's transcript as reference for summarising

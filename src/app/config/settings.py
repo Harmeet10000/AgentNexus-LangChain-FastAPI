@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     @model_validator(mode="before")
     @classmethod
     def validate_embedding_dimension(cls, values: dict[str, object]) -> dict[str, object]:
+        if "OTEL_ENABLED" not in values and values.get("ENVIRONMENT") == "production":
+            values["OTEL_ENABLED"] = True
+
         dim = values.get("EMBEDDING_DIMENSION")
         model = values.get("GEMINI_EMBEDDING_MODEL", "")
         embedding_model_dimensions: dict[str, int] = {
@@ -368,7 +371,7 @@ class Settings(BaseSettings):
     OTEL_TRACES_EXPORTER: str = Field(default="otlp")
     OTEL_METRICS_EXPORTER: str = Field(default="otlp")
     OTEL_LOGS_EXPORTER: str = Field(default="otlp")
-    OTEL_ENABLED: bool = Field(default=True)
+    OTEL_ENABLED: bool = Field(default=False)
     OTEL_SAMPLE_RATE: float = Field(default=1.0, ge=0.0, le=1.0)
 
     @override

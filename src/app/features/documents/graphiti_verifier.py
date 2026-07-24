@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from app.utils import logger
 
 if TYPE_CHECKING:
+    from graphiti_core.edges import EntityEdge
     from graphiti_core.graphiti import AddEpisodeResults, Graphiti
 
 
@@ -64,7 +65,7 @@ async def write_and_verify_chunk(
         return GraphitiVerificationResult(chunk_id=chunk_id, episode_id=None, verified=False)
 
     try:
-        raw_results = await graphiti.search(  # type: ignore
+        raw_results: list[EntityEdge] = await graphiti.search(  # type: ignore
             query=chunk_id,
             group_ids=[user_id, document_id],
             num_results=10,
@@ -77,7 +78,7 @@ async def write_and_verify_chunk(
         )
         return GraphitiVerificationResult(chunk_id=chunk_id, episode_id=episode_id, verified=False)
 
-    verified = any(
+    verified: bool = any(
         chunk_id in _extract_postgres_chunk_ids(_extract_search_blob(item))
         for item in raw_results or []
     )

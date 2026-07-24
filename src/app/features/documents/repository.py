@@ -26,8 +26,11 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Any
 
+    from sqlalchemy.dialects.postgresql.dml import Insert
     from sqlalchemy.engine.result import Result
+    from sqlalchemy.engine.row import RowMapping
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.elements import TextClause
     from sqlalchemy.sql.selectable import Select
 
     from app.shared.result import AppResult
@@ -49,7 +52,7 @@ class DocumentRepository:
     """Repository for unified document lifecycle and retrieval."""
 
     def __init__(self, session: AsyncSession):
-        self.session = session
+        self.session: AsyncSession = session
 
     async def get_document_by_user_hash(
         self,
@@ -66,7 +69,7 @@ class DocumentRepository:
             doc: UnifiedDocument | None = result.scalar_one_or_none()
             if doc is None:
                 return Failure(
-                    NotFoundAppError(
+                    inner_value=NotFoundAppError(
                         code=ErrorCode.DOCUMENT_NOT_FOUND,
                         message="Document not found for the given user and content hash",
                         details={"user_id": user_id, "content_hash": content_hash},
@@ -76,7 +79,7 @@ class DocumentRepository:
             return Success(doc)
         except SQLAlchemyError as exc:
             return Failure(
-                InfrastructureAppError(
+                inner_value=InfrastructureAppError(
                     code="DB_ERROR",
                     message="Database error while fetching document by user hash",
                     details={"user_id": user_id, "content_hash": content_hash, "error": str(exc)},
@@ -99,20 +102,20 @@ class DocumentRepository:
             doc: UnifiedDocument | None = result.scalar_one_or_none()
             if doc is None:
                 return Failure(
-                    NotFoundAppError(
+                    inner_value=NotFoundAppError(
                         code=ErrorCode.DOCUMENT_NOT_FOUND,
                         message="Document not found for the given user and document ID",
                         details={"user_id": user_id, "document_id": document_id},
                         source="document_repository",
                     )
                 )
-            return Success(doc)
+            return Success(inner_value=doc)
         except SQLAlchemyError as exc:
             return Failure(
-                InfrastructureAppError(
+                inner_value=InfrastructureAppError(
                     code="DB_ERROR",
                     message="Database error while fetching document by ID",
-                    details={"user_id": user_id, "document_id": document_id, "error": str(exc)},
+                    details={"user_id": user_id, "document_id": document_id, "error": str(object=exc)},
                     source="document_repository",
                 )
             )
@@ -146,12 +149,12 @@ class DocumentRepository:
                 parties=parties,
                 metadata_=metadata_,
             )
-            self.session.add(document)
+            self.session.add(instance=document)
             await self.session.flush()
-            return Success(document)
+            return Success(inner_value=document)
         except IntegrityError as exc:
             return Failure(
-                ConflictAppError(
+                inner_value=ConflictAppError(
                     code="DOCUMENT_CONFLICT",
                     message="Document creation failed due to a constraint violation",
                     details={"user_id": user_id, "content_hash": content_hash, "error": str(exc)},
@@ -160,7 +163,7 @@ class DocumentRepository:
             )
         except SQLAlchemyError as exc:
             return Failure(
-                InfrastructureAppError(
+                inner_value=InfrastructureAppError(
                     code="DB_ERROR",
                     message="Database error while creating document",
                     details={"user_id": user_id, "content_hash": content_hash, "error": str(exc)},
@@ -180,8 +183,8 @@ class DocumentRepository:
         parties: list[object] | None = None,
         metadata_: dict[str, object] | None = None,
     ) -> None:
-        statement = text(
-            """
+        statement: TextClause = text(
+            text="""
             UPDATE documents
             SET
                 status = :status,
@@ -197,25 +200,25 @@ class DocumentRepository:
         )
         await self.session.execute(
             statement,
-            {
+            params={
                 "document_id": document_id,
                 "status": status,
                 "title": title,
                 "document_kind": document_kind,
                 "jurisdiction": jurisdiction,
                 "contract_type": contract_type,
-                "parties": json.dumps(parties) if parties is not None else None,
-                "metadata_": json.dumps(metadata_) if metadata_ is not None else None,
-                "updated_at": datetime.now(UTC),
+                "parties": json.dumps(obj=parties) if parties is not None else None,
+                "metadata_": json.dumps(obj=metadata_) if metadata_ is not None else None,
+                "updated_at": datetime.now(tz=UTC),
             },
         )
 
     async def upsert_chunks(self, rows: list[dict[str, Any]]) -> AppResult[None]:
         if not rows:
-            return Success(None)
+            return Success(inner_value=None)
         try:
-            statement = insert(UnifiedChunk).values(rows)
-            statement = statement.on_conflict_do_update(
+            statement: Insert = insert(table=UnifiedChunk).values(rows)
+            statement: Insert = statement.on_conflict_do_update(
                 constraint="uq_chunks_document_chunk_index",
                 set_={
                     "chunk_kind": statement.excluded.chunk_kind,
@@ -232,28 +235,28 @@ class DocumentRepository:
                 },
             )
             await self.session.execute(statement)
-            return Success(None)
+            return Success(inner_value=None)
         except IntegrityError as exc:
             return Failure(
-                ConflictAppError(
+                inner_value=ConflictAppError(
                     code="CHUNK_CONFLICT",
                     message="Chunk upsert failed due to a constraint violation",
-                    details={"error": str(exc)},
+                    details={"error": str(object=exc)},
                     source="document_repository",
                 )
             )
         except SQLAlchemyError as exc:
             return Failure(
-                InfrastructureAppError(
+                inner_value=InfrastructureAppError(
                     code="DB_ERROR",
                     message="Database error while upserting chunks",
-                    details={"error": str(exc)},
+                    details={"error": str(object=exc)},
                     source="document_repository",
                 )
             )
 
     async def analyze_chunks(self) -> None:
-        await self.session.execute(text("ANALYZE chunks"))
+        await self.session.execute(statement=text(text="ANALYZE chunks"))
 
     async def fetch_status(
         self,
@@ -262,8 +265,8 @@ class DocumentRepository:
         document_id: str,
     ) -> AppResult[dict[str, Any] | None]:
         try:
-            statement = text(
-                """
+            statement: TextClause = text(
+                text="""
                 SELECT
                     d.id::text AS document_id,
                     d.status,
@@ -281,25 +284,25 @@ class DocumentRepository:
                 """
             )
             result = await self.session.execute(
-                statement, {"user_id": user_id, "document_id": document_id}
+                statement, params={"user_id": user_id, "document_id": document_id}
             )
-            row = result.mappings().one_or_none()
+            row: RowMapping | None = result.mappings().one_or_none()
             if row is None:
                 return Failure(
-                    NotFoundAppError(
+                    inner_value=NotFoundAppError(
                         code=ErrorCode.STATUS_NOT_FOUND,
                         message="Status not found for the given document",
                         details={"user_id": user_id, "document_id": document_id},
                         source="document_repository",
                     )
                 )
-            return Success(dict(row))
+            return Success(inner_value=dict(row))
         except SQLAlchemyError as exc:
             return Failure(
-                InfrastructureAppError(
+                inner_value=InfrastructureAppError(
                     code="DB_ERROR",
                     message="Database error while fetching document status",
-                    details={"user_id": user_id, "document_id": document_id, "error": str(exc)},
+                    details={"user_id": user_id, "document_id": document_id, "error": str(object=exc)},
                     source="document_repository",
                 )
             )
@@ -313,8 +316,8 @@ class DocumentRepository:
         filter_params: dict[str, Any],
     ) -> AppResult[list[dict[str, Any]]]:
         try:
-            statement = text(
-                """
+            statement: TextClause = text(
+                text="""
                 SELECT
                     c.id::text AS chunk_id,
                     (-1 * (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx'))) AS score
@@ -338,10 +341,10 @@ class DocumentRepository:
                     **filter_params,
                 },
             )
-            return Success([dict(row) for row in result.mappings().all()])
+            return Success(inner_value=[dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
             return Failure(
-                InfrastructureAppError(
+                inner_value=InfrastructureAppError(
                     code="DB_ERROR",
                     message="Database error while performing BM25 search",
                     details={"error": str(exc)},
@@ -358,8 +361,8 @@ class DocumentRepository:
         filter_params: dict[str, Any],
     ) -> AppResult[list[dict[str, Any]]]:
         try:
-            statement = text(
-                """
+            statement: TextClause = text(
+                text="""
                 SELECT
                     c.id::text AS chunk_id,
                     (1 - (c.embedding <=> CAST(:embedding AS vector))) AS score
@@ -375,10 +378,10 @@ class DocumentRepository:
                 """
             )
             await self.session.execute(
-                text(f"SET LOCAL diskann.query_search_list_size = {DISKANN_QUERY_SEARCH_LIST_SIZE}")
+                statement=text(text=f"SET LOCAL diskann.query_search_list_size = {DISKANN_QUERY_SEARCH_LIST_SIZE}")
             )
             await self.session.execute(
-                text(f"SET LOCAL diskann.query_rescore = {DISKANN_QUERY_RESCORE}")
+                statement=text(text=f"SET LOCAL diskann.query_rescore = {DISKANN_QUERY_RESCORE}")
             )
             result = await self.session.execute(
                 statement,
@@ -389,10 +392,10 @@ class DocumentRepository:
                     **filter_params,
                 },
             )
-            return Success([dict(row) for row in result.mappings().all()])
+            return Success(inner_value=[dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
             return Failure(
-                InfrastructureAppError(
+                inner_value=InfrastructureAppError(
                     code="DB_ERROR",
                     message="Database error while performing vector search",
                     details={"error": str(exc)},
@@ -409,8 +412,8 @@ class DocumentRepository:
         filter_params: dict[str, Any],
     ) -> AppResult[list[dict[str, Any]]]:
         try:
-            statement = text(
-                """
+            statement: TextClause = text(
+                text="""
                 SELECT
                     c.id::text AS chunk_id,
                     similarity(c.search_text, :query) AS score
@@ -428,7 +431,7 @@ class DocumentRepository:
             )
             result = await self.session.execute(
                 statement,
-                {
+                params={
                     "user_id": user_id,
                     "query": query,
                     "candidate_limit": candidate_limit,
@@ -436,13 +439,13 @@ class DocumentRepository:
                     **filter_params,
                 },
             )
-            return Success([dict(row) for row in result.mappings().all()])
+            return Success(inner_value=[dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
             return Failure(
-                InfrastructureAppError(
+                inner_value=InfrastructureAppError(
                     code="DB_ERROR",
                     message="Database error while performing trigram search",
-                    details={"error": str(exc)},
+                    details={"error": str(object=exc)},
                     source="document_repository",
                 )
             )
@@ -450,8 +453,8 @@ class DocumentRepository:
     async def fetch_chunks_by_ids(self, chunk_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
         if not chunk_ids:
             return {}
-        statement = text(
-            """
+        statement: TextClause = text(
+            text="""
             SELECT
                 c.id::text AS chunk_id,
                 c.document_id::text AS document_id,
@@ -468,8 +471,8 @@ class DocumentRepository:
             WHERE c.id = ANY(CAST(:chunk_ids AS uuid[]))
             """
         )
-        result = await self.session.execute(statement, {"chunk_ids": list(chunk_ids)})
-        return {str(row["chunk_id"]): dict(row) for row in result.mappings().all()}
+        result = await self.session.execute(statement, params={"chunk_ids": list(chunk_ids)})
+        return {str(object=row["chunk_id"]): dict(row) for row in result.mappings().all()}
 
     async def legal_rrf_search(
         self,
@@ -489,8 +492,8 @@ class DocumentRepository:
         bm25_threshold: float | None = None,
         exact_phrase: str | None = None,
     ) -> list[dict[str, Any]]:
-        statement = text(
-            """
+        statement: TextClause = text(
+            text="""
             WITH candidate_chunks AS (
                 SELECT
                     c.id,
@@ -575,7 +578,7 @@ class DocumentRepository:
         )
         result = await self.session.execute(
             statement,
-            {
+            params={
                 "user_id": user_id,
                 "query_text": query_text,
                 "query_embedding": _vector_literal(query_embedding),
