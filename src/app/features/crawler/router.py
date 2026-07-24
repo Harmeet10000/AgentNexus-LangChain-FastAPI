@@ -4,19 +4,20 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 
-from app.features.crawler.constants import CRAWLER_PREFIX, CRAWLER_TAG
-from app.features.crawler.dependencies import get_crawler_service, get_rate_limiter
-from app.features.crawler.dto import (
+from app.shared.services import RateLimitScope
+from app.shared.services.rate_limiter import RateLimiter
+from app.utils import TooManyRequestsException
+
+from .constants import CRAWLER_PREFIX, CRAWLER_TAG
+from .dependencies import get_crawler_service, get_rate_limiter
+from .dto import (
     CrawlRequest,
     CrawlResponse,
     RateLimitInfo,
     SearchRequest,
     SearchResponse,
 )
-from app.features.crawler.service import CrawlerService
-from app.shared.services import RateLimitScope
-from app.shared.services.rate_limiter import RateLimiter
-from app.utils import TooManyRequestsException
+from .service import CrawlerService
 
 router = APIRouter(prefix=CRAWLER_PREFIX, tags=[CRAWLER_TAG])
 

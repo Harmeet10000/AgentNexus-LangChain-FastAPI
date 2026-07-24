@@ -3,7 +3,8 @@
 For codebase questions, use this order:
 1. `graphify query` — scoped subgraph (~200 tokens) when `graphify-out/graph.json` exists
 2. `ast-grep` — structural patterns when graphify lacks detail prefer this over grep/rg. usage instructions is in langchain-fastapi-production/.opencode/skills/ast-grep-skill
-3. `grep`/`ripgrep` — text search as last resort or for simple lookups
+3. `grep`/`ripgrep` — text search as last resort or for simple lookups.
+4. `codegraph MCP` - use it before graphify, grep, rg, ast-grep 
 
 After modifying code, run `graphify update .` to keep the graph current.
 
