@@ -22,7 +22,7 @@ router = APIRouter(tags=["documents"])
 
 
 @router.post(
-    "/documents/upload",
+    path="/documents/upload",
     status_code=status.HTTP_201_CREATED,
 )
 async def upload_document(
@@ -42,7 +42,7 @@ async def upload_document(
         raw_bytes=raw_bytes,
     )
     return http_response(
-        "Document queued for ingestion", data=response, status_code=status.HTTP_201_CREATED
+        message="Document queued for ingestion", data=response, status_code=status.HTTP_201_CREATED
     )
 
 
@@ -55,7 +55,7 @@ async def get_document_status(
     user_id: UserIdDep,
 ) -> APIResponse[DocumentStatusResponse]:
     response: DocumentStatusResponse = await service.get_status(user_id=user_id, document_id=doc_id)
-    return http_response("Document ingestion status", data=response)
+    return http_response(message="Document ingestion status", data=response)
 
 
 @router.post(
@@ -67,11 +67,11 @@ async def unified_search(
     user_id: UserIdDep,
 ) -> APIResponse[UnifiedSearchResponse]:
     response: UnifiedSearchResponse = await service.search(user_id=user_id, payload=payload)
-    return http_response("Unified search results", data=response)
+    return http_response(message="Unified search results", data=response)
 
 
 @router.post(
-    "/search/rag",
+    path="/search/rag",
 )
 async def unified_rag(
     payload: UnifiedRagRequest,
@@ -83,7 +83,7 @@ async def unified_rag(
 
 
 @router.post(
-    "/search/ask",
+    path="/search/ask",
 )
 async def ask_corpus(
     payload: UnifiedAskRequest,
@@ -93,11 +93,11 @@ async def ask_corpus(
     response: UnifiedAskResponse = await service.ask(
         user_id=user_id, payload=payload, require_graphiti_verified=False
     )
-    return http_response("Grounded corpus answer", data=response)
+    return http_response(message="Grounded corpus answer", data=response)
 
 
 @router.post(
-    "/legal/ask",
+    path="/legal/ask",
 )
 async def ask_legal(
     payload: UnifiedAskRequest,
@@ -107,4 +107,4 @@ async def ask_legal(
     response: UnifiedAskResponse = await service.ask(
         user_id=user_id, payload=payload, require_graphiti_verified=True
     )
-    return http_response("Grounded legal answer", data=response)
+    return http_response(message="Grounded legal answer", data=response)

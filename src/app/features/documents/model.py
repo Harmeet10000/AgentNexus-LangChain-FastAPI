@@ -56,13 +56,13 @@ class UnifiedDocument(Base):
     metadata_: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
+        default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
+        default=lambda: datetime.now(tz=UTC),
+        onupdate=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
 
@@ -87,7 +87,7 @@ class UnifiedChunk(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     document_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("documents.id", ondelete="CASCADE"),
+        ForeignKey(column="documents.id", ondelete="CASCADE"),
         nullable=False,
     )
     user_id: Mapped[str] = mapped_column(String(length=255), nullable=False)
@@ -106,7 +106,7 @@ class UnifiedChunk(Base):
     search_text: Mapped[str] = mapped_column(
         Text,
         Computed(
-            "COALESCE(clause_type, '') || ' ' || "
+            sqltext="COALESCE(clause_type, '') || ' ' || "
             "COALESCE(preamble, '') || ' ' || "
             "COALESCE(content, '')",
             persisted=True,
@@ -115,7 +115,7 @@ class UnifiedChunk(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
+        default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
 

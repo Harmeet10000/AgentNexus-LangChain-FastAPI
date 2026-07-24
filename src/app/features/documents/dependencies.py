@@ -1,6 +1,6 @@
 """Dependency wiring for unified document feature."""
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Depends, Request
 from langchain_core.language_models import BaseChatModel
@@ -14,6 +14,9 @@ from app.shared.services.storage import StorageService
 
 from .repository import DocumentRepository
 from .service import DocumentCommandService, DocumentQueryService
+
+if TYPE_CHECKING:
+    from app.config.settings import Settings
 
 
 async def get_document_repository(
@@ -36,15 +39,15 @@ async def get_document_command_service(
 ) -> DocumentCommandService:
     object_store: StorageService | None = getattr(request.app.state, "object_store", None)
     if object_store is None:
-        settings = get_settings()
+        settings: Settings = get_settings()
         if settings.S3_BUCKET_NAME:
-            object_store = StorageService.from_settings(settings=settings)
+            object_store: StorageService = StorageService.from_settings(settings=settings)
     return DocumentCommandService(repo=repo, object_store=object_store)
 
 
 async def get_document_query_service(
     repo: Annotated[DocumentRepository, Depends(get_document_repository)],
-    redis: Annotated[Redis, Depends(get_redis)],
+    redis: Annotated[Redis, Depends(dependency=get_redis)],
     request: Request,
 ) -> DocumentQueryService:
     return DocumentQueryService(

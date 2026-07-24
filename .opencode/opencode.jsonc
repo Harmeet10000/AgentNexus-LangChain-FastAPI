@@ -29,11 +29,6 @@
   "command": {},
   "plugin": [
     ".opencode/plugins/graphify.js",
-    "@warp-dot-dev/opencode-warp@0.1.5",
-    "@mohak34/opencode-notifier@latest",
-    // "@zenobius/opencode-skillful",
-    "opencode-scheduler",
-    "@lyculs/opencode-firecrawl",
     "opencode-handoff",
     "opencode-ponytail"
   ],
