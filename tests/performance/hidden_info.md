@@ -201,7 +201,6 @@ how error handling is done - Supervision
 the running state of an actor is constantly monitored by an another actor, can perform action based on the state of the actor
 who supervises the supervisor - there are supervision trees
 
-<<<<<<< Updated upstream
 
 
 # Main Risks
@@ -309,7 +308,6 @@ The **"hook, buffer, read"** mental model (1:28) is a foundational conceptual fr
 2. **Buffer:** Once an event is hooked, the data is placed into a **lockless ring buffer** (known as the *traceFS* buffer). This stage is critical because it ensures that the tracing machinery can capture and store event records highly efficiently without blocking or slowing down the primary kernel producers (1:04 - 1:14).
 3. **Read:** Finally, the captured data is surfaced to user space via the *traceFS* file system. User space tools (like *trace-cmd* or custom applications) then "read" this data from the file system to perform analysis and visualization (1:17 - 1:25).]
 4. According to the video (2:15 - 2:25), **Fprobes** are specialized tools that leverage *Ftrace* mechanisms to provide optimized tracing specifically for **function entry and exit**. They are designed to efficiently monitor when a kernel function starts executing and when it finishes, making them a targeted option within the broader scope of dynamic instrumentation.
-=======
 use cases
 1. processing pipeline
 2. streaming data
@@ -323,4 +321,3 @@ anti use cases
 drawbacks
 1. too many actors 
 2. 
->>>>>>> Stashed changes

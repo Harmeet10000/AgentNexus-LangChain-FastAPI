@@ -23,10 +23,10 @@ async def parse_document(*, raw_bytes: bytes, filename: str, content_type: str) 
 
     converter: DocumentConverter = create_document_converter(gpu_available=False)
     result: ConversionResult = converter.convert(
-        DocumentStream(name=filename, stream=BytesIO(raw_bytes))
+        source=DocumentStream(name=filename, stream=BytesIO(initial_bytes=raw_bytes))
     )
     document: DoclingDocument = result.document
-    markdown = document.export_to_markdown()
+    markdown: str = document.export_to_markdown()
     return ParsedDocument(
         title=_extract_title(markdown, filename),
         markdown=markdown,
