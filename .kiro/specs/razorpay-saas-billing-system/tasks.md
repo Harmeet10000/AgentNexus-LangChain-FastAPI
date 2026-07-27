@@ -54,8 +54,11 @@ The billing engine manages the complete subscription lifecycle including plan ma
   - [ ] 3.2 Implement Subscription repository
     - Create `repositories/subscription_repository.py` with `SubscriptionRepository` class
     - Implement `create()`, `find_by_id()`, `find_by_user_and_plan()`, `update_status()`, `increment_retry_count()`, `reset_retry_count()` methods
+    - **NEW: Implement `update_with_lock()` with optimistic locking using version field**
+    - **NEW: Check version matches before update, increment version on success**
+    - **NEW: Return ConflictAppError on version mismatch**
     - Implement state transition validation in `update_status()`
-    - _Requirements: 2.1, 2.4, 2.6, 4.1-4.8, 6.1, 7.1_
+    - _Requirements: 2.1, 2.4, 2.6, 4.1-4.8, 6.1, 7.1, 29.1-29.7_
 
   - [ ] 3.3 Implement Payment repository
     - Create `repositories/payment_repository.py` with `PaymentRepository` class
@@ -86,15 +89,21 @@ The billing engine manages the complete subscription lifecycle including plan ma
     - Create `clients/razorpay_client.py` with `RazorpayClient` class
     - Implement async methods: `create_customer()`, `create_subscription()`, `cancel_subscription()`, `create_payment()`, `create_refund()`, `submit_dispute_evidence()`
     - Implement error handling with circuit breaker pattern (requirement 25.6)
-    - Implement retry logic with exponential backoff for HTTP 429 and 503 errors
+    - **NEW: Implement Tenacity retry decorators for all API methods**
+    - **NEW: Use @retry with stop_after_attempt(3), wait_exponential(multiplier=1, min=1, max=10)**
+    - **NEW: Retry only on ExternalServiceException with retryable=True**
+    - **NEW: Map HTTP 503, 504, 429 to retryable exceptions**
+    - **NEW: Map HTTP 401, 403 to non-retryable exceptions**
     - Use `SecretStr` for API keys and secrets
-    - _Requirements: 2.2, 2.3, 7.4, 10.3, 11.3, 25.1-25.6_
+    - _Requirements: 2.2, 2.3, 7.4, 10.3, 11.3, 25.1-25.6, 34.1-34.7_
 
   - [ ]* 4.2 Write unit tests for Razorpay client
-    - Test retry logic for transient errors
+    - Test retry logic for transient errors (503, 504, 429)
+    - Test no retry for permanent errors (401, 403)
+    - Test exponential backoff timing
     - Test circuit breaker activation after consecutive failures
     - Mock Razorpay API responses for success and error scenarios
-    - _Requirements: 25.1-25.6_
+    - _Requirements: 25.1-25.6, 34.1-34.7_
 
 - [ ] 5. Implement core service layer - Plan Service
   - [ ] 5.1 Implement Plan Service
@@ -145,11 +154,15 @@ The billing engine manages the complete subscription lifecycle including plan ma
 - [ ] 7. Implement Proration Service
   - [ ] 7.1 Implement Proration Service
     - Create `services/proration_service.py` with `ProrationService` class
+    - **NEW: Implement `calculate_proration_fraction()` using integer microsecond arithmetic**
+    - **NEW: Convert timedeltas to int microseconds before Decimal conversion**
+    - **NEW: Use Decimal arithmetic for exact fractional calculations**
+    - **NEW: Apply Banker's rounding (ROUND_HALF_EVEN) for final currency amounts**
     - Implement `calculate_plan_change_proration()` with mathematical formula from design
     - Implement `calculate_cancellation_proration()` for refund calculation
     - Implement `preview_proration()` without state changes
     - Validate billing interval compatibility and effective date bounds
-    - _Requirements: 5.1-5.8, 19.1-19.5, 28.1-28.6_
+    - _Requirements: 5.1-5.8, 19.1-19.5, 28.1-28.6, 33.1-33.7_
 
   - [ ]* 7.2 Write property test for proration calculation
     - **Property 4: Proration Calculation Correctness**
@@ -191,6 +204,8 @@ The billing engine manages the complete subscription lifecycle including plan ma
   - [ ] 10.1 Implement Invoice Service
     - Create `services/invoice_service.py` with `InvoiceService` class
     - Implement `generate_invoice()` with sequential invoice numbering
+    - **NEW: Snapshot tax_rate from plan at invoice creation time**
+    - **NEW: Store snapshotted tax_rate in invoice model**
     - Implement GST tax calculation: `tax_amount = subtotal * tax_rate`, `total = subtotal + tax_amount`
     - Implement intra-state tax split: `cgst = sgst = tax_amount / 2`, `igst = 0`
     - Implement inter-state tax: `igst = tax_amount`, `cgst = sgst = 0`
@@ -199,7 +214,7 @@ The billing engine manages the complete subscription lifecycle including plan ma
     - Implement `generate_credit_note()` for refunds and downgrades
     - Implement `get_invoice()`, `list_invoices()` with user authorization
     - Create audit log entries for invoice generation
-    - _Requirements: 12.1-12.10, 13.1-13.5, 28.1-28.6_
+    - _Requirements: 12.1-12.10, 13.1-13.5, 28.1-28.6, 32.1-32.7_
 
   - [ ]* 10.2 Write property test for GST tax calculation
     - **Property 5: GST Tax Calculation Compliance**
@@ -230,9 +245,14 @@ The billing engine manages the complete subscription lifecycle including plan ma
     - Implement `process_event()` with idempotency check
     - Implement `is_duplicate_event()` checking razorpay_event_id
     - Implement `mark_event_processed()` creating WebhookEvent record
+    - **NEW: Implement `replay_failed_event()` with state validation**
+    - **NEW: Add `is_replay` parameter to all event handlers**
+    - **NEW: Validate subscription state before processing replayed events**
+    - **NEW: Skip replayed payment.captured if subscription is CANCELLED**
+    - **NEW: Skip replayed subscription.activated if already ACTIVE**
+    - **NEW: Mark skipped replays as SKIPPED status (not PROCESSED or FAILED)**
     - Implement event routing to appropriate service handlers
-    - Implement `replay_failed_event()` for admin operations
-    - _Requirements: 3.1-3.8, 14.1-14.8, 15.1-15.7, 22.1-22.6_
+    - _Requirements: 3.1-3.8, 14.1-14.8, 15.1-15.7, 22.1-22.6, 31.1-31.6_
 
   - [ ]* 11.2 Write property test for webhook idempotency
     - **Property 2: Webhook Idempotency**
@@ -245,12 +265,17 @@ The billing engine manages the complete subscription lifecycle including plan ma
   - [ ] 12.1 Implement Dunning Service
     - Create `services/dunning_service.py` with `DunningService` class
     - Implement `initiate_dunning()` checking retry_count < max_retries
-    - Implement `execute_retry()` with exponential backoff (1, 3, 7, 14 days)
+    - **NEW: Implement `calculate_retry_delay_with_jitter()` helper function**
+    - **NEW: Add random jitter (0-3600 seconds) to base retry delays**
+    - **NEW: Use secrets.randbelow() for cryptographically secure random**
+    - **NEW: Compute: base_delay * (2 ** attempt) + jitter_seconds**
+    - Implement `execute_retry()` with exponential backoff (1, 3, 7, 14 days base)
     - Implement `halt_subscription()` after max retries exhausted
     - Implement `configure_dunning_strategy()` for retry intervals and max attempts
     - Implement `get_retry_schedule()` returning retry history
     - Schedule retry tasks via Celery with appropriate delays
-    - _Requirements: 9.1-9.8, 21.1-21.5_
+    - Log scheduled retry times with jitter information for debugging
+    - _Requirements: 9.1-9.8, 21.1-21.5, 30.1-30.5_
 
 - [ ] 13. Implement FastAPI routers
   - [ ] 13.1 Create Plan router
@@ -343,6 +368,19 @@ The billing engine manages the complete subscription lifecycle including plan ma
     - Cancel scheduled job if manually resumed early
     - _Requirements: 23.1-23.5_
 
+  - [ ] 15.5 Create daily Razorpay reconciliation job
+    - **NEW: Create `tasks/reconciliation_task.py` with Celery task**
+    - **NEW: Fetch last 7 days of payments from Razorpay API**
+    - **NEW: Cross-check Razorpay payments against local payment records**
+    - **NEW: Detect missing payments and log critical alerts**
+    - **NEW: Synthesize webhook events for missing payments**
+    - **NEW: Fetch Razorpay subscriptions and compare statuses**
+    - **NEW: Generate reconciliation reports with discrepancies**
+    - **NEW: Alert operations team on mismatches**
+    - **NEW: Schedule job daily at 2:00 AM UTC via crontab**
+    - **NEW: Retry up to 3 times on job failure**
+    - _Requirements: 35.1-35.10_
+
 - [ ] 16. Implement lifespan and dependency injection
   - [ ] 16.1 Configure lifespan for Razorpay client
     - Add Razorpay client initialization to `lifecycle/lifespan.py`
@@ -403,16 +441,18 @@ The billing engine manages the complete subscription lifecycle including plan ma
     - Add CHECK constraint: invoice tax calculation validation
     - Add CHECK constraint: subscription period validation (current_period_end > current_period_start)
     - Add CHECK constraint: retry_count ≤ max_retries
-    - _Requirements: 1.2, 2.4, 12.2, 12.3_
+    - **NEW: Add CHECK constraint: version field ≥ 0**
+    - _Requirements: 1.2, 2.4, 12.2, 12.3, 29.2_
 
   - [ ] 19.2 Create database indexes for performance
     - Index on subscriptions.user_id for user lookups
     - Index on subscriptions.razorpay_subscription_id for webhook lookups
+    - **NEW: Composite index on subscriptions(id, version) for optimistic locking**
     - Index on payments.razorpay_payment_id for idempotency checks
     - Index on webhook_events.razorpay_event_id for duplicate detection
     - Index on invoices.user_id for user invoice queries
     - Index on audit_logs.entity_type, audit_logs.entity_id for audit queries
-    - _Requirements: Performance optimization_
+    - _Requirements: Performance optimization, 29.1-29.7_
 
   - [ ] 19.3 Ensure audit log immutability
     - Add database trigger or application-level constraint to reject UPDATE on audit_logs

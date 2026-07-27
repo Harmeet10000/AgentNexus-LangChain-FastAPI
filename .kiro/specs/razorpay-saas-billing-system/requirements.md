@@ -417,7 +417,105 @@ The billing engine supports the complete subscription journey—from initial pla
 5. THE System SHALL display credit note amount in the user's billing dashboard
 6. WHEN a credit note exists THEN THE System SHALL deduct the credit from the next payment charge
 
-### Requirement 29: Subscription Listing and Filtering
+### Requirement 29: Optimistic Locking for Concurrent Updates
+
+**User Story:** As the system, I want to prevent race conditions during concurrent subscription updates, so that subscription state remains consistent.
+
+#### Acceptance Criteria
+
+1. WHEN updating a subscription THEN THE System SHALL use an optimistic locking mechanism with a version field
+2. THE Subscription model SHALL include an integer version field that increments on every update
+3. WHEN updating a subscription THEN THE System SHALL check that the version matches the expected value
+4. WHEN a concurrent modification is detected THEN THE System SHALL raise a ConflictException
+5. WHEN a conflict occurs THEN THE System SHALL require the client to refetch the subscription and retry
+6. THE System SHALL apply version checking to all subscription state changes including plan changes, status updates, and cancellations
+7. WHEN a version conflict occurs THEN THE System SHALL create an audit log entry recording the conflict
+
+### Requirement 30: Retry Jitter for Dunning Delays
+
+**User Story:** As the system, I want to add randomized jitter to dunning retry delays, so that simultaneous failures do not create thundering herd effects on Razorpay.
+
+#### Acceptance Criteria
+
+1. WHEN scheduling a dunning retry THEN THE System SHALL add random jitter to the base delay
+2. THE Dunning_Service SHALL compute retry_delay as base_delay * (2 ** attempt) + random(0, 3600 seconds)
+3. WHEN 1000 subscriptions fail simultaneously THEN THE System SHALL spread retry attempts across the time window
+4. THE System SHALL use cryptographically secure random number generation for jitter
+5. WHEN jitter is applied THEN THE System SHALL log the actual scheduled retry time for debugging
+
+### Requirement 31: State Validation for Webhook Replay
+
+**User Story:** As an administrator, I want replayed webhook events to validate subscription state, so that replay does not corrupt data.
+
+#### Acceptance Criteria
+
+1. WHEN replaying a webhook event THEN THE Webhook_Service SHALL validate current subscription status before processing
+2. WHEN replaying a payment.captured event THEN THE System SHALL skip processing if subscription status is CANCELLED
+3. WHEN replaying a subscription.activated event THEN THE System SHALL skip processing if subscription is already ACTIVE
+4. WHEN state validation fails THEN THE System SHALL log a warning with the mismatch details
+5. WHEN state validation fails THEN THE System SHALL mark the replayed event as SKIPPED instead of PROCESSED
+6. THE Webhook_Service SHALL enforce state validation rules for all replayed events (not just first-time processing)
+
+### Requirement 32: Tax Rate Versioning
+
+**User Story:** As an administrator, I want tax rates to be versioned with plans, so that historical invoices remain accurate when GST rates change.
+
+#### Acceptance Criteria
+
+1. WHEN creating a plan THEN THE Plan_Service SHALL include a tax_rate field with the current GST rate
+2. THE Plan model SHALL store tax_rate as Decimal with default value matching current regulations
+3. WHEN generating an invoice THEN THE Invoice_Service SHALL snapshot the tax_rate from the plan at invoice creation time
+4. THE Invoice model SHALL include a tax_rate field storing the rate used for calculation
+5. WHEN GST rates change THEN THE System SHALL allow creating new plan versions with updated tax_rate without affecting existing invoices
+6. WHEN querying historical invoices THEN THE System SHALL display the tax_rate that was active at the time of invoice generation
+7. THE System SHALL support multiple tax rates simultaneously for different plans
+
+### Requirement 33: Decimal Precision in Proration
+
+**User Story:** As the system, I want proration calculations to use exact decimal arithmetic, so that no precision is lost in fractional currency amounts.
+
+#### Acceptance Criteria
+
+1. WHEN calculating proration fractions THEN THE Proration_Service SHALL use integer microsecond arithmetic before converting to Decimal
+2. THE Proration_Service SHALL compute elapsed_microseconds as (now - start).total_seconds() * 1,000,000 converted to int
+3. THE Proration_Service SHALL compute total_microseconds as (end - start).total_seconds() * 1,000,000 converted to int
+4. WHEN computing fraction THEN THE System SHALL use Decimal(int(elapsed_microseconds)) / Decimal(int(total_microseconds))
+5. THE Proration_Service SHALL never convert floating-point seconds directly to Decimal
+6. WHEN applying proration THEN THE System SHALL use Banker's rounding (ROUND_HALF_EVEN) for final currency amounts
+7. THE System SHALL validate that proration calculations produce exact cent values with no floating-point errors
+
+### Requirement 34: Tenacity-Based Retry for Razorpay API Calls
+
+**User Story:** As the system, I want declarative retry logic for Razorpay API calls, so that transient failures are handled automatically without manual retry code.
+
+#### Acceptance Criteria
+
+1. WHEN calling Razorpay_API THEN THE System SHALL use Tenacity decorators for automatic retry
+2. THE System SHALL retry on ExternalServiceException with retryable=true
+3. THE System SHALL use exponential backoff with multiplier=1, min=1 second, max=10 seconds
+4. THE System SHALL stop after 3 retry attempts
+5. WHEN Razorpay_API returns HTTP 503 or timeout THEN THE System SHALL retry with exponential backoff
+6. WHEN Razorpay_API returns HTTP 401 or 403 THEN THE System SHALL not retry and raise immediately
+7. WHEN max retries are exhausted THEN THE System SHALL raise the original exception with retry context
+
+### Requirement 35: Daily Razorpay Reconciliation
+
+**User Story:** As the system, I want to reconcile local payment records with Razorpay's records daily, so that lost webhooks and data inconsistencies are detected and corrected.
+
+#### Acceptance Criteria
+
+1. WHEN the daily reconciliation job runs THEN THE System SHALL fetch the last 7 days of payments from Razorpay_API
+2. WHEN reconciling payments THEN THE System SHALL compare Razorpay payment records against local payment records
+3. WHEN a Razorpay payment is missing from local database THEN THE System SHALL log a critical alert with payment details
+4. WHEN a missing payment is detected THEN THE System SHALL synthesize a webhook event and process it through normal payment flow
+5. THE Reconciliation_Service SHALL schedule the job daily at 2:00 AM UTC via Celery
+6. WHEN reconciliation detects mismatches THEN THE System SHALL create a reconciliation report with discrepancies
+7. THE System SHALL fetch subscriptions from Razorpay and cross-check local subscription statuses
+8. WHEN a subscription status mismatch is detected THEN THE System SHALL alert operations team
+9. THE Reconciliation_Service SHALL validate that all ACTIVE subscriptions have valid razorpay_subscription_id references
+10. WHEN reconciliation job fails THEN THE System SHALL retry up to 3 times before alerting
+
+### Requirement 36: Subscription Listing and Filtering
 
 **User Story:** As a user, I want to view all my subscriptions with filters, so that I can manage multiple subscriptions easily.
 

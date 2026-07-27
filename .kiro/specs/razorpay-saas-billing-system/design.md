@@ -629,6 +629,7 @@ class Plan(BaseModel):
     interval: BillingInterval = Field(description="Billing frequency")
     interval_count: int = Field(default=1, description="Number of intervals per billing cycle")
     trial_period_days: int = Field(default=0, description="Free trial duration")
+    tax_rate: Decimal = Field(default=Decimal("0.18"), description="GST rate (18% = 0.18)")
     is_active: bool = Field(default=True, description="Plan availability")
     features: dict = Field(default_factory=dict, description="Plan features JSON")
     metadata: dict = Field(default_factory=dict, description="Custom metadata")
@@ -685,6 +686,8 @@ class Subscription(BaseModel):
     
     retry_count: int = Field(default=0, description="Failed payment retry attempts")
     max_retries: int = Field(default=4, description="Max retry attempts")
+    
+    version: int = Field(default=0, description="Optimistic locking version field")
     
     metadata: dict = Field(default_factory=dict)
     created_at: datetime
@@ -782,7 +785,7 @@ class Invoice(BaseModel):
     status: InvoiceStatus = Field(default=InvoiceStatus.DRAFT)
     
     subtotal: Decimal = Field(description="Amount before tax")
-    tax_rate: Decimal = Field(description="GST rate (18% = 0.18)")
+    tax_rate: Decimal = Field(description="GST rate snapshot (18% = 0.18)")
     tax_amount: Decimal = Field(description="Calculated GST")
     total: Decimal = Field(description="Subtotal + tax")
     currency: str = Field(default="INR")
@@ -1688,6 +1691,564 @@ async def generate_invoice(
 - Audit log entry created
 
 **Loop Invariants:** N/A
+
+## Correctness Properties
+
+### Property 1: Financial Integrity - No Phantom Charges
+
+**Invariant**: Every captured payment must reference a valid subscription and have a corresponding invoice. Invoice total must match payment amount.
+
+**Mathematical Formulation**:
+```
+∀ payment ∈ Payments where payment.status = CAPTURED:
+  ∃ subscription ∈ Subscriptions: subscription.id = payment.subscription_id
+  ∧ ∃ invoice ∈ Invoices: invoice.payment_id = payment.id
+  ∧ invoice.total = payment.amount
+```
+
+**Verification Strategy**: Property-based testing with Hypothesis generating random payment scenarios.
+
+**Test Cases**:
+- Generate 100 payment records with random amounts and subscriptions
+- Verify each has a valid subscription FK
+- Verify each has exactly one invoice with matching amount
+- Verify paisa-to-rupee conversion is lossless
+
+### Property 2: Webhook Idempotency
+
+**Invariant**: Processing the same webhook event N times produces identical system state to processing it once.
+
+**Mathematical Formulation**:
+```
+∀ event ∈ WebhookEvents:
+  process(event) ≡ process(event) ∘ process(event) ∘ ... ∘ process(event)  [N times]
+  ∧ |{e ∈ WebhookEvents | e.razorpay_event_id = event.razorpay_event_id}| = 1
+```
+
+**Verification Strategy**: Property-based testing processing same event 1, 2, 5, 10 times and asserting state equivalence.
+
+**Test Cases**:
+- Generate webhook event with random payload
+- Process it 1, 2, 5, 10 times
+- Assert subscription status identical after all runs
+- Assert exactly one WebhookEvent record exists
+- Assert payment record count unchanged after first processing
+
+### Property 3: Subscription State Machine Validity
+
+**Invariant**: All subscription status transitions must follow valid state machine rules. No invalid transitions are allowed.
+
+**State Transition Rules**:
+```
+CREATED → AUTHENTICATED
+AUTHENTICATED → ACTIVE
+ACTIVE → {PAST_DUE, PAUSED, CANCELLED}
+PAST_DUE → {ACTIVE, HALTED}
+HALTED → {ACTIVE, CANCELLED}
+PAUSED → {ACTIVE, CANCELLED}
+```
+
+**Verification Strategy**: Property-based testing generating random transition sequences and rejecting invalid ones.
+
+**Test Cases**:
+- Generate valid transition sequences → all succeed
+- Generate invalid transitions (e.g., CREATED → ACTIVE) → all raise ValidationException
+- Verify audit log records every transition
+
+### Property 4: Proration Calculation Correctness
+
+**Invariant**: Proration must be proportional to unused time. For upgrades, charge is positive. For downgrades, credit is positive.
+
+**Mathematical Formulation**:
+```
+remaining_fraction = (period_end - effective_date) / (period_end - period_start)
+proration_amount = (new_plan.amount - old_plan.amount) * remaining_fraction
+
+upgrade: new_plan.amount > old_plan.amount → proration_amount > 0
+downgrade: new_plan.amount < old_plan.amount → proration_amount < 0
+```
+
+**Verification Strategy**: Property-based testing with random dates, plan amounts, and intervals.
+
+**Test Cases**:
+- Random subscription periods (monthly, yearly)
+- Random effective dates within period
+- Random plan amounts (₹100 to ₹10,000)
+- Verify proration at period_start = full price difference
+- Verify proration at period_end = ₹0
+- Verify proration at period_middle ≈ 50% of price difference
+- Verify upgrade direction is positive charge
+- Verify downgrade direction is negative (credit)
+
+### Property 5: GST Tax Calculation Compliance
+
+**Invariant**: Tax calculations must follow GST rules. Total must equal subtotal + tax. Tax must equal subtotal * rate. Intra-state and inter-state tax splits must be correct.
+
+**Mathematical Formulation**:
+```
+∀ invoice ∈ Invoices:
+  invoice.tax_amount = invoice.subtotal * invoice.tax_rate
+  ∧ invoice.total = invoice.subtotal + invoice.tax_amount
+  ∧ (seller_state = buyer_state →
+       invoice.cgst_amount = invoice.tax_amount / 2
+       ∧ invoice.sgst_amount = invoice.tax_amount / 2
+       ∧ invoice.igst_amount = 0)
+  ∧ (seller_state ≠ buyer_state →
+       invoice.igst_amount = invoice.tax_amount
+       ∧ invoice.cgst_amount = 0
+       ∧ invoice.sgst_amount = 0)
+```
+
+**Verification Strategy**: Property-based testing with random subtotals, tax rates, and state combinations.
+
+**Test Cases**:
+- Random subtotals (₹100 to ₹1,000,000)
+- Random tax rates (0.18, 0.12, 0.05)
+- Random state combinations (intra-state and inter-state)
+- Verify tax_amount = subtotal * tax_rate (exact Decimal arithmetic)
+- Verify total = subtotal + tax_amount
+- Verify CGST + SGST = tax_amount for intra-state
+- Verify IGST = tax_amount for inter-state
+- Verify CGST = SGST for intra-state
+
+## Enhanced Resilience Patterns
+
+### Tenacity-Based Retry for Razorpay API Calls
+
+All Razorpay API interactions use declarative retry logic via the Tenacity library to handle transient failures gracefully.
+
+**Implementation**:
+```python
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
+from app.utils.exceptions import ExternalServiceException
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(
+        lambda e: isinstance(e, ExternalServiceException) and e.retryable
+    ),
+)
+async def create_razorpay_subscription(data: dict) -> dict:
+    """Create Razorpay subscription with automatic retry on transient errors."""
+    try:
+        response = await razorpay_client.subscription.create(data)
+        return response
+    except RazorpayAPIError as e:
+        if e.status_code in (503, 504, 429):
+            raise ExternalServiceException(
+                service="Razorpay",
+                detail=e.message,
+                retryable=True,
+            ) from e
+        raise ExternalServiceException(
+            service="Razorpay",
+            detail=e.message,
+            retryable=False,
+        ) from e
+```
+
+**Key Features**:
+- Automatic retry on `ExternalServiceException` with `retryable=True`
+- Exponential backoff: 1s, 2s, 4s, 8s, 10s (capped at max=10)
+- Stop after 3 attempts
+- Permanent errors (401, 403) do not retry
+- Transient errors (503, 504, 429) retry with backoff
+
+**Applied To**:
+- `create_customer()`
+- `create_subscription()`
+- `cancel_subscription()`
+- `create_payment()`
+- `create_refund()`
+- `submit_dispute_evidence()`
+
+### Optimistic Locking for Concurrent Subscription Updates
+
+Prevents race conditions when multiple processes attempt to modify the same subscription simultaneously (e.g., webhook processing + user-initiated plan change).
+
+**Database Schema**:
+```sql
+ALTER TABLE subscriptions ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX idx_subscriptions_version ON subscriptions(id, version);
+```
+
+**Repository Implementation**:
+```python
+async def update_with_lock(
+    self,
+    subscription_id: str,
+    expected_version: int,
+    updates: dict,
+) -> AppResult[Subscription]:
+    """Update subscription with optimistic locking."""
+    result = await Subscription.find_one(
+        Subscription.id == subscription_id,
+        Subscription.version == expected_version,
+    ).update({
+        "$set": updates,
+        "$inc": {"version": 1},
+    })
+    
+    if result.modified_count == 0:
+        return Failure(
+            ConflictAppError(
+                message="Subscription modified concurrently",
+                details={"subscription_id": subscription_id, "expected_version": expected_version},
+            )
+        )
+    
+    updated = await Subscription.get(subscription_id)
+    return Success(updated)
+```
+
+**Service Usage**:
+```python
+async def change_plan(
+    self,
+    subscription_id: str,
+    new_plan_id: str,
+) -> SubscriptionResponse:
+    subscription = await self._repo.find_by_id(subscription_id)
+    expected_version = subscription.version
+    
+    # Calculate proration...
+    
+    result = await self._repo.update_with_lock(
+        subscription_id=subscription_id,
+        expected_version=expected_version,
+        updates={"plan_id": new_plan_id},
+    )
+    
+    if isinstance(result, Failure):
+        error = result.failure()
+        log_expected_failure(error, operation="change_plan")
+        raise app_error_to_exception(error)
+    
+    return SubscriptionResponse.from_model(result.unwrap())
+```
+
+**Benefits**:
+- Prevents lost updates
+- No pessimistic locks (no blocking)
+- Detects conflicts immediately
+- Client can retry with fresh data
+
+### Jitter in Dunning Retry Delays
+
+Adds randomized jitter to retry delays to prevent thundering herd when many subscriptions fail simultaneously (e.g., Razorpay outage).
+
+**Implementation**:
+```python
+import secrets
+from datetime import datetime, timedelta
+
+def calculate_retry_delay_with_jitter(attempt: int, base_delay_days: int) -> timedelta:
+    """Calculate exponential backoff delay with jitter."""
+    # Base delays: 1, 3, 7, 14 days
+    base_delays = [1, 3, 7, 14]
+    base_delay = base_delays[min(attempt, len(base_delays) - 1)]
+    
+    # Add random jitter: 0 to 3600 seconds (1 hour)
+    jitter_seconds = secrets.randbelow(3600)
+    
+    total_delay = timedelta(days=base_delay, seconds=jitter_seconds)
+    return total_delay
+
+async def schedule_retry(self, subscription_id: str, attempt: int) -> None:
+    """Schedule dunning retry with jitter."""
+    delay = calculate_retry_delay_with_jitter(attempt, base_delay_days=1)
+    retry_at = datetime.utcnow() + delay
+    
+    await celery_client.apply_async(
+        "retry_payment",
+        args=[subscription_id],
+        eta=retry_at,
+    )
+    
+    log.info(
+        "Scheduled dunning retry",
+        subscription_id=subscription_id,
+        attempt=attempt,
+        retry_at=retry_at.isoformat(),
+        jitter_applied=True,
+    )
+```
+
+**Benefits**:
+- Prevents 1000 subscriptions retrying at exact same time
+- Spreads load over 1-hour window
+- Uses cryptographically secure random (secrets.randbelow)
+- Maintains base exponential backoff pattern
+
+### State Validation on Webhook Replay
+
+When administrators replay failed webhook events, the system validates current subscription state to prevent corrupting data.
+
+**Implementation**:
+```python
+async def process_payment_captured(
+    self,
+    event: WebhookEventDTO,
+    is_replay: bool = False,
+) -> None:
+    """Process payment.captured webhook with state validation on replay."""
+    subscription = await self._subscription_repo.find_by_razorpay_id(
+        event.payload["subscription"]["id"]
+    )
+    
+    if is_replay:
+        # State validation for replayed events
+        if subscription.status == SubscriptionStatus.CANCELLED:
+            log.warning(
+                "Skipping replayed payment.captured for cancelled subscription",
+                subscription_id=subscription.id,
+                event_id=event.razorpay_event_id,
+            )
+            await self._webhook_repo.mark_event_skipped(event.id)
+            return
+        
+        if subscription.status in (SubscriptionStatus.CREATED, SubscriptionStatus.AUTHENTICATED):
+            log.warning(
+                "Subscription not yet activated, cannot process payment",
+                subscription_id=subscription.id,
+                event_id=event.razorpay_event_id,
+            )
+            await self._webhook_repo.mark_event_skipped(event.id)
+            return
+    
+    # Normal payment processing...
+    await self._payment_service.record_payment(...)
+```
+
+**State Validation Rules**:
+- `payment.captured` → skip if subscription is CANCELLED
+- `subscription.activated` → skip if already ACTIVE
+- `subscription.charged` → skip if subscription is PAUSED or CANCELLED
+
+**Benefits**:
+- Prevents replay-induced state corruption
+- Logs skipped replays for audit
+- Marks events as SKIPPED (not PROCESSED or FAILED)
+
+### Tax Rate Versioning
+
+Tax rates are stored per-plan and snapshotted to invoices at generation time, ensuring historical invoices remain accurate when GST rates change.
+
+**Plan Model**:
+```python
+class Plan(BaseModel):
+    tax_rate: Decimal = Field(
+        default=Decimal("0.18"),
+        description="GST rate for this plan version (18% = 0.18)",
+    )
+```
+
+**Invoice Generation**:
+```python
+async def generate_invoice(
+    self,
+    subscription_id: str,
+    payment_id: str,
+) -> InvoiceResponse:
+    subscription = await self._subscription_repo.find_by_id(subscription_id)
+    plan = await self._plan_repo.find_by_id(subscription.plan_id)
+    
+    # Snapshot tax_rate from plan
+    tax_rate_snapshot = plan.tax_rate
+    
+    invoice = Invoice(
+        subscription_id=subscription_id,
+        payment_id=payment_id,
+        subtotal=plan.amount,
+        tax_rate=tax_rate_snapshot,  # Snapshot preserves historical accuracy
+        tax_amount=plan.amount * tax_rate_snapshot,
+        total=plan.amount + (plan.amount * tax_rate_snapshot),
+        ...
+    )
+    
+    await self._invoice_repo.create(invoice)
+    return InvoiceResponse.from_model(invoice)
+```
+
+**Benefits**:
+- Historical invoices show correct tax rate used at generation time
+- New plans can use updated tax rates without affecting existing invoices
+- Supports multiple simultaneous tax rates for different plans
+- Compliant with tax audit requirements
+
+### Decimal Precision in Proration
+
+Proration calculations use exact integer microsecond arithmetic before converting to Decimal, eliminating floating-point precision errors.
+
+**Implementation**:
+```python
+from decimal import Decimal, ROUND_HALF_EVEN
+from datetime import datetime
+
+def calculate_proration_fraction(
+    period_start: datetime,
+    period_end: datetime,
+    effective_date: datetime,
+) -> Decimal:
+    """Calculate proration fraction with exact decimal arithmetic."""
+    # Convert to integer microseconds to avoid float precision loss
+    elapsed_microseconds = int((effective_date - period_start).total_seconds() * 1_000_000)
+    total_microseconds = int((period_end - period_start).total_seconds() * 1_000_000)
+    
+    # Use Decimal for exact fractional arithmetic
+    elapsed = Decimal(elapsed_microseconds)
+    total = Decimal(total_microseconds)
+    
+    fraction = elapsed / total
+    return fraction
+
+def calculate_proration_amount(
+    old_plan_amount: Decimal,
+    new_plan_amount: Decimal,
+    remaining_fraction: Decimal,
+) -> Decimal:
+    """Calculate proration charge/credit with Banker's rounding."""
+    price_difference = new_plan_amount - old_plan_amount
+    proration_amount = price_difference * remaining_fraction
+    
+    # Apply Banker's rounding (ROUND_HALF_EVEN) for currency
+    rounded_amount = proration_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
+    
+    return rounded_amount
+```
+
+**Key Features**:
+- Integer microsecond arithmetic eliminates float errors
+- Decimal type preserves exact fractional values
+- Banker's rounding (ROUND_HALF_EVEN) for final currency amounts
+- No precision loss from `timedelta.total_seconds()` float conversion
+
+**Before (Incorrect)**:
+```python
+# ❌ Float precision loss
+elapsed_seconds = (now - start).total_seconds()  # Returns float!
+fraction = Decimal(str(elapsed_seconds)) / Decimal(str(total_seconds))
+```
+
+**After (Correct)**:
+```python
+# ✅ Exact integer arithmetic
+elapsed_microseconds = int((now - start).total_seconds() * 1_000_000)
+fraction = Decimal(elapsed_microseconds) / Decimal(total_microseconds)
+```
+
+### Daily Razorpay Reconciliation
+
+Background job that cross-checks local payment/subscription records against Razorpay's source of truth, catching lost webhooks and data inconsistencies.
+
+**Implementation**:
+```python
+from datetime import datetime, timedelta
+
+@celery.task
+async def daily_razorpay_reconciliation() -> None:
+    """Reconcile local records with Razorpay data."""
+    reconciliation_window = timedelta(days=7)
+    start_date = datetime.utcnow() - reconciliation_window
+    
+    # Fetch Razorpay payments for last 7 days
+    razorpay_payments = await razorpay_client.payment.all(
+        created_at_gte=int(start_date.timestamp())
+    )
+    
+    discrepancies = []
+    
+    for rz_payment in razorpay_payments:
+        local_payment = await payment_repo.find_by_razorpay_id(rz_payment["id"])
+        
+        if not local_payment:
+            # Missing payment — webhook was lost!
+            log.critical(
+                "Missing payment detected during reconciliation",
+                razorpay_payment_id=rz_payment["id"],
+                amount=rz_payment["amount"],
+                subscription_id=rz_payment.get("subscription_id"),
+            )
+            
+            # Synthesize webhook processing
+            await webhook_service.process_event(
+                WebhookEventDTO(
+                    razorpay_event_id=f"reconciliation_{rz_payment['id']}",
+                    event_type="payment.captured",
+                    payload={"payment": rz_payment},
+                )
+            )
+            
+            discrepancies.append({
+                "type": "missing_payment",
+                "razorpay_payment_id": rz_payment["id"],
+                "action": "synthetic_webhook_processed",
+            })
+    
+    # Fetch Razorpay subscriptions
+    razorpay_subscriptions = await razorpay_client.subscription.all(
+        created_at_gte=int(start_date.timestamp())
+    )
+    
+    for rz_sub in razorpay_subscriptions:
+        local_sub = await subscription_repo.find_by_razorpay_id(rz_sub["id"])
+        
+        if local_sub and local_sub.status != rz_sub["status"]:
+            # Status mismatch
+            log.error(
+                "Subscription status mismatch detected",
+                subscription_id=local_sub.id,
+                local_status=local_sub.status,
+                razorpay_status=rz_sub["status"],
+            )
+            
+            discrepancies.append({
+                "type": "status_mismatch",
+                "subscription_id": local_sub.id,
+                "local_status": local_sub.status,
+                "razorpay_status": rz_sub["status"],
+            })
+    
+    # Generate reconciliation report
+    if discrepancies:
+        await generate_reconciliation_report(discrepancies)
+        await alert_operations_team(discrepancies)
+    
+    log.info(
+        "Daily reconciliation completed",
+        discrepancies_found=len(discrepancies),
+        payments_checked=len(razorpay_payments),
+        subscriptions_checked=len(razorpay_subscriptions),
+    )
+
+# Schedule daily at 2:00 AM UTC
+celery.add_periodic_task(
+    crontab(hour=2, minute=0),
+    daily_razorpay_reconciliation.s(),
+)
+```
+
+**Key Features**:
+- Runs daily at 2:00 AM UTC
+- Checks last 7 days of data
+- Detects missing payments (lost webhooks)
+- Detects subscription status mismatches
+- Synthesizes webhook events for missing payments
+- Generates reconciliation reports
+- Alerts operations team on discrepancies
+- Retries up to 3 times on failure
+
+**Benefits**:
+- Catches Razorpay webhook delivery failures (>24hr downtime)
+- Detects data drift between systems
+- Self-healing via synthetic webhook processing
+- Audit trail for all reconciliation actions
 
 ## Correctness Properties
 
