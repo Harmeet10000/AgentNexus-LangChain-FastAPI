@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 from string import Template
-from typing import TYPE_CHECKING
+from typing import Any
 
 from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder,
 )
 from pydantic import BaseModel, Field, field_validator, model_validator
-
-if TYPE_CHECKING:
-    from typing import Any
 
 # ---------------------------------------------------------------------------
 # System prompt templates

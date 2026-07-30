@@ -288,6 +288,8 @@ todos:-
 195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
 196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node 
 210. fix ingestion -> docuements -> tools -> cognee
+211. check agent router usage
+
 ```
 
 summarise these chapters in great detail and take video's transcript as reference for summarising
@@ -609,7 +611,31 @@ Observability (15:34-16:53): Average metrics like a 95% hit rate can hide catast
 Memcached vs. Redis (16:53-18:08): Technology selection should come last. Memcached is favored for simple, multi-threaded, high-throughput object caching, while Redis provides a rich set of data structures and features useful for complex mutations and logic.
 
 
+ Ensuring Idempotency
+Idempotency—ensuring that performing the same action multiple times results in the same outcome—is critical. Alex identifies three strategies to handle this:
 
+Fetch before processing: Use the webhook as a trigger to query the provider's API for the current state (e.g., Stripe's new event format).
+Upsert by date: Use database transactions to update or insert records only if the incoming data is newer than what is already stored.
+Tracking processing state: Maintain a separate, transactional storage to track if an event has been processed, is in progress, or is new, returning errors for incomplete attempts to trigger retries.
+10:00 - 15:00: Handling Bursts, Back Pressure, and Architecture
+Alex highlights the dangers of bursty traffic, citing a personal experience where a mass email campaign caused a production API outage due to subsequent webhook processing. He emphasizes the need for a decoupled architecture: ingest webhooks into a queue and process them separately. He also discusses optimistic filtering, where you perform quick, aggressive cache lookups during ingestion, assuming a record exists if a lookup fails, to avoid system-wide delays.
+
+15:00 - 20:00: Back Pressure and Data Integrity
+Managing back pressure requires monitoring queue depth and max age. You must understand your system's theoretical capacity versus baseline capacity. To ensure data integrity after inevitable failures (crashes, bad deploys), he suggests:
+
+Processing guarantees: Carefully managing acknowledgments (acking/nacking) through every link in the request chain.
+Reconciliation: Using the provider's events API to fetch and resync data if a failure causes significant discrepancies.
+20:00 - 25:00: Observability and Emerging Trends
+Visibility is vital. Companies should build a centralized event log (e.g., using Elasticsearch) to audit failed events and troubleshoot issues. He warns against waiting for a major incident to build replay tooling. He also discusses the shift toward Event Destinations (like AWS EventBridge support) and how platforms are increasingly offering native filtering and better event management tools.
+
+25:00 - 31:25: Event Gateways and Future Outlook
+Alex defines an Event Gateway as a cloud infrastructure primitive—similar to an API Gateway—that handles ingestion, routing, filtering, and queuing for asynchronous events. He demonstrates how Hookdeck functions as this layer, showing how users can:
+
+Manage webhooks via Terraform.
+Visualize and resolve back pressure issues by adjusting delivery rates.
+Debug and trigger manual retries for failed events.
+
+Web Locks 
 
 ```markdown
 

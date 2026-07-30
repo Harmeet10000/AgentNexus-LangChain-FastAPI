@@ -39,25 +39,35 @@ if TYPE_CHECKING:
     from redis.asyncio.client import Redis
 
 
-async def setup_redis(url: str) -> redis.asyncio.Redis:
+async def setup_redis(url: str) -> redis.asyncio.Redis | None:
     """Initialize Redis with health check."""
-    redis: Redis = create_redis_client(url)
-    await redis.ping()
+    try:
+        client: Redis = create_redis_client(url)
+        await client.ping()
+    except (ConnectionError, TimeoutError, OSError, redis.exceptions.RedisError) as exc:
+        logger.warning("Redis startup failed, continuing without cache", error=str(exc))
+        return None
+
     logger.info("Redis connected")
-    return redis
+    return client
 
 
 async def setup_mongodb(
     uri: str, db_name: str, document_models: list[type]
-) -> tuple[AsyncIOMotorClient[Any], AsyncIOMotorDatabase[Any]]:
+) -> tuple[AsyncIOMotorClient[Any], AsyncIOMotorDatabase[Any]] | None:
     """Initialize MongoDB with health check."""
-    mongo_client, db = await create_mongo_client(
-        uri=uri,
-        db_name=db_name,
-        document_models=document_models,
-    )
-    await mongo_client.admin.command(command="ping")
-    server_info = await mongo_client.server_info()
+    try:
+        mongo_client, db = await create_mongo_client(
+            uri=uri,
+            db_name=db_name,
+            document_models=document_models,
+        )
+        await mongo_client.admin.command(command="ping")
+        server_info = await mongo_client.server_info()
+    except (ConnectionError, TimeoutError, OSError, Exception) as exc:
+        logger.warning("MongoDB startup failed, continuing without document store", error=str(exc))
+        return None
+
     logger.info(
         "MongoDB connected",
         database=db_name,
@@ -66,10 +76,15 @@ async def setup_mongodb(
     return mongo_client, db
 
 
-async def setup_neo4j() -> AsyncDriver:
+async def setup_neo4j() -> AsyncDriver | None:
     """Initialize Neo4j with connectivity verification."""
-    neo4j_driver = await init_neo4j()
-    await neo4j_driver.verify_connectivity()
+    try:
+        neo4j_driver = await init_neo4j()
+        await neo4j_driver.verify_connectivity()
+    except (ConnectionError, TimeoutError, OSError, Exception) as exc:
+        logger.warning("Neo4j startup failed, continuing without graph features", error=str(exc))
+        return None
+
     logger.info("Neo4j driver initialized")
     return neo4j_driver
 
@@ -124,45 +139,63 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     settings = get_settings()
     logger.info("Application starting", app_name=app.title, version=app.version)
 
-    # STARTUP: Parallel execution — critical deps fail-fast, optional deps degrade
-    async with asyncio.TaskGroup() as tg:
-        pg_task = tg.create_task(coro=init_db())
-        mongo_task = tg.create_task(
-            coro=setup_mongodb(
-                uri=settings.MONGODB_URI,
-                db_name=settings.MONGODB_DB_NAME,
-                document_models=[User, TokenAuditLog],
+    # STARTUP: Parallel execution for optional services; PostgreSQL remains required for the app to function.
+    try:
+        async with asyncio.TaskGroup() as tg:
+            pg_task = tg.create_task(coro=init_db())
+            mongo_task = tg.create_task(
+                coro=setup_mongodb(
+                    uri=settings.MONGODB_URI,
+                    db_name=settings.MONGODB_DB_NAME,
+                    document_models=[User, TokenAuditLog],
+                )
             )
+            redis_task = tg.create_task(coro=setup_redis(url=settings.REDIS_URL))
+            neo_task = tg.create_task(coro=setup_neo4j())
+    except ExceptionGroup as exc_group:
+        logger.warning(
+            "One or more startup tasks failed; continuing with available services",
+            error=str(exc_group),
         )
-        redis_task = tg.create_task(coro=setup_redis(url=settings.REDIS_URL))
-        neo_task = tg.create_task(coro=setup_neo4j())
+        pg_task = None
+        mongo_task = None
+        redis_task = None
+        neo_task = None
 
-    # Critical deps: PG, Redis, MongoDB — raise on failure
+    # Critical dependency: PostgreSQL
+    if pg_task is None:
+        msg = "PostgreSQL startup failed"
+        raise ServiceUnavailableException(msg)
+
     try:
         app.state.db_engine, app.state.db_session_local = pg_task.result()
     except Exception as exc:
         msg = f"PostgreSQL startup failed: {exc}"
         raise ServiceUnavailableException(msg) from exc
 
-    try:
-        app.state.mongo_client, app.state.db = mongo_task.result()
-    except Exception as exc:
-        msg = f"MongoDB startup failed: {exc}"
-        raise ServiceUnavailableException(msg) from exc
+    # Non-critical deps: use None if unavailable
+    if mongo_task is not None:
+        mongo_result = mongo_task.result()
+        if mongo_result is not None:
+            app.state.mongo_client, app.state.db = mongo_result
+        else:
+            app.state.mongo_client = None
+            app.state.db = None
+    else:
+        app.state.mongo_client = None
+        app.state.db = None
 
-    try:
-        app.state.redis = redis_task.result()
-    except Exception as exc:
-        msg = f"Redis startup failed: {exc}"
-        raise ServiceUnavailableException(msg) from exc
+    if redis_task is not None:
+        redis_result = redis_task.result()
+        app.state.redis = redis_result
+    else:
+        app.state.redis = None
 
-    # Optional deps: Neo4j, Graphiti — log warning, set None on failure
-    try:
-        app.state.neo4j_driver = neo_task.result()
-    except (ConnectionError, TimeoutError, OSError) as exc:
-        exc.add_note("operation=setup_neo4j")
-        logger.warning("Neo4j startup failed, continuing without graph features", error=str(exc))
-        app.state.neo4j_driver = None  # type: ignore
+    if neo_task is not None:
+        neo_result = neo_task.result()
+        app.state.neo4j_driver = neo_result
+    else:
+        app.state.neo4j_driver = None
 
     app.state.websocket_security = await build_websocket_security_service(
         redis=app.state.redis,
@@ -250,7 +283,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     # Outbox relay (uses existing database session factory)
     try:
         await _init_outbox_relay(app, celery_app)
-    except (ConnectionError, TimeoutError, OSError) as exc:
+    except Exception as exc:
         exc.add_note("operation=setup_outbox_relay")
         logger.warning("Outbox relay startup failed, continuing without outbox", error=str(exc))
         app.state.outbox_relay = None

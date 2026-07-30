@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from langchain_core.exceptions import LangChainException
 from langchain_core.messages import (
@@ -53,7 +53,7 @@ from .utils import (
 )
 
 if TYPE_CHECKING:
-    from typing import Any, Literal
+    from typing import Any
 
     from langchain_core.runnables import RunnableConfig
 

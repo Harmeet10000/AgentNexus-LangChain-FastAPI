@@ -10,23 +10,34 @@ from typing import TYPE_CHECKING, override
 from uuid import UUID  # noqa: TC003 — UUID used at runtime in callback metadata
 
 from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
-from langsmith import Client
 
 from app.config import get_settings
+
+try:
+    from langsmith import Client
+except Exception:  # pragma: no cover - optional dependency guard
+    Client = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from typing import Any
 
 
-def configure_langsmith() -> Client | None:
+def configure_langsmith() -> object | None:
     """
     Bootstrap LangSmith tracing by setting env vars.
     Call this at application startup, before any agents are built.
     """
+    if Client is None:
+        return None
+
     settings = get_settings()
-    return Client(
-        api_url=settings.LANGSMITH_ENDPOINT, api_key=settings.LANGSMITH_API_KEY.get_secret_value()
-    )
+    try:
+        return Client(
+            api_url=settings.LANGSMITH_ENDPOINT,
+            api_key=settings.LANGSMITH_API_KEY.get_secret_value(),
+        )
+    except Exception:  # pragma: no cover - optional dependency guard
+        return None
 
 
 class LatencyCallbackHandler(BaseCallbackHandler):

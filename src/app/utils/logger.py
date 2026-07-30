@@ -5,15 +5,15 @@ from contextvars import ContextVar
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
-import opentelemetry.trace as otel_trace
-from loguru import logger as loguru_logger
-
 if TYPE_CHECKING:
     from _contextvars import Token
 
+import opentelemetry.trace as otel_trace
+from loguru import logger as loguru_logger
+
 # 1. Context Variables
-request_state: ContextVar[dict[str, Any]] = ContextVar(name="request_state")
-execution_path: ContextVar[list[str]] = ContextVar(name="execution_path")
+request_state: ContextVar[dict[str, Any]] = ContextVar("request_state")
+execution_path: ContextVar[list[str]] = ContextVar("execution_path")
 
 
 # 2. Console Formatter (Unchanged - Your logic here is perfect)

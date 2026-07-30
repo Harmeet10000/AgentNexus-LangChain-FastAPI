@@ -24,7 +24,7 @@ keywords = ["fastapi", "langchain", "ai", "api", "async"]
 requires-python = ">=3.12,<3.14"
 dependencies = [
     # --- WEB FRAMEWORK ---
-    "fastapi[standard]>=0.135.0",
+    "fastapi[standard]>=0.140.0",
     "httptools>=0.7.1",
     "python-multipart>=0.0.20",
     "uvicorn[standard]>= 0.50.1",

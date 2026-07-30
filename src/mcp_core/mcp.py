@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from fastapi.requests import HTTPConnection
 
-from mcp_core import get_mcp_client_manager as _get_mcp_client_manager
+from mcp_core.client.manager import get_mcp_client_manager as _get_mcp_client_manager
 
 if TYPE_CHECKING:
     from mcp_core import MCPClientManager
