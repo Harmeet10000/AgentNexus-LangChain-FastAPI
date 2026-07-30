@@ -35,45 +35,51 @@ class OutboxRelay:
 
     async def run_startup_scan(self) -> None:
         """One-time scan for unpublished events created while relay was offline."""
-        async with self._session_factory() as session:
-            rows = (
-                (
-                    await session.execute(
-                        text(
+        try:
+            async with self._session_factory() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            text(
+                                """
+                            SELECT id, event_type, payload, publish_attempts
+                            FROM outbox_events
+                            WHERE published_at IS NULL AND publish_attempts < :max_retries
+                            ORDER BY created_at
+                            LIMIT 100
+                            FOR UPDATE SKIP LOCKED
                             """
-                        SELECT id, event_type, payload, publish_attempts
-                        FROM outbox_events
-                        WHERE published_at IS NULL AND publish_attempts < :max_retries
-                        ORDER BY created_at
-                        LIMIT 100
-                        FOR UPDATE SKIP LOCKED
-                        """
-                        ),
-                        {"max_retries": _MAX_RETRIES},
+                            ),
+                            {"max_retries": _MAX_RETRIES},
+                        )
                     )
+                    .mappings()
+                    .all()
                 )
-                .mappings()
-                .all()
-            )
 
-            if rows:
-                logger.info("outbox_startup_scan", found=len(rows))
-                for row in rows:
-                    await self._publish(dict(row), session=session)
-            else:
-                logger.info("outbox_startup_scan", found=0)
+                if rows:
+                    logger.info("outbox_startup_scan", found=len(rows))
+                    for row in rows:
+                        await self._publish(dict(row), session=session)
+                else:
+                    logger.info("outbox_startup_scan", found=0)
+        except (PostgresError, Exception) as exc:
+            logger.warning("outbox_startup_scan_skipped", error=str(exc))
 
     async def run_listener(self) -> None:
         """Long-running listen loop. Subscribe to outbox_channel, handle notifications."""
-        dsn = self._database_url.replace("+asyncpg", "")
-        listener = asyncpg_listen.NotificationListener(
-            connect=lambda: asyncpg.connect(dsn=dsn),
-        )
-        await listener.run(
-            handler_per_channel={"outbox_channel": self._handle_notification},
-            policy=asyncpg_listen.ListenPolicy.ALL,
-            notification_timeout=asyncpg_listen.NO_TIMEOUT,
-        )
+        try:
+            dsn = self._database_url.replace("+asyncpg", "")
+            listener = asyncpg_listen.NotificationListener(
+                connect=lambda: asyncpg.connect(dsn=dsn),
+            )
+            await listener.run(
+                handler_per_channel={"outbox_channel": self._handle_notification},
+                policy=asyncpg_listen.ListenPolicy.ALL,
+                notification_timeout=asyncpg_listen.NO_TIMEOUT,
+            )
+        except Exception as exc:
+            logger.warning("outbox_listener_stopped", error=str(exc))
 
     async def _handle_notification(
         self,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import Any
 from uuid import UUID, uuid4  # noqa: TC003 — UUID used at runtime by SQLAlchemy column type
 
 from pgvector.sqlalchemy import Vector
@@ -17,9 +17,6 @@ from sqlalchemy.orm import (  # noqa: TC002 — Mapped, mapped_column used at ru
 )
 
 from app.shared import Base
-
-if TYPE_CHECKING:
-    from typing import Any
 
 
 class SearchDocument(Base):
