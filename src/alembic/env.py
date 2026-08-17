@@ -20,6 +20,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import all models here for autogenerate support
+import app.features.billing.models  # noqa: F401, E402 — registers model with Base.metadata for Alembic autogenerate
 import app.shared.outbox.model  # noqa: F401, E402 — registers model with Base.metadata for Alembic autogenerate
 
 try:

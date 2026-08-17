@@ -7,15 +7,32 @@ import fakeredis.aioredis
 import pytest
 from fakeredis.aioredis import FakeRedis
 
-# Break circular/broken imports before any app module loads
+# Break circular/broken imports before any app module loads.
+# A MagicMock has no __path__ (dunders are not auto-created), so every
+# `from <stubbed root>.<sub> import ...` in src/ needs its own entry — otherwise
+# the import machinery reports "'<root>' is not a package". Regenerate with:
+#   rg -o 'from (mcp_core|tasks|app\.shared\.langgraph_layer)(\.[\w.]+)? import' src/
 sys.modules["app.connections.mcp"] = MagicMock()
 sys.modules["app.connections.celery"] = MagicMock()
 sys.modules["mcp_core"] = MagicMock()
+sys.modules["mcp_core.client.auth"] = MagicMock()
+sys.modules["mcp_core.client.manager"] = MagicMock()
+sys.modules["mcp_core.client.settings"] = MagicMock()
+sys.modules["mcp_core.common.errors"] = MagicMock()
+sys.modules["mcp_core.common.models"] = MagicMock()
+sys.modules["mcp_core.lifespan_mcp"] = MagicMock()
+sys.modules["mcp_core.mcp"] = MagicMock()
+sys.modules["mcp_core.server.factory"] = MagicMock()
+sys.modules["mcp_core.server.http"] = MagicMock()
 sys.modules["mcp_core.server.middleware"] = MagicMock()
+sys.modules["mcp_core.server.tools"] = MagicMock()
 sys.modules["tasks"] = MagicMock()
 sys.modules["tasks.auth_email_tasks"] = MagicMock()
 sys.modules["tasks.search_tasks"] = MagicMock()
 sys.modules["app.shared.langgraph_layer"] = MagicMock()
+sys.modules["app.shared.langgraph_layer.agent_saul.state"] = MagicMock()
+sys.modules["app.shared.langgraph_layer.checkpointer"] = MagicMock()
+sys.modules["app.shared.langgraph_layer.kb_retry"] = MagicMock()
 sys.modules["app.shared.langgraph_layer.retrieval_kb"] = MagicMock()
 
 _tal_mock = MagicMock()

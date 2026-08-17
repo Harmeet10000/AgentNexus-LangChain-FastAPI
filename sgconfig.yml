@@ -1,0 +1,14 @@
+# ast-grep config for this repo.
+#
+# ruleDirs is REPO-RELATIVE and vendored, so `ast-grep scan` works on a fresh
+# checkout and in CI. It previously pointed at ~/.config/ast-grep, which was
+# machine-pinned AND empty — `ast-grep scan` failed with "Cannot read rule
+# directory" on every invocation.
+#
+# Rules here must cover only what ruff CANNOT express. ruff already selects
+# E,W,F,I,UP,B,A,C4,PERF,TRY,ASYNC,RUF,PL,ANN,S,SIM,PTH,TCH,RET,ARG,LOG,FAST,
+# PT,T20 (see pyproject.toml) — bare except, async misuse, exception hygiene,
+# and FastAPI lints are already covered there. Do not duplicate them.
+# These five encode project conventions from .opencode/instructions/.
+ruleDirs:
+  - .ast-grep/rules

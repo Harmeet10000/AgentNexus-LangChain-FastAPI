@@ -1,6 +1,7 @@
 # src/settings.py
 
 import warnings
+from decimal import Decimal
 from functools import cache
 from pathlib import Path
 from typing import override
@@ -364,6 +365,23 @@ class Settings(BaseSettings):
     ALLOWED_EXTENSIONS: list[str] = Field(
         default_factory=lambda: ["pdf", "txt", "docx", "xlsx", "pptx", "md", "html"]
     )
+
+    # --- Razorpay Billing ---
+    RAZORPAY_KEY_ID: str = Field(default="")
+    RAZORPAY_KEY_SECRET: SecretStr = Field(default=SecretStr(""))
+    RAZORPAY_WEBHOOK_SECRET: SecretStr = Field(default=SecretStr(""))
+    RAZORPAY_API_BASE_URL: str = Field(default="https://api.razorpay.com")
+    RAZORPAY_REQUEST_TIMEOUT_SECONDS: float = Field(default=15.0)
+    # GST configuration
+    BILLING_SELLER_GSTIN: str = Field(default="")
+    BILLING_SELLER_STATE_CODE: str = Field(default="27")
+    BILLING_PLACE_OF_SUPPLY: str = Field(default="27")
+    BILLING_DEFAULT_TAX_RATE: Decimal = Field(default=Decimal("0.18"))
+    BILLING_INVOICE_PREFIX: str = Field(default="INV")
+    BILLING_RECEIPT_PREFIX: str = Field(default="REC")
+    BILLING_DUNNING_RETRY_DAYS: list[int] = Field(default_factory=lambda: [1, 3, 7, 14])
+    BILLING_MAX_RETRIES: int = Field(default=4)
+    BILLING_RECONCILIATION_LOOKBACK_DAYS: int = Field(default=7)
 
     # --- OpenTelemetry ---
     OTEL_EXPORTER_OTLP_ENDPOINT: str = Field(default="http://localhost:4317")

@@ -5,6 +5,7 @@ from typing import Any, ClassVar, cast, override
 
 import opentelemetry.trace as otel_trace
 from celery import Celery, Task
+from celery.schedules import crontab
 from celery.signals import (
     after_task_publish,
     task_failure,
@@ -187,7 +188,12 @@ def create_celery_app() -> Celery:
         main="langchain_fastapi",
         broker=settings.RABBITMQ_URL,
         backend="rpc://",
-        include=["tasks.auth_email_tasks", "tasks.example", "tasks.search_tasks"],
+        include=[
+            "tasks.auth_email_tasks",
+            "tasks.example",
+            "tasks.search_tasks",
+            "tasks.billing_tasks",
+        ],
     )
 
     app.Task = ResilientTask
@@ -249,6 +255,24 @@ def create_celery_app() -> Celery:
                 "queue": settings.CELERY_DEFAULT_QUEUE,
                 "routing_key": settings.CELERY_DEFAULT_ROUTING_KEY,
             }
+        },
+        beat_schedule={
+            "billing-invoice-daily": {
+                "task": "billing.invoice_generation",
+                "schedule": crontab(hour=0, minute=15),
+            },
+            "billing-dunning-daily": {
+                "task": "billing.dunning",
+                "schedule": crontab(hour=1, minute=0),
+            },
+            "billing-receipt-daily": {
+                "task": "billing.receipt_generation",
+                "schedule": crontab(hour=1, minute=45),
+            },
+            "billing-reconciliation-daily": {
+                "task": "billing.reconciliation",
+                "schedule": crontab(hour=2, minute=0),
+            },
         },
     )
 

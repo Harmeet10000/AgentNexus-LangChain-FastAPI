@@ -12,7 +12,10 @@ from typing import (
 from fastapi import WebSocket, WebSocketException, status
 from fastapi_limiter.depends import WebSocketRateLimiter
 from pydantic import BaseModel, ConfigDict
-from pyrate_limiter import Limiter, Rate, RedisBucket
+from pyrate_limiter import Limiter, Rate
+from pyrate_limiter.buckets import InMemoryBucket, RedisBucket
+
+from app.utils import logger
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -86,28 +89,38 @@ def _raise_websocket_rate_limit(*_: object, **__: object) -> None:
 
 
 async def build_websocket_security_service(
-    redis: Redis,
+    redis: Redis | None,
     settings: Settings,
 ) -> WebSocketSecurityService:
-    user_bucket = await RedisBucket.init(
-        [
-            Rate(
-                settings.WEBSOCKET_USER_MESSAGE_RATE, settings.WEBSOCKET_USER_MESSAGE_PERIOD_SECONDS
+    user_rates = [
+        Rate(settings.WEBSOCKET_USER_MESSAGE_RATE, settings.WEBSOCKET_USER_MESSAGE_PERIOD_SECONDS)
+    ]
+    connection_rates = [
+        Rate(
+            settings.WEBSOCKET_CONNECTION_MESSAGE_RATE,
+            settings.WEBSOCKET_CONNECTION_MESSAGE_PERIOD_SECONDS,
+        )
+    ]
+
+    if redis is not None:
+        try:
+            user_bucket = await RedisBucket.init(user_rates, redis, "ws:user:messages")
+            connection_bucket = await RedisBucket.init(
+                connection_rates,
+                redis,
+                "ws:connection:messages",
             )
-        ],
-        redis,
-        "ws:user:messages",
-    )
-    connection_bucket = await RedisBucket.init(
-        [
-            Rate(
-                settings.WEBSOCKET_CONNECTION_MESSAGE_RATE,
-                settings.WEBSOCKET_CONNECTION_MESSAGE_PERIOD_SECONDS,
+        except Exception as exc:
+            logger.warning(
+                "Redis-based WebSocket rate limiter failed, falling back to in-memory bucket",
+                error=str(exc),
             )
-        ],
-        redis,
-        "ws:connection:messages",
-    )
+            user_bucket = InMemoryBucket(user_rates)
+            connection_bucket = InMemoryBucket(connection_rates)
+    else:
+        user_bucket = InMemoryBucket(user_rates)
+        connection_bucket = InMemoryBucket(connection_rates)
+
     user_limiter = WebSocketRateLimiter(
         limiter=Limiter(user_bucket),
         identifier=_websocket_rate_identifier,

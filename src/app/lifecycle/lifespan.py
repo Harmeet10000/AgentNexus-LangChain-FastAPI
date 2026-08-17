@@ -64,7 +64,7 @@ async def setup_mongodb(
         )
         await mongo_client.admin.command(command="ping")
         server_info = await mongo_client.server_info()
-    except (ConnectionError, TimeoutError, OSError, Exception) as exc:
+    except (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError) as exc:
         logger.warning("MongoDB startup failed, continuing without document store", error=str(exc))
         return None
 
@@ -81,7 +81,7 @@ async def setup_neo4j() -> AsyncDriver | None:
     try:
         neo4j_driver = await init_neo4j()
         await neo4j_driver.verify_connectivity()
-    except (ConnectionError, TimeoutError, OSError, Exception) as exc:
+    except (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError) as exc:
         logger.warning("Neo4j startup failed, continuing without graph features", error=str(exc))
         return None
 
@@ -128,13 +128,13 @@ async def _init_outbox_relay(app: FastAPI, celery_app: Celery | None) -> None:
         session_factory=app.state.db_session_local,
     )
     await relay.run_startup_scan()
-    app.state.outbox_relay_task = asyncio.create_task(coro=relay.run_listener())  # type: ignore
+    app.state.outbox_relay_task = asyncio.create_task(coro=relay.run_listener())
     app.state.outbox_relay = relay
     logger.info("Outbox relay started")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR0912 — lifespan initializes 15+ optional dependencies
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR0914, PLR0915
     """Manage application startup and shutdown with parallel execution."""
     settings = get_settings()
     logger.info("Application starting", app_name=app.title, version=app.version)
@@ -169,7 +169,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
 
     try:
         app.state.db_engine, app.state.db_session_local = pg_task.result()
-    except Exception as exc:
+    except (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError) as exc:
         msg = f"PostgreSQL startup failed: {exc}"
         raise ServiceUnavailableException(msg) from exc
 
@@ -198,7 +198,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
         app.state.neo4j_driver = None
 
     app.state.websocket_security = await build_websocket_security_service(
-        redis=app.state.redis,
+        redis=getattr(app.state, "redis", None),
         settings=settings,
     )
 
@@ -283,7 +283,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
     # Outbox relay (uses existing database session factory)
     try:
         await _init_outbox_relay(app, celery_app)
-    except Exception as exc:
+    except (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError) as exc:
         exc.add_note("operation=setup_outbox_relay")
         logger.warning("Outbox relay startup failed, continuing without outbox", error=str(exc))
         app.state.outbox_relay = None
@@ -322,12 +322,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
             logger.info("Outbox relay stopped")
 
         # Close HTTPX client
-        if hasattr(app.state, "httpx_client"):
-            await app.state.httpx_client.aclose()
+        httpx_client = getattr(app.state, "httpx_client", None)
+        if httpx_client is not None:
+            await httpx_client.aclose()
 
         # Close Tavily HTTP client
-        if hasattr(app.state, "tavily_http_client"):
-            await close_tavily_http_client(app.state.tavily_http_client)
+        tavily_http_client = getattr(app.state, "tavily_http_client", None)
+        if tavily_http_client is not None:
+            await close_tavily_http_client(tavily_http_client)
 
         if hasattr(app.state, "graphiti"):
             await close_graphiti(app.state.graphiti)
@@ -336,18 +338,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0915, PLR09
             await close_crawl4ai_crawler(app.state.crawl4ai_crawler)
 
         # MongoDB close is synchronous - run outside TaskGroup
-        if hasattr(app.state, "mongo_client"):
-            app.state.mongo_client.close()
+        mongo_client = getattr(app.state, "mongo_client", None)
+        if mongo_client is not None:
+            mongo_client.close()
 
         async with asyncio.TaskGroup() as tg:
-            if hasattr(app.state, "redis"):
-                tg.create_task(coro=app.state.redis.aclose(close_connection_pool=True))
-            if hasattr(app.state, "db_engine"):
-                tg.create_task(coro=app.state.db_engine.dispose())
-            if hasattr(app.state, "neo4j_driver"):
-                driver = app.state.neo4j_driver
-                if driver is not None:
-                    tg.create_task(coro=close_neo4j_driver(driver=driver))
+            redis_client = getattr(app.state, "redis", None)
+            if redis_client is not None:
+                tg.create_task(coro=redis_client.aclose(close_connection_pool=True))
+
+            db_engine = getattr(app.state, "db_engine", None)
+            if db_engine is not None:
+                tg.create_task(coro=db_engine.dispose())
+
+            neo4j_driver = getattr(app.state, "neo4j_driver", None)
+            if neo4j_driver is not None:
+                tg.create_task(coro=close_neo4j_driver(driver=neo4j_driver))
         # Shutdown OpenTelemetry (flush remaining spans/metrics/logs)
         shutdown_otel()
 

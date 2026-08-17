@@ -1,0 +1,11 @@
+id: no-match-on-result
+language: python
+severity: warning
+message: Use `isinstance(result, Failure)` — match/case does not narrow Result for ty.
+note: |
+  RESULT-PATTERN.md anti-pattern 2 — match/case on Success/Failure creates no-op
+  branches (`case Success(): pass`) and `ty` does not narrow the type through
+  them, so `.unwrap()` stays untyped. isinstance narrows correctly.
+rule:
+  kind: case_pattern
+  regex: ^(Success|Failure)\(\s*\)$

@@ -1,0 +1,13 @@
+id: no-log-failure-or-chain
+language: python
+severity: error
+message: Side-effect `or` chain — split into two statements.
+note: |
+  RESULT-PATTERN.md anti-pattern 4 — this relies on log_expected_failure()
+  returning None so the right operand evaluates. The logging call reads as a
+  condition when it is a side effect.
+
+    log_expected_failure(error, operation="login")   # ✓ two statements
+    return http_error(...)
+rule:
+  pattern: log_expected_failure($$$ARGS) or $RIGHT
