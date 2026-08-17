@@ -1,0 +1,13 @@
+id: no-raise-app-error-mapper
+language: python
+severity: warning
+message: Retired pattern — answer expected failures with http_error(), do not raise the typed error.
+note: |
+  RESULT-PATTERN.md Pattern 1 — `http_error()` is the only error formatter at the
+  service-layer ownership boundary. `app_error_to_exception` survives in
+  shared/result/mappers.py for legacy call sites; new code must not raise it.
+
+    log_expected_failure(error, operation="find_by_email")
+    return http_error(message=error.message, status_code=..., error_code=error.code)
+rule:
+  pattern: raise app_error_to_exception($$$ARGS)

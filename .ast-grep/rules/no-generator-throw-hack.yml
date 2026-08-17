@@ -1,0 +1,10 @@
+id: no-generator-throw-hack
+language: python
+severity: error
+message: Generator .throw() hack — use `isinstance(result, Failure)` + http_error() instead.
+note: |
+  RESULT-PATTERN.md anti-pattern 3 — `(_ for _ in ()).throw(...)` raises from
+  inside an expression so it can sit in a ternary or comprehension. It is
+  obscure, untestable, and produces a traceback through a dead generator frame.
+rule:
+  pattern: (_ for _ in ()).throw($$$ARGS)

@@ -1,20 +1,68 @@
-schema: spec-driven
+schema: spec-gated
 
 # Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+# Injected into every artifact instruction so the AI plans against real
+# conventions instead of generic ones.
+context: |
+  langchain-fastapi-production: production-grade async FastAPI + LangChain
+  backend. Python 3.12, uv package manager, modular monolith, async-first.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  Stack: FastAPI, Pydantic v2, LangChain 1.x, LangGraph, SQLAlchemy 2 + asyncpg,
+  Beanie (MongoDB/motor), Neo4j, Redis (redis.asyncio), Celery, loguru.
+
+  Conventions (authoritative: .opencode/instructions/):
+  - Layering: thin FastAPI routers, service layer, repository layer. No HTTP
+    concerns in repos. Classes only for stateful components.
+  - Dependencies use typing.Annotated (Depends/Query/Header); shared clients
+    live in lifespan and are read from connection.app.state.
+  - Async-first: all I/O through async clients (asyncpg, motor, redis.asyncio);
+    bounded fan-out via asyncio.gather; no blocking calls in async functions.
+  - Errors: typed hierarchy in src/app/utils/exceptions.py (ValidationException,
+    NotFoundException, ConflictException, UnauthorizedException,
+    ExternalServiceException). Service code unwraps repository AppResult with
+    isinstance(result, Failure) then log_expected_failure(...) and
+    http_error(...); never raise the typed error, never match/case on
+    Success/Failure, never chain log_expected_failure(...) or ...
+  - Secrets: Pydantic SecretStr; always call .get_secret_value(), never str()
+    or repr on a SecretStr.
+  - Response envelope: APIResponse from src/app/shared/response_type.py;
+    routers return http_response(...). Uniform error shape success/statusCode/
+    error/request.
+  - Typing: ruff + ty gate the merge; PEP 695 generics on Python 3.12; no
+    blanket type ignores; always use uv run for tooling.
+
+  Tooling: uv sync, then uv run ruff format src/, uv run ruff check src/,
+  uv run ty check src/ before finishing code work.
+
+# Per-artifact rules
+rules:
+  proposal:
+    - Why goal in 1-2 sentences; What Changes as a specific bullet list.
+    - Capabilities section names kebab-case specs, checking openspec/specs/ for
+      existing names first. Mark BREAKING changes explicitly.
+    - Keep it 1-2 pages; no implementation detail.
+  specs:
+    - One spec file per capability named in the proposal.
+    - Requirements use SHALL/MUST (avoid should/may); each has a scenario.
+    - Scenarios MUST use exactly 4 hashtags (####) followed by WHEN/THEN.
+    - MODIFIED requirements copy the ENTIRE existing requirement block.
+  tasks:
+    - Checkboxes - [ ] N.M Description - under ## N section headings.
+    - Small enough to complete in one session; ordered by dependency.
+    - Each task must be verifiable.
+
+# Operation guidance - advisory advice for apply and archive work
+operations:
+  apply:
+    guidance:
+      - Run uv sync then uv run ruff format src/ and uv run ruff check src/.
+      - Run uv run ty check src/ and fix type errors before finishing.
+      - Run ast-grep scan and fix any rule violations in changed files.
+      - Check tasks off in tasks.md as they are completed.
+  archive:
+    guidance:
+      - Keep the completion summary concise — state what shipped and what
+        changed.
+      - Confirm all tasks are complete before archiving.
+githubCopilot:
+  cloudAgent: false

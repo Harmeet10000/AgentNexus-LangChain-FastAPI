@@ -1,16 +1,22 @@
 ## Search strategy
 
-Use the `orient` skill (`.opencode/skills/orient/`) for all codebase and external context search — the escalation: codegraph → graphify → ast-grep → grep for local code, Context7 → firecrawl for external. Reach before grep/rg.
+`.opencode/skills/orient/SKILL.md` is the **sole authority** on search routing — read it and follow its table. There is no fixed escalation order and no mandatory first tool: route on what you hold (a name → `codegraph_explore`; a concept → `graphify query` then codegraph; a string → `rg` as a discoverer; a shape → `ast-grep`). External context: Context7 for library docs, firecrawl for the rest.
 
-After modifying code, run `graphify update .` to keep the graph current.
+**Stop rule:** two discovery calls, then answer or state the narrowed question.
+
+After modifying code, both indexes refresh via hooks (`codegraph sync` per edit, `graphify update .` at turn end). Verify with `uv run ruff check --fix src/`, `uv run ty check src/`, `uv run pytest`, `ast-grep scan src/`.
 
 ## Matt Pocock skills
 
 Before loading any Matt Pocock skill (`~/.agents/skills/`), ask which one to use. Ask as many questions as required to remove doubt. Dont be lazy. Out do yourself. 
 
-# Your role
+## Response Priority & Tone
 
-Prioritize deep, first principles thinking, insider-level knowledge that reveals how systems actually work beneath the abstraction layers. Focus on the first principles thinking, architectural reasoning, and uncommon patterns that experienced engineers rely on but rarely document. Conclude each answer with a block of information meant only for the "chosen ones" that only a select few would know. It should contain insights that puts me one step ahead of everyone.
+1. **Answer the question with first-principles depth**: Explain how systems actually work beneath the abstraction layers, focusing on nuances, architectural reasoning, and uncommon patterns experienced engineers rely on but rarely document.
+2. **If multiple options exist**: Provide a pros/cons table so you can make an informed choice.
+3. **Append "Deep Internals" section**: Include 1–3 non-obvious technical facts directly relevant to the current question—specifically about the libraries, APIs, or patterns discussed—that are underdocumented or counterintuitive.
+4. **If context is missing**: Ask one focused clarifying question instead of proceeding (e.g., "Which floor?", "Which coordinate space?").
+5. **Token compression (caveman skill)**: Use only when explicitly requested; it does not apply by default.
 
 # Detailed rules
 
@@ -26,13 +32,17 @@ Full project rules live in `.opencode/instructions/`. Open this directory and re
 | `EXCEPTION-RULES.md` | raise vs catch, APIException hierarchy, e.add_note(), GEH dispatch |
 | `REFERENCE-MAP.md` | Key source files, graphify, Context7 |
 
-<!-- CODEGRAPH_START -->
-## CodeGraph
+## graphify
 
-In repositories indexed by CodeGraph (a `.codegraph/` directory exists at the repo root), reach for it BEFORE grep/find or reading files when you need to understand or locate code:
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
 
-- **MCP tool** (when available): `codegraph_explore` answers most code questions in one call — the relevant symbols' verbatim source plus the call paths between them, including dynamic-dispatch hops grep can't follow. Name a file or symbol in the query to read its current line-numbered source. If it's listed but deferred, load it by name via tool search.
-- **Shell** (always works): `codegraph explore "<symbol names or question>"` prints the same output.
+When the user types `/graphify`, invoke the `skill` tool with `skill: "graphify"` before doing anything else.
 
-If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is the user's decision.
-<!-- CODEGRAPH_END -->
+Rules:
+- Route by the orient table — `graphify query` is the entry point for **concepts without a name**, not for every question. Pass `--budget 12000`; the default 2000 drops ~23% of the traversal. `query` returns names only; `path` and `explain` return edges.
+- Depth on `query` is hardcoded at 2. To go deeper, re-seed from a frontier symbol with `explain`/`path`/`affected --depth N`.
+- Community names are hub-derived and churn on every update — never reference one by name.
+- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- Refresh is hooked. By hand: `graphify update .` (25s, AST-only, no API cost); `--force` after a refactor that deletes code; never `--no-cluster` (drops every community).

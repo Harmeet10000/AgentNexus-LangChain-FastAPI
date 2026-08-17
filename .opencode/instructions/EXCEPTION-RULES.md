@@ -15,11 +15,14 @@ starlette.exceptions.HTTPException  (re-exported as fastapi.HTTPException)
         ├── ConflictException               → 409  (detail, data?)
         ├── TooManyRequestsException        → 429
         ├── ServiceUnavailableException     → 503
+        ├── InfrastructureException         → 500/503  (retryable flag picks the status)
         ├── DatabaseException               → 500  (original_exc?)
         └── ExternalServiceException        → 502  (service, detail)
 ```
 
-`APIException` **extends** `starlette.exceptions.HTTPException` (imported as `fastapi.HTTPException`). All subclasses are valid `HTTPException` instances: Starlette/FastAPI native handlers can catch them. The Global Exception Handler (`global_exception_handler.py`) intercepts them FIRST via `isinstance(exc, APIException)` to extract rich detail (`error_code`, `data`, structured `message`).
+`APIException` **extends** `starlette.exceptions.HTTPException` (imported as `fastapi.HTTPException`). All subclasses are valid `HTTPException` instances: Starlette/FastAPI native handlers can catch them. The Global Exception Handler (`global_exception_handler.py`) intercepts them FIRST via `isinstance(exc, APIException)` to extract rich detail (`error_code`, `data`, structured `message`), then formats the envelope with `http_error()`.
+
+`AppError` (typed Result failures) is **never** handled by the Global Exception Handler — it is a Pydantic model, not an `Exception`, and is never raised. It exists only inside `AppResult[T]` return values at repository/adapter boundaries. Expected `AppError` failures are answered with `http_error()` at the service-layer ownership boundary — they are NOT raised (see "Result bridge pattern" below). The GEH's only formatter is `http_error()`.
 
 ## Raise — let GEH handle it
 
@@ -101,18 +104,23 @@ Do NOT use `add_note` when:
 
 ## Result bridge pattern
 
-Repositories return `AppResult[T]` (`Result[T, AppError]` from `returns`). Service boundaries unwrap:
+Repositories return `AppResult[T]` (`Result[T, AppError]` from `returns`). Service boundaries unwrap. Expected failures are NOT raised — log them, then answer with `http_error()`:
 
 ```python
 result = await repo.find_by_email(email)
 if isinstance(result, Failure):
     error = result.failure()
     log_expected_failure(error, operation="find_by_email")
-    raise app_error_to_exception(error)
+    return http_error(
+        message=error.message,
+        status_code=...,  # derive from error.kind (422 / 404 / 409 / 502 / 500-503)
+        error_code=error.code,
+        data=error.details,
+    )
 user = result.unwrap()
 ```
 
-The mapper (`app_error_to_exception` in `shared/result/mappers.py`) converts `AppError` subtypes to `APIException` subclasses without losing error code or detail. See `RESULT-PATTERN.md` for the full dual-method pattern.
+Raising the typed error (`raise app_error_to_exception(error)`) is removed from the pattern — `http_error()` is the only error formatter at this boundary. The mapper (`app_error_to_exception` in `shared/result/mappers.py`) still exists for legacy call sites; new code does not raise it. See `RESULT-PATTERN.md` for the full dual-method pattern.
 
 ## LangGraph nodes
 

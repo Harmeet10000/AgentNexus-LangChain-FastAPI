@@ -215,6 +215,14 @@ It will be compatible before version 2.0.0.
 208. check if the patterm matching is usefull as written after ruff rules with raise keyword   DONE
 209. make a new skill for codebase search  DONE
 207. only enable OTEL in prod and not in dev    DONE
+212. update orient skill, grpahify, everything related to it  DONE
+213. update the orient skills, graphify and others in docs/   DONE
+214. add memory DB from tencent and compare with cognee, honcho   DONE
+216. check if cognee is actually working within github copilot and add it in opencode as well  DONE
+217. customise openspec, ast-grep  DONE
+215. add knowledge from other projects and this to OFK folder including agent, DB, python, JS/TS optimisations, skills, BDD, research for SDD from gemini chat history, set of best practices for deployment, version pinning, maintaining docker image history with git commit hash, terraform practices, book wisdom. add research done in Kiro. use OpenWiki if it suits and see cole medin videos for organising files in a scalable manner, ring buffers, debugging tips, eBPF, how ABI works, how to make FFIs, SGLang and vLLM, webhooks, errors best practices, finance and other stuff as well  DONE
+211. check agent router usage  DONE
+136. use LangExtract outputs to build rich graph knowledge from your legal documents.  ABANDONDED
 
 161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
 type Composable = Callable[[Any], Any]
@@ -266,12 +274,19 @@ But a lot of current Agent Saul / precedent / reconciliation code still reads cl
 Do you want me to:
 - A. keep the architecture clean now: new documents/chunks become the only retrieval substrate, and any old code still tied to clauses is left stale/disabled until second pass   
 185. remove ts_vector(think if it is required here or other extension can do the job here) from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
-190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
-155. complete the ingestion pipeline to working condition and see where reconciliation comes init
+
+
+148. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
+57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
+165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384     
+195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
+196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node 
+210. fix ingestion -> docuements -> tools -> cognee
+155. complete the ingestion pipeline to working condition and see where reconciliation comes init. i want to remove reconciliation and replace it with agent memory made with cognee entirely.
 todos:-
     1. toons reusable , point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
     a. docling - Legal docs need hierarchical chunking, convert dataclass to pydantic models, use embedders(batch, chunks, etc) to reusable function in langchain_layer, remove Grapgiti initilisation from here
-    b. langextract and pageindex
+    b. langextract and pageindex(leave this for now if not currently implemented)
     c. graphiti refactor
     d. postgres RAG should be agentic
     e. celery for off loading to a queue
@@ -279,24 +294,16 @@ todos:-
     g. pass default and metadata for particular config in pydantic models for agents
     h. research for RAG pipeline with Gemini
     i. use MessagesState to standardise the moving of data between Agent A and Agent 
-    j. use tenacity for retries, new capabilities, output format from chatpromptparts, check newer things F-S-A-T-O-F as capabilites, output format can be outside System Prompt
+    j. use tenacity for retries, new capabilities, output format from chatpromptparts,
+190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
 
-148. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
-57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
-165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384     
-136. use LangExtract outputs to build rich graph knowledge from your legal documents.
-195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
-196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node 
-210. fix ingestion -> docuements -> tools -> cognee
-211. check agent router usage
-
+218. add a small gloassary of the project from the screenshot, we are open at the core, we share about are roadmap, how we think about things, and of course we share all our code and should strive to be in that way. its important to maintian the things they live and iterate over the product. 
+219.  add in the system prompt to add a search, implementation, verifier, reviewer, check if i can give specific system propmts, skills, tools, MCP servers to subagents, defining models for subagents, permissions
+220. check the alembic warning having 2 heads
 ```
-
 summarise these chapters in great detail and take video's transcript as reference for summarising
 
 summarise this video in great detail and depth by dividing it into 5 minute chunk and take video's transcript as reference for summarising
-
-
 
 
 
@@ -636,6 +643,51 @@ Visualize and resolve back pressure issues by adjusting delivery rates.
 Debug and trigger manual retries for failed events.
 
 Web Locks 
+
+This video presents a comprehensive framework for creating high-quality AI agent skills, aiming to help developers navigate what the presenter calls "skill hell."
+
+### **0:00 - 5:00: Introduction & The Skill Checklist Framework**
+Matt Pocock introduces the concept of **"skill hell,"** a situation where developers have access to many skills but lack a shared rubric or framework for building effective ones (0:52). To solve this, he proposes a **four-part skill checklist**: 
+1. **Trigger:** How the skill is invoked (3:16).
+2. **Structure:** The internal composition of steps and references (7:29).
+3. **Steering:** Guiding agent behavior through leading words (11:54).
+4. **Pruning:** Minimizing the skill by removing unnecessary elements (16:48).
+
+He discusses the trade-off between **user-invoked** and **model-invoked** skills (3:36). While model-invoked skills offer flexibility, they increase "context load" on the agent and introduce unpredictability (5:23). User-invoked skills keep the context load low but require more cognitive effort from the user/pilot (5:53).
+
+### **5:00 - 10:00: Structure & Minimizing Skill.md**
+Continuing the discussion on triggers, the presenter explains that he favors user-invoked skills to avoid the unpredictability of agents deciding whether to call a skill (6:36). He then transitions to **Structure** (7:29). A well-designed skill should be split into **steps** (the procedure) and **reference** (supporting info) (7:38). To keep the `skill.md` file minimal, he recommends offloading branching reference material—material not needed in every execution branch—into separate markdown files linked by **context pointers** (9:00 - 11:53).
+
+### **10:00 - 15:00: Steering with Leading Words & Leg Work**
+This section focuses on **Steering** (11:54), the method for ensuring an agent follows instructions precisely. He introduces **"leading words"**—dense, high-meaning terms like "vertical slice" that trigger an agent’s prior knowledge and align its reasoning traces with the developer's intent (12:22). He emphasizes that when an agent fails to perform a task, it often needs more **"leg work"** per step (14:56). A powerful technique is to break complex, multi-step processes into smaller, individual skills to force the agent to focus solely on the current phase without prematurely attempting to reach the final goal (16:01).
+
+### **15:00 - 20:43: Pruning & Final Summary**
+In the final segment, the focus shifts to **Pruning** (16:48). This involves maintaining a clean skill set by:
+* **Avoiding duplication:** Ensuring every part of a skill has a single source of truth (17:15).
+* **Removing sediment:** Deleting stale or irrelevant legacy material from shared files (17:41).
+* **Eliminating "no-ops":** Removing instructions that do not actually change agent behavior (18:26).
+
+The video concludes by summarizing the framework (19:06) and directing viewers to his GitHub repository for a practical implementation of these "writing great skills" techniques (19:55).
+
+This video explains how to perform **zero-downtime database migrations** using the **Expand-Contract pattern**. This pattern is essential for mission-critical applications where even a second of downtime is unacceptable.
+
+### **Phase 1: Concept and Initial Setup (0:00 - 5:00)**
+*   **The Problem:** In a typical rolling update (e.g., using *Kubernetes*), you may have multiple versions of an application running simultaneously. If your database migration involves a breaking change—like renaming a column—the old version of your application will fail when it attempts to access the new schema, leading to 500 errors and downtime.
+*   **The Solution (Expand-Contract):** This pattern allows you to transition your database schema without breaking changes by separating the process into phases:
+    1.  **Expand:** Introduce new schema elements (e.g., a new column) while keeping the old ones intact.
+    2.  **Migrate:** Use the application to support both the old and new columns, and run backfill jobs to sync data.
+    3.  **Contract:** Once the new structure is fully adopted and verified, remove the legacy schema components.
+
+### **Phase 2: Technical Execution and Verification (5:00 - 6:36)**
+*   **Implementation Details:**
+    *   **Dual Writes:** During the transition, the application must write to both the old and new columns to ensure data consistency.
+    *   **Backfill Jobs:** Use background jobs to copy historical data from the old column to the new one. These jobs should be idempotent, meaning they can safely run repeatedly until all missing data is migrated.
+    *   **Read Strategy:** Gradually shift the application from reading the old column to reading the new column only after the data has been verified.
+*   **The Final Steps:**
+    *   **Verify:** Before cleaning up, you must perform a thorough verification to ensure no hidden processes (like *cron jobs*, *BI tools*, or *database triggers*) are still relying on the old field.
+    *   **Contracting:** Only after complete confirmation should you deploy the final code that exclusively uses the new structure and perform a final cleanup by dropping the old column.
+
+By following these steps, you ensure that your application remains functional throughout the entire migration process, regardless of which version is handling the request.
 
 ```markdown
 

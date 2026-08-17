@@ -19,18 +19,23 @@ The billing engine manages the complete subscription lifecycle including plan ma
     - Implement `models/plan.py` with `Plan`, `BillingInterval` enum
     - Implement `models/subscription.py` with `Subscription`, `SubscriptionStatus` enum
     - Implement `models/payment.py` with `Payment`, `PaymentStatus`, `PaymentMethod` enums
-    - Implement `models/invoice.py` with `Invoice`, `InvoiceStatus` enum, GST fields
+    - Implement `models/invoice.py` with `Invoice`, `InvoiceStatus` enum, GST fields, SAC code
+    - Implement `models/receipt.py` with `PaymentReceipt`, `PaymentMethod` enums
     - Implement `models/webhook.py` with `WebhookEvent`, `WebhookEventType`, `WebhookEventStatus` enums
     - Implement `models/audit.py` with `AuditLog`, `AuditAction` enum
-    - _Requirements: 1.1, 1.2, 2.1, 8.1, 12.1, 14.1, 16.1_
+    - **NEW: Fix GST tax calculation: subtotal = amount / 1.18, tax = subtotal * 0.18 (GST inclusive)**
+    - **NEW: Use ROUND_HALF_EVEN for CGST/SGST split to ensure exact equality**
+    - _Requirements: 1.1, 1.2, 2.1, 8.1, 12.1, 14.1, 16.1, 28.1, 36.1_
 
   - [ ] 1.3 Create SQLAlchemy/Alembic database schema
-    - Define SQLAlchemy table models for plans, subscriptions, payments, invoices, webhook_events, audit_logs
+    - Define SQLAlchemy table models for plans, subscriptions, payments, invoices, receipts, webhook_events, audit_logs
     - Add foreign key constraints (subscription.plan_id → plans.id, payment.subscription_id → subscriptions.id)
-    - Add unique constraints (invoice.invoice_number, webhook_event.razorpay_event_id)
-    - Add CHECK constraints (payment amount validation, tax calculation validation)
+    - Add unique constraints (invoice.invoice_number, receipt.receipt_number, webhook_event.razorpay_event_id)
+    - Add CHECK constraints (payment amount validation, tax calculation validation, GST inclusive check)
+    - **NEW: Add CHECK constraint: total * 100 == payment.amount (GST inclusive - Property 1)**
+    - **NEW: Add CHECK constraint: cgst + sgst = tax_amount for intra-state (exact using ROUND_HALF_EVEN)**
     - Create Alembic migration script for billing tables
-    - _Requirements: 1.1, 1.2, 8.6, 12.9, 14.7, 26.6_
+    - _Requirements: 1.1, 1.2, 8.6, 12.9, 14.7, 26.6, 28.1, 36.1_
 
 - [ ] 2. Implement DTO layer and validation
   - [ ] 2.1 Create request/response DTOs
@@ -206,15 +211,18 @@ The billing engine manages the complete subscription lifecycle including plan ma
     - Implement `generate_invoice()` with sequential invoice numbering
     - **NEW: Snapshot tax_rate from plan at invoice creation time**
     - **NEW: Store snapshotted tax_rate in invoice model**
-    - Implement GST tax calculation: `tax_amount = subtotal * tax_rate`, `total = subtotal + tax_amount`
-    - Implement intra-state tax split: `cgst = sgst = tax_amount / 2`, `igst = 0`
+    - **NEW: GST INCLUSIVE calculation: subtotal = amount / 1.18, tax = subtotal * 0.18**
+    - **NEW: Use ROUND_HALF_EVEN for CGST/SGST split to ensure exact equality**
+    - Implement intra-state tax split: `cgst = sgst = tax_amount / 2` (with ROUND_HALF_EVEN), `igst = 0`
     - Implement inter-state tax: `igst = tax_amount`, `cgst = sgst = 0`
     - Implement GSTIN format validation (15 alphanumeric characters)
+    - Implement SAC code validation (998314/998315 for SaaS)
     - Implement `generate_proration_invoice()` for mid-cycle plan changes
     - Implement `generate_credit_note()` for refunds and downgrades
+    - Implement `generate_payment_receipt()` for payment acknowledgment (non-taxable)
     - Implement `get_invoice()`, `list_invoices()` with user authorization
     - Create audit log entries for invoice generation
-    - _Requirements: 12.1-12.10, 13.1-13.5, 28.1-28.6, 32.1-32.7_
+    - _Requirements: 12.1-12.10, 13.1-13.5, 27.1-27.7, 28.1-28.6, 32.1-32.7, 36.1-36.5, 37.1-37.6, 38.1-38.5_
 
   - [ ]* 10.2 Write property test for GST tax calculation
     - **Property 5: GST Tax Calculation Compliance**
@@ -237,6 +245,14 @@ The billing engine manages the complete subscription lifecycle including plan ma
     - Implement `send_invoice_email()` with PDF attachment
     - Integrate with email service (SMTP or cloud email service)
     - _Requirements: 18.4_
+    
+  - [ ] 10.5 Implement payment receipt generation
+    - Implement `generate_payment_receipt()` for payment acknowledgment (non-taxable)
+    - Generate receipt_number (sequential format: REC-2024-0001)
+    - Include payment ref, amount, method, date, plan/period
+    - Generate PDF receipt with simpler format than invoice
+    - Store receipt in cloud storage with presigned URL
+    - _Requirements: 28.1-28.6, 36.1-36.5_
 
 - [ ] 11. Implement Webhook Service
   - [ ] 11.1 Implement Webhook Service
@@ -275,7 +291,7 @@ The billing engine manages the complete subscription lifecycle including plan ma
     - Implement `get_retry_schedule()` returning retry history
     - Schedule retry tasks via Celery with appropriate delays
     - Log scheduled retry times with jitter information for debugging
-    - _Requirements: 9.1-9.8, 21.1-21.5, 30.1-30.5_
+    - _Requirements: 9.1-9.8, 21.1-21.5, 30.1-30.5, 38.1-38.5_
 
 - [ ] 13. Implement FastAPI routers
   - [ ] 13.1 Create Plan router
@@ -341,17 +357,19 @@ The billing engine manages the complete subscription lifecycle including plan ma
   - [ ] 15.1 Create subscription renewal job
     - Create `tasks/renewal_task.py` with Celery task
     - Schedule job 24 hours before `current_period_end`
-    - Trigger charge via Razorpay API
-    - On success: extend billing period, generate invoice
+    - **NEW: DO NOT trigger charge via Razorpay API - Razorpay auto-charges natively**
+    - **NEW: Reconcile expected charge by checking Razorpay API for actual payment**
+    - **NEW: On mismatch: log discrepancy, alert ops team, attempt manual recovery**
+    - **NEW: On match: extend billing period, generate invoice**
     - On failure: initiate dunning process
-    - _Requirements: 17.1-17.7_
+    - _Requirements: 17.1-17.7, 35.1-35.10_
 
   - [ ] 15.2 Create dunning retry job
     - Create `tasks/dunning_task.py` with Celery task
     - Execute scheduled retry attempts
     - On success: reset retry_count, update status to ACTIVE
     - On failure: increment retry_count, schedule next retry or halt
-    - _Requirements: 9.1-9.8_
+    - _Requirements: 9.1-9.8, 30.1-30.5_
 
   - [ ] 15.3 Create invoice generation job
     - Create `tasks/invoice_task.py` with Celery task
@@ -380,6 +398,14 @@ The billing engine manages the complete subscription lifecycle including plan ma
     - **NEW: Schedule job daily at 2:00 AM UTC via crontab**
     - **NEW: Retry up to 3 times on job failure**
     - _Requirements: 35.1-35.10_
+
+  - [ ] 15.6 Create payment receipt generation job
+    - **NEW: Create `tasks/receipt_task.py` with Celery task**
+    - **NEW: Generate payment receipt on payment.captured webhook**
+    - **NEW: Include receipt_number (sequential), payment ref, amount, method, date, plan/period**
+    - **NEW: Generate PDF receipt (non-taxable, simpler than invoice)**
+    - **NEW: Store receipt in cloud storage with presigned URL**
+    - _Requirements: 28.1-28.6, 36.1-36.5_
 
 - [ ] 16. Implement lifespan and dependency injection
   - [ ] 16.1 Configure lifespan for Razorpay client

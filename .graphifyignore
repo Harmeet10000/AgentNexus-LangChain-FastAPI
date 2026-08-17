@@ -4,8 +4,7 @@
 *
 !src/
 !src/**
-!docs/
-!docs/**
+
 
 # .gitignore entries (within src/ and docs/)
 __pycache__/

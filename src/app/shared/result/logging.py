@@ -7,7 +7,7 @@ from .errors import AppError
 
 def log_expected_failure(error: AppError, *, operation: str | None = None) -> None:
     """Log an expected failure once at the ownership boundary."""
-    flow = " -> ".join(execution_path.get())
+    flow: str = " -> ".join(execution_path.get())
     logger.bind(
         error_code=error.code,
         retryable=error.retryable,

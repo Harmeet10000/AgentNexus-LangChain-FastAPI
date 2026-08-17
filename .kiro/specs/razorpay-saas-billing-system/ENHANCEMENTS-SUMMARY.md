@@ -225,25 +225,30 @@ The following were considered but rejected to avoid unnecessary complexity:
 ## Implementation Impact Summary
 
 ### Requirements Added
-- **7 new requirements** (29-35)
+- **7 new requirements** (29-35) from previous enhancements
+- **1 new requirement** (36) for payment receipt generation
+- **1 renumbered requirement** (36 renamed from duplicate 30 for webhook routing)
 - All existing requirements preserved
 - No breaking changes to original design
 
 ### Tasks Added/Modified
-- **4.1**: Added Tenacity retry decorators
+- **1.2**: Added receipt model, fixed GST tax calculation
+- **1.3**: Added receipt table, added GST inclusive CHECK constraint
+- **10.1**: Added receipt generation, fixed GST calculation, added SAC code
+- **15.5**: Added reconciliation job task
+- **15.6**: New payment receipt generation task
 - **3.2**: Added optimistic locking implementation
 - **7.1**: Added precise decimal arithmetic
 - **10.1**: Added tax rate snapshotting
 - **11.1**: Added replay state validation
 - **12.1**: Added jitter calculation
-- **15.5**: New reconciliation job task
-- **19.1, 19.2**: New constraints and indexes
 
 ### Data Model Changes
 - **Subscription**: Added `version: int` field
 - **Plan**: Added `tax_rate: Decimal` field
-- **Invoice**: Changed `tax_rate` description to "snapshot"
+- **Invoice**: Changed `tax_rate` to "snapshot", added `sac_code: str` field
 - **WebhookEvent**: Added SKIPPED status (implicit)
+- **Receipt**: New PaymentReceipt model added
 
 ### New Dependencies
 - `tenacity` library (retry logic)
@@ -255,11 +260,11 @@ The following were considered but rejected to avoid unnecessary complexity:
 
 All enhancements support the 5 formal correctness properties:
 
-1. **Property 1**: Financial Integrity - Reconciliation catches phantom charges
+1. **Property 1**: Financial Integrity - Reconciliation catches phantom charges, GST inclusive ensures total * 100 == payment.amount
 2. **Property 2**: Webhook Idempotency - State validation prevents replay corruption
 3. **Property 3**: State Machine Validity - Optimistic locking prevents invalid transitions
 4. **Property 4**: Proration Correctness - Decimal precision ensures exact calculations
-5. **Property 5**: GST Tax Compliance - Tax rate versioning preserves historical accuracy
+5. **Property 5**: GST Tax Compliance - Tax rate versioning preserves historical accuracy, CGST+SGST exact equality
 
 ---
 
@@ -284,12 +289,16 @@ All enhancements support the 5 formal correctness properties:
 
 ---
 
+---
+
 ## Rollout Plan
 
 ### Phase 1: Foundation (Tasks 1-4)
 - Add Tenacity decorators to Razorpay client
 - Add version field to Subscription model
 - Add tax_rate field to Plan model
+- Add SAC code to Invoice model
+- Add PaymentReceipt model
 - Database migration
 
 ### Phase 2: Service Layer (Tasks 5-12)
@@ -297,10 +306,13 @@ All enhancements support the 5 formal correctness properties:
 - Add jitter to dunning service
 - Implement decimal precision in proration
 - Add state validation to webhook replay
+- Implement GST inclusive tax calculation with ROUND_HALF_EVEN
+- Implement receipt generation
 
-### Phase 3: Background Jobs (Task 15.5)
+### Phase 3: Background Jobs (Tasks 15.5-15.6)
 - Implement reconciliation job
-- Schedule daily at 2:00 AM UTC
+- Implement receipt generation job
+- Schedule daily at 2:00 AM UTC via crontab
 - Set up reconciliation report alerts
 
 ### Phase 4: Validation (Tasks 19-21)
@@ -338,13 +350,32 @@ All enhancements support the 5 formal correctness properties:
 - State validation is simple if-checks
 - Decimal precision is arithmetic correctness
 - Reconciliation job is read-only with clear audit trail
+- Receipt generation is straightforward with minimal code
 
 **No custom frameworks or abstractions introduced.**
 
 ---
 
-## Conclusion
+## Timeline Estimate
 
-These 7 enhancements add production-grade resilience to the Razorpay billing system without over-engineering. Total implementation effort: ~2-3 days. All patterns are battle-tested in production SaaS billing systems.
+**Revised Estimate: 3-6 weeks** (was "~2-3 days")
 
-**Bottom line:** The spec is now enterprise-ready. Ship it.
+**Rationale**: The previous estimate was overly optimistic. This spec includes:
+- 23+ implementation tasks
+- 7 services with complete CRUD + business logic
+- 6 background jobs with Celery setup
+- GST-compliant invoicing with PDF generation
+- Payment receipt generation
+- Reconciliation system
+- Full test coverage (unit, integration, property tests)
+- Database migrations
+- API documentation
+- Monitoring/alerting setup
+
+**Breakdown**:
+- Phase 1 (Foundation): 2-3 days
+- Phase 2 (Service Layer): 5-7 days
+- Phase 3 (Background Jobs): 2-3 days
+- Phase 4 (Validation & Documentation): 3-5 days
+
+**Bottom line**: The spec is now enterprise-ready and production-viable.

@@ -563,9 +563,9 @@ class IDunningService(Protocol):
 
 **Interface**:
 ```python
+from decimal import Decimal, ROUND_HALF_EVEN
+from datetime import datetime, UTC
 from typing import Protocol
-from decimal import Decimal
-from datetime import datetime
 from app.features.billing.dto import ProrationCalculation
 
 class IProrationService(Protocol):
@@ -624,12 +624,13 @@ class Plan(BaseModel):
     razorpay_plan_id: str | None = Field(default=None, description="Razorpay plan ID")
     name: str = Field(description="Plan name (e.g., 'Pro', 'Enterprise')")
     description: str | None = Field(default=None)
-    amount: Decimal = Field(description="Plan price in INR (paisa)")
-    currency: str = Field(default="INR")
+    amount: Decimal = Field(description="Plan price in base currency (paisa for INR, cents for USD)")
+    currency: str = Field(default="INR", description="Base currency for this plan (INR, USD, EUR, GBP)")
     interval: BillingInterval = Field(description="Billing frequency")
     interval_count: int = Field(default=1, description="Number of intervals per billing cycle")
     trial_period_days: int = Field(default=0, description="Free trial duration")
     tax_rate: Decimal = Field(default=Decimal("0.18"), description="GST rate (18% = 0.18)")
+    refund_policy: str = Field(default="PRO_RATA", description="Refund policy: FULL, PRO_RATA, NONE")
     is_active: bool = Field(default=True, description="Plan availability")
     features: dict = Field(default_factory=dict, description="Plan features JSON")
     metadata: dict = Field(default_factory=dict, description="Custom metadata")
@@ -686,6 +687,15 @@ class Subscription(BaseModel):
     
     retry_count: int = Field(default=0, description="Failed payment retry attempts")
     max_retries: int = Field(default=4, description="Max retry attempts")
+    
+    # Multi-currency support
+    currency_display: str = Field(default="INR", description="User's preferred display currency")
+    
+    # Trial extension tracking
+    trial_extension_count: int = Field(default=0, description="Number of manual trial extensions granted")
+    
+    # Soft delete for audit compliance
+    deleted_at: datetime | None = Field(default=None, description="Soft delete timestamp")
     
     version: int = Field(default=0, description="Optimistic locking version field")
     
@@ -785,15 +795,16 @@ class Invoice(BaseModel):
     status: InvoiceStatus = Field(default=InvoiceStatus.DRAFT)
     
     subtotal: Decimal = Field(description="Amount before tax")
-    tax_rate: Decimal = Field(description="GST rate snapshot (18% = 0.18)")
+    tax_rate: Decimal = Field(description="GST rate snapshot from plan at invoice creation")
     tax_amount: Decimal = Field(description="Calculated GST")
-    total: Decimal = Field(description="Subtotal + tax")
+    total: Decimal = Field(description="Subtotal + tax (must equal payment.amount/100)")
     currency: str = Field(default="INR")
     
     # GST fields
     seller_gstin: str = Field(description="Seller GSTIN")
     buyer_gstin: str | None = Field(default=None, description="Buyer GSTIN (B2B)")
     place_of_supply: str = Field(description="State code (e.g., '27' for Maharashtra)")
+    sac_code: str = Field(default="998314", description="SAC code for SaaS services (998314/998315)")
     
     # Tax breakdown for intra-state (CGST+SGST) or inter-state (IGST)
     cgst_amount: Decimal = Field(default=Decimal("0"))
@@ -813,12 +824,13 @@ class Invoice(BaseModel):
 
 **Validation Rules**:
 - `invoice_number` must be unique and sequential
-- `total` must equal `subtotal + tax_amount`
+- `total * 100` must equal `payment.amount` (Property 1: No phantom charges, GST inclusive pricing)
 - `tax_amount` must equal `subtotal * tax_rate`
-- For intra-state: `cgst_amount + sgst_amount = tax_amount`, `igst_amount = 0`
+- For intra-state: `cgst_amount + sgst_amount = tax_amount` (exact equality using ROUND_HALF_EVEN), `igst_amount = 0`
 - For inter-state: `igst_amount = tax_amount`, `cgst_amount = sgst_amount = 0`
 - `seller_gstin` must match valid GSTIN format
 - `buyer_gstin` required for B2B transactions
+- `sac_code` must be valid SAC code (998314 or 998315 for SaaS)
 - `paid_at` required when status is PAID
 
 ### Model 5: WebhookEvent
@@ -890,6 +902,14 @@ class AuditAction(str, Enum):
     PAYMENT_FAILED = "payment.failed"
     REFUND_ISSUED = "refund.issued"
     INVOICE_GENERATED = "invoice.generated"
+    INVOICE_VOIDED = "invoice.voided"
+    INVOICE_REISSUED = "invoice.reissued"
+    TRIAL_EXTENSION_REQUESTED = "trial_extension.requested"
+    TRIAL_EXTENSION_APPROVED = "trial_extension.approved"
+    TRIAL_EXTENSION_REJECTED = "trial_extension.rejected"
+    BATCH_INVOICE_GENERATED = "batch.invoice_generated"
+    EMAIL_SENT = "email.sent"
+    REPORT_GENERATED = "report.generated"
 
 class AuditLog(BaseModel):
     """Immutable audit trail for compliance."""
@@ -914,6 +934,384 @@ class AuditLog(BaseModel):
 - `entity_id` must reference valid entity
 - `created_at` is immutable (no updates allowed)
 - `changes` should contain before/after snapshots for critical operations
+- Records are append-only (no DELETE operations)
+
+### Model 7: PaymentReceipt
+
+```python
+from pydantic import BaseModel, Field, ConfigDict
+from decimal import Decimal
+from enum import Enum
+
+class PaymentMethod(str, Enum):
+    CARD = "card"
+    UPI = "upi"
+    NETBANKING = "netbanking"
+    WALLET = "wallet"
+    EMI = "emi"
+
+class PaymentReceipt(BaseModel):
+    """Payment receipt - non-taxable acknowledgment of payment received."""
+    model_config = ConfigDict(frozen=True)
+    
+    id: str = Field(description="UUID primary key")
+    receipt_number: str = Field(description="Sequential receipt number (REC-2024-0001)")
+    subscription_id: str = Field(description="FK to Subscription")
+    payment_id: str = Field(description="FK to Payment")
+    user_id: str = Field(description="FK to User")
+    
+    amount: Decimal = Field(description="Payment amount in INR (not in paisa)")
+    currency: str = Field(default="INR")
+    payment_method: PaymentMethod | None = Field(default=None)
+    
+    razorpay_payment_id: str = Field(description="Razorpay payment ID reference")
+    
+    receipt_date: datetime = Field(description="Date payment was received")
+    billing_period_start: datetime | None = Field(default=None)
+    billing_period_end: datetime | None = Field(default=None)
+    plan_name: str | None = Field(default=None)
+    
+    created_at: datetime
+```
+
+**Validation Rules**:
+- `receipt_number` must be unique and sequential
+- `amount` must match payment.amount / 100 (paisa to INR conversion)
+- `subscription_id` and `payment_id` must reference existing records
+- `receipt_date` must match or follow payment captured_at timestamp
+- Records are append-only (no DELETE operations)
+
+### Model 8: InvoiceVoid
+
+```python
+from pydantic import BaseModel, Field, ConfigDict
+from decimal import Decimal
+from enum import Enum
+
+class VoidReason(str, Enum):
+    INCORRECT_AMOUNT = "incorrect_amount"
+    INCORRECT_TAX = "incorrect_tax"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    CUSTOMER_REQUEST = "customer_request"
+    PLAN_CHANGED = "plan_changed"
+    OTHER = "other"
+
+class InvoiceVoid(BaseModel):
+    """Invoice void record for audit trail and reissue tracking."""
+    model_config = ConfigDict(frozen=True)
+    
+    id: str = Field(description="UUID primary key")
+    original_invoice_id: str = Field(description="FK to Invoice that was voided")
+    void_reason: VoidReason = Field(description="Reason for voiding the invoice")
+    void_description: str | None = Field(default=None, description="Optional description of why")
+    
+    voided_by_user_id: str = Field(description="FK to User who voided the invoice")
+    voided_at: datetime = Field(description="When the invoice was voided")
+    
+    # Copy of original invoice data at time of void
+    original_invoice_number: str = Field(description="Invoice number at time of void")
+    original_subtotal: Decimal = Field(description="Subtotal at time of void")
+    original_tax_rate: Decimal = Field(description="Tax rate at time of void")
+    original_tax_amount: Decimal = Field(description="Tax amount at time of void")
+    original_total: Decimal = Field(description="Total at time of void")
+    original_currency: str = Field(default="INR")
+    
+    # New invoice reference (if reissued)
+    reissued_invoice_id: str | None = Field(default=None, description="FK to new invoice if reissued")
+    
+    created_at: datetime
+```
+
+**Validation Rules**:
+- `original_invoice_id` must reference existing invoice
+- `void_reason` must be valid enum value
+- `voided_by_user_id` must reference existing user
+- `voided_at` must be after original invoice `issued_at`
+- Records are append-only (no DELETE operations)
+
+### Model 9: TrialExtension
+
+```python
+from pydantic import BaseModel, Field, ConfigDict
+from datetime import datetime
+from enum import Enum
+
+class TrialExtensionStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+class TrialExtension(BaseModel):
+    """Manual trial extension record for audit trail."""
+    model_config = ConfigDict(frozen=True)
+    
+    id: str = Field(description="UUID primary key")
+    subscription_id: str = Field(description="FK to Subscription")
+    
+    requested_days: int = Field(description="Number of days requested")
+    approved_days: int = Field(description="Number of days approved (may differ from requested)")
+    
+    status: TrialExtensionStatus = Field(default=TrialExtensionStatus.PENDING)
+    
+    requested_by_user_id: str = Field(description="FK to User who requested extension")
+    requested_at: datetime = Field(description="When extension was requested")
+    
+    approved_by_user_id: str | None = Field(default=None, description="FK to Admin who approved")
+    approved_at: datetime | None = Field(default=None, description="When extension was approved")
+    rejection_reason: str | None = Field(default=None, description="Reason for rejection if rejected")
+    
+    # Updated trial end date (calculated on approval)
+    original_trial_end: datetime | None = Field(default=None, description="Trial end before extension")
+    new_trial_end: datetime | None = Field(default=None, description="Trial end after extension")
+    
+    created_at: datetime
+    updated_at: datetime
+```
+
+**Validation Rules**:
+- `subscription_id` must reference existing subscription
+- `requested_days` must be positive integer (1-365)
+- `approved_days` must be positive integer
+- `requested_by_user_id` must reference existing user
+- `status` transitions: PENDING → APPROVED/REJECTED/CANCELLED
+- Records are append-only (no DELETE operations)
+
+### Model 10: EmailTemplate
+
+```python
+from pydantic import BaseModel, Field, ConfigDict
+from enum import Enum
+
+class EmailType(str, Enum):
+    WELCOME = "welcome"
+    RENEWAL_REMINDER = "renewal_reminder"
+    PAYMENT_FAILED = "payment_failed"
+    PAYMENT_SUCCESS = "payment_success"
+    CANCELLATION = "cancellation"
+    REFUND_ISSUED = "refund_issued"
+    SUBSCRIPTION_PAUSED = "subscription_paused"
+    SUBSCRIPTION_RESUMED = "subscription_resumed"
+
+class EmailTemplate(BaseModel):
+    """Email template for automated billing notifications."""
+    model_config = ConfigDict(frozen=True)
+    
+    id: str = Field(description="UUID primary key")
+    email_type: EmailType = Field(description="Type of email")
+    
+    subject: str = Field(description="Email subject line")
+    body_html: str = Field(description="HTML body template")
+    body_plain: str = Field(description="Plain text body template")
+    
+    # Template variables (placeholders to be replaced)
+    # Example: {user_name}, {invoice_number}, {amount}, {plan_name}, {retry_date}
+    variables: list[str] = Field(default_factory=list, description="List of variable names used")
+    
+    is_active: bool = Field(default=True, description="Whether template is active")
+    created_at: datetime
+    updated_at: datetime
+```
+
+**Validation Rules**:
+- `email_type` must be unique
+- `subject` must be non-empty string
+- `body_html` and `body_plain` must be non-empty strings
+- `variables` must match placeholders in body templates
+- Records support soft-delete (use `is_active` instead of DELETE)
+
+### Model 11: InvoiceBatch
+
+```python
+from pydantic import BaseModel, Field, ConfigDict
+from datetime import datetime
+from enum import Enum
+
+class BatchStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    PARTIAL = "partial"
+
+class InvoiceBatch(BaseModel):
+    """Batch invoice generation record for tracking."""
+    model_config = ConfigDict(frozen=True)
+    
+    id: str = Field(description="UUID primary key")
+    batch_name: str = Field(description="Human-readable batch name (e.g., 'March 2024 Renewals')")
+    
+    status: BatchStatus = Field(default=BatchStatus.PENDING)
+    
+    # Subscription selection criteria
+    plan_ids: list[str] | None = Field(default=None, description="Filter by specific plans")
+    status_filter: list[str] | None = Field(default=None, description="Filter by subscription status")
+    date_from: datetime | None = Field(default=None, description="Renewal period start date range")
+    date_to: datetime | None = Field(default=None, description="Renewal period end date range")
+    
+    # Results
+    total_subscriptions: int = Field(default=0, description="Total subscriptions matching criteria")
+    invoices_generated: int = Field(default=0, description="Successfully generated invoices")
+    failed_count: int = Field(default=0, description="Failed invoice generations")
+    failed_subscriptions: list[str] = Field(default_factory=list, description="Subscription IDs that failed")
+    
+    initiated_by_user_id: str = Field(description="FK to User who initiated batch")
+    initiated_at: datetime = Field(description="When batch was initiated")
+    completed_at: datetime | None = Field(default=None, description="When batch completed")
+    
+    pdf_urls: list[str] = Field(default_factory=list, description="PDF URLs for generated invoices")
+    
+    created_at: datetime
+    updated_at: datetime
+```
+
+**Validation Rules**:
+- `batch_name` must be non-empty string
+- `status_filter` must contain valid SubscriptionStatus values
+- `total_subscriptions` must equal `invoices_generated + failed_count`
+- Records are append-only (no DELETE operations)
+
+### Model 12: Currency
+
+```python
+from pydantic import BaseModel, Field, ConfigDict
+from enum import Enum
+
+class CurrencyCode(str, Enum):
+    INR = "INR"
+    USD = "USD"
+    EUR = "EUR"
+    GBP = "GBP"
+    AUD = "AUD"
+    CAD = "CAD"
+    JPY = "JPY"
+    SGD = "SGD"
+    CHF = "CHF"
+    CNY = "CNY"
+
+class Currency(BaseModel):
+    """Currency configuration with ISO 4217 code."""
+    model_config = ConfigDict(frozen=True)
+    
+    code: CurrencyCode = Field(description="ISO 4217 currency code")
+    name: str = Field(description="Full currency name (e.g., 'Indian Rupee')")
+    symbol: str = Field(description="Currency symbol (e.g., '₹', '$')")
+    iso_number: int = Field(description="ISO 4217 numeric code")
+    decimal_places: int = Field(default=2, description="Default decimal places")
+    
+    is_active: bool = Field(default=True, description="Whether currency is enabled")
+    
+    created_at: datetime
+    updated_at: datetime
+```
+
+**Validation Rules**:
+- `code` must be valid ISO 4217 currency code
+- `iso_number` must be valid ISO 4217 numeric code
+- `decimal_places` must be 0-9
+
+### Model 13: FXRate
+
+```python
+from pydantic import BaseModel, Field, ConfigDict
+from decimal import Decimal
+from datetime import datetime
+from enum import Enum
+
+class FXRateSource(str, Enum):
+    RAZORPAY = "razorpay"
+    RBI = "rbi"
+    ECB = "ecb"
+    MANUAL = "manual"
+
+class FXRate(BaseModel):
+    """Foreign exchange rate for currency conversion."""
+    model_config = ConfigDict(frozen=True)
+    
+    id: str = Field(description="UUID primary key")
+    base_currency: str = Field(description="Base currency code (e.g., 'INR')")
+    target_currency: str = Field(description="Target currency code (e.g., 'USD')")
+    
+    rate: Decimal = Field(description="Exchange rate (how many target per one base)")
+    source: FXRateSource = Field(default=FXRateSource.RAZORPAY, description="Source of the rate")
+    
+    effective_at: datetime = Field(description="When this rate became effective")
+    expires_at: datetime | None = Field(default=None, description="When this rate expires")
+    
+    # Audit
+    fetched_at: datetime | None = Field(default=None, description="When rate was fetched from source")
+    manually_entered_by_user_id: str | None = Field(default=None, description="FK to Admin who entered manually")
+    
+    created_at: datetime
+```
+
+**Validation Rules**:
+- `base_currency` and `target_currency` must be different
+- `rate` must be positive
+- `effective_at` must be before `expires_at` if both set
+- At any given time, only one active rate per currency pair
+
+### Model 14: Report
+
+```python
+from pydantic import BaseModel, Field, ConfigDict
+from datetime import datetime
+from enum import Enum
+
+class ReportType(str, Enum):
+    REVENUE = "revenue"
+    CHURN = "churn"
+    AR_AGING = "ar_aging"
+    TAX LIABILITY = "tax_liability"
+    SUBSCRIPTION_SUMMARY = "subscription_summary"
+    PAYMENT_SUMMARY = "payment_summary"
+
+class ReportFormat(str, Enum):
+    PDF = "pdf"
+    CSV = "csv"
+    XLSX = "xlsx"
+
+class ReportStatus(str, Enum):
+    PENDING = "pending"
+    GENERATING = "generating"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+class Report(BaseModel):
+    """Generated report for analytics and export."""
+    model_config = ConfigDict(frozen=True)
+    
+    id: str = Field(description="UUID primary key")
+    report_type: ReportType = Field(description="Type of report")
+    report_name: str = Field(description="Human-readable report name")
+    
+    status: ReportStatus = Field(default=ReportStatus.PENDING)
+    
+    # Time period
+    date_from: datetime | None = Field(default=None, description="Report period start")
+    date_to: datetime | None = Field(default=None, description="Report period end")
+    
+    # Filters
+    plan_ids: list[str] | None = Field(default=None, description="Filter by plans")
+    user_ids: list[str] | None = Field(default=None, description="Filter by users")
+    
+    # Results
+    generated_at: datetime | None = Field(default=None, description="When report was generated")
+    generated_by_user_id: str | None = Field(default=None, description="FK to User who generated")
+    
+    # Output
+    output_format: ReportFormat = Field(default=ReportFormat.CSV)
+    file_url: str | None = Field(default=None, description="S3/storage URL for report file")
+    row_count: int | None = Field(default=None, description="Number of rows in report")
+    
+    created_at: datetime
+    updated_at: datetime
+```
+
+**Validation Rules**:
+- `report_type` must be valid enum value
+- `date_from` must be before `date_to` if both set
+- `file_url` required when status is COMPLETED
 - Records are append-only (no DELETE operations)
 
 ## Algorithmic Pseudocode
@@ -1440,16 +1838,28 @@ async def generate_invoice(
     # Step 3: Generate sequential invoice number
     invoice_number = await generate_invoice_number()
     
-    # Step 4: Calculate subtotal and tax
-    subtotal = payment.amount / 100  # Convert paisa to rupees
-    tax_rate = Decimal("0.18")  # 18% GST
+    # Step 4: Calculate subtotal and tax (GST inclusive pricing - plan.amount is what customer pays)
+    # Razorpay charges plan.amount directly (no tax engine), so we derive the GST components
+    # invoice.total * 100 must equal payment.amount (Property 1: No phantom charges)
+    amount_in_rupees = Decimal(str(payment.amount)) / Decimal("100")  # Convert paisa to rupees
+    tax_rate = Decimal("0.18")  # 18% GST (snapshot from plan)
+    
+    # Derive subtotal (before tax) and tax amount from the inclusive amount
+    # amount = subtotal + (subtotal * tax_rate) = subtotal * (1 + tax_rate)
+    # Therefore: subtotal = amount / (1 + tax_rate), tax = subtotal * tax_rate
+    subtotal = amount_in_rupees / Decimal("1.18")
     tax_amount = subtotal * tax_rate
     
+    # Round to 2 decimal places using Banker's rounding (ROUND_HALF_EVEN)
+    subtotal = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
+    tax_amount = tax_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
+    
     # Step 5: Determine tax breakdown (intra-state vs inter-state)
+    # Use ROUND_HALF_EVEN for the split to ensure cgst + sgst = tax_amount exactly
     if seller_state_code == buyer_state_code:
         # Intra-state: CGST + SGST
-        cgst_amount = tax_amount / 2
-        sgst_amount = tax_amount / 2
+        cgst_amount = (tax_amount / Decimal("2")).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
+        sgst_amount = (tax_amount / Decimal("2")).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
         igst_amount = Decimal("0")
     else:
         # Inter-state: IGST
@@ -1457,7 +1867,8 @@ async def generate_invoice(
         sgst_amount = Decimal("0")
         igst_amount = tax_amount
     
-    # Step 6: Calculate total
+    # Step 6: Calculate total (must equal the original amount charged)
+    # Total should exactly match amount_in_rupees after rounding
     total = subtotal + tax_amount
     
     # Step 7: Create invoice record
@@ -1696,23 +2107,32 @@ async def generate_invoice(
 
 ### Property 1: Financial Integrity - No Phantom Charges
 
-**Invariant**: Every captured payment must reference a valid subscription and have a corresponding invoice. Invoice total must match payment amount.
+**Invariant**: Every captured payment must reference a valid subscription and have a corresponding invoice. Invoice total must match payment amount (GST inclusive pricing).
 
 **Mathematical Formulation**:
 ```
 ∀ payment ∈ Payments where payment.status = CAPTURED:
   ∃ subscription ∈ Subscriptions: subscription.id = payment.subscription_id
   ∧ ∃ invoice ∈ Invoices: invoice.payment_id = payment.id
-  ∧ invoice.total = payment.amount
+  ∧ invoice.total = payment.amount / 100  (paisa to rupee conversion)
+  ∧ invoice.total = invoice.subtotal + invoice.tax_amount
+  ∧ invoice.tax_amount = invoice.subtotal * invoice.tax_rate
 ```
+
+**Key Notes**:
+- Razorpay charges plan.amount directly (no tax engine)
+- GST is derived inversely: subtotal = amount / 1.18, tax = subtotal * 0.18
+- This ensures invoice.total * 100 == payment.amount exactly (Property 1)
+- CGST + SGST = tax_amount must hold exactly using ROUND_HALF_EVEN
 
 **Verification Strategy**: Property-based testing with Hypothesis generating random payment scenarios.
 
 **Test Cases**:
 - Generate 100 payment records with random amounts and subscriptions
 - Verify each has a valid subscription FK
-- Verify each has exactly one invoice with matching amount
-- Verify paisa-to-rupee conversion is lossless
+- Verify each has exactly one invoice with matching amount (paisa to rupee)
+- Verify GST derived correctly: subtotal = total / 1.18, tax = subtotal * 0.18
+- Verify CGST + SGST = tax_amount exactly for intra-state
 
 ### Property 2: Webhook Idempotency
 
@@ -1782,16 +2202,17 @@ downgrade: new_plan.amount < old_plan.amount → proration_amount < 0
 
 ### Property 5: GST Tax Calculation Compliance
 
-**Invariant**: Tax calculations must follow GST rules. Total must equal subtotal + tax. Tax must equal subtotal * rate. Intra-state and inter-state tax splits must be correct.
+**Invariant**: Tax calculations must follow GST rules with GST-inclusive pricing. Total must equal subtotal + tax. Tax must equal subtotal * rate. Intra-state and inter-state tax splits must be correct with exact equality using ROUND_HALF_EVEN.
 
 **Mathematical Formulation**:
 ```
 ∀ invoice ∈ Invoices:
-  invoice.tax_amount = invoice.subtotal * invoice.tax_rate
+  invoice.total = payment.amount / 100  (GST inclusive: amount charged is plan.amount)
+  ∧ invoice.tax_amount = invoice.subtotal * invoice.tax_rate
   ∧ invoice.total = invoice.subtotal + invoice.tax_amount
   ∧ (seller_state = buyer_state →
-       invoice.cgst_amount = invoice.tax_amount / 2
-       ∧ invoice.sgst_amount = invoice.tax_amount / 2
+       invoice.cgst_amount + invoice.sgst_amount = invoice.tax_amount  (exact using ROUND_HALF_EVEN)
+       ∧ invoice.cgst_amount = invoice.sgst_amount
        ∧ invoice.igst_amount = 0)
   ∧ (seller_state ≠ buyer_state →
        invoice.igst_amount = invoice.tax_amount
@@ -1799,15 +2220,18 @@ downgrade: new_plan.amount < old_plan.amount → proration_amount < 0
        ∧ invoice.sgst_amount = 0)
 ```
 
+**Key Notes**:
+- GST is derived inversely from the charged amount: subtotal = total / 1.18, tax = subtotal * 0.18
+- CGST/SGST split must use ROUND_HALF_EVEN to ensure exact equality on odd-paisa edge cases
+- SAC code (998314/998315) must be included for SaaS services
+
 **Verification Strategy**: Property-based testing with random subtotals, tax rates, and state combinations.
 
 **Test Cases**:
-- Random subtotals (₹100 to ₹1,000,000)
-- Random tax rates (0.18, 0.12, 0.05)
-- Random state combinations (intra-state and inter-state)
-- Verify tax_amount = subtotal * tax_rate (exact Decimal arithmetic)
-- Verify total = subtotal + tax_amount
-- Verify CGST + SGST = tax_amount for intra-state
+- Generate invoices from random payments (₹100 to ₹1,000,000 in paisa)
+- Verify GST derived correctly: subtotal = total / 1.18, tax = subtotal * 0.18
+- Verify total * 100 == payment.amount exactly (no phantom charges)
+- Verify CGST + SGST = tax_amount exactly for intra-state (even with rounding)
 - Verify IGST = tax_amount for inter-state
 - Verify CGST = SGST for intra-state
 

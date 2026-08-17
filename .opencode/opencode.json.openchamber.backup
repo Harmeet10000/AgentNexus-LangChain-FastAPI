@@ -1,0 +1,134 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/AGENTS.md",
+    ".opencode/instructions/PROJECT-SNAPSHOT.md",
+    ".opencode/instructions/TOOLING-COMMANDS.md",
+    ".opencode/instructions/ARCHITECTURE-RULES.md",
+    ".opencode/instructions/PYTHON-TYPING-RULES.md",
+    ".opencode/instructions/RESULT-PATTERN.md",
+    ".opencode/instructions/REFERENCE-MAP.md"
+  ],
+  "references": {
+    "docs": {
+      "path": "docs",
+      "description": "Use for product behavior, architecture decisions, and domain documentation conventions"
+    }
+  },
+  "skills": {
+    "paths": [
+    //   ".opencode/skills",
+    //   ".github/skills",
+    //   "/home/harmeet/Desktop/prompts/skills"
+    ]
+  },
+  "tools": {
+    "skill": false
+  },
+  "agent": {},
+  "command": {},
+  "plugin": [
+    ".opencode/plugins/graphify.js",
+    "opencode-handoff",
+    "opencode-ponytail"
+  ],
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "uv *": "allow",
+      "pytest *": "allow",
+      "ruff *": "allow",
+      "ty *": "allow",
+      "git *": "allow",
+      "graphify *": "allow",
+      "rm -rf *": "ask",
+      "git reset --hard *": "ask",
+      "grep *": "allow",
+      "ls *": "allow",
+      "cat *": "allow",
+      "echo *": "allow",
+      "cd *": "allow",
+      "pwd": "allow",
+      "python3 *": "allow",
+      "python -c *": "allow",
+      "rg *": "allow",
+      "Select-String *": "allow",
+      "Test-Path *": "allow",
+      "Get-ChildItem *": "allow",
+      "Get-Command *": "allow",
+      "openspec *": "allow",
+      "New-Item *": "allow",
+      "findstr *": "allow"
+    },
+    "edit": "allow",
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "task": "allow",
+    "todowrite": "allow",
+    "question": "allow",
+    "skill": "allow",
+    "webfetch": "allow"
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "reserved": 10000
+  },
+  "provider": {
+    "anthropic": {
+      "models": {
+        "claude-sonnet-4-5": {
+          "limit": { "context": 200000, "output": 128000 }
+        },
+        "claude-opus-4-5": {
+          "limit": { "context": 200000, "output": 32000 }
+        },
+        "claude-haiku-4-5": {
+          "limit": { "context": 200000, "output": 8000 }
+        }
+      }
+    },
+    "openai": {
+      "models": {
+        "gpt-5": {
+          "limit": { "context": 128000, "output": 16000 }
+        },
+        "gpt-5.2": {
+          "limit": { "context": 128000, "output": 16000 }
+        }
+      }
+    },
+    "google": {
+      "models": {
+        "gemini-3-pro": {
+          "limit": { "context": 200000, "output": 64000 }
+        },
+        "gemini-2.5-pro": {
+          "limit": { "context": 1000000, "output": 64000 }
+        }
+      }
+    },
+    "deepseek": {
+      "models": {
+        "deepseek-v4": {
+          "limit": { "context": 200000, "output": 64000 }
+        },
+        "deepseek-chat": {
+          "limit": { "context": 200000, "output": 64000 }
+        }
+      }
+    },
+    "opencode": {
+      "models": {
+        "mimo-v2.5-free": {
+          "limit": { "context": 200000, "output": 32000 }
+        },
+        "nemotron-3-ultra-free": {
+          "limit": { "context": 1000000, "output": 128000 }
+        }
+      }
+    }
+  }
+}

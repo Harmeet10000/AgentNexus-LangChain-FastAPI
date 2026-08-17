@@ -53,6 +53,7 @@ def app_error_to_exception(error: AppError) -> APIException:
                 retryable=retryable,
                 data=error.details,
             )
+            # TODO: make a specific exception AppErrorException to handle this case, so we can differentiate between expected and unexpected errors
         case AppError():
             return ValidationException(
                 detail=error.message,

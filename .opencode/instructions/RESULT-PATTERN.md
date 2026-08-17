@@ -6,16 +6,21 @@ This codebase uses **3 pattern matching approaches**. This document catalogs eac
 
 ---
 
-### Pattern 1: `isinstance` + `raise` — **STANDARD**
+### Pattern 1: `isinstance` + `http_error()` — **STANDARD**
 
-The single canonical pattern for unwrapping `AppResult[T]` in service-layer code.
+The single canonical pattern for unwrapping `AppResult[T]` in service-layer code. Expected failures are logged and answered with `http_error()` — the typed error is NOT raised.
 
 ```python
 result = await self._user_repo.find_by_email(dto.email)
 if isinstance(result, Failure):
     error = result.failure()
     log_expected_failure(error, operation="find_by_email")
-    raise app_error_to_exception(error)
+    return http_error(
+        message=error.message,
+        status_code=...,  # derive from error.kind (422 / 404 / 409 / 502 / 500-503)
+        error_code=error.code,
+        data=error.details,
+    )
 resolved = result.unwrap()
 ```
 
@@ -25,7 +30,12 @@ result = await self._user_repo.find_by_id(user_id)
 if isinstance(result, Failure):
     error = result.failure()
     log_expected_failure(error, operation="find_by_id")
-    raise app_error_to_exception(error)
+    return http_error(
+        message=error.message,
+        status_code=...,  # derive from error.kind
+        error_code=error.code,
+        data=error.details,
+    )
 user = result.unwrap()
 if user is None:
     raise NotFoundException("User not found")
@@ -37,7 +47,12 @@ result = await self._token_repo.get_user_sessions(user_id)
 if isinstance(result, Failure):
     error = result.failure()
     log_expected_failure(error, operation="get_user_sessions")
-    raise app_error_to_exception(error)
+    return http_error(
+        message=error.message,
+        status_code=...,  # derive from error.kind
+        error_code=error.code,
+        data=error.details,
+    )
 sessions = result.unwrap()
 return [SessionResponse(...) for s in sessions]
 ```
@@ -50,7 +65,7 @@ return [SessionResponse(...) for s in sessions]
 - `features/auth/dependencies.py` — get_current_user
 - `features/ingestion/service.py` — ingestion failure mapping
 
-**When to use:** All service-layer and dependency code unwrapping repository/helper `AppResult[T]` values. This is the project standard.
+**When to use:** All service-layer and dependency code unwrapping repository/helper `AppResult[T]` values. This is the project standard. Do NOT `raise app_error_to_exception(error)` for expected failures — the legacy mapper-based raise is retired; `http_error()` is the only error formatter at this boundary.
 
 ---
 
@@ -86,9 +101,9 @@ match provider:
 
 ---
 
-### Pattern 3: `match`/`case` on typed error hierarchy (structural matching) — **STANDARD**
+### Pattern 3: `match`/`case` on typed error hierarchy (structural matching) — **LEGACY**
 
-**1 block, 7 cases** in `shared/result/mappers.py`. The boundary between the Result world and the exception world.
+**1 block, 7 cases** in `shared/result/mappers.py`. The boundary between the Result world and the exception world. Retained only for legacy call sites that still `raise app_error_to_exception(error)` — new code answers expected failures with `http_error()` (Pattern 1) and never raises the typed error.
 
 ```python
 def app_error_to_exception(error: AppError) -> APIException:
@@ -205,7 +220,7 @@ if isinstance(raw_groups, list)     # field: list[...] = ...
 
 | Scenario | Pattern | Example |
 |---|---|---|
-| Unwrapping `AppResult[T]` | `isinstance(result, Failure)` + `raise` | Pattern 1 |
+| Unwrapping `AppResult[T]` | `isinstance(result, Failure)` + `http_error()` | Pattern 1 |
 | Routing on enum or closed string set | `match`/`case` on literals | Pattern 2 |
 | Translating typed error hierarchy | `match`/`case` with structural binding | Pattern 3 |
 | Exception handler (external hierarchy) | `isinstance` if/elif chain | Pattern 4 |
@@ -217,12 +232,12 @@ if isinstance(raw_groups, list)     # field: list[...] = ...
 ## When to Use `returns.Result`
 
 **Yes — repositories and sync domain helpers:**
-- Repository methods handling expected failures (not-found, conflict, DB error, validation). Dual-method pattern: `_result` variant returning `AppResult[T]` + thin public wrapper calling `app_error_to_exception(...)` on `Failure`.
+- Repository methods handling expected failures (not-found, conflict, DB error, validation). Dual-method pattern: `_result` variant returning `AppResult[T]` + thin public wrapper handling the failure locally (return `None` or `http_error(...)`).
 - Validation, parsing, normalization, mapping functions where caller can make local decision.
 - LangGraph node helpers returning typed `AppResult`, mapped to state-dicts at node boundary with `log_expected_failure()`.
 
 **Yes — ownership boundaries (unwrapping `Failure`):**
-- Service-layer: `if isinstance(result, Failure): raise app_error_to_exception(result.failure())`.
+- Service-layer: `if isinstance(result, Failure): log_expected_failure(...); return http_error(...)` — do NOT raise the typed error.
 - LangGraph node entrypoints: `if isinstance(result, Failure): log_expected_failure(...); return {...error_state...}`.
 
 ## When NOT to Use `returns.Result`
@@ -266,14 +281,14 @@ async def find_by_email(self, email: str) -> User | None:
 ## General Rules
 
 - `Failure.failure` is a **method** in this version of `returns`, not a property — always call `result.failure()`.
-- Map internal `Failure(...)` to project exceptions before leaving the service layer.
+- Handle internal `Failure(...)` with `http_error()` before leaving the service layer — never raise the typed error.
 - Match specific typed errors before generic ones; keep one final `Failure(error)` fallback at boundary.
 - Do not pattern-match to swallow unexpected exceptions — unexpected failures should still raise.
 
 ## Anti-Patterns to Eliminate
 
 1. **`isinstance` on Pydantic model outputs** — trust the type system. If the model says `list[dict]`, it's `list[dict]`.
-2. **`match`/`case` on `returns.Result` Success/Failure** — use `isinstance` + `raise` instead. Match/case on Result creates no-op branches (`case Success(): pass`) and doesn't narrow types for `ty`.
-3. **`(_ for _ in ()).throw(...)` generator hack** — use `isinstance` + `raise` directly. Lambda throw hacks are obscure and untestable.
-4. **`log_expected_failure(e, ...) or app_error_to_exception(e)`** — the `or` relies on `log_expected_failure` returning `None` (side effect). Use two separate statements instead.
+2. **`match`/`case` on `returns.Result` Success/Failure** — use `isinstance(result, Failure)` + `http_error()` instead. Match/case on Result creates no-op branches (`case Success(): pass`) and doesn't narrow types for `ty`.
+3. **`(_ for _ in ()).throw(...)` generator hack** — use `isinstance(result, Failure)` + `http_error()` directly. Lambda throw hacks are obscure and untestable.
+4. **`log_expected_failure(e, ...) or app_error_to_exception(e)`** — the `or` relies on `log_expected_failure` returning `None` (side effect). Use two separate statements (`log_expected_failure(...)`, then `return http_error(...)`) instead.
 5. **`if/elif` chains on error types** — use `match`/`case` with structural binding (Pattern 3) for typed error translation at system boundaries only.

@@ -515,20 +515,86 @@ The billing engine supports the complete subscription journey—from initial pla
 9. THE Reconciliation_Service SHALL validate that all ACTIVE subscriptions have valid razorpay_subscription_id references
 10. WHEN reconciliation job fails THEN THE System SHALL retry up to 3 times before alerting
 
-### Requirement 36: Subscription Listing and Filtering
+### Requirement 36: Payment Receipt Generation
 
-**User Story:** As a user, I want to view all my subscriptions with filters, so that I can manage multiple subscriptions easily.
+**User Story:** As a user, I want to receive payment receipts for all transactions, so that I can maintain financial records of payments made.
 
 #### Acceptance Criteria
 
-1. WHEN a user requests subscriptions THEN THE Subscription_Service SHALL return all subscriptions owned by that user
-2. THE Subscription_Service SHALL support filtering by status (ACTIVE, CANCELLED, PAST_DUE, etc.)
-3. THE Subscription_Service SHALL support filtering by plan_id
-4. WHEN listing subscriptions THEN THE System SHALL include plan details, current_period_start, current_period_end, and status
-5. THE Subscription_Service SHALL sort subscriptions by created_at descending by default
-6. THE Subscription_Service SHALL support pagination with limit and offset parameters
+1. WHEN a payment is captured THEN THE Invoice_Service SHALL generate a payment receipt
+2. THE PaymentReceipt model SHALL include receipt_number (sequential), payment ref, amount, method, date, plan/period
+3. WHEN generating a receipt THEN THE System SHALL validate that receipt_number is unique and sequential
+4. WHEN generating a receipt THEN THE System SHALL include subscription_id, payment_id, razorpay_payment_id references
+5. WHEN generating a receipt THEN THE System SHALL calculate amount in INR (not paisa) from payment.amount
+6. WHEN generating a receipt THEN THE System SHALL store billing period dates (current_period_start, current_period_end)
+7. WHEN generating a receipt THEN THE System SHALL generate a PDF receipt (simpler format than invoice, non-taxable)
+8. WHEN a receipt is generated THEN THE System SHALL store receipt URL in cloud storage with presigned URL
+9. WHEN generating a receipt THEN THE System SHALL create an audit log entry with action PAYMENT_RECEIVED
 
-### Requirement 30: Webhook Event Type Routing
+### Requirement 37: State Code Validation
+
+**User Story:** As the system, I want to validate Indian state codes correctly, so that GST tax calculations (CGST/SGST vs IGST) are accurate.
+
+#### Acceptance Criteria
+
+1. WHEN processing an invoice THEN THE System SHALL validate that seller_state_code is a valid Indian state code
+2. WHEN processing an invoice THEN THE System SHALL validate that buyer_state_code is a valid Indian state code
+3. THE System SHALL accept state codes from 01 to 38 (including 38 for Ladakh)
+4. THE System SHALL use 2-digit state code format (e.g., "27" for Maharashtra, "38" for Ladakh)
+5. WHEN seller_state_code == buyer_state_code THEN THE System SHALL treat as intra-state (CGST + SGST)
+6. WHEN seller_state_code != buyer_state_code THEN THE System SHALL treat as inter-state (IGST only)
+7. THE System SHALL log a warning for unknown state codes but continue processing
+
+### Requirement 38: CGST/SGST Exact Equality
+
+**User Story:** As the system, I want CGST and SGST to always sum exactly to tax_amount, so that GST compliance is maintained.
+
+#### Acceptance Criteria
+
+1. WHEN generating an invoice for intra-state transactions THEN THE System SHALL use ROUND_HALF_EVEN for CGST/SGST split
+2. THE System SHALL validate that cgst_amount + sgst_amount == tax_amount exactly for intra-state
+3. THE System SHALL validate that cgst_amount == sgst_amount for intra-state transactions
+4. WHEN tax_amount is odd (e.g., ₹0.05) THEN THE System SHALL use banker's rounding for CGST/SGST split
+5. THE System SHALL raise a ValidationException if cgst + sgst != tax_amount after rounding
+
+### Requirement 39: Invoice Line Items
+
+**User Story:** As an administrator, I want invoices to include line items for billing transparency, so that customers can see what they are being charged for.
+
+#### Acceptance Criteria
+
+1. WHEN generating an invoice THEN THE System SHALL include line_items array with plan details
+2. EACH line_item SHALL include plan_name, description, quantity, unit_price, amount, tax_amount
+3. THE System SHALL validate that sum of line_item amounts equals subtotal
+4. THE System SHALL include SAC code per line_item for GST compliance
+5. WHEN PDF is generated THEN THE System SHALL render line_items in invoice PDF
+
+### Requirement 40: Proration Charge Mechanism
+
+**User Story:** As the system, I want to charge proration amounts immediately for plan upgrades, so that billing is accurate for mid-cycle plan changes.
+
+#### Acceptance Criteria
+
+1. WHEN upgrading plans mid-cycle THEN THE System SHALL calculate proration amount using proration service
+2. WHEN proration charge is calculated THEN THE System SHALL charge via Razorpay Payment Link (not subscription)
+3. WHEN proration payment is captured THEN THE System SHALL create proration invoice with status PAID
+4. WHEN proration payment fails THEN THE System SHALL rollback plan change and notify user
+5. THE System SHALL store proration payment reference for audit trail
+
+### Requirement 41: Cancellation-Refund Policy Configuration
+
+**User Story:** As an administrator, I want to configure cancellation refund policies per plan, so that different plans can have different refund rules.
+
+#### Acceptance Criteria
+
+1. THE Plan model SHALL include a refund_policy field (FULL, PRO_RATA, NONE)
+2. WHEN a subscription is cancelled THEN THE System SHALL apply the plan's refund_policy
+3. WHEN refund_policy = FULL THEN THE System SHALL refund full unused time
+4. WHEN refund_policy = PRO_RATA THEN THE System SHALL refund prorated unused time
+5. WHEN refund_policy = NONE THEN THE System SHALL NOT issue any refund
+6. WHEN cancelling subscription THEN THE System SHALL validate refund_policy is valid enum
+
+### Requirement 43: Webhook Event Type Routing
 
 **User Story:** As the system, I want to route webhook events to appropriate handlers, so that each event type triggers the correct business logic.
 
@@ -542,3 +608,78 @@ The billing engine supports the complete subscription journey—from initial pla
 6. WHEN a refund.processed event is received THEN THE Webhook_Service SHALL route to Payment_Service.handle_refund_processed
 7. WHEN an unhandled event type is received THEN THE Webhook_Service SHALL log a warning and create a WebhookEvent record without processing
 8. THE Webhook_Service SHALL use pattern matching on event_type for routing decisions
+
+### Requirement 44: Subscription Listing and Filtering
+
+**User Story:** As a user, I want to view all my subscriptions with filters, so that I can manage multiple subscriptions easily.
+
+#### Acceptance Criteria
+
+1. WHEN a user requests subscriptions THEN THE Subscription_Service SHALL return all subscriptions owned by that user
+2. THE Subscription_Service SHALL support filtering by status (ACTIVE, CANCELLED, PAST_DUE, etc.)
+3. THE Subscription_Service SHALL support filtering by plan_id
+4. WHEN listing subscriptions THEN THE System SHALL include plan details, current_period_start, current_period_end, and status
+5. THE Subscription_Service SHALL sort subscriptions by created_at descending by default
+6. THE Subscription_Service SHALL support pagination with limit and offset parameters
+
+### Requirement 45: Proration Preview
+
+**User Story:** As a user, I want to preview proration charges before changing plans, so that I understand the financial impact.
+
+#### Acceptance Criteria
+
+1. WHEN a user requests a proration preview THEN THE Proration_Service SHALL calculate the proration amount without applying changes
+2. WHEN previewing proration THEN THE System SHALL return proration_amount, tax_amount, total_amount, and direction
+3. THE Proration_Service SHALL calculate preview using current subscription state and target plan
+4. WHEN previewing THEN THE System SHALL not modify the subscription or create any transactions
+5. THE Proration_Service SHALL validate that the subscription status is ACTIVE before preview
+
+### Requirement 46: Subscription Pause Duration Validation
+
+**User Story:** As a user, I want to pause my subscription for a specified duration, so that automatic resumption occurs without manual action.
+
+#### Acceptance Criteria
+
+1. WHEN pausing with a duration THEN THE System SHALL validate that pause_duration_days is between 1 and 365
+2. WHEN pause_end timestamp is reached THEN THE System SHALL automatically resume the subscription
+3. THE System SHALL schedule a resume job at pause_end timestamp via Celery
+4. WHEN automatically resuming THEN THE Subscription_Service SHALL follow the same logic as manual resume
+5. WHEN a user manually resumes before pause_end THEN THE System SHALL cancel the scheduled resume job
+
+### Requirement 47: Dunning Strategy Configuration
+
+**User Story:** As an administrator, I want to configure dunning retry intervals and maximum attempts, so that retry behavior aligns with business policies.
+
+#### Acceptance Criteria
+
+1. WHEN an administrator updates dunning configuration THEN THE Dunning_Service SHALL validate retry intervals are positive integers
+2. WHEN an administrator updates max_retries THEN THE System SHALL validate the value is between 1 and 10
+3. THE System SHALL apply updated dunning configuration to new subscriptions only (not retroactive)
+4. WHEN retrieving dunning configuration THEN THE System SHALL return current retry intervals and max_retries
+5. THE System SHALL support per-plan dunning overrides for enterprise customers
+
+### Requirement 48: Failed Event Replay
+
+**User Story:** As an administrator, I want to manually replay failed webhook events, so that I can recover from transient processing errors.
+
+#### Acceptance Criteria
+
+1. WHEN an administrator requests event replay THEN THE Webhook_Service SHALL retrieve the WebhookEvent record by ID
+2. WHEN replaying an event THEN THE System SHALL validate that the event status is FAILED
+3. WHEN replaying THEN THE Webhook_Service SHALL reprocess the event payload through the original event handler
+4. WHEN replay succeeds THEN THE System SHALL update the WebhookEvent status to PROCESSED
+5. WHEN replay fails THEN THE System SHALL update the error_message and increment retry_count
+6. THE Webhook_Service SHALL enforce that only administrators can trigger manual replay
+
+### Requirement 42: Payment Method Tokenization
+
+**User Story:** As the system, I want to delegate payment method storage to Razorpay, so that the platform never stores card data and maintains PCI-DSS compliance.
+
+#### Acceptance Criteria
+
+1. THE System SHALL never store raw credit card numbers, CVV codes, or expiration dates in the Database
+2. WHEN a user adds a payment method THEN THE System SHALL redirect to Razorpay's hosted payment page
+3. WHEN Razorpay tokenizes a payment method THEN THE System SHALL store only the razorpay_customer_id
+4. THE System SHALL retrieve payment method details from Razorpay_API when needed for display
+5. WHEN processing payments THEN THE System SHALL reference razorpay_customer_id and razorpay_subscription_id only
+6. THE System SHALL not log or transmit sensitive payment data in any form

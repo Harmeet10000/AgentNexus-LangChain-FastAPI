@@ -33,23 +33,71 @@ ast-grep -p '<pattern>' -l <language>
 | `-i, --ignore-case` | Case-insensitive |
 | `--stdin` | Read code from pipe |
 
-### One-liners
+### One-liners — this repo is Python, so patterns are Python
+
+Hit counts measured against `src/` on 2026-08-16; they are there so you can tell
+a broken pattern from a clean codebase.
 
 ```bash
-# Find type assertions
-ast-grep -p '$x as $T' -l ts
+# Raw HTTPException instead of a typed APIException subclass          → 4
+ast-grep -p 'raise HTTPException($$$ARGS)' -l py src/
 
-# Empty catch blocks
-ast-grep -p 'catch ($_) { }'
+# Every injected dependency (this repo uses Annotated, not `x: T = Depends()`)  → 16
+ast-grep -p 'Annotated[$T, Depends($D)]' -l py src/
 
-# Convert require to import
-ast-grep -p 'const $NAME = require($PATH)' -r 'import $NAME from $PATH' -l js
+# .unwrap() call sites — each one needs an isinstance/Failure guard above it   → 27
+ast-grep -p '$X.unwrap()' -l py src/
 
-# Nullish coalescing
-ast-grep -p '$A = $A ?? $B' -r '$A ??= $B'
+# Result construction inside the feature layer                        → 37
+ast-grep -p 'Success($V)' -l py src/app/features/
+
+# Retired mapper raise (review each hit; do not batch-rewrite)        → 30
+ast-grep -p 'raise app_error_to_exception($E)' -l py src/
 ```
 
-Full lint/transform/YAML reference at `/home/harmeet/Desktop/prompts/skills/ast-grep-skill/`.
+Two traps that cost real time:
+
+- `$$$ARGS` is the multi-node metavar. `$ARGS` matches exactly **one** node and
+  silently misses `HTTPException(status_code=404, detail="...")`.
+- **Two `$$$` metavars in one argument list do not parse.**
+  `def $FN($$$A, db: Session = Depends($$$D), $$$B)` yields *"Pattern contains an
+  ERROR node"* and matches nothing — while still exiting 0, so it reads as a
+  clean codebase. Match the parameter shape on its own instead, or express the
+  "function containing X" idea as a YAML rule with `has:`.
+
+### When a pattern can't express it: `kind` + `regex`
+
+Some shapes have no literal form — an *empty* capture pattern, for instance.
+Match the tree-sitter node kind and constrain it with a regex instead:
+
+```yaml
+rule:
+  kind: case_pattern
+  regex: ^(Success|Failure)\(\s*\)$
+```
+
+That is `.ast-grep/rules/no-match-on-result.yml`. Run `ast-grep -p '<pattern>'
+-l py --debug-query` to print the parse tree and learn the kind names — it is
+also the fastest way to spot an ERROR node before trusting a zero-hit result.
+
+### Project rules
+
+Five vendored rules live in `.ast-grep/rules/`, registered by repo-relative
+`sgconfig.yml`. They encode conventions from `.opencode/instructions/` that ruff
+cannot express — do not add a rule ruff already covers.
+
+```bash
+ast-grep scan src/                   # all rules
+ast-grep scan --json=compact src/    # machine-readable
+```
+
+They are **not** wired into `.pre-commit-config.yaml`: `no-raw-httpexception` is
+severity `error` with live hits, so a blocking hook would fail every commit
+today. Run the scan by hand until those are resolved.
+
+Full lint/transform/YAML reference at
+`/home/harmeet/Desktop/prompts/skills/ast-grep-skill/` (machine-local, not in
+this repo).
 
 ---
 

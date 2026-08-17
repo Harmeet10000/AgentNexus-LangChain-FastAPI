@@ -51,7 +51,24 @@ def get_database_url() -> str:
     asyncpg_url: str = asyncpg_url.replace("&sslmode=require", "")
     asyncpg_url: str = asyncpg_url.replace("&channel_binding=require", "")
     asyncpg_url: str = asyncpg_url.replace("?sslmode=require", "")
-    return asyncpg_url.replace("?channel_binding=require", "")
+    asyncpg_url = asyncpg_url.replace("?channel_binding=require", "")
+
+    parsed: ParseResult = urlparse(asyncpg_url)
+    if not parsed.password and settings.POSTGRES_PASSWORD.get_secret_value() != "pass":
+        from urllib.parse import urlunparse
+
+        password: str = settings.POSTGRES_PASSWORD.get_secret_value()
+        netloc: str = (
+            f"{parsed.username}:{password}@{parsed.hostname}"
+            if parsed.username
+            else parsed.netloc
+        )
+        if parsed.port:
+            netloc += f":{parsed.port}"
+        asyncpg_url = urlunparse(
+            (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+        )
+    return asyncpg_url
 
 
 async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
