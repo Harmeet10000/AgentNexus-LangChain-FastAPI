@@ -10,41 +10,54 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.connections import ResilientTask, celery_app, init_db
-from app.features.billing.clients.razorpay_client import RazorpayClient
-from app.features.billing.dto import PaymentRecordDTO
-from app.features.billing.models import (
-    AuditAction,
-    AuditLog,
-    Invoice,
-    Payment,
-    PaymentReceipt,
-    Subscription,
-    SubscriptionStatus,
-)
-from app.features.billing.repositories import (
-    AuditLogRepository,
-    BillingRepositories,
-    InvoiceRepository,
-    PaymentRepository,
-    PlanRepository,
-    SubscriptionRepository,
-    WebhookEventRepository,
-)
-from app.features.billing.services import DunningService, InvoiceService, PaymentService
+from app.features.audit.model import AuditAction, AuditLog
+from app.features.audit.repository import AuditLogRepository
+from app.features.dunning.service import DunningService
+from app.features.invoices.model import Invoice
+from app.features.invoices.receipt import PaymentReceipt
+from app.features.invoices.repository import InvoiceRepository
+from app.features.invoices.service import InvoiceService
+from app.features.payments.clients.razorpay_client import RazorpayClient
+from app.features.payments.dto import PaymentRecordDTO
+from app.features.payments.model import Payment
+from app.features.payments.repository import PaymentRepository
+from app.features.payments.service import PaymentService
+from app.features.plans.repository import PlanRepository
+from app.features.subscriptions.model import Subscription, SubscriptionStatus
+from app.features.subscriptions.repository import SubscriptionRepository
 from app.utils import logger
 
 settings = get_settings()
 
 
-def _build_repos(session) -> BillingRepositories:
-    return BillingRepositories(
-        session=session,
-        plans=PlanRepository(session),
-        subscriptions=SubscriptionRepository(session),
-        payments=PaymentRepository(session),
-        invoices=InvoiceRepository(session),
-        webhooks=WebhookEventRepository(session),
-        audit=AuditLogRepository(session),
+def _subscription_repo(session) -> SubscriptionRepository:
+    return SubscriptionRepository(session)
+
+
+def _plan_repo(session) -> PlanRepository:
+    return PlanRepository(session)
+
+
+def _payment_repo(session) -> PaymentRepository:
+    return PaymentRepository(session)
+
+
+def _invoice_repo(session) -> InvoiceRepository:
+    return InvoiceRepository(session)
+
+
+def _audit_repo(session) -> AuditLogRepository:
+    return AuditLogRepository(session)
+
+
+def _invoice_service(session) -> InvoiceService:
+    return InvoiceService(
+        session,
+        InvoiceRepository(session),
+        SubscriptionRepository(session),
+        PlanRepository(session),
+        PaymentRepository(session),
+        AuditLogRepository(session),
     )
 
 
@@ -70,7 +83,8 @@ def _current_utc() -> datetime:
 
 async def _renewal_job(session) -> dict[str, int]:
     """Reconcile-only renewal pass: no Razorpay charges are initiated here."""
-    repos = _build_repos(session)
+    subscriptions = _subscription_repo(session)
+    audit = _audit_repo(session)
     now = _current_utc()
     statement = (
         select(Subscription)
@@ -83,11 +97,11 @@ async def _renewal_job(session) -> dict[str, int]:
         .limit(500)
     )
     result = await session.execute(statement)
-    subscriptions = list(result.scalars().all())
+    subscription_rows = list(result.scalars().all())
 
     razorpay = RazorpayClient()
     renewed = 0
-    for subscription in subscriptions:
+    for subscription in subscription_rows:
         if not subscription.razorpay_subscription_id:
             continue
         try:  # noqa: PLW0717
@@ -101,7 +115,7 @@ async def _renewal_job(session) -> dict[str, int]:
                 values["current_period_end"] = datetime.fromtimestamp(int(current_end), tz=UTC)
             if not values:
                 continue
-            update = await repos.subscriptions.update_with_lock(
+            update = await subscriptions.update_with_lock(
                 subscription, subscription.version, values=values
             )
             if isinstance(update, Failure):
@@ -114,20 +128,24 @@ async def _renewal_job(session) -> dict[str, int]:
                 subscription_id=str(subscription.id),
             ).warning("renewal reconcile failed", error=str(exc))
 
-    await repos.audit.create(
+    await audit.create(
         AuditLog(
             entity_type="system",
             entity_id="billing",
             action=AuditAction.RECONCILIATION_RUN.value,
-            changes={"job": "renewal", "checked": len(subscriptions), "renewed": renewed},
+            changes={"job": "renewal", "checked": len(subscription_rows), "renewed": renewed},
         )
     )
-    return {"checked": len(subscriptions), "renewed": renewed}
+    return {"checked": len(subscription_rows), "renewed": renewed}
 
 
 async def _dunning_job(session) -> dict[str, int]:
-    repos = _build_repos(session)
-    service = DunningService(repos)
+    service = DunningService(
+        session,
+        SubscriptionRepository(session),
+        PlanRepository(session),
+        AuditLogRepository(session),
+    )
     due = await service.find_due_for_retry(limit=200)
     retried = 0
     halted = 0
@@ -140,8 +158,9 @@ async def _dunning_job(session) -> dict[str, int]:
 
 
 async def _invoice_backfill(session) -> dict[str, int]:
-    repos = _build_repos(session)
-    service = InvoiceService(repos)
+    service = _invoice_service(session)
+    subscriptions = _subscription_repo(session)
+    plans = _plan_repo(session)
     existing = select(Invoice.payment_id).where(Invoice.payment_id.is_not(None))
     statement = (
         select(Payment)
@@ -156,13 +175,13 @@ async def _invoice_backfill(session) -> dict[str, int]:
 
     generated = 0
     for payment in payments:
-        sub_result = await repos.subscriptions.find_by_id(payment.subscription_id)
+        sub_result = await subscriptions.find_by_id(payment.subscription_id)
         if isinstance(sub_result, Failure):
             continue
         subscription = sub_result.unwrap()
         if subscription is None:
             continue
-        plan_result = await repos.plans.find_by_id(subscription.plan_id)
+        plan_result = await plans.find_by_id(subscription.plan_id)
         if isinstance(plan_result, Failure):
             continue
         plan = plan_result.unwrap()
@@ -179,8 +198,9 @@ async def _invoice_backfill(session) -> dict[str, int]:
 
 
 async def _receipt_backfill(session) -> dict[str, int]:
-    repos = _build_repos(session)
-    service = InvoiceService(repos)
+    service = _invoice_service(session)
+    subscriptions = _subscription_repo(session)
+    plans = _plan_repo(session)
     existing = select(PaymentReceipt.payment_id)
     statement = (
         select(Payment)
@@ -195,13 +215,13 @@ async def _receipt_backfill(session) -> dict[str, int]:
 
     generated = 0
     for payment in payments:
-        sub_result = await repos.subscriptions.find_by_id(payment.subscription_id)
+        sub_result = await subscriptions.find_by_id(payment.subscription_id)
         if isinstance(sub_result, Failure):
             continue
         subscription = sub_result.unwrap()
         if subscription is None:
             continue
-        plan_result = await repos.plans.find_by_id(subscription.plan_id)
+        plan_result = await plans.find_by_id(subscription.plan_id)
         if isinstance(plan_result, Failure):
             continue
         plan = plan_result.unwrap()
@@ -218,7 +238,7 @@ async def _receipt_backfill(session) -> dict[str, int]:
 
 
 async def _pause_resume_job(session) -> dict[str, int]:
-    repos = _build_repos(session)
+    subscriptions = _subscription_repo(session)
     now = _current_utc()
     statement = (
         select(Subscription)
@@ -231,11 +251,11 @@ async def _pause_resume_job(session) -> dict[str, int]:
         .limit(500)
     )
     result = await session.execute(statement)
-    subscriptions = list(result.scalars().all())
+    subscription_rows = list(result.scalars().all())
 
     resumed = 0
-    for subscription in subscriptions:
-        update = await repos.subscriptions.update_status(
+    for subscription in subscription_rows:
+        update = await subscriptions.update_status(
             subscription,
             SubscriptionStatus.ACTIVE,
             expected_version=subscription.version,
@@ -247,13 +267,13 @@ async def _pause_resume_job(session) -> dict[str, int]:
             ).warning(update.failure().message)
             continue
         resumed += 1
-    return {"checked": len(subscriptions), "resumed": resumed}
+    return {"checked": len(subscription_rows), "resumed": resumed}
 
 
 async def _reconciliation_job(session) -> dict[str, int]:
     """Daily Razorpay reconciliation: fetch captured payments and align local records."""
-    repos = _build_repos(session)
-    service = PaymentService(repos)
+    service = PaymentService(PaymentRepository(session), AuditLogRepository(session))
+    subscriptions = _subscription_repo(session)
     razorpay = RazorpayClient()
 
     since = _current_utc() - timedelta(days=settings.BILLING_RECONCILIATION_LOOKBACK_DAYS)
@@ -277,14 +297,14 @@ async def _reconciliation_job(session) -> dict[str, int]:
         rz_id = payment.get("id")
         if not isinstance(rz_id, str):
             continue
-        existing = await repos.payments.find_by_razorpay_id(rz_id)
+        existing = await service.payments.find_by_razorpay_id(rz_id)
         if isinstance(existing, Failure):
             continue
         if existing.unwrap() is not None:
             reconciled += 1
             continue
         # New payment not created via webhook: create if subscription resolvable.
-        sub_result = await repos.subscriptions.find_by_razorpay_id(
+        sub_result = await subscriptions.find_by_razorpay_id(
             str(payment.get("subscription_id") or "")
         )
         if isinstance(sub_result, Failure) or sub_result.unwrap() is None:
@@ -307,7 +327,7 @@ async def _reconciliation_job(session) -> dict[str, int]:
         )
         reconciled += 1
 
-    await repos.audit.create(
+    await _audit_repo(session).create(
         AuditLog(
             entity_type="system",
             entity_id="billing",

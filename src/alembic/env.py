@@ -20,7 +20,19 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import all models here for autogenerate support
-import app.features.billing.models  # noqa: F401, E402 — registers model with Base.metadata for Alembic autogenerate
+import app.features.audit.model  # noqa: F401, E402 — registers model with Base.metadata for Alembic autogenerate
+import app.features.invoices.invoice_batch  # noqa: F401, E402
+import app.features.invoices.invoice_void  # noqa: F401, E402
+import app.features.invoices.model  # noqa: F401, E402
+import app.features.invoices.receipt  # noqa: F401, E402
+import app.features.invoices.report  # noqa: F401, E402
+import app.features.payments.currency  # noqa: F401, E402
+import app.features.payments.model  # noqa: F401, E402
+import app.features.plans.model  # noqa: F401, E402
+import app.features.subscriptions.model  # noqa: F401, E402
+import app.features.subscriptions.trial_extension  # noqa: F401, E402
+import app.features.webhooks.email_template  # noqa: F401, E402
+import app.features.webhooks.model  # noqa: F401, E402
 import app.shared.outbox.model  # noqa: F401, E402 — registers model with Base.metadata for Alembic autogenerate
 
 try:

@@ -262,7 +262,7 @@ def compose(*functions: Composable) -> Composable:
 163. refactor vectorStore code        TSVECTOR,
 164. refactor RAG code
 
-170. write cron job for memory decay and then send to celery for off loading
+170. write cron job for memory decay and then send to celery for off loading for cognee
 171. use CacheBackedEmbeddings fore reusing embeddings
 172. use prebuilt and custom middlewares in langchain 
 173. rewrite the tools for the new grpahiti, cognee etc
@@ -300,6 +300,8 @@ todos:-
 218. add a small gloassary of the project from the screenshot, we are open at the core, we share about are roadmap, how we think about things, and of course we share all our code and should strive to be in that way. its important to maintian the things they live and iterate over the product. 
 219.  add in the system prompt to add a search, implementation, verifier, reviewer, check if i can give specific system propmts, skills, tools, MCP servers to subagents, defining models for subagents, permissions
 220. check the alembic warning having 2 heads
+221. fix the files tht are scrambled in utils, shared and other places
+222. RESULT-PATTERN.md currently documents the envelope style as "project standard" — it now contradicts the code (users/service.py raises). Optional follow-up: update the doc to match. Say the word and I'll include it.
 ```
 summarise these chapters in great detail and take video's transcript as reference for summarising
 
