@@ -1,6 +1,6 @@
 """Health feature API router."""
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, Request, Response
 
@@ -10,6 +10,9 @@ from .dependencies import get_health_service
 from .dto import HealthDataDTO, SelfInfoDTO
 from .service import HealthService
 
+if TYPE_CHECKING:
+    from .dto import HealthResultDTO
+
 router = APIRouter(prefix="/health", tags=["health"])
 
 
@@ -18,7 +21,7 @@ async def get_self(
     request: Request,
     service: Annotated[HealthService, Depends(get_health_service)],
 ) -> APIResponse[SelfInfoDTO]:
-    self_info = await service.get_self_info(
+    self_info: SelfInfoDTO = await service.get_self_info(
         server_name=request.app.title or "unknown",
         server_version=request.app.version or "unknown",
         client_host=request.client.host if request.client else "unknown",
@@ -35,7 +38,7 @@ async def get_health(
     response: Response,
     service: Annotated[HealthService, Depends(get_health_service)],
 ) -> APIResponse[HealthDataDTO]:
-    result = await service.get_health()
+    result: HealthResultDTO = await service.get_health()
     response.status_code = result.status_code
     return http_response(
         message=result.message,

@@ -179,7 +179,7 @@ def get_idempotency_status(
     *,
     namespace: str = IDEMPOTENCY_NAMESPACE,
 ) -> IdempotencyStatus | None:
-    payload = cast(
+    payload: str | None = cast(
         "str | None",
         run_redis_call(
             redis_client.get(build_idempotency_key(idempotency_key, namespace=namespace))
@@ -188,7 +188,7 @@ def get_idempotency_status(
     if not payload:
         return None
 
-    record = IdempotencyRecord.model_validate_json(payload)
+    record: IdempotencyRecord = IdempotencyRecord.model_validate_json(payload)
     return record.status
 
 
