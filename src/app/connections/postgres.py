@@ -59,9 +59,7 @@ def get_database_url() -> str:
 
         password: str = settings.POSTGRES_PASSWORD.get_secret_value()
         netloc: str = (
-            f"{parsed.username}:{password}@{parsed.hostname}"
-            if parsed.username
-            else parsed.netloc
+            f"{parsed.username}:{password}@{parsed.hostname}" if parsed.username else parsed.netloc
         )
         if parsed.port:
             netloc += f":{parsed.port}"

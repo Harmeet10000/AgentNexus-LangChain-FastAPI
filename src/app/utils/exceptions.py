@@ -185,8 +185,16 @@ class InfrastructureException(APIException):
         original_exc: Exception | None = None,
     ):
         if original_exc:
-            data = {"original_error": str(original_exc), "retryable": retryable} if data is None else {**data, "original_error": str(original_exc), "retryable": retryable}
-        status_code = status.HTTP_503_SERVICE_UNAVAILABLE if retryable else status.HTTP_500_INTERNAL_SERVER_ERROR
+            data = (
+                {"original_error": str(original_exc), "retryable": retryable}
+                if data is None
+                else {**data, "original_error": str(original_exc), "retryable": retryable}
+            )
+        status_code = (
+            status.HTTP_503_SERVICE_UNAVAILABLE
+            if retryable
+            else status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
         super().__init__(
             status_code=status_code,
             detail=detail,

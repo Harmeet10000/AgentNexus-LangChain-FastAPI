@@ -274,9 +274,7 @@ class SubscriptionService:
             responses.append(_subscription_to_response(subscription, plan=plan))
         return SubscriptionListResponse(items=responses, total=total, limit=limit, offset=offset)
 
-    async def get_subscription(
-        self, user_id: str, subscription_id: str
-    ) -> SubscriptionResponse:
+    async def get_subscription(self, user_id: str, subscription_id: str) -> SubscriptionResponse:
         result = await self.subscriptions.find_by_id(subscription_id)
         if isinstance(result, Failure):
             _repo_failure(result.failure(), "get_subscription")
@@ -395,7 +393,7 @@ class SubscriptionService:
                 )
         update = await self.subscriptions.update_status(
             subscription,
-            SubscriptionStatus.PAUSED,
+            new_status=SubscriptionStatus.PAUSED,
             expected_version=subscription.version,
             extra_values=values,
         )
@@ -415,9 +413,7 @@ class SubscriptionService:
         plan = await self._load_plan(subscription.plan_id)
         return _subscription_to_response(subscription, plan=plan)
 
-    async def resume_subscription(
-        self, user_id: str, subscription_id: str
-    ) -> SubscriptionResponse:
+    async def resume_subscription(self, user_id: str, subscription_id: str) -> SubscriptionResponse:
         subscription = await self._get_owned_subscription(user_id, subscription_id)
         if subscription.status != SubscriptionStatus.PAUSED.value:
             raise InvalidStateTransitionException(
@@ -469,7 +465,7 @@ class SubscriptionService:
             msg = "New plan is not active"
             raise ValidationException(msg)
 
-        proration = calculate_plan_change_proration(
+        proration: ProrationCalculation = calculate_plan_change_proration(
             subscription, current_plan, new_plan, effective_date=dto.effective_date
         )
         payment_url: str | None = None
@@ -527,11 +523,11 @@ class SubscriptionService:
     async def request_trial_extension(
         self, user_id: str, subscription_id: str, *, days: int, reason: str | None = None
     ) -> dict[str, object]:
-        subscription = await self._get_owned_subscription(user_id, subscription_id)
+        subscription: Subscription = await self._get_owned_subscription(user_id, subscription_id)
         if subscription.trial_end is None:
             msg = "Subscription is not in trial"
             raise ValidationException(msg)
-        now = datetime.now(tz=UTC)
+        now: datetime = datetime.now(tz=UTC)
         extension = TrialExtension(
             subscription_id=subscription.id,
             requested_days=days,
