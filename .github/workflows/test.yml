@@ -76,9 +76,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Create .env.test file
+      - name: Create .env.development file
         run: |
-          cat > .env.test << EOF
+          cat > .env.development << EOF
           ENVIRONMENT=test
           MONGODB_URI=mongodb://localhost:27017
           MONGODB_DB_NAME=test_db
@@ -115,6 +115,11 @@ jobs:
 
       - name: Run tests with pytest
         run: uv run pytest tests/ -v --tb=short
+        env:
+          ENVIRONMENT: test
+
+      - name: Run integration tests
+        run: uv run pytest tests/ -m integration -v --tb=short
         env:
           ENVIRONMENT: test
 
