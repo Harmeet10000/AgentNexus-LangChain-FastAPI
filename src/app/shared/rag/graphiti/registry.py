@@ -83,14 +83,6 @@ class ToolRegistry(BaseModel):
     get_obligation_chain: BaseTool
 
     @property
-    def compliance_tools(self) -> list[BaseTool]:
-        return [self.search_legal_precedents, self.retrieve_statute_section]
-
-    @property
-    def risk_tools(self) -> list[BaseTool]:
-        return [self.query_knowledge_graph, self.get_obligation_chain]
-
-    @property
     def deep_research_tool(self) -> BaseTool:
         return self.search_legal_precedents
 
