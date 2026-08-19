@@ -154,13 +154,17 @@ def _heuristic_metadata(
         effective_date=_extract_text_after_label(markdown, label_regex=r"effective date"),
         contract_signed=_extract_text_after_label(markdown, label_regex=r"signed on"),
         amendment_effective=_extract_text_after_label(markdown, label_regex=r"amendment effective"),
-        expiry_date=_extract_text_after_label(markdown, label_regex=r"expiry date|expiration date|expires on"),
+        expiry_date=_extract_text_after_label(
+            markdown, label_regex=r"expiry date|expiration date|expires on"
+        ),
         document_summary=_first_nonempty_paragraph(markdown),
     )
 
 
 def _extract_text_after_label(markdown: str, label_regex: str) -> str | None:
-    match: re.Match[str] | None = re.search(pattern=rf"{label_regex}[^\n:]*[:\-]?\s*([^\n]+)", string=markdown, flags=re.IGNORECASE)
+    match: re.Match[str] | None = re.search(
+        pattern=rf"{label_regex}[^\n:]*[:\-]?\s*([^\n]+)", string=markdown, flags=re.IGNORECASE
+    )
     if not match:
         return None
     return match.group(1).strip()[:255]

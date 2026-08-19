@@ -21,6 +21,7 @@ if config.config_file_name is not None:
 
 # Import all models here for autogenerate support
 import app.features.audit.model  # noqa: F401, E402 — registers model with Base.metadata for Alembic autogenerate
+import app.features.credits.models  # noqa: F401, E402 — registers models with Base.metadata for Alembic autogenerate
 import app.features.invoices.invoice_batch  # noqa: F401, E402
 import app.features.invoices.invoice_void  # noqa: F401, E402
 import app.features.invoices.model  # noqa: F401, E402

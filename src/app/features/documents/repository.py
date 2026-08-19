@@ -115,7 +115,11 @@ class DocumentRepository:
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",
                     message="Database error while fetching document by ID",
-                    details={"user_id": user_id, "document_id": document_id, "error": str(object=exc)},
+                    details={
+                        "user_id": user_id,
+                        "document_id": document_id,
+                        "error": str(object=exc),
+                    },
                     source="document_repository",
                 )
             )
@@ -302,7 +306,11 @@ class DocumentRepository:
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",
                     message="Database error while fetching document status",
-                    details={"user_id": user_id, "document_id": document_id, "error": str(object=exc)},
+                    details={
+                        "user_id": user_id,
+                        "document_id": document_id,
+                        "error": str(object=exc),
+                    },
                     source="document_repository",
                 )
             )
@@ -378,7 +386,9 @@ class DocumentRepository:
                 """
             )
             await self.session.execute(
-                statement=text(text=f"SET LOCAL diskann.query_search_list_size = {DISKANN_QUERY_SEARCH_LIST_SIZE}")
+                statement=text(
+                    text=f"SET LOCAL diskann.query_search_list_size = {DISKANN_QUERY_SEARCH_LIST_SIZE}"
+                )
             )
             await self.session.execute(
                 statement=text(text=f"SET LOCAL diskann.query_rescore = {DISKANN_QUERY_RESCORE}")

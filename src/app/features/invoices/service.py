@@ -322,9 +322,7 @@ class InvoiceService:
                 original_currency=invoice.currency,
             )
         )
-        void_result = await self.invoices.update_status(
-            invoice, status=InvoiceStatus.VOID.value
-        )
+        void_result = await self.invoices.update_status(invoice, status=InvoiceStatus.VOID.value)
         if isinstance(void_result, Failure):
             _repo_failure(void_result.failure(), "void_invoice")
         voided = void_result.unwrap()

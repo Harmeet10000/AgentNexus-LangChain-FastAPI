@@ -206,7 +206,9 @@ class DocumentCommandService:
         )
 
     async def get_status(self, *, user_id: str, document_id: str) -> DocumentStatusResponse:
-        status_result: AppResult[dict[str, Any] | None] = await self.repo.fetch_status(user_id=user_id, document_id=document_id)
+        status_result: AppResult[dict[str, Any] | None] = await self.repo.fetch_status(
+            user_id=user_id, document_id=document_id
+        )
         if isinstance(status_result, Success):
             record: dict[str, Any] | None = status_result.unwrap()
             if record is not None:
@@ -306,11 +308,15 @@ class DocumentQueryService:
         chunk_lookup = await self.repo.fetch_chunks_by_ids(
             [item.chunk_id for item in fused_results]
         )
-        items: list[DocumentSearchResultItem] = _build_search_items(fused_results=fused_results, chunk_lookup=chunk_lookup)
+        items: list[DocumentSearchResultItem] = _build_search_items(
+            fused_results=fused_results, chunk_lookup=chunk_lookup
+        )
         response = UnifiedSearchResponse(items=items, cache_hit=False)
         if not payload.bypass_cache and self.redis is not None:
             await self.redis.setex(
-                name=cache_key, time=DEFAULT_SEARCH_CACHE_TTL_SECONDS, value=response.model_dump_json()
+                name=cache_key,
+                time=DEFAULT_SEARCH_CACHE_TTL_SECONDS,
+                value=response.model_dump_json(),
             )
             if lock_acquired:
                 await self.redis.delete(lock_key)

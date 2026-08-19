@@ -121,9 +121,9 @@ class DunningService:
             )
             return {"status": "charge_attempted", "payment_link_id": link.get("id")}
         except Exception as exc:  # noqa: BLE001  -- recorded, not re-raised
-            logger.bind(
-                operation="dunning", subscription_id=str(subscription.id)
-            ).warning(f"Charge attempt failed: {exc}")
+            logger.bind(operation="dunning", subscription_id=str(subscription.id)).warning(
+                f"Charge attempt failed: {exc}"
+            )
             return {"status": "charge_failed", "reason": str(exc)[:500]}
 
     async def execute_retry(self, subscription: Subscription) -> Subscription:

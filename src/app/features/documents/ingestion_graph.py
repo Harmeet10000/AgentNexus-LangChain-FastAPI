@@ -50,12 +50,12 @@ def build_document_ingestion_graph(
     graph.add_node(
         node="ingest_document",
         action=_make_ingest_document_node(
-                object_store=object_store,
-                repo=repo,
-                graphiti=graphiti,
-                ingest_document_fn=ingest_document_fn,
-                llm=llm,
-            ),
+            object_store=object_store,
+            repo=repo,
+            graphiti=graphiti,
+            ingest_document_fn=ingest_document_fn,
+            llm=llm,
+        ),
     )
     graph.set_entry_point("ingest_document")
     graph.add_edge("ingest_document", END)
