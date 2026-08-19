@@ -110,7 +110,7 @@ class InvoiceRepository:
         offset: int = 0,
     ) -> AppResult[list[Invoice]]:
         """List issued/paid invoices for a user (Requirement 13)."""
-        try:  # noqa: PLW0717
+        try:
             conditions = [
                 Invoice.user_id == user_id,
                 Invoice.status.in_(["issued", "paid"]),
@@ -200,7 +200,7 @@ class InvoiceRepository:
         status: str,
         extra_values: dict[str, object] | None = None,
     ) -> AppResult[Invoice]:
-        try:  # noqa: PLW0717
+        try:
             values: dict[str, object] = {"status": status}
             if extra_values:
                 values.update(extra_values)

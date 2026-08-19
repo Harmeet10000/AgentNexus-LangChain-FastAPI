@@ -383,6 +383,7 @@ ignore = [
     "COM812",  # Trailing comma missing (conflicts with formatter in some cases)
     "SLF001",  # Private member access (occasionally needed in tests)
     "RUF029",  # unused-async: FastAPI deps are async by convention
+    "PLW0717", # too-many-statements-in-try-clause (orchestration/agent code)
 ]
 
 [tool.ruff.lint.flake8-type-checking]
@@ -471,22 +472,18 @@ section-order = [
     "BLE001",
     "F821",
     "PLC0415",
-    "PLW0717", # Complex agent orchestration in single try
 ]
 "src/app/shared/rag/document_processing/ingest.py" = [
     "PLC0415", # Late imports to break circular deps
-    "PLW0717", # Complex pipeline orchestration
 ]
 "src/app/shared/rag/document_processing/ingest_v2.py" = [
     "PLC0415", # Late imports to break circular deps
-    "PLW0717", # Complex pipeline orchestration
 ]
 "src/app/shared/rag/document_processing/embedder.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
 "src/app/shared/rag/document_processing/docling_enhanced.py" = [
     "PLC0415", # Late imports to break circular deps
-    "PLW0717", # Complex document processing
 ]
 "src/app/shared/rag/document_processing/chunker.py" = [
     "PLC0415", # Late imports to break circular deps
@@ -533,10 +530,6 @@ section-order = [
 "src/app/shared/langchain_layer/agents/tools/shell.py" = [
     "ASYNC240", # Blocking path methods in async — uses os.path intentionally
     "PLC0415",  # Local import re to avoid name collision
-    "PLW0717",  # Complex shell orchestration
-]
-"src/app/shared/langgraph_layer/reconciliation/nodes.py" = [
-    "PLW0717", # Graph node orchestration
 ]
 "**/_*.py" = ["ANN201"] # Private modules
 "src/app/features/auth/router.py" = ["S105"]
@@ -548,6 +541,7 @@ section-order = [
 ]
 "src/app/features/crawler/dependencies.py" = ["PLC0415"]
 "src/mcp_core/server/*.py" = ["PLC0415"]
+"src/mcp_core/__init__.py" = ["F822", "PLC0415"] # lazy __getattr__ exports; imports inside __getattr__
 
 
 [tool.ruff.format]

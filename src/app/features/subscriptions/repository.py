@@ -199,7 +199,7 @@ class SubscriptionRepository:
         offset: int = 0,
     ) -> AppResult[tuple[list[Subscription], int]]:
         """Return (items, total_count) for the requested slice."""
-        try:  # noqa: PLW0717
+        try:
             conditions = [Subscription.user_id == user_id, Subscription.deleted_at.is_(None)]
             if status is not None:
                 conditions.append(Subscription.status == status)

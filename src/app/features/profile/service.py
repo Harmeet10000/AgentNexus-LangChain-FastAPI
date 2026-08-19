@@ -73,7 +73,7 @@ class ProfileService:
         content_type: str,
     ) -> AvatarResponse:
         # StorageService validates type and size — raises ValidationException if invalid
-        public_url = await self._storage.upload_avatar(
+        public_url = await self._storage.upload_avatar(  # ty: ignore[unresolved-attribute]
             user_id=str(user.id),
             data=file_data,
             content_type=content_type,
@@ -85,7 +85,7 @@ class ProfileService:
         user.avatar_url = public_url
         await self._user_repo.save(user)
 
-        if old_avatar:
+        if old_avatar and self._storage.public_url:
             # Extract key from old URL and delete asynchronously
             old_key = old_avatar.removeprefix(self._storage.public_url + "/")
             await self._storage.delete_object(key=old_key)

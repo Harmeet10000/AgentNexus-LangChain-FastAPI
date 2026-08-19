@@ -50,9 +50,7 @@ class Subscription(Base):
             "user_id",
             "plan_id",
             unique=True,
-            postgresql_where=text(
-                "deleted_at IS NULL AND status NOT IN ('cancelled', 'expired')"
-            ),
+            postgresql_where=text("deleted_at IS NULL AND status NOT IN ('cancelled', 'expired')"),
         ),
     )
 

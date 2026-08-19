@@ -425,9 +425,7 @@ class WebhookService:
             logger.bind(operation="webhook").warning(update.failure().message)
         return "processed"
 
-    async def _handle_payment_captured(
-        self, payload: dict[str, object], *, replay: bool
-    ) -> str:
+    async def _handle_payment_captured(self, payload: dict[str, object], *, replay: bool) -> str:
         entity = self._entity(payload, "payment")
         rz_payment_id = entity.get("id")
         subscription = await self._find_subscription_by_entity(entity)

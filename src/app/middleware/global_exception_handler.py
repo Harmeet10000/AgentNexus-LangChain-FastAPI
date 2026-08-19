@@ -45,7 +45,7 @@ async def global_exception_handler(_request: Request, exc: Exception) -> JSONRes
             error_code=error_code,
             flow=current_flow,
         )
-        return _json_error_response(payload, status_code, headers=exc.headers)  # type: ignore
+        return _json_error_response(payload, status_code, headers=exc.headers)  # ty: ignore[invalid-argument-type]
 
     # ────────────────────────────────────────────────
     # 2. Pydantic / FastAPI validation errors (422)
@@ -97,7 +97,7 @@ async def global_exception_handler(_request: Request, exc: Exception) -> JSONRes
             error_code=error_code,
             flow=current_flow,
         )
-        return _json_error_response(payload, status_code, headers=exc.headers)  # type: ignore
+        return _json_error_response(payload, status_code, headers=exc.headers)  # ty: ignore[invalid-argument-type]
 
     # ────────────────────────────────────────────────
     # 4. Catch-all — unexpected server errors (500)
