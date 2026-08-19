@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Create credit spec directory",
+  "description": "Create spec directory for user credit integration",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "mkdir -p \"c:\\Users\\HarmeetSingh\\Desktop\\Projects\\AgentNexus-LangChain-FastAPI\\.kiro\\specs\\user-credit-integration\""
+  }
+}
