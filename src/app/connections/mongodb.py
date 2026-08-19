@@ -35,8 +35,8 @@ async def create_mongo_client(
     database: AsyncIOMotorDatabase[Any] = client[db_name]
 
     await init_beanie(
-        database=database,  # type: ignore
-        document_models=document_models,  # type: ignore
+        database=database,  # ty: ignore[invalid-argument-type]
+        document_models=document_models,  # ty: ignore[invalid-argument-type]
     )
 
     return client, database

@@ -23,9 +23,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.drop_constraint("uq_plans_name", "plans", type_="unique")
-    op.execute(
-        "CREATE UNIQUE INDEX uq_plans_active_name ON plans (name) WHERE is_active"
-    )
+    op.execute("CREATE UNIQUE INDEX uq_plans_active_name ON plans (name) WHERE is_active")
 
     op.execute(
         """

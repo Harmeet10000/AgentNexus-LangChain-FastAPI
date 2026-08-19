@@ -210,9 +210,7 @@ class PaymentService:
     def _refund_paisa(payment: Payment) -> int:
         return int((payment.refund_amount or Decimal(0)) * 100)
 
-    async def handle_refund_processed(
-        self, *, razorpay_payment_id: str, refund_paisa: int
-    ) -> None:
+    async def handle_refund_processed(self, *, razorpay_payment_id: str, refund_paisa: int) -> None:
         """Finalize a payment after ``refund.processed`` (Requirement 11)."""
         result = await self.payments.find_by_razorpay_id(razorpay_payment_id)
         if isinstance(result, Failure):

@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from authlib.integrations.httpx_client import AsyncOAuth2Client  # ty:ignore[unresolved-import]
+from authlib.integrations.httpx_client import AsyncOAuth2Client
 from returns.result import Failure, Success
 
 from app.config import get_settings
@@ -231,22 +231,22 @@ class AuthService:
         else:
             return  # silent — don't reveal email existence
 
-        if resolved.is_verified:
+        if resolved.is_verified:  # ty: ignore[unresolved-attribute]
             msg = "Email already verified"
             raise ConflictException(msg)
 
         new_token = generate_token()
-        resolved.verification_token_hash = hash_token(new_token)  # type: ignore
-        save_result = await self._user_repo.save(resolved)  # type: ignore
+        resolved.verification_token_hash = hash_token(new_token)  # ty: ignore[invalid-assignment]
+        save_result = await self._user_repo.save(resolved)  # ty: ignore[invalid-argument-type]
         if isinstance(save_result, Failure):
             log_expected_failure(save_result.failure(), operation="save_user")
             raise app_error_to_exception(save_result.failure())
 
         await self._publish_outbox_event(
             aggregate_type="auth_email",
-            aggregate_id=str(resolved.id),
+            aggregate_id=str(resolved.id),  # ty: ignore[unresolved-attribute]
             event_type="auth.send_verification_email",
-            payload={"user_id": str(resolved.id), "email": resolved.email, "token": new_token},  # type: ignore
+            payload={"user_id": str(resolved.id), "email": resolved.email, "token": new_token},  # ty: ignore[unresolved-attribute]
         )
 
     async def forgot_password(self, email: str) -> None:

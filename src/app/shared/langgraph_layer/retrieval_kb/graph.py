@@ -39,7 +39,7 @@ def build_retrieval_graph(
     grader_llm = _structured(llm, ContextGrade)
     generator_llm = _structured(llm, GeneratedAnswer)
 
-    graph = StateGraph(RetrievalState)  # type: ignore
+    graph = StateGraph(RetrievalState)  # ty: ignore[invalid-argument-type]
     graph.add_node("query_analyzer", cast("Any", make_query_analyzer_node(query_llm, redis)))
     graph.add_node("graph_neo4j", cast("Any", make_graph_retrieval_node(graphiti)))
     graph.add_node(
@@ -65,7 +65,7 @@ def build_retrieval_graph(
         {"query_analyzer": "query_analyzer", "generate": "generate"},
     )
     graph.add_edge("generate", END)
-    return graph.compile()  # type: ignore
+    return graph.compile()  # ty: ignore[invalid-return-type]
 
 
 def _structured(llm: Any, schema: type[Any]) -> Any:

@@ -143,7 +143,7 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
     resolved_tools: list[BaseTool] = []
     for t in spec.tools:
         if isinstance(t, str):
-            resolved_tools.append(get_tool_registry().get(t))
+            resolved_tools.append(get_tool_registry().get(t))  # ty: ignore[unresolved-attribute]
         else:
             resolved_tools.append(t)
 
@@ -187,7 +187,7 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
         system_prompt=system_text,
         middleware=middleware,
         response_format=spec.response_format,
-        context_schema=spec.context_schema,  # type: ignore
+        context_schema=spec.context_schema,  # ty: ignore[invalid-argument-type]
         checkpointer=memory.checkpointer,
         debug=spec.debug,
         name=spec.name,
@@ -243,7 +243,7 @@ class ProductionAgent(BaseModel):
 
         # Inject long-term memory into the first invocation
         if self.spec.enable_long_term_memory:
-            msgs = await self.memory.inject_long_term_context(
+            msgs = await self.memory.inject_long_term_context(  # ty: ignore[unresolved-attribute]
                 [HumanMessage(content=user_message)],
                 user_id=user_id,
                 agent_id=self.spec.name,
@@ -253,7 +253,7 @@ class ProductionAgent(BaseModel):
         result = await self.compiled.ainvoke(input_state, config=config)
 
         if save_memory and self.spec.enable_long_term_memory:
-            await self.memory.save_session(
+            await self.memory.save_session(  # ty: ignore[unresolved-attribute]
                 result.get("messages", []),
                 user_id=user_id,
                 session_id=thread_id,
@@ -313,7 +313,7 @@ class ProductionAgent(BaseModel):
             msg = "messages and thread_ids must have the same length"
             raise ValueError(msg)
 
-        max_c = max_concurrency or settings.model.max_concurrency  # type: ignore  # ponytail: Settings doesn't have max_concurrency yet, add when needed
+        max_c = max_concurrency or settings.model.max_concurrency  # ty: ignore[unresolved-attribute]  # ponytail: Settings doesn't have max_concurrency yet, add when needed
         semaphore = asyncio.Semaphore(max_c)
 
         async def bounded_invoke(msg: str, tid: str) -> dict[str, Any]:

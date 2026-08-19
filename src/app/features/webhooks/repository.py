@@ -131,7 +131,7 @@ class WebhookEventRepository:
         status: str,
         extra_values: dict[str, object] | None = None,
     ) -> AppResult[WebhookEvent]:
-        try:  # noqa: PLW0717
+        try:
             values: dict[str, object] = {"status": status}
             if extra_values:
                 values.update(extra_values)

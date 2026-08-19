@@ -1,3 +1,5 @@
+"""Lazy-export module: imports are deferred to __getattr__ to keep startup light."""
+
 __all__ = [
     "MCPClientManager",
     "MCPClientServerConfig",
@@ -78,7 +80,7 @@ def __getattr__(name: str):
             "stop_mcp": stop_mcp,
         }[name]
 
-    if name in {"get_mcp_server"}:
+    if name == "get_mcp_server":
         from mcp_core.server.factory import get_mcp_server
 
         return get_mcp_server
@@ -91,9 +93,10 @@ def __getattr__(name: str):
             "run_mcp_server": run_mcp_server,
         }[name]
 
-    if name in {"bind_mcp_parent_app"}:
+    if name == "bind_mcp_parent_app":
         from mcp_core.server.tools import bind_mcp_parent_app
 
         return bind_mcp_parent_app
 
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)

@@ -89,7 +89,9 @@ def upgrade() -> None:
         sa.UniqueConstraint("user_id", "plan_id", name="uq_subscriptions_user_plan"),
     )
     op.create_index("ix_subscriptions_user_id", "subscriptions", ["user_id"])
-    op.create_index("ix_subscriptions_razorpay_subscription_id", "subscriptions", ["razorpay_subscription_id"])
+    op.create_index(
+        "ix_subscriptions_razorpay_subscription_id", "subscriptions", ["razorpay_subscription_id"]
+    )
     op.create_index("ix_subscriptions_plan_id", "subscriptions", ["plan_id"])
     op.create_index("ix_subscriptions_id_version", "subscriptions", ["id", "version"])
 
@@ -108,7 +110,9 @@ def upgrade() -> None:
         sa.Column("failed_at", _now(), nullable=True),
         sa.Column("error_code", sa.String(64), nullable=True),
         sa.Column("error_description", sa.Text(), nullable=True),
-        sa.Column("refund_amount", sa.Numeric(20, 2), nullable=False, server_default=sa.text("0.0")),
+        sa.Column(
+            "refund_amount", sa.Numeric(20, 2), nullable=False, server_default=sa.text("0.0")
+        ),
         sa.Column("metadata_", _jsonb(), nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("created_at", _now(), nullable=False),
         sa.Column("updated_at", _now(), nullable=False),
@@ -306,7 +310,9 @@ def upgrade() -> None:
         sa.Column("total_subscriptions", sa.BigInteger(), nullable=False, server_default="0"),
         sa.Column("invoices_generated", sa.BigInteger(), nullable=False, server_default="0"),
         sa.Column("failed_count", sa.BigInteger(), nullable=False, server_default="0"),
-        sa.Column("failed_subscriptions", _jsonb(), nullable=False, server_default=sa.text("'[]'::jsonb")),
+        sa.Column(
+            "failed_subscriptions", _jsonb(), nullable=False, server_default=sa.text("'[]'::jsonb")
+        ),
         sa.Column("initiated_by_user_id", sa.String(255), nullable=False),
         sa.Column("initiated_at", _now(), nullable=False),
         sa.Column("completed_at", _now(), nullable=True),

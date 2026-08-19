@@ -205,7 +205,7 @@ class SubscriptionService:
 
         payment_url: str | None = None
         if self._razorpay_enabled():
-            try:  # noqa: PLW0717
+            try:
                 customer_id = await self._find_or_create_customer(
                     dto.customer_email, dto.customer_phone
                 )
@@ -274,9 +274,7 @@ class SubscriptionService:
             responses.append(_subscription_to_response(subscription, plan=plan))
         return SubscriptionListResponse(items=responses, total=total, limit=limit, offset=offset)
 
-    async def get_subscription(
-        self, user_id: str, subscription_id: str
-    ) -> SubscriptionResponse:
+    async def get_subscription(self, user_id: str, subscription_id: str) -> SubscriptionResponse:
         result = await self.subscriptions.find_by_id(subscription_id)
         if isinstance(result, Failure):
             _repo_failure(result.failure(), "get_subscription")
@@ -415,9 +413,7 @@ class SubscriptionService:
         plan = await self._load_plan(subscription.plan_id)
         return _subscription_to_response(subscription, plan=plan)
 
-    async def resume_subscription(
-        self, user_id: str, subscription_id: str
-    ) -> SubscriptionResponse:
+    async def resume_subscription(self, user_id: str, subscription_id: str) -> SubscriptionResponse:
         subscription = await self._get_owned_subscription(user_id, subscription_id)
         if subscription.status != SubscriptionStatus.PAUSED.value:
             raise InvalidStateTransitionException(

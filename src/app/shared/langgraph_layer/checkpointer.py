@@ -26,7 +26,7 @@ from app.utils import logger
 try:
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 except ImportError:
-    AsyncPostgresSaver = Any  # type: ignore[misc,assignment]
+    AsyncPostgresSaver = Any  # ty: ignore[invalid-assignment]
 
 
 async def setup_langgraph_checkpointer(conn_string: str) -> AsyncPostgresSaver:
@@ -50,7 +50,7 @@ async def setup_langgraph_checkpointer(conn_string: str) -> AsyncPostgresSaver:
 
     if AsyncPostgresSaver is Any:
         logger.warning("LangGraph Postgres checkpointer is unavailable; skipping initialization")
-        return None  # type: ignore[return-value]
+        return None  # ty: ignore[invalid-return-type]
 
     try:
         checkpointer = AsyncPostgresSaver.from_conn_string(conn_string)

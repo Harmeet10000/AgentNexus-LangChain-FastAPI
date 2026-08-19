@@ -217,7 +217,9 @@ class PlanService:
                 dto.interval_count if dto.interval_count is not None else plan.interval_count
             ),
             trial_period_days=(
-                dto.trial_period_days if dto.trial_period_days is not None else plan.trial_period_days
+                dto.trial_period_days
+                if dto.trial_period_days is not None
+                else plan.trial_period_days
             ),
             tax_rate=dto.tax_rate if dto.tax_rate is not None else plan.tax_rate,
             refund_policy=dto.refund_policy or plan.refund_policy,
