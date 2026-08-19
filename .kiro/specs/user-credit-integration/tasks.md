@@ -81,14 +81,18 @@ The credit integration feature enables administrators and the system to grant cr
     - _Requirements: 49.1-49.5, 52.1, 53.8_
 
   - [ ] 4.2 Implement Credit Service (part 2: consumption)
-    - Implement `consume_credits()` for applying credits to invoices
+    - Implement `consume_credits(user_id, invoice_id, invoice_gross_total, session)` for applying credits to invoices
+    - **CRITICAL: Add `session: AsyncSession` parameter - method MUST NOT own transaction boundary**
+    - **CRITICAL: DO NOT call `session.commit()` or `session.flush()` within this method**
+    - **CRITICAL: Caller (InvoiceService) owns transaction - credit + Razorpay charge MUST be atomic**
     - **NEW: Call `find_available_for_consumption()` to get credits in correct order**
     - **NEW: Iterate through credits, consuming until invoice_gross_total (in rupees) is covered**
     - **NEW: Convert paisa amounts to rupees ONLY in calculation: consumed_amount / 100**
-    - **NEW: Create CreditConsumption record with consumed_amount in paisa**
-    - **NEW: Update UserCredit.remaining_balance and optionally status**
+    - **NEW: Create CreditConsumption record with consumed_amount in paisa using passed session**
+    - **NEW: Update UserCredit.remaining_balance and optionally status using passed session**
     - **NEW: Return CreditConsumptionResult with credit_applied and cash_due in rupees**
-    - _Requirements: 50.1-50.7, 53.1, 53.5_
+    - **BUG VECTOR: If you create your own session or commit here, Razorpay failure won't rollback credit**
+    - _Requirements: 50.1-50.7, 53.1, 53.2, 53.3, 53.5_
 
   - [ ] 4.3 Implement Credit Service (part 3: history and expiration)
     - Implement `get_credit_history()` returning credits and consumptions for a user
@@ -109,9 +113,10 @@ The credit integration feature enables administrators and the system to grant cr
   - [ ] 5.1 Create Credit-specific Razorpay integration
     - Review existing `features/payments/clients/razorpay_client.py`
     - **NEW: Add method for creating payment links (for partial cash payments)**
-    - **NEW: Ensure credit consumption and Razorpay charge are in same transaction**
-    - Implement transaction rollback on payment failure
-    - _Requirements: 50.3, 50.4, 53.3_
+    - **CRITICAL: Invoice generation flow MUST be: begin transaction → generate invoice → consume_credits(session) → Razorpay charge → commit on success / rollback on failure**
+    - **CRITICAL: Do NOT call consume_credits() then attempt Razorpay in separate transaction**
+    - Implement transaction rollback on payment failure (caller owns this, not CreditService)
+    - _Requirements: 50.3, 50.4, 53.2, 53.3_
 
 - [ ] 6. Implement FastAPI routers
   - [ ] 6.1 Create Admin/Portal credit router
@@ -129,11 +134,13 @@ The credit integration feature enables administrators and the system to grant cr
   - [ ] 6.2 Create System-Internal credit router
     - Create `routers/credit_internal_router.py` with `APIRouter`
     - Implement POST `/credits/apply-to-invoice` endpoint for InvoiceService
+    - **CRITICAL: Accept `session: AsyncSession = Depends(get_db_session)` and pass to consume_credits()**
+    - **CRITICAL: DO NOT commit session within this endpoint - InvoiceService owns the transaction**
     - **NEW: This endpoint is called internally by InvoiceService**
     - **NEW: Accept invoice_gross_total in rupees**
     - **NEW: Return CreditConsumptionResult**
     - Implement system-internal endpoints (no user-facing)
-    - _Requirements: 50.1-50.7, 55.1-55.6_
+    - _Requirements: 50.1-50.7, 53.2, 53.3, 55.1-55.6_
 
   - [ ] 6.3 Wire credit routers into main application
     - Register credit routers in main FastAPI app with `/credits` prefix
@@ -339,12 +346,15 @@ The credit integration feature enables administrators and the system to grant cr
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP
 - All tasks marked with `**NEW:**` contain critical implementation details
+- All tasks marked with `**CRITICAL:**` prevent the double-charge bug - DO NOT SKIP
 - Property-based tests use `hypothesis` library with minimum 100 iterations each
 - Credit amounts stored in paisa (BigInteger), converted to rupees ONLY in service layer
 - GST compliance: tax calculated on full invoice total before credit application
 - Consumption order: soonest-expiring-first, then oldest-created (no expiry last)
 - Repository pattern uses dual-method: `_result()` returning `AppResult[T]` + public wrapper
 - All credit operations create audit log entries for compliance
+- **SESSION OWNERSHIP RULE: `consume_credits()` takes `session` parameter it doesn't own - NEVER commit within this method**
+- **BUG VECTOR: If CreditService manages its own session, Razorpay failure leaves credit consumed (user double-charged)**
 - Transactional atomicity enforced for credit consumption + invoice/payment creation
 - Checkpoint tasks ensure incremental validation
 

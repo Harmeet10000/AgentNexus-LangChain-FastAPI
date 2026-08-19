@@ -280,6 +280,7 @@ class CreditConsumption(Base):
 from typing import Protocol
 from decimal import Decimal
 from uuid import UUID
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.credits.dto import (
     CreditGrantDTO,
@@ -304,8 +305,15 @@ class ICreditService(Protocol):
         user_id: str,
         invoice_id: UUID,
         invoice_gross_total: Decimal,  # in rupees
+        session: AsyncSession,  # CRITICAL: session it doesn't own - no commit within this method
     ) -> CreditConsumptionResult:
-        """Apply available credits to an invoice (Requirement 50)."""
+        """Apply available credits to an invoice (Requirement 50).
+        
+        CRITICAL: This method accepts a session it does not own and MUST NOT commit.
+        The caller (InvoiceService) owns the transaction boundary. This ensures that
+        credit consumption and Razorpay charge occur in the same transaction, preventing
+        the bug where Razorpay fails but credit is already consumed.
+        """
         ...
     
     async def get_credit_balance(self, user_id: str) -> Decimal:
@@ -342,6 +350,13 @@ class ICreditService(Protocol):
 - History retrieval with consumption tracking
 - Daily expiration job for past-due credits
 - Proration credit grant for plan downgrades
+
+**CRITICAL SESSION HANDLING**:
+- `consume_credits()` accepts an `AsyncSession` it does NOT own
+- NEVER call `session.commit()` or `session.flush()` within `consume_credits()`
+- The caller (InvoiceService) owns the transaction boundary
+- This ensures credit consumption + Razorpay charge are atomic
+- Failure mode if violated: Razorpay fails → credit already gone → user double-charged
 
 ### Component 2: Credit Repository
 
@@ -639,6 +654,27 @@ class ConsumptionRecord(BaseModel):
 
 *A property is a characteristic or behavior that should hold true across all valid executions of a system—essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
 
+## Transaction Boundary Rules
+
+**The Double-Charge Bug and How to Prevent It**
+
+Most billing integration bugs stem from incorrect transaction boundaries. The failure mode:
+
+1. InvoiceService calls `CreditService.consume_credits()` ✓
+2. Credit is consumed, records written to DB ✓
+3. Razorpay charge attempted for remaining amount ✗ FAILS
+4. Dunning kicks in, user gets billed next cycle
+5. **BUG**: User's credit is already gone, they pay twice for the same coverage
+
+**The structural fix**: `consume_credits()` takes a `session: AsyncSession` parameter it does NOT own.
+
+**Rules**:
+1. **InvoiceService owns the transaction**: `begin transaction → generate invoice → consume_credits(session) → Razorpay charge → commit on success / rollback on failure`
+2. **CreditService never commits**: `consume_credits()` writes credit/consumption records using the passed session but NEVER calls `session.commit()` or `session.flush()`
+3. **Code review red flag**: If anyone hands CreditService its own `get_db_session()` or creates a session inside `consume_credits()`, the bug is about to ship
+
+**Test validation**: Property 3 (Rollback on Payment Failure) explicitly tests this by simulating Razorpay failures and verifying credit balance unchanged.
+
 ### Property 1: Ledger Integrity (Amount Conservation)
 
 *For any* UserCredit record, the original `credit_amount` MUST equal the sum of `remaining_balance` plus all `consumed_amount` records referencing that credit.
@@ -672,6 +708,8 @@ class ConsumptionRecord(BaseModel):
 **Property Type**: Atomicity + Idempotence
 
 **Explanation**: This property ensures that failed payments don't leave credits consumed. If Razorpay fails to charge the remaining cash amount, the entire transaction (including credit deduction) is rolled back. This is tested by simulating Razorpay failures and verifying rollback.
+
+**CRITICAL IMPLEMENTATION NOTE**: This property can only be satisfied if `consume_credits()` accepts a session parameter it doesn't own and never calls `session.commit()`. If CreditService manages its own session, Razorpay failure will leave credit consumed (user gets double-charged). The structural fix is: InvoiceService owns the transaction, CreditService only participates in it.
 
 **Test Strategy**: Generate random partial coverage scenarios, simulate Razorpay failure, verify credit balance is unchanged.
 
@@ -1114,11 +1152,16 @@ async def apply_credit_to_invoice(
     user_id: str,
     invoice_id: str,
     invoice_gross_total: Decimal = Body(..., description="Invoice gross total in rupees"),
+    session: AsyncSession = Depends(get_db_session),  # CRITICAL: pass to consume_credits
 ) -> APIResponse[CreditConsumptionResult]:
     """Apply available credits to an invoice (Requirement 50, 55).
     
     This endpoint is called internally by InvoiceService during invoice generation.
     It consumes credits in order of soonest expiry first, then oldest creation.
+    
+    CRITICAL: This endpoint MUST be called within the same transaction as invoice
+    creation and Razorpay charge. The session passed here is owned by InvoiceService,
+    not by this endpoint or CreditService. Do not commit the session here.
     
     **Permission**: System/internal only (no user-facing endpoint)
     """
@@ -1126,6 +1169,7 @@ async def apply_credit_to_invoice(
         user_id=user_id,
         invoice_id=UUID(invoice_id),
         invoice_gross_total=invoice_gross_total,
+        session=session,  # CRITICAL: pass session to service
     )
     return http_response(result)
 ```
