@@ -92,6 +92,15 @@ def _fail(
     }
 
 
+async def _invoke_structured(
+    llm: Runnable[list[Any], Any],
+    system_prompt: str,
+    human_content: str | None,
+) -> Any:
+    messages = [SystemMessage(content=system_prompt), HumanMessage(content=human_content)]
+    return await llm.ainvoke(messages)
+
+
 class QnAOutput(BaseModel):
     """Structured output schema for the QnA LLM call."""
 
@@ -390,11 +399,11 @@ def make_normalization_node(
                 "document_text not populated by ingestion",
             )
 
-        messages = [
-            SystemMessage(content=_NORMALIZATION_SYSTEM_PROMPT),
-            HumanMessage(content=state["document_text"]),
-        ]
-        result: NormalizedDocument = await normalization_llm.ainvoke(messages)
+        result: NormalizedDocument = await _invoke_structured(
+            normalization_llm,
+            _NORMALIZATION_SYSTEM_PROMPT,
+            state["document_text"],
+        )
         log.info("normalization_completed", section_count=len(result.sections))
 
         return {
@@ -420,11 +429,11 @@ def make_segmentation_node(
             )
 
         doc_text = "\n".join(s.content for s in normalized_document.sections)
-        messages = [
-            SystemMessage(content=_SEGMENTATION_SYSTEM_PROMPT),
-            HumanMessage(content=doc_text),
-        ]
-        result: ClauseSegmentationOutput = await segmentation_llm.ainvoke(messages)
+        result: ClauseSegmentationOutput = await _invoke_structured(
+            segmentation_llm,
+            _SEGMENTATION_SYSTEM_PROMPT,
+            doc_text,
+        )
         log.info("segmentation_completed", segment_count=len(result.segments))
 
         return {
@@ -494,11 +503,11 @@ def make_relationship_mapping_node(
             f"[{e.entity_type}] {e.value} (clause: {e.clause_id}, party: {e.party or 'N/A'})"
             for e in state["extracted_entities"]
         )
-        messages = [
-            SystemMessage(content=_RELATIONSHIP_MAPPING_SYSTEM_PROMPT),
-            HumanMessage(content=entity_summary),
-        ]
-        result: RelationshipMappingOutput = await relationship_llm.ainvoke(messages)
+        result: RelationshipMappingOutput = await _invoke_structured(
+            relationship_llm,
+            _RELATIONSHIP_MAPPING_SYSTEM_PROMPT,
+            entity_summary,
+        )
         log.info("relationship_mapping_done", relationship_count=len(result.relationships))
 
         return {
@@ -545,7 +554,8 @@ def make_risk_analysis_node(risk_agent: Any) -> StateNode:
 
 def _build_analysis_context(state: LegalAgentState) -> str:
     clauses = "\n".join(
-        f"[{seg.clause_type}] {seg.clause_id}: {seg.text[:_CLAUSE_CONTEXT_CHARS]}" for seg in state["segments"]
+        f"[{seg.clause_type}] {seg.clause_id}: {seg.text[:_CLAUSE_CONTEXT_CHARS]}"
+        for seg in state["segments"]
     )
     entities = "\n".join(
         f"{e.entity_type}: {e.value} (party: {e.party or 'N/A'})"
@@ -619,11 +629,11 @@ def make_grounding_verification_node(
         if compliance_result:
             summary_parts.append(f"COMPLIANCE SUMMARY: {compliance_result.summary}")
 
-        messages = [
-            SystemMessage(content=_GROUNDING_SYSTEM_PROMPT),
-            HumanMessage(content="\n\n".join(summary_parts)),
-        ]
-        result: GroundingVerificationOutput = await grounding_llm.ainvoke(messages)
+        result: GroundingVerificationOutput = await _invoke_structured(
+            grounding_llm,
+            _GROUNDING_SYSTEM_PROMPT,
+            "\n\n".join(summary_parts),
+        )
         log.info("grounding_verified", verified=result.verified)
 
         return {
@@ -650,7 +660,9 @@ def make_human_review_node() -> StateNode:
             "risk_summary": risk_analysis.summary if risk_analysis else None,
             "compliance_summary": compliance_result.summary if compliance_result else None,
             "unverified_claims": grounding.unverified_claims if grounding else [],
-            "segments": [seg.model_dump() for seg in state["segments"][:_HUMAN_REVIEW_SEGMENT_PREVIEW]],
+            "segments": [
+                seg.model_dump() for seg in state["segments"][:_HUMAN_REVIEW_SEGMENT_PREVIEW]
+            ],
             "message": "Please review findings, add overrides if needed, and approve to finalize",
         }
 
