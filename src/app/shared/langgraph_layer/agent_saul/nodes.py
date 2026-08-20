@@ -70,6 +70,20 @@ _VALID_WORKER_NODES = frozenset(
 )
 
 
+def _fail(
+    node: str,
+    code: str,
+    message: str,
+    *,
+    status: WorkflowStatus = WorkflowStatus.FAILED,
+    retryable: bool = False,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "errors": [AgentError(node=node, code=code, message=message, retryable=retryable)],
+    }
+
+
 class QnAOutput(BaseModel):
     """Structured output schema for the QnA LLM call."""
 
@@ -113,17 +127,11 @@ def make_gateway_node() -> StateNode:
 
         if not state.get("doc_id"):
             log.error("gateway_missing_doc_id")
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="gateway",
-                        code="MISSING_DOC_ID",
-                        message="doc_id is required to start the pipeline",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "gateway",
+                "MISSING_DOC_ID",
+                "doc_id is required to start the pipeline",
+            )
 
         working_memory: dict[str, Any] = dict(state.get("working_memory", {}))
         working_memory["gateway_validated"] = True
@@ -216,17 +224,11 @@ def make_orchestrator_node(
             and action.target_node not in _VALID_WORKER_NODES
         ):
             log.error("orchestrator_invalid_target", target=action.target_node)
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="orchestrator",
-                        code="INVALID_TARGET_NODE",
-                        message=f"Orchestrator routed to unknown node: {action.target_node}",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "orchestrator",
+                "INVALID_TARGET_NODE",
+                f"Orchestrator routed to unknown node: {action.target_node}",
+            )
 
         log.info(
             "orchestrator_action_decided",
@@ -292,17 +294,13 @@ def make_planner_node(planner_llm: Runnable[list[Any], PlannerOutput]) -> StateN
 
         if action == "reject":
             log.info("planner_plan_rejected")
-            return {
-                "status": WorkflowStatus.PLAN_REJECTED,
-                "errors": [
-                    AgentError(
-                        node="planner",
-                        code="PLAN_REJECTED",
-                        message=human_response.get("feedback") or "Plan rejected by reviewer",
-                        retryable=True,
-                    )
-                ],
-            }
+            return _fail(
+                "planner",
+                "PLAN_REJECTED",
+                human_response.get("feedback") or "Plan rejected by reviewer",
+                status=WorkflowStatus.PLAN_REJECTED,
+                retryable=True,
+            )
 
         if action == "modify":
             raw_steps: list[dict[str, Any]] = human_response.get("modified_plan") or []
@@ -332,17 +330,11 @@ def make_ingestion_node() -> StateNode:
 
         retry_count = state.get("retry_count", 0)
         if retry_count >= _MAX_RETRIES:
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="ingestion",
-                        code="MAX_RETRIES_EXCEEDED",
-                        message=f"Ingestion failed after {_MAX_RETRIES} attempts",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "ingestion",
+                "MAX_RETRIES_EXCEEDED",
+                f"Ingestion failed after {_MAX_RETRIES} attempts",
+            )
 
         text: str = ""
         confidence: float = 1.0
@@ -366,17 +358,11 @@ def make_ingestion_node() -> StateNode:
                     "retry_count": retry_count + 1,
                     "status": WorkflowStatus.INGESTING,
                 }
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="ingestion",
-                        code="LOW_OCR_CONFIDENCE",
-                        message=f"OCR confidence {confidence:.0%} - user declined re-upload",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "ingestion",
+                "LOW_OCR_CONFIDENCE",
+                f"OCR confidence {confidence:.0%} - user declined re-upload",
+            )
 
         log.info("ingestion_completed", text_length=len(text), confidence=confidence)
         return {
@@ -394,17 +380,11 @@ def make_normalization_node(
         log = logger.bind(node="normalization", doc_id=state["doc_id"])
 
         if not state.get("document_text"):
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="normalization",
-                        code="MISSING_DOCUMENT_TEXT",
-                        message="document_text not populated by ingestion",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "normalization",
+                "MISSING_DOCUMENT_TEXT",
+                "document_text not populated by ingestion",
+            )
 
         messages = [
             SystemMessage(content=_NORMALIZATION_SYSTEM_PROMPT),
@@ -429,17 +409,11 @@ def make_segmentation_node(
 
         normalized_document = state["normalized_document"]
         if normalized_document is None:
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="segmentation",
-                        code="MISSING_NORMALIZED_DOCUMENT",
-                        message="normalized_document not populated by normalization node",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "segmentation",
+                "MISSING_NORMALIZED_DOCUMENT",
+                "normalized_document not populated by normalization node",
+            )
 
         doc_text = "\n".join(s.content for s in normalized_document.sections)
         messages = [
@@ -680,17 +654,12 @@ def make_human_review_node() -> StateNode:
 
         if human_response.get("action") == "reject":
             log.warning("human_review_rejected")
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="human_review",
-                        code="REVIEW_REJECTED",
-                        message=human_response.get("feedback") or "Rejected at human review",
-                        retryable=True,
-                    )
-                ],
-            }
+            return _fail(
+                "human_review",
+                "REVIEW_REJECTED",
+                human_response.get("feedback") or "Rejected at human review",
+                retryable=True,
+            )
 
         raw_overrides = human_response.get("overrides") or []
         overrides = [ReviewOverride.model_validate(o) for o in raw_overrides]
@@ -781,16 +750,14 @@ def make_persist_memory_node(_cognee_client: Any) -> StateNode:
         except Exception as exc:
             log.exception("persist_memory_failed", error=str(exc))
             return {
+                **_fail(
+                    "persist_memory",
+                    "COGNEE_WRITE_FAILED",
+                    str(exc),
+                    status=WorkflowStatus.COMPLETED,
+                    retryable=True,
+                ),
                 "long_term_refs": long_term_refs,
-                "status": WorkflowStatus.COMPLETED,
-                "errors": [
-                    AgentError(
-                        node="persist_memory",
-                        code="COGNEE_WRITE_FAILED",
-                        message=str(exc),
-                        retryable=True,
-                    )
-                ],
             }
 
         return {
