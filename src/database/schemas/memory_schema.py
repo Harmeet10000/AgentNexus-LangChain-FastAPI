@@ -37,19 +37,16 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import (  # noqa: TC002 — Mapped, mapped_column used at runtime by SQLAlchemy mapper
-    DeclarativeBase,
     Mapped,
     mapped_column,
     relationship,
 )
 
+from app.shared import Base
+
 if TYPE_CHECKING:
     from datetime import datetime
     from typing import Any
-
-
-class Base(DeclarativeBase):
-    pass
 
 
 class Entity(Base):
