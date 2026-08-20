@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.connections import get_postgres_db, get_redis
+from app.features.auth import CurrentClaims
 from app.shared.langchain_layer import _build_chat_model
 from app.shared.services.storage import StorageService
 
@@ -58,8 +59,8 @@ async def get_document_query_service(
     )
 
 
-async def get_current_user_id(request: Request) -> str:
-    return request.state.user_id
+async def get_current_user_id(claims: CurrentClaims) -> str:
+    return claims.sub
 
 
 DocumentCommandServiceDep = Annotated[DocumentCommandService, Depends(get_document_command_service)]
