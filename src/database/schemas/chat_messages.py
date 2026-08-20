@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import JSON, DateTime, Enum, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.shared.base import Base
+from database.base import Base
 
 
 class ChatMessage(Base):

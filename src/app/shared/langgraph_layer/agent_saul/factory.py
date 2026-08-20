@@ -34,7 +34,6 @@ from .nodes import (
 )
 from .prompts import (
     _COMPLIANCE_SYSTEM_PROMPT,
-    _ORCHESTRATOR_SYSTEM_PROMPT,
     _RISK_ANALYSIS_SYSTEM_PROMPT,
 )
 from .state import (
@@ -62,7 +61,6 @@ class AgentRegistry(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # create_react_agent compiled sub-graphs
-    orchestrator_agent: Any  # CompiledStateGraph
     risk_agent: Any  # CompiledStateGraph
     compliance_agent: Any  # CompiledStateGraph
 
@@ -111,12 +109,6 @@ def build_agent_registry(
       Flash (thinking_level=none) → fast structural: qna, planner, pipeline nodes
     """
     # --- create_agent nodes (Pro LLM + tool stubs) -------------------------
-    orchestrator_agent = create_agent(
-        model=pro_llm,
-        tools=[],  # TODO: add delegation tools when available  # noqa: FIX002
-        system_prompt=_ORCHESTRATOR_SYSTEM_PROMPT,
-    )
-
     risk_agent = create_agent(
         model=pro_llm,
         tools=[],  # TODO: add search_caselaw, retrieve_statute tools  # noqa: FIX002
@@ -161,7 +153,6 @@ def build_agent_registry(
     finalization_llm = cast("Runnable[list[Any], Any]", pro_llm.with_structured_output(FinalReport))
 
     return AgentRegistry(
-        orchestrator_agent=orchestrator_agent,
         risk_agent=risk_agent,
         compliance_agent=compliance_agent,
         qna_llm=qna_llm,

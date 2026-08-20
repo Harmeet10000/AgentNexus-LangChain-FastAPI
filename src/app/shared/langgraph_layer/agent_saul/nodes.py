@@ -28,6 +28,7 @@ from .prompts import (
     _SEGMENTATION_SYSTEM_PROMPT,
 )
 from .state import (
+    GRAPH_NODE_NAMES,
     AgentError,
     CitedEntity,
     ClauseExtractionInput,
@@ -53,21 +54,42 @@ from .state import (
 _CLARIFICATION_THRESHOLD = 0.72
 _OCR_CONFIDENCE_THRESHOLD = 0.85
 _MAX_RETRIES = 3
+_HUMAN_REVIEW_SEGMENT_PREVIEW = 20
+_REFLECTION_LOG_CHARS = 120
+_CLAUSE_CONTEXT_CHARS = 300
 
-_VALID_WORKER_NODES = frozenset(
-    {
-        "ingestion",
-        "normalization",
-        "segmentation",
-        "entity_extraction",
-        "relationship_mapping",
-        "risk_analysis",
-        "compliance",
-        "grounding_verification",
-        "finalization",
-        "deep_research",
-    }
+
+def _utc_now_iso() -> str:
+    return datetime.now(tz=UTC).isoformat()
+
+
+# Subset of GRAPH_NODE_NAMES reachable directly from the orchestrator's CONTINUE action.
+_VALID_WORKER_NODES = GRAPH_NODE_NAMES - frozenset(
+    {"gateway", "qna", "orchestrator", "planner", "persist_memory", "human_review"}
 )
+
+
+def _fail(
+    node: str,
+    code: str,
+    message: str,
+    *,
+    status: WorkflowStatus = WorkflowStatus.FAILED,
+    retryable: bool = False,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "errors": [AgentError(node=node, code=code, message=message, retryable=retryable)],
+    }
+
+
+async def _invoke_structured(
+    llm: Runnable[list[Any], Any],
+    system_prompt: str,
+    human_content: str | None,
+) -> Any:
+    messages = [SystemMessage(content=system_prompt), HumanMessage(content=human_content)]
+    return await llm.ainvoke(messages)
 
 
 class QnAOutput(BaseModel):
@@ -113,17 +135,11 @@ def make_gateway_node() -> StateNode:
 
         if not state.get("doc_id"):
             log.error("gateway_missing_doc_id")
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="gateway",
-                        code="MISSING_DOC_ID",
-                        message="doc_id is required to start the pipeline",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "gateway",
+                "MISSING_DOC_ID",
+                "doc_id is required to start the pipeline",
+            )
 
         working_memory: dict[str, Any] = dict(state.get("working_memory", {}))
         working_memory["gateway_validated"] = True
@@ -137,10 +153,6 @@ def make_gateway_node() -> StateNode:
         }
 
     return gateway_node
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(tz=UTC).isoformat()
 
 
 def make_qna_node(qna_llm: Runnable[list[Any], QnAOutput]) -> StateNode:
@@ -216,23 +228,17 @@ def make_orchestrator_node(
             and action.target_node not in _VALID_WORKER_NODES
         ):
             log.error("orchestrator_invalid_target", target=action.target_node)
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="orchestrator",
-                        code="INVALID_TARGET_NODE",
-                        message=f"Orchestrator routed to unknown node: {action.target_node}",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "orchestrator",
+                "INVALID_TARGET_NODE",
+                f"Orchestrator routed to unknown node: {action.target_node}",
+            )
 
         log.info(
             "orchestrator_action_decided",
             action_type=action.action_type,
             target=action.target_node,
-            reflection=action.reflection[:120],
+            reflection=action.reflection[:_REFLECTION_LOG_CHARS],
         )
 
         return {
@@ -292,17 +298,13 @@ def make_planner_node(planner_llm: Runnable[list[Any], PlannerOutput]) -> StateN
 
         if action == "reject":
             log.info("planner_plan_rejected")
-            return {
-                "status": WorkflowStatus.PLAN_REJECTED,
-                "errors": [
-                    AgentError(
-                        node="planner",
-                        code="PLAN_REJECTED",
-                        message=human_response.get("feedback") or "Plan rejected by reviewer",
-                        retryable=True,
-                    )
-                ],
-            }
+            return _fail(
+                "planner",
+                "PLAN_REJECTED",
+                human_response.get("feedback") or "Plan rejected by reviewer",
+                status=WorkflowStatus.PLAN_REJECTED,
+                retryable=True,
+            )
 
         if action == "modify":
             raw_steps: list[dict[str, Any]] = human_response.get("modified_plan") or []
@@ -332,17 +334,11 @@ def make_ingestion_node() -> StateNode:
 
         retry_count = state.get("retry_count", 0)
         if retry_count >= _MAX_RETRIES:
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="ingestion",
-                        code="MAX_RETRIES_EXCEEDED",
-                        message=f"Ingestion failed after {_MAX_RETRIES} attempts",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "ingestion",
+                "MAX_RETRIES_EXCEEDED",
+                f"Ingestion failed after {_MAX_RETRIES} attempts",
+            )
 
         text: str = ""
         confidence: float = 1.0
@@ -366,17 +362,11 @@ def make_ingestion_node() -> StateNode:
                     "retry_count": retry_count + 1,
                     "status": WorkflowStatus.INGESTING,
                 }
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="ingestion",
-                        code="LOW_OCR_CONFIDENCE",
-                        message=f"OCR confidence {confidence:.0%} - user declined re-upload",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "ingestion",
+                "LOW_OCR_CONFIDENCE",
+                f"OCR confidence {confidence:.0%} - user declined re-upload",
+            )
 
         log.info("ingestion_completed", text_length=len(text), confidence=confidence)
         return {
@@ -394,23 +384,17 @@ def make_normalization_node(
         log = logger.bind(node="normalization", doc_id=state["doc_id"])
 
         if not state.get("document_text"):
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="normalization",
-                        code="MISSING_DOCUMENT_TEXT",
-                        message="document_text not populated by ingestion",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "normalization",
+                "MISSING_DOCUMENT_TEXT",
+                "document_text not populated by ingestion",
+            )
 
-        messages = [
-            SystemMessage(content=_NORMALIZATION_SYSTEM_PROMPT),
-            HumanMessage(content=state["document_text"]),
-        ]
-        result: NormalizedDocument = await normalization_llm.ainvoke(messages)
+        result: NormalizedDocument = await _invoke_structured(
+            normalization_llm,
+            _NORMALIZATION_SYSTEM_PROMPT,
+            state["document_text"],
+        )
         log.info("normalization_completed", section_count=len(result.sections))
 
         return {
@@ -427,39 +411,20 @@ def make_segmentation_node(
     async def segmentation_node(state: LegalAgentState) -> dict[str, Any]:
         log = logger.bind(node="segmentation", doc_id=state["doc_id"])
 
-        if not state.get("normalized_document"):
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="segmentation",
-                        code="MISSING_NORMALIZED_DOCUMENT",
-                        message="normalized_document not populated by normalization node",
-                        retryable=False,
-                    )
-                ],
-            }
-
         normalized_document = state["normalized_document"]
         if normalized_document is None:
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="segmentation",
-                        code="MISSING_NORMALIZED_DOCUMENT",
-                        message="normalized_document not populated by normalization node",
-                        retryable=False,
-                    )
-                ],
-            }
+            return _fail(
+                "segmentation",
+                "MISSING_NORMALIZED_DOCUMENT",
+                "normalized_document not populated by normalization node",
+            )
 
         doc_text = "\n".join(s.content for s in normalized_document.sections)
-        messages = [
-            SystemMessage(content=_SEGMENTATION_SYSTEM_PROMPT),
-            HumanMessage(content=doc_text),
-        ]
-        result: ClauseSegmentationOutput = await segmentation_llm.ainvoke(messages)
+        result: ClauseSegmentationOutput = await _invoke_structured(
+            segmentation_llm,
+            _SEGMENTATION_SYSTEM_PROMPT,
+            doc_text,
+        )
         log.info("segmentation_completed", segment_count=len(result.segments))
 
         return {
@@ -529,11 +494,11 @@ def make_relationship_mapping_node(
             f"[{e.entity_type}] {e.value} (clause: {e.clause_id}, party: {e.party or 'N/A'})"
             for e in state["extracted_entities"]
         )
-        messages = [
-            SystemMessage(content=_RELATIONSHIP_MAPPING_SYSTEM_PROMPT),
-            HumanMessage(content=entity_summary),
-        ]
-        result: RelationshipMappingOutput = await relationship_llm.ainvoke(messages)
+        result: RelationshipMappingOutput = await _invoke_structured(
+            relationship_llm,
+            _RELATIONSHIP_MAPPING_SYSTEM_PROMPT,
+            entity_summary,
+        )
         log.info("relationship_mapping_done", relationship_count=len(result.relationships))
 
         return {
@@ -563,7 +528,7 @@ def make_risk_analysis_node(risk_agent: Any) -> StateNode:
             }
         )
 
-        risk_output = _extract_risk_output(result["messages"])
+        risk_output = _placeholder_risk_output(result["messages"])
         log.info(
             "risk_analysis_completed",
             finding_count=len(risk_output.findings),
@@ -580,7 +545,8 @@ def make_risk_analysis_node(risk_agent: Any) -> StateNode:
 
 def _build_analysis_context(state: LegalAgentState) -> str:
     clauses = "\n".join(
-        f"[{seg.clause_type}] {seg.clause_id}: {seg.text[:300]}" for seg in state["segments"]
+        f"[{seg.clause_type}] {seg.clause_id}: {seg.text[:_CLAUSE_CONTEXT_CHARS]}"
+        for seg in state["segments"]
     )
     entities = "\n".join(
         f"{e.entity_type}: {e.value} (party: {e.party or 'N/A'})"
@@ -593,7 +559,7 @@ def _build_analysis_context(state: LegalAgentState) -> str:
     return f"CLAUSES:\n{clauses}\n\nENTITIES:\n{entities}\n\nRELATIONSHIPS:\n{relationships}"
 
 
-def _extract_risk_output(_messages: list[Any]) -> RiskAnalysisOutput:
+def _placeholder_risk_output(_messages: list[Any]) -> RiskAnalysisOutput:
     return RiskAnalysisOutput(
         findings=[],
         overall_label=RiskLabel.LOW,
@@ -616,7 +582,7 @@ def make_compliance_node(compliance_agent: Any) -> StateNode:
             }
         )
 
-        compliance_output = _extract_compliance_output(result["messages"])
+        compliance_output = _placeholder_compliance_output(result["messages"])
         log.info(
             "compliance_completed",
             finding_count=len(compliance_output.findings),
@@ -631,7 +597,7 @@ def make_compliance_node(compliance_agent: Any) -> StateNode:
     return compliance_node
 
 
-def _extract_compliance_output(_messages: list[Any]) -> ComplianceOutput:
+def _placeholder_compliance_output(_messages: list[Any]) -> ComplianceOutput:
     return ComplianceOutput(
         findings=[],
         jurisdiction="India",
@@ -654,11 +620,11 @@ def make_grounding_verification_node(
         if compliance_result:
             summary_parts.append(f"COMPLIANCE SUMMARY: {compliance_result.summary}")
 
-        messages = [
-            SystemMessage(content=_GROUNDING_SYSTEM_PROMPT),
-            HumanMessage(content="\n\n".join(summary_parts)),
-        ]
-        result: GroundingVerificationOutput = await grounding_llm.ainvoke(messages)
+        result: GroundingVerificationOutput = await _invoke_structured(
+            grounding_llm,
+            _GROUNDING_SYSTEM_PROMPT,
+            "\n\n".join(summary_parts),
+        )
         log.info("grounding_verified", verified=result.verified)
 
         return {
@@ -685,7 +651,9 @@ def make_human_review_node() -> StateNode:
             "risk_summary": risk_analysis.summary if risk_analysis else None,
             "compliance_summary": compliance_result.summary if compliance_result else None,
             "unverified_claims": grounding.unverified_claims if grounding else [],
-            "segments": [seg.model_dump() for seg in state["segments"][:20]],
+            "segments": [
+                seg.model_dump() for seg in state["segments"][:_HUMAN_REVIEW_SEGMENT_PREVIEW]
+            ],
             "message": "Please review findings, add overrides if needed, and approve to finalize",
         }
 
@@ -693,17 +661,12 @@ def make_human_review_node() -> StateNode:
 
         if human_response.get("action") == "reject":
             log.warning("human_review_rejected")
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="human_review",
-                        code="REVIEW_REJECTED",
-                        message=human_response.get("feedback") or "Rejected at human review",
-                        retryable=True,
-                    )
-                ],
-            }
+            return _fail(
+                "human_review",
+                "REVIEW_REJECTED",
+                human_response.get("feedback") or "Rejected at human review",
+                retryable=True,
+            )
 
         raw_overrides = human_response.get("overrides") or []
         overrides = [ReviewOverride.model_validate(o) for o in raw_overrides]
@@ -780,7 +743,7 @@ def make_persist_memory_node(_cognee_client: Any) -> StateNode:
         namespace = f"{state['user_id']}.legal"
         long_term_refs: list[str] = list(state.get("long_term_refs", []))
 
-        try:  # noqa: PLW0717 — small orchestration, extraction would add overhead
+        try:
             if state.get("final_report"):
                 ref_key = f"{namespace}.{state['doc_id']}.report"
                 long_term_refs.append(ref_key)
@@ -794,16 +757,14 @@ def make_persist_memory_node(_cognee_client: Any) -> StateNode:
         except Exception as exc:
             log.exception("persist_memory_failed", error=str(exc))
             return {
+                **_fail(
+                    "persist_memory",
+                    "COGNEE_WRITE_FAILED",
+                    str(exc),
+                    status=WorkflowStatus.COMPLETED,
+                    retryable=True,
+                ),
                 "long_term_refs": long_term_refs,
-                "status": WorkflowStatus.COMPLETED,
-                "errors": [
-                    AgentError(
-                        node="persist_memory",
-                        code="COGNEE_WRITE_FAILED",
-                        message=str(exc),
-                        retryable=True,
-                    )
-                ],
             }
 
         return {
@@ -863,7 +824,7 @@ def make_deep_research_node(
         for i, r in enumerate(results):
             if isinstance(r, Exception):
                 r.add_note(f"step_id={research_steps[i].step_id}")
-                r.add_note(f"description={research_steps[i].description[:120]}")
+                r.add_note(f"description={research_steps[i].description[:_REFLECTION_LOG_CHARS]}")
                 log.warning(
                     "deep_research_step_failed",
                     step_id=research_steps[i].step_id,

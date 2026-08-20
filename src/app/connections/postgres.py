@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from fastapi.requests import HTTPConnection
 from sqlalchemy import text
@@ -55,8 +55,6 @@ def get_database_url() -> str:
 
     parsed: ParseResult = urlparse(asyncpg_url)
     if not parsed.password and settings.POSTGRES_PASSWORD.get_secret_value() != "pass":
-        from urllib.parse import urlunparse
-
         password: str = settings.POSTGRES_PASSWORD.get_secret_value()
         netloc: str = (
             f"{parsed.username}:{password}@{parsed.hostname}" if parsed.username else parsed.netloc

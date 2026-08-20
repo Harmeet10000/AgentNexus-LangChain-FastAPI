@@ -110,7 +110,7 @@ async def build_websocket_security_service(
                 redis,
                 "ws:connection:messages",
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — fall back to in-memory rate limiter
             logger.warning(
                 "Redis-based WebSocket rate limiter failed, falling back to in-memory bucket",
                 error=str(exc),
@@ -143,7 +143,7 @@ class WebSocketSecurityService:
     def __init__(
         self,
         *,
-        redis: Redis,
+        redis: Redis | None,
         settings: Settings,
         user_limiter: WebSocketRateLimiter,
         connection_limiter: WebSocketRateLimiter,
@@ -192,6 +192,8 @@ class WebSocketSecurityService:
             )
 
     async def register_connection(self, context: WebSocketSecurityContext) -> None:
+        if self._redis is None:
+            return
         connection_key = _CONNECTION_KEY.format(context.connection_id)
         user_key = _USER_CONNECTIONS_KEY.format(context.user_id)
         ttl = self._settings.WEBSOCKET_PRESENCE_TTL_SECONDS
@@ -213,6 +215,8 @@ class WebSocketSecurityService:
             await pipe.execute()
 
     async def unregister_connection(self, context: WebSocketSecurityContext) -> None:
+        if self._redis is None:
+            return
         async with self._redis.pipeline(transaction=True) as pipe:
             pipe.delete(_CONNECTION_KEY.format(context.connection_id))
             pipe.srem(_USER_CONNECTIONS_KEY.format(context.user_id), context.connection_id)
@@ -224,6 +228,8 @@ class WebSocketSecurityService:
             await pipe.execute()
 
     async def touch_connection(self, context: WebSocketSecurityContext) -> None:
+        if self._redis is None:
+            return
         ttl = self._settings.WEBSOCKET_PRESENCE_TTL_SECONDS
         async with self._redis.pipeline(transaction=True) as pipe:
             pipe.expire(_CONNECTION_KEY.format(context.connection_id), ttl)
@@ -233,6 +239,8 @@ class WebSocketSecurityService:
             await pipe.execute()
 
     async def get_active_connection_count(self, user_id: str) -> int:
+        if self._redis is None:
+            return 0
         user_key = _USER_CONNECTIONS_KEY.format(user_id)
         redis = cast("Any", self._redis)
         connection_ids = await redis.smembers(user_key)

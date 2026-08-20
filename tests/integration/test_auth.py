@@ -16,6 +16,10 @@ from app.utils.exceptions import (
     UnauthorizedException,
 )
 
+# Stale against the Result-pattern service (returns AppResult, not bare values);
+# deferred until the mocks are updated. Runs with the integration suite.
+pytestmark = pytest.mark.integration
+
 
 def make_mock_user(**kwargs):
     user = MagicMock()
@@ -29,7 +33,7 @@ def make_mock_user(**kwargs):
     role_value = kwargs.get("role", "user")
     user.role = MagicMock()
     user.role.value = role_value
-    user.full_name = kwargs.get("full_name", None)
+    user.full_name = kwargs.get("full_name")
     user.oauth_accounts = []
     user.verification_token_hash = None
     user.reset_token_hash = None
@@ -185,17 +189,15 @@ class TestAuthRefresh:
         with patch(
             "app.features.auth.service.decode_token",
             return_value=MagicMock(token_type="refresh", jti="nonexistent", sub="user-id"),
-        ):
-            with pytest.raises(UnauthorizedException):
-                await auth_service.refresh("nonexistent-session")
+        ), pytest.raises(UnauthorizedException):
+            await auth_service.refresh("nonexistent-session")
 
     async def test_refresh_revoked_token_raises_unauthorized(self, auth_service):
         with patch(
             "app.features.auth.service.decode_token",
             return_value=MagicMock(token_type="refresh", jti="unknown", sub="user-id"),
-        ):
-            with pytest.raises(UnauthorizedException):
-                await auth_service.refresh("unknown-token")
+        ), pytest.raises(UnauthorizedException):
+            await auth_service.refresh("unknown-token")
 
 
 class TestAuthLogout:

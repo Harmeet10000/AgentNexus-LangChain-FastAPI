@@ -34,7 +34,7 @@ class ApiDeprecationMiddleware(BaseHTTPMiddleware):
         v2_base_path: str = "/api/v2",
         exempt_prefixes: frozenset[str] | None = None,
     ) -> None:
-        super().__init__(app)  # type: ignore
+        super().__init__(app)  # ty: ignore[invalid-argument-type]
         self._sunset_date = sunset_date
         self._v2_base_path = v2_base_path
         self._exempt = exempt_prefixes or _DEFAULT_EXEMPT_PREFIXES

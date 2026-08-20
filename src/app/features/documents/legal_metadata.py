@@ -68,7 +68,7 @@ async def extract_legal_metadata(
         ]
         try:
             raw = await retry_immediate(
-                operation=lambda: structured_llm.ainvoke(messages),
+                operation=lambda: structured_llm.ainvoke(messages),  # ty: ignore[unresolved-attribute]
                 label="documents_extract_legal_metadata",
             )
             extracted = LegalMetadataExtraction.model_validate(raw)

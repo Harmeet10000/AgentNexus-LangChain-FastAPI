@@ -19,31 +19,23 @@ if TYPE_CHECKING:
 
 from .factory import _build_graph_nodes, build_agent_registry
 from .nodes import (
+    _VALID_WORKER_NODES,
     dispatch_entity_extraction,
     route_after_qna,
     route_deep_research,
     route_from_orchestrator,
 )
-from .state import LegalAgentInputState, LegalAgentOutputState, LegalAgentState
+from .state import (
+    GRAPH_NODE_NAMES,
+    LegalAgentInputState,
+    LegalAgentOutputState,
+    LegalAgentState,
+)
 
 
 def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
-    graph.add_node("gateway", nodes.gateway)
-    graph.add_node("qna", nodes.qna)
-    graph.add_node("orchestrator", nodes.orchestrator)
-    graph.add_node("planner", nodes.planner)
-    graph.add_node("ingestion", nodes.ingestion)
-    graph.add_node("normalization", nodes.normalization)
-    graph.add_node("segmentation", nodes.segmentation)
-    graph.add_node("entity_extraction", nodes.entity_extraction)
-    graph.add_node("relationship_mapping", nodes.relationship_mapping)
-    graph.add_node("risk_analysis", nodes.risk_analysis)
-    graph.add_node("compliance", nodes.compliance)
-    graph.add_node("grounding_verification", nodes.grounding_verification)
-    graph.add_node("human_review", nodes.human_review)
-    graph.add_node("finalization", nodes.finalization)
-    graph.add_node("persist_memory", nodes.persist_memory)
-    graph.add_node("deep_research", nodes.deep_research)
+    for name in GRAPH_NODE_NAMES:
+        graph.add_node(name, getattr(nodes, name))
 
     graph.set_entry_point("gateway")
     graph.add_edge("gateway", "qna")
@@ -55,13 +47,7 @@ def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
     graph.add_conditional_edges(
         "orchestrator",
         route_from_orchestrator,
-        {
-            "planner": "planner",
-            "ingestion": "ingestion",
-            "finalization": "finalization",
-            "deep_research": "deep_research",
-            END: END,
-        },
+        {name: name for name in _VALID_WORKER_NODES} | {"planner": "planner", END: END},
     )
     graph.add_conditional_edges(
         "planner",
@@ -74,8 +60,7 @@ def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
     graph.add_conditional_edges("segmentation", dispatch_entity_extraction)
     graph.add_edge("entity_extraction", "relationship_mapping")
     graph.add_edge("relationship_mapping", "risk_analysis")
-    graph.add_edge("relationship_mapping", "compliance")
-    graph.add_edge("risk_analysis", "grounding_verification")
+    graph.add_edge("risk_analysis", "compliance")
     graph.add_edge("compliance", "grounding_verification")
     graph.add_edge("grounding_verification", "human_review")
     graph.add_edge("human_review", "orchestrator")

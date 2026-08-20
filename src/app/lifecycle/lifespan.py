@@ -8,8 +8,11 @@ from typing import TYPE_CHECKING, Any
 import redis
 from celery import Celery
 from fastapi import FastAPI
+from kombu.exceptions import OperationalError
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from neo4j import AsyncDriver
+from neo4j.exceptions import ConfigurationError, ServiceUnavailable
+from playwright.async_api import Error as PlaywrightError
 
 from app.config import get_settings
 from app.connections import (
@@ -81,7 +84,15 @@ async def setup_neo4j() -> AsyncDriver | None:
     try:
         neo4j_driver = await init_neo4j()
         await neo4j_driver.verify_connectivity()
-    except (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError) as exc:
+    except (
+        ConnectionError,
+        TimeoutError,
+        OSError,
+        RuntimeError,
+        ValueError,
+        ServiceUnavailable,
+        ConfigurationError,
+    ) as exc:
         logger.warning("Neo4j startup failed, continuing without graph features", error=str(exc))
         return None
 
@@ -96,7 +107,7 @@ def setup_celery() -> Celery | None:
         conn.ensure_connection(max_retries=1, timeout=2)
         conn.release()
         logger.info("Celery connected to RabbitMQ")
-    except ServiceUnavailableException as e:
+    except (ServiceUnavailableException, OperationalError, OSError) as e:
         logger.warning("Celery connection failed, tasks will be unavailable", error=str(e))
         return None
     else:
@@ -202,10 +213,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
         settings=settings,
     )
 
-    # Setup Cognee for episodic + procedural memory
-    cognee_config = await setup_cognee(settings)
-    app.state.cognee_config = cognee_config
-    logger.info("Cognee configured")
+    # Setup Cognee for episodic + procedural memory (optional)
+    try:
+        cognee_config = await setup_cognee(settings)
+        app.state.cognee_config = cognee_config
+        logger.info("Cognee configured")
+    except Exception as exc:  # noqa: BLE001 — optional dependency; app degrades without it
+        exc.add_note("operation=setup_cognee")
+        logger.warning("Cognee startup failed, continuing without episodic memory", error=str(exc))
+        app.state.cognee_config = None
 
     # Setup Graphiti for legal knowledge graph (optional)
     try:
@@ -217,7 +233,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
         await setup_graphiti_indices(graphiti)
         app.state.graphiti = graphiti
         logger.info("Graphiti initialized")
-    except (ConnectionError, TimeoutError, OSError) as exc:
+    except (ConnectionError, TimeoutError, OSError, ServiceUnavailable) as exc:
         exc.add_note("operation=setup_graphiti")
         logger.warning("Graphiti startup failed, continuing without graph features", error=str(exc))
         app.state.graphiti = None
@@ -258,7 +274,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     try:
         app.state.crawl4ai_crawler = await create_crawl4ai_crawler()
         logger.info("Crawl4AI browser initialized")
-    except (ConnectionError, TimeoutError, OSError):
+    except (ConnectionError, TimeoutError, OSError, PlaywrightError):
         logger.exception("Crawl4AI browser startup failed, continuing without crawl capability")
         app.state.crawl4ai_crawler = None
     settings = get_settings()

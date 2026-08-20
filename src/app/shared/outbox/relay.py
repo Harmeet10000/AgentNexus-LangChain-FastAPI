@@ -63,7 +63,7 @@ class OutboxRelay:
                         await self._publish(dict(row), session=session)
                 else:
                     logger.info("outbox_startup_scan", found=0)
-        except (PostgresError, Exception) as exc:
+        except Exception as exc:  # noqa: BLE001 — best-effort scan, any failure is logged and skipped
             logger.warning("outbox_startup_scan_skipped", error=str(exc))
 
     async def run_listener(self) -> None:
@@ -78,7 +78,7 @@ class OutboxRelay:
                 policy=asyncpg_listen.ListenPolicy.ALL,
                 notification_timeout=asyncpg_listen.NO_TIMEOUT,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — listener is long-running; log and re-enter loop
             logger.warning("outbox_listener_stopped", error=str(exc))
 
     async def _handle_notification(

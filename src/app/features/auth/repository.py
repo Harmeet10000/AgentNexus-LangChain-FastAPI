@@ -1,6 +1,5 @@
-from collections.abc import Awaitable
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from beanie import PydanticObjectId
 from beanie.operators import In, Set
@@ -22,6 +21,9 @@ from app.utils import ErrorCode
 
 from .model import OAuthAccount, User
 from .token_audit_log import TokenAuditLog
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
 
 _SESSION_KEY = "auth:session:{}"
 _USER_SESSIONS_KEY = "auth:user_sessions:{}"

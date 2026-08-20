@@ -104,7 +104,7 @@ async def _renewal_job(session) -> dict[str, int]:
     for subscription in subscription_rows:
         if not subscription.razorpay_subscription_id:
             continue
-        try:  # noqa: PLW0717
+        try:
             data = await razorpay.fetch_subscription(subscription.razorpay_subscription_id)
             current_start = data.get("current_start")
             current_end = data.get("current_end")

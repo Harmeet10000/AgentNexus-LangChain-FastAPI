@@ -1,11 +1,5 @@
 """Database connection dependencies."""
 
-from mcp_core.mcp import (
-    close_mcp_client_manager,
-    get_mcp_client_manager_dep,
-    get_shared_mcp_client_manager,
-)
-
 from .celery import ResilientTask, celery_app, create_celery_app
 from .celery_reliability import (
     CircuitBreakerOpenError,
@@ -55,7 +49,6 @@ __all__ = [
     "ResilientTask",
     "celery_app",
     "close_crawl4ai_crawler",
-    "close_mcp_client_manager",
     "close_neo4j_driver",
     "close_tavily_http_client",
     "create_celery_app",
@@ -67,14 +60,12 @@ __all__ = [
     "get_crawl4ai_crawler",
     "get_crawler",
     "get_httpx_client",
-    "get_mcp_client_manager_dep",
     "get_mongodb",
     "get_neo4j_driver",
     "get_neo4j_session",
     "get_postgres_db",
     "get_redis",
     "get_shared_httpx_client",
-    "get_shared_mcp_client_manager",
     "get_shared_tavily_http_client",
     "get_tavily_http_client",
     "init_db",

@@ -32,7 +32,7 @@ async def retry_immediate[T](
             label=label,
             attempt=state.attempt_number,
             attempts=attempts,
-        ).warning("kb_retry_immediate_retry", error=str(state.outcome.exception())),
+        ).warning("kb_retry_immediate_retry", error=str(state.outcome.exception())),  # ty: ignore[unresolved-attribute]
     )
     try:
         async for attempt in retryer:

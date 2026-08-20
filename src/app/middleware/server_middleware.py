@@ -162,7 +162,7 @@ async def initialize_fastapi_guard(app: "FastAPI", settings: "Settings") -> None
 
     if settings.FASTAPI_GUARD_ENABLE_REDIS and hasattr(app.state, "redis"):
         redis_adapter = RedisGuardAdapter(redis=app.state.redis)
-        guard_middleware.redis_handler = redis_adapter  # type: ignore
+        guard_middleware.redis_handler = redis_adapter  # ty: ignore[invalid-assignment]
         guard_middleware.rate_limit_handler.redis_handler = redis_adapter
         guard_middleware.handler_initializer.redis_handler = redis_adapter
 
