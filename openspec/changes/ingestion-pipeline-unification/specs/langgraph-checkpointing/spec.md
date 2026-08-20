@@ -1,9 +1,16 @@
 ## Purpose
 
 Define the persistence and resumability contract for the ingestion pipeline: a checkpointer that is actually
-constructible against a real database driver, an application-owned connection pool with a teardown that closes
-it, thread identity tied to the document, and checkpointed state that carries references rather than document
-payloads.
+constructible against a real database driver, pool ownership that belongs to whichever process constructs it and a
+teardown that can tell "closed a pool" from "there was nothing to close", thread identity tied to the document, and
+checkpointed state that carries references rather than document payloads.
+
+**Two boundaries this capability deliberately does not cross.** It provisions the checkpointer; it does **not**
+define what a *consumer* does when the deployment deliberately leaves the shared checkpointer unprovisioned — that
+read-site fail-closed contract belongs to `agent-runtime-resilience` in the agent-tools change, which owns the
+unguarded read of the shared application slot. And it consumes a connection-string accessor; it does **not** define
+the accessor set — that belongs to `infrastructure-client-access` in the foundation change. This capability names
+the flavour it needs and the properties that flavour must have, and nothing more.
 
 ## ADDED Requirements
 
@@ -69,17 +76,28 @@ state for one document SHALL remain within a stated size budget.
 - **WHEN** per-chunk results accumulate across a fan-out
 - **THEN** each accumulated item SHALL carry references and metadata rather than the chunk's full source text
 
-### Requirement: The application owns the checkpointer connection pool and closes it on shutdown
-The application SHALL create and own the connection pool the checkpointer uses, and shutdown SHALL close that
-pool. Teardown SHALL NOT be a silent no-op, and SHALL succeed without error when no checkpointer was created.
+### Requirement: The constructing process owns the checkpointer pool, and teardown distinguishes nothing-to-close from a close
+Whichever process constructs the checkpointer SHALL own the connection pool that checkpointer uses and SHALL close
+that pool when that process shuts down. In this change that process is the queue worker, not the application serving
+HTTP requests: the application's construction of the checkpointer is deliberately disabled, and this change SHALL
+NOT enable it. The shutdown path that calls teardown SHALL complete without raising when no checkpointer was ever
+constructed, and SHALL report that outcome distinguishably from a successful close rather than returning silently.
 
-#### Scenario: Shutdown closes the pool
-- **WHEN** the application shuts down with a checkpointer active
-- **THEN** the connection pool SHALL be closed and the closure SHALL be observable
+#### Scenario: The owning process closes the pool it created
+- **WHEN** the process that constructed a checkpointer shuts down
+- **THEN** that checkpointer's connection pool SHALL be closed, and the closure SHALL be observable
 
-#### Scenario: Teardown with no checkpointer is a clean no-op
-- **WHEN** the application shuts down without having created a checkpointer
-- **THEN** teardown SHALL complete without raising
+#### Scenario: Teardown with no checkpointer is reported, not silent
+- **WHEN** the shutdown path calls teardown and no checkpointer was ever constructed
+- **THEN** teardown SHALL complete without raising and SHALL report that no checkpointer was provisioned, rather than returning with no observable outcome
+
+#### Scenario: Teardown does not silently skip a pool it was given
+- **WHEN** teardown receives a value that is not a checkpointer exposing a pool
+- **THEN** it SHALL report that it could not close a pool rather than completing as though it had
+
+#### Scenario: The deliberately disabled application construction stays disabled
+- **WHEN** the application's startup path is inspected
+- **THEN** the checkpointer construction there SHALL remain disabled, and this change SHALL introduce no flag, default, or alternative path that enables it
 
 ### Requirement: Checkpointer setup creates its storage before first use
 Checkpointer setup SHALL create the checkpoint storage it requires before the first checkpoint is written, and
@@ -110,15 +128,27 @@ function declared to return one, and SHALL NOT defer the failure to the first co
 - **WHEN** checkpointer setup is called
 - **THEN** it SHALL either return a usable checkpointer or raise, and SHALL NOT return an absent value
 
-### Requirement: The checkpointer connection string carries credentials in its driver's own scheme
-The system SHALL provide a connection-string accessor for the checkpointer that uses the checkpointer driver's own
-URL scheme, carries the configured credentials, and retains the transport-security parameters that driver
-requires. The accessor used by the application's relational engine SHALL NOT be reused for the checkpointer, and
-no accessor SHALL emit the connection string to logs.
+### Requirement: The checkpointer consumes a credentialed driver-scheme connection string it does not build itself
+The checkpointer SHALL obtain its connection string from the shared accessor for its own driver's flavour, and SHALL
+NOT derive, repair, or re-scheme any other flavour's string at its call site. The string it consumes SHALL use the
+checkpointer driver's own URL scheme, SHALL carry the configured credentials, and SHALL retain the
+transport-security parameters that driver requires. The accessor serving the application's relational engine SHALL
+NOT be reused for the checkpointer, because that accessor returns the relational engine's dialect alias, which the
+checkpointer driver cannot parse. No accessor and no checkpointer code path SHALL emit the connection string, or any
+part of its credentials, to logs.
 
-#### Scenario: The accessor returns a credentialed driver-scheme URL
+The accessor set itself — one accessor per flavour, with credential injection and scheme repair living only there —
+is defined by `infrastructure-client-access` in the foundation change. This capability is that accessor's consumer,
+and it is the reason the plain driver flavour exists: the checkpointer is the consumer that can parse neither the raw
+configured URL (which carries no password) nor the relational engine's dialect-aliased form.
+
+#### Scenario: The checkpointer consumes the accessor rather than transforming a string
+- **WHEN** the checkpointer is constructed
+- **THEN** its connection string SHALL have come from the accessor for its driver's flavour, and no scheme repair or credential injection SHALL occur at the checkpointer's call site
+
+#### Scenario: The consumed string is a credentialed driver-scheme URL
 - **WHEN** the checkpointer connection string is requested
-- **THEN** it SHALL use the checkpointer driver's scheme and SHALL contain the configured credentials
+- **THEN** it SHALL use the checkpointer driver's scheme, SHALL contain the configured credentials, and SHALL retain the transport-security parameters that driver requires
 
 #### Scenario: The relational engine dialect alias is never passed to the checkpointer
 - **WHEN** the checkpointer is constructed
@@ -127,33 +157,3 @@ no accessor SHALL emit the connection string to logs.
 #### Scenario: The connection string is never logged
 - **WHEN** checkpointer setup succeeds or fails
 - **THEN** no log record SHALL contain the connection string or its credentials
-
-### Requirement: Consumers of a deliberately unprovisioned checkpointer fail closed
-Where the deployment deliberately does not provision the shared checkpointer, every consumer that reads it SHALL
-fail closed with a typed service-unavailable error naming the missing capability, and SHALL NOT raise an
-attribute error on an absent value.
-
-#### Scenario: An agent request without a checkpointer returns service unavailable
-- **WHEN** a request reaches a consumer requiring the shared checkpointer while it is absent
-- **THEN** the system SHALL respond with a typed service-unavailable error
-
-#### Scenario: The absent checkpointer never surfaces as an internal error
-- **WHEN** the shared checkpointer is absent
-- **THEN** no consumer SHALL raise an attribute error and no request SHALL fail with an unhandled internal error
-
-### Requirement: Each database URL flavour has exactly one accessor
-The system SHALL expose exactly one accessor per database URL flavour it needs, and every consumer of a flavour
-SHALL obtain its URL from that accessor. The credential injection and scheme repair for a flavour SHALL NOT be
-reimplemented at a call site.
-
-#### Scenario: Every consumer of a flavour uses its accessor
-- **WHEN** any component needs a database connection string
-- **THEN** it SHALL obtain it from the accessor for the flavour it requires rather than transforming another flavour's string itself
-
-#### Scenario: No consumer can obtain an unusable URL
-- **WHEN** a connection string is obtained from any accessor
-- **THEN** it SHALL carry the configured credentials and a scheme its intended driver accepts
-
-#### Scenario: Scheme repair is not duplicated
-- **WHEN** the repository is inspected for transformations of the configured database URL
-- **THEN** each transformation SHALL occur in exactly one accessor rather than being repeated at consumer sites

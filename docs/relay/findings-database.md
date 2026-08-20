@@ -56,7 +56,7 @@ side channel is **wrong for that path**. My probe failed only because it used th
 |---|---|---|
 | `connections/postgres.py:80` | `get_database_url()` | correct — password injected, scheme rewritten |
 | `shared/langgraph_layer/checkpointer.py:9` | `settings.POSTGRES_URL` raw | passwordless; also psycopg wants `postgresql://`, not `+asyncpg` (see §5) |
-| `shared/langchain_layer/agents/memory/cognee_client.py:111` | `settings.POSTGRES_URL` raw | hands Cognee a **credential-less** URL |
+| ~~`shared/langchain_layer/agents/memory/cognee_client.py:111`~~ | ~~`settings.POSTGRES_URL` raw~~ | **RETRACTED 2026-08-18 — see §9** |
 | `features/auth/service.py:512` | `create_async_engine(get_database_url())` | correct source, but builds a **second engine** outside lifespan |
 
 Change 0 owns the fix, and the shape is now clear: the repair belongs in `settings` (or a single accessor) so no
@@ -74,7 +74,7 @@ Two smaller observations on `get_database_url()`, worth a task but not urgent:
 
 | Extension | default_version | state on this server |
 |---|---|---|
-| `pg_textsearch` | **1.3.0** | available, NOT installed |
+| `pg_textsearch` | **1.3.0** | ~~available, NOT installed~~ → **INSTALLED 1.3.0** (see §10) |
 | `vector` | 0.8.6 | **INSTALLED 0.8.2** (older than available) |
 | `vectorscale` | 0.9.0 | **INSTALLED 0.9.0** |
 | `timescaledb` | 2.28.3 | **INSTALLED 2.29.1** |
@@ -88,6 +88,11 @@ Two smaller observations on `get_database_url()`, worth a task but not urgent:
 Non-builtin index access methods present: `diskann` (vectorscale), `hnsw`, `ivfflat` (pgvector).
 **No `bm25` access method, and `to_bm25query()` has 0 matching `pg_proc` rows** — expected, because
 `pg_textsearch` is not installed *yet*. `CREATE EXTENSION IF NOT EXISTS pg_textsearch` will succeed.
+
+> **SUPERSEDED 2026-08-18 — do not act on the two sentences above.** They were accurate *when measured* and are
+> kept because they are the evidence that dates the install. `pg_textsearch` 1.3.0 is now **installed**, `bm25`
+> **is** in `pg_am`, and `to_bm25query` has **two** overloads. See **§10**, which also closes F8 and records who
+> installed it.
 
 So the D5.1 decision to keep the existing BM25 implementation stands on solid ground, and the earlier
 UNVERIFIED precondition in `findings-deployment.md` §5 is **CLOSED — favourable**. Note the vendor is
@@ -294,11 +299,221 @@ app, failing after a partial write.
 2. **Ordering constraint, load-bearing:** fixing D5.2's `UserIdDep` without creating the outbox tables does not
    fix `POST /documents` — it moves the 500 from the dependency layer down to the outbox `INSERT`. The two fixes
    must land together or the endpoint's repair is illusory.
-3. **A third URL flavour exists.** `lifespan.py:124` does `get_database_url().replace("+asyncpg", "")`, and
-   `relay.py:71` strips it *again* on the already-stripped value. So change 0's single-accessor work has three
-   consumers to serve, not two: SQLAlchemy+asyncpg (main engine), a plain libpq/psycopg DSN (relay listener via
-   `asyncpg_listen`, and the checkpointer per §5), and Cognee. A single accessor returning one string cannot
-   serve all three — it needs a flavour argument or three named accessors.
+3. **A second URL flavour exists** (this item said *third* until 2026-08-18; **corrected in §9** — Cognee is not a
+   URL consumer at all). `lifespan.py:124` does `get_database_url().replace("+asyncpg", "")`, and `relay.py:71`
+   strips it *again* on the already-stripped value. So change 0's single-accessor work has **two** consumers to
+   serve: SQLAlchemy+asyncpg (main engine) and a plain libpq/psycopg DSN (relay listener via `asyncpg_listen`, and
+   the checkpointer per §5). A single accessor returning one string cannot serve both — it needs a flavour
+   argument or two named accessors. Cognee needs a **discrete-field** config object instead, which is a different
+   shape of work, not a third string.
 4. `relay.py:66`'s `except (PostgresError, Exception)` and `:80`'s bare `except Exception` belong in change 0's
    exception-tightening scope, but **only after** the tables exist — tightening first converts a silent
    degradation into a boot failure.
+
+---
+
+## §9 — RETRACTION: Cognee is **not** handed a credential-less URL, and is **not** a URL consumer at all
+
+Raised as blocking finding **B1** by change 4's reviewer; **verified independently by the orchestrator**
+(2026-08-18) by reading the installed package and the call site directly. The reviewer is right and §2's table row
+was wrong. Recorded here rather than silently edited, because two changes were planned on the retracted claim.
+
+### What the installed package actually accepts
+
+`.venv/lib/python3.12/site-packages/cognee/infrastructure/databases/relational/config.py:12-23` —
+`class RelationalConfig(BaseSettings)` exposes **discrete fields only**:
+
+```
+db_path: str = ""            db_name: str = "cognee_db"      db_provider: str = "sqlite"
+db_host: str | None = None   db_port: str | None = None
+db_username: str | None = None                               db_password: str | None = None
+```
+
+There is **no** connection-string / DSN / URL field on it, and `to_dict()` (`:73-79`) returns those same seven
+keys. Any requirement that mandates configuring Cognee's relational store "with a single connection string" is
+therefore **unimplementable against the installed version** — not merely inelegant.
+
+### What the call site actually does
+
+`shared/langchain_layer/agents/memory/cognee_client.py` has a `try/except/else`, and the two halves do different
+things:
+
+- **`:91-101` (inside `try`) — this is the real configuration.** `set_relational_db_config({...})` already passes
+  the discrete fields, **including a working password** via `settings.POSTGRES_PASSWORD.get_secret_value()`, plus
+  `db_provider="postgres"`, `db_host=settings.POSTGRES_HOST`, `db_port`, `db_username`, `db_name`, `db_path=""`.
+- **`:107-112` (inside `else`) — this is only a return value.** It builds a *separate* local `dict` also named
+  `config`, containing `{"service", "llm_model", "neo4j_uri", "postgres_url": settings.POSTGRES_URL}`, and
+  `return`s it. Nothing consumes it as configuration. `settings.POSTGRES_URL` at `:111` never reaches Cognee.
+
+Two variables named `config` in one function, one of which configures nothing — that is what made the misread easy,
+and it is worth a rename task on its own.
+
+### Corrections this forces
+
+1. **§2's table row for `cognee_client.py:111` is retracted.** Cognee does **not** receive a credential-less URL.
+   It receives discrete fields with the correct password. Marked struck-through in §2.
+2. **§8 consequence 3 drops from three URL flavours to two.** Corrected in place. Change 0's
+   `infrastructure-client-access` capability must serve SQLAlchemy+asyncpg and plain libpq/psycopg — **not** a
+   Cognee string. If its spec text names three, that text is now wrong.
+3. **Change 4's B1 stands** and must be remediated: the requirement mandating single-connection-string config
+   cannot be satisfied.
+4. `dispositions.md` item 152 said "`set_vector_db_config` is never called so Cognee defaults to
+   `vector_db_provider="lancedb"`" — that is a **different** call and is **not** retracted; the graph and LLM
+   configs are set (`:77-90`), the *vector* one is not. Only the relational/URL claim is affected.
+
+### The real Cognee defect, which survives the retraction
+
+`:96` reads `settings.POSTGRES_HOST` and `:100` reads `settings.POSTGRES_DB_NAME` independently of
+`get_database_url()`. Nothing makes those agree with the `POSTGRES_URL` the app's own engine parses (§1: the live
+host is `qbid1qrc75.nnro3dh8tf.tsdb.cloud.timescale.com:39662/tsdb`). So Cognee can silently be pointed at a
+*different database than the application*, with a valid password, and succeed. That is a worse failure mode than
+the credential-less URL originally alleged, because it fails **silently and consistently** rather than loudly.
+Change 4 owns verifying whether those settings currently resolve to the same instance.
+
+---
+
+## §10 — **F8 is CLOSED.** The access method is `bm25`, the repo's SQL is correct, and BM25 still cannot run
+
+User authorized `CREATE EXTENSION IF NOT EXISTS pg_textsearch` against the live instance on 2026-08-18, scoped to
+that one statement. Probe: `/tmp/f8probe.py`. Nothing else was created; `public` still holds exactly 16 tables.
+
+### The names F8 was asking for
+
+| Question | Answer |
+|---|---|
+| index access method name | **`bm25`** — present in `pg_am` alongside `brin`, `btree`, `diskann`, `gin`, `gist`, `hash`, `hnsw`, `ivfflat`, `spgist` |
+| operator classes | `text_bm25_ops` on `text` (**default**), `text_array_bm25_ops` on `text[]` (**default**) |
+| extension types | `bm25query`, `bm25vector` (plus array forms) |
+| `to_bm25query` signature | **two overloads**: `to_bm25query(input_text text) -> bm25query` and `to_bm25query(input_text text, index_name text) -> bm25query` |
+| scoring function behind `<@>` | `bm25_text_bm25query_score(left_text text, right_query bm25query) -> double precision`, with `text[]` and `text`/`text` variants alongside |
+
+### Favourable: the repo's existing BM25 SQL is **already correct** against 1.3.0
+
+`search/repository.py` uses the **two-argument, index-scoped** overload, which is a real signature:
+
+- `:415,417,419` and `:430,432,433` — `c.content <@> to_bm25query(:query, 'search_chunks_bm25_idx')`
+- `:356,361,362` — `search_text <@> to_bm25query(:query_text, 'clauses_bm25_idx')`
+
+Negation and ordering are handled consistently (`-1 *` for the returned score, `< 0` as the match predicate, `ASC`
+ordering on the raw operator), which is the expected shape for a distance-style operator. **No rewrite of the BM25
+SQL is required** — this strengthens D5.1 further than §3 did, because §3 only established the extension was
+*obtainable*, not that the call shape matched.
+
+### The remaining break: **the SQL names an index that does not exist**
+
+`SELECT ... FROM pg_class c JOIN pg_am am ON am.oid = c.relam WHERE am.amname = 'bm25'` returns **zero rows**. There
+is no `bm25` index anywhere in the database.
+
+That matters more here than it would for most index types, because the **two-argument overload takes the index name
+as a literal argument**. `search/constants.py:15` pins it: `SEARCH_CHUNKS_BM25_INDEX_NAME = "search_chunks_bm25_idx"`.
+So BM25 retrieval fails until an index exists with **exactly** that name and `USING bm25`, and the same holds for
+`clauses_bm25_idx`. An index of the right shape under the wrong name will not satisfy this SQL.
+
+Consequences:
+1. **Change 0's migration must create both indexes by exact name** — `search_chunks_bm25_idx` and, if the clause
+   path survives D5.1/change 2's retarget, `clauses_bm25_idx`. The name is part of the query contract, not a
+   convention, which is a stronger constraint than the usual "rename freely" assumption about index names.
+2. Change 2's drift-gate reasoning about `clauses_bm25_idx` is confirmed on the facts: that index genuinely does not
+   exist. (Whether the *gate* counts it as red is a separate, spec-internal question left to change 2.)
+3. `bm25_force_merge(index_name)`, `bm25_summarize_index(text)`, and the `bm25_cache_*` family are all index-name
+   keyed too, so any future maintenance task inherits the same coupling.
+
+### Correction on the record: the extension was installed **before** today, by an earlier subagent
+
+`CREATE EXTENSION` today was a **no-op** — the probe read `pg_textsearch before: 1.3.0`. Dating it from the catalog:
+
+```
+plpgsql 13560 · timescaledb 16535 · timescaledb_toolkit 17387 · postgres_fdw 18887
+pg_buffercache 18895 · vector 18931 · vectorscale 19262 · plpython3u 19287
+ai 19292 · pg_stat_statements 19498          <- every pre-existing extension
+pg_textsearch 46640                          <- ~27,000 OIDs later
+max(oid) in pg_class = 46505                 <- newer than every table and index
+```
+
+`pg_textsearch` is the **newest object in the catalog**, above all the billing tables from `0002`–`0004`. Combined
+with §3's measurement at probe time (`to_bm25query` had **0** matching `pg_proc` rows, and `bm25` was absent from
+`pg_am`), the only consistent explanation is that the earlier subagent's `CREATE EXTENSION` — which was reported as
+transaction-wrapped and rolled back — **committed**.
+
+So the earlier statement that the database was "left clean" was **wrong**, and is retracted here. The material
+outcome is benign and now authorized: the change is additive, it is the same extension change 0's migration was
+already specced to create, and nothing else was left behind. The process failure is what matters — **a subagent's
+DDL persisted while the orchestrator reported it reverted** — and the lesson is that a rollback claimed by an agent
+is not evidence of a rollback. Verify catalog state directly, by OID ordering, not by trusting the report.
+
+---
+
+## §11 — ROOT CAUSE of item 210: the migration chain is branched, one revision is unrunnable, and the stamp hid both
+
+Measured 2026-08-18, read-only, in direct service of todo item **210** ("fix ingestion → documents → tools → cognee").
+This supersedes the looser framing "the tables were never created" — it says *why*, and it changes what the fix is.
+
+### The chain is branched, with two heads
+
+```
+<base> → c0c17c6eb1cc  (document_vectors, chat_messages, chat_sessions)
+       → 2bc7726317f6  (rename metadata→meta_data)          ← BRANCHPOINT
+            ├→ 8a7d9b1c2e3f  (search_documents, search_chunks)
+            │    → 9f4a1b7c6d2e  (parent_documents; + ALL the `clauses` DDL)
+            │       → 0001  (outbox_events, dead_letter_events)
+            │          → 0002 (15 billing tables) → 0003 → 0004   ← HEAD 1, DB stamped here
+            └→ a71f0d7d9c12  (documents, chunks)                  ← HEAD 2, NOT in that ancestry
+```
+
+`uv run alembic heads` reports **two heads**: `0004` and `a71f0d7d9c12`. So a bare `alembic upgrade head` (singular) is
+**ambiguous** and only `upgrade heads` is well-defined — a live foot-gun for any deploy script using the singular form.
+
+### `9f4a1b7c6d2e` is unrunnable, and that is why the database was stamped
+
+`9f4a1b7c6d2e` operates extensively on a table **no revision creates and no ORM model defines**:
+
+- `:63` `batch_alter_table("clauses")`, `:101-102` `UPDATE clauses SET …`, `:103-105` three `alter_column`,
+  `:108` an FK, `:115-125` four indexes, `:132` `CREATE INDEX clauses_bm25_idx ON clauses`, `:138`
+  `clauses_embedding_idx … USING diskann`.
+- Its own `op.create_table` at `:28` creates **`parent_documents`**, not `clauses`.
+- `rg` across every revision for a `create_table`/`CREATE TABLE` of `clauses` → **nothing creates it.**
+- `rg '__tablename__\s*=\s*"clauses"' src/app` → **no ORM model either.**
+
+So `alembic upgrade` from base dies at this revision with `UndefinedTable: relation "clauses" does not exist`. **The
+stamp was a workaround for an unrunnable migration**, not a deployment shortcut — which is the fact that explains
+every downstream symptom.
+
+**Proof that it never executed, independent of the above reasoning:** `9f4a1b7c6d2e` is marked applied in
+`alembic_version`'s ancestry, yet `parent_documents` — the table it *does* create — is absent. Had it run, either the
+table would exist or the run would have failed. It never ran.
+
+### What the live database actually contains
+
+`alembic_version` holds exactly **one** row: `0004`. Public table count: **16** = the 15 tables from `0002` plus
+`alembic_version` itself. Every one of the eleven tables the 210 chain needs is **absent**:
+
+| Revision | Tables | Marked applied? | Present? |
+|---|---|---|---|
+| `c0c17c6eb1cc` | `document_vectors`, `chat_messages`, `chat_sessions` | yes | **no** |
+| `8a7d9b1c2e3f` | `search_documents`, `search_chunks` | yes | **no** |
+| `9f4a1b7c6d2e` | `parent_documents` (+ all `clauses` DDL) | yes | **no** |
+| `0001` | `outbox_events`, `dead_letter_events` | yes | **no** |
+| `0002`–`0004` | 15 billing tables | yes | **YES** |
+| `a71f0d7d9c12` | `documents`, `chunks` | **no** | **no** |
+
+`bm25` indexes present: **0** (consistent with §10).
+
+### The three consequences that decide the shape of the 210 fix
+
+1. **`upgrade heads` today creates `documents` and `chunks` — and nothing else.** `a71f0d7d9c12` is the only
+   unapplied head, and its `down_revision` (`2bc7726317f6`) is inside the stamped ancestry, so it is satisfiable and
+   would run.
+2. **`search_chunks`, `search_documents`, `parent_documents`, `outbox_events`, `dead_letter_events`, `chat_*` and
+   `document_vectors` are unreachable by `upgrade` forever**, because their revisions are falsely marked applied.
+   Reaching them requires either a **new repair revision** that creates them idempotently, or a **stamp-down** to
+   before `8a7d9b1c2e3f` followed by a real upgrade — and the stamp-down route re-enters the unrunnable
+   `9f4a1b7c6d2e`, so it is **not viable until `clauses` is resolved**.
+3. **`clauses` must be decided before either route works.** `dispositions.md` item 184 already routes this: under
+   Option **A+** the clause readers are *retargeted* onto the unified store rather than left stale. That decision is
+   now load-bearing rather than tidy-up — it is what makes the migration chain runnable at all.
+
+### Why no amount of code repair fixes 210 on its own
+
+All four hops of the chain terminate in a table that does not exist. Ingestion writes chunks; documents reads them;
+tools query them; Cognee ingests from them. This is a **schema-reachability** defect, and it sits upstream of every
+code finding in all five changes.

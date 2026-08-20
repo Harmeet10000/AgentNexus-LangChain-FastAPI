@@ -32,6 +32,21 @@ The corpus SHALL carry the attributes that identify a statutory provision — th
 reference, and the year — under a documented contract, and a point lookup on the instrument name and section
 reference SHALL be served by an index rather than a full scan of the corpus.
 
+**Coordination point.** This change ships no DDL. The carrier for these three attributes and the index that serves
+the point lookup are provided by the change that owns the retrieval schema, under its ADR *"`documents` / `chunks`
+is the sole retrieval schema"* (`openspec/changes/documents-unified-schema/adrs.md`, status **Accepted**), and are
+normatively specified by its `document-retrieval-schema` capability. That ADR is the authority on the attribute
+names and on whether they are columns or a typed metadata sub-object; this capability deliberately states the
+requirement at the attribute level and names no column. The retrieval work in this change therefore *consumes* the
+contract and is gated on it — no task in this change creates, alters, or indexes a relation.
+
+**The dependency is directional, and it constrains proofs as well as order.** This requirement is **unsatisfiable until
+the retrieval-schema migration lands**: the carrier relation and its index do not exist in the deployed database today.
+Every scenario below is therefore verified **after** that migration, or by an import- or type-level check that does not
+touch the database. In particular, a proof asserting an index-served lookup **as of today** would be unexecutable — the
+relation it queries is absent — and must not be written. This is a repeated failure mode in this refactor, not a
+hypothetical one, so the constraint is stated in the capability rather than left to the task list.
+
 #### Scenario: A statute section is addressable by instrument and section reference
 
 - **WHEN** a statute section is requested by instrument name and section reference
@@ -46,6 +61,12 @@ reference SHALL be served by an index rather than a full scan of the corpus.
 
 - **WHEN** the statute point lookup executes
 - **THEN** it SHALL be served by an index on the identifying attributes
+
+#### Scenario: The attribute contract is resolved before the retarget is written
+
+- **WHEN** the statute point lookup is implemented against the unified corpus
+- **THEN** the attribute names it reads SHALL be the ones the retrieval-schema contract documents
+- **AND** the implementation SHALL NOT introduce attribute names of its own
 
 ### Requirement: Ranked retrieval and fusion have a single implementation
 

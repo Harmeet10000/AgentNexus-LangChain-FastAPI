@@ -53,6 +53,8 @@ definition only**, never about working capability.
   ingest DTOs, Celery ingest task — without losing a single read capability and without making anything newly
   reachable.
 - Retarget the retrieval graph's fused search off the clause table, which no migration creates.
+- Make a failed retrieval branch fail the request rather than silently reduce the fused result to the branches that
+  happened to succeed.
 - Hand change 0 an exact, unambiguous column-and-index specification for the one migration that will create the
   target schema for the first time.
 - Leave behind a gate that fails when query text names a database identifier no migration creates — the defect
@@ -94,11 +96,14 @@ definition only**, never about working capability.
   dimension, are change 1's. Both are cheapest at change 1's moment because the chunk store has zero rows — one
   convention is simply chosen before the first row is written.
 - **The clause-reading tool stub** that returns an empty list: change 3's.
-- Recorded gaps adjacent to this change, carried from the disposition ledger so they are not silently dropped: a
-  shared vector-store singleton object is **dropped** (it would create a *third* retrieval path alongside the two
-  this change unifies); the "refactor vector-store code" item is **merged** into the reader-less derived column
-  work, whose other half is a set of zero-byte packages in change 0's deletion manifest; and evaluating external
-  retrieval frameworks is **deferred**, since the scope decision commits to the existing extension-based path.
+- Recorded gaps adjacent to this change, carried from the disposition ledger so they are not silently dropped. Only
+  the middle one is change 2's own; the other two are listed here for continuity and **remain change 1's to record
+  in its own Non-Goals**, because a gap belongs to the owning change and the hazard is change 1 omitting it on the
+  assumption that change 2 covered it. A shared vector-store singleton object is **dropped** (change 1's row; it
+  would create a *third* retrieval path alongside the two this change unifies); the "refactor vector-store code"
+  item is **merged** into the reader-less derived column work — **this one is change 2's** — whose other half is a
+  set of zero-byte packages in change 0's deletion manifest; and evaluating external retrieval frameworks is
+  **deferred** (change 1's row), since the scope decision commits to the existing extension-based path.
 
 ## Decisions
 
@@ -234,12 +239,38 @@ that index's corpus statistics, so a rename is a silent runtime break with no li
 
 *Alternatives considered:* **interpolate a constant into the query string** — rejected; it trips the project's
 hardcoded-SQL lint rules and buys nothing, because the literal still has to exist somewhere. **Do nothing** —
-rejected; this is the exact defect class that produced the clause-index hole. The gate is **red on three counts
-today**, which makes it simultaneously the proof of the clause retarget and a permanent guard.
+rejected; this is the exact defect class that produced the clause-index hole.
+
+**What the gate actually finds today, counted under its own rule.** The rule is "created by a migration, on a table
+that a migration creates", and it may not consult a database. Five identifiers are named inside query text; exactly
+**one** is red:
+
+| Identifier named in query text | Created by | On a table created by | Gate |
+|---|---|---|---|
+| `clauses_bm25_idx` | `9f4a1b7c6d2e:132` | **nothing** — no revision creates `clauses`; `9f4a1b7c6d2e` only `batch_alter_table`s and indexes it | **RED** |
+| `search_chunks_bm25_idx` | `8a7d9b1c2e3f:86` | `8a7d9b1c2e3f:45` | green |
+| `uq_search_chunks_document_chunk_index` | `8a7d9b1c2e3f:67-71` (in the `create_table`) | `8a7d9b1c2e3f:45` | green |
+| `chunks_bm25_idx` | `a71f0d7d9c12:97` | `a71f0d7d9c12:53` | green |
+| `uq_chunks_document_chunk_index` | `a71f0d7d9c12:90` (in the `create_table`) | `a71f0d7d9c12:53` | green |
+
+An earlier draft of this change claimed the gate was **red on three counts**. That was wrong, and the error is worth
+naming because it would have produced unpassable work: it counted objects that do not exist *in the live database*,
+which is a criterion this change's own spec explicitly forbids the gate from using. The superseded search index and
+constraint are both created by the same revision that creates the table they sit on, so the gate — correctly — has
+nothing to say about them. Their problem is that the revision was never applied, which is a different defect with a
+different owner (change 0), and folding it in here would have forced the implementer to make the gate
+database-aware, pad it with an expected-fail list, or conclude it was broken.
+
+**The one red identifier has two readers, in two different features.** `features/search/repository.py:356,361,362`
+is removed by the retarget and the deletion. But `shared/langgraph_layer/ingestion_kb/nodes.py:751` also names it,
+in `SELECT bm25_force_merge('clauses_bm25_idx')`. That module is change 1's, and this change touches exactly one
+string literal in it — retargeting that maintenance call onto `chunks_bm25_idx` — because otherwise the gate cannot
+go green in this change at all, and a gate that ships red is an expected-fail list waiting to be written. It stays a
+literal rather than an interpolated constant, for the reason above.
 
 ### 11. Relocate helpers behind a temporary re-export shim
 
-The global test conftest imports twenty symbols from the module being deleted, at module level, so a missing
+The global test conftest imports twenty-one symbols from the module being deleted, at module level, so a missing
 symbol is a collection error for the **entire** suite. The relocation therefore lands with a re-export shim in
 place, so both import paths resolve until the deletion and the conftest rewrite land in the same commit.
 
@@ -248,7 +279,7 @@ repository, which is the single highest-risk moment in this change.
 
 ## Risks / Trade-offs
 
-- **[The global test conftest is a single point of failure for the whole suite]** — it imports twenty symbols from
+- **[The global test conftest is a single point of failure for the whole suite]** — it imports twenty-one symbols from
   the module being deleted, at module level, and conftest is global, so one missing symbol is a collection error
   for **every** test, not just this feature's. → Relocate behind a re-export shim so both import paths resolve;
   delete the module and rewrite the conftest **in the same commit**; compare collection output against a captured
@@ -278,9 +309,13 @@ repository, which is the single highest-risk moment in this change.
   non-nullable column that never changes is worse than no column.
 
 - **[No retrieval index has ever been created, on either schema]** — all three branches' indexes are declared by
-  an unapplied revision, and the fuzzy extension is not installed. → The permission probe proves they are
-  buildable; the real-database gate is the only thing that can prove they build. Recorded here so no later reader
-  mistakes "the target defines an equivalent" for "the branch works today."
+  an unapplied revision, and the fuzzy extension is not installed. A later probe confirmed the keyword extension
+  registers an access method literally named `bm25` with `text_bm25_ops` as the default operator class on `text`,
+  and that the repository's existing two-argument `to_bm25query` calls are already correct — so the last open
+  question about whether these declarations *could* build is closed. What is still not established is that any of
+  them **has** built: the live server holds **no** `bm25` index at all. → The real-database gate is the only thing
+  that can prove they build. Recorded here so no later reader mistakes "the access method exists" or "the target
+  defines an equivalent" for "the branch works today."
 
 - **[Change 1 lands first and builds a promoted pipeline writing the abolished schema]** — its persistence nodes
   target clause, parent-document, entity and relationship tables while this change names the chunk store the sole
@@ -340,7 +375,7 @@ embedded in query text and asserted by this change's static gate, so a rename is
 
 | Column | Type | Null | Default |
 |---|---|---|---|
-| `id` | uuid | NOT NULL | primary key |
+| `id` | uuid | NOT NULL | primary key — **no server default**; the writer supplies the value |
 | `user_id` | varchar(255) | **NOT NULL** | **none — never a server default** |
 | `title` | varchar(500) | NOT NULL | none |
 | `source_uri` | text | NULL | none |
@@ -363,7 +398,7 @@ dedup key, and it is the pair, never the digest alone**; `ix_documents_user_id`;
 
 | Column | Type | Null | Default |
 |---|---|---|---|
-| `id` | uuid | NOT NULL | primary key |
+| `id` | uuid | NOT NULL | primary key — **no server default**; the writer supplies the value |
 | `document_id` | uuid | NOT NULL | foreign key to `documents.id`, `ON DELETE CASCADE` |
 | `user_id` | varchar(255) | **NOT NULL** | **none — never a server default** |
 | `chunk_index` | integer | NOT NULL | none |
@@ -371,6 +406,9 @@ dedup key, and it is the pair, never the digest alone**; `ix_documents_user_id`;
 | `content` | text | NOT NULL | none |
 | `preamble` | text | NOT NULL | `''` |
 | `clause_type` | varchar(128) | NULL | none |
+| `instrument_name` | varchar(255) | NULL | none |
+| `section_ref` | varchar(64) | NULL | none |
+| `instrument_year` | smallint | NULL | none |
 | `page_no` | integer | NOT NULL | `0` |
 | `embedding` | vector(*configured dimension*) | NULL | none |
 | `metadata_` | jsonb | NOT NULL | `'{}'` |
@@ -384,20 +422,52 @@ dedup key, and it is the pair, never the digest alone**; `ix_documents_user_id`;
 
 Constraint and indexes: unique `uq_chunks_document_chunk_index` on `(document_id, chunk_index)` — **the chunk
 upsert key, named inside query text**; `ix_chunks_user_document` on `(user_id, document_id)`; `ix_chunks_kind` on
-`chunk_kind`; `ix_chunks_metadata_gin`, GIN on `metadata_`; `ix_chunks_graphiti_verified`.
+`chunk_kind`; `ix_chunks_metadata_gin`, GIN on `metadata_`; `ix_chunks_graphiti_verified`; and
+`ix_chunks_instrument_section` on `(user_id, instrument_name, section_ref, instrument_year)`, **partial**,
+`WHERE instrument_name IS NOT NULL` — the statute point-lookup index. Its column order is load-bearing and the ADR
+explains why: tenant first because every read is tenant-scoped, the two identity columns next so the lookup is one
+index descent, and the year last so a backward scan yields the newest applicable vintage first without a sort. The
+partial predicate keeps the non-statute majority of chunks off the index entirely.
+
+**Which side owns the Default column, stated so it does not become drift later.** Every value in the Default
+columns above except the two timestamps and `search_text` is today an **application-side** default on the ORM
+model, not a `server_default`. The tables above describe the *value a row ends up with*, not an instruction to emit
+`DEFAULT` clauses in DDL. **The ORM is authoritative for these defaults, and change 0 must not add
+`server_default` for them** — doing so would make the model and the database disagree the moment autogenerate
+comparison becomes usable, which is exactly the drift the schema-break gates exist to catch. The two exceptions are
+deliberate and belong in the DDL: `created_at`/`updated_at` default to now in the database, and `search_text` is a
+stored generated column, which by definition only the database can produce. The `NOT NULL, never a server default`
+cells are stronger than a default choice: they are a prohibition, and they hold on both sides.
 
 Three retrieval indexes, all on the chunk store, all required for the three-branch contract:
 
-- `chunks_bm25_idx` — keyword relevance over `search_text`, English text configuration, `k1=1.2`, `b=0.75`.
-  **Its name is read inside the query**, because the extension uses that index's corpus statistics.
-- `chunks_embedding_idx` — approximate vector search over `embedding` with cosine distance.
-- `chunks_search_text_trgm_idx` — GIN character-similarity index over `search_text`.
+- `chunks_bm25_idx` — keyword relevance over `search_text`, English text configuration, `k1=1.2`, `b=0.75`, using
+  access method `bm25` and the default `text_bm25_ops` operator class. **Its name is a literal argument inside the
+  query**, via the two-argument `to_bm25query(input_text, index_name)` overload, because the function reads that
+  index's corpus statistics. A correct index under a different name silently matches nothing instead of failing, so
+  the name is part of the query contract and change 0 may not rename it.
+- `chunks_embedding_idx` — approximate vector search over `embedding` with cosine distance, as
+  `USING diskann (embedding vector_cosine_ops)`. The access method is **pinned**, and it is why `vectorscale` is on
+  the required-extension list below rather than optional: `diskann` comes from `vectorscale`, and the other
+  candidate available on this server (`vchord`) does not provide it. Change 0 may substitute a different access
+  method only by changing this line and the extension list together.
+- `chunks_search_text_trgm_idx` — GIN character-similarity index over `search_text`, `gin_trgm_ops`.
 
-**Extensions the migration must create itself, not inherit.** Vector support, approximate-vector indexing, keyword
-search and character similarity. This is not pedantry: the revision that declares the approximate-vector index
-never creates the extension that provides it — only the sibling branch does, and that branch is
-stamped-but-unrun — so the index survives today purely because the extension happens to be installed already. The
-application role has been verified able to create the two that are missing.
+**Extensions the migration must create itself, not inherit — all four by name**, each as
+`CREATE EXTENSION IF NOT EXISTS` in the authoritative revision:
+
+| Extension | Provides | State on the live server |
+|---|---|---|
+| `vector` | the `vector` column type | installed |
+| `vectorscale` | the `diskann` access method for `chunks_embedding_idx` | installed, but **created by no revision on the authoritative branch** |
+| `pg_textsearch` | BM25 keyword relevance, the `bm25` access method, `text_bm25_ops`, and `to_bm25query` | installed; 1.3.0 |
+| `pg_trgm` | trigram character similarity for the fuzzy branch | **available, not installed**; 1.6 |
+
+This is not pedantry. The revision that declares the approximate-vector index never creates the extension providing
+it — only the sibling branch does, and that branch is stamped-but-unrun. So on this server the declaration *would*
+build only because `vectorscale` happens to be pre-installed already, which is luck and will not reproduce on a
+fresh environment. (The index itself has never been created anywhere, as stated above; what is inherited by luck is
+the extension, not the index.) The application role has been verified able to create the two that are missing.
 
 **Must not be created:** the superseded search document and chunk tables, the clause table, and any second derived
 text-search column or index over one. The embedding column's dimension must come from the single configured
@@ -415,27 +485,71 @@ Each step leaves the repository importable and the suite collecting.
 3. Flip the unified feature's imports off the superseded feature. After this step it imports nothing from it
    except the embedding client, which is flagged rather than fixed.
 4. Retarget the retrieval graph's fused search onto the unified repository, passing no clause filter and no
-   verification filter, and clear the residual untyped attribute in the same module.
-5. Add the static identifier gate. It must be **red before the retarget and green after** — that is what makes it
-   a regression guard rather than a snapshot.
-6. Delete the schema-bound twin, moving the graph-backed ask path onto the document query service unexposed, and
+   verification filter, and clear the residual untyped attribute in the same module. In the same step, retarget the
+   **one** remaining source reader of the phantom clause index — the `bm25_force_merge` literal in the ingestion
+   graph — onto `chunks_bm25_idx`, since the gate at step 5 cannot go green while it survives.
+5. Make a failed retrieval branch **fail the request** instead of degrading the fused result. Today the fused-search
+   path logs a branch failure and appends an empty rank list, so a request whose keyword branch raises returns
+   `200` with a result silently fused from two modes — the precise behaviour the three-mode requirement forbids.
+   Each branch's failure must surface as a failure of the whole retrieval call, with the failing branch named. An
+   empty result from a healthy branch is **not** a failure and must keep degrading gracefully; that distinction is
+   the whole content of this step, and the two scenarios that pin it are adjacent in the spec on purpose.
+6. Add the static identifier gate. It must be **red before step 4 and green after** — that is what makes it a
+   regression guard rather than a snapshot.
+7. Delete the schema-bound twin, moving the graph-backed ask path onto the document query service unexposed, and
    rewrite the test surface **in the same commit**: the global conftest, the feature's integration test, and the
    relocated unit tests. Then drop the shim.
-7. Delete the superseded ORM models and assert that no revision creates their tables outside the frozen history,
+8. Delete the superseded ORM models and assert that no revision creates their tables outside the frozen history,
    and that the authoritative create-schema migration creates neither.
-8. Delete the Celery ingest task, its re-export, its registration in the worker's include list, and the conftest
+9. Delete the Celery ingest task, its re-export, its registration in the worker's include list, and the conftest
    line that stubs the module out — that stub would otherwise mask the deletion.
-9. Add the schema-break gates: the static gate from step 5, and the real-database gate behind a marker so the
-   default suite stays offline. Autogenerate comparison is **not usable** until change 0 rebuilds the database by
-   upgrade rather than stamp, because it cannot distinguish a drifted model from migrations that never ran.
-10. Add the chunk modification timestamp to the ORM, the conflict-resolution set and the row builder. No `ALTER`
-    accompanies it; the column ships in change 0's `CREATE TABLE`.
+10. Add the schema-break gates: the static gate from step 6, and the real-database gate behind a marker so the
+    default suite stays offline. Autogenerate comparison is **not usable** until change 0 rebuilds the database by
+    upgrade rather than stamp, because it cannot distinguish a drifted model from migrations that never ran.
+11. Add the chunk modification timestamp **and the three statute identity attributes** to the ORM, the
+    conflict-resolution set and the row builder, so the model matches what change 0 creates. No `ALTER` accompanies
+    any of them; all four columns ship in change 0's `CREATE TABLE`. The statute attributes are nullable and
+    write-through — nothing in this change populates them, and change 3 is their reader.
+
+**A term the specs use that only this document can define.** "Provisioning" in the missing-capability requirement
+means **change 0's authoritative create-schema migration running its `CREATE EXTENSION` and `CREATE INDEX`
+statements** — that is the moment a missing database capability must be named and fatal. The specs cannot say
+"change 0" or "migration author", so they say "provisioning"; this is its referent. The runtime half of the same
+requirement is step 5 above, and the two halves have different owners on purpose: absence is detected at
+provisioning, and *any* branch failure at runtime is fatal to the request rather than absorbed.
 
 ### Coordination points
 
 - Change 0 lands first: head merge, the authoritative create-schema migration, the task-registry rewrite, and
   model registration for the unified models only.
+- **Change 0's `UserIdDep` fix (D5.2) is a hard precondition for the mounted-owner requirement's second scenario.**
+  `features/documents/dependencies.py:61-62` reads `request.state.user_id` unguarded and no middleware assigns it,
+  so a mounted document endpoint called without an authenticated owner raises `AttributeError` today — an unhandled
+  internal error, which is exactly what that scenario forbids. This change writes **no code** for it and cannot:
+  fixing owner resolution is an explicit Non-Goal above. The requirement becomes true when change 0 lands, and the
+  scenario is stated here rather than dropped because change 2 owns the capability that must eventually hold it.
+  The requirement's *first* scenario (the mounted route set gains nothing) is change 2's own and is provable by
+  route enumeration without change 0.
 - Change 1 consumes the accepted ADR before implementing its persistence nodes.
+- **Change 1 defers to `document-retrieval-schema` for extension-missing behaviour and for rank fusion.** Both
+  changes initially specified the same code path in opposite directions — change 2 requires a missing capability to
+  fail loudly, change 1 had required it to degrade and continue. **Fail loudly is the ruling**, on two grounds:
+  change 0 creates all four extensions explicitly (D14.4), so a missing extension at runtime means the migration
+  did not run, which is a deployment error and not a runtime condition to absorb; and degrade-and-continue is the
+  pattern that built this repository's invisible-failure register. Change 1 drops its degrade-and-continue
+  requirement and its duplicated fusion and single-source requirements, and references this capability instead.
+- **The relocated chunker may be superseded rather than kept.** This change moves `search/chunking.py` into the
+  documents feature; D8 gives change 1 hierarchical chunking for legal documents, which may replace it outright.
+  Change 1 should replace it in place at its new home rather than re-relocating it or leaving it orphaned beside a
+  new implementation.
+- **Change 3's `legal-corpus-retrieval` depends on this change's column set, and the dependency was one-way until
+  now.** Its requirement that statute identity attributes be addressable and index-served can only be satisfied
+  here, because change 3 ships no DDL and this change owns the schema contract. It is satisfied **in full and
+  without a new table**: `chunks.instrument_name`, `chunks.section_ref` and `chunks.instrument_year`, plus the
+  partial `ix_chunks_instrument_section` index, plus the newest-applicable-year rule — all specified in the ADR and
+  handed to change 0 above. Change 3 should reference this contract rather than re-specify it, and in particular
+  should not introduce a `statutes` table: the ADR forecloses one. Naming is this change's: change 3's spec is
+  written at the attribute level and names no columns, so there is no column-name conflict to resolve.
 - Change 3 owns the clause-reading tool stub; the handoff is recorded, and this change does not touch it.
 
 ### Proof status, stated honestly

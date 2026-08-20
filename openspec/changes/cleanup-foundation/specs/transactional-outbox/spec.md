@@ -54,43 +54,19 @@ their declaring revision without that revision's body ever having run.
 - **THEN** the upgrade SHALL resolve to exactly one head
 - **AND** SHALL terminate with both outbox relations present
 
-## ADDED Requirements
+<!--
+Deliberately NOT added here: a requirement that a missing outbox relation must fail loudly instead of being
+absorbed by the relay's broad exception handling.
 
-### Requirement: A missing outbox relation SHALL fail loudly rather than silently disabling the outbox
+That requirement was drafted for this change and has been withdrawn, because every clause of it is a change to the
+relay's exception handling and to the auth service's transaction boundary — work this change disclaims in three
+places, ships no step for, and deliberately sequences after the relations exist. It would also have contradicted an
+accepted requirement this change does not modify: `typed-exception-handling`'s *Degradation boundaries SHALL keep
+except Exception with add_note*, whose scenario *Outbox relay dead-letters on any failure* currently sanctions the
+broad catch. Two accepted specs disagreeing about the same lines is worse than one recorded gap.
 
-The relay MUST NOT convert the absence of its own relations into a warning that leaves the process healthy. When
-the relations the relay depends on do not exist, the outbox is permanently dead for the lifetime of that process:
-nothing retries, no event is ever published, and every endpoint that enqueues an event fails after committing its
-own state change. Today that condition is absorbed by broad exception handling in both the startup scan and the
-listener — the listener additionally inside a fire-and-forget background task, where nothing observes its
-outcome — so the application boots successfully only because those handlers are wide enough to hide a schema
-defect. No requirement sanctions that behaviour, and the same breadth would hide any future schema drift
-identically.
+The gap is therefore carried as an explicit Non-Goal in `design.md`, and the decision about what the relay owes when
+a relation is absent — including which spec wins until the narrowing lands, and the paired
+`typed-exception-handling` MODIFIED that the narrowing change must ship — is recorded in `adrs.md` as ADR-5.
+-->
 
-#### Scenario: Startup with absent outbox relations
-
-- **WHEN** the application starts and the relations the relay reads or writes do not exist
-- **THEN** the condition SHALL be reported at error severity, distinguishable from a transient connection failure
-- **AND** the report SHALL identify the missing relation by name
-- **AND** the outbox subsystem SHALL be recorded as unavailable in a form the readiness surface can observe,
-  rather than left indistinguishable from a healthy relay
-
-#### Scenario: Background listener failure is observable
-
-- **WHEN** the long-running notification listener terminates for any reason after startup
-- **THEN** the termination SHALL be reported at error severity and SHALL NOT be discarded because it occurred in a
-  detached background task
-- **AND** the outbox subsystem SHALL be recorded as no longer running
-
-#### Scenario: Endpoints do not report success when the event cannot be durably enqueued
-
-- **WHEN** a request path attempts to enqueue an outbox event and the relations are absent
-- **THEN** the request SHALL NOT report success
-- **AND** the state change that the event was meant to accompany SHALL NOT remain committed without its event
-
-#### Scenario: Ordering constraint on tightening the relay's exception handling
-
-- **WHEN** the relay's broad exception handling is narrowed so that a missing relation is no longer swallowed
-- **THEN** that narrowing SHALL NOT be applied to any environment in which the outbox relations do not yet exist
-- **AND** the revision that creates the relations SHALL be applied first, so that the change converts a silent
-  permanent degradation into a loud, observable failure rather than into a startup failure

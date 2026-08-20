@@ -18,22 +18,35 @@ single configured embedding dimension and MUST NOT be left to a third-party defa
 - **THEN** the resolved model SHALL be the application's configured embedding model
 - **AND** it SHALL NOT be a provider default that requires credentials the application has not configured
 
-### Requirement: Memory vectors are persisted in the application's managed database
+### Requirement: Memory vectors are persisted in a durable store, preferring the application's managed database
 
-Agent-memory vectors and their metadata SHALL be persisted in the application's managed relational database. They
-MUST NOT be written to the local filesystem of the process that produced them.
+Agent-memory vectors and their metadata SHALL be persisted in a store whose contents **survive replacement of the
+process and of the container that produced them**. The memory library's own default store SHALL NOT be accepted, and
+no store whose data is lost on process or container replacement SHALL be configured. The application's managed
+relational database is the required target; a file-backed store on durable storage is permitted only under the
+conditions in the fallback scenario below.
 
 #### Scenario: Memory vectors survive process replacement
 
 - **WHEN** a memory write completes and the process is then replaced
 - **THEN** a subsequent recall from a new process SHALL still find the written memory
 
-#### Scenario: No memory data is written to local files
+#### Scenario: The memory library's default store is never accepted
 
 - **WHEN** the memory subsystem is configured at startup
-- **THEN** no memory vector store SHALL be configured against a local filesystem path
-- **AND** if no managed vector store is available, startup SHALL report the subsystem as degraded rather than
-  silently falling back to local files
+- **THEN** its vector store SHALL have been configured explicitly rather than left to the library default
+- **AND** no store resolving to the producing process's own ephemeral filesystem SHALL be configured
+- **AND** if no durable store can be configured, startup SHALL report the subsystem as degraded rather than
+  silently accepting the default
+
+#### Scenario: A durable file-backed store is permitted only for memory recall
+
+- **WHEN** the managed relational database cannot host the memory vector store and a file-backed store on durable
+  storage is configured instead
+- **THEN** that store SHALL serve agent-memory recall only
+- **AND** it SHALL NOT serve document retrieval
+- **AND** the health surface SHALL report that the memory subsystem is running on the fallback store rather than
+  reporting it as fully configured
 
 ### Requirement: Memory multi-user access control state is explicit
 
@@ -52,23 +65,45 @@ memory configuration call. It MUST NOT be left unset.
 - **THEN** tenant isolation SHALL be enforced by the application through the memory partition identity
 - **AND** the partition identity SHALL be produced by a single validated construction path
 
-### Requirement: The memory subsystem receives an authenticated database connection
+### Requirement: The memory subsystem is configured against the application's own database
 
-The memory subsystem SHALL receive a database connection string that is usable as given — correct scheme,
-credentials present, and no transport parameters the driver rejects. It MUST NOT read a raw configuration value
-that bypasses the application's single connection-string accessor.
+The memory subsystem's relational store SHALL be configured from the application's single settings source using the
+**discrete connection fields its own configuration surface accepts** — provider, host, port, username, password and
+database name. Those fields SHALL resolve to the **same database instance the application's own engine connects
+to**; a configuration that can point the memory subsystem at a different instance than the application SHALL NOT be
+accepted. No connection field SHALL be satisfied by a placeholder default. Transport-security parameters SHALL be
+supplied in the form the memory subsystem's own driver accepts, never appended to a value that driver does not
+parse. The subsystem's reported configuration state MUST NOT carry a connection URL that no component consumes as
+configuration, because such a value is indistinguishable from configuration to its readers.
+
+#### Scenario: Memory store and application resolve to one database instance
+
+- **WHEN** the memory subsystem is configured at startup
+- **THEN** its resolved host, port and database name SHALL equal those the application's own database engine
+  resolves for the same run
+- **AND** startup SHALL fail rather than configure the memory subsystem against a different instance
+
+#### Scenario: No connection field falls back to a placeholder default
+
+- **WHEN** the memory subsystem resolves its connection fields
+- **THEN** each field SHALL come from the application's configured settings
+- **AND** a field still holding its placeholder default SHALL be treated as a configuration error rather than as a
+  usable value
 
 #### Scenario: Memory store connection succeeds on first use
 
 - **WHEN** the memory subsystem performs its first database operation
-- **THEN** the connection SHALL authenticate successfully
+- **THEN** the connection SHALL authenticate successfully using the credential drawn from the application's secret
+  settings
 - **AND** no credential SHALL be supplied by an ambient environment side effect
+- **AND** transport security SHALL be negotiated through the driver's own connection arguments
 
 #### Scenario: An unusable connection is reported, not swallowed
 
 - **WHEN** the memory subsystem's database connection cannot authenticate
 - **THEN** the memory health check SHALL report a failure naming the store
 - **AND** the application SHALL NOT report the memory subsystem as healthy
+- **AND** no reported configuration value SHALL expose a credential or a credential-less connection URL
 
 ## MODIFIED Requirements
 
@@ -138,3 +173,15 @@ query type SHALL be auto-routed by Cognee (default `auto_route=True`) — no exp
 - **WHEN** `cognee.recall()` raises an exception
 - **THEN** an empty list SHALL be returned and the error SHALL be logged
 - **AND** the caller's run SHALL continue
+
+### Requirement: No type ignore suppressions
+
+The system SHALL NOT use `# type: ignore` comments on the agent-memory call surface — the module or modules that
+call `cognee.remember()`, `cognee.improve()` and `cognee.recall()` — whatever their path. Retiring or relocating that
+call surface SHALL NOT be a way to satisfy this requirement: the prohibition follows the calls, not the file.
+
+#### Scenario: Type checker passes
+
+- **WHEN** the project's type checker is run over the module or modules that hold the agent-memory call surface
+- **THEN** no type errors SHALL be reported on `cognee.remember()`, `cognee.improve()` or `cognee.recall()` calls
+- **AND** no `# type: ignore` comment SHALL appear on any line of that call surface

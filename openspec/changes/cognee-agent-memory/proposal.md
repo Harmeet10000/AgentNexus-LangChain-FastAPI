@@ -20,8 +20,11 @@ migration, a backfill, or a cutover.
 - **Fix two live configuration defects** (backlog item 152): memory embeddings currently default to a 3072-dimension
   third-party model against this repo's 768-dimension standard, and the vector store is never configured at all, so
   memory vectors default to local files invisible to the application's database and lost on container replacement.
-- **Give the memory subsystem an authenticated database connection.** It is handed the raw connection string, which
-  carries no password; the single-accessor repair is owned by change 0 and consumed here.
+- **Make the memory subsystem's database connection provably the application's own.** It is configured with discrete
+  credential fields — the only form its library accepts, and the password is already correct — but its host and
+  database name are read independently of the URL the application's own engine connects through, so nothing stops it
+  from succeeding against a *different* database. Same-instance resolution becomes a requirement, and no connection
+  field may fall back to a placeholder default.
 - **Disable multi-user access control explicitly.** Left unset, the default path raises on this repo's graph backend
   rather than quietly degrading. Tenant isolation is enforced by the application through dataset and thread naming.
 - **Make the subsystem observable before it is used** — a `cognee` health probe on both health surfaces, reporting
@@ -53,8 +56,14 @@ gap**, not an omission):
 - `redisvl` / `langcache` adoption (the deferred half of item 179).
 - Making the agent graph reachable, and therefore any end-to-end proof of this change (D17).
 - A LangGraph store backed by agent memory, and any second document-retrieval path (D5.1).
-- Exposing a deeper memory-retrieval tool to individual reasoning nodes — reassigned to change 3, because tool
-  exposure is the registry's concern (D6.1).
+- **Registering** a deeper memory-retrieval tool in the agent tool registry. The *behaviour* — which roles may invoke
+  deeper retrieval, what it returns, what it must refuse — is specified **here**; only the tool binding belongs to
+  change 3, because tool exposure is the registry's concern (D6.1). Recorded as an open coordination point in
+  `design.md` § Context, **not** as a completed handoff: change 3's artifacts do not mention it today.
+- **Provisioning the process that runs scheduled consolidation.** There is no worker and no beat service in the
+  deployment at all; that gap is dispositioned in change 1. This change registers the task and the schedule entry, and
+  **the entry is inert until change 1 lands those services** — after this change, consolidation never runs. Stated
+  plainly rather than implied.
 
 **BREAKING:** the knowledge-graph final-report write path is removed. Its only caller is removed in the same change,
 so no live consumer breaks; the observable consequence is that the user-level partition of the knowledge graph
@@ -72,14 +81,21 @@ becomes empty (recorded in `adrs.md` § Consequences).
 
 - `cognee-v1-api`: the memory call surface. The write requirement becomes conversation-scoped; the enrichment
   requirement stops mandating a redundant call and confines enrichment to scheduled consolidation; the query
-  requirement keeps the origin of each recalled item. Four configuration requirements are **added** (embedding
-  dimensionality parity, managed-store persistence, explicit access-control state, authenticated connection) because
-  the deployed spec leaves all four unspecified rather than forbidden.
+  requirement keeps the origin of each recalled item; the type-suppression prohibition is restated against the
+  surviving call surface instead of a deleted file path. Four configuration requirements are **added** (embedding
+  dimensionality parity, durable managed-store persistence, explicit access-control state, same-instance authenticated
+  connection) because the deployed spec leaves all four unspecified rather than forbidden.
 
 ### Removed from Scope
 
-- No deployed requirement is removed. The retired knowledge-graph final-report write was never specified under
-  `openspec/specs/` — it existed only in the superseded change's deltas, which are handled by archiving.
+- **No deployed requirement is deleted, and all four are modified.** The deployed `cognee-v1-api` capability has four
+  requirements; earlier drafts of this proposal said "no deployed requirement is removed" while the delta touched only
+  three. The fourth — *No type ignore suppressions* — pinned its only scenario to `ty check` on a single file path that
+  this change retires, so leaving it alone would have archived an accepted requirement pointing at a deleted file. It
+  is now a fourth `MODIFIED` block: the prohibition is kept, its original scenario title is kept verbatim, and its test
+  is restated path-neutrally over the agent-memory call surface. Nothing is `REMOVED`.
+- The retired knowledge-graph final-report write was never specified under `openspec/specs/` — it existed only in the
+  superseded change's deltas, which are handled by archiving (never deletion).
 
 ## Impact
 
@@ -98,13 +114,22 @@ becomes empty (recorded in `adrs.md` § Consequences).
 
 - **Memory grows unbounded.** No decay, curation, or dedup exists anywhere after this change (D10). Not mitigated —
   accepted and recorded; the one safeguard added is a size metric on consolidation so growth is observable.
+- **The memory subsystem can silently connect to the wrong database.** Its host and database name are configured
+  independently of the URL the application's own engine uses; they agree today only because both are set by hand in the
+  same env file, and their code defaults do not agree at all. A wrong-database connection **succeeds**, so there is no
+  loud failure. Mitigated by a same-instance requirement, a startup check and a probe that reports the store actually
+  reached.
+- **Guarding the startup call trades loudness for availability.** The memory startup call is today the only unguarded
+  optional-subsystem call in the lifespan; guarding it means a misconfiguration no longer stops a deploy, which makes
+  the health probe the only remaining signal. Accepted deliberately, and the reason the probe is a requirement.
 - **A third-party library performs schema DDL inside the production managed database at first write.** Mitigated by
   schema isolation plus a migration filter, and by a precondition check before any code lands.
 - **The graph rebuild fails silently without the required graph plugins.** Mitigated by a documented precondition, a
   health probe sub-field, and one manual round-trip that observes the conversation-to-permanent-graph transition.
 - **Scheduled consolidation has no infrastructure to run on.** There is no worker or beat service in the deployment
-  at all, and the documented command to start one names a module that does not exist. Stated as an explicit
-  dependency in `design.md`, not assumed.
+  at all, and the documented command to start one names a module that does not exist. That gap is **change 1's**
+  (`dispositions.md` 198.4); this change registers the task and the schedule entry, and the entry is **inert** until
+  change 1 lands. Stated as an explicit coordination point in `design.md`, not assumed.
 - **This change cannot be proven by running the product** (D17). Its proofs are configuration read-backs, service
   tests against a faked memory module, and one scripted round-trip. The residual wiring risk is real and recorded.
 - **Dataset and thread naming are the only tenant boundary.** Mitigated by a single validated naming helper

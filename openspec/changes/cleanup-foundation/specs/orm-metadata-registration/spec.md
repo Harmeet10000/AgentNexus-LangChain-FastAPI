@@ -27,6 +27,25 @@ application.
 - **AND** merely importing its module SHALL NOT be accepted as registration, because importing a module that
   owns a private registry registers nothing on the shared one
 
+#### Scenario: A private-registry model that no live code depends on
+
+- **WHEN** a model declared against a private registry is found to have no importer anywhere in the application and no
+  live code path depending on it
+- **THEN** it SHALL be removed rather than re-declared on the shared registry
+- **AND** the reason SHALL be recorded: moving it onto the shared registry would make it visible to comparison and so
+  schedule creation of a relation nothing reads, which is the same defect as a reader without a relation, inverted
+- **AND** every model the private registry declares SHALL be accounted for individually, so that a partial move cannot
+  leave some of them behind unnoticed
+
+#### Scenario: Enumerating a private registry before acting on it
+
+- **WHEN** a private registry is to be retired
+- **THEN** the full set of models it declares SHALL be enumerated first and each SHALL receive an explicit
+  re-declare-or-remove decision
+- **AND** an enumeration recorded anywhere in the change record SHALL match the registry's actual contents, because a
+  short enumeration silently leaves models behind
+
+
 ### Requirement: Schema comparison SHALL never propose removing a live relation
 
 Comparing the shared registry against the database SHALL NOT propose dropping a relation that live code reads or

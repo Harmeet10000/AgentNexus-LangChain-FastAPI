@@ -12,6 +12,11 @@ Every agent tool SHALL return results through a single common envelope carrying 
 description, an availability signal, and structured metadata. No agent tool SHALL return a differently-shaped result,
 and no second envelope definition SHALL be reachable from application code.
 
+"Envelope definition" SHALL be determined by shape and role, not by class name. Four definitions of this envelope
+exist today under two different names — three named `ToolResult` and one named `ToolOutput` — and the requirement is
+satisfied only when exactly one remains reachable. A definition SHALL NOT be treated as out of scope because its
+class name differs from the survivor's.
+
 #### Scenario: A successful tool call returns the common envelope
 
 - **WHEN** an agent tool completes successfully
@@ -27,16 +32,36 @@ and no second envelope definition SHALL be reachable from application code.
 - **WHEN** a result envelope is constructed or deserialized with a field that is not part of the contract
 - **THEN** construction SHALL fail rather than silently retaining the unknown field
 
+#### Scenario: No differently-named envelope of the same shape survives
+
+- **WHEN** the application's source is searched for definitions of a tool-result envelope under any name
+- **THEN** exactly one definition SHALL be found
+
+#### Scenario: The shell tool group returns the common envelope
+
+- **WHEN** any of the filesystem, shell, or search tools registered from the agent tools package returns a result
+- **THEN** it SHALL return the common envelope
+- **AND** it SHALL NOT return a differently-shaped envelope defined in the same package
+
 ### Requirement: Tool failures are never reported as free-text output
 
 A tool SHALL report failure through the envelope's error and availability signals. A tool SHALL NOT return a
 human-readable error sentence in the success payload, and SHALL NOT return an error string in place of a result.
+
+No envelope SHALL provide a method that renders itself to a bare error sentence for consumption by the model, and no
+tool SHALL call such a method on its return path.
 
 #### Scenario: A backend exception does not become the tool's answer
 
 - **WHEN** a tool's underlying call raises
 - **THEN** the tool SHALL return a failure envelope
 - **AND** the success payload SHALL NOT contain a rendered error message presented as content
+
+#### Scenario: The envelope is returned as a value, not as a rendered sentence
+
+- **WHEN** a tool returns a failure result
+- **THEN** it SHALL return the envelope itself
+- **AND** it SHALL NOT return a string formed by prefixing the error description with an error marker
 
 ### Requirement: Unavailability SHALL never be reported as absence
 

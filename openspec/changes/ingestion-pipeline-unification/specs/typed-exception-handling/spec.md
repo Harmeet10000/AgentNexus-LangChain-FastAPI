@@ -8,7 +8,7 @@ every downstream consumer.
 
 #### Scenario: Provider failure raises with context
 - **WHEN** an embedding provider call fails
-- **THEN** the code catches the provider's own exception type, adds a note naming the model, task type, and text count, and raises a typed project exception
+- **THEN** a typed project exception SHALL be raised, carrying the provider's own exception as its cause and a note naming the model, task type, and text count
 
 #### Scenario: No placeholder vector is returned
 - **WHEN** an embedding operation cannot produce a vector
@@ -35,23 +35,29 @@ than retrying immediately.
 - **WHEN** a retry boundary's retryable set is inspected
 - **THEN** it SHALL name specific exception types and SHALL NOT be the base exception type
 
-### Requirement: Retry boundaries SHALL preserve the original exception for callers
-A retry boundary SHALL leave the original exception type observable to callers. Where retries are exhausted and a
-transient-failure exception is raised instead, it SHALL be chained to the original via `raise ... from exc` so the
-original type and message remain reachable, and SHALL NOT be substituted in a way that prevents a caller's
-existing degradation branch from matching.
+### Requirement: Retry boundaries SHALL raise one typed transient failure and their callers SHALL be converted to catch it
+A retry boundary that exhausts its attempts SHALL raise the project's typed transient-failure exception, chained to
+the original exception so the original type, message, and traceback remain reachable as that exception's cause.
+Chaining preserves the *cause*, not the raised *type*: a caller catching the provider's or framework's own base
+exception type will therefore **not** match the transient-failure exception, however it is chained. Every caller with
+a degradation branch around a retried operation SHALL therefore be converted to catch the transient-failure type as
+well, and no such branch SHALL be left matching only a type the boundary can no longer raise.
 
 #### Scenario: Exhausted retries chain the original cause
 - **WHEN** a retry boundary exhausts its attempts
-- **THEN** the raised transient-failure exception carries the original exception as its cause
+- **THEN** the raised transient-failure exception SHALL carry the original exception as its cause, and the original exception's type and message SHALL be recoverable from that cause
 
-#### Scenario: A caller's degradation branch still matches
-- **WHEN** a caller catches the provider's or framework's own base exception type around a retried operation
-- **THEN** that catch SHALL still match the failure the retried operation produced
+#### Scenario: Every caller's degradation branch matches what the boundary raises
+- **WHEN** the callers that wrap a retried operation in a degradation branch are inspected
+- **THEN** each SHALL catch the transient-failure type raised by the retry boundary, and none SHALL rely solely on catching a provider or framework base type that the boundary does not raise
+
+#### Scenario: A degradation branch fires for an exhausted retry
+- **WHEN** a retried operation inside a converted caller exhausts its attempts
+- **THEN** that caller's degradation branch SHALL execute, and the recorded diagnostic SHALL name the original failure reached through the chained cause
 
 #### Scenario: Distinct upstream failures remain distinguishable
 - **WHEN** authentication, quota, and malformed-response failures occur inside a retry boundary
-- **THEN** each SHALL remain distinguishable by type or by its chained cause rather than collapsing into one opaque type
+- **THEN** each SHALL remain distinguishable by its chained cause rather than collapsing into one opaque failure with no recoverable origin
 
 ### Requirement: Retry boundaries SHALL NOT wrap whole graph nodes or catch control-flow exceptions
 Retry wrappers SHALL be applied at input/output client boundaries only, and SHALL NOT wrap a whole graph node.

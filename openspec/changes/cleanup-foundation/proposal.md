@@ -18,9 +18,11 @@ already-shipped surface answer correctly, and subtracts the dead weight.
   event-outbox relations that live write paths already depend on. The revision is written idempotently so it
   converges whether or not an earlier revision already created part of the schema, and it destroys no rows.
 - **Model registration.** Every persisted model that live code uses is registered on the single metadata the
-  schema-comparison tooling reads, so a future comparison can never propose dropping a live relation. Two
-  models declared against a private, orphaned registry are re-declared on the shared one. The migration
-  environment's unreachable import fallback is deleted so a broken registration fails loudly.
+  schema-comparison tooling reads, so a future comparison can never propose dropping a live relation. A private,
+  orphaned registry declaring six models is retired by **deletion, not harvest**: none of the six has an importer
+  anywhere in the application, and moving them onto the shared registry would schedule creation of relations nothing
+  reads — the mirror image of the defect this change exists to close. The migration environment's unreachable import
+  fallback is deleted so a broken registration fails loudly.
 - **BREAKING — request identity.** The caller's user id is derived from validated access-token claims instead
   of from request state that nothing assigns. Six mounted document endpoints change failure mode from
   `500 Internal Server Error` to `401 Unauthorized` for unauthenticated calls. Clients treating the 500 as
@@ -30,15 +32,19 @@ already-shipped surface answer correctly, and subtracts the dead weight.
   failed to initialise instead of raising an attribute error.
 - **Usable database URLs.** Every database consumer obtains its connection URL from a single accessor, in the
   flavour its driver requires. Two consumers currently read the raw configured value, which carries no
-  credentials; a third derives a driver-specific variant by ad-hoc string replacement.
+  credentials; a third derives a driver-specific variant by ad-hoc string replacement. There are exactly **two**
+  URL flavours — the async-ORM form and the plain low-level-driver form — and the accessor additionally exposes the
+  same underlying values as **discrete fields** for an embedded component that accepts no connection URL at all.
 - **BREAKING (additive) — health reporting.** The versioned health endpoint reports the graph-memory
   dependency the startup sequence degrades past silently. An absent optional dependency reports
   `not_configured` and does not change the overall status or HTTP status code. Two response shapes (v1 and v2)
   gain fields; nothing is renamed or removed.
-- **Subtraction.** Nine proven-dead trees and files are deleted — an unparseable 783-line draft, an inverted
-  36-line parser, three zero-byte package trees, two zero-byte feature packages, and the 1,129-line
-  reconciliation subsystem — each in the same commit as the `__init__` / config edit coupled to it, so no
-  commit leaves the application unbootable.
+- **Subtraction.** **Seven** proven-dead trees and files are deleted, and the list is exhaustive: (1) an
+  unparseable 783-line draft, (2) an inverted 36-line parser, (3) a zero-byte vector-store package, (4) a zero-byte
+  orchestration-type package, (5) a zero-byte `knowledge_base` feature package, (6) a zero-byte `web_scraping`
+  feature package, and (7) the 1,129-line reconciliation subsystem including the private-registry schema module that
+  sits inside it. Four of the seven carry a coupled `__init__` or config edit, made in the same commit as the
+  deletion, so no commit leaves the application unbootable.
 - **Annotation residue.** Two `object`-typed parameters inside the blast radius are given real types.
 
 ## Scope / Non-Goals
@@ -68,9 +74,26 @@ knowingly leaves open.
   database consumer obtains a usable connection URL from a single accessor.
 
 ### Modified Capabilities
-- `typed-exception-handling`: the database-error requirement loses the scenario describing the reconciliation
-  query path, whose code this change deletes. The requirement's substance is unchanged — its sibling
-  outbox scenario already covers the same normative statement against live code.
+- `typed-exception-handling`: the requirement *Database operations SHALL catch `asyncpg.exceptions.PostgresError`* is
+  restated, and **all six of its scenarios are reproduced verbatim** — including
+  `Reconciliation fetch failure catches PostgresError`, whose code this change deletes. It is kept on purpose. A
+  `## MODIFIED` block replaces its requirement wholesale on archive, so reproducing five of six would have **deleted**
+  the sixth from the deployed spec with no `## REMOVED` block, no Reason and no Migration — and `validate --strict`
+  cannot detect that, because the evidence lives in a file this change does not contain. `## REMOVED Requirements`
+  is not the alternative: it works at requirement granularity and would retire the whole asyncpg guarantee. Retiring
+  the one stale scenario is routed to a direct spec-hygiene edit, alongside the four `## Purpose` failures that also
+  need one.
+- `transactional-outbox`: two requirements are restated — *Outbox Table Schema*, because the deployed text describes
+  a shape the database does not hold, and *Migration*, because the revision it names was stamped rather than applied.
+  No requirement is added there; the requirement an earlier draft added, demanding that a missing outbox relation fail
+  loudly, is withdrawn because it had no implementing step here and contradicted an accepted requirement in
+  `typed-exception-handling` that sanctions the relay's broad catch. That gap is a recorded Non-Goal, and ADR-5 decides
+  which spec wins until the narrowing lands.
+- `outbox-helper-extraction`: one requirement is restated because the deployed text asserts a property of the auth
+  outbox helper that reality only partly satisfies. The correction runs the *opposite* way to the obvious reading: the
+  engine-per-call fallback the deployed spec describes still exists and is still reachable from a mounted route, and
+  this change does **not** remove it. It is carried as a named outstanding defect against
+  `infrastructure-client-access`, owned by the connection-plumbing change.
 
 ## Impact
 
@@ -93,6 +116,16 @@ No data migration: the target relations hold zero rows because they do not yet e
 - The migration chain remains partly dishonest after this change: revisions recorded as applied that created
   nothing stay that way, because rewriting them was rejected. `design.md` states the accepted cost and the
   one procedure that gets a fresh environment to the target schema anyway.
+- **The chain is branched, so `alembic upgrade head` — singular — does not resolve and exits 255 today.** Three
+  committed call sites use the singular form (`Makefile:39`, `README.md:272`, `.github/workflows/test.yml:105`); the
+  merge revision repairs all three without editing them. Until then only `heads` is a well-defined target.
+- **One of the falsely-applied revisions cannot execute against any database**, which is *why* the stamp happened:
+  `9f4a1b7c6d2e` mutates a `clauses` relation that no revision creates and no model declares. That eliminates the
+  rewind-and-re-upgrade repair route — it does not terminate — so the repair is a forward, idempotent revision.
+  **ADR-6** records the route decision, and the `clauses` question belongs to the search-consolidation change, which
+  retargets its readers rather than creating the relation.
+- **Applying any of this to the live database is a separately authorized act.** This change writes, renders and
+  rehearses the repair against a scratch database; nothing in the sequence assumes the deployed upgrade has run.
 - **The outbox relations are the most severe break in the set, and they are on public surface.**
   `POST /auth/forgot-password` and `POST /auth/resend-verification` are mounted, public, rate-limited and
   **return 500 today**, because the event relation they write does not exist — and they fail *after* persisting

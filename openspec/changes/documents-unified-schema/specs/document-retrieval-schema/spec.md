@@ -104,6 +104,13 @@ single ordered result set by fusing rank positions rather than raw scores.
 - **THEN** provisioning SHALL fail loudly with that missing capability named
 - **AND** the system SHALL NOT silently serve a fused result from fewer modes than it declares
 
+#### Scenario: One mode fails to execute
+
+- **WHEN** one of the three retrieval modes fails to execute for any reason
+- **THEN** the retrieval request SHALL fail, naming the mode that failed
+- **AND** the system SHALL NOT return a result fused from only the modes that succeeded
+- **AND** a mode that executes successfully and matches nothing SHALL NOT be treated as a failure
+
 ### Requirement: Tenant-scoped retrieval
 
 Every retrieval path over the chunk store SHALL constrain its results to chunks owned by the requesting tenant.
@@ -197,7 +204,7 @@ retrieval schema SHALL NOT make a previously unreachable ingest or retrieval end
 - **THEN** the request SHALL be refused
 - **AND** the refusal SHALL be an explicit authorization failure, not an unhandled internal error
 
-### Requirement: A provisioned database contains only the unified stores
+### Requirement: The authoritative schema migration creates only the unified stores
 
 The project's authoritative schema migration SHALL create exactly one document store and one chunk store, and
 SHALL NOT create a superseded search-specific document or chunk table. Outside migration history, no model,
@@ -212,5 +219,5 @@ query, task or test SHALL reference a superseded search-specific document or chu
 #### Scenario: The source tree names no superseded table
 
 - **WHEN** the source tree and test suite are scanned outside migration history
-- **THEN** no model, query, Celery task or test fixture SHALL name a superseded search-specific document or
+- **THEN** no model, query, background task or test fixture SHALL name a superseded search-specific document or
   chunk table

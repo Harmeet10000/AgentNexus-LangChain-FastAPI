@@ -76,16 +76,37 @@ the string at the call site, and no flavour SHALL be produced by editing a strin
 - **THEN** it SHALL receive a plain connection URL its driver accepts, carrying credentials and retaining the
   transport-security parameter that driver requires
 
-#### Scenario: An embedded third-party component
+#### Scenario: The set of flavours is closed at two, and a third is not invented
 
-- **WHEN** an embedded component that manages its own connections is configured with a database URL
-- **THEN** it SHALL receive one from the accessor rather than the raw configured value, since it cannot recover
-  missing credentials on its own
+- **WHEN** the flavours the accessor exposes are enumerated
+- **THEN** there SHALL be exactly two URL flavours — the asynchronous ORM form and the plain low-level-driver form
+- **AND** no flavour SHALL be added for a consumer that does not accept a connection URL at all
 
 #### Scenario: No flavour is derived at the call site
 
 - **WHEN** database URL construction is inspected across the application
 - **THEN** no call site SHALL produce a flavour by removing or rewriting part of a URL the accessor returned
+
+### Requirement: Consumers that assemble their own connection SHALL be served discrete fields, not a URL
+
+Some embedded components accept only discrete connection fields — host, port, user, credential, database name — and
+expose no connection-string setting at all. For those consumers the accessor SHALL expose the same underlying values
+as discrete fields drawn from the same configuration the URL flavours are built from. A URL flavour SHALL NOT be
+invented for them, because there is nothing on the consumer that could receive it.
+
+#### Scenario: A component configured from discrete fields
+
+- **WHEN** an embedded component that accepts only discrete connection fields is configured
+- **THEN** it SHALL receive host, port, user, credential and database name from the shared accessor
+- **AND** those values SHALL be the same ones the accessor's URL flavours are built from, so the component cannot be
+  pointed at a different instance than the application's own pool
+- **AND** it SHALL NOT be handed a connection URL, and no URL flavour SHALL exist solely for it
+
+#### Scenario: Discrete fields and URL flavours cannot disagree
+
+- **WHEN** the discrete fields and any URL flavour are both requested
+- **THEN** the host, port, user, credential and database name they carry SHALL be identical
+- **AND** neither SHALL be assembled from configuration the other does not read
 
 ### Requirement: A credential SHALL survive being placed into a URL
 

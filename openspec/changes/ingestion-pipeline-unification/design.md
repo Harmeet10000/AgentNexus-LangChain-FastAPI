@@ -49,7 +49,20 @@ the opposite order from the one the plan assumed.
 - **Any database migration.** The foundation change owns all schema through one new migration on the merged head.
   This change ships no revision. Every requirement that reads or writes a table is gated on that migration.
 - **Enabling the commented shared-graph and checkpointer wiring.** The user confirmed both are deliberate. They
-  stay commented. See Decision 12.
+  stay commented, and D17 forbids re-enabling them here. The consequence is scoped deliberately: this change does
+  **not** wire the checkpointer into the application lifespan, does **not** make the FastAPI application the owner of
+  a checkpointer connection pool, and therefore ships **no** proof that runs through the lifespan. Every checkpointer
+  proof here is import-level, type-level, or a unit test over a construction the test itself owns. See Decision 12
+  and Coordination point 3.
+- **The fused-retrieval contract, the single retrieval source of truth, and extension preconditions** — all owned by
+  change 2's `document-retrieval-schema`. This change's retrieval capability contains no fusion requirement, no
+  single-source requirement, and no degrade-and-continue behaviour for a missing database extension. See
+  Coordination point 1.
+- **The read-site fail-closed contract for an unprovisioned shared checkpointer** — change 3's
+  `agent-runtime-resilience`. This change provisions the checkpointer honestly; the 503 at the read site is change
+  3's step 1. See Coordination point 2.
+- **The database URL accessor set** — change 0's `infrastructure-client-access`. This change is a consumer. See
+  Coordination point 4.
 - **Mounting the ingestion router**, for the same reason: a mounted route in front of an unprovisioned shared graph
   is a route that returns service-unavailable by design. The upload surface already exists on the documents router.
 - **Mounting the retrieval router.** In scope means refactor and unify; mounting is gated on the request-scoped
@@ -78,6 +91,58 @@ the opposite order from the one the plan assumed.
 - **Pre-existing routing gaps** where two task-name families do not match the routing pattern and fall to the
   default destination. Recorded, not fixed here.
 
+## Coordination points
+
+Five boundaries where this change and a sibling change touch the same code. Each was a review finding: two changes
+independently specifying one code path is invisible from inside either one, so each is recorded on **both** sides.
+Ownership is settled, not negotiable at implementation time.
+
+1. **A missing lexical or fuzzy extension fails loudly. Change 2 owns it.** Change 2's
+   `document-retrieval-schema` requires that a declared retrieval mode whose required extension or index is absent
+   causes provisioning to **fail loudly**, and forbids silently serving a fused result from fewer modes than the
+   system declares. This change originally required the opposite — omit the branch, continue fusion, report the
+   omission — over the same code path. Ruled in change 2's favour, for two reasons that also generalise: change 0
+   creates all four extensions explicitly (D14.4), so a missing extension at runtime means the migration did not run,
+   which is a deployment error rather than a runtime condition; and degrade-and-continue is the exact pattern that
+   left this repository's outbox permanently dead behind two warning lines. Consequently this change **deleted** its
+   degrade-and-continue requirements for both the lexical and the fuzzy branch, and **deleted** its duplicated fusion
+   and single-retrieval-source requirements. What remains here is re-ranking, index identity, and extraction
+   ordering. Change 2 must not weaken its scenario to meet this change halfway.
+   *One deliberate asymmetry, stated so it does not read as a contradiction:* the **re-ranker model** being
+   unloadable still degrades to the fused order and reports on the health surface. A model download failure is a
+   recoverable runtime condition whose degraded output is still a correct ranking; an absent extension is a
+   deployment error. The retrieval capability states this distinction in the requirement body.
+
+2. **The fail-closed 503 for an unprovisioned checkpointer is change 3's.** D17 names
+   `features/agent_saul/dependencies.py:45` reading `app.state.langgraph_checkpointer` unguarded as the defect, and
+   makes it the primary justification for change 3's step 1. Split: **this change provisions** the checkpointer
+   (`dispositions.md` item 138 residue a) and guarantees it never returns an absent value from a function typed to
+   return a saver; **change 3 owns the read site** and its typed service-unavailable response. This change's
+   `langgraph-checkpointing` capability no longer carries a consumer-side requirement.
+
+3. **The application lifespan wiring stays commented, so pool ownership is the worker's.** D17 forbids re-enabling
+   the two deliberately commented blocks and requires proofs there to be import-level and type-level only. The
+   original requirement — "the application SHALL create and own the connection pool … shutdown SHALL close that
+   pool", with an observable-closure scenario keyed to application shutdown — could only be satisfied by writing the
+   forbidden lifespan wiring. Re-scoped to what is provable by construction: the **constructing process** owns and
+   closes its pool, in this change that process is the queue worker, and the requirement now states explicitly that
+   the disabled application construction stays disabled.
+
+4. **The database URL accessor set is change 0's `infrastructure-client-access`.** This change deleted its own
+   "each flavour has exactly one accessor" requirement and became a consumer. Corrected fact, replacing what
+   Decision 14 originally claimed: there are **two** flavours, not three — SQLAlchemy-plus-asyncpg, and plain
+   libpq/psycopg. The psycopg flavour exists **because of this change's checkpointer**, which can parse neither the
+   raw configured URL (no password) nor the relational engine's dialect-aliased form. See Decision 14.
+
+5. **The lexical index name is part of the query contract, and change 0's migration must create it by exact name.**
+   The lexical extension's `to_bm25query` has a two-argument overload taking the index name as a **literal
+   argument**, and the repository uses that overload. An index of the correct shape under a different name does not
+   satisfy the SQL. So the constant this change pins is the same string change 0's migration must use. This change
+   owns hoisting the literal to the constant; **change 0 owns creating the index**, and until it does, the lexical
+   branch cannot run at all — there is currently no `bm25` index anywhere in the database
+   (`findings-database.md` §10).
+
+
 ## Decisions
 
 ### Decision 1 — Retry policy stays at input/output boundaries; model and tool retries belong to middleware
@@ -86,7 +151,23 @@ Retries already exist, using the retry library the sub-todo asks us to "add", an
 than absent: the retry predicate is the base exception type, the wait is zero, the re-raise flag is dead because
 the loop is wrapped in a catch-all that re-wraps every distinct failure into one opaque transient type — which is
 not the framework's base exception, so the pipeline's own degradation branches **can never fire** for a wrapped
-call. We fix the policy in place: named transient types, growing wait, original exception preserved and chained.
+call. We fix the policy in place: named transient types, growing wait, and the original exception reachable as the
+chained cause.
+
+**A correction that the original wording got wrong, and it is the kind of error that ships broken code.** The first
+version of this decision said the fix was to chain via `raise … from exc` "so a caller's existing degradation branch
+still matches". It does not. Chaining sets `__cause__`; it does **not** change the type of the exception raised, so
+an `except LangChainException` around a boundary that raises `TransientExternalError` will not match no matter how it
+is chained — and `nodes.py:236` is exactly that `except`. Chaining and type-preservation are two different
+properties, and only one of them was actually being delivered.
+
+Two coherent contracts existed. Either the boundary re-raises the **original type** and attaches the retry context as
+a note, leaving callers untouched; or the boundary raises **one typed transient failure** chained to the original, and
+the callers are converted to catch it. **Chosen: the second.** It matches this decision's own direction — a single
+named transient type at the boundary is what makes the retryable set nameable in the first place — and it makes the
+conversion of callers an explicit, greppable step rather than an invisible assumption. The cost is honest: converting
+callers is work, and a caller that is missed is a degradation branch that silently stops firing. That is why the
+capability requires the caller inspection as a scenario in its own right, not as a side effect.
 
 *Alternatives considered.* (a) Add a second retry mechanism as the sub-todo literally reads — rejected: two
 policies at one boundary is worse than one wrong policy. (b) Move all retries into model-call middleware now, as
@@ -183,17 +264,44 @@ graph, whose only caller lives there, and the retrieval graph is squarely this c
 fusion in a new place — rejected: that is exactly the duplication the reversal was made to avoid.
 
 **Chosen:** keep the module in scope, keep the code as the foundation, and downgrade the claim. Concretely: the
-fuzzy branch is treated as a **new** branch to bring up (its extension and index must be created, not assumed), and
-extension availability is a **recurring per-environment precondition** checked against the database the application
-connects to — not against a container image, and not once. A green lint, type, and test run must never be allowed
-to stand in for "lexical search works"; nothing in the test suite touches the database.
+fuzzy branch is treated as a **new** branch to bring up (its extension and index must be created, not assumed). A
+green lint, type, and test run must never be allowed to stand in for "lexical search works"; nothing in the test
+suite touches the database.
 
-The precondition closes favourably today: the lexical extension is available at version 1.3.0 on the managed
-instance the application actually connects to, and not yet installed. The vector and vector-index extensions are
-installed; the fuzzy, accent-folding, and identifier extensions are available and not installed. The lexical index
-access method is consequently **absent** today and must appear after the extension is created. The compose database
-has never been up in this working copy — nothing listens on its port — so any check aimed at the container image
-answers a question nobody asked.
+**Extension availability is no longer this capability's contract.** The original version of this decision made
+extension availability a recurring per-environment precondition owned here, with the branch omitted observably where
+an extension was absent. That collided head-on with change 2, which requires a missing capability to be a loud
+provisioning failure, and change 2 won — see Coordination point 1. Both the lexical and the fuzzy
+precondition requirements were deleted from this change's retrieval capability. What is left here is re-ranking,
+index identity, and extraction ordering.
+
+**F8 is CLOSED, and the answer is favourable twice and unfavourable once.** The earlier version of this decision read
+the lexical extension question as settled when D14.2 had left one part of it open: whether the access method is
+literally named `bm25`. That could not be answered read-only — the probe found no such access method precisely
+because the extension was not installed — and it needed the user's authorisation for a `CREATE EXTENSION`. The user
+authorised it, scoped to that one statement, and it was run on 2026-08-18 (`findings-database.md` §10). The answers:
+
+- The access method **is** named `bm25`, and it is now present in the catalogue alongside the built-in methods.
+- Operator classes are `text_bm25_ops` on `text` (default) and `text_array_bm25_ops` on `text[]` (default); the
+  extension supplies the query and vector types; the operator behind `<@>` is a scoring function over
+  `(text, bm25query)`.
+- `to_bm25query` has **two** overloads: one taking the query text alone, and one taking the query text plus an
+  **index name**.
+- **The repository's existing lexical SQL is already correct.** It uses the two-argument index-scoped overload, and
+  its negation and ordering (`-1 *` on the returned score, `< 0` as the match predicate, ascending order on the raw
+  operator) are the right shape for a distance-style operator. This is the third time a plan has declared greenfield
+  over working code, and it is the strongest confirmation yet: no lexical SQL is rewritten in this change. **Any task
+  that would have rewritten it is a harvest task instead.**
+- **Unfavourable, and it is the remaining break:** there is **no `bm25` index anywhere in the database**. Because the
+  two-argument overload takes the index name as a *literal argument*, the name is part of the query contract — an
+  index of the right shape under a different name does not satisfy the SQL. Creating those indexes by exact name is
+  change 0's migration work, so this is Coordination point 5 and a named dependency, not a task this change owns.
+
+The other half of the precondition still closes favourably: the lexical extension is available at version 1.3.0 on
+the managed instance the application actually connects to. The vector and vector-index extensions are installed; the
+fuzzy, accent-folding, and identifier extensions are available and not installed. The compose database has never been
+up in this working copy — nothing listens on its port — so any check aimed at the container image answers a question
+nobody asked.
 
 ### Decision 7 — Splitter: the parser's own structure-aware chunker. Framework vector-store classes: neither
 
@@ -234,8 +342,14 @@ installed and its index has never existed, so it cannot simply be harvested.
 *Alternatives considered.* (a) Drop the branch — permitted by the reversal only if recorded, and it would make
 fusion two-branch. Rejected: fuzzy matching earns its place on legal text, where party names and defined terms are
 misspelled and reformatted constantly. (b) Bring it up here with its own migration — rejected: this change ships no
-schema. **Chosen:** retain the branch, request the extension and index in the foundation change's single migration,
-and require the branch to be omitted observably where either is absent.
+schema. **Chosen:** retain the branch and request the extension and index in the foundation change's single migration.
+
+**Revised on the omission question.** The original form of this decision also required the branch to be omitted
+observably where its extension or index is absent. That requirement is **deleted** — change 2 owns the missing-
+capability contract and it is fail-loudly, not omit-and-continue (Coordination point 1). The consequence for this
+change is that the fuzzy branch has no runtime degradation path of its own: either change 0's migration created the
+extension and index, or provisioning fails. That is a stricter and more honest contract than the one it replaces, and
+it removes the only place where this change told the same code the opposite of what change 2 tells it.
 
 ### Decision 10 — Persistence writes chunk records, never clause records
 
@@ -284,6 +398,25 @@ ingestion surface that reads the shared graph stays unprovisioned and must **fai
 service-unavailable error — which is now the primary justification for that fix rather than a side effect of
 restoring wiring. The router is not mounted, so no service-unavailable surface ships.
 
+**Two boundaries that follow from this, both settled after review.** First, pool ownership: because the lifespan
+wiring stays commented, the application is **not** the owner of a checkpointer connection pool, and no requirement
+here may imply it is. Ownership belongs to the process that constructs the checkpointer — the worker — and the
+capability now says so and additionally requires that the disabled application construction stays disabled
+(Coordination point 3). Second, the **consumer-side** fail-closed contract for the shared *checkpointer* is
+**change 3's**, not this change's: D17 names the unguarded read of `app.state.langgraph_checkpointer` in the agent
+dependency module as the defect and makes it change 3's step 1. This change supplies only the honest provisioning —
+setup either returns a usable checkpointer or raises, never an absent value from a function typed to return one
+(Coordination point 2). The synchronous *ingestion* surface's fail-closed requirement, which is about a different
+shared object on a different router, stays here.
+
+**The one live defect in this area that this change can fix without uncommenting anything** is the shutdown
+asymmetry. Teardown is invoked on shutdown while the setup it pairs with is commented out, and teardown's own
+early-return on an absent checkpointer is silent — indistinguishable from a successful close. Worse, its pool guard
+tests for an attribute that the value it is handed does not have, because the constructor being called returns an
+async context manager rather than a saver, so the pool would not be closed even when one existed and nothing would
+say so. Making teardown report which of the three outcomes occurred is real work, is import-level and type-level
+provable, and touches no commented block.
+
 **Therefore the proofs for the checkpointer and the shared-graph construction are import-level and type-level
 only.** Commented code cannot be linted, type-checked, or executed, so it rots. Every task touching it proves
 correctness *by construction* — imports resolve, types check, the constructor is exercised by a unit test — and
@@ -308,27 +441,37 @@ uncommenting the wiring would log **one warning**, leave the shared slot absent,
 at the first agent request. Not a boot crash — a silent degradation that becomes a crash later, in the same
 invisible-failure register and materially worse, because continuous integration that only checks startup passes.
 
-### Decision 14 — The checkpointer gets its own connection-string accessor; there are three flavours, not two
+### Decision 14 — The checkpointer is a *consumer* of change 0's accessor set, and there are two URL flavours, not three
 
 Neither existing option works. The raw configured URL carries **no password** — the relational engine works only
 because its accessor repairs the URL, injecting the password and stripping the transport parameters its driver
 rejects. But that accessor returns the relational engine's **dialect alias**, which the checkpointer driver cannot
 parse. One is unauthenticated, the other unparseable.
 
-The system needs **three** URL flavours: the relational engine's dialect-aliased form; a plain client-library
-form, which the checkpointer and the durable-event relay's listener both need and which must **retain** the
-transport-security parameter the other driver rejects; and the memory subsystem's form. The dialect alias is
-currently stripped in at least two separate places, and a third component reads the raw passwordless URL — the same
-class of defect in three locations.
+**Corrected count, replacing the "three flavours" claim this decision originally made.** There are **two**: the
+relational engine's dialect-aliased form (SQLAlchemy plus asyncpg), and the plain client-library form (libpq/psycopg),
+which must **retain** the transport-security parameter the other driver rejects. The third flavour previously claimed
+here — a memory-subsystem form — does not exist: that subsystem is **not a URL consumer at all**. Its configuration
+exposes discrete host, port, database, user, and password fields and no connection-string field whatsoever, so a
+requirement to hand it a URL is unimplementable against the installed version, not merely inelegant
+(`findings-database.md` §9, a retraction issued after reading the installed package). The dialect alias is currently
+stripped in two separate places, and a third component reads the raw passwordless URL.
+
+The plain client-library flavour exists **because of this change's checkpointer**. It is the consumer that can parse
+neither the raw configured URL nor the dialect-aliased form, so it is the reason that flavour has to exist at all —
+worth stating, because the accessor otherwise looks like a foundation-change tidy with no caller.
 
 *Alternatives considered.* (a) Reuse the relational engine's accessor — rejected: unparseable scheme. (b) Read the
 configured URL raw — rejected: unauthenticated. (c) Repair the string at each call site — rejected: that is the
-current state, and it is why three components disagree.
+current state, and it is why the components disagree.
 
-**Chosen:** exactly one accessor per flavour, with credential injection and scheme repair living only there, so no
-consumer can obtain an unusable URL. The durable fix — that the repair belongs in configuration or in a single
-accessor set rather than in call sites — is the foundation change's to complete; this change adds the
-client-library-flavour accessor it needs and requires no consumer to transform another flavour's string.
+**Chosen, and narrowed after review:** exactly one accessor per flavour, with credential injection and scheme repair
+living only there — and **that accessor set is change 0's**, specified by `infrastructure-client-access`. This
+decision originally conceded that the durable fix was change 0's while the spec asserted ownership of it anyway; the
+requirement asserting ownership has been **deleted**, and this change is now purely a consumer (Coordination
+point 4). What remains local, and is genuinely this change's, is the checkpointer-side contract: it takes its string
+from the accessor for its flavour, performs no repair of its own, never receives the dialect alias, and never logs
+the string or its credentials.
 
 ### Decision 15 — The batch embedding implementation survives as batch-only and must not become a second live path
 
@@ -394,6 +537,59 @@ reason; the dimension contract lives in the embedding capability, which is where
 
 **Chosen:** the task-name constant requirement lives in the worker-deployment capability.
 
+**The archived typed-task-registry capability is harvested, and this records it so the omission is not read as an
+oversight.** An archived change shipped a capability binding typed task dispatch: a registry that validates a
+dispatched payload against a registered model *at dispatch time*, falling back to a permissive payload for an
+unregistered name and logging that fallback. It is **not** present in the live capability directory, so there is no
+live requirement block to delta — the same situation as the node-failure-pattern capability in Decision 16, and it is
+handled the same way. Its contract is harvested into the worker-deployment capability's task-name requirement rather
+than duplicated as a new capability under the same name, which would fork one contract into two at archive time.
+
+Harvesting it also **resolves the review's one residual objection to that capability**: the requirement's original
+scenario read "an event dispatches a task name that is not registered", which reaches through the durable-event relay
+whose tables this change is forbidden to assume work. The archived registry's dispatch helper is the natural
+unit-level seam — invoke the helper directly with an unregistered name, and with a malformed payload for a registered
+name — so the check now requires no upstream event at all. The scenario was rewritten accordingly. One deliberate
+tightening over the archived text: the archived version let an unregistered name fall through permissively with only
+a warning, which is the same invisible-failure shape this change exists to remove, so the requirement now demands the
+unregistered name be *reported as a failure* rather than merely logged.
+
+### Decision 19 — Re-ranking is **not** missing: the work is harvest, unify, and fill one gap
+
+The proposal originally called re-ranking "the one genuinely missing third of the hybrid contract", and the disposition
+it came from said "add re-ranking (genuinely missing)". Both were wrong, and the correction has been verified directly
+against source rather than inferred.
+
+**What actually exists.** A cross-encoder re-ranker class exists, wrapping the sentence-transformer cross-encoding
+model with a documented fallback model. It is not an optional extra — it is wired as a **graph edge**: the retrieval
+graph adds it as a node and edges `hybrid_postgres → reranker → context_grader`. Its constructor parameter looks
+off-by-default (`reranker: CrossEncoderReranker | None = None`), but the node factory resolves
+`reranker or CrossEncoderReranker()`, so the node **self-provisions**. Nothing injects one anywhere, and it still runs
+on every request through that graph. A **second, independent** call path exists in the documents service, and that one
+constructs a fresh instance **per call** — loading a cross-encoder model on every invocation, against the class's own
+docstring warning that it is CPU-bound.
+
+*Alternatives considered.* (a) Build a re-ranker as the proposal read — rejected on the facts: it would be the fourth
+time this project's planning declared greenfield over working code, and it would produce a second implementation of
+something already wired into a graph edge. (b) Leave the two paths alone and only add the missing one — rejected: the
+per-call construction is a live performance defect on a shipped surface, and three re-ranking sites is worse than one.
+
+**Chosen: harvest, unify, fill one gap.** The class and the graph node are kept as the foundation. The genuine gap is
+exactly one path — the direct hybrid retrieval entry point fuses and hydrates but never re-ranks, while the agentic
+entry point goes through the retrieval graph and does. That path is routed through the existing re-ranker. The
+per-call construction in the documents service is replaced by the one shared, process-lifetime instance. The
+capability therefore requires a single re-ranking implementation, a model loaded once per process, and every ranked
+path re-ranking — not the existence of a re-ranker, which is already true.
+
+**Second-order correction, and it narrows a Non-Goal.** Because the re-ranker genuinely needs the sentence-transformer
+cross-encoder, the "drop the transformer dependencies" item is not merely unachievable as a whole (Decision 3) — the
+sentence-transformer half is **settled: it stays**. Only the tokenizer half of that item remains in scope at all, and
+Decision 3's reasoning covers it.
+
+**The standing rule this produced, recorded because it has now cost three corrections** (lexical, rank fusion, and
+re-ranking): before any requirement says "add X", grep for X's **edge wiring**, not just its symbol — and follow one
+layer past an `| None = None` parameter, because the default is often resolved downstream.
+
 ## Risks / Trade-offs
 
 **[The promoted modules have zero covering tests, so "it still works" is unfalsifiable]** → No test references the
@@ -420,10 +616,11 @@ by pattern search** — a missed site poisons the graph exactly as thoroughly as
 **[The end-to-end acceptance check does not exist inside this change]** → Because the shared wiring stays commented
 by decision, there is no path from a mounted route through a provisioned graph to a persisted chunk row inside this
 change. **Mitigation:** the acceptance evidence is decomposed — construction-level proofs for the graph and
-checkpointer, a worker-interrogation proof for the queue consumer, unit-level proofs for every correctness fix, and
-a checkpoint round-trip against a reachable database for resumability. State plainly in the task list that the
-single upload-to-chunks check is **not** available here, so nobody writes it as a task and then deletes it when it
-cannot pass.
+checkpointer, a worker-interrogation proof for the queue consumer, unit-level proofs for every correctness fix, and a
+checkpoint round-trip against a **local scratch database the task brings up itself**, never against the managed
+instance: the checkpointer's setup issues DDL, and every probe this work has made against the managed instance was
+read-only. State plainly in the task list that the single upload-to-chunks check is **not** available here, so nobody
+writes it as a task and then deletes it when it cannot pass.
 
 **[Deleting the live single-stage path is the one step that is not independently revertible]** → It removes the
 currently reachable implementation. **Mitigation:** it is last, every prerequisite is separately proven, and the
@@ -455,12 +652,23 @@ there is no legacy checkpoint data, because the checkpointer's setup has never b
 cannot exist. This is a free window that **closes permanently** the moment the checkpointer is attached. If the
 ordering slips and attachment precedes the state shrink, the mitigation evaporates and a migration becomes necessary.
 
-**[The lexical extension's availability is controlled by the vendor, not by this repository]** → It is available and
-uninstalled on the managed instance today, and there is **no fallback**: the two alternative lexical extensions are
-not available at all. Creating an extension conditionally does not protect against a missing one — it only suppresses
-"already exists", so a missing extension aborts the whole migration, taking the durable-event and billing schema with
-it. **Mitigation:** availability is a recurring per-environment precondition, and the lexical branch is required to be
-omitted observably rather than to error where the extension is absent.
+**[The lexical extension's availability is controlled by the vendor, not by this repository]** → It is available on
+the managed instance, and there is **no fallback**: the two alternative lexical extensions are not available at all.
+Creating an extension conditionally does not protect against a missing one — it only suppresses "already exists", so a
+missing extension aborts the whole migration, taking the durable-event and billing schema with it. **Mitigation, and
+it changed after review:** this is now change 2's contract and it is **fail loudly**, not degrade — an absent
+extension means change 0's migration did not run, which is a deployment error rather than a runtime condition
+(Coordination point 1). The mitigation is therefore ordering and verification, not absorption: change 0 creates the
+extensions explicitly, and the residual risk is that its migration aborts wholesale, which is a loud failure with a
+named cause. The lexical **index** is the sharper residual: no `bm25` index exists anywhere today, and the index name
+is a literal argument inside the query, so change 0's migration must create it under exactly the pinned name
+(Coordination point 5).
+
+**[A forward-only contract with no data to test against]** → The requirement that a configured dimension differing
+from stored vectors refuses new writes cannot be exercised as a data check: there are zero stored vectors and no
+vector columns. **Mitigation:** its verification is a unit test over a stubbed stored width, not a query against a
+table. Stated here so the task list does not promise a proof that cannot exist, and so a later reader does not read
+the absence of a data check as an omission.
 
 **[A swallowing error handler behind the ingestion service could turn a failed ingestion into a success response]** →
 The service logs an exception at one point and it was not established whether it re-raises. **Mitigation:** the task
@@ -469,8 +677,10 @@ same handler behind a live surface is a correctness bug on shipped surface.
 
 **[Scope creep by reading "the retrieval module is in scope" as "collapse the schema now"]** → It is not: the
 collapse is the following change and mounting is gated elsewhere. **Mitigation:** the retrieval work here is about
-one fusion implementation, index-name constants, re-ranking, and extension preconditions — **not** about table names.
-If a task starts editing retrieval column definitions, it has left this change.
+re-ranking, index-name constants, and extraction ordering — **not** about table names, **not** about fusion (change
+2 owns the fused contract), and **not** about the lexical SQL, which §10 confirmed is already correct. If a task
+starts editing retrieval column definitions, rewriting a fusion rule, or rewriting a lexical query, it has left this
+change.
 
 **[Seven new capability directories, and the four-hashtag scenario trap fails silently]** → Three hashtags or bullets
 drop the scenario with no error. **Mitigation:** a pattern search for scenario headers with one to three hashtags
@@ -483,10 +693,14 @@ across the change's spec files must return zero, run as the final check before v
    settled without data migration. This reasoning is not obvious to a later reader and is recorded here deliberately.
 2. **The foundation change lands first**: merge the revision heads, then one new migration creating the target
    schema — the document and chunk tables with the additional timestamp column, the durable-event and dead-letter
-   tables, the vector index, and the lexical, fuzzy, accent-folding, and identifier extensions.
-3. **Install a working database driver binding and delete the placeholder alias in the same commit.** This is a hard
-   precondition for any checkpointer work, and nothing else in the change depends on it, so the correctness fixes,
-   the seam unifications, and most of the retarget proceed in parallel with it.
+   tables, the vector index, and the lexical, fuzzy, accent-folding, and identifier extensions. It must also create
+   the lexical **indexes by exact name**, because the index name is a literal argument inside the query text
+   (Coordination point 5). Until it does, the lexical branch cannot execute: there is no `bm25` index anywhere.
+3. **Install a working client-library binary binding for the checkpointer driver and delete the placeholder alias in
+   the same commit.** Without that binding the checkpointer type cannot even be imported, so the alias fallback is the
+   live path and is currently the only reason the application boots on this machine. This is a hard precondition for
+   any checkpointer work, and nothing else in the change depends on it, so the correctness fixes, the seam
+   unifications, and most of the retarget proceed in parallel with it.
 4. **Correctness fixes before seams before substrate.** The diagnostic-logging fix precedes anything that changes a
    dimension, because until it is fixed every dimension mismatch is an error rather than a warning and six tests stay
    red — no later step has a clean baseline. The dimension-contract fix precedes the column definitions.
@@ -502,10 +716,11 @@ across the change's spec files must return zero, run as the final check before v
 1. **Does ingestion get its own queue, or share the default one?** Recommendation is a dedicated queue with its own
    concurrency, because minutes-long model work will otherwise starve sub-second billing and transactional-email
    tasks. But the configuration forbids creating queues implicitly, so the queue set is fixed and this is a
-   deliberate operational decision with a cost, and **no locked decision covers it**. This changes the task
-   breakdown, so per the workflow schema it must be **asked, not guessed** — it must be answered before the task
-   list is written. The capability states the behaviour (long work must not starve latency-sensitive work) and
-   leaves the topology to this answer.
+   deliberate operational decision with a cost, and **no locked decision covers it**. It changes the task breakdown,
+   so it must be **asked, not guessed**. It is **still unanswered**, and the task list was written anyway rather than
+   held: the tasks whose content depends on the topology are written with the dependency named in the task and their
+   Proof expressed against whichever topology is chosen, and no task assumes a topology. The capability states the
+   behaviour (long work must not starve latency-sensitive work) and leaves the topology to this answer.
 2. **Does the bare graph builder still accept a validated-model state type on the installed framework version?**
    Inherited and deliberately left open. It does not block this change, which only shrinks channels, but it blocks
    change 3's conversion decision. Resolve from the graph builder's own documentation, not from another pass over
@@ -515,3 +730,14 @@ across the change's spec files must return zero, run as the final check before v
    type. If the framework validates, the fan-out is rejected and the fold hits it immediately. Resolved by the
    checkpoint round-trip check, which invokes the graph once — so it is answered by work already planned, but it is
    recorded because the answer changes the fold's shape.
+
+### Closed since the first draft
+
+- **F8 — is the lexical extension's index access method literally named `bm25`?** **CLOSED, answered `bm25`.** It was
+  the one question here that could not be settled read-only; it needed the user's authorisation for a single
+  `CREATE EXTENSION` against the live database. The authorisation was given and scoped to that one statement, and the
+  probe ran on 2026-08-18. The answer, the operator classes, the two `to_bm25query` overloads, and the two
+  consequences — that the repository's lexical SQL is already correct, and that no `bm25` index exists anywhere — are
+  recorded in Decision 6 and Coordination point 5. It is listed here rather than deleted so that a reader who
+  remembers it as open can see how it closed.
+

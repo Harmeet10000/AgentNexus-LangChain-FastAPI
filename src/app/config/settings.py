@@ -20,6 +20,8 @@ PRODUCTION_SECRET_FIELDS: dict[str, list[str]] = {
     "S3_SECRET_ACCESS_KEY": [""],
     "TAVILY_API_KEY": [""],
     "PINECONE_API_KEY": [""],
+    "RABBITMQ_DEFAULT_PASS": ["guest"],
+    "POSTGRES_PASSWORD": ["pass"],
 }
 
 
@@ -128,7 +130,7 @@ class Settings(BaseSettings):
     MCP_CLIENT_SERVER_CONFIGS: str = Field(default="[]")
     MCP_CLIENT_DEFAULT_TIMEOUT_SECONDS: int = Field(default=15)
     MCP_CLIENT_MAX_CONCURRENCY: int = Field(default=10)
-    MCP_CLIENT_RETRY_ATTEMPTS: int = Field(default=1)
+    MCP_CLIENT_RETRY_ATTEMPTS: int = Field(default=3)
     MCP_CLIENT_CIRCUIT_BREAKER_THRESHOLD: int = Field(default=3)
     MCP_CLIENT_CIRCUIT_BREAKER_COOLDOWN_SECONDS: int = Field(default=60)
 
