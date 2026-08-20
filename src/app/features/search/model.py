@@ -16,7 +16,7 @@ from sqlalchemy.orm import (  # noqa: TC002 — Mapped, mapped_column used at ru
     relationship,
 )
 
-from app.shared import Base
+from database.base import Base
 
 
 class SearchDocument(Base):

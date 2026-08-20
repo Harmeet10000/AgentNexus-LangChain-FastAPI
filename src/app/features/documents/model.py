@@ -25,7 +25,7 @@ from sqlalchemy.orm import (  # noqa: TC002 — Mapped resolved at runtime by SQ
     relationship,
 )
 
-from app.shared import Base
+from database.base import Base
 
 
 class UnifiedDocument(Base):
