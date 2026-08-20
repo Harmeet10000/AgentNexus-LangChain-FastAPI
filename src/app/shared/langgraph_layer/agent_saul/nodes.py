@@ -53,6 +53,13 @@ from .state import (
 _CLARIFICATION_THRESHOLD = 0.72
 _OCR_CONFIDENCE_THRESHOLD = 0.85
 _MAX_RETRIES = 3
+_HUMAN_REVIEW_SEGMENT_PREVIEW = 20
+_REFLECTION_LOG_CHARS = 120
+_CLAUSE_CONTEXT_CHARS = 300
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(tz=UTC).isoformat()
 
 _VALID_WORKER_NODES = frozenset(
     {
@@ -147,10 +154,6 @@ def make_gateway_node() -> StateNode:
     return gateway_node
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(tz=UTC).isoformat()
-
-
 def make_qna_node(qna_llm: Runnable[list[Any], QnAOutput]) -> StateNode:
     async def qna_node(state: LegalAgentState) -> dict[str, Any]:
         log = logger.bind(
@@ -234,7 +237,7 @@ def make_orchestrator_node(
             "orchestrator_action_decided",
             action_type=action.action_type,
             target=action.target_node,
-            reflection=action.reflection[:120],
+            reflection=action.reflection[:_REFLECTION_LOG_CHARS],
         )
 
         return {
@@ -524,7 +527,7 @@ def make_risk_analysis_node(risk_agent: Any) -> StateNode:
             }
         )
 
-        risk_output = _extract_risk_output(result["messages"])
+        risk_output = _placeholder_risk_output(result["messages"])
         log.info(
             "risk_analysis_completed",
             finding_count=len(risk_output.findings),
@@ -541,7 +544,7 @@ def make_risk_analysis_node(risk_agent: Any) -> StateNode:
 
 def _build_analysis_context(state: LegalAgentState) -> str:
     clauses = "\n".join(
-        f"[{seg.clause_type}] {seg.clause_id}: {seg.text[:300]}" for seg in state["segments"]
+        f"[{seg.clause_type}] {seg.clause_id}: {seg.text[:_CLAUSE_CONTEXT_CHARS]}" for seg in state["segments"]
     )
     entities = "\n".join(
         f"{e.entity_type}: {e.value} (party: {e.party or 'N/A'})"
@@ -554,7 +557,7 @@ def _build_analysis_context(state: LegalAgentState) -> str:
     return f"CLAUSES:\n{clauses}\n\nENTITIES:\n{entities}\n\nRELATIONSHIPS:\n{relationships}"
 
 
-def _extract_risk_output(_messages: list[Any]) -> RiskAnalysisOutput:
+def _placeholder_risk_output(_messages: list[Any]) -> RiskAnalysisOutput:
     return RiskAnalysisOutput(
         findings=[],
         overall_label=RiskLabel.LOW,
@@ -577,7 +580,7 @@ def make_compliance_node(compliance_agent: Any) -> StateNode:
             }
         )
 
-        compliance_output = _extract_compliance_output(result["messages"])
+        compliance_output = _placeholder_compliance_output(result["messages"])
         log.info(
             "compliance_completed",
             finding_count=len(compliance_output.findings),
@@ -592,7 +595,7 @@ def make_compliance_node(compliance_agent: Any) -> StateNode:
     return compliance_node
 
 
-def _extract_compliance_output(_messages: list[Any]) -> ComplianceOutput:
+def _placeholder_compliance_output(_messages: list[Any]) -> ComplianceOutput:
     return ComplianceOutput(
         findings=[],
         jurisdiction="India",
@@ -646,7 +649,7 @@ def make_human_review_node() -> StateNode:
             "risk_summary": risk_analysis.summary if risk_analysis else None,
             "compliance_summary": compliance_result.summary if compliance_result else None,
             "unverified_claims": grounding.unverified_claims if grounding else [],
-            "segments": [seg.model_dump() for seg in state["segments"][:20]],
+            "segments": [seg.model_dump() for seg in state["segments"][:_HUMAN_REVIEW_SEGMENT_PREVIEW]],
             "message": "Please review findings, add overrides if needed, and approve to finalize",
         }
 
@@ -817,7 +820,7 @@ def make_deep_research_node(
         for i, r in enumerate(results):
             if isinstance(r, Exception):
                 r.add_note(f"step_id={research_steps[i].step_id}")
-                r.add_note(f"description={research_steps[i].description[:120]}")
+                r.add_note(f"description={research_steps[i].description[:_REFLECTION_LOG_CHARS]}")
                 log.warning(
                     "deep_research_step_failed",
                     step_id=research_steps[i].step_id,
