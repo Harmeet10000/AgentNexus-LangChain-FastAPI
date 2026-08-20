@@ -38,7 +38,11 @@ if TYPE_CHECKING:
 
 
 async def get_saul_graph(request: Request) -> CompiledStateGraph[Any]:
-    return request.app.state.saul_graph
+    graph = request.app.state.saul_graph
+    if graph is None:
+        msg = "Saul graph is not wired"
+        raise ServiceUnavailableException(msg)
+    return graph
 
 
 async def get_saul_checkpointer(request: Request) -> AsyncPostgresSaver:
@@ -51,16 +55,6 @@ async def get_saul_checkpointer(request: Request) -> AsyncPostgresSaver:
 
 async def get_redis(request: Request) -> Redis:
     return request.app.state.redis
-
-
-async def get_current_user_id(request: Request) -> str:
-    """
-    Stub — replace with your project's JWT/session auth dependency.
-    The user_id is injected into LegalAgentState.user_id and
-    used as the LangGraph Store namespace for long-term memory.
-    """
-    # Example: return request.state.user_id after auth middleware sets it.
-    return request.state.user_id
 
 
 async def get_websocket_security_service(websocket: WebSocket) -> WebSocketSecurityService:
@@ -124,7 +118,6 @@ async def get_agent_saul_ws_security_context(
 # ---------------------------------------------------------------------------
 
 AgentSaulDepsAnnotated = Annotated[AgentSaulDeps, Depends(get_agent_saul_deps)]
-CurrentUserIdAnnotated = Annotated[str, Depends(get_current_user_id)]
 AgentSaulWebSocketSecurityContextAnnotated = Annotated[
     WebSocketSecurityContext,
     Depends(get_agent_saul_ws_security_context),

@@ -64,7 +64,7 @@ def make_get_obligation_chain_tool(
             depth=depth,
         )
 
-        idempotency_key = IdempotencyGuard.make_key(
+        idempotency_key = IdempotencyGuard.make_key(  # ty: ignore[unresolved-attribute]
             step_id=step_id,
             input_data={
                 "doc_id": doc_id,
@@ -74,7 +74,7 @@ def make_get_obligation_chain_tool(
             user_id=user_id,
         )
 
-        cached_result = await idempotency.get(idempotency_key)
+        cached_result = await idempotency.get(idempotency_key)  # ty: ignore[unresolved-attribute]
         if cached_result is not None:
             log.debug("obligation_chain_cache_hit")
             return cached_result.model_dump()
@@ -91,7 +91,7 @@ def make_get_obligation_chain_tool(
             reverse=True,
         )
 
-        tool_result = ToolResult.ok(
+        tool_result = ToolResult.ok(  # ty: ignore[unresolved-attribute]
             data={
                 "entity": entity_name,
                 "chain": [_serialize_result(result) for result in sorted_results],
@@ -101,7 +101,7 @@ def make_get_obligation_chain_tool(
             tool="get_obligation_chain",
         )
 
-        await idempotency.set(
+        await idempotency.set(  # ty: ignore[unresolved-attribute]
             key=idempotency_key,
             result=tool_result,
             tool_name="get_obligation_chain",

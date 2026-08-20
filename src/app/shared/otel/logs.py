@@ -53,7 +53,7 @@ def _patch_loguru_sink(logger_provider: SDKLoggerProvider) -> None:
             timestamp=int(record["time"].timestamp() * 1_000_000_000),
             trace_id=trace_id,
             span_id=span_id,
-            trace_flags=trace_flags,  # type: ignore
+            trace_flags=trace_flags,  # ty: ignore[invalid-argument-type]
             severity_number=_SEVERITY_MAP.get(record["level"].name.upper(), SeverityNumber.INFO),
             severity_text=record["level"].name,
             body=record["message"],
@@ -70,4 +70,4 @@ def _patch_loguru_sink(logger_provider: SDKLoggerProvider) -> None:
         level=0,
         format="{message}",
     )
-    _patch_loguru_sink._sink_id = new_sink_id  # type: ignore
+    _patch_loguru_sink._sink_id = new_sink_id  # ty: ignore[unresolved-attribute]

@@ -106,7 +106,7 @@ class CrawlUrlTool(BaseTool):
             links = [link.get("href", "") for link in result.links[:10]]
             parts.append("\n## Links Found\n" + "\n".join(f"- {link}" for link in links))
 
-        await crawler.close()
+        await crawler.close()  # ty: ignore[unresolved-attribute]
 
         return "\n\n".join(parts)
 

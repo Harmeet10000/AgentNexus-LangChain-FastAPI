@@ -197,7 +197,7 @@ class GeminiProcessor:
         schema, _schema_name = schema_result.unwrap()
 
         try:
-            return self._do_extract_structured(content, schema)  # type: ignore
+            return self._do_extract_structured(content, schema)
         except Exception as e:  # noqa: BLE001 - DTO boundary preserves crawler error contract.
             return ExtractionResult(
                 success=False,
@@ -225,7 +225,7 @@ class GeminiProcessor:
         extracted_data = extraction_result.unwrap()
         return ExtractionResult(
             success=True,
-            extracted_data=extracted_data,  # type: ignore
+            extracted_data=extracted_data,
         )
 
     async def extract_and_summarize(

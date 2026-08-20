@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any  # noqa: TC003 — Any resolved at runtime by SQLAlchemy mapper
 from uuid import UUID, uuid4  # noqa: TC003 — UUID used at runtime by SQLAlchemy column type
 
 from pgvector.sqlalchemy import Vector
@@ -16,7 +16,7 @@ from sqlalchemy.orm import (  # noqa: TC002 — Mapped, mapped_column used at ru
     relationship,
 )
 
-from app.shared import Base
+from database.base import Base
 
 
 class SearchDocument(Base):

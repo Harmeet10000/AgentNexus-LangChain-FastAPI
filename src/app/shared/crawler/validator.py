@@ -79,10 +79,11 @@ def validate_url(url: str) -> tuple[bool, str]:
     if not parsed.netloc:
         return False, "URL must include a domain"
 
-    hostname = parsed.hostname.lower()
+    hostname = parsed.hostname
     if not hostname:
         return False, "Invalid hostname"
 
+    hostname = hostname.lower()
     if hostname in BLOCKED_DOMAINS:
         return False, f"Domain '{hostname}' is not allowed"
 

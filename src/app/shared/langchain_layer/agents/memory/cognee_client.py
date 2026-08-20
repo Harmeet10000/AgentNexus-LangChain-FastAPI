@@ -283,7 +283,7 @@ class CogneeStore(BaseStore):
         self.client = cognee_client
 
     @override
-    async def put(  # type: ignore
+    async def put(  # ty: ignore[invalid-method-override]
         self,
         namespace: Sequence[str | None],
         key: str,
@@ -292,7 +292,7 @@ class CogneeStore(BaseStore):
         """Store a value in the graph with embeddings."""
 
     @override
-    async def get(  # type: ignore
+    async def get(  # ty: ignore[invalid-method-override]
         self,
         namespace: Sequence[str | None],
         key: str,
@@ -301,7 +301,7 @@ class CogneeStore(BaseStore):
         return None
 
     @override
-    async def search(  # type: ignore
+    async def search(  # ty: ignore[invalid-method-override]
         self,
         _namespace: Sequence[str | None],
         *,
@@ -313,7 +313,7 @@ class CogneeStore(BaseStore):
         return []
 
     @override
-    async def delete(  # type: ignore
+    async def delete(  # ty: ignore[invalid-method-override]
         self,
         namespace: Sequence[str | None],
         *,
@@ -321,9 +321,9 @@ class CogneeStore(BaseStore):
     ) -> None:
         """Delete a single key or entire namespace."""
 
-    async def list_keys(
+    async def list_keys(  # noqa: PLR6301 — placeholder stub, interface-shape only
         self,
-        namespace: Sequence[str | None],
+        namespace: Sequence[str | None],  # noqa: ARG002
     ) -> list[str]:
         """List all keys in a namespace."""
         return []
@@ -334,7 +334,7 @@ class CogneeStore(BaseStore):
         return "/".join(filter(None, [*namespace, key]))
 
     @staticmethod
-    def _matches_filter(data: Any, filter_dict: dict[str, Any]) -> bool:  # type: ignore
+    def _matches_filter(data: Any, filter_dict: dict[str, Any]) -> bool:
         """Check if data matches the filter criteria."""
         if not isinstance(data, dict):
             return False

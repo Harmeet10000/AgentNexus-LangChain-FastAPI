@@ -46,11 +46,11 @@ class ModelRetryMiddleware(BaseModel):
 
     @override
     def model_post_init(self, __context: object) -> None:
-        @wrap_model_call  # type: ignore
+        @wrap_model_call  # ty: ignore[no-matching-overload]
         async def _retry_wrapper(request: object, handler: object) -> Any:
             for attempt in range(self.max_retries + 1):
                 try:
-                    return await handler(request)  # type: ignore
+                    return await handler(request)  # ty: ignore[call-non-callable]
                 except self.retryable_exceptions as exc:
                     if attempt == self.max_retries:
                         raise
@@ -91,7 +91,7 @@ class TodoListMiddleware(BaseModel):
     todo_header: str = "## Current To-Do List"
 
     def build(self) -> list[Any]:
-        @before_model  # type: ignore
+        @before_model  # ty: ignore[no-matching-overload]
         def inject_todos(state, request) -> Any:
             todos = state.get("todo_list", [])
             if not todos:
@@ -111,7 +111,7 @@ class TodoListMiddleware(BaseModel):
 
             return request.override(messages=msgs)
 
-        @after_model  # type: ignore
+        @after_model  # ty: ignore[no-matching-overload]
         def parse_todo_commands(state, response) -> Any:
             ai_msg = response.message
             if not isinstance(ai_msg.content, str):
@@ -156,9 +156,9 @@ class ContextEditingMiddleware(BaseModel):
         patterns = [re.compile(p) for p in self.redact_patterns]
         inject_fn = self.inject_context_fn
 
-        @wrap_model_call  # type: ignore
+        @wrap_model_call  # ty: ignore[no-matching-overload]
         async def edit_context(request: object, handler: object) -> Any:
-            msgs = list(request.messages)  # type: ignore
+            msgs = list(request.messages)  # ty: ignore[unresolved-attribute]
 
             # Redact PII
             if patterns:
@@ -174,8 +174,8 @@ class ContextEditingMiddleware(BaseModel):
                 msgs = new_msgs
 
             # Inject runtime context into system prompt
-            if inject_fn and request.runtime and request.runtime.context:
-                ctx_vars = inject_fn(request.runtime.context)
+            if inject_fn and request.runtime and request.runtime.context:  # ty: ignore[unresolved-attribute]
+                ctx_vars = inject_fn(request.runtime.context)  # ty: ignore[unresolved-attribute]
                 from string import Template
 
                 new_msgs = []
@@ -187,7 +187,7 @@ class ContextEditingMiddleware(BaseModel):
                         new_msgs.append(msg)
                 msgs = new_msgs
 
-            return await handler(request.override(messages=msgs))  # type: ignore
+            return await handler(request.override(messages=msgs))  # ty: ignore[unresolved-attribute, call-non-callable]
 
         return edit_context
 
@@ -212,13 +212,13 @@ class GuardrailMiddleware(BaseModel):
         fallback = self.fallback_message
         raise_on = self.raise_on_violation
 
-        @after_model  # type: ignore
+        @after_model  # ty: ignore[no-matching-overload]
         async def check_safety(state: object, response: object) -> Any:
-            ai_msg = response.message  # type: ignore
+            ai_msg = response.message  # ty: ignore[unresolved-attribute]
             if not isinstance(ai_msg.content, str):
                 return response
 
-            messages = state.get("messages", [])
+            messages = state.get("messages", [])  # ty: ignore[unresolved-attribute]
             last_human = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
             user_input = last_human.content if last_human else ""
 
@@ -245,7 +245,7 @@ class GuardrailMiddleware(BaseModel):
                     raise ValueError(msg)
 
                 safe_response = AIMessage(content=fallback)
-                return response.override(
+                return response.override(  # ty: ignore[unresolved-attribute]
                     message=safe_response,
                     state_update={
                         "blocked": True,
@@ -275,7 +275,7 @@ class DynamicSystemPromptMiddleware(BaseModel):
     def build(self) -> Any:
         fn = self.prompt_fn
 
-        @before_model  # type: ignore
+        @before_model  # ty: ignore[no-matching-overload]
         def inject_dynamic_prompt(state, request) -> Any:
             ctx = request.runtime.context if request.runtime else None
             new_system = fn(state, ctx)
@@ -349,7 +349,7 @@ def build_default_middleware_stack(
 
     # 5. Human in the loop
     if enable_human_loop:
-        stack.append(HumanInTheLoopMiddleware(interrupt_on=human_loop_tools or {}))  # type: ignore
+        stack.append(HumanInTheLoopMiddleware(interrupt_on=human_loop_tools or {}))  # ty: ignore[invalid-argument-type]
 
     # 6. Guardrails (after_model — runs last in after-model chain)
     if enable_guardrails:

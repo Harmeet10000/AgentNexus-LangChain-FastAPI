@@ -81,7 +81,7 @@ class AuditLogRepository:
         limit: int = 100,
         offset: int = 0,
     ) -> AppResult[tuple[list[AuditLog], int]]:
-        try:  # noqa: PLW0717
+        try:
             conditions = []
             if entity_type is not None:
                 conditions.append(AuditLog.entity_type == entity_type)

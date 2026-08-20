@@ -242,6 +242,6 @@ class CrawlerService:
     async def close(self) -> None:
         """Close all connections."""
         if self._crawler:
-            await self._crawler.close()
+            await self._crawler.close()  # ty: ignore[unresolved-attribute]
         if self._rate_limiter:
-            await self._rate_limiter.close()
+            await self._rate_limiter.close()  # ty: ignore[unresolved-attribute]

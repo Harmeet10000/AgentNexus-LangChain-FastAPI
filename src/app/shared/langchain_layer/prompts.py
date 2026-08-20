@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from string import Template
-from typing import Any
+from typing import Any  # noqa: TC003 — Any resolved at runtime by Pydantic models
 
 from langchain_core.prompts import (
     ChatPromptTemplate,

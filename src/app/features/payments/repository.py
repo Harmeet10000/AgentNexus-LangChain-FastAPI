@@ -180,7 +180,7 @@ class PaymentRepository:
     async def update_status(
         self, payment: Payment, *, status: str, extra_values: dict[str, object] | None = None
     ) -> AppResult[Payment]:
-        try:  # noqa: PLW0717
+        try:
             values: dict[str, object] = {"status": status}
             if extra_values:
                 values.update(extra_values)

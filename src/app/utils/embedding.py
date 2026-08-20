@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.utils import logger
+from app.utils.logger import logger
 
 
 def normalize_embedding(embedding: list[float], expected_dim: int | None = None) -> list[float]:

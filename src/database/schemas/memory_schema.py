@@ -21,6 +21,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+if TYPE_CHECKING:
+    from datetime import datetime
+    from typing import Any
+
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     CheckConstraint,
@@ -37,19 +41,15 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import (  # noqa: TC002 — Mapped, mapped_column used at runtime by SQLAlchemy mapper
-    DeclarativeBase,
     Mapped,
     mapped_column,
     relationship,
 )
 
+from database.base import Base
+
 if TYPE_CHECKING:
     from datetime import datetime
-    from typing import Any
-
-
-class Base(DeclarativeBase):
-    pass
 
 
 class Entity(Base):
@@ -156,7 +156,7 @@ class ParentDocument(Base):
         UniqueConstraint("doc_id", name="uq_parent_documents_doc_id"),
         Index("idx_parent_documents_doc_id", "doc_id"),
         Index("idx_parent_documents_user_id", "user_id"),
-        Index("idx_parent_documents_metadata_gin", "metadata_", postgresql_using="gin"),
+        Index("idx_parent_documents_metadata_gin", "metadata", postgresql_using="gin"),
     )
 
     id: Mapped[str] = mapped_column(
@@ -195,7 +195,7 @@ class Clause(Base):
         Index("idx_clauses_type", "clause_type"),
         Index("idx_clauses_risk_score", "risk_score"),
         Index("idx_clauses_user_id", "user_id"),
-        Index("idx_clauses_metadata_gin", "metadata_", postgresql_using="gin"),
+        Index("idx_clauses_metadata_gin", "metadata", postgresql_using="gin"),
     )
 
     id: Mapped[str] = mapped_column(
@@ -217,7 +217,9 @@ class Clause(Base):
     preamble: Mapped[str] = mapped_column(Text, nullable=False, default="")
     embedding: Mapped[Any] = mapped_column(Vector(768), nullable=True)
     clause_type: Mapped[str] = mapped_column(String(64), nullable=False, default="other")
-    metadata_: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     custom_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     search_text: Mapped[str] = mapped_column(
         Text,

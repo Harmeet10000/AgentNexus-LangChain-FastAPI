@@ -7,4 +7,4 @@ def get_prometheus_metrics() -> tuple[bytes, str]:
     reader = get_prometheus_reader()
     if reader is None:
         return b"", CONTENT_TYPE_LATEST
-    return generate_latest(reader._collector.registry), CONTENT_TYPE_LATEST  # type: ignore
+    return generate_latest(reader._collector.registry), CONTENT_TYPE_LATEST  # ty: ignore[unresolved-attribute]

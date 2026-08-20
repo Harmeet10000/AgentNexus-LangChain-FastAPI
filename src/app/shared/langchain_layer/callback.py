@@ -15,8 +15,8 @@ from app.config import get_settings
 
 try:
     from langsmith import Client
-except Exception:  # pragma: no cover - optional dependency guard
-    Client = None  # type: ignore[assignment]
+except Exception:  # noqa: BLE001 — pragma: no cover - optional dependency guard
+    Client = None  # ty: ignore[invalid-assignment]
 
 if TYPE_CHECKING:
     from typing import Any
@@ -36,7 +36,7 @@ def configure_langsmith() -> object | None:
             api_url=settings.LANGSMITH_ENDPOINT,
             api_key=settings.LANGSMITH_API_KEY.get_secret_value(),
         )
-    except Exception:  # pragma: no cover - optional dependency guard
+    except Exception:  # noqa: BLE001 — pragma: no cover - optional dependency guard
         return None
 
 

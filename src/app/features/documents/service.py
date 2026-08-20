@@ -536,7 +536,7 @@ async def process_document_ingestion(
         if graphiti is not None and legal_metadata is not None:
             for event_name, event_date in contract_event_dates(legal_metadata):
                 try:
-                    await graphiti.add_episode(  # type: ignore
+                    await graphiti.add_episode(
                         name=f"{event_name}:{document_id}:{event_date}",
                         episode_body=f"{event_name} for {document_id} occurs on {event_date}.",
                         source_description=(
@@ -546,7 +546,7 @@ async def process_document_ingestion(
                             f'"event_date":"{event_date}"'
                             "}"
                         ),
-                        reference_time=None,  # type: ignore
+                        reference_time=None,  # ty: ignore[invalid-argument-type]
                         group_id=document_id,
                     )
                 except (AttributeError, TypeError, ValueError) as exc:
@@ -757,7 +757,7 @@ async def _graphiti_filter_chunk_ids(
         raw_results = await retry_immediate(
             lambda: graphiti.search(
                 query=query, group_ids=[user_id, *doc_ids_filter], num_results=20
-            ),  # type: ignore
+            ),
             label="documents_graphiti_filter",
         )
     except (ValueError, TypeError):
@@ -827,7 +827,7 @@ async def _cached_embedding(
         if cached:
             return from_json_float_list(str(cached))
     embedding = await retry_immediate(
-        lambda: embedding_fn.aembed_query(text_to_embed, task_type="RETRIEVAL_QUERY"),
+        lambda: embedding_fn.aembed_query(text_to_embed, task_type="RETRIEVAL_QUERY"),  # ty: ignore[unresolved-attribute]
         label="documents_query_embedding",
     )
     if redis is not None:
@@ -866,7 +866,7 @@ def _build_search_items(
                 chunk_kind=str(row["chunk_kind"]),
                 clause_type=str(row["clause_type"]) if row["clause_type"] is not None else None,
                 chunk_metadata=cast("dict[str, object]", row["chunk_metadata"] or {}),
-                quality_warnings=_flatten_warnings(row.get("quality_warnings", [])),  # type: ignore
+                quality_warnings=_flatten_warnings(row.get("quality_warnings", [])),  # ty: ignore[invalid-argument-type]
                 graphiti_verified=bool(row.get("graphiti_verified", False)),
                 score=ranked_chunk.score,
                 rank=ranked_chunk.rank,

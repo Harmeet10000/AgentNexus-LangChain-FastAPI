@@ -205,7 +205,7 @@ class SubscriptionService:
 
         payment_url: str | None = None
         if self._razorpay_enabled():
-            try:  # noqa: PLW0717
+            try:
                 customer_id = await self._find_or_create_customer(
                     dto.customer_email, dto.customer_phone
                 )
