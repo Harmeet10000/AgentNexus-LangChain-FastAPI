@@ -28,6 +28,7 @@ from .prompts import (
     _SEGMENTATION_SYSTEM_PROMPT,
 )
 from .state import (
+    GRAPH_NODE_NAMES,
     AgentError,
     CitedEntity,
     ClauseExtractionInput,
@@ -62,19 +63,9 @@ def _utc_now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
 
 
-_VALID_WORKER_NODES = frozenset(
-    {
-        "ingestion",
-        "normalization",
-        "segmentation",
-        "entity_extraction",
-        "relationship_mapping",
-        "risk_analysis",
-        "compliance",
-        "grounding_verification",
-        "finalization",
-        "deep_research",
-    }
+# Subset of GRAPH_NODE_NAMES reachable directly from the orchestrator's CONTINUE action.
+_VALID_WORKER_NODES = GRAPH_NODE_NAMES - frozenset(
+    {"gateway", "qna", "orchestrator", "planner", "persist_memory", "human_review"}
 )
 
 
