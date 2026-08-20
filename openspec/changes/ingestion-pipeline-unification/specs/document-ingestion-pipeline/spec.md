@@ -15,13 +15,13 @@ SHALL NOT expose a single-stage wrapper that forwards an entire ingestion to one
 - **WHEN** a document is accepted for ingestion
 - **THEN** the system SHALL advance it through the pipeline stages and SHALL record a terminal status of either completed or failed
 
-#### Scenario: Resubmitting the same document does not duplicate it
+#### Scenario: Resubmitting the same document resumes it rather than duplicating it
 - **WHEN** the same document identity is submitted for ingestion a second time
-- **THEN** the system SHALL continue or restart that document's ingestion under the same identity and SHALL NOT create a second document record
+- **THEN** the system SHALL resume that document's ingestion at its first incomplete stage under the same identity, and SHALL NOT create a second document record
 
-#### Scenario: One ingestion behaviour is observable
-- **WHEN** a document is ingested through any accepted entry point
-- **THEN** the resulting document record, chunk records, and status vocabulary SHALL be identical regardless of entry point
+#### Scenario: Exactly one ingestion entry point exists
+- **WHEN** the repository is inspected for paths that begin an ingestion
+- **THEN** exactly one SHALL exist, and it SHALL be the multi-stage pipeline
 
 ### Requirement: Ingestion executes outside the request path
 The system SHALL perform document ingestion in a queue worker process, not inside the HTTP request that accepts
@@ -148,13 +148,29 @@ issued as a bounded concurrent fan-out rather than serially.
 - **THEN** the graph calls SHALL be issued concurrently under a stated concurrency bound rather than one after another
 
 ### Requirement: The pipeline fails closed when its target schema is absent
-The pipeline SHALL NOT define or apply database schema changes. When the relational tables it writes are absent,
-the pipeline SHALL fail with a diagnostic naming the missing schema and SHALL NOT leave a document in a
-non-terminal status.
+The pipeline SHALL NOT define or apply database schema changes. When a relational table it writes is absent, the
+pipeline SHALL fail with a diagnostic naming the missing relation.
 
-#### Scenario: Missing tables produce a clear terminal failure
-- **WHEN** ingestion runs against a database where the document or chunk tables do not exist
-- **THEN** the document SHALL reach a terminal failure status whose diagnostic names the missing schema
+The contract splits by *which* table is missing, because the terminal status the pipeline records lives in the
+document table itself:
+
+- Where the document table exists and a downstream table it writes does not, the document SHALL reach a terminal
+  failure status whose diagnostic names the missing relation, and SHALL NOT be left in a non-terminal status.
+- Where the document table itself does not exist, there is no row on which to record a status. The pipeline SHALL
+  fail with a diagnostic naming the missing relation, surfaced through the task result and the log, and SHALL NOT
+  imply, report, or require a document row. No requirement here SHALL be read as demanding a status transition that
+  has nowhere to be written.
+
+Both tables are created by the foundation change's single migration; this change depends on that migration and ships
+no revision of its own.
+
+#### Scenario: A missing downstream table produces a terminal failure on the document
+- **WHEN** ingestion runs against a database where the document table exists and the chunk table does not
+- **THEN** the document SHALL reach a terminal failure status whose diagnostic names the missing relation, and SHALL NOT remain in a non-terminal status
+
+#### Scenario: A missing document table fails through the task result, with no document row implied
+- **WHEN** ingestion runs against a database where the document table itself does not exist
+- **THEN** the pipeline SHALL fail with a diagnostic naming the missing relation, reported through the task result and the log, and SHALL NOT attempt to record a status or report a document row
 
 #### Scenario: No schema changes ship with the pipeline
 - **WHEN** the change is applied to a database at the expected schema version

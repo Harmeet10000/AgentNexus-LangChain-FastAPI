@@ -5,10 +5,13 @@
 ## Why
 
 `features/search/` is not the future of retrieval — it is the **pre-unified twin that was left behind**.
-`features/documents/` already holds a complete retargeted **superset** of search's retrieval surface, and the
-**mounted** documents router already exposes every read endpoint search's unmounted router exposes. So this is
-de-duplication, not a port: we subtract the twin, relocate the schema-free helpers that `documents/` currently
-imports *back out of* `search/`, and name one document store and one chunk store as the sole retrieval truth.
+`features/documents/` already holds a complete retargeted **superset** of search's *retrieval* surface, and the
+**mounted** documents router already exposes an equivalent of every read endpoint search's unmounted router
+exposes, with one exception that costs nothing: search's task-status read has no documents equivalent keyed by task
+(documents exposes a status read keyed by document instead), and the ingest whose task it tracked is deleted by
+this change. So this is de-duplication, not a port: we subtract the twin, relocate the schema-free helpers that
+`documents/` currently imports *back out of* `search/`, and name one document store and one chunk store as the sole
+retrieval truth.
 
 Deleting the twin's write path costs nothing, and that is now a positive proof rather than an absence of one:
 its ingest call publishes an outbox event, the outbox table does not exist, and the asynchronous consumer of
@@ -30,9 +33,16 @@ have run. The write path is not merely unreached — it is unrunnable.
   This change ships **no DDL and drops no table**: the superseded tables were never created in any environment,
   so there is nothing to drop, and all schema authorship belongs to change 0.
 - Add a static drift gate asserting that every database index and unique constraint named inside query text is
-  created by a migration, on a table a migration creates. It is **red on three counts today**.
+  created by a migration, on a table a migration creates. Measured under that rule, it is **red on exactly one
+  count today** — the clause keyword index, declared on a table no migration creates — and that one identifier has
+  two source readers, both of which this change removes.
+- Make a failed retrieval branch fail the request instead of quietly fusing a result from whichever branches
+  happened to succeed.
 - Record chunk modification time so a re-embedding campaign can distinguish a current-generation embedding
   from a carried-over one.
+- Give statute identity a home on the chunk row — instrument name, section reference and instrument year, with one
+  partial index serving the point lookup and the newest-applicable-year rule — so the legal-corpus capability change
+  3 specifies has a schema that can satisfy it, and no `statutes` table is ever created.
 - **BREAKING (spec level, not API level):** the `llm-injection` capability's requirement bound to the
   superseded search service is removed, and its dependency-layer requirement is narrowed to the surviving
   document path. **No mounted API request or response contract changes, and no endpoint becomes newly
@@ -60,14 +70,21 @@ the broken owner-resolution dependency on the mounted router.
 - `llm-injection`: the requirement that the superseded search service take its model by constructor injection
   is **removed** — that service ceases to exist and its graph-backed ask path moves to the document query
   service, which the capability's own document-injection requirement already governs. The dependency-layer
-  requirement is **modified** to drop its search half and keep the documents half unchanged.
+  requirement is **modified** to drop its search half; its surviving documents half keeps the same contract, though
+  the wording is restated to describe behaviour rather than name the deleted dependency module and its private
+  model-builder function, and it gains a scenario asserting that no provider survives for the dissolved service.
 
 ## Impact
 
 - `src/app/features/documents/` — gains `constants.py`, the relocated helpers, the retargeted imports, the
-  chunk modification-time column and its write in both the upsert conflict set and the row builder.
+  chunk modification-time column and its write in both the upsert conflict set and the row builder, the three
+  nullable statute identity columns on the same terms, and the fail-the-request handling of a failed retrieval
+  branch.
 - `src/app/features/search/` — reduced to the embedding client and its package init, awaiting change 1.
 - `src/app/shared/langgraph_layer/retrieval_kb/` — fused search retargeted off `clauses`.
+- `src/app/shared/langgraph_layer/ingestion_kb/` — one string literal only: the keyword-index name in the
+  force-merge maintenance call, retargeted off the phantom clause index so the drift gate can be green. The rest of
+  that module is change 1's.
 - `src/tasks/` and `src/app/connections/celery.py` — the search ingest task and its registration removed.
 - `tests/conftest.py`, `tests/integration/test_search.py`, `tests/unit/search/` — repointed; one new drift test.
 - Change 0 receives a column-and-index specification; change 1 receives an accepted schema ADR it must build
@@ -75,7 +92,7 @@ the broken owner-resolution dependency on the mounted router.
 
 ## Risks
 
-- The global test conftest imports twenty symbols from the module being deleted, so a mistimed deletion is a
+- The global test conftest imports twenty-one symbols from the module being deleted, so a mistimed deletion is a
   collection error for the **entire** suite, not just one feature's tests.
 - Nothing in the repository executes SQL against a database, and the target tables have never existed in any
   environment — so every column, index and constraint name here ships unverified unless the real-database gate

@@ -93,11 +93,18 @@ serve.** That is what makes this decision an API fact rather than a matter of ta
    dataset name is produced by one validated helper rather than three f-strings
    (`cognee_client.py:140,189,238`).
 
-6. **Cognee receives a usable database connection.** `cognee_client.py:111` today reads `settings.POSTGRES_URL`
-   **raw**, and that value carries **no password** (`findings-database.md` §2), bypassing
-   `connections/postgres.py:30-71` `get_database_url()`, which is the one place that injects the credential,
-   rewrites the scheme and strips the transport parameters asyncpg rejects. Change 0 owns the single-accessor fix;
-   this ADR's requirement is only that Cognee is handed a connection that authenticates on first use.
+6. **Cognee is configured with discrete credentials that must resolve to the application's own database.**
+   `RelationalConfig` (`.venv/.../cognee/infrastructure/databases/relational/config.py:12-23`) exposes **discrete
+   fields only** — `db_path`, `db_name`, `db_host`, `db_port`, `db_username`, `db_password`, `db_provider` — with
+   **no DSN or connection-string field**, and `cognee_client.py:91-101` **already** passes them, password included
+   (`:98`, via `get_secret_value()`). *An earlier version of this decision said `cognee_client.py:111` hands Cognee a
+   credential-less `settings.POSTGRES_URL`; that is retracted — `:107-112` builds a separate return-value dict, and
+   that URL never reaches Cognee (`findings-database.md` §9).* The **surviving** defect is that `:96`/`:100` read
+   `POSTGRES_HOST`/`POSTGRES_DB_NAME` independently of `get_database_url()`, so Cognee can be pointed at a
+   **different database than the application** and succeed silently — a worse failure mode than the one originally
+   alleged, and the reason this ADR's requirement is now *same-instance resolution plus no placeholder defaults*
+   rather than *receive a usable connection string*. Change 0's single-accessor work is **not** a dependency of this
+   decision: Cognee is not a URL consumer.
 
 ### Amendment folded in — the application's Postgres is Timescale **Cloud**
 
@@ -110,9 +117,11 @@ originally chosen for Decision 5, not its goal:
 - **Amended Decision 5:** isolate Cognee by **Postgres schema** (`cognee` inside `tsdb`), **and additionally** add an
   `include_object` / `include_name` filter to `src/alembic/env.py`. Rationale: Alembic's `include_schemas` defaults
   to `False`, so a non-default schema is already invisible to `--autogenerate` reflection; the explicit filter is the
-  belt-and-braces that survives someone later flipping `include_schemas=True`. `src/alembic/env.py:23-30` sets
-  `target_metadata = Base.metadata` with **no** filter today, so without this the next `--autogenerate` emits
-  `op.drop_table(...)` for every Cognee table.
+  belt-and-braces that survives someone later flipping `include_schemas=True`. `src/alembic/env.py:39` sets
+  `target_metadata = Base.metadata` (`:42` sets it to `None` on the offline branch; `:23-33` are model imports) with
+  **no** filter of any kind today, so without this the next `--autogenerate` emits `op.drop_table(...)` for every
+  Cognee table. The filter lands **before** the vector store is configured, since the store is what creates the
+  tables it protects.
 - **`vector_db_provider="pgvector"` now depends on a managed extension allow-list.** Cognee's pgvector provider
   issues `CREATE EXTENSION`-class DDL and creates its own tables via its own alembic
   (`.venv/.../cognee/alembic/`, invoked lazily by `_ensure_migrations_run()` at `remember.py:41`). Whether the
@@ -122,7 +131,14 @@ originally chosen for Decision 5, not its goal:
 - **Recorded fallback, so it is a decision rather than a scramble:** if the precondition fails, use
   `vector_db_provider="lancedb"` on a **mounted persistent volume**, accepting local-file vectors for memory recall
   only — never for document retrieval, which D5.1 keeps on `pg_textsearch` — and revisit when a self-managed
-  Postgres exists.
+  Postgres exists. **The `cognee-v1-api` delta permits this branch explicitly**: its persistence requirement tests
+  *durability* ("no store whose data is lost on process or container replacement"), not storage medium, and carries a
+  scenario — *A durable file-backed store is permitted only for memory recall* — that bounds the fallback and
+  requires the health surface to report it as a fallback. Taking the fallback therefore needs no spec amendment.
+- **Transport security is unresolved on this connection.** `POSTGRES_URL` carries `sslmode=require`;
+  `get_database_url()` strips it for asyncpg (`postgres.py:51-54`); `RelationalConfig` has no field for it, and only
+  `database_connect_args` could carry one — which nothing sets. Whether this connection to a managed cloud instance
+  is encrypted at all is a **precondition to verify**, in the same audit as the schema privilege.
 
 ## Rationale / Alternatives
 
@@ -142,7 +158,8 @@ session cache only (`remember.py:895-900`) and never touches `cognify`, and `imp
 (`api/v1/improve/improve.py:36`) is the documented consolidation that bridges session Q&A into the permanent graph,
 applies feedback weights and rebuilds triplet embeddings. Hand-rolled batching would duplicate that. We additionally
 pass `self_improvement=False`, because with a session id **and** `self_improvement=True` Cognee fires the bridge as
-an unstructured `asyncio.create_task` (`remember.py:~885-890`) inside the caller's event loop — fire-and-forget work
+an unstructured `asyncio.create_task` (`remember.py:898`, inside the `:885-898` session-improve block that the
+session-mode `return` at `:900` closes) inside the caller's event loop — fire-and-forget work
 whose failure is logged as "non-fatal" and whose lifetime is not tied to anything we control. **An explicit
 scheduled job is observable; a detached task is not.** Because no `cognify` call site exists yet, honouring Trap3
 costs nothing now and would be a rewrite later.
@@ -154,7 +171,7 @@ costs nothing now and would be a rewrite later.
 | **C. Graphiti primary, Cognee deleted** | Removes an unused dependency and all its config risk; smallest possible change | Contradicts D2; Graphiti has no typed run-memory model (no actor/reason/feedback fields on episodes), so agent-run memory would be hand-built on top of episodes | Contradicts D2, which is locked |
 | **D. Cognee owns semantic document retrieval via `CogneeStore`** | One `BaseStore` interface for LangGraph; free hybrid retrieval | Directly contradicts D5.1, which commits document retrieval to asyncpg + `pg_textsearch` where BM25 and RRF already work; adds a fourth retrieval path; `CogneeStore` is a stub with five `# type: ignore`d overrides | Contradicts D5.1, and `app.state.vector_store` was already dropped for the identical "third retrieval path" reason |
 | **E. Enable Cognee ACLs for tenant isolation instead of app-level dataset naming** | Isolation enforced by the library; defence in depth | With `graph_database_provider="neo4j"` and the handler left at its default `"ladybug"` (`databases/graph/config.py:45,59`, whose `fill_derived` at `:77-79` only remaps kuzu and postgres), `multi_user_support_possible()` reaches `context_global_variables.py:~60-77` and **raises `EnvironmentError`**, because `supported_dataset_database_handlers["ladybug"]["handler_provider"] == "ladybug" != "neo4j"`. With the env var unset this is the **default** path (`:88-92`) | Rejected as **unavailable**, not as undesirable. The only ACL-capable neo4j handler is `neo4j_aura_dev` (`supported_dataset_database_handlers.py:18-21`), which is Aura-specific and untested here |
-| **F. Give Cognee the application's own Postgres database** (status quo of `setup_cognee`) | One database to operate; already coded (`cognee_client.py:92-102` passes `settings.POSTGRES_DB_NAME`) | Cognee creates and migrates its own tables, and `src/alembic/env.py:23-30` has **no** `include_object` filter, so the next `--autogenerate` emits `op.drop_table(...)` for every Cognee table | Rejected. A dedicated *database* is unavailable on managed Postgres anyway (see the amendment); schema isolation plus an `env.py` filter achieves the goal |
+| **F. Give Cognee the application's own Postgres database** (status quo of `setup_cognee`) | One database to operate; already coded (`cognee_client.py:92-102` passes `settings.POSTGRES_DB_NAME`) | Cognee creates and migrates its own tables, and `src/alembic/env.py:39` has **no** `include_object` filter, so the next `--autogenerate` emits `op.drop_table(...)` for every Cognee table. It also reads `POSTGRES_HOST`/`POSTGRES_DB_NAME` independently of the URL the app's engine uses, so "the application's own database" is asserted, never enforced (Decision 6) | Rejected. A dedicated *database* is unavailable on managed Postgres anyway (see the amendment); schema isolation plus an `env.py` filter achieves the goal |
 
 ### Two corrections recorded so they are not re-inherited
 
@@ -225,9 +242,19 @@ costs nothing now and would be a rewrite later.
   **requirement** of this change and not a nicety, and why the probe reports APOC/GDS as a named sub-field.
 - **Scheduled consolidation has no infrastructure to run on yet.** `docker-compose.yml` contains **no worker and no
   beat service at all**, and `Makefile:52` starts a worker from a `celery_config` module that does not exist
-  (`findings-deployment.md` §1–§2). This ADR's Decision 2 depends on a scheduled job; provisioning the process that
-  executes it is an operational dependency of the decision, and until it exists the permanent-graph half of the
-  boundary is registered but not running.
+  (`findings-deployment.md` §1–§2). This ADR's Decision 2 depends on a scheduled job; **provisioning the process that
+  executes it is dispositioned in change 1** (`dispositions.md` 198.4), not here, so change 4 registers the task and
+  the beat entry and **that entry is inert on the day it lands**. Until change 1 provisions those services the
+  permanent-graph half of this boundary is registered but never executes, and no reading of the consolidation
+  requirement should suggest otherwise.
+- **The boot posture of the memory subsystem is a deliberate asymmetry.** A dimension or model mismatch **fails
+  startup**, because vectors written at the wrong dimension are unrepairable without a re-embedding path that does not
+  exist; an unreachable or unconfigurable store **degrades**, because taking the API down over run-memory would trade
+  a legal-analysis outage for a recall outage. `lifespan.py:206` `await setup_cognee(settings)` is today the **only**
+  unguarded optional-subsystem call in that file — commit `1b3891f` *"make startup resilient to optional services"*
+  rewrote 121 lines of it and skipped that line — and it becomes guarded, re-raising only the mismatch class. **The
+  accepted cost:** a Cognee misconfiguration then stops being loud, which makes the health probe this change's only
+  signal for it, and therefore a requirement rather than a nicety.
 - **The boundary cannot be proven by running the product.** `build_saul_graph` (`agent_saul/graph.py:86`) has no
   caller, and D17 settled that the unwired graph was **deliberate and stays commented**. So `persist_memory` never
   executes, the read seam is speculative, and the evidence for this ADR is API-level and service-level only. A

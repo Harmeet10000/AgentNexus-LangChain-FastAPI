@@ -302,6 +302,35 @@ todos:-
 220. check the alembic warning having 2 heads
 221. fix the files tht are scrambled in utils, shared and other places
 222. RESULT-PATTERN.md currently documents the envelope style as "project standard" — it now contradicts the code (users/service.py raises). Optional follow-up: update the doc to match. Say the word and I'll include it.
+there are 2-3 error handling that i need to figure out
+try catch with return typed error
+one raises exception from custom exception
+one raises raise app_error_to_exception(error)
+except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while updating subscription",
+                    details={"subscription_id": str(subscription.id), "error": str(exc)},
+                    source="subscription_repository",
+                )
+            )
+ if updated is None:
+                return Failure(
+                    ConflictAppError(
+                        code="VERSION_CONFLICT",
+                        message="Subscription was modified concurrently; refetch and retry",
+                        details={
+                            "subscription_id": str(subscription.id),
+                            "expected_version": expected_version,
+                        },
+                        source="subscription_repository",
+                    )
+                )
+and also need to check where to put log_expected_failure(error, operation=operation) in the final one
+also need to check how exactly error msg should be written. should it be string message, StringEnum or something else. need to chec the best practice.
+need to standardise w\hat happens in except block
+ 
 ```
 summarise these chapters in great detail and take video's transcript as reference for summarising
 

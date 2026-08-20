@@ -24,20 +24,36 @@ reachable from application code.
 - **THEN** it SHALL receive the authoritative registry
 - **AND** it SHALL NOT receive a second, differently-behaving registry with the same name
 
-### Requirement: The registry is populated deterministically at import
+### Requirement: The registry is populated by explicit registration before any consumer resolves a tool
 
-The registry SHALL contain every tool intended to be resolvable as soon as the agent tools package has been imported.
-Population SHALL NOT depend on some other module happening to be imported first.
+Population SHALL be performed by an explicit registration entry point, and that entry point SHALL have been called
+before any consumer resolves a tool by name or selects tools by tag. Population SHALL NOT depend on a module import
+side effect, and SHALL NOT depend on the order in which modules are imported.
 
-#### Scenario: Registry is non-empty after importing the agent tools package
+#### Scenario: The registration entry point populates the registry
 
-- **WHEN** the agent tools package is imported and nothing else
+- **WHEN** the explicit tool-registration entry point is called
 - **THEN** the registry SHALL report a non-empty set of registered tool names
+
+#### Scenario: Importing the package registers nothing on its own
+
+- **WHEN** the agent tools package is imported and the registration entry point has not been called
+- **THEN** no tool registration SHALL have occurred as a side effect of that import
+
+#### Scenario: Registration is idempotent
+
+- **WHEN** the registration entry point is called more than once in one process
+- **THEN** the registry SHALL hold each registered tool exactly once
 
 #### Scenario: Every tool advertised as registered is resolvable
 
 - **WHEN** the registry reports a tool name as registered
 - **THEN** resolving that name SHALL return a usable tool
+
+#### Scenario: Resolving before registration fails loudly
+
+- **WHEN** a consumer resolves a tool by name before the registration entry point has been called
+- **THEN** resolution SHALL raise rather than return an empty or absent tool
 
 ### Requirement: Resolving an unknown tool name fails loudly
 
@@ -74,7 +90,13 @@ grouped tool sets are obtained.
 ### Requirement: Every agent role receives the tools assigned to it
 
 Each agent role SHALL be constructed with the tool set assigned to that role. No agent role that is documented as
-tool-using SHALL be constructed with an empty tool set.
+tool-using SHALL be constructed with an empty tool set. Every one of the three agent roles is tool-using: the
+orchestrating role delegates through handoff tools, and the two reasoning roles retrieve evidence.
+
+#### Scenario: The orchestrator role receives its delegation tools
+
+- **WHEN** the orchestrating agent is constructed
+- **THEN** it SHALL receive the handoff tools by which it delegates work to the other agent roles
 
 #### Scenario: The compliance role receives its statutory tools
 

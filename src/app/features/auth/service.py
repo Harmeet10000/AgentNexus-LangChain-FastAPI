@@ -22,6 +22,7 @@ from app.utils import (
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
     from .dto import LoginRequest, RegisterRequest
     from .repository import RefreshTokenRepository, UserRepository
@@ -432,6 +433,88 @@ class AuthService:
             log_expected_failure(revoke_result.failure(), operation="revoke_all_user_sessions")
             raise app_error_to_exception(revoke_result.failure())
 
+    async def revoke_session_and_close_connections(
+        self,
+        session_id: str,
+        user_id: str,
+        ws_security_service: object,
+        reason: str = "manual_revoke",
+    ) -> list[str]:
+        """Revoke a session and close all associated WebSocket connections.
+
+        Task 3.4: Atomic session revocation + connection teardown at service boundary.
+        - Revoke the session in Redis token store
+        - Look up all connections for this session from Redis sorted set
+        - Close each connection and return the list of closed connection IDs
+
+        Args:
+            session_id: The session ID to revoke
+            user_id: The user ID (for validation)
+            ws_security_service: WebSocketSecurityService instance with close_connection() method
+            reason: Reason for revocation (default: "manual_revoke")
+
+        Returns:
+            List of connection IDs that were closed
+
+        Raises:
+            NotFoundException: If session not found
+            UnauthorizedException: If user_id doesn't match session owner
+            AppException: If revocation or connection closure fails
+        """
+        # Verify session exists and belongs to this user
+        session_result = await self._token_repo.get_session(session_id)
+        if isinstance(session_result, Failure):
+            error = session_result.failure()
+            log_expected_failure(error, operation="get_session")
+            raise app_error_to_exception(error)
+        resolved_session = session_result.unwrap()
+        if resolved_session is None:
+            msg = "Session not found"
+            raise NotFoundException(msg)
+        if resolved_session.user_id != user_id:
+            msg = "Cannot revoke another user's session"
+            raise UnauthorizedException(msg)
+
+        # Revoke the session
+        revoke_result = await self._token_repo.revoke_session(
+            session_id=session_id,
+            user_id=user_id,
+            reason=reason,
+        )
+        if isinstance(revoke_result, Failure):
+            log_expected_failure(revoke_result.failure(), operation="revoke_session")
+            raise app_error_to_exception(revoke_result.failure())
+
+        # Look up active connections for this session from sorted set
+        # ws_security_service has Redis access to ws:session:{session_id}
+        closed_connection_ids: list[str] = []
+        try:
+            # Retrieve all connections for this session from the sorted set
+            # The sorted set key is ws:session:{session_id}
+            connections = await ws_security_service.redis.zrange(
+                f"ws:session:{session_id}",
+                0,
+                -1,
+            )
+            for conn_id in connections:
+                # Close the WebSocket connection
+                await ws_security_service.close_connection(conn_id, reason=reason)
+                closed_connection_ids.append(conn_id)
+
+            logger.bind(
+                user_id=user_id,
+                session_id=session_id,
+                closed_count=len(closed_connection_ids),
+            ).info("Session revoked and connections closed")
+        except Exception as e:  # noqa: BLE001 — connection closure is best-effort
+            logger.bind(user_id=user_id, session_id=session_id).error(
+                "Error closing connections: {}", e
+            )
+            # Don't fail the entire operation if connection closure has issues
+            # The session is already revoked, so new WebSocket auth will fail
+
+        return closed_connection_ids
+
     async def _create_session(
         self,
         user: User,
@@ -509,7 +592,7 @@ class AuthService:
             get_database_url,
         )
 
-        engine = create_async_engine(get_database_url())
+        engine: AsyncEngine = create_async_engine(get_database_url())
         try:
             async with engine.begin() as conn:
                 session_ = AsyncSession(bind=conn)

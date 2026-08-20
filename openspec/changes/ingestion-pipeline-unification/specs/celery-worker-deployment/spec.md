@@ -65,16 +65,21 @@ modules that are declared but not yet implemented.
 
 ### Requirement: Task names are defined once and shared by producer and consumer
 Each dispatchable task name SHALL be defined in exactly one place, and both the dispatching side and the task
-declaration SHALL reference that definition. Dispatch to a name that is not registered SHALL fail with a
-diagnostic naming the task rather than being discarded.
+declaration SHALL reference that definition. The dispatch helper SHALL refuse or report a name that is not
+registered, with a diagnostic naming the task, rather than discarding the dispatch. This SHALL be verifiable by
+invoking the dispatch helper directly, without a durable outbound event being recorded or relayed first.
 
 #### Scenario: Producer and consumer share one name definition
 - **WHEN** a task name is changed at its single definition
 - **THEN** both the dispatching side and the task declaration SHALL follow, with no string literal left behind
 
-#### Scenario: Dispatch to an unregistered name is reported
-- **WHEN** an event dispatches a task name that is not registered
-- **THEN** the system SHALL record a failure naming the task rather than silently discarding the dispatch
+#### Scenario: The dispatch helper reports an unregistered name
+- **WHEN** the dispatch helper is invoked directly with a task name that is not registered
+- **THEN** it SHALL report a failure naming the task rather than silently discarding the dispatch, and the check SHALL require no durable outbound event
+
+#### Scenario: A malformed payload for a registered name is rejected at dispatch
+- **WHEN** the dispatch helper is invoked directly for a registered task name with a payload that does not match that task's declared payload
+- **THEN** it SHALL raise a validation failure naming the task at dispatch time rather than enqueueing a payload the consumer cannot accept
 
 ### Requirement: Long-running ingestion work does not starve latency-sensitive tasks
 Ingestion tasks, whose duration is measured in minutes, SHALL be routed such that they cannot delay the execution

@@ -134,10 +134,44 @@ grounding.
 - **THEN** that supplement SHALL be limited to matter and document grounding context
 - **AND** SHALL be bounded in size rather than unbounded by the query
 
-#### Scenario: Deep retrieval is not performed for every task
+#### Scenario: The knowledge-graph supplement is fetched only for the tasks that need it
 
-- **WHEN** the prefetch step runs for a task that is neither risk analysis nor compliance
-- **THEN** no deeper memory retrieval SHALL be performed
+- **WHEN** the prefetch step runs for a task that is not risk analysis, obligation-chain analysis, or compliance
+- **THEN** no knowledge-graph supplement SHALL be fetched
+- **AND** the run SHALL proceed on prefetched agent memory alone
+
+### Requirement: Deeper memory retrieval is available only to designated reasoning roles
+
+Deeper memory retrieval — an on-demand query of agent memory issued by a reasoning role during its own step, which is
+a **distinct operation from the single bounded prefetch** performed before deeper reasoning begins — SHALL be
+available only to the risk-analysis and compliance roles. It SHALL NOT be available to the orchestrating role or to
+any other role. When invoked it SHALL return entries from the caller's own memory partition only. When invoked by a
+role it is not available to, or without a memory partition identity, it SHALL refuse with a named reason and SHALL
+NOT report the refusal as an empty result.
+
+#### Scenario: The risk-analysis role may retrieve deeper memory
+
+- **WHEN** the risk-analysis role needs memory context beyond what prefetch supplied
+- **THEN** it SHALL be able to issue a deeper memory retrieval
+- **AND** the entries returned SHALL come from the caller's own memory partition only
+
+#### Scenario: The compliance role may retrieve deeper memory
+
+- **WHEN** the compliance role needs memory context beyond what prefetch supplied
+- **THEN** it SHALL be able to issue a deeper memory retrieval
+
+#### Scenario: The orchestrating role cannot retrieve deeper memory
+
+- **WHEN** the orchestrating role runs
+- **THEN** deeper memory retrieval SHALL NOT be available to it
+- **AND** its absence SHALL be a property of what the role is given, not a check performed inside the retrieval
+
+#### Scenario: An undesignated caller is refused, never silently emptied
+
+- **WHEN** deeper memory retrieval is invoked by a role it is not available to, or without a memory partition
+  identity
+- **THEN** the invocation SHALL be refused with a named reason
+- **AND** the refusal SHALL NOT be reported as an empty result set
 
 ### Requirement: Agent memory failures never fail the run
 

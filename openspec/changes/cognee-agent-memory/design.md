@@ -8,7 +8,12 @@
 `src/`. The only Cognee symbol this repository has ever called is `setup_cognee` (`lifespan.py:206`), which
 configures an LLM, a graph store and a relational store — and neither an embedder nor a vector store.
 `CogneeStore` is a stub whose five overrides return `None`/`[]`. `store_final_report`, `store_relationships` and
-`search_episodic_memory` have zero production call sites; only the package `__init__` re-exports them.
+`search_episodic_memory` have **no live call sites**. `search_episodic_memory` is genuinely uncalled from anywhere.
+The other two are called — at `write_final_report.py:122,146`, through a structural `CogneeService` interface declared
+at `:41-50` — from a module that is itself dead. That is dead code calling dead code, and this change deletes both
+sides in one step, so nothing follows from it for scope. It follows for **ordering**: the edge is duck-typed through
+an interface declaration, so `graphify affected` on the memory functions does not surface it, and a deletion that
+removes the callee while leaving the caller is a break no graph query would have warned about.
 
 `findings-database.md` §7 closes the last doubt: Cognee's own alembic (`.venv/.../cognee/alembic/`) has **never
 run against this database**, and `entities` / `relationships` / `events` / `memory_versions` do not exist in any
@@ -55,7 +60,8 @@ nightly in production" is reading it wrong until that service exists.
 
 ### The `cognee-v1-api` validation mechanic — read this before concluding the author failed
 
-**The baseline is 16 passed / 6 failed of 22, and it stays 16/6 through this change.** That is not a shortfall; it
+**The baseline is 21 passed / 6 failed of 27, and the failure count stays at 6 through this change.** That is not a
+shortfall; it
 is structural, and the reason is worth stating precisely, because two different things about
 `openspec/specs/cognee-v1-api/spec.md` are wrong and only one of them is this change's business.
 
@@ -73,7 +79,7 @@ deltas to the deployed spec. **Nothing in the delta mechanism writes a `## Purpo
 | Defect | Mechanism | Effect on `openspec validate --all` |
 |---|---|---|
 | The redundant enrichment mandate (C1) | the `## MODIFIED Requirements` delta in this change | **none** — the counts do not move |
-| The missing `## Purpose` header | a **direct one-line edit** to `openspec/specs/cognee-v1-api/spec.md`, housekeeping outside the change flow | would move 16/6 → 17/5, if and when it is done |
+| The missing `## Purpose` header | a **direct one-line edit** to `openspec/specs/cognee-v1-api/spec.md`, housekeeping outside the change flow | would move the failure count 6 → 5, if and when it is done |
 
 **Which of the two this change does, stated explicitly so a later reader does not assume the delta covers both:**
 this change authors the `MODIFIED` delta for the redundant-enrichment defect **only**. It does **not** hand-edit
@@ -85,7 +91,15 @@ is unaffected and still correct.
 failed**, and the plan's ordering constraint 1 claimed the header repair must land *before* the delta because an
 unparseable spec has no blocks to match. Both are wrong. The counts do not move on the delta, and the spec's
 requirement blocks parse today — the validator's only complaint is the missing Purpose — so the `MODIFIED` header
-match works against the file as it stands. Anywhere else in this change's artifacts that implies 17/5, read 16/6.
+match works against the file as it stands.
+
+**Corrects this document's own earlier arithmetic (2026-08-18).** Every earlier draft of this section said
+*"16 passed / 6 failed of 22"*. Measured today, `openspec validate --all` reports **21 passed / 6 failed of 27** —
+the item total grew by five as the sibling changes of this relay were authored, and each new change passes, so the
+**pass count is not an invariant and must never be used as an acceptance number.** The invariant is the **failure
+count: 6**, and the four missing-Purpose stubs, the missing-keyword spec and the one failing change that make it up
+are identical to those enumerated below. Anywhere in this change's artifacts that a pass count appears, read the
+failure count instead.
 
 The acceptance criterion is therefore **"no new failures beyond the existing 6"**, never "validate passes", and it
 is **6**, not 5. Four of the six are the same missing-Purpose error (`cognee-v1-api`, `noqa-documentation`,
@@ -100,6 +114,20 @@ Since this change is superseded-and-archived through that same flow, the new cap
 **real, written `## Purpose`** — not a stub — so archiving does not add a seventh failure. `cognee-v1-api`'s delta
 deliberately carries **no** `## Purpose`: on a delta for an existing capability it is ignored, and including one
 would falsely imply the delta repairs the header.
+
+### Coordination points with other changes — open obligations, not completed handoffs
+
+Two things this change needs are owned elsewhere. Neither is a requirement here, and neither is finished; both are
+recorded so that a later reader can see the seam rather than discover it.
+
+| # | What is needed | Owner | State after change 4 lands | Consequence if the owner never lands it |
+|---|---|---|---|---|
+| **C-A** | **A registry binding for deeper memory retrieval.** The behaviour is specified here (`saul-agent-memory`: *Deeper memory retrieval is available only to designated reasoning roles*). What is missing is the tool-name binding and the role assignment: change 3's `agent-tool-registry` must add the memory-retrieval tool to the tool set of exactly the risk-analysis and compliance roles and to no other role — its *"every agent role receives the tools assigned to it"* requirement (`agent-tool-registry/spec.md:74-92`) currently enumerates precedent/statute and knowledge-graph tools only — and change 3's `agent-tool-contract` must carry its refusal path, because the operation must refuse rather than return an empty result set (that contract already has *"Unavailability SHALL never be reported as absence"*, which is exactly the shape needed). | **change 3** (`agent-tools-unification`) — **not yet written into its artifacts**, verified 2026-08-18 | The service operation exists with the role restriction specified. No tool is registered. No reasoning node can invoke it. | The constraint remains specified and unexposed. Nothing regresses; the capability simply is not reachable from a node. This is the *stated* cost of not adding a second tool-registration path here (D6.1). |
+| **C-B** | **A worker and a beat service to execute scheduled consolidation.** There is no worker and no beat service in `docker-compose.yml` at all, and `Makefile:52` starts one from a `celery_config` module that does not exist. | **change 1** — dispositioned there (`dispositions.md` 198.4), deliberately **not** duplicated as a requirement here | The consolidation task is registered and its beat entry is present. **The entry is inert: no process exists to execute it.** | Memory accumulates in conversation-scoped caches and is never consolidated into the permanent graph. Recall keeps working against the conversation cache; the permanent half of the boundary stays theoretical. See NG14. |
+
+**C-B also has a hard ordering dependency on change 0**, which is separate from the runtime gap: registration cannot
+even be *proven* until change 0 removes the reconciliation re-exports from `src/tasks/__init__.py:6-9,18-20`, because
+until then any worker importing the task package dies at import.
 
 ## Goals / Non-Goals
 
@@ -160,15 +188,29 @@ Remaining Non-Goals:
   LangGraph checkpoint and store duties stay on Postgres.
 - **NG10 — making the agent graph reachable.** This change makes memory persistence *correct*, never *reached*.
   See § D17 below; this is permanent, not a temporary state.
-- **NG11 — exposing a deeper memory-retrieval tool to individual reasoning nodes.** Harvested out of the
-  superseded change and handed to **change 3**, because tool exposure is the registry's concern (D6.1) and this
-  change must not add a second tool-registration path. The *node-level* half (deep retrieval only for risk
-  analysis and compliance) is specified here as a behaviour of the prefetch step; the *tool-registration* half is
-  not.
+- **NG11 — *registering* a deeper memory-retrieval tool in the agent tool registry.** The **behaviour** is owned here
+  (`saul-agent-memory`: *Deeper memory retrieval is available only to designated reasoning roles*) — which roles may
+  invoke it, what it returns, what it must refuse. What this change does **not** do is add a second
+  tool-registration path: binding that operation to a tool name and handing it to exactly the risk-analysis and
+  compliance roles is the registry's concern (D6.1). That is a **coordination point with change 3, not a completed
+  handoff** — see § Context. Until change 3 exposes it, the operation exists as a service method with the role
+  restriction specified and no tool binding.
 - **NG12 — the alembic head merge and target-schema migration.** Owned by change 0 (D14). This change consumes
   `env.py` being sane before anyone runs `--autogenerate`; it does not perform the merge.
-- **NG13 — the single connection-string accessor.** Owned by change 0. This change consumes it: its requirement is
-  only that the memory subsystem *receives a usable connection*, not that it repairs the URL itself.
+- **NG13 — the single connection-string accessor.** Owned by change 0, and **this change no longer depends on it.**
+  Restated after the B1 retraction (Decision 5): the memory library has no connection-string field to receive, so
+  there is no URL for change 0's accessor to hand it. What this change needs from change 0 is nothing; what it needs
+  from itself is that its **discrete** connection fields resolve to the same instance the application's own engine
+  resolves. If an implementer chooses to satisfy that by parsing `get_database_url()` into discrete parts, the
+  accessor becomes a convenience, never a precondition.
+- **NG14 — the process that executes scheduled consolidation.** This change registers a task and a beat entry; it
+  does **not** provision a worker or a beat service, and there is no such service in the deployment to register
+  against (§ Context). **The beat entry this change adds is inert on the day it lands**, and will stay inert until
+  change 1 provisions those services — the runtime gap is dispositioned **in change 1** (`dispositions.md` 198.4),
+  so it is deliberately not duplicated as a requirement here. Stated plainly rather than implied: **after this
+  change, consolidation never runs.** The requirement *Consolidation into the permanent memory graph runs on a
+  schedule* is satisfied by registration and schedule presence, and nothing in it should be read as evidence that a
+  consolidation has ever executed.
 - **Not owned at all:** item 159 (RAGFlow / OpenRAG evaluation) is deferred per D13 with no owning change, and is
   explicitly not claimed here — D5.1 already commits document retrieval to the existing `pg_textsearch` path.
 
@@ -197,8 +239,9 @@ intent is right; the mechanism is already in the library.** Verified: `remember(
 self-improvement defaulting to `True` at `:610`). The repository's existing `store_final_report`
 (`cognee_client.py:150-151`) then awaits `improve()` a **second** time — one full graph rebuild plus **two**
 enrichment passes, synchronously, per approved report, inside a graph node. Conversation-scoped `remember()`
-appends to the conversation cache and never touches the rebuild (`remember.py:895-900`); scheduled `improve(dataset,
-session_ids=[…])` is the documented bridge into the permanent graph.
+appends to the conversation cache and **returns at `remember.py:900`**, before `_run()` at `:915` — the
+`add` → `cognify` → `improve` chain — is ever reached (the detached session-improve bridge occupies `:885-898`);
+scheduled `improve(dataset, session_ids=[…])` is the documented bridge into the permanent graph.
 
 **Because no rebuild call site exists yet, this constrains the design before it is written — the cheapest possible
 moment to honour it.** Written the other way, it would be a rewrite later.
@@ -233,8 +276,12 @@ embeddings go to **local files**, invisible to the application's database and lo
 Fix: configure the managed relational database explicitly. Isolation is by **schema**, not by database, because the
 application database is Timescale Cloud (`findings-database.md` §1) and `CREATE DATABASE` cannot be assumed there.
 Belt-and-braces: add an object/name filter to `src/alembic/env.py`, which today sets
-`target_metadata = Base.metadata` with **no** filter (`env.py:23-30`), so the next `--autogenerate` would otherwise
-emit `op.drop_table(...)` for every third-party memory table.
+`target_metadata = Base.metadata` at **`env.py:39`** (`:42` sets it to `None` on the offline branch; `:23-33` are
+model imports) with **no** filter of any kind, so the next `--autogenerate` would otherwise
+emit `op.drop_table(...)` for every third-party memory table. **The filter lands before the vector store is
+configured**, not after: the filter is the only protection that survives someone setting `include_schemas=True`, and
+the first memory write is what creates the tables it protects, so configuring the store first would open a window in
+which those tables exist unprotected.
 
 - *Alternatives considered:* a Cognee-dedicated **database** — the original ADR choice, withdrawn because the
   managed instance almost certainly forbids it; leave the default local files — silently loses all memory on
@@ -243,19 +290,64 @@ emit `op.drop_table(...)` for every third-party memory table.
 - *Documented fallback, recorded as a decision rather than left to a scramble:* if the precondition check finds the
   application role cannot create a schema or the required extension, use a local-file vector store **on a mounted
   persistent volume**, for memory recall only — never for document retrieval, which D5.1 keeps on `pg_textsearch`.
+  **The delta permits this branch explicitly and does not have to be amended to take it.** The requirement's
+  normative test is *durability*, not storage medium — "no store whose data is lost on process or container
+  replacement" — with a third scenario, *A durable file-backed store is permitted only for memory recall*, that
+  bounds the fallback to recall, forbids it for document retrieval, and requires the health surface to report that
+  the subsystem is running on the fallback rather than reporting it fully configured. An earlier draft of the
+  requirement forbade *any* local filesystem path absolutely, which outlawed this documented contingency at exactly
+  the moment it would be needed; that draft is corrected.
 
-### 5. The memory subsystem is handed a usable connection; it does not repair one
+### 5. The memory subsystem is configured with discrete credentials, and they must point at the application's own database
 
-`cognee_client.py:111` reads `settings.POSTGRES_URL` **raw**. That value carries **no password**
-(`findings-database.md` §2) and bypasses `connections/postgres.py:30-71` `get_database_url()`, which is the one
-place that injects the credential, rewrites the scheme and strips the transport parameters the driver rejects.
-Change 0 owns the fix and its shape is settled there: **the repair belongs in a single accessor so no caller can
-obtain an unusable URL**, not in three call sites. This change's requirement is narrower and consumes that: the
-memory subsystem receives a connection that authenticates on first use.
+**This decision replaces an earlier one built on a misread, and the misread is recorded rather than quietly
+overwritten** (`findings-database.md` §9, verified independently 2026-08-18).
 
-- *Alternatives considered:* repair the URL inside the memory client — a third copy of the same repair, and the
-  reason the defect exists; rely on the ambient `PGPASSWORD` / `POSTGRES_PASSWORD` environment side effect — works
-  by accident today and breaks in any process that does not inherit it.
+*What was claimed:* `cognee_client.py:111` reads `settings.POSTGRES_URL` **raw**, hands Cognee a credential-less URL,
+and the fix is for Cognee to receive the output of change 0's single connection-string accessor.
+
+*What the installed library and the call site actually do:*
+
+- `RelationalConfig` (`.venv/.../cognee/infrastructure/databases/relational/config.py:12-23`) exposes **discrete
+  fields only** — `db_path`, `db_name`, `db_host`, `db_port`, `db_username`, `db_password`, `db_provider` — and
+  `to_dict()` (`:73-79`) returns those same seven keys. **There is no DSN, URL or connection-string field on it.** A
+  requirement mandating single-connection-string configuration is therefore not merely inelegant, it is
+  **unimplementable against the installed version**.
+- `cognee_client.py:91-101`, inside the `try`, is the **real** configuration, and it **already** passes those
+  discrete fields — including a working password via `settings.POSTGRES_PASSWORD.get_secret_value()` at `:98`.
+- `cognee_client.py:107-112`, inside the `else`, builds a **separate local dict also named `config`** carrying
+  `"postgres_url": settings.POSTGRES_URL`, and merely `return`s it as `app.state.cognee_config`. That value **never
+  reaches Cognee**. Two variables named `config` in one function, one of which configures nothing, is what made the
+  misread easy — and renaming it is a task of its own.
+
+*The real defect, which survives the retraction and is what the requirement now covers:* `:96` reads
+`settings.POSTGRES_HOST` and `:100` reads `settings.POSTGRES_DB_NAME` **independently of `get_database_url()`**, the
+accessor that parses `settings.POSTGRES_URL` and is what the application's own engine connects through. Nothing makes
+the two agree. Measured today they *happen* to agree — `.env.development` sets `POSTGRES_URL` to
+`…qbid1qrc75.nnro3dh8tf.tsdb.cloud.timescale.com:39662/tsdb` and separately sets `POSTGRES_HOST`,
+`POSTGRES_PORT=39662` and `POSTGRES_DB_NAME=tsdb` to the same values (`findings-database.md` §1) — but they agree
+**by hand-maintained duplication, not by construction**, and the Pydantic defaults diverge outright:
+`settings.py:140` defaults `POSTGRES_URL` to `postgresql://user:pass@host/db` while `:141` defaults `POSTGRES_HOST`
+to `localhost` and `:145` defaults `POSTGRES_DB_NAME` to `db`. `.env.example` sets none of them. So **any environment
+that configures only `POSTGRES_URL` — the one the application itself uses — silently points memory at
+`localhost:5432/db`**, and a memory subsystem that connects to the wrong database succeeds quietly rather than
+failing loudly. That is a worse failure mode than the credential-less URL originally alleged.
+
+The requirement therefore mandates: discrete fields drawn from the single settings source, **resolving to the same
+instance the application's own engine resolves**, with startup failing rather than proceeding on a divergence, no
+field satisfied by a placeholder default, and transport security supplied in the form the driver accepts. On that
+last point: `POSTGRES_URL` carries `sslmode=require` (and `get_database_url()` strips `sslmode` and
+`channel_binding` at `postgres.py:51-54` because asyncpg rejects them), and Cognee's discrete config has **nowhere to
+put them** except `database_connect_args`, which nothing sets — so "how does this connection get TLS" is a
+precondition-audit question, and it is now asked.
+
+- *Alternatives considered:* keep the connection-string requirement and have change 0's accessor feed Cognee —
+  impossible, there is no field to feed; derive the discrete fields by parsing `get_database_url()` inside the memory
+  client — better than today because it removes the second source of truth, and it is the shape this requirement
+  admits, but it is an implementation choice the spec deliberately does not fix; leave the two sources independent
+  and document it — that is the status quo, and the status quo is a silent wrong-database failure.
+- *Consequence for the cross-change dependency:* this decision **no longer depends on change 0's connection-string
+  accessor**, because Cognee is not a URL consumer. See NG13, restated.
 
 ### 6. Access control is disabled **explicitly**, because leaving it unset raises
 
@@ -274,11 +366,19 @@ explicitly makes startup deterministic. Tenant isolation moves entirely to the a
 ### 7. The observability seam is `check_cognee` only — `check_graphiti` already exists
 
 **Correction to `dispositions.md` 198.2, which said the knowledge graph is unprobed.** `check_graphiti` **already
-exists** at `features/health/health_check.py:83-90` and is already registered in the probe list. Disposition 198.2
-was narrowed for exactly this reason, and this change **does not claim it**. What is missing is `check_cognee` —
+exists** at **`src/app/middleware/health_check.py:83-90`** and is already registered in `ALL_PROBES` (`:93-99`, where
+it is the fifth entry at `:98`). Disposition 198.2
+was narrowed for exactly this reason, and this change **does not claim it**. *(Path correction: earlier drafts of this
+decision, and `dispositions.md` 198.2 itself, cite `features/health/health_check.py:83-90` — no such file exists.
+`plan-change4.md:273` had it right.)* What is missing is `check_cognee` —
 and separately, the *second* health surface (`src/app/features/health/service.py`) probes
 postgres/redis/mongo/neo4j/celery/memory/disk and carries **neither** subsystem, so the probe is added in both
 places or the two surfaces disagree.
+
+**A name collision on the second surface, which the implementer must not walk into.** That surface already reports a
+field called `memory` — `features/health/service.py:69` calls `_check_memory()`, defined at `:200-213`, and it is
+**psutil RAM**, nothing to do with agent memory. The agent-memory probe SHALL use a distinct field name on that
+surface; reusing `memory` would overwrite a live, unrelated check and make both unreadable.
 
 The probe must distinguish three states, because a boolean cannot express this subsystem's failure mode: *degraded*
 when the configuration is absent, *fail* when the configuration is present but the stores are unreachable, *ok*
@@ -312,7 +412,40 @@ parameter and `settings-validation` is the production secret registry, so neithe
 
 The correction to the deployed spec's redundant-enrichment requirement (conflict **C1**) is expressed as a
 `## MODIFIED Requirements` delta **inside this change**. See § Context for what that does and does not repair — the
-baseline stays **16 passed / 6 failed** through this change, by structure rather than by omission.
+failure count stays at **6** through this change, by structure rather than by omission.
+
+**The deployed capability has four requirements and the delta now touches all four.** The fourth, *No type ignore
+suppressions*, pins its only scenario to `uv run ty check` on a **single file path** —
+`…/agents/memory/cognee_client.py` — and Decision 12 retires that module's entire contents (three module-level
+functions plus `CogneeStore`, replaced by a service). Left untouched, that requirement would **archive pointing at a
+path that does not exist**: an accepted, deployed requirement rendered permanently unverifiable, and a hole through
+which `# type: ignore` could re-enter the very code that replaces it. It is therefore carried as a fourth `MODIFIED`
+block that keeps the prohibition, keeps the original scenario title *Type checker passes* **verbatim**, and restates
+the test **path-neutrally** — over "the module or modules that hold the agent-memory call surface" — with an explicit
+sentence that retiring or relocating the call surface is not a way to satisfy it. It is `MODIFIED`, not `REMOVED`:
+nothing about the prohibition has stopped being desirable, only its address changed, and `REMOVED` would demand a
+Reason and a Migration for a rule this change actively wants to keep.
+
+**The three pre-existing `MODIFIED` blocks replace their scenarios wholesale, and that is intended, not a partial
+copy.** Each reproduces the deployed `### Requirement:` header character-for-character, but every one of the eight
+deployed scenarios is superseded by a rewritten scenario covering the same concern under a new title. `schema.yaml`
+warns that a delta which reproduces only part of the original block silently loses the rest, so the mapping is
+recorded here to prove the loss is deliberate and complete:
+
+| Deployed scenario | Superseded by | Why the title changed |
+|---|---|---|
+| `Store final report` | `Approved final report is stored in conversation scope` | the write is now conversation-scoped and approval-gated |
+| `Store relationships` | `Relationship summaries are no longer stored in agent memory` | the behaviour is **inverted** by the accepted boundary; keeping the old title would assert the opposite of the body |
+| `Process report after store` | `A write does not trigger consolidation` | C1: the mandated post-write enrichment is exactly the defect |
+| `Process relationships after store` | `Consolidation is invoked only on a schedule` | as above, plus there are no relationship writes left to follow |
+| `Search episodic memory` | `Recall is scoped to the caller's memory partition` | the tenant boundary is the requirement now, not the call shape |
+| `Search returns results as dicts` | `Recall results are fully serialisable and retain their origin` | `[dict(r) for r in …]` is a shallow conversion; "as dicts" understates it |
+| `Search handles failures gracefully` | `Recall handles failures gracefully` | rename only, for the `search` → `recall` API change |
+
+Every deployed concern is accounted for and every replacement is a deliberate behaviour change. Two of the seven
+titles (`Store relationships`, `Process report after store`) **could not** be kept verbatim without a title that
+asserts the opposite of its own body, which is a worse failure than a rename. Where a title *could* be kept — the
+fourth requirement above — it is kept.
 
 - *Alternatives considered:* one combined capability — puts behaviour in an API spec; comply with the deployed spec
   as written — means enriching twice per write, which is the defect; hand-edit
@@ -325,8 +458,25 @@ baseline stays **16 passed / 6 failed** through this change, by structure rather
 settled that the unwired agent graph was **deliberate** and **stays commented**. So the read seam added by this
 change cannot be exercised by running the product — not temporarily, but permanently under the current decision.
 It is built anyway, because without a read seam this change writes memory nobody reads, and because the logic
-largely already exists in the file being deleted (`memory_pipeline.py:213,220` already branches on exactly the two
-task names; `:258-260` is already the fail-open pattern), so relocating it now is cheaper than rebuilding it later.
+largely already exists in the file being deleted (`:258-260` is already the fail-open pattern), so relocating it now
+is cheaper than rebuilding it later.
+
+**Correction to an earlier draft of this decision, which misread the code it relocates.** The earlier text said
+*"`memory_pipeline.py:213,220` already branches on exactly the two task names"*. Verified in
+`src/app/shared/rag/graphiti/memory_pipeline.py`: `:213` is `if task in {"risk_analysis", "obligation_chain"}:` and
+`:220` is `elif task == "compliance":`, inside **`_do_retrieve_graphiti_context`** (`:204-237`). So it branches on
+**three** task values, not two, and it is the **knowledge-graph supplement** branch — *not* a deep memory-retrieval
+branch. Two things follow, and both are settled here rather than left to the implementer:
+
+1. **`obligation_chain` keeps supplement eligibility.** Dropping it would be a silent behaviour regression smuggled in
+   under a relocation, and it is eligible today for a reason: an obligation chain is precisely a
+   document-graph traversal. The spec scenario is corrected to name all three tasks —
+   *The knowledge-graph supplement is fetched only for the tasks that need it*.
+2. **The supplement gate and deeper memory retrieval are two different constraints and are now two different
+   requirements.** The relocated three-way branch gates the **knowledge-graph supplement** inside prefetch. The
+   two-role restriction (risk analysis and compliance only) gates **deeper memory retrieval**, a separate on-demand
+   operation, and lives in its own requirement in `saul-agent-memory`. The earlier single scenario conflated them,
+   which would have produced a "memory retrieval" constraint implemented over the knowledge-graph path.
 
 **What follows from labelling it speculative:** its proofs are import-level, type-level and unit-level only. Node
 reachability is not proven and is not claimed (NG10). A wiring defect between the node and the service would not be
@@ -346,8 +496,22 @@ reconciliation outright.
 
 It is nonetheless directionally right, so **its content is harvested, not discarded**: its final-report-write
 capability is harvested in full (amended so the write is conversation-scoped and an unapproved run writes
-**nothing** — the old design's implicit low-trust write of unapproved reports is dropped), and three of the four
-requirements of its prefetch capability are harvested; the fourth (tool exposure) goes to change 3 as NG11.
+**nothing** — the old design's implicit low-trust write of unapproved reports is dropped), and **all four**
+requirements of its prefetch capability are harvested into `saul-agent-memory`, including the fourth.
+
+**Correction to an earlier draft, which handed the fourth requirement away and left nobody holding it.** That draft
+said the tool-exposure requirement (*Deep memory retrieval is limited to selected reasoning nodes*) went to change 3
+as NG11. Verified: `openspec/changes/agent-tools-unification/` is fully authored — proposal, design, adrs and seven
+spec deltas — and `rg -ni "cognee|memory|deep(er)? retrieval"` over all of it returns **nothing** on this subject; its
+`agent-tool-registry/spec.md:74-92` enumerates precedent/statute and knowledge-graph/obligation-chain tools with **no
+memory tool and no negative requirement excluding the orchestrator**. So the handoff was to a change that does not
+carry it, and archiving this change's predecessor would have deleted the only statement of a cost-limiting constraint
+from the whole five-change set. Because the requirement **originated in the change this one supersedes, the harvest
+gap is change 4's**, and it is closed here: *Deeper memory retrieval is available only to designated reasoning roles*
+is a first-class requirement of `saul-agent-memory`, which also supplies the definition the old scenario lacked —
+deeper retrieval as an on-demand operation **distinct from prefetch** — so the constraint is falsifiable by a reader
+of the spec alone. What change 3 still owes is recorded as a coordination point in § Context, not as a requirement in a
+capability change 3 owns.
 
 **The directory must be archived, never deleted.** Its `proposal.md:20-21` is the **primary citation** for D10's
 recorded gap — the repository's own admission that the memory library has no curation, decay or dedup. That
@@ -414,6 +578,45 @@ configuration surface. So no Redis instance, connection pool or configuration ke
 - *Alternatives considered:* provision a Redis for memory pre-emptively — an unused dependency; leave the question
   open — it is answerable by inspection in minutes and blocks a settings decision.
 
+### 15. The startup posture is stated per failure class, and `lifespan.py:206` becomes guarded
+
+Three requirements across the two capabilities prescribe three different startup postures — *"startup SHALL fail
+rather than proceed if the two differ"* (embedding dimension, `cognee-v1-api`), *"startup SHALL report the subsystem
+as degraded rather than silently accepting the default"* (no durable vector store, `cognee-v1-api`), and *"the health
+check SHALL report the memory subsystem as degraded … and SHALL NOT fail the request"* (absent configuration,
+`saul-agent-memory`). That is deliberate, it was nowhere stated, and it is stated here.
+
+The split is on **whether the failure corrupts data or merely withholds it**:
+
+| Failure class | Posture | Why |
+|---|---|---|
+| Embedding dimension or model disagrees with the application's | **Hard fail at startup** | Every vector written under a wrong dimension is silently unusable and **cannot be repaired by fixing the config later** — it must be re-embedded, and there is no re-embedding path. It is also a pure configuration error, detectable with no I/O, and never an environment outage. Failing here costs a boot; not failing costs a corrupt store. |
+| No durable vector store can be configured | **Degrade, and say so** | Nothing is corrupted; memory is simply not persisted. Taking the API down over the *memory* subsystem would trade a legal-analysis outage for a recall outage. The fallback scenario applies, and the health surface must report the fallback rather than reporting fully configured. |
+| Stores configured but unreachable, or configuration absent entirely | **Degrade, probe reports it, requests still served** | Identical to how every other optional subsystem in this repository behaves, and agent memory is optional by construction: *Agent memory failures never fail the run*. |
+
+**`lifespan.py:206` becomes guarded.** Today `cognee_config = await setup_cognee(settings)` is bare — and it is the
+**only** unguarded optional-subsystem call in that file. Everything around it degrades: Graphiti `:211-223` (`try` /
+`except (ConnectionError, TimeoutError, OSError)` / `add_note` / `warning` / `app.state.graphiti = None`), Crawl4AI
+`:258`, object storage `:266`, Celery `:273`, outbox `:284`. Commit `1b3891f` — *"make startup resilient to optional
+services"* — rewrote 121 lines of that file and **did not touch line 206**, so the current posture is an oversight
+rather than a decision. Left as it is, an implementer who reads *"startup SHALL fail"* literally, and a memory
+subsystem that now reaches for a database, an embedder, a vector store **and** a graph at boot, together take the
+whole API down on an unreachable memory store. The guard therefore wraps it in the same shape as Graphiti's, sets
+`app.state.cognee_config = None` on failure, and **re-raises the dimension/model-mismatch class**, which is the one
+failure the table above says must stop the boot.
+
+**The stated loss, not hedged (D10's honesty rule).** Adding that guard means a Cognee misconfiguration **no longer
+stops a deploy**. Today, in theory, it would. So the guard removes the loudest possible signal about this subsystem
+and leaves the health probe as the *only* signal — which is precisely why the probe is a **requirement** of this
+change rather than a nicety, and why it must distinguish *not configured* from *unreachable* from *ok*. If the probe
+is descoped, this change ships a subsystem whose misconfiguration is invisible. That is the trade, on the record.
+
+- *Alternatives considered:* leave `:206` unguarded so misconfiguration is loud — makes agent memory the only
+  optional subsystem that can kill boot, and inverts D10's own priority that a memory failure must never fail a
+  completed legal analysis; guard everything including the dimension mismatch — permits a silently corrupt vector
+  store, the one outcome no later fix repairs; guard it and add no probe — the misconfiguration becomes
+  unobservable, which is the failure mode `lifespan.py:220-223` already demonstrates.
+
 ## Risks / Trade-offs
 
 - **[Memory grows without decay, curation, or dedup]** → **Not mitigated — accepted and recorded**, per D10 and
@@ -433,11 +636,25 @@ configuration surface. So no Redis instance, connection pool or configuration ke
   graph service in `docker-compose.yml`**, so this repository cannot install them. Mitigated three ways: a
   documented precondition, a health-probe sub-field, and the one round-trip that observes the
   conversation-cache-to-permanent-graph transition — the **only** check that detects a silent failure at all.
+- **[The memory subsystem can be pointed at a different database than the application, silently]** → Its discrete
+  connection fields (`POSTGRES_HOST`, `POSTGRES_DB_NAME`, …) are read independently of the `POSTGRES_URL` the
+  application's own engine parses. They agree in `.env.development` **by hand-maintained duplication**, and their
+  Pydantic defaults do not agree at all (`localhost`/`db` versus `postgresql://user:pass@host/db`). A memory
+  subsystem connected to the wrong database **succeeds**, so there is no loud failure to notice. Mitigated by a
+  requirement that they resolve to the same instance and that startup fail on divergence, and by a health probe that
+  reports the store it actually reached — not eliminated, because nothing prevents an operator from setting the two
+  independently. See Decision 5.
+- **[Transport security has nowhere to go in the memory library's connection config]** → `POSTGRES_URL` carries
+  `sslmode=require`; `get_database_url()` strips it (`postgres.py:51-54`) because asyncpg rejects it; the memory
+  library's `RelationalConfig` has no place for it except `database_connect_args`, which nothing sets. So it is
+  unverified whether this connection to a **managed cloud instance** negotiates TLS at all. Added to the
+  precondition audit; not answerable from the repository.
 - **[Scheduled consolidation has nothing to execute it]** → There is no worker or beat service in the deployment,
   and `Makefile:52` names a nonexistent module (`findings-deployment.md` §1–§2). Mitigated only by honesty: this
   change registers the task and the schedule entry and proves **registration**, and provisioning the worker/beat
   services is stated as an operational dependency. Do not read the consolidation requirement as "consolidation runs
-  nightly" until that service exists.
+  nightly" until that service exists. **The runtime gap is change 1's** (`dispositions.md` 198.4) and is not
+  duplicated as a requirement here — see NG14 and coordination point C-B.
 - **[The partition name is the sole tenant boundary]** → With access control unavailable (NG6), a bug in partition
   naming is a cross-tenant memory leak with no second line of defence. Mitigated by one validated helper replacing
   three interpolations, plus a test asserting two tenants never collide.
@@ -475,33 +692,42 @@ no dual-run and no cutover. What follows is an ordering, and the order is the de
 2. **Apply the `cognee-v1-api` requirement delta** (the redundant-enrichment correction, C1). It has **no
    ordering dependency** on the spec's missing `## Purpose` header: the requirement blocks parse today, so the
    `MODIFIED` header match works against the file as it stands. Separately and optionally, a **one-line direct
-   edit** inserting `## Purpose` into `openspec/specs/cognee-v1-api/spec.md` is the only thing that would move
-   validation from 16/6 to 17/5 — it is tracked as its own task and is not part of the delta. See § Context.
-3. **Configuration** — the `COGNEE_*` settings surface (which does not exist today), then the embedder and vector
+   edit** inserting `## Purpose` into `openspec/specs/cognee-v1-api/spec.md` is the only thing that would move the
+   failure count from 6 to 5 — it is tracked as its own task and is not part of the delta. See § Context.
+3. **The migration filter, before any store is configured.** The `include_object` / `include_name` filter on
+   `src/alembic/env.py`. It comes **before** step 4 deliberately (Decision 4): it is the only protection that
+   survives someone setting `include_schemas=True`, and step 4 is what causes the tables it protects to be created.
+4. **Configuration** — the `COGNEE_*` settings surface (which does not exist today), then the embedder and vector
    store on the startup helper, plus the explicit access-control setting written into the process environment
    **before** the first memory configuration call, and a typed configuration result in place of the current
-   `dict[str, Any]` so the probe has something to assert on.
-4. **Observability** — `check_cognee` on both health surfaces, with the graph-procedure precondition as a named
-   sub-field. This is the acceptance test for step 1's first finding.
-5. **The memory service** — the repository's first memory call site, with four operations: conversation-scoped
+   `dict[str, Any]` so the probe has something to assert on. The startup call is **guarded** in the same pass
+   (Decision 15) — it is the only unguarded optional-subsystem call in `lifespan.py` today.
+5. **Observability** — `check_cognee` on both health surfaces, with the graph-procedure precondition as a named
+   sub-field, and a field name on the second surface that does **not** collide with its existing psutil `memory`
+   check (Decision 7). This is the acceptance test for step 1's first finding.
+6. **The memory service** — the repository's first memory call site, with four operations: conversation-scoped
    report write, typed trace/QA/feedback writes, recall, and consolidation. The write shape is where Trap3 is
    honoured; the machine-checkable form is *"the rebuild is never called from a request-path method, and enrichment
-   is called only by consolidation"*.
-6. **Retarget the memory-persist node** onto the service, gated on human approval, keeping the existing fail-open
+   is called only by consolidation"*. The prune operation is **never** called from anywhere — a grep guard, not a
+   remark (Risks).
+7. **Retarget the memory-persist node** onto the service, gated on human approval, keeping the existing fail-open
    shape — a memory failure must not fail a completed legal analysis.
-7. **Scheduled consolidation** — a real task decorator, module registered in the task `include` list, one schedule
+8. **Scheduled consolidation** — a real task decorator, module registered in the task `include` list, one schedule
    entry. **Depends on change 0** having removed the reconciliation re-exports from `src/tasks/__init__.py:6-9,18-20`;
-   until then every worker dies at import and registration cannot be proven. Name it distinctly from the existing
-   billing reconciliation entry, which shares only the word.
-8. **The read seam** — the prefetch node after clarification, relocating the fail-open and task-branching logic out
-   of the file step 9 deletes. **Speculative** (Decision 10).
-9. **Harvest, then delete** — the two unique helpers move first; then the two reference files, the knowledge-graph
-   final-report writer, the stub LangGraph store and the three legacy module-level functions go, with their
-   re-exports edited in the same commit.
-10. **Dispose of the superseded change** — archive (never delete), with `superseded-by` recorded on both ends.
+   until then every worker dies at import and registration cannot be proven. **Registration is all that lands: the
+   beat entry is inert until change 1 provisions a worker and a beat service** (NG14, coordination point C-B). Name it
+   distinctly from the existing billing reconciliation entry, which shares only the word.
+9. **The read seam** — the prefetch node after clarification, relocating the fail-open and the **three-way**
+   supplement branch out of the file step 10 deletes, plus the deeper-retrieval service operation with its role
+   restriction (whose tool binding is change 3's, coordination point C-A). **Speculative** (Decision 10).
+10. **Harvest, then delete** — the two unique helpers move first; then the two reference files, the knowledge-graph
+    final-report writer, the stub LangGraph store and the three legacy module-level functions go, with their
+    re-exports edited in the same commit. The `write_final_report.py:122,146` → memory-function edge runs through a
+    structural interface, so caller and callee must go together (§ Context).
+11. **Dispose of the superseded change** — archive (never delete), with `superseded-by` recorded on both ends.
 
-**Rollback shape:** steps 3–4 are pure additions and revert cleanly. Step 5 adds a service with no callers until
-step 6. Steps 9–10 are the only irreversible ones, and they come last for exactly that reason.
+**Rollback shape:** steps 3–5 are pure additions and revert cleanly. Step 6 adds a service with no callers until
+step 7. Steps 10–11 are the only irreversible ones, and they come last for exactly that reason.
 
 ## Open Questions
 
@@ -525,7 +751,12 @@ would change the specs. Each names what closes it.
   an observable transition — a recall scoped to the conversation returns a conversation-cache hit; after
   consolidation, a recall *without* the conversation scope returns a permanent-graph hit — rather than parity with
   code that never ran.
-- **Does `openspec archive` accept a 0/15-task change?** Decides whether step 10 is a CLI call or a manual move.
+- **Does `openspec archive` accept a 0/15-task change?** Decides whether step 11 is a CLI call or a manual move.
   *Closes with:* one dry run.
+- **Does the memory subsystem's connection to the managed instance negotiate TLS, and how?** Its config has no
+  `sslmode` field; only `database_connect_args` could carry one, and nothing sets it. *Closes with:* one connection
+  against the real instance with `pg_stat_ssl` inspected for that backend, in step 1. *If it connects unencrypted:*
+  `database_connect_args` is set explicitly in step 4 — a configuration line, not a design change, which is why this
+  is a precondition and not an open decision.
 
 **Deliberately left open, not fog:** `redisvl` / `langcache` adoption for the application's caching (NG8).
