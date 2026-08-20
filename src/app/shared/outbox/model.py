@@ -8,7 +8,7 @@ import sqlalchemy.dialects.postgresql  # noqa: F401 — used for JSONB type refe
 from sqlalchemy import DateTime, Integer, String, Text, dialects
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.shared import Base
+from database.base import Base
 
 
 class OutboxEvent(Base):
