@@ -61,6 +61,7 @@ _CLAUSE_CONTEXT_CHARS = 300
 def _utc_now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
 
+
 _VALID_WORKER_NODES = frozenset(
     {
         "ingestion",
