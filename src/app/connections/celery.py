@@ -12,7 +12,6 @@ from celery.signals import (
     task_postrun,
     task_prerun,
     task_retry,
-    worker_shutting_down,
 )
 from kombu import Exchange, Queue
 from opentelemetry import metrics
@@ -20,7 +19,6 @@ from redis.asyncio import Redis
 
 from app.config import get_settings
 from app.connections.redis import create_redis_client
-from app.shared.otel import setup_otel, shutdown_otel
 from app.utils import logger
 
 from .celery_reliability import (
@@ -136,7 +134,7 @@ class ResilientTask(Task):
         einfo: Any,
     ) -> None:
         _ = (args, kwargs, einfo)
-        celery_task_retries_total.add(1, {"task_name": str(self.name)})
+        _celery_meters()[2].add(1, {"task_name": str(self.name)})
         logger.bind(
             task=self.name,
             task_id=task_id,
@@ -153,10 +151,11 @@ class ResilientTask(Task):
         einfo: Any,
     ) -> None:
         _ = (args, kwargs, einfo)
+        completed, duration, retries = _celery_meters()
         attrs = {"task_name": str(self.name), "status": "failure"}
-        celery_task_completed_total.add(1, attrs)
-        celery_task_duration.record(time.time() - self.request.started or time.time(), attrs)
-        celery_task_retries_total.add(1, {"task_name": str(self.name)})
+        completed.add(1, attrs)
+        duration.record(time.time() - self.request.started or time.time(), attrs)
+        retries.add(1, {"task_name": str(self.name)})
         logger.bind(
             task=self.name,
             task_id=task_id,
@@ -172,9 +171,10 @@ class ResilientTask(Task):
         kwargs: Any,
     ) -> None:
         _ = (retval, args, kwargs)
+        completed, duration, _ = _celery_meters()
         attrs = {"task_name": str(self.name), "status": "success"}
-        celery_task_completed_total.add(1, attrs)
-        celery_task_duration.record(time.time() - self.request.started or time.time(), attrs)
+        completed.add(1, attrs)
+        duration.record(time.time() - self.request.started or time.time(), attrs)
         logger.bind(
             task=self.name,
             task_id=task_id,
@@ -281,21 +281,21 @@ def create_celery_app() -> Celery:
 
 celery_app = create_celery_app()
 
-# OTel setup for Celery worker
-if settings.OTEL_ENABLED:
-    setup_otel(service_name="langchain-fastapi-celery")
-
-_otel_celery_meter = metrics.get_meter("celery")
-celery_task_completed_total = _otel_celery_meter.create_counter(
-    "celery.task.completed_total", unit="1"
-)
-celery_task_duration = _otel_celery_meter.create_histogram("celery.task.duration_seconds", unit="s")
-celery_task_retries_total = _otel_celery_meter.create_counter("celery.task.retries_total", unit="1")
+# OTel meters are created lazily on first task event; importing this module
+# must not spin up exporters or the app.shared.otel package.
+_otel_celery_meters: tuple[Any, Any, Any] | None = None
 
 
-@worker_shutting_down.connect
-def _celery_shutdown_otel(**_: Any) -> None:
-    shutdown_otel()
+def _celery_meters() -> tuple[Any, Any, Any]:
+    global _otel_celery_meters  # noqa: PLW0603 — module-level lazy init
+    if _otel_celery_meters is None:
+        meter = metrics.get_meter("celery")
+        _otel_celery_meters = (
+            meter.create_counter("celery.task.completed_total", unit="1"),
+            meter.create_histogram("celery.task.duration_seconds", unit="s"),
+            meter.create_counter("celery.task.retries_total", unit="1"),
+        )
+    return _otel_celery_meters
 
 
 @after_task_publish.connect
