@@ -1,12 +1,13 @@
 """
-ToolRegistry: all LangChain tools assembled once at lifespan startup.
+ToolRegistry: all LangChain tools assembled once at graph-build time.
 
-build_tool_registry() is called from lifespan.py alongside build_saul_graph().
-The ToolRegistry is passed into build_agent_registry() in factory.py so
-agents get their tools at graph compile time — never at node execution time.
+build_tool_registry() is called wherever the Saul graph is wired (see
+lifespan.py — currently commented out pending the graph wiring). The
+ToolRegistry is passed into build_agent_registry() in factory.py so agents
+can get their tools at compile time — never at node execution time.
 
 Lifespan wiring (in src/app/lifecycle/lifespan.py):
-    from app.shared.agents.tools.registry import ToolRegistry, build_tool_registry
+    from app.shared.rag.graphiti.registry import ToolRegistry, build_tool_registry
     from app.shared.agents.tools.idempotency import IdempotencyGuard
 
     idempotency_guard = IdempotencyGuard(
@@ -57,15 +58,14 @@ class ToolRegistry(BaseModel):
     """
     Immutable collection of all pre-built LangChain tools.
 
-    Tool assignment to agents:
+    Tool assignment to agents (pending — agents are currently built with
+    empty tool lists in factory.py):
       compliance_agent  → [search_legal_precedents, retrieve_statute_section]
       risk_agent        → [query_knowledge_graph, get_obligation_chain]
-      orchestrator      → [] (uses structured output, no tools needed)
       deep_research     → deep_research_tool (delegates to search_legal_precedents)
 
-    Non-@tool functions (called directly from nodes, not via agent):
-      write_clause_episodes_to_graphiti  → relationship_mapping node
-      write_final_report_to_memory       → persist_memory node
+    Memory writers (write_clause_episodes_to_graphiti / write_final_report_to_memory)
+    are implemented but not yet wired into any node.
     """
 
     model_config = ConfigDict(
