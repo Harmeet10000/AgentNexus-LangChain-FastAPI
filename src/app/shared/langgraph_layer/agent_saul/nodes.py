@@ -427,19 +427,6 @@ def make_segmentation_node(
     async def segmentation_node(state: LegalAgentState) -> dict[str, Any]:
         log = logger.bind(node="segmentation", doc_id=state["doc_id"])
 
-        if not state.get("normalized_document"):
-            return {
-                "status": WorkflowStatus.FAILED,
-                "errors": [
-                    AgentError(
-                        node="segmentation",
-                        code="MISSING_NORMALIZED_DOCUMENT",
-                        message="normalized_document not populated by normalization node",
-                        retryable=False,
-                    )
-                ],
-            }
-
         normalized_document = state["normalized_document"]
         if normalized_document is None:
             return {
