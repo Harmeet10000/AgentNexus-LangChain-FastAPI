@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.shared import Base
+from database.base import Base
 
 
 class EmailType(StrEnum):
