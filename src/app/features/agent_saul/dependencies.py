@@ -38,7 +38,11 @@ if TYPE_CHECKING:
 
 
 async def get_saul_graph(request: Request) -> CompiledStateGraph[Any]:
-    return request.app.state.saul_graph
+    graph = request.app.state.saul_graph
+    if graph is None:
+        msg = "Saul graph is not wired"
+        raise ServiceUnavailableException(msg)
+    return graph
 
 
 async def get_saul_checkpointer(request: Request) -> AsyncPostgresSaver:

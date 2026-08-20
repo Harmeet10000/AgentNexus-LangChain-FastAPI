@@ -8,6 +8,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connections import get_postgres_db, get_redis
+from app.features.auth import CurrentClaims
 from app.shared.langchain_layer.models import _build_chat_model
 
 from .repository import SearchRepository
@@ -41,8 +42,8 @@ async def get_search_service(
     )
 
 
-async def get_current_user_id(request: Request) -> str:
-    return request.state.user_id
+async def get_current_user_id(claims: CurrentClaims) -> str:
+    return claims.sub
 
 
 SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
