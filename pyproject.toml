@@ -319,6 +319,7 @@ select = [
     "G",   # logging format validation (complements LOG)
     "RSE", # exception raising patterns
     "INP", # implicit namespace packages (package structure)
+    "PLW", # pylint warnings (for better code quality, e.g., PLW3201 bad-dunder-method)
 ]
 
 # Enable autofix for safe rules only
@@ -384,6 +385,7 @@ ignore = [
     "SLF001",  # Private member access (occasionally needed in tests)
     "RUF029",  # unused-async: FastAPI deps are async by convention
     "PLW0717", # too-many-statements-in-try-clause (orchestration/agent code)
+    "PLW3201", # bad-dunder-method: SQLAlchemy declared_attr.directive makes __tablename__ a special pattern
 ]
 
 [tool.ruff.lint.flake8-type-checking]
@@ -420,7 +422,7 @@ section-order = [
     "N806",    # Allow invalid variable names in test fixtures
     "T100",    # Allow debugger calls in test code
 ]
-"src/alembic/migrations/*.py" = [
+"src/alembic/versions/*.py" = [
     "ANN",
     "N999", # Allow invalid module names
     "E501", # Allow long lines
@@ -721,7 +723,7 @@ exclude = [
 
 [tool.alembic]
 script_location = "src/alembic"
-version_locations = "src/database/migrations"
+version_locations = "src/alembic/versions"
 
 [[tool.alembic.post_write_hooks]]
 name = "ruff-format"
