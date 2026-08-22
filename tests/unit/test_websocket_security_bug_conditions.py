@@ -66,7 +66,7 @@ async def ws_security_service(redis, mock_settings):
     mock_connection_limiter.try_acquire = MagicMock()
 
     # Patch Limiter class to return mocks
-    with patch('app.features.auth.websocket_security.Limiter') as MockLimiter:
+    with patch("app.features.auth.websocket_security.Limiter") as MockLimiter:
         MockLimiter.side_effect = [mock_user_limiter, mock_connection_limiter]
         service = await build_websocket_security_service(redis, mock_settings)
 
