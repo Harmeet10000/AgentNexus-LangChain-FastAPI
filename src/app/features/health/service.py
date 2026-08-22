@@ -1,14 +1,15 @@
 """Health service layer."""
 
+import asyncio
 import os
 import time
-from typing import Any
+from typing import Any, Protocol
 
 import psutil
 from celery import Celery
 from motor.motor_asyncio import AsyncIOMotorClient
 from neo4j import AsyncDriver
-from neo4j.exceptions import Neo4jError
+from neo4j.exceptions import DriverError, Neo4jError
 from pymongo.errors import PyMongoError
 from redis import RedisError
 from redis.asyncio import Redis
@@ -19,6 +20,32 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.utils import logger
 
 from .dto import HealthChecksDTO, HealthDataDTO, HealthResultDTO, SelfInfoDTO
+
+# The graph-memory probe is bounded: an unreachable graph backend must report,
+# not hang. A readiness probe that blocks is worse than one that answers degraded.
+_GRAPH_MEMORY_PROBE_TIMEOUT_S = 2.0
+
+# Read-only liveness query. The graph-memory client is *set once at startup* and
+# never cleared, so a presence check alone cannot distinguish "initialised" from
+# "reachable" — the probe has to ask the backend something.
+_GRAPH_MEMORY_PROBE_QUERY = "RETURN 1 AS ok"
+
+
+class GraphQueryDriver(Protocol):
+    """Minimal query surface the graph-memory probe needs from its driver."""
+
+    async def execute_query(self, cypher_query_: str, **kwargs: Any) -> Any: ...
+
+
+class GraphMemoryClient(Protocol):
+    """Structural type of the graph-memory client published on ``app.state.graphiti``.
+
+    Declared structurally rather than imported: pulling ``graphiti_core`` in for a
+    type would add ~1.7s to every import of the health feature, and the probe
+    needs exactly one attribute.
+    """
+
+    driver: GraphQueryDriver
 
 
 class HealthService:
@@ -31,12 +58,15 @@ class HealthService:
         postgres_session_factory: async_sessionmaker[AsyncSession] | None,
         neo4j_driver: AsyncDriver | None,
         celery_app: Celery | None,
+        *,
+        graph_memory_client: GraphMemoryClient | None = None,
     ) -> None:
         self.mongo_client = mongo_client
         self.redis_client = redis_client
         self.postgres_session_factory = postgres_session_factory
         self.neo4j_driver = neo4j_driver
         self.celery_app = celery_app
+        self.graph_memory_client = graph_memory_client
         self.start_time = time.time()
 
     @staticmethod
@@ -65,6 +95,7 @@ class HealthService:
             else self._not_configured()
         )
         neo4j_check = await self._check_neo4j() if self.neo4j_driver else self._not_configured()
+        graphiti_check = await self._check_graphiti()
         celery_check = self._check_celery()
         memory_check = self._check_memory()
         disk_check = self._check_disk()
@@ -74,6 +105,7 @@ class HealthService:
             redis=redis_check,
             postgres=postgres_check,
             neo4j=neo4j_check,
+            graphiti=graphiti_check,
             celery=celery_check,
             memory=memory_check,
             disk=disk_check,
@@ -177,6 +209,39 @@ class HealthService:
             logger.bind(error=str(exc)).warning("Neo4j health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
 
+    async def _check_graphiti(self) -> dict[str, Any]:
+        """Probe the graph-memory layer with a bounded, read-only query.
+
+        Absence reports ``not_configured`` and deliberately leaves the overall
+        status — and therefore the HTTP status code — untouched, mirroring how the
+        graph database itself is already treated. Graph memory is optional, and a
+        deployment without it must not begin answering 503 from a mounted endpoint.
+
+        Failures report the exception *type*, never its message: the underlying
+        driver interpolates its connection URI into error text, so ``str(exc)``
+        would put a DSN into the response body and the log line.
+        """
+        client = self.graph_memory_client
+        if client is None:
+            return self._not_configured()
+        start = time.perf_counter()
+        try:
+            async with asyncio.timeout(_GRAPH_MEMORY_PROBE_TIMEOUT_S):
+                await client.driver.execute_query(_GRAPH_MEMORY_PROBE_QUERY)
+        except (Neo4jError, DriverError, OSError, TimeoutError) as exc:
+            logger.bind(error_type=type(exc).__name__).warning("Graphiti health check failed")
+            return {
+                "status": "unhealthy",
+                "state": "disconnected",
+                "error": type(exc).__name__,
+            }
+        response_time = (time.perf_counter() - start) * 1000
+        return {
+            "status": "healthy",
+            "state": "connected",
+            "responseTime": f"{response_time:.2f}ms",
+        }
+
     def _check_celery(self) -> dict[str, Any]:
         if self.celery_app is None:
             return self._not_configured()
@@ -241,6 +306,7 @@ class HealthService:
             checks.redis,
             checks.postgres,
             checks.neo4j,
+            checks.graphiti,
             checks.celery,
             checks.memory,
             checks.disk,

@@ -30,6 +30,7 @@ import cognee
 from cognee.exceptions import CogneeApiError
 from langgraph.store.base import BaseStore
 
+from app.connections.postgres import get_database_fields
 from app.utils import logger
 
 if TYPE_CHECKING:
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from app.config import Settings
+    from app.connections.postgres import DatabaseConnectionFields
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +75,12 @@ async def setup_cognee(settings: Settings) -> dict[str, Any]:
     """
     logger.bind(service="cognee").info("Configuring Cognee")
 
+    # Cognee's RelationalConfig exposes discrete fields only -- it has no connection
+    # string field -- so the database identity is taken apart by the accessor instead of
+    # being read from the individual settings fields, which nothing keeps in agreement
+    # with the URL the application's own pool connects to.
+    database: DatabaseConnectionFields = get_database_fields()
+
     try:
         cognee.config.set_llm_config(
             config_dict={
@@ -92,11 +100,11 @@ async def setup_cognee(settings: Settings) -> dict[str, Any]:
         cognee.config.set_relational_db_config(
             {
                 "db_provider": "postgres",
-                "db_host": settings.POSTGRES_HOST,
-                "db_port": str(settings.POSTGRES_PORT),
-                "db_username": settings.POSTGRES_USERNAME,
-                "db_password": settings.POSTGRES_PASSWORD.get_secret_value(),
-                "db_name": settings.POSTGRES_DB_NAME,
+                "db_host": database.host,
+                "db_port": str(database.port),
+                "db_username": database.username,
+                "db_password": database.password.get_secret_value(),
+                "db_name": database.database,
                 "db_path": "",
             }
         )
@@ -108,7 +116,8 @@ async def setup_cognee(settings: Settings) -> dict[str, Any]:
             "service": "cognee",
             "llm_model": settings.GEMINI_FLASH_MODEL,
             "neo4j_uri": settings.NEO4J_URI,
-            "postgres_url": settings.POSTGRES_URL,
+            "postgres_host": database.host,
+            "postgres_database": database.database,
         }
         logger.bind(service="cognee").info("Cognee configured successfully")
         return config

@@ -9,7 +9,7 @@ from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from .service import HealthService
+from .service import GraphMemoryClient, HealthService
 
 
 def get_health_mongodb_client(request: Request) -> AsyncIOMotorClient[Any] | None:
@@ -34,6 +34,11 @@ def get_health_celery_app(request: Request) -> Celery | None:
     return getattr(request.app.state, "celery", None)
 
 
+def get_health_graph_memory_client(request: Request) -> GraphMemoryClient | None:
+    """Resolve the graph-memory client, which startup publishes as ``None`` on failure."""
+    return getattr(request.app.state, "graphiti", None)
+
+
 def get_health_service(
     mongo_client: AsyncIOMotorClient[Any] | None = Depends(get_health_mongodb_client),
     redis_client: Redis | None = Depends(get_health_redis_client),
@@ -42,6 +47,8 @@ def get_health_service(
     ),
     neo4j_driver: AsyncDriver | None = Depends(get_health_neo4j_driver),
     celery_app: Celery | None = Depends(get_health_celery_app),
+    *,
+    graph_memory_client: GraphMemoryClient | None = Depends(get_health_graph_memory_client),
 ) -> HealthService:
     return HealthService(
         mongo_client=mongo_client,
@@ -49,4 +56,5 @@ def get_health_service(
         postgres_session_factory=postgres_session_factory,
         neo4j_driver=neo4j_driver,
         celery_app=celery_app,
+        graph_memory_client=graph_memory_client,
     )

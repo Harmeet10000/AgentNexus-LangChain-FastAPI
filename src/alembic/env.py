@@ -3,14 +3,72 @@ from logging.config import fileConfig
 
 from sqlalchemy.engine import Connection
 
+import app.features.audit.model
+import app.features.credits.models.consumption
+import app.features.credits.models.credit
+import app.features.documents.model
+import app.features.invoices.invoice_batch
+import app.features.invoices.invoice_void
+import app.features.invoices.model
+import app.features.invoices.receipt
+import app.features.invoices.report
+import app.features.payments.currency
+import app.features.payments.model
+import app.features.plans.model
+import app.features.search.model
+import app.features.subscriptions.model
+import app.features.subscriptions.trial_extension
+import app.features.webhooks.email_template
+import app.features.webhooks.model
+import app.shared.outbox.model
 from alembic import context
-
-# Import database initialization function
 from app.connections import init_db
 from app.utils import logger
 from database import Base
 
-# Import all models to register with Base.metadata
+# Every module above is imported for one side effect: executing its body declares its
+# SQLAlchemy models, which registers their tables on ``Base.metadata`` — the registry
+# Alembic compares the database against. A table missing from that registry is a table a
+# future comparison proposes to DROP, so the import list is the drop-safety contract and
+# nothing in this file calls into it.
+#
+# The modules are therefore named a second time below rather than carrying a suppression.
+# ``F401`` is in this project's ruff ``fixable`` set, so a bare side-effect import here is
+# not merely flagged: ``ruff check --fix`` deletes it, silently unregistering the tables it
+# was protecting. Referencing them removes the diagnostic instead of hiding it.
+#
+# Import order is load-bearing and alphabetical order happens to satisfy it:
+# ``app.features.payments.model`` must precede ``app.features.subscriptions.model``,
+# because the subscriptions package reaches payments and back through
+# ``subscriptions.dependencies``. Entering that cycle from subscriptions raises
+# ``ImportError``; entering it from payments does not.
+#
+# The two credit modules are registered for the same drop-safety reason as the rest, even
+# though they are named nowhere in this change's task text. ``0005`` creates ``user_credits``
+# and ``credit_consumptions``, and joining the heads put ``0005`` inside the single-head
+# chain — so leaving them unregistered would have a future comparison propose dropping two
+# relations the chain creates, which is precisely the defect this import list exists to
+# prevent.
+_MODEL_MODULES = (
+    app.features.audit.model,
+    app.features.credits.models.consumption,
+    app.features.credits.models.credit,
+    app.features.documents.model,
+    app.features.invoices.invoice_batch,
+    app.features.invoices.invoice_void,
+    app.features.invoices.model,
+    app.features.invoices.receipt,
+    app.features.invoices.report,
+    app.features.payments.currency,
+    app.features.payments.model,
+    app.features.plans.model,
+    app.features.search.model,
+    app.features.subscriptions.model,
+    app.features.subscriptions.trial_extension,
+    app.features.webhooks.email_template,
+    app.features.webhooks.model,
+    app.shared.outbox.model,
+)
 
 # Alembic Config object
 config = context.config
@@ -19,27 +77,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import all models here for autogenerate support
-import app.features.audit.model  # noqa: F401, E402 — registers model with Base.metadata for Alembic autogenerate
-import app.features.invoices.invoice_batch  # noqa: F401, E402
-import app.features.invoices.invoice_void  # noqa: F401, E402
-import app.features.invoices.model  # noqa: F401, E402
-import app.features.invoices.receipt  # noqa: F401, E402
-import app.features.invoices.report  # noqa: F401, E402
-import app.features.payments.currency  # noqa: F401, E402
-import app.features.payments.model  # noqa: F401, E402
-import app.features.plans.model  # noqa: F401, E402
-import app.features.subscriptions.model  # noqa: F401, E402
-import app.features.subscriptions.trial_extension  # noqa: F401, E402
-import app.features.webhooks.email_template  # noqa: F401, E402
-import app.features.webhooks.model  # noqa: F401, E402
-import app.shared.outbox.model  # noqa: F401, E402 — registers model with Base.metadata for Alembic autogenerate
-
-try:
-    target_metadata = Base.metadata
-except ImportError as e:
-    logger.warning(f"Failed to import models: {e}")
-    target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:

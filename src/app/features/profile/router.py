@@ -9,7 +9,12 @@ from app.features.auth import (
     get_refresh_token_repository,
     get_user_repository,
 )
-from app.utils import APIResponse, ValidationException, http_response
+from app.utils import (
+    APIResponse,
+    ServiceUnavailableException,
+    ValidationException,
+    http_response,
+)
 
 from .dto import (
     AvatarResponse,
@@ -25,10 +30,33 @@ router = APIRouter(prefix="/profile", tags=["profile"])
 
 
 async def _get_profile_service(request: Request) -> ProfileService:
-    """Resolve ProfileService with storage from app.state."""
-    storage: StorageService = request.app.state.storage
-    user_repo = await get_user_repository(request.app.state.mongodb)
-    token_repo = await get_refresh_token_repository(request.app.state.redis)
+    """Resolve ProfileService against the client names startup actually publishes.
+
+    Startup publishes ``object_store``, ``db`` and ``redis`` on ``app.state`` — never
+    ``storage`` or ``mongodb`` — and it sets each of them to ``None`` when that
+    connection fails instead of aborting boot. Every read is therefore resolved
+    defensively: a missing or absent client answers ``503`` from here, rather than
+    becoming a ``None`` that fails deeper in the request, far from its cause.
+
+    The object store is *not* required here. Only avatar upload uses it, so it is
+    passed through as optional and its absence is answered at the point of use —
+    a password change must not fail because object storage is down.
+    """
+    state = request.app.state
+
+    db = getattr(state, "db", None)
+    if db is None:
+        msg = "User database is unavailable"
+        raise ServiceUnavailableException(msg)
+
+    redis = getattr(state, "redis", None)
+    if redis is None:
+        msg = "Session store is unavailable"
+        raise ServiceUnavailableException(msg)
+
+    storage: StorageService | None = getattr(state, "object_store", None)
+    user_repo = await get_user_repository(db)
+    token_repo = await get_refresh_token_repository(redis)
     return ProfileService(user_repo, token_repo, storage)
 
 

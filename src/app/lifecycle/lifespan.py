@@ -132,7 +132,7 @@ async def _init_outbox_relay(app: FastAPI, celery_app: Celery | None) -> None:
         OutboxRelay,
     )
 
-    dsn = get_database_url().replace("+asyncpg", "")
+    dsn = get_database_url(flavour="plain")
     relay = OutboxRelay(
         database_url=dsn,
         celery_app=celery_app or app.state.celery,
@@ -307,10 +307,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     # FastAPI-Guard setup (depends on Redis, but non-blocking)
     await initialize_fastapi_guard(app=app, settings=settings)
 
-    # LangGraph checkpointer setup (uses existing PostgreSQL connection)
+    # LangGraph checkpointer setup (uses existing PostgreSQL connection).
+    # Deliberately left unwired. If it is ever re-enabled: the checkpointer is
+    # psycopg-backed, so it needs the plain flavour of the accessor -- a raw
+    # settings.POSTGRES_URL carries no credential, and the async flavour carries a
+    # dialect scheme psycopg cannot parse.
+    #     from app.connections.postgres import get_database_url
     # try:
     #     saul_checkpointer = await setup_langgraph_checkpointer(
-    #         conn_string=settings.POSTGRES_URL,
+    #         conn_string=get_database_url(flavour="plain"),
     #     )
     #     app.state.langgraph_checkpointer = saul_checkpointer
     #     logger.info("LangGraph checkpointer initialized")

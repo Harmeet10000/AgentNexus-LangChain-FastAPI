@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -80,6 +81,34 @@ class UnifiedChunk(Base):
         Index("ix_chunks_kind", "chunk_kind"),
         Index("ix_chunks_metadata_gin", "metadata_", postgresql_using="gin"),
         Index("ix_chunks_graphiti_verified", "graphiti_verified"),
+        # The three retrieval branches. Declared here, not only in the migration,
+        # because an index present in the database and absent from the registry is
+        # one `alembic check` proposes to REMOVE — and `chunks_bm25_idx` is passed
+        # to `to_bm25query()` as a literal string, so a silent drop would make
+        # keyword retrieval match nothing without raising. The names are a query
+        # contract; see `features/documents/repository.py`.
+        # bm25 comes from pg_textsearch, diskann from vectorscale, gin_trgm_ops
+        # from pg_trgm — all three created by revision a5bd6b69a28e.
+        Index(
+            "chunks_bm25_idx",
+            "search_text",
+            postgresql_using="bm25",
+            # Values render through str() unquoted, so 'english' carries its own
+            # quotes — a bare "english" would emit an unquoted identifier.
+            postgresql_with={"text_config": "'english'", "k1": "1.2", "b": "0.75"},
+        ),
+        Index(
+            "chunks_embedding_idx",
+            "embedding",
+            postgresql_using="diskann",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        Index(
+            "chunks_search_text_trgm_idx",
+            "search_text",
+            postgresql_using="gin",
+            postgresql_ops={"search_text": "gin_trgm_ops"},
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -114,6 +143,17 @@ class UnifiedChunk(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+    # Server-side default, unlike UnifiedDocument's Python-side one: revision
+    # a5bd6b69a28e added this column as NOT NULL DEFAULT now() precisely so the
+    # database can satisfy it alone. Declaring it here closes the inverse
+    # hazard — a column in the database and absent from the registry is one
+    # `alembic check` proposes to DROP, which loses data rather than speed.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 

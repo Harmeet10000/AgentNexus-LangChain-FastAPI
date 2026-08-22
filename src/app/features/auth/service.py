@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
 from authlib.integrations.httpx_client import AsyncOAuth2Client
@@ -21,6 +21,7 @@ from app.utils import (
 )
 
 if TYPE_CHECKING:
+    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
     from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
@@ -48,6 +49,27 @@ from .security import (
 # Dummy hash used in the constant-time negative path during login.
 # Prevents timing attacks that would reveal whether an email is registered.
 _DUMMY_HASH = "$argon2id$v=19$m=65536,t=2,p=2$c29tZXNhbHRzb21lc2FsdA$dGVzdGhhc2h0ZXN0aGFzaA"
+
+
+class WebSocketConnectionCloser(Protocol):
+    """Structural contract required of the collaborator passed to
+    :meth:`AuthService.revoke_session_and_close_connections`.
+
+    Declared structurally rather than importing ``WebSocketSecurityService`` for two
+    reasons: only these two members are used, and ``AuthService`` must not acquire an
+    import edge onto the WebSocket transport layer to obtain a parameter annotation.
+
+    KNOWN GAP — ``WebSocketSecurityService`` does **not** satisfy this protocol today.
+    It keeps its client private as ``_redis`` and exposes no ``close_connection``; the
+    nearest member, ``close_with_violation``, needs a live ``WebSocket`` object and
+    cannot be reached from a connection id. Closing the gap means adding those members
+    to ``websocket_security.py``, which is outside this annotation fix.
+    """
+
+    @property
+    def redis(self) -> Redis: ...
+
+    async def close_connection(self, connection_id: str, /, *, reason: str) -> None: ...
 
 
 def _to_user_response(user: User) -> UserResponse:
@@ -437,7 +459,7 @@ class AuthService:
         self,
         session_id: str,
         user_id: str,
-        ws_security_service: object,
+        ws_security_service: WebSocketConnectionCloser,
         reason: str = "manual_revoke",
     ) -> list[str]:
         """Revoke a session and close all associated WebSocket connections.
@@ -450,7 +472,9 @@ class AuthService:
         Args:
             session_id: The session ID to revoke
             user_id: The user ID (for validation)
-            ws_security_service: WebSocketSecurityService instance with close_connection() method
+            ws_security_service: Collaborator satisfying :class:`WebSocketConnectionCloser`
+                — a ``redis`` client for the ``ws:session:{id}`` presence set plus a
+                ``close_connection()`` coroutine. See that protocol's KNOWN GAP note.
             reason: Reason for revocation (default: "manual_revoke")
 
         Returns:
