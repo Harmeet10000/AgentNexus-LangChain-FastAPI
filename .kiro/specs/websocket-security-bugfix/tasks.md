@@ -4,7 +4,7 @@
 
 **Property 1: Bug Condition** - WebSocket Security Vulnerabilities
 
-- [ ] 1. Write bug condition exploration tests (BEFORE implementing fix)
+- [x] 1. Write bug condition exploration tests (BEFORE implementing fix)
   - **Property 1: Bug Condition** - Session Revocation Gap and TOCTOU Vulnerabilities
   - **IMPORTANT**: This test MUST FAIL on unfixed code - failure confirms the bug exists
   - **DO NOT attempt to fix the test or the code when it fails**
@@ -22,7 +22,7 @@
 
 **Property 2: Preservation** - Valid Connection Handling
 
-- [ ] 2. Write preservation property tests (BEFORE implementing fix)
+- [x]2. Write preservation property tests (BEFORE implementing fix)
   - **Property 2: Preservation** - Normal Connection Flow and Rate Limiting
   - **IMPORTANT**: Follow observation-first methodology
   - **Observe Unfixed Behavior**:
@@ -41,9 +41,9 @@
 
 ## Implementation Tasks
 
-- [ ] 3. Fix WebSocket Security Vulnerabilities
+- [x]3. Fix WebSocket Security Vulnerabilities
 
-  - [ ] 3.1 Implement pull-based session revocation check loop
+  - [x]3.1 Implement pull-based session revocation check loop
     - Create 30-second periodic background task in lifespan
     - Re-read `token_repo.get_session(context.session_id)` for each active connection
     - Close connection with `SESSION_REVOKED` violation if session gone
@@ -53,7 +53,7 @@
     - _Preservation: Valid connections continue normal operation_
     - _Requirements: 2.1, 2.2_
 
-  - [ ] 3.2 Refactor presence tracking to sorted sets for atomic operations
+  - [x]3.2 Refactor presence tracking to sorted sets for atomic operations
     - Replace `_USER_CONNECTIONS_KEY`, `_SESSION_CONNECTIONS_KEY`, `_CONNECTION_KEY` patterns
     - Add `_USER_PRESENCE_KEY`, `_SESSION_PRESENCE_KEY` sorted sets
     - Member = `connection_id`, score = last-touch epoch (Unix timestamp)
@@ -65,7 +65,7 @@
     - _Preservation: Presence tracking still works for valid connections_
     - _Requirements: 2.4_
 
-  - [ ] 3.3 Fix rate limiter to use direct try_acquire() calls
+  - [x]3.3 Fix rate limiter to use direct try_acquire() calls
     - Replace `WebSocketRateLimiter` wrapper with direct `Limiter.try_acquire()` calls
     - Remove `websocket.state.ws_rate_limit_id` mutation
     - Use explicit identifier keys: `f"user:{user_id}"` and `f"connection:{connection_id}"`
@@ -75,7 +75,7 @@
     - _Preservation: Rate limiting works correctly for valid traffic patterns_
     - _Requirements: 2.5_
 
-  - [ ] 3.4 Add session revocation lookup from sorted sets
+  - [x]3.4 Add session revocation lookup from sorted sets
     - When `AuthService.revoke_session()` is called, look up connection IDs from `ws:session:{session_id}`
     - Trigger closure of all connections in the set
     - Return list of closed connection IDs for audit logging
@@ -83,7 +83,7 @@
     - _Preservation: Non-revoked sessions unaffected_
     - _Requirements: 2.3_
 
-  - [ ] 3.5 Update configuration for production secrets and proxy resolution
+  - [x]3.5 Update configuration for production secrets and proxy resolution
     - Add `RABBITMQ_DEFAULT_PASS` and `POSTGRES_PASSWORD` to `PRODUCTION_SECRET_FIELDS`
     - Split `validate_embedding_dimension` into two validators
     - Change `MCP_CLIENT_RETRY_ATTEMPTS` default from 1 to 3
@@ -93,7 +93,7 @@
     - _Preservation: Development configuration unchanged_
     - _Requirements: 2.6, 2.7, 2.8_
 
-- [ ] 4. Verify Bug Condition Exploration Test Now Passes
+- [x]4. Verify Bug Condition Exploration Test Now Passes
   - **Property 1: Expected Behavior** - Session Revocation Gap and TOCTOU Fixed
   - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
   - The test from task 1 encodes the expected behavior
@@ -102,7 +102,7 @@
   - **EXPECTED OUTCOME**: All tests PASS (confirms vulnerabilities are fixed)
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
 
-- [ ] 5. Verify Preservation Tests Still Pass
+- [x]5. Verify Preservation Tests Still Pass
   - **Property 2: Preservation** - Normal Connection Flow Preserved
   - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
   - Run preservation property tests from step 2
@@ -110,7 +110,7 @@
   - Confirm all tests still pass after fix (no regressions)
   - _Requirements: 3.1, 3.2, 3.3, 3.4_
 
-- [ ] 6. Checkpoint - Ensure All Tests Pass
+- [x]6. Checkpoint - Ensure All Tests Pass
   - Ensure all tests pass
   - Run `uv run ruff check --fix src/`
   - Run `uv run ty check src/`
