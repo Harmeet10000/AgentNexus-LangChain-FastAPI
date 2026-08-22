@@ -4,15 +4,21 @@ from __future__ import annotations
 
 import operator
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+
+# `Annotated` is imported at runtime, not under `TYPE_CHECKING`, and the suppression is
+# load-bearing rather than cosmetic. `from __future__ import annotations` makes every
+# annotation below a string, so `TC003` is right by the language's rules — but Pydantic
+# *evaluates* those strings when it builds the model, and `IngestionState.contextualized_chunks`
+# is annotated `Annotated[list[ContextualizedChunk], operator.add]`. With the import confined
+# to a type-checking block the name is absent at runtime, the model is never fully defined, and
+# every `IngestionState(...)` raises `PydanticUserError`. The same reasoning already guards
+# `AppError` on the next line; this import was the one that got away.
+from typing import Annotated, Any  # noqa: TC003 - Pydantic resolves these fields at runtime.
 
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.shared.result import AppError  # noqa: TC001 - Pydantic resolves this field at runtime.
-
-if TYPE_CHECKING:
-    from typing import Annotated
 
 EmbeddingFunction = Any
 

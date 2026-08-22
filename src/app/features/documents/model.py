@@ -26,7 +26,26 @@ from sqlalchemy.orm import (  # noqa: TC002 — Mapped resolved at runtime by SQ
     relationship,
 )
 
+from app.config import get_settings
 from database.base import Base
+
+# The width `chunks.embedding` is created with, captured once when this module is
+# imported. Two reasons it is a named constant rather than an inline call:
+#
+# 1. It is the *stored* width. `get_settings()` is re-read on every call, but a
+#    SQLAlchemy column type is concrete for the life of the process — so the
+#    moment configuration changes underneath a running app, this constant and
+#    `EMBEDDING_DIMENSION` disagree, and that disagreement is exactly what the
+#    write guard in `repository._reject_width_mismatch` detects.
+# 2. Reading it back off the column (`__table__.c.embedding.type.dim`) is typed
+#    as the base `TypeEngine`, which declares no `dim` — so every consumer would
+#    need a narrowing dance or a suppression to get an `int` out.
+#
+# Not annotated `Final`: `from __future__ import annotations` makes the annotation
+# a string that is never evaluated, so the import would be typing-only and `TC003`
+# would ask for a type-checking block. The module-level SCREAMING_SNAKE name is
+# how this codebase already spells a constant.
+CHUNK_EMBEDDING_DIM = get_settings().EMBEDDING_DIMENSION
 
 
 class UnifiedDocument(Base):
@@ -124,7 +143,14 @@ class UnifiedChunk(Base):
     preamble: Mapped[str] = mapped_column(Text, nullable=False, default="")
     clause_type: Mapped[str | None] = mapped_column(String(length=128), nullable=True)
     page_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    # Width comes from the one configured value, not a literal. It resolves to the
+    # same 768 today, so this renders identically and `alembic check` proposes
+    # nothing — which is the point: this is the cheapest possible moment to remove
+    # the literal, before any row exists to migrate. Read at class-definition time
+    # because a SQLAlchemy column type must be concrete when the class body runs.
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(CHUNK_EMBEDDING_DIM), nullable=True
+    )
     metadata_: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict, nullable=False)
     custom_metadata: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict, nullable=False)
     quality_warnings: Mapped[list[object]] = mapped_column(JSONB, default=list, nullable=False)
