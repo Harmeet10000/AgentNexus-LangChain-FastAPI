@@ -220,9 +220,7 @@ class TestIdempotencyManager:
         msg = "transient"
 
         async def _run():
-            async with idempotency_manager(
-                mock_redis, "op-1", retryable_exceptions=(ValueError,)
-            ):
+            async with idempotency_manager(mock_redis, "op-1", retryable_exceptions=(ValueError,)):
                 raise ValueError(msg)
 
         with pytest.raises(ValueError, match=msg):
@@ -235,9 +233,7 @@ class TestIdempotencyManager:
         msg = "permanent"
 
         async def _run():
-            async with idempotency_manager(
-                mock_redis, "op-1", retryable_exceptions=(ValueError,)
-            ):
+            async with idempotency_manager(mock_redis, "op-1", retryable_exceptions=(ValueError,)):
                 raise TypeError(msg)
 
         with pytest.raises(TypeError, match=msg):
@@ -288,7 +284,14 @@ class TestRateLimiterConfig:
     def test_config_validation_rejects_burst_lt_rate(self):
         mock_redis = MagicMock()
         with pytest.raises(ValueError, match="burst must be >= rate"):
-            RateLimiter(mock_redis, scope="x", rate=10, period_seconds=60, burst=5, settings=_make_settings())
+            RateLimiter(
+                mock_redis,
+                scope="x",
+                rate=10,
+                period_seconds=60,
+                burst=5,
+                settings=_make_settings(),
+            )
 
 
 class TestRateLimiterExtractClientIp:

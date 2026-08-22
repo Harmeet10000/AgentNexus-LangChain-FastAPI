@@ -172,9 +172,7 @@ class TestConsumeCredits:
         )
 
         credit = _make_credit(remaining_balance=1000, credit_amount=1000)
-        svc.credit_repo.find_available_for_consumption = AsyncMock(
-            return_value=Success([credit])
-        )
+        svc.credit_repo.find_available_for_consumption = AsyncMock(return_value=Success([credit]))
         updated_credit = _make_credit(remaining_balance=0)
         updated_credit.status = CreditStatus.CONSUMED.value
         svc.credit_repo.update_balance = AsyncMock(return_value=Success(updated_credit))
@@ -204,9 +202,7 @@ class TestConsumeCredits:
         )
 
         credit = _make_credit(remaining_balance=300, credit_amount=500)
-        svc.credit_repo.find_available_for_consumption = AsyncMock(
-            return_value=Success([credit])
-        )
+        svc.credit_repo.find_available_for_consumption = AsyncMock(return_value=Success([credit]))
         updated_credit = _make_credit(remaining_balance=0, credit_amount=500)
         updated_credit.status = CreditStatus.CONSUMED.value
         svc.credit_repo.update_balance = AsyncMock(return_value=Success(updated_credit))
@@ -234,9 +230,7 @@ class TestConsumeCredits:
             audit=AsyncMock(),
         )
 
-        svc.credit_repo.find_available_for_consumption = AsyncMock(
-            return_value=Success([])
-        )
+        svc.credit_repo.find_available_for_consumption = AsyncMock(return_value=Success([]))
 
         result = _run(
             svc.consume_credits(
@@ -318,9 +312,7 @@ class TestConsumeCredits:
         )
 
         credit = _make_credit(remaining_balance=500, credit_amount=500)
-        svc.credit_repo.find_available_for_consumption = AsyncMock(
-            return_value=Success([credit])
-        )
+        svc.credit_repo.find_available_for_consumption = AsyncMock(return_value=Success([credit]))
         updated_credit = _make_credit(remaining_balance=0)
         updated_credit.status = CreditStatus.CONSUMED.value
         svc.credit_repo.update_balance = AsyncMock(return_value=Success(updated_credit))
@@ -375,9 +367,7 @@ class TestCreditHistory:
         )
 
         credit = _make_credit()
-        svc.credit_repo.find_by_user = AsyncMock(
-            return_value=Success(([credit], 1))
-        )
+        svc.credit_repo.find_by_user = AsyncMock(return_value=Success(([credit], 1)))
 
         consumption = MagicMock()
         consumption.id = uuid4()
@@ -386,13 +376,9 @@ class TestCreditHistory:
         consumption.invoice_id = None
         consumption.razorpay_payment_id = None
         consumption.created_at = datetime.now(tz=UTC)
-        svc.consumptions.find_by_user = AsyncMock(
-            return_value=Success(([consumption], 1))
-        )
+        svc.consumptions.find_by_user = AsyncMock(return_value=Success(([consumption], 1)))
 
-        result = _run(
-            svc.get_credit_history("user-123", limit=10, offset=0)
-        )
+        result = _run(svc.get_credit_history("user-123", limit=10, offset=0))
 
         assert isinstance(result, CreditHistoryResponse)
         assert len(result.credits) == 1

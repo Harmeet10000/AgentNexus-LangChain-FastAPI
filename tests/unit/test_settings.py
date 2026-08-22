@@ -30,7 +30,9 @@ class TestSettingsProductionValidation:
         assert settings.ENVIRONMENT == "development"
 
     def test_error_lists_all_bad_field_names(self) -> None:
-        with pytest.raises(ValueError, match="The following secret fields have default/insecure values"):
+        with pytest.raises(
+            ValueError, match="The following secret fields have default/insecure values"
+        ):
             Settings(ENVIRONMENT="production")
 
     def test_error_does_not_expose_secret_values(self) -> None:

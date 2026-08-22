@@ -71,6 +71,7 @@ def _make_row(**overrides):
 
 def _run(coro):
     import asyncio
+
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(coro)
