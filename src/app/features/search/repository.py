@@ -12,7 +12,6 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.features.search.fusion import RankedResultRow
 from app.shared.result import InfrastructureAppError, NotFoundAppError
 from app.utils import ErrorCode
 
@@ -21,6 +20,7 @@ from .constants import (
     DISKANN_QUERY_SEARCH_LIST_SIZE,
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
+from .fusion import RankedResultRow
 from .model import SearchChunk, SearchDocument
 from .rag import SearchChunkRecord
 
@@ -105,10 +105,10 @@ class SearchRepository:
                         source="search_repository",
                     )
                 )
-            return Success(doc)
+            return Success(inner_value=doc)
         except SQLAlchemyError as exc:
             return Failure(
-                InfrastructureAppError(
+                inner_value=InfrastructureAppError(
                     code="DB_ERROR",
                     message="Database error while fetching search document by ID",
                     details={"document_id": document_id, "error": str(exc)},

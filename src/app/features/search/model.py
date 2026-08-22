@@ -16,6 +16,7 @@ from sqlalchemy.orm import (  # noqa: TC002 — Mapped, mapped_column used at ru
     relationship,
 )
 
+from app.config import get_settings
 from database.base import Base
 
 
@@ -70,7 +71,12 @@ class SearchChunk(Base):
     )
     chunk_index: Mapped[int] = mapped_column(nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    # Same configured width as `UnifiedChunk.embedding` — see the note there. The
+    # two relations must agree: a query vector is embedded once and searched
+    # against both, so divergent widths would fail at insert rather than at config.
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(get_settings().EMBEDDING_DIMENSION), nullable=True
+    )
     chunk_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     content_tsv: Mapped[str] = mapped_column(
         TSVECTOR,

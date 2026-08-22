@@ -29,11 +29,24 @@ sys.modules["mcp_core.server.tools"] = MagicMock()
 sys.modules["tasks"] = MagicMock()
 sys.modules["tasks.auth_email_tasks"] = MagicMock()
 sys.modules["tasks.search_tasks"] = MagicMock()
-sys.modules["app.shared.langgraph_layer"] = MagicMock()
-sys.modules["app.shared.langgraph_layer.agent_saul.state"] = MagicMock()
-sys.modules["app.shared.langgraph_layer.checkpointer"] = MagicMock()
-sys.modules["app.shared.langgraph_layer.kb_retry"] = MagicMock()
-sys.modules["app.shared.langgraph_layer.retrieval_kb"] = MagicMock()
+
+# `app.shared.langgraph_layer` and four of its submodules were stubbed here too. They are
+# not any more, and the entries must not come back:
+#
+#   * The cycles they worked around are gone, severed by 319c698 and 6525c6f. Removing all
+#     five leaves the suite at exactly its prior counts, and faster.
+#   * The stub made every Band C proof in `ingestion-pipeline-unification` unwritable. A
+#     MagicMock has no `__path__`, so `app.shared.langgraph_layer.<anything>` raised
+#     "is not a package" — and C2, C4, C5, and C6 each require a unit test over
+#     `checkpointer.py` or `kb_retry.py`.
+#   * It was hiding a live defect. Nothing had ever constructed `IngestionState`, so nobody
+#     saw that it could not be constructed at all: `Annotated` sat in a `TYPE_CHECKING`
+#     block while a Pydantic field annotation needed it at runtime. Removing the stub
+#     surfaced it on the first attempt.
+#
+# A stub that makes a package unimportable does not isolate a test from that package; it
+# removes the package from the suite's reach entirely, and takes its defects out of view
+# with it.
 
 _tal_mock = MagicMock()
 _tal_mock.TokenAuditLog = MagicMock()

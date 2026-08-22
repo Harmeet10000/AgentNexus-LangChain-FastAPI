@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from google.api_core.exceptions import GoogleAPIError
 from openai import OpenAIError
 
+from app.shared.rag.document_processing.embedder import create_embedder
 from app.utils.logger import logger
 
 # Load environment variables
@@ -116,8 +117,6 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
         logger.info("Multi-query search with {} variations", len(queries))
 
         # Generate embeddings for all queries
-        from ingestion.embedder import create_embedder
-
         embedder = create_embedder()
 
         # Execute searches in parallel
@@ -195,8 +194,6 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
         initialize_reranker()
 
         # Stage 1: Fast vector retrieval (retrieve more candidates)
-        from ingestion.embedder import create_embedder
-
         embedder = create_embedder()
         query_embedding = await embedder.embed_query(query)
         embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
@@ -263,8 +260,6 @@ async def search_knowledge_base(ctx: RunContext[None], query: str, limit: int = 
     try:
         if not db_pool:
             await initialize_db()
-
-        from ingestion.embedder import create_embedder
 
         embedder = create_embedder()
         query_embedding = await embedder.embed_query(query)
@@ -370,7 +365,6 @@ async def search_with_self_reflection(ctx: RunContext[None], query: str, limit: 
         if not db_pool:
             await initialize_db()
 
-        from ingestion.embedder import create_embedder
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -577,10 +571,3 @@ async def main() -> None:
         sys.exit(1)
 
     await run_cli()
-
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")

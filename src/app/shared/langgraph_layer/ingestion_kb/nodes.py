@@ -200,6 +200,13 @@ def dispatch_contextualize_chunks(state: IngestionState) -> list[Send]:
         Send(
             "contextualize_chunks",
             {
+                # `Send` REPLACES the state for the fanned-out invocation — the node
+                # receives this dict, not `IngestionState`. So anything the node needs
+                # for a diagnostic has to be carried in here; it cannot be reached from
+                # the graph state. `doc_id` was missing, which made a degraded
+                # contextualization attributable to a clause but not to a document, and
+                # `clause_id` alone does not disambiguate under concurrent ingestion.
+                "doc_id": state.doc_id,
                 "segment": segment.model_dump(),
                 "contract_metadata": metadata.model_dump(),
                 "source": parsed.source,
@@ -215,6 +222,11 @@ def make_contextualize_chunk_node(
     async def contextualize_chunk_node(state: dict[str, Any]) -> dict[str, object]:
         segment: ClauseSegment = ClauseSegment.model_validate(state["segment"])
         metadata: ContractMetadata = ContractMetadata.model_validate(state["contract_metadata"])
+        # Bound before the `try`, and with `.get`, for the reason A5 is about: a
+        # handler must not introduce a new raise site of its own. A missing key here
+        # would turn a recoverable contextualization failure into a `KeyError` that
+        # replaces the original diagnostic — the precise shape A5 set out to remove.
+        doc_id: str = state.get("doc_id", "")
         preamble: str = _build_preamble(segment, metadata)
         payload = serialize_to_toon(
             {
@@ -234,10 +246,16 @@ def make_contextualize_chunk_node(
             )
             chunk: ContextualizedChunk = ContextualizedChunk.model_validate(result)
         except LangChainException as exc:
-            exc.add_note(f"clause_id={segment.clause_id}, operation=contextualize")
-            logger.bind(clause_id=segment.clause_id, error=str(exc)).warning(
-                "contextualize_failed_using_deterministic_preamble"
+            exc.add_note(
+                f"doc_id={doc_id}, clause_id={segment.clause_id}, "
+                f"chunk_index={segment.chunk_index}, operation=contextualize"
             )
+            logger.bind(
+                doc_id=doc_id,
+                clause_id=segment.clause_id,
+                chunk_index=segment.chunk_index,
+                error=str(exc),
+            ).warning("contextualize_failed_using_deterministic_preamble")
             chunk: ContextualizedChunk = ContextualizedChunk(
                 clause_id=segment.clause_id,
                 chunk_index=segment.chunk_index,

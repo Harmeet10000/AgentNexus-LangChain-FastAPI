@@ -19,8 +19,9 @@ from app.features.search.constants import (
 )
 from app.shared.result import ConflictAppError, InfrastructureAppError, NotFoundAppError
 from app.utils import ErrorCode
+from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 
-from .model import UnifiedChunk, UnifiedDocument
+from .model import CHUNK_EMBEDDING_DIM, UnifiedChunk, UnifiedDocument
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -217,9 +218,73 @@ class DocumentRepository:
             },
         )
 
+    @staticmethod
+    def _reject_width_mismatch(rows: list[dict[str, Any]]) -> InfrastructureAppError | None:
+        """Refuse a chunk batch whose vectors are not the width this relation stores.
+
+        Returns the error rather than raising it because the caller returns
+        ``AppResult`` — the raising half of the same guard lives in
+        ``utils/embedding.assert_stored_width_matches_configured`` for the offline
+        batch paths that have no ``Result`` to put a failure into.
+
+        Two distinct conditions, in the order they can occur:
+
+        1. **Declared width against configured width.** Tautological in production
+           today, because ``UnifiedChunk.embedding`` derives its width from
+           ``EMBEDDING_DIMENSION`` when the class body runs. It is *not*
+           tautological the moment configuration is reloaded after import, and it
+           is the condition the N6 stub test drives — there are zero stored
+           vectors, so the only honest way to exercise a stored-width mismatch is
+           to move the configured value out from under a column already built.
+        2. **Row width against declared width.** This is the one that fires in
+           practice: a caller hands vectors from a model of a different shape.
+           Refusing here rather than letting psycopg reject the INSERT is what
+           turns an opaque driver error deep in a batch into a diagnostic that
+           names the relation, both widths, and the remedy.
+        """
+        stored_dim = CHUNK_EMBEDDING_DIM
+
+        mismatch = stored_width_mismatch(stored_dim)
+        if mismatch is not None:
+            stored, expected = mismatch
+            return InfrastructureAppError(
+                code="EMBEDDING_WIDTH_MISMATCH",
+                message=width_mismatch_detail(stored, expected, relation="chunks.embedding"),
+                details={"stored_dim": stored, "configured_dim": expected},
+                # `retryable` defaults to True on this error, which would be wrong
+                # here in a way that costs real money: a Celery task retrying a
+                # width disagreement spins until its ceiling against a condition
+                # that only a re-embedding run can change.
+                retryable=False,
+                source="document_repository",
+            )
+
+        for index, row in enumerate(iterable=rows):
+            embedding = row.get("embedding")
+            if embedding is None:
+                continue
+            actual = len(embedding)
+            if actual != stored_dim:
+                return InfrastructureAppError(
+                    code="EMBEDDING_WIDTH_MISMATCH",
+                    message=(
+                        f"chunk at index {index} carries a {actual}-dimensional vector but "
+                        f"chunks.embedding stores {stored_dim}; the batch is refused rather "
+                        f"than partially written. Re-embed with the configured model."
+                    ),
+                    details={"row_index": index, "row_dim": actual, "stored_dim": stored_dim},
+                    retryable=False,
+                    source="document_repository",
+                )
+
+        return None
+
     async def upsert_chunks(self, rows: list[dict[str, Any]]) -> AppResult[None]:
         if not rows:
             return Success(inner_value=None)
+        width_error = self._reject_width_mismatch(rows)
+        if width_error is not None:
+            return Failure(inner_value=width_error)
         try:
             statement: Insert = insert(table=UnifiedChunk).values(rows)
             statement: Insert = statement.on_conflict_do_update(
