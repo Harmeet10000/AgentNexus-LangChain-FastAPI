@@ -330,7 +330,9 @@ except SQLAlchemyError as exc:
 and also need to check where to put log_expected_failure(error, operation=operation) in the final one
 also need to check how exactly error msg should be written. should it be string message, StringEnum or something else. need to chec the best practice.
 need to standardise w\hat happens in except block
- 
+ 223. need to make standardise alembic file naming scheme
+ 224. fix this def _celery_meters() -> tuple[Any, Any, Any]:
+    global _otel_celery_meters  # noqa: PLW0603 — module-level lazy init
 ```
 summarise these chapters in great detail and take video's transcript as reference for summarising
 

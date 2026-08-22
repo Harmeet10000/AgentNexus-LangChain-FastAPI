@@ -55,7 +55,22 @@ def mock_token_claims():
 
 @pytest.fixture
 async def ws_security_service(redis, mock_settings):
-    return await build_websocket_security_service(redis, mock_settings)
+    """Build WebSocketSecurityService with mocked rate limiters to avoid background tasks."""
+    from unittest.mock import MagicMock, patch
+
+    # Create mock limiters BEFORE building service
+    mock_user_limiter = MagicMock()
+    mock_user_limiter.try_acquire = MagicMock()
+
+    mock_connection_limiter = MagicMock()
+    mock_connection_limiter.try_acquire = MagicMock()
+
+    # Patch Limiter class to return mocks
+    with patch('app.features.auth.websocket_security.Limiter') as MockLimiter:
+        MockLimiter.side_effect = [mock_user_limiter, mock_connection_limiter]
+        service = await build_websocket_security_service(redis, mock_settings)
+
+    return service
 
 
 @pytest.fixture
@@ -74,7 +89,7 @@ def ws_security_context(mock_token_claims):
 class TestBugCondition1SessionRevocationGap:
     """
     Property 1.1: Session Revocation Gap (P0)
-    
+
     Bug Condition: WHEN a user's session is revoked via AuthService.revoke_session()
                    THEN the system does NOT close live WebSocket connections
     """
@@ -88,7 +103,7 @@ class TestBugCondition1SessionRevocationGap:
         """Demonstrates that revoked sessions are detected by pull-based check."""
         # GIVEN a registered WebSocket connection
         await ws_security_service.register_connection(ws_security_context)
-        
+
         # AND a session record exists in Redis
         token_repo = RefreshTokenRepository(redis)
         session_data = SessionData(
@@ -101,7 +116,7 @@ class TestBugCondition1SessionRevocationGap:
         )
         result = await token_repo.store_session(session_data)
         assert isinstance(result, Success)
-        
+
         # WHEN the session is revoked
         revoke_result = await token_repo.revoke_session(
             session_id=ws_security_context.session_id,
@@ -109,10 +124,10 @@ class TestBugCondition1SessionRevocationGap:
             reason="logout",
         )
         assert isinstance(revoke_result, Success)
-        
+
         # THEN the WebSocket connection should be detected as revoked
         ws_security_service._token_repo = token_repo
-        
+
         # This should raise WebSocketSessionRevokedError on fixed code
         with pytest.raises(WebSocketSessionRevokedError):
             await ws_security_service._check_session_validity(
@@ -124,7 +139,7 @@ class TestBugCondition1SessionRevocationGap:
 class TestBugCondition2JWTExpiryIgnored:
     """
     Property 1.2: JWT Expiry Ignored (P0)
-    
+
     Demonstrates that expired JWT tokens are detected on next session check.
     """
 
@@ -137,9 +152,9 @@ class TestBugCondition2JWTExpiryIgnored:
         # GIVEN a session that has expired
         expired_session_id = "expired-session"
         user_id = "user-expired"
-        
+
         token_repo = RefreshTokenRepository(redis)
-        
+
         # Create a session that expires immediately
         session_data = SessionData(
             session_id=expired_session_id,
@@ -150,10 +165,10 @@ class TestBugCondition2JWTExpiryIgnored:
             ttl=1,  # TTL of 1 second
         )
         await token_repo.store_session(session_data)
-        
+
         # WHEN we wait for session to expire
         await asyncio.sleep(2)
-        
+
         # AND check session validity
         ws_security_service._token_repo = token_repo
         context = WebSocketSecurityContext(
@@ -165,7 +180,7 @@ class TestBugCondition2JWTExpiryIgnored:
             user_rate_limit_key=f"user:{user_id}",
             connection_rate_limit_key=f"connection:{uuid4()}",
         )
-        
+
         # THEN expired session should be detected
         with pytest.raises(WebSocketSessionRevokedError):
             await ws_security_service._check_session_validity(
@@ -177,7 +192,7 @@ class TestBugCondition2JWTExpiryIgnored:
 class TestBugCondition3TOCTOUCapacityOverflow:
     """
     Property 1.3: TOCTOU Capacity Overflow (P0)
-    
+
     Demonstrates that TOCTOU race condition is fixed with atomic operations.
     """
 
@@ -190,7 +205,7 @@ class TestBugCondition3TOCTOUCapacityOverflow:
         """Capacity limit should be enforced atomically."""
         user_id = "user-capacity-test"
         max_connections = 3
-        
+
         # WHEN attempting to exceed capacity
         connection_tasks = []
         for i in range(4):
@@ -204,7 +219,7 @@ class TestBugCondition3TOCTOUCapacityOverflow:
                 connection_rate_limit_key=f"connection:conn-{i}",
             )
             connection_tasks.append((context, i))
-        
+
         # Attempt all 4 simultaneously
         successful = 0
         for context, idx in connection_tasks:
@@ -214,7 +229,7 @@ class TestBugCondition3TOCTOUCapacityOverflow:
                 successful += 1
             except Exception:
                 pass  # Expected to fail after max
-        
+
         # THEN final count should not exceed capacity
         final_count = await ws_security_service.get_active_connection_count(user_id)
         assert final_count <= max_connections, (
@@ -225,7 +240,7 @@ class TestBugCondition3TOCTOUCapacityOverflow:
 class TestBugCondition4RateLimiterBypass:
     """
     Property 1.4: Rate Limiter Bypass (P1)
-    
+
     Demonstrates that direct rate limiter calls enforce limits correctly.
     """
 
@@ -236,10 +251,10 @@ class TestBugCondition4RateLimiterBypass:
     ):
         """Rate limiting should enforce message rate limits."""
         user_message_rate = ws_security_service._settings.WEBSOCKET_USER_MESSAGE_RATE
-        
+
         accepted = 0
         rejected = 0
-        
+
         # Try to send more than the rate limit
         for i in range(user_message_rate + 5):
             try:
@@ -247,7 +262,7 @@ class TestBugCondition4RateLimiterBypass:
                 accepted += 1
             except WebSocketRateLimitExceededError:
                 rejected += 1
-        
+
         # THEN exactly user_message_rate should be accepted
         assert accepted == user_message_rate, (
             f"Expected {user_message_rate} accepted, got {accepted}"
@@ -258,7 +273,7 @@ class TestBugCondition4RateLimiterBypass:
 class TestBugCondition5SessionConnectionsSetRead:
     """
     Property 1.5: Sorted Set is Now Read
-    
+
     Demonstrates that ws:session:{session_id} sorted set is actually used.
     """
 
@@ -271,19 +286,17 @@ class TestBugCondition5SessionConnectionsSetRead:
         """Session sorted set should be readable for revocation."""
         # GIVEN a registered connection
         await ws_security_service.register_connection(ws_security_context)
-        
+
         # VERIFY the session sorted set is populated and readable
         session_key = f"ws:session:{ws_security_context.session_id}"
         connection_ids = await cast("any", redis).zrange(session_key, 0, -1)
-        
+
         assert ws_security_context.connection_id in connection_ids, (
             "Session presence sorted set should contain the connection ID"
         )
-        
+
         # WHEN we look up connections for a session (as revoke would)
         found_connections = await cast("any", redis).zrange(session_key, 0, -1)
-        
+
         # THEN we should find the connections
-        assert len(found_connections) > 0, (
-            "Session connections should be findable via sorted set"
-        )
+        assert len(found_connections) > 0, "Session connections should be findable via sorted set"

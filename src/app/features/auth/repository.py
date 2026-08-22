@@ -88,7 +88,7 @@ async def _do_find_or_create_oauth_user(
 
 class UserRepository:
     def __init__(self, db: AsyncIOMotorDatabase[Any]) -> None:
-        self._db = db  # retained for raw Motor queries when needed
+        self._db: AsyncIOMotorDatabase[Any] = db  # retained for raw Motor queries when needed
 
     @staticmethod
     async def find_by_id(user_id: str) -> AppResult[User | None]:

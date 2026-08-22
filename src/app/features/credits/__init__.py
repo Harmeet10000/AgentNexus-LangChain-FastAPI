@@ -13,29 +13,27 @@ from app.features.credits.dto.credit_dto import (
     CreditRecord,
 )
 from app.features.credits.dto.response import (
-    CreditBalanceResponseEnvelope,
-    CreditConsumptionResultEnvelope,
-    CreditGrantResponseEnvelope,
-    CreditHistoryResponseEnvelope,
+    CreditBalanceApiResponse,
+    CreditConsumptionApiResponse,
+    CreditGrantApiResponse,
+    CreditHistoryApiResponse,
 )
 from app.features.credits.models import CreditConsumption, CreditStatus, CreditType, UserCredit
 
 __all__ = [
     "ConsumedCredit",
     "ConsumptionRecord",
+    "CreditBalanceApiResponse",
     "CreditBalanceResponse",
+    "CreditConsumptionApiResponse",
     "CreditConsumptionResult",
-    "CreditConsumption",
+    "CreditGrantApiResponse",
     "CreditGrantDTO",
     "CreditGrantResponse",
+    "CreditHistoryApiResponse",
     "CreditHistoryResponse",
     "CreditRecord",
     "CreditStatus",
     "CreditType",
     "UserCredit",
-    # Response envelopes
-    "CreditBalanceResponseEnvelope",
-    "CreditConsumptionResultEnvelope",
-    "CreditGrantResponseEnvelope",
-    "CreditHistoryResponseEnvelope",
 ]

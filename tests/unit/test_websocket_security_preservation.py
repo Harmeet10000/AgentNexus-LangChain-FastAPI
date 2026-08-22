@@ -31,7 +31,22 @@ def mock_settings():
 
 @pytest.fixture
 async def ws_security_service(redis, mock_settings):
-    return await build_websocket_security_service(redis, mock_settings)
+    """Build WebSocketSecurityService with mocked rate limiters to avoid background tasks."""
+    from unittest.mock import MagicMock, patch
+
+    # Create mock limiters BEFORE building service
+    mock_user_limiter = MagicMock()
+    mock_user_limiter.try_acquire = MagicMock()
+
+    mock_connection_limiter = MagicMock()
+    mock_connection_limiter.try_acquire = MagicMock()
+
+    # Patch Limiter class to return mocks
+    with patch('app.features.auth.websocket_security.Limiter') as MockLimiter:
+        MockLimiter.side_effect = [mock_user_limiter, mock_connection_limiter]
+        service = await build_websocket_security_service(redis, mock_settings)
+
+    return service
 
 
 @pytest.fixture
@@ -71,7 +86,7 @@ class TestPreservation1ValidConnections:
         """Valid connections should register without issues."""
         # WHEN a valid connection is registered
         await ws_security_service.register_connection(valid_context)
-        
+
         # THEN it should appear in Redis user sorted set
         user_key = f"ws:user:{valid_context.user_id}"
         user_conns = await redis.zrange(user_key, 0, -1)
@@ -86,10 +101,10 @@ class TestPreservation1ValidConnections:
         """Valid connections should unregister without issues."""
         # GIVEN a registered connection
         await ws_security_service.register_connection(valid_context)
-        
+
         # WHEN unregistered
         await ws_security_service.unregister_connection(valid_context)
-        
+
         # THEN it should be removed from Redis
         user_key = f"ws:user:{valid_context.user_id}"
         user_conns = await redis.zrange(user_key, 0, -1)
@@ -108,15 +123,15 @@ class TestPreservation2PresenceUpdates:
         """Touch should update presence scores."""
         # GIVEN a registered connection
         await ws_security_service.register_connection(valid_context)
-        
+
         # Get initial score
         user_key = f"ws:user:{valid_context.user_id}"
         initial_score = await redis.zscore(user_key, valid_context.connection_id)
-        
+
         # WHEN touched
         await asyncio.sleep(0.1)
         await ws_security_service.touch_connection(valid_context)
-        
+
         # THEN score should be updated (unless throttled)
         # Note: throttle is 30s, so this may not update immediately
         # But subsequent calls after 30s should update
@@ -135,7 +150,7 @@ class TestPreservation3RateLimitingNormalTraffic:
         """Connection capacity should be enforced."""
         user_id = "user-capacity-preserve"
         max_conns = mock_settings.WEBSOCKET_MAX_CONNECTIONS_PER_USER
-        
+
         # Register max connections
         for i in range(max_conns):
             context = WebSocketSecurityContext(
@@ -148,7 +163,7 @@ class TestPreservation3RateLimitingNormalTraffic:
                 connection_rate_limit_key=f"connection:conn-{i}",
             )
             await ws_security_service.register_connection(context)
-        
+
         # Try to exceed limit
         over_context = WebSocketSecurityContext(
             claims=valid_token_claims,
@@ -159,7 +174,7 @@ class TestPreservation3RateLimitingNormalTraffic:
             user_rate_limit_key=f"user:{user_id}",
             connection_rate_limit_key="connection:over",
         )
-        
+
         # Should raise exception
         with pytest.raises(WebSocketException):
             await ws_security_service.ensure_connection_capacity(user_id)
@@ -171,14 +186,14 @@ class TestPreservation4OriginValidation:
     def test_invalid_origin_rejected(self, ws_security_service, mock_settings):
         """Invalid origins should still be rejected."""
         mock_settings.WEBSOCKET_ALLOWED_ORIGINS = ["https://allowed.com"]
-        
+
         with pytest.raises(WebSocketException, match="Origin not allowed"):
             ws_security_service.ensure_origin_allowed("https://malicious.com")
 
     def test_valid_origin_allowed(self, ws_security_service, mock_settings):
         """Valid origins should be allowed."""
         mock_settings.WEBSOCKET_ALLOWED_ORIGINS = ["https://allowed.com"]
-        
+
         # Should not raise
         ws_security_service.ensure_origin_allowed("https://allowed.com")
 
@@ -195,7 +210,7 @@ class TestPreservation5AtomicCapacityCheck:
         """Capacity check should use atomic sorted set operations."""
         user_id = "user-atomic-test"
         max_conns = mock_settings.WEBSOCKET_MAX_CONNECTIONS_PER_USER
-        
+
         # Register connections up to capacity
         for i in range(max_conns):
             context = WebSocketSecurityContext(
@@ -208,7 +223,7 @@ class TestPreservation5AtomicCapacityCheck:
                 connection_rate_limit_key=f"connection:conn-{i}",
             )
             await ws_security_service.register_connection(context)
-        
+
         # Count should be accurate
         count = await ws_security_service.get_active_connection_count(user_id)
         assert count == max_conns

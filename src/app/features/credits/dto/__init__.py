@@ -1,11 +1,11 @@
 """Credits DTOs module.
 
- DTOs for user credit operations.
+DTOs for user credit operations.
 """
 
 from app.features.credits.dto.consumption_dto import (
-    CreditConsumptionResult,
     ConsumedCredit,
+    CreditConsumptionResult,
 )
 from app.features.credits.dto.credit_dto import (
     CreditBalanceResponse,
@@ -15,10 +15,10 @@ from app.features.credits.dto.credit_dto import (
 )
 
 __all__ = [
+    "ConsumedCredit",
     "CreditBalanceResponse",
     "CreditConsumptionResult",
     "CreditGrantDTO",
     "CreditGrantResponse",
     "CreditHistoryResponse",
-    "ConsumedCredit",
 ]

@@ -12,18 +12,25 @@ from .api import v1_router, v2_router
 from .config import get_settings
 from .lifecycle import lifespan
 from .middleware import (
+    ALL_PROBES,
+    ApiDeprecationMiddleware,
     RequestStateLoggingMiddleware,
     build_fastapi_guard_config,
+    default_span_details,
     get_metrics,
     global_exception_handler,
 )
-from .middleware.api_versioning import ApiDeprecationMiddleware
-from .middleware.health_check import ALL_PROBES
-from .middleware.otel import default_span_details
 from .shared.langchain_layer import configure_langsmith
 from .shared.otel import setup_otel
-from .utils import APIResponse, ErrorCode, http_error, logger
-from .utils.response_type import DependencyHealth, HealthResponse, HealthStatus
+from .utils import (
+    APIResponse,
+    DependencyHealth,
+    ErrorCode,
+    HealthResponse,
+    HealthStatus,
+    http_error,
+    logger,
+)
 
 if TYPE_CHECKING:
     from typing import Literal

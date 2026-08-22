@@ -57,9 +57,16 @@ from .json_serializer import (
     to_sorted_key_bytes,
 )
 from .logger import execution_path, logger, request_state, trace_layer
-from .response_type import APIResponse, DependencyHealth, ErrorDetail, RequestMeta
+from .response_type import (
+    APIResponse,
+    DependencyHealth,
+    ErrorDetail,
+    HealthResponse,
+    HealthStatus,
+    RequestMeta,
+)
 
-__all__ = [
+__all__ = [  # noqa: RUF022
     "APIException",
     "APIFeatures",
     "APIResponse",
@@ -79,6 +86,8 @@ __all__ = [
     "TooManyRequestsException",
     "UnauthorizedException",
     "ValidationException",
+    "HealthResponse",
+    "HealthStatus",
     "execution_path",
     "from_json",
     "from_json_float_list",

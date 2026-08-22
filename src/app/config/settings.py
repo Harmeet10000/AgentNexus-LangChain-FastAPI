@@ -188,6 +188,23 @@ class Settings(BaseSettings):
     CELERY_CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = Field(default=5)
     CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT: int = Field(default=60)
 
+    # --- Credit System ---
+    CREDIT_EXPIRATION_CRON_HOUR: int = Field(
+        default=3, description="Hour of day for credit expiration job (0-23)"
+    )
+    CREDIT_EXPIRATION_CRON_MINUTE: int = Field(
+        default=0, description="Minute of day for credit expiration job (0-59)"
+    )
+    CREDIT_RECONCILIATION_CRON_HOUR: int = Field(
+        default=4, description="Hour of day for credit reconciliation job (0-23)"
+    )
+    CREDIT_RECONCILIATION_CRON_MINUTE: int = Field(
+        default=0, description="Minute of day for credit reconciliation job (0-59)"
+    )
+    CREDIT_RECONCILIATION_CRON_DAY_OF_WEEK: str = Field(
+        default="0", description="Day of week for reconciliation (0=Sunday)"
+    )
+
     # --- Google Gemini API ---
     GEMINI_API_KEY: SecretStr = Field(default=SecretStr(""))
     GEMINI_FLASH_MODEL: str = Field(default="gemini-3.1-flash")
