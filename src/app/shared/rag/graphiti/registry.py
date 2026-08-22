@@ -8,7 +8,7 @@ can get their tools at compile time — never at node execution time.
 
 Lifespan wiring (in src/app/lifecycle/lifespan.py):
     from app.shared.rag.graphiti.registry import ToolRegistry, build_tool_registry
-    from app.shared.agents.tools.idempotency import IdempotencyGuard
+    from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
 
     idempotency_guard = IdempotencyGuard(
         redis=app.state.redis,
