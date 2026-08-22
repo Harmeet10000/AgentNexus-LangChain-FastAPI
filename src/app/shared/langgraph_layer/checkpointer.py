@@ -1,14 +1,19 @@
 """
 Async PostgreSQL checkpointer for LangGraph persistence.
 
-Uses the existing PostgreSQL connection from app.connections.postgres.
+Points at the same database as app.connections.postgres, through its accessor.
 
 Lifespan wiring:
     from src/app/lifecycle/lifespan.py
     checkpointer = await setup_langgraph_checkpointer(
-        conn_string=settings.POSTGRES_URL,
+        conn_string=get_database_url(flavour="plain"),
     )
     app.state.langgraph_checkpointer = checkpointer
+
+`AsyncPostgresSaver` is backed by psycopg, which parses libpq DSNs: it rejects
+SQLAlchemy's ``postgresql+asyncpg://`` dialect scheme. Pass the *plain* flavour, never
+the async one, and never `settings.POSTGRES_URL` -- that value carries no credential
+until the accessor injects one.
 
 Dependency injection:
     from src/app/features/agent_saul/dependencies.py
@@ -37,7 +42,9 @@ async def setup_langgraph_checkpointer(conn_string: str) -> AsyncPostgresSaver:
     reusing the same PostgreSQL database as the app.
 
     Args:
-        conn_string: Async PostgreSQL connection string (postgresql+asyncpg://...)
+        conn_string: Plain libpq connection string (``postgresql://...``) carrying a
+            credential -- `get_database_url(flavour="plain")`. psycopg cannot parse
+            SQLAlchemy's ``postgresql+asyncpg://`` scheme.
 
     Returns:
         Initialized AsyncPostgresSaver ready for use.

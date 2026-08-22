@@ -29,6 +29,16 @@ class OutboxRelay:
         *,
         session_factory: async_sessionmaker[AsyncSession],
     ) -> None:
+        """Store the relay's collaborators.
+
+        Args:
+            database_url: A plain libpq DSN, as returned by
+                `get_database_url(flavour="plain")`. `asyncpg.connect` cannot parse a
+                SQLAlchemy dialect scheme, so the URL is used verbatim rather than
+                repaired here.
+            celery_app: Celery application used to publish events.
+            session_factory: Async session factory for the outbox tables.
+        """
         self._database_url = database_url
         self._celery_app = celery_app
         self._session_factory = session_factory
@@ -69,9 +79,8 @@ class OutboxRelay:
     async def run_listener(self) -> None:
         """Long-running listen loop. Subscribe to outbox_channel, handle notifications."""
         try:
-            dsn = self._database_url.replace("+asyncpg", "")
             listener = asyncpg_listen.NotificationListener(
-                connect=lambda: asyncpg.connect(dsn=dsn),
+                connect=lambda: asyncpg.connect(dsn=self._database_url),
             )
             await listener.run(
                 handler_per_channel={"outbox_channel": self._handle_notification},

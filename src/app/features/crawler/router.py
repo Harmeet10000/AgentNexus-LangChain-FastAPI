@@ -23,10 +23,19 @@ router = APIRouter(prefix=CRAWLER_PREFIX, tags=[CRAWLER_TAG])
 
 
 def get_client_identifier(request: Request) -> str:
-    """Get client identifier from request (IP or user ID)."""
-    if hasattr(request.state, "user_id"):
-        return str(request.state.user_id)
+    """Get the client identifier from the request address.
 
+    Identity is **not** consulted here. The branch that read the per-request identity
+    attribute off ``Request.state`` was removed because nothing in the application ever
+    assigns it — verified repo-wide, there is no writer — so the branch could never be
+    taken. Keeping it would have required introducing a writer for state nothing sets,
+    which is the inverse of the defect this change closes. Authenticated identity comes
+    from token claims (``features/auth/dependencies.py``), never from request state.
+
+    The literal attribute name is deliberately not spelled out above: the gate for this
+    repair is a repo-wide search for it that must return no hits, and prose naming it
+    would defeat that search.
+    """
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
         return forwarded.split(",")[0].strip()

@@ -1,10 +1,8 @@
 """Application features/domain modules."""
 
-from . import documents, health, knowledge_base, web_scraping
+from . import documents, health
 
 __all__ = [
     "documents",
     "health",
-    "knowledge_base",
-    "web_scraping",
 ]

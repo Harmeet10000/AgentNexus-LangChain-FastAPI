@@ -6,7 +6,12 @@ from app.features.auth import (
     verify_password,
 )
 from app.shared.services.storage import StorageService
-from app.utils import ConflictException, UnauthorizedException, logger
+from app.utils import (
+    ConflictException,
+    ServiceUnavailableException,
+    UnauthorizedException,
+    logger,
+)
 
 from .dto import AvatarResponse, UpdateProfileRequest
 
@@ -16,7 +21,7 @@ class ProfileService:
         self,
         user_repo: UserRepository,
         token_repo: RefreshTokenRepository,
-        storage: StorageService,
+        storage: StorageService | None,
     ) -> None:
         self._user_repo = user_repo
         self._token_repo = token_repo
@@ -72,8 +77,14 @@ class ProfileService:
         file_data: bytes,
         content_type: str,
     ) -> AvatarResponse:
+        # Startup publishes object_store as None when S3 access cannot be verified,
+        # so answer 503 here instead of raising AttributeError on a None client.
+        storage = self._storage
+        if storage is None:
+            raise ServiceUnavailableException(detail="Object storage is not configured")
+
         # StorageService validates type and size — raises ValidationException if invalid
-        public_url = await self._storage.upload_avatar(  # ty: ignore[unresolved-attribute]
+        public_url = await storage.upload_avatar(  # ty: ignore[unresolved-attribute]
             user_id=str(user.id),
             data=file_data,
             content_type=content_type,
@@ -85,10 +96,10 @@ class ProfileService:
         user.avatar_url = public_url
         await self._user_repo.save(user)
 
-        if old_avatar and self._storage.public_url:
+        if old_avatar and storage.public_url:
             # Extract key from old URL and delete asynchronously
-            old_key = old_avatar.removeprefix(self._storage.public_url + "/")
-            await self._storage.delete_object(key=old_key)
+            old_key = old_avatar.removeprefix(storage.public_url + "/")
+            await storage.delete_object(key=old_key)
 
         logger.bind(user_id=str(user.id)).info("Avatar uploaded")
         return AvatarResponse(avatar_url=public_url)

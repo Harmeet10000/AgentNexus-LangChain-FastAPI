@@ -25,6 +25,7 @@ class HealthChecksDTO(BaseModel):
     redis: dict[str, Any]
     postgres: dict[str, Any]
     neo4j: dict[str, Any]
+    graphiti: dict[str, Any]
     celery: dict[str, Any]
     memory: dict[str, Any]
     disk: dict[str, Any]
