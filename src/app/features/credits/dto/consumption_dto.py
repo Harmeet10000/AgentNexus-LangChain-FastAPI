@@ -1,7 +1,5 @@
 """DTOs for credit consumption operations."""
 
-from decimal import Decimal
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -26,9 +24,7 @@ class CreditConsumptionResult(BaseModel):
         serialization_alias="cashDueRupees",
         description="Remaining amount to be charged in rupees (for convenience)",
     )
-    credits_consumed: list["ConsumedCredit"] = Field(
-        serialization_alias="creditsConsumed"
-    )
+    credits_consumed: list["ConsumedCredit"] = Field(serialization_alias="creditsConsumed")
     invoice_paid_in_full: bool = Field(
         serialization_alias="invoicePaidInFull",
         description="True if invoice is fully covered by credit",

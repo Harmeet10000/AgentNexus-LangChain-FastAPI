@@ -66,13 +66,14 @@ class CreditGrantDTO(BaseModel):
 
     @field_validator("metadata_")
     @classmethod
-    def validate_admin_grant_metadata(cls, v: dict[str, Any]) -> dict[str, Any]:
-        """Validate ADMIN_GRANT has admin_user_id in metadata.
-        
-        NOTE: This validator checks if credit_type is ADMIN_GRANT and validates metadata.
-        Since validators run in arbitrary order, we check both the credit_type and
-        the presence of admin_user_id in metadata.
-        """
+    def validate_admin_grant_metadata(cls, v: dict[str, Any], info) -> dict[str, Any]:
+        """Validate ADMIN_GRANT has admin_user_id in metadata."""
+        credit_type = info.data.get("credit_type")
+        if credit_type == "admin_grant" and "admin_user_id" not in v:
+            raise ValidationException(
+                detail="ADMIN_GRANT requires admin_user_id in metadata",
+                error_code="CREDIT_METADATA_MISSING",
+            )
         return v
 
 

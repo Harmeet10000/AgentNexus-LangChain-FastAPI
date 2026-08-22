@@ -3,6 +3,9 @@
 from fastapi import APIRouter
 
 from app.api.strict_envelope import StrictEnvelopeAPIRouter
+from app.features.auth.router import router as auth_router
+from app.features.credits.routers.credit_admin_router import router as credit_admin_router
+from app.features.credits.routers.credit_internal_router import router as credit_internal_router
 from app.features.dunning.router import router as dunning_router
 from app.features.health.router import router as health_router
 from app.features.invoices.router import router as invoices_router
@@ -19,10 +22,12 @@ for _router in (
     invoices_router,
     webhooks_router,
     dunning_router,
+    credit_admin_router,
+    credit_internal_router,
 ):
     billing_router.include_router(_router)
 
 v2_router = StrictEnvelopeAPIRouter(prefix="/api/v2")
-# v2_router.include_router(auth_router)
+v2_router.include_router(auth_router)
 v2_router.include_router(health_router)
 v2_router.include_router(billing_router)

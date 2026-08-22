@@ -344,6 +344,166 @@ Recommended workflow:
 - Add circuit breaker when the task depends on a service that may become slow or unavailable.
 - Use both idempotency and circuit breaker for expensive external operations.
 
+## ReliabilitySystem
+
+`ReliabilitySystem` is a unified base class that wraps circuit breaker and idempotency checks. It delegates to the functional helpers in `celery_reliability.py`.
+
+```python
+from app.connections.celery import ResilientTask
+from app.connections.celery_reliability import ReliabilitySystem
+
+@celery_app.task(name="tasks.sync_to_crm", bind=True, base=ResilientTask)
+def sync_to_crm(self, customer_id: str) -> dict[str, str]:
+    system = ReliabilitySystem(
+        self.get_redis_client(),
+        circuit_breaker_name="crm-api",
+        failure_threshold=3,
+        recovery_timeout_seconds=60,
+    )
+
+    system.check_circuit_breaker()
+
+    try:
+        result = push_to_crm(customer_id)
+        system.record_success()
+        return result
+    except Exception:
+        system.record_failure()
+        raise
+```
+
+Check idempotency status before executing:
+
+```python
+status = system.get_idempotency_status("customer:123:sync")
+if status == "completed":
+    return {"status": "already-processed"}
+```
+
+## IdempotencyManager
+
+`idempotency_manager` is an async context manager that automates lock acquisition, completion marking, and failure handling.
+
+```python
+import asyncio
+from app.connections.celery_reliability import idempotency_manager
+
+async def process_payment(payment_id: str, redis_client) -> dict[str, str]:
+    async with idempotency_manager(
+        redis_client,
+        f"payment:{payment_id}:capture",
+        task_id="task-123",
+        retryable_exceptions=(TimeoutError, ConnectionError),
+    ):
+        # Task logic here
+        await charge_payment(payment_id)
+        return {"status": "charged", "payment_id": payment_id}
+```
+
+On normal exit: record marked as `completed`.
+On retryable exception: processing lock released (Celery retry can re-acquire).
+On non-retryable exception: record marked as `failed_permanent`.
+
+## RateLimiter
+
+`RateLimiter` provides sliding-window rate limiting with configuration embedded in Redis keys.
+
+```python
+import asyncio
+from app.connections.celery_reliability import RateLimiter
+
+async def rate_limited_task(redis_client) -> dict[str, str]:
+    limiter = RateLimiter(
+        redis_client,
+        scope="api:process-document",
+        rate=10,
+        period_seconds=60,
+        burst=15,
+    )
+
+    result = await limiter.check_and_increment(
+        forwarded_for="203.0.113.50, 70.41.3.18",
+        direct_ip="70.41.3.18",
+    )
+
+    if not result.allowed:
+        raise Exception(f"Rate limit exceeded. Retry after {result.reset_at}")
+
+    return {"status": "ok", "remaining": result.remaining}
+```
+
+The Redis key format is `celery:ratelimit:{scope}:rate={rate}:period={period}:burst={burst}`, so rate limit state is self-documenting in Redis.
+
+IP-based rate limiting with proxy trust:
+
+```python
+limiter = RateLimiter(
+    redis_client,
+    scope="api:user-endpoints",
+    rate=100,
+    period_seconds=60,
+)
+# Client IP extracted from X-Forwarded-For using FASTAPI_GUARD_TRUSTED_PROXY_DEPTH
+result = await limiter.check_and_increment(
+    forwarded_for=request.headers.get("x-forwarded-for"),
+    direct_ip=request.client.host,
+)
+```
+
+## Combined Usage Example
+
+```python
+import asyncio
+from app.connections.celery import ResilientTask
+from app.connections.celery_reliability import (
+    RateLimiter,
+    ReliabilitySystem,
+    idempotency_manager,
+)
+
+
+@celery_app.task(name="tasks.process_document", bind=True, base=ResilientTask)
+def process_document(self, doc_id: str, idempotency_key: str) -> dict[str, str]:
+    redis = self.get_redis_client()
+
+    system = ReliabilitySystem(
+        redis,
+        circuit_breaker_name="document-processor",
+    )
+    system.check_circuit_breaker()
+
+    loop = asyncio.new_event_loop()
+
+    async def _run():
+        async with idempotency_manager(
+            redis,
+            idempotency_key,
+            task_id=self.request.id,
+            retryable_exceptions=(TimeoutError, ConnectionError),
+        ):
+            limiter = RateLimiter(
+                redis,
+                scope=f"process_doc:{doc_id}",
+                rate=5,
+                period_seconds=60,
+            )
+            rate_result = await limiter.check_and_increment(direct_ip="127.0.0.1")
+            if not rate_result.allowed:
+                raise Exception("Rate limit exceeded for document processing")
+
+            return {"status": "processed", "doc_id": doc_id}
+
+    try:
+        result = loop.run_until_complete(_run())
+        system.record_success()
+        return result
+    except Exception:
+        system.record_failure()
+        raise
+    finally:
+        loop.close()
+```
+
 ## Suggested File Pattern
 
 Keep real task modules small:

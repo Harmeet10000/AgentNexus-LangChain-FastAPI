@@ -20,9 +20,7 @@ from typing import Any, cast
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from app.utils.exceptions import DatabaseException
-from app.utils.json_serializer import from_json, to_json_str
-from app.utils.logger import logger
+from app.utils import DatabaseException, from_json, logger, to_json_str
 
 type CacheKeyPart = str | int
 type CacheKey = CacheKeyPart | list[CacheKeyPart]

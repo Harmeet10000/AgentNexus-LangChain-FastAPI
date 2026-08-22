@@ -18,11 +18,9 @@ Then: uv run alembic revision --autogenerate -m "add_memory_schema"
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any  # noqa: TC003
+from datetime import datetime  # noqa: TC003
+from typing import Any  # noqa: TC003
 from uuid import uuid4
-
-if TYPE_CHECKING:
-    from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -46,9 +44,6 @@ from sqlalchemy.orm import (  # noqa: TC002 — Mapped, mapped_column used at ru
 )
 
 from database.base import Base
-
-if TYPE_CHECKING:
-    from datetime import datetime
 
 
 class Entity(Base):

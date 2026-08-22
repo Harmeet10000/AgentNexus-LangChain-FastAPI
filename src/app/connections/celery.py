@@ -193,6 +193,7 @@ def create_celery_app() -> Celery:
             "tasks.example",
             "tasks.search_tasks",
             "tasks.billing_tasks",
+            "tasks.credit_tasks",
         ],
     )
 
@@ -272,6 +273,21 @@ def create_celery_app() -> Celery:
             "billing-reconciliation-daily": {
                 "task": "billing.reconciliation",
                 "schedule": crontab(hour=2, minute=0),
+            },
+            "credits-expire-daily": {
+                "task": "credits.expire",
+                "schedule": crontab(
+                    hour=settings.CREDIT_EXPIRATION_CRON_HOUR,
+                    minute=settings.CREDIT_EXPIRATION_CRON_MINUTE,
+                ),
+            },
+            "credits-reconcile-weekly": {
+                "task": "credits.reconcile",
+                "schedule": crontab(
+                    hour=settings.CREDIT_RECONCILIATION_CRON_HOUR,
+                    minute=settings.CREDIT_RECONCILIATION_CRON_MINUTE,
+                    day_of_week=settings.CREDIT_RECONCILIATION_CRON_DAY_OF_WEEK,
+                ),
             },
         },
     )

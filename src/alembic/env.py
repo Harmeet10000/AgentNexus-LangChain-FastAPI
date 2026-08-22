@@ -6,8 +6,8 @@ from sqlalchemy.engine import Connection
 from alembic import context
 
 # Import database initialization function
-from app.connections.postgres import init_db
-from app.utils.logger import logger
+from app.connections import init_db
+from app.utils import logger
 from database import Base
 
 # Import all models to register with Base.metadata
@@ -21,7 +21,6 @@ if config.config_file_name is not None:
 
 # Import all models here for autogenerate support
 import app.features.audit.model  # noqa: F401, E402 — registers model with Base.metadata for Alembic autogenerate
-import app.features.credits.models  # noqa: F401, E402 — registers models with Base.metadata for Alembic autogenerate
 import app.features.invoices.invoice_batch  # noqa: F401, E402
 import app.features.invoices.invoice_void  # noqa: F401, E402
 import app.features.invoices.model  # noqa: F401, E402

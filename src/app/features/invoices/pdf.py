@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 from fpdf import FPDF
 
 if TYPE_CHECKING:
-    from app.features.invoices.model import Invoice
-    from app.features.invoices.receipt import PaymentReceipt
+    from .model import Invoice
+    from .receipt import PaymentReceipt
 
 
 def _header(pdf: FPDF, title: str, number: str) -> None:
