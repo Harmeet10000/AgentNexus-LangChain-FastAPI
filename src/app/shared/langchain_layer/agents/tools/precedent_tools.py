@@ -18,9 +18,10 @@ from typing import TYPE_CHECKING
 
 from langchain_core.tools import tool
 
-from app.shared.agents.memory.memory_scope import PRECEDENT_SCOPE
-from app.shared.agents.tools.idempotency import IdempotencyGuard, ToolResult
 from app.utils import logger
+
+from ..memory.memory_scope import PRECEDENT_SCOPE
+from .idempotency import IdempotencyGuard, ToolResult
 
 if TYPE_CHECKING:
     from typing import Any
@@ -77,12 +78,12 @@ def make_hybrid_retrieve_precedents_tool(
         log = logger.bind(tool="hybrid_retrieve_precedents", user_id=user_id)
         scope = PRECEDENT_SCOPE
 
-        idem_key = IdempotencyGuard.make_key(  # ty: ignore[unresolved-attribute]
+        idem_key = IdempotencyGuard.make_key(
             step_id=step_id,
             input_data={"query": query, "user_id": user_id, "num_results": num_results},
             user_id=user_id,
         )
-        cached = await idempotency.get(idem_key)  # ty: ignore[unresolved-attribute]
+        cached = await idempotency.get(idem_key)
         if cached is not None:
             log.debug("precedent_hybrid_cache_hit")
             return cached.model_dump()
@@ -100,7 +101,7 @@ def make_hybrid_retrieve_precedents_tool(
         graphiti_results = await graphiti_service.search_for_precedent_chains(
             query=query,
             user_id=user_id,
-            num_results=scope.top_k,  # ty: ignore[unresolved-attribute]
+            num_results=scope.top_k,
         )
 
         # Layer 3: Subgraph expansion from Graphiti seed entities
@@ -112,7 +113,7 @@ def make_hybrid_retrieve_precedents_tool(
             group_ids=group_ids,
         )
 
-        result = ToolResult.ok(  # ty: ignore[unresolved-attribute]
+        result = ToolResult.ok(
             data={
                 "vector_clauses": vector_results[:num_results],
                 "graphiti_precedents": [
@@ -132,7 +133,7 @@ def make_hybrid_retrieve_precedents_tool(
             tool="hybrid_retrieve_precedents",
         )
 
-        await idempotency.set(  # ty: ignore[unresolved-attribute]
+        await idempotency.set(
             key=idem_key,
             result=result,
             tool_name="hybrid_retrieve_precedents",
@@ -185,18 +186,18 @@ def make_detect_graph_conflicts_tool(
             step_id: Plan step ID
         """
         log = logger.bind(tool="detect_graph_conflicts", doc_id=doc_id)
-        idem_key = IdempotencyGuard.make_key(  # ty: ignore[unresolved-attribute]
+        idem_key = IdempotencyGuard.make_key(
             step_id=step_id,
             input_data={"doc_id": doc_id},
             user_id=user_id,
         )
-        cached = await idempotency.get(idem_key)  # ty: ignore[unresolved-attribute]
+        cached = await idempotency.get(idem_key)
         if cached is not None:
             return cached.model_dump()
 
         conflicts = await subgraph_expander.detect_conflicts(group_ids=[user_id, doc_id])  # ty: ignore[unresolved-attribute]
 
-        result = ToolResult.ok(  # ty: ignore[unresolved-attribute]
+        result = ToolResult.ok(
             data={
                 "conflicts": conflicts,
                 "conflict_count": len(conflicts),
@@ -204,7 +205,7 @@ def make_detect_graph_conflicts_tool(
             },
             tool="detect_graph_conflicts",
         )
-        await idempotency.set(  # ty: ignore[unresolved-attribute]
+        await idempotency.set(
             key=idem_key,
             result=result,
             tool_name="detect_graph_conflicts",
