@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
+from fastapi.testclient import TestClient
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from typing import Any
 
 # The root tests/conftest.py stubs heavy/cyclic modules with MagicMock so unit
 # tests stay import-light. The real app needs the real modules, so drop the
@@ -45,8 +49,8 @@ def client() -> Iterator[Any]:
     for name in _STUBBED_MODULES:
         sys.modules.pop(name, None)
 
-    from app.main import create_app
-    from fastapi.testclient import TestClient
+    # app.main must be imported only after the stubs above are popped.
+    from app.main import create_app  # noqa: PLC0415
 
     app = create_app()
     with TestClient(app) as test_client:
