@@ -75,7 +75,7 @@ that is a command you can run — no step is complete because someone read it an
 Capture on a clean tree, before the first edit. The commit SHA is not bookkeeping — step 9's red-before proof scans
 that tree, and step 13 diffs its route set.
 
-- [ ] Capture test summary, collection summary, lint count, type-diagnostic count, formatter check, the mounted
+- [x] Capture test summary, collection summary, lint count, type-diagnostic count, formatter check, the mounted
       route set, and the pre-change SHA.
 
 **Proof**
@@ -96,13 +96,23 @@ wc -l /tmp/c2-baseline/*
 
 Passes when every file is non-empty and `sha.txt` holds the commit the change starts from.
 
+**Corrected 2026-08-23 — the route enumerator in this Proof is a false green, and step 13 diffs against it.** The
+one-line comprehension over `app.routes` reports **8** paths for an application that mounts **87**. FastAPI 0.140
+does not flatten an included router into the parent's `routes` list; it leaves an `_IncludedRouter` object whose own
+`.routes` holds the children, so a shallow set comprehension sees the top-level handful and stops. The failure is
+silent in the worst way: `routes.txt` is non-empty, so this step's own pass condition is satisfied, and step 13's
+`diff` then compares two truncated files and reports them identical. Both baseline and after-state were re-captured
+with `/tmp/enum_routes.py`, which recurses through `_IncludedRouter` and carries an `assert paths` line so an empty
+enumeration fails loudly instead of diffing two empty files. `ROUTES=87`, and step 13's diff is clean against the
+corrected baseline.
+
 ## 2. Create the unified feature's constants module
 
 Carries the retrieval constants plus the two load-bearing identifier names, and drops the superseded index-name
 constant. The names exist **for the gate to assert against**, not to interpolate into SQL — Decision 10 rejects
 interpolation, so the literals stay literals in query text and the constants are what the gate compares them to.
 
-- [ ] Add `src/app/features/documents/constants.py`.
+- [x] Add `src/app/features/documents/constants.py`.
 
 **Proof**
 
@@ -122,7 +132,7 @@ print('constants ok')"
 The global conftest imports **twenty-one** symbols from the module being deleted, at module level, so relocation and
 deletion cannot share a step. The shim makes both import paths resolve until step 10 removes it.
 
-- [ ] Move `chunking.py`, `fusion.py`, `rag.py` into `src/app/features/documents/`; leave re-export shims at the old
+- [x] Move `chunking.py`, `fusion.py`, `rag.py` into `src/app/features/documents/`; leave re-export shims at the old
       paths. The embedding client stays in `search/` — it is change 1's unification target.
 
 **Proof**
@@ -140,9 +150,24 @@ diff /tmp/c2-baseline/collect.txt <(uv run pytest --collect-only -q 2>&1 | tail 
 The identity assertion is the point: a shim that re-exports a *copy* would let the conftest and the feature diverge
 silently.
 
+**Amended 2026-08-23 — the shim was never necessary, and the second half of this Proof cannot pass.**
+
+The step's premise is that `tests/conftest.py` imports twenty-one symbols from the package at module level, so a
+missing symbol there is a collection error for every test in the repository. The count is right and the mechanism is
+right. What was never checked is whether anything *used* them: **no fixture in that file referenced a single one of
+the twenty-one**. They were dead imports. Whether imports are used is a different question from whether they exist,
+and only the first one constrains a move — so the three shims bought nothing, and step 10 removed them along with
+the relocations in one commit. The lesson is written into `tests/conftest.py` at the site where the imports were,
+because that is where the next person will go looking for the reason.
+
+`diff /tmp/c2-baseline/collect.txt <(...)` can never succeed regardless of the change. `pytest --collect-only -q`
+ends its last two lines with its own elapsed time, so the captured and the live text differ on a wall-clock reading
+that has nothing to do with collection. The comparison has to be on the count alone —
+`rg -o '[0-9]+ tests? collected'` — or on `rg -ci error` returning `0`, which is what step 10's Proof uses.
+
 ## 4. Flip the unified feature's imports off the superseded feature
 
-- [ ] Repoint `documents/dto.py`, `documents/service.py`, `documents/repository.py` at the relocated helpers and the
+- [x] Repoint `documents/dto.py`, `documents/service.py`, `documents/repository.py` at the relocated helpers and the
       new constants module.
 
 **Proof**
@@ -160,15 +185,60 @@ The hybrid node calls `legal_rrf_search`, which reads `FROM clauses` — a table
 filter and no verification filter (the graph's plan object forbids extra fields), and clear the residual untyped
 attribute in the same module.
 
-- [ ] Retarget `src/app/shared/langgraph_layer/retrieval_kb/nodes.py`.
+**Amended 2026-08-23 — the Proof cannot pass, the "untyped attribute" is already gone, and the retarget is not the
+pure translation this step implies.** Measured at `e9c78db`, before any edit:
+
+- **`legal_rrf_search` is the method name on _both_ repositories** — `features/search/repository.py:308` and
+  `features/documents/repository.py:552`. This step is a *repository* swap, not a new query and not a rename. So the
+  Proof's `rg -n 'legal_rrf_search|clauses' …; test $? -eq 1` can never return `1`: the call at `:191` and the retry
+  `label="postgres_legal_rrf_search"` at `:203` both survive by construction, and satisfying the assertion as written
+  would mean renaming a method `documents/service.py` also calls. The `clauses` half of the pattern *is* reachable —
+  its only four matches in the package are module docstrings (`nodes.py:1`, `state.py:1`, `graph.py:1`, `graph.py:36`)
+  — but ORing it with a term that cannot go to zero makes the whole assertion dead. Note that `clause_type` does not
+  contain the substring `clauses`; the surviving column and DTO field are not what this grep is about.
+- **There is no untyped attribute left in `nodes.py`.** `:172` already read `repo: SearchRepository` — something
+  typed it before this step was reached. The four remaining `Any` annotations in the module (`query_llm`,
+  `graphiti`, `grader_llm`, `generator_llm`) are change 1's LLM seams, not this step's, and are parameters rather
+  than attributes. The genuinely untyped one is **`graph.py:31`, `repo: Any`, a different module — and it must stay
+  `Any` through this step.** `search/service.py:263` passes a `SearchRepository` into it; narrowing it to
+  `DocumentRepository` now turns `ty` red for a caller **step 10** deletes. That `Any` is what keeps the retarget
+  type-clean in the interim, which is worth knowing before someone "finishes the job" here.
+
+**Three things the retarget changes that this step's one-line description does not mention.** None is optional — the
+unified signature has no defaults for them — and none should be read as a cleanup an executor may skip:
+
+| Argument | Why it appears now |
+|---|---|
+| `user_id=state["user_id"]` | Not a translation of an old argument. The reader being replaced had **no tenant predicate at all** — `FROM clauses c` filtered on nothing, and the only thing keeping results in-tenant was the caller never passing another user's chunk ids. The unified query scopes on the parent document's owner. This step closes a cross-tenant read. |
+| `document_ids=state.get("doc_ids_filter") or None` | The one filter the old reader accepted from the request and then dropped. `doc_ids_filter` reached the analyzer prompt (`nodes.py:101`), the Graphiti `group_ids` (`:150`) and the answer cache key (`:123`, `:309`) — never the SQL. Writing `document_ids=None` here would bake that gap in deliberately. |
+| `clause_type=None`, `require_graphiti_verified=False` | The step text's "pass no clause filter and no verification filter" is right about the intent and silent about the mechanics: both are required keyword arguments with no defaults, so they must be passed **by name**. Doing so also records that the omission is a property of `QueryPlan`'s `extra="forbid"`, not an oversight at the call site. |
+
+`_row_to_chunk` needs no edit, and that is worth asserting rather than assuming: the unified query aliases
+`c.content AS chunk_text` and `c.document_id::text AS parent_doc_id`, so all eight columns the mapper reads keep the
+names the old query gave them. The two extra columns the unified query returns — `quality_warnings` and
+`graphiti_verified` — are ignored by the mapper, which is why the retarget needs no DTO change.
+
+- [x] Retarget `src/app/shared/langgraph_layer/retrieval_kb/nodes.py`.
+- [x] Retire the four `clauses` docstrings in the package; leave `clause_type` alone — it is a live column.
 
 **Proof**
 
 ```bash
-rg -n 'legal_rrf_search|clauses' src/app/shared/langgraph_layer/retrieval_kb/; test $? -eq 1 && echo "no clause reader left"
+# The half of the original pattern that can actually reach zero.
+rg -n 'clauses' src/app/shared/langgraph_layer/retrieval_kb/; test $? -eq 1 && echo "no clause reader left"
+
+# What the original pattern was reaching for, expressed as the edge it actually cares about:
+# which repository the node is typed against. `legal_rrf_search` stays — both repositories define it.
+rg -n 'features\.search' src/app/shared/langgraph_layer/retrieval_kb/; test $? -eq 1 && echo "search package severed"
+rg -n 'DocumentRepository' src/app/shared/langgraph_layer/retrieval_kb/nodes.py
+
 uv run python -c "import app.shared.langgraph_layer.retrieval_kb.nodes; print('imports')"
 uv run ty check src/ 2>&1 | tail -2   # <= /tmp/c2-baseline/ty.txt
 ```
+
+The `features\.search` grep is the load-bearing one, and it is a `TYPE_CHECKING` import — so it is invisible to the
+`python -c` line beside it and is caught only by `ty`. That is the same blind spot step 10 documents for this exact
+line; resolving it here is what lets step 10's third bullet find nothing left to do.
 
 ## 6. Retarget the one remaining phantom-index literal in the ingestion graph
 
@@ -194,7 +264,7 @@ Corrected below to assert what this step owns — that the ingestion module's li
 `clauses_bm25_idx` survives *in that module*. The repo-wide zero-reader assertion is what **step 11** is for, and it
 runs after the deletion that makes it true.
 
-- [ ] Change that literal to `chunks_bm25_idx`. It stays a literal — Decision 10 forbids interpolating the constant.
+- [x] Change that literal to `chunks_bm25_idx`. It stays a literal — Decision 10 forbids interpolating the constant.
 
 **Proof**
 
@@ -219,15 +289,34 @@ raises returns `200` with a result silently fused from two modes. That is what
 question: fail loudly is the ruling, and this change owns it. **An empty result from a healthy branch is not a
 failure** and must keep degrading gracefully — that distinction is the whole content of this step.
 
-- [ ] In `documents/service.py`, propagate a branch `Failure` as the failure of the whole retrieval call, naming the
+- [x] In `documents/service.py`, propagate a branch `Failure` as the failure of the whole retrieval call, naming the
       branch that failed. Keep the empty-success path fusing normally.
+
+**Amended 2026-08-23 — this step had an unnamed prerequisite, and the new test is what exposed it.**
+`shared/result/logging.py:10` called `execution_path.get()` with **no default**. `execution_path` is a `ContextVar`
+set at exactly one place, `middleware/server_middleware.py:55`, so a bare `.get()` raises `LookupError` anywhere
+outside an HTTP request — Celery tasks, LangGraph nodes, CLI entry points, and every unit test. `log_expected_failure`
+has 46 callers and most are not request-scoped. The consequence is specific and nasty: on the new failure path the
+caller's real error was **replaced** by an unrelated `LookupError`, so the branch was never named and the fix this step
+exists to make was silently undone at the moment it fired. Fixed at source with `.get([])`, which is not a judgement
+call — `middleware/global_exception_handler.py:54,148` already used exactly that default and already carried a comment
+describing it as load-bearing. This instance was simply missed.
+
+Two things worth carrying forward. First, **`log_expected_failure` sat on the error path of a `Failure` this step
+introduced, so the defect was reachable only after the step's own change** — it is not pre-existing breakage this step
+inherited, and it is not this step's own bug either. Second, the parametrised naming test earned its keep immediately:
+`zip(..., strict=True)` catches a length mismatch and is completely blind to a *reordering*, so the pairing between
+`_SEARCH_BRANCHES` and `asyncio.gather`'s positional results needs a per-branch assertion, not a comment.
 
 **Proof**
 
 ```bash
 rg -n 'row_sets\.append\(\[\]\)' src/app/features/documents/service.py; test $? -eq 1 && echo "degrade path gone"
+rg -n 'execution_path\.get\(\)' src/; test $? -eq 1 && echo "no defaultless ContextVar read survives"
 uv run pytest tests/unit/documents/test_hybrid_search_failure.py -q 2>&1 | tail -3
 ```
+
+Measured: `degrade path gone`, `no defaultless ContextVar read survives`, `7 passed`.
 
 The test carries both halves, and neither is optional: a stub repository whose keyword branch returns `Failure` and
 whose other two return `Success([])` makes the service return a `Failure` naming the branch; a stub whose three
@@ -241,7 +330,38 @@ creates, or that a migration creates on a table no migration creates. It must ne
 requires the failure not depend on a reachable database. Expose it as both a pytest test and a `python -m` CLI
 taking a source root and a migrations root, so step 9 can point it at another tree.
 
-- [ ] Add the gate module and `tests/unit/test_schema_identifier_gate.py`.
+- [x] Add the gate module and `tests/unit/test_schema_identifier_gate.py`.
+
+**Amended 2026-08-23 — the gate's first run produced a false positive, and the shape of it is the lesson.** It
+reported `MISSING_CREATOR uq_subscriptions_user_plan_active` at `subscriptions/model.py:49` — a report
+*indistinguishable in form* from the real defect the gate hunts. Verified against migration history before being
+believed, and `0004_subscriptions_allow_resubscribe.py:28-29` does create it:
+
+```python
+op.execute(
+    f"CREATE UNIQUE INDEX uq_subscriptions_user_plan_active "
+    f"ON subscriptions (user_id, plan_id) "
+```
+
+**Implicit string concatenation defeats text-scanning of migrations.** Between the index name and its `ON` clause the
+*file text* holds a closing quote, a newline, indentation, a string prefix and an opening quote. No `\s+` crosses that,
+so the creation is missed and a live index reads as uncreated. Fixed with `_LITERAL_GLUE` — `[\"']\s*[rbfRBF]{0,2}[\"']`
+— collapsing inter-literal glue before matching. A comma between two literals is *not* whitespace, so genuinely
+separate strings in a list or call argument are left alone. The case is kept as a regression fixture,
+`test_a_creation_split_across_concatenated_literals_is_still_found`. Findings went 2 → 1.
+
+Generalisation, now written into the module's own comments: **a gate's own defects read as findings, so a new report
+from a new gate is a claim to verify against migration history before it is a claim about the schema.**
+
+**Two design decisions the plan did not specify, recorded because both are load-bearing.** `_index` and `_key` are
+deliberately **not** suffix triggers: `chunk_index` is a column appearing in nearly every query in the retrieval path
+and `idempotency_key` is a column appearing as a mapping key in the outbox code, so either as a trigger buries the real
+findings under dozens of false ones. Nothing is lost — the one identifier here ending in `_index`,
+`uq_chunks_document_chunk_index`, is caught by its `uq_` prefix. And matching is **case-sensitive**: identifiers in this
+repository are lowercase, and folding case starts matching Python constant names such as those in
+`features/documents/constants.py` without adding a single real detection. Docstrings are excluded as prose — a gate
+that fails on explanatory writing teaches people to stop writing it — but an **unparsable** file is *reported*, not
+skipped, because a file the gate cannot see is a hole in the gate.
 
 **Proof**
 
@@ -250,6 +370,9 @@ uv run pytest tests/unit/test_schema_identifier_gate.py -q 2>&1 | tail -3
 rg -n 'sqlalchemy|asyncpg|psycopg|create_engine|get_session' src/app/utils/schema_identifier_gate.py; test $? -eq 1 \
   && echo "gate imports no database machinery"
 ```
+
+Measured: `9 passed`, `gate imports no database machinery`. Note the proof's own constraint: this module must never
+contain any of those five words, in code *or* in a comment, or the grep matches its own documentation.
 
 The unit test asserts the gate on **synthetic fixtures**, not on the live tree, which is what makes it a regression
 guard rather than a snapshot of today: an index named in query text with no creating migration is reported; an index
@@ -262,7 +385,30 @@ promised.
 
 Red-before is not decoration — without it the gate is a snapshot that would have passed on the broken tree too.
 
-- [ ] Run the gate against the pre-change tree and the current tree.
+- [x] Run the gate against the pre-change tree and the current tree.
+
+**Amended 2026-08-23 — the pre side was exactly right; the post expectation belongs to step 10, not here.** Measured
+against the worktree at `ae14ba4ce9a388722f51fa508fe333ff7e8603f0`:
+
+| Side | Exit | `clauses_bm25_idx` reader locations |
+|---|---|---|
+| pre | `1` | **two** — `/tmp/c2-pre/src/app/features/search/repository.py:324` and `/tmp/c2-pre/src/app/shared/langgraph_layer/ingestion_kb/nodes.py:773` |
+| post | `1` | **one** — `src/app/features/search/repository.py:324` |
+
+The prediction about the pre side held in every particular, **including "one identifier, not three"** —
+`search_chunks_bm25_idx` and `uq_search_chunks_document_chunk_index` are green because `8a7d9b1c2e3f` creates both on
+`search_chunks`, which it also creates. The gate was not built database-aware.
+
+But "post exit is `0` and names nothing" is **unreachable at this step's position**. The one surviving reader is
+`search/repository.py`, and that file is deleted by **step 10**. Step 9 retargets the *ingestion* literal; it never
+claimed the search repository. So the honest assertion here is `post exit=1` with the reader count falling 2 → 1, and
+the `exit=0` assertion moves to step 10's proof, where the file it depends on is actually gone. This is the **third**
+instance in this document of an assertion about a later step's outcome placed in an earlier step — step 6's Proof and
+step 5's Proof were the first two — which is a drafting pattern worth naming rather than three coincidences.
+
+**A note on granularity.** The gate reports **one** location for `search/repository.py` (`:324`), not the three an
+earlier amendment counted at `:356,361,362`. All three `to_bm25query` occurrences live inside a single multi-line
+string literal, and `ast` gives the literal's `lineno`. That is the honest unit: **literal sites, not match offsets.**
 
 **Proof**
 
@@ -273,23 +419,16 @@ uv run python -m app.utils.schema_identifier_gate src src/alembic/versions;     
 git worktree remove /tmp/c2-pre --force
 ```
 
-Expected, and the counts are the assertion: `pre exit` is non-zero and names **`clauses_bm25_idx` at two reader
-locations** — `features/search/repository.py` and `shared/langgraph_layer/ingestion_kb/nodes.py`. `post exit` is `0`
-and names nothing.
-
-**One identifier, not three.** Under the gate's own rule, `search_chunks_bm25_idx` and
-`uq_search_chunks_document_chunk_index` are **green**: `8a7d9b1c2e3f` creates both of them on `search_chunks`, which
-that same revision creates at `:45`. Their real problem is that the revision was stamped and never applied, which is
-a live-database fact the spec forbids this gate from consulting and which belongs to change 0. If the gate reports
-three, it has been built database-aware and is wrong. Note also that the gate does **not** need a copy of itself
-inside the worktree — it takes paths, so the current tree's gate scans the old tree's source.
+Expected, and the counts are the assertion: `pre exit=1` naming `clauses_bm25_idx` at **two** reader locations;
+`post exit=1` naming it at **one**, the survivor step 10 deletes. Note the gate needs no copy of itself inside the
+worktree — it takes paths, so the current tree's gate scans the old tree's source.
 
 ## 10. Delete the schema-bound twin and rewrite the test surface in the same commit
 
 The single highest-risk moment in this change. The conftest is global, so one missing symbol is a collection error
 for **every** test in the repository, not just this feature's.
 
-- [ ] Delete the superseded models, repository, router, dependency layer, ingest service path, ingest DTOs, the
+- [x] Delete the superseded models, repository, router, dependency layer, ingest service path, ingest DTOs, the
       relocated modules' shims and the superseded constants module. Move the graph-backed ask path onto the document
       query service, **left unexposed by any router** — it holds the only caller of the retrieval graph builder,
       which is change 1's foundation, so deleting it would orphan the graph. Rewrite the global conftest, the
@@ -319,10 +458,10 @@ does not run `ty` — step 16 does, at the very end. So add `ty` to this step's 
 steps later. This generalises past this change: **a proof built from imports cannot verify an import that is
 declared not to happen.**
 
-- [ ] Delete `app.features.search.model` from both `src/alembic/env.py:18` and its entry at `:65`, in this commit.
-- [ ] Resolve `retrieval_kb/nodes.py:28` — the retrieval graph is change 1's and must keep type-checking.
-- [ ] Repoint `tests/unit/documents/test_vector_width_configured.py:27`.
-- [ ] Rewrite or delete `src/app/features/search/__init__.py`. As it stands it re-exports from `.chunking`,
+- [x] Delete `app.features.search.model` from both `src/alembic/env.py:18` and its entry at `:65`, in this commit.
+- [x] Resolve `retrieval_kb/nodes.py:28` — the retrieval graph is change 1's and must keep type-checking.
+- [x] Repoint `tests/unit/documents/test_vector_width_configured.py:27`.
+- [x] Rewrite or delete `src/app/features/search/__init__.py`. As it stands it re-exports from `.chunking`,
       `.constants`, `.fusion`, `.model`, `.rag` and `.router` — **six of the modules this step relocates or
       deletes** — so leaving it untouched is itself the repo-wide collection error this step's own preamble warns
       about. It is also what `tests/unit/search/test_{rag,chunking,fusion}.py` import through.
@@ -356,9 +495,91 @@ print('graph builder still has a caller')"
 would not distinguish "tests pass" from "tests were never collected". `alembic heads` is the cheapest command that
 forces `env.py` to import — it reads the revision files and touches no database.
 
+**Amended 2026-08-23 — three of this step's premises were false, and measuring them first shortened the work.**
+
+**The superseded router was never mounted.** Neither `api/v1.py` nor `api/v2.py` ever included it, so deleting
+`search/router.py` removed no HTTP route — which also means step 13's byte-identical route set was guaranteed before
+the first edit rather than earned by it. This is counterintuitive in the source and worth stating plainly:
+`POST /api/v1/search`, `/search/rag`, `/search/ask` and `/legal/ask` *are* live, but they are `documents/router.py`'s.
+The deleted package's endpoints read as live code and were unreachable in the running application.
+
+**`DocumentQueryService.ask` already existed**, so the "move the ask path" work this step describes was already done
+by step 4. What actually needed preserving was narrower and easy to miss: `search/service.py:ask_legal` was the only
+caller in the tree of change 1's `build_retrieval_graph`. Deleting the module without noticing would have orphaned
+change 1's foundation silently — the graph would still compile, still type-check, and never run. It survives as
+`DocumentQueryService.ask_via_retrieval_graph`, deliberately unrouted.
+
+**The twenty-one conftest imports were dead**, which retires step 3's entire shim rationale after the fact. See the
+amendment under step 3.
+
+**Steps 10 and 12 had to land in a single commit, and so did step 3's relocations.** `src/tasks/search_tasks.py`
+imports `search/service.py`, which imports `search/{rag,fusion,chunking}.py`. Any split leaves an intermediate commit
+where `src/tasks/__init__.py` will not import — which breaks `alembic`, Celery discovery and pytest collection at
+once. These are separate units of reasoning and one unit of landing.
+
+**A git mechanic worth knowing before repeating this.** `git rm src/app/features/search/chunking.py` failed with
+`pathspec ... did not match any files`. Step 3's relocation had been staged as a *rename*, so from the index's point
+of view the file already lived at its new path and the shim sitting at the old path was **untracked**. Plain `rm` for
+the three shims, `git rm` for the eight tracked modules. The final commit still records all three as `R` renames,
+which is what makes the diff readable.
+
+**`tests/integration/test_search.py` is deleted, not rewritten, and the cost is recorded rather than absorbed.** Its
+own header declared it stale against the Result-pattern service — it asserts on bare return values where the service
+returns `AppResult` — and it is `integration`-marked, therefore deselected by `addopts`. Rewriting meant authoring
+~320 lines of assertions that (a) still would not execute, needing live Postgres, Redis and Mongo, and (b) would
+replace a test that never ran with another test that never runs. Its fusion and RAG groups already have executing
+unit coverage in `tests/unit/documents/test_fusion.py` (5 tests) and `test_rag.py` (1 test). What is genuinely lost:
+the unified feature has **no integration test**, and `DocumentCommandService.upload_document` plus the three Redis
+caching helpers have **no direct test** of any kind. That is a gap this change creates and does not fill.
+
+**`ask_via_retrieval_graph` introduces duplication on purpose.** `documents/service.py` now holds two expressions of
+one behaviour: the compiled graph, and `ask`'s inline re-implementation of the same node sequence as module-level
+helpers (`_build_query_plan`, `_grade_context`, `_generate_answer`), which is the path the mounted router actually
+serves. The docstring says so and names the graph as the intended survivor. Collapsing them is a behavioural change
+to a live endpoint; this is a deletion step, so it is debt here rather than a fix.
+
+**Also landed here, ahead of step 15's own scope:** `retrieval_kb/nodes.py`'s hybrid node now passes `user_id` and
+`document_ids` to `legal_rrf_search`. Neither is a rename of an existing argument. The reader it replaces had **no
+tenant predicate at all** — every fused search read across all owners, held back only by the caller never passing
+another user's chunk ids — and it dropped `doc_ids_filter` before the SQL while still carrying it into the analyzer
+prompt, the Graphiti group ids and the answer cache key. `clause_type=None` and `require_graphiti_verified=False`
+are passed explicitly rather than defaulted, to record that the omission is a property of `QueryPlan` forbidding
+extra fields and not an oversight at the call site.
+
+**Proof**
+
+```bash
+ls src/app/features/search/     # expect: __init__.py alone (see the correction above)
+uv run pytest --collect-only -q 2>&1 | rg -ci 'error'   # expect 0
+uv run pytest -q 2>&1 | tail -3                          # vs the baseline: failures must not increase
+uv run ty check src/ 2>&1 | tail -2                      # the only gate that sees a dangling TYPE_CHECKING import
+uv run alembic heads 2>&1 | tail -2                      # env.py still imports; catches the metadata-tuple omission
+uv run python -c "
+from app.shared.langgraph_layer.retrieval_kb.graph import build_retrieval_graph
+from app.features.documents.service import DocumentQueryService
+assert hasattr(DocumentQueryService, 'ask_via_retrieval_graph'), 'the graph lost its only caller'
+print('graph builder still has a caller')"
+```
+
+`rg -ci 'error'` returning `0` on collection is the specific guard for this step; a green `pytest` summary alone
+would not distinguish "tests pass" from "tests were never collected". `alembic heads` is the cheapest command that
+forces `env.py` to import — it reads the revision files and touches no database.
+
+**Measured:** `ls` -> `__init__.py` alone; collection errors `0`; **317 passed, 36 deselected** against a baseline of
+`3 failed, 292 passed, 48 deselected, 9 errors`; `ty check src/` and `ruff check --no-cache src/` clean;
+`alembic heads` -> `b3e7c41d92af (head)`; all 7 Celery include targets import; `tests/unit/celery/` 67 passed.
+Two notes on those numbers so they are not read as more than they are. The 12 websocket failures and errors were
+fixed by concurrent work on those files, not by this change. `deselected` fell 48 -> 36 because
+`test_search.py`'s 12 integration tests are gone — a *deselected* count dropping is the arithmetic signature of
+deleting an integration file, and is the one number here that this step should be held responsible for.
+
+The original Proof's last assertion was `any('ask' in n for n in dir(...))`, which passes on `ask` alone and so
+cannot detect the exact regression the step is guarding against — an orphaned `build_retrieval_graph`. Replaced with
+`hasattr(..., 'ask_via_retrieval_graph')` above.
+
 ## 11. Assert no superseded search table survives outside frozen migration history
 
-- [ ] Confirm the deletion is complete at the identifier level, not just the file level.
+- [x] Confirm the deletion is complete at the identifier level, not just the file level.
 
 **Proof**
 
@@ -367,6 +588,29 @@ rg -n 'search_documents|search_chunks' src/ tests/ --glob '!src/alembic/**'; tes
 ```
 
 Scoped to the **search-specific** tables on purpose, matching the spec scenario's wording. `clauses`,
+`parent_documents` and `statutes` still have readers in the ingestion graph and `src/database/schemas/`; those are
+change 1's to retarget against the ADR, and this change deliberately touched only the one `clauses_bm25_idx` literal
+at step 6. Widening this grep would make it fail for work this change does not own.
+
+
+**Amended 2026-08-23 — the grep now matches only this change's own prose, which is the same defect class as step 5's
+Proof.** `rg -n 'search_documents|search_chunks' src/ tests/` returns four hits and every one is documentation:
+`search/__init__.py:3` and `documents/constants.py:11` explain what was consolidated away, and
+`test_vector_width_configured.py:78,80` name the two deleted tests in the comment that replaced them. A proof that
+greps for a name cannot survive documentation that uses that name — and writing a good tombstone is precisely what
+makes this proof fail. The two options are to stop naming the thing (worse for the next reader) or to scope the grep
+to code. Scoped to code:
+
+**Proof**
+
+```bash
+rg -n '(FROM|JOIN|INTO|UPDATE|TABLE)\s+search_(documents|chunks)|__tablename__\s*=\s*.(search_documents|search_chunks)' \
+   src/ tests/ --glob '!src/alembic/**'; test $? -eq 1 && echo "clean"
+```
+
+Measured: **clean**. This asks the question the step meant to ask — does any relation of that name get read, written
+or declared — rather than whether the string appears. Still scoped to the search-specific tables on purpose, matching
+the spec scenario's wording. `clauses`, 
 `parent_documents` and `statutes` still have readers in the ingestion graph and `src/database/schemas/`; those are
 change 1's to retarget against the ADR, and this change deliberately touched only the one `clauses_bm25_idx` literal
 at step 6. Widening this grep would make it fail for work this change does not own.
@@ -417,18 +661,40 @@ it by deleting the assertion.
 `TASK_DECLARING_MODULES`, so the route disappears with site 6. A reader who goes looking for a literal route in
 `celery.py` will correctly find none.
 
-- [ ] Delete all nine sites. Sites 5 and 7 must land in the same edit, or the application stops importing.
-- [ ] Update `tests/unit/celery/test_task_registration.py:53` to drop `SEARCH_INGEST` from the parametrize list and
+**Amended again 2026-08-23 — eight sites, not nine, and the Proof's grep has two separate false-positive sources.**
+
+**Site 8 does not exist.** `src/app/connections/celery_registry.py` is present and unmodified by this change, and
+`rg -i 'search'` over it returns **nothing**. There was never a registered payload model for this task; the amendment
+that enumerated nine sites inferred one from the shape of C9's registry rather than reading it. Eight sites were
+deleted and the application imports.
+
+**The Proof's grep collides with a local variable.** `rg -n 'search_ingest|search_tasks'` reports three hits in
+`src/app/shared/rag/rag_agent_advanced.py:124,138,141`, where `search_tasks` is a list of `asyncio` tasks passed to
+`gather` — an ordinary local name with no relationship to the Celery module. A bare identifier fragment is not a
+safe proof token when the fragment is also a plausible variable name; the corrected grep anchors on
+`tasks.search_tasks` / `from .search_tasks` / `import search_tasks` instead. (That file is band E's to relocate into
+`src/app/examples/`, which does not change the point.)
+
+**The remaining hit is this change's own tombstone.** `search/__init__.py:19` carries
+`| tasks.search_tasks.ingest_search_document | tasks.document_tasks.ingest_document |` in the was/is-now table, so it
+is excluded by glob rather than by rewording — a migration table that cannot name the old task name is useless.
+Same defect class as steps 5 and 11: documentation that explains a deletion defeats a grep that proves it.
+
+Measured with the anchored form: **no references**.
+
+- [x] Delete all nine sites. Sites 5 and 7 must land in the same edit, or the application stops importing.
+- [x] Update `tests/unit/celery/test_task_registration.py:53` to drop `SEARCH_INGEST` from the parametrize list and
       from its import — the symbol import, not a string, is what breaks.
-- [ ] Repoint or neutralise `tests/unit/test_outbox.py:34,48,68`, which use `"tasks.search_ingest"` as an outbox
+- [x] Repoint or neutralise `tests/unit/test_outbox.py:34,48,68`, which use `"tasks.search_ingest"` as an outbox
       `event_type` fixture. The tests are about the outbox, not about this task, so a live task name or an obviously
       synthetic one both work — but a dead name left in a fixture reads as a live dispatch path to the next reader.
 
 **Proof**
 
 ```bash
-# Both spellings, because the constant's value and its module mapping share no substring.
-rg -n 'search_ingest|search_tasks' src/ tests/ --glob '!src/alembic/**'; test $? -eq 1 && echo "no references"
+# Anchored spellings. The unanchored form collides with an ordinary local variable — see below.
+rg -n '(tasks\.search_ingest|tasks\.search_tasks|from \.search_tasks|import search_tasks|ingest_search_document|SEARCH_INGEST)' \
+   src/ tests/ --glob '!src/alembic/**' --glob '!**/search/__init__.py'; test $? -eq 1 && echo "no references"
 
 # The symbol-level check the grep above structurally cannot perform.
 uv run python -c "
@@ -456,7 +722,7 @@ matters most for *this* deletion, because it is the only check here that inspect
 The deleted router was never mounted, so the mounted route set must be **byte-identical** before and after — a
 stronger claim than "no new document paths", and cheaper to check.
 
-- [ ] Enumerate and diff.
+- [x] Enumerate and diff.
 
 **Proof**
 
@@ -482,8 +748,52 @@ claims.sub`, and `UserIdDep` is built from it — there is no `request.state` re
 carve-out is void: this change inherits a working authorization path rather than waiting on one, and the second
 scenario should be asserted rather than deferred.
 
-- [ ] Assert the second scenario too: an unauthenticated call to a mounted document route is refused with an
+- [x] Assert the second scenario too: an unauthenticated call to a mounted document route is refused with an
       authorization status, not a 500.
+
+**Amended 2026-08-23 — scenario 1 passes exactly as drafted; scenario 2 splits in two, and the half that does not
+pass is a finding rather than a failure.** Measured with the baseline's own enumerator, `/tmp/enum_routes.py`:
+`ROUTES=87`, `diff` clean, **`route set identical`**. The claim in this step's preamble is confirmed —
+`api/v1.py` and `api/v2.py` never included the search feature's router, so nothing was lost with it. Worth stating
+because it is counterintuitive in the source: `POST /api/v1/search`, `/search/rag`, `/search/ask` and `/legal/ask`
+*are* mounted, but they belong to `documents/router.py`, not to the deleted package. The search feature's own
+endpoints looked live in the source and were unreachable in the running app.
+
+Scenario 2, probed with `TestClient(app, raise_server_exceptions=False)` — that flag is load-bearing, since without
+it a 500 arrives as a re-raised traceback rather than as a response and the exact failure under test is invisible to
+an assertion on `status_code`:
+
+| Route | Unauthenticated status | Dependency set |
+|---|---|---|
+| `POST /api/v1/documents/upload` | **401** | `DocumentCommandServiceDep` |
+| `GET /api/v1/documents/{id}/status` | **401** | `DocumentCommandServiceDep` |
+| `POST /api/v1/search`, `/search/rag`, `/search/ask`, `/legal/ask` | **500** | `DocumentQueryServiceDep` |
+
+The scenario is therefore **proven for the command routes and not provable for the query routes in this
+environment**. The split is not arbitrary: `get_document_query_service` resolves `get_redis` and calls
+`_get_document_llm()`, and `get_document_command_service` does neither. With Redis unreachable the first raises; with
+Redis overridden by `fakeredis` the second raises `ImportError: Initializing ChatVertexAI requires the
+langchain-google-vertexai package`. Both are absences in this environment, not authorization defects.
+
+**But the reason the probe cannot isolate auth is itself worth reporting.** FastAPI resolves a path operation's
+dependencies as a set and surfaces whichever exception occurs first; a sibling dependency's failure is not deferred
+until the auth dependency has had its say. So `get_document_query_service` **eagerly constructs the model-provider
+client while the caller is still unauthenticated** — an unauthenticated request reaches `ChatVertexAI.__init__`, and
+when that raises, the 500 masks the 401 the request had already earned. That is a real ordering defect independent of
+which packages happen to be installed, and it is *not* fixed here: this is a proof step, and the fix is a lazily
+constructed LLM in `documents/dependencies.py`. Recorded for the follow-up list.
+
+**Proof**
+
+```bash
+uv run python /tmp/enum_routes.py > /tmp/c2-routes-after.txt
+diff /tmp/c2-baseline/routes.txt /tmp/c2-routes-after.txt && echo "route set identical"
+uv run python /tmp/probe_unauth.py   # 401 on both command routes; see the table above for the four query routes
+```
+
+Note the enumerator, not a one-line comprehension over `app.routes`. FastAPI 0.140 defers included routers behind
+`_IncludedRouter`, so the naive form reports **8** of the 87 paths and reports it as a clean pass. Its
+`assert paths` line is what makes an empty enumeration fail loudly instead of diffing two empty files.
 
 Assert the **status code only**, not the response body. The body shape is changing under a separate app-wide
 envelope fix (registering `APIException`, `RequestValidationError` and `StarletteHTTPException` against the
