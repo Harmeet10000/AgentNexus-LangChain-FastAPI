@@ -5,29 +5,29 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from graphiti_core.errors import GraphitiError
 from langchain_core.exceptions import LangChainException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
+from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text
 from app.shared.langgraph_layer.kb_retry import retry_immediate
-from app.utils import logger, normalize_embedding
+from app.utils import logger
 
 from .reranker import CrossEncoderReranker
 from .state import ContextGrade, GeneratedAnswer, QueryPlan, RetrievedChunk
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+    from typing import Any
 
     from redis.asyncio import Redis
 
     from app.features.search.repository import SearchRepository
 
     from .state import RetrievalState
-
-EmbeddingFunction = Any
 
 _QUERY_ANALYZER_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a legal retrieval query planning engine."),
@@ -170,12 +170,22 @@ def make_graph_retrieval_node(
 
 def make_hybrid_retrieval_node(
     repo: SearchRepository,
-    embedding_fn: EmbeddingFunction,
     redis: Redis | None,
 ) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
     async def hybrid_retrieval_node(state: RetrievalState) -> dict[str, object]:
         plan = state["query_plan"]
-        embedding = await _cached_embedding(redis, embedding_fn, plan.rewritten_query)
+        # `QUERY`, not `DOCUMENT`. This is the side of the asymmetry that was never declared:
+        # the prior helper passed no task type at all, so a query vector was drawn from the
+        # document projection and compared against stored vectors drawn from the same one.
+        # Mutually consistent, and both wrong — which is why nothing ever errored.
+        embedding = await retry_immediate(
+            lambda: embed_text(
+                plan.rewritten_query,
+                task_type=EmbeddingTaskType.QUERY,
+                redis=redis,
+            ),
+            label="gemini_query_embedding",
+        )
         chunk_ids = state.get("graph_chunk_ids") or None
         rows = await retry_immediate(
             lambda: repo.legal_rrf_search(
@@ -338,38 +348,6 @@ def _normalize_plan(plan: QueryPlan) -> QueryPlan:
     return plan.model_copy(
         update={"vector_weight": vector_weight, "keyword_weight": keyword_weight}
     )
-
-
-async def _cached_embedding(
-    redis: Redis | None,
-    embedding_fn: EmbeddingFunction,
-    text_to_embed: str,
-) -> list[float]:
-    key = "kb:embedding:" + hashlib.sha256(text_to_embed.encode("utf-8")).hexdigest()
-    if redis is not None:
-        cached = await redis.get(key)
-        if cached:
-            raw = str(cached)
-            return cast("list[float]", json.loads(raw))
-    embedding = await retry_immediate(
-        lambda: _call_embedding_fn(embedding_fn, text_to_embed),
-        label="gemini_query_embedding",
-    )
-    embedding = normalize_embedding(embedding)
-    if redis is not None:
-        await redis.setex(key, 60 * 60 * 24, json.dumps(embedding))
-    return embedding
-
-
-async def _call_embedding_fn(embedding_fn: EmbeddingFunction, text_to_embed: str) -> list[float]:
-    if hasattr(embedding_fn, "aembed_query"):
-        return cast("list[float]", await embedding_fn.aembed_query(text_to_embed))
-    if hasattr(embedding_fn, "ainvoke"):
-        return cast("list[float]", await embedding_fn.ainvoke(text_to_embed))
-    result = embedding_fn(text_to_embed)
-    if hasattr(result, "__await__"):
-        return cast("list[float]", await result)
-    return cast("list[float]", result)
 
 
 def _row_to_chunk(row: dict[str, Any]) -> RetrievedChunk:

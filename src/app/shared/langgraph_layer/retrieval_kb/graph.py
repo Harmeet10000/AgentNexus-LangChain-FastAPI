@@ -29,12 +29,17 @@ def build_retrieval_graph(
     *,
     llm: Any,
     repo: Any,
-    embedding_fn: Any,
     redis: Any = None,
     graphiti: Any = None,
     reranker: CrossEncoderReranker | None = None,
 ) -> CompiledStateGraph[Any]:
-    """Build a request-scoped retrieval graph over clauses."""
+    """Build a request-scoped retrieval graph over clauses.
+
+    There is deliberately no ``embedding_fn`` parameter. It was annotated ``Any``, which erased
+    the contract and forced the node to duck-type the injected object through three candidate
+    method names — two of which no caller ever exercised. The embedding path is now resolved
+    where it is used, so the client is process-wide and its task type is declared per call.
+    """
     query_llm = _structured(llm, QueryPlan)
     grader_llm = _structured(llm, ContextGrade)
     generator_llm = _structured(llm, GeneratedAnswer)
@@ -44,7 +49,7 @@ def build_retrieval_graph(
     graph.add_node("graph_neo4j", cast("Any", make_graph_retrieval_node(graphiti)))
     graph.add_node(
         "hybrid_postgres",
-        cast("Any", make_hybrid_retrieval_node(repo, embedding_fn, redis)),
+        cast("Any", make_hybrid_retrieval_node(repo, redis)),
     )
     graph.add_node("reranker", cast("Any", make_reranker_node(reranker)))
     graph.add_node("context_grader", cast("Any", make_context_grader_node(grader_llm)))

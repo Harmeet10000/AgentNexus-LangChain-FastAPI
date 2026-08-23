@@ -20,8 +20,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.shared.result import AppError  # noqa: TC001 - Pydantic resolves this field at runtime.
 
-EmbeddingFunction = Any
-
 
 class ClauseType(StrEnum):
     INDEMNITY = "indemnity"

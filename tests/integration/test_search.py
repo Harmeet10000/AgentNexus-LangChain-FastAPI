@@ -37,13 +37,13 @@ class TestSearchIngestion:
                 "app.features.search.service.SearchRepository",
                 return_value=repo,
             ),
-            patch(
-                "app.features.search.service.build_embedding_client"
-            ) as mock_embed,
+            patch("app.features.search.service.embed_texts") as mock_embed,
         ):
-            mock_embed.return_value.aembed_documents = AsyncMock(
-                side_effect=lambda texts, **kw: [[0.1] * 768 for _ in texts]
-            )
+            # Patched at the function, not at a client factory. `patch` returns an `AsyncMock`
+            # here because the target is an `async def`, so the `side_effect`'s return value is
+            # what the `await` yields — no `.return_value.aembed_documents` chain to keep in sync
+            # with the provider's method names.
+            mock_embed.side_effect = lambda texts, **kw: [[0.1] * 768 for _ in texts]
 
             session_mock = AsyncMock()
             result = await process_ingestion_document(
@@ -61,15 +61,16 @@ class TestSearchIngestion:
                 "app.features.search.service.SearchRepository",
                 return_value=MagicMock(),
             ),
-            patch(
-                "app.features.search.service.build_embedding_client"
-            ) as mock_embed,
+            patch("app.features.search.service.embed_texts") as mock_embed,
         ):
             session_mock = AsyncMock()
             result = await process_ingestion_document(
                 session=session_mock, document_id=DOC_UUID, content="     "
             )
             assert result["chunk_count"] == 0
+            # The point of the patch is that it is never reached: whitespace-only content must
+            # short-circuit before any provider call, not embed an empty batch.
+            mock_embed.assert_not_awaited()
 
     async def test_content_hash_dedup(self):
         from app.features.search.service import SearchService
@@ -94,13 +95,9 @@ class TestSearchIngestion:
                 "app.features.search.service.SearchRepository",
                 return_value=repo,
             ),
-            patch(
-                "app.features.search.service.build_embedding_client"
-            ) as mock_embed,
+            patch("app.features.search.service.embed_texts") as mock_embed,
         ):
-            mock_embed.return_value.aembed_documents = AsyncMock(
-                side_effect=lambda texts, **kw: [[0.1] * 768 for _ in texts]
-            )
+            mock_embed.side_effect = lambda texts, **kw: [[0.1] * 768 for _ in texts]
             session_mock = AsyncMock()
             result = await process_ingestion_document(
                 session=session_mock, document_id=DOC_UUID, content=corpus

@@ -21,10 +21,10 @@ from app.features.search import (
     RankedResultRow,
     SearchChunkRecord,
     assemble_rag_context,
-    build_embedding_client,
     reciprocal_rank_fusion,
 )
 from app.shared.langchain_layer import serialize_to_toon
+from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text, embed_texts
 from app.shared.langchain_layer.models import _build_chat_model
 from app.shared.langgraph_layer.kb_retry import retry_immediate
 from app.shared.langgraph_layer.retrieval_kb import (
@@ -42,10 +42,7 @@ from app.utils import (
     NotFoundException,
     ServiceUnavailableException,
     ValidationException,
-    from_json_float_list,
     logger,
-    normalize_embedding,
-    to_float_list_str,
     to_sorted_key_bytes,
 )
 
@@ -78,7 +75,6 @@ if TYPE_CHECKING:
 
     from graphiti_core.graphiti import Graphiti
     from langchain_core.language_models import BaseChatModel
-    from langchain_google_genai import GoogleGenerativeAIEmbeddings
     from redis.asyncio import Redis
     from ty_extensions import Unknown
 
@@ -266,9 +262,10 @@ class DocumentQueryService:
             else:
                 await self.redis.expire(lock_key, 15)
 
-        embedding_client: GoogleGenerativeAIEmbeddings = build_embedding_client()
-        query_embedding = await embedding_client.aembed_query(
-            payload.query, task_type="RETRIEVAL_QUERY"
+        query_embedding = await embed_text(
+            payload.query,
+            task_type=EmbeddingTaskType.QUERY,
+            redis=None if payload.bypass_cache else self.redis,
         )
         filter_params = build_search_filter_params(
             metadata_filter=payload.metadata_filter.model_dump()
@@ -409,8 +406,16 @@ class DocumentQueryService:
                 query=plan.rewritten_query,
                 doc_ids_filter=payload.doc_ids_filter,
             )
-            embedding = await _cached_embedding(
-                self.redis, build_embedding_client(), plan.rewritten_query
+            embedding = await retry_immediate(
+                # `query=` binds the loop variable at definition rather than at call. It is awaited
+                # inside the same iteration so late binding would not bite today, but this loop
+                # retries on a grade and the binding is what keeps that true.
+                lambda query=plan.rewritten_query: embed_text(
+                    query,
+                    task_type=EmbeddingTaskType.QUERY,
+                    redis=None if payload.bypass_cache else self.redis,
+                ),
+                label="documents_query_embedding",
             )
             rows = await self.repo.legal_rrf_search(
                 user_id=user_id,
@@ -636,12 +641,11 @@ async def _embed_chunks(
     chunks: list[PreparedChunk],
     extra_warnings: list[QualityWarning],
 ) -> list[dict[str, object]]:
-    embedding_client: GoogleGenerativeAIEmbeddings = build_embedding_client()
     rows: list[dict[str, object]] = []
     for batch in _batched(chunks, INGEST_EMBEDDING_BATCH_SIZE):
-        embeddings = await embedding_client.aembed_documents(
+        embeddings = await embed_texts(
             [f"{chunk.preamble}\n\n{chunk.content}".strip() for chunk in batch],
-            task_type="RETRIEVAL_DOCUMENT",
+            task_type=EmbeddingTaskType.DOCUMENT,
         )
         for chunk, embedding in zip(batch, embeddings, strict=True):
             rows.append(
@@ -814,25 +818,6 @@ async def _generate_answer(
     if answer.confidence == "uncertain" and _FALLBACK_ANSWER not in answer.answer:
         return answer.model_copy(update={"answer": f"{answer.answer}\n\n{_FALLBACK_ANSWER}"})
     return answer
-
-
-async def _cached_embedding(
-    redis: Redis | None,
-    embedding_fn: object,
-    text_to_embed: str,
-) -> list[float]:
-    cache_key = "documents:embedding:" + hashlib.sha256(text_to_embed.encode("utf-8")).hexdigest()
-    if redis is not None:
-        cached = await redis.get(cache_key)
-        if cached:
-            return from_json_float_list(str(cached))
-    embedding = await retry_immediate(
-        lambda: embedding_fn.aembed_query(text_to_embed, task_type="RETRIEVAL_QUERY"),  # ty: ignore[unresolved-attribute]
-        label="documents_query_embedding",
-    )
-    if redis is not None:
-        await redis.setex(cache_key, 60 * 60 * 24, to_float_list_str(embedding))
-    return normalize_embedding(list(embedding))
 
 
 def _to_ranked_rows(rows: list[dict[str, object]]) -> list[RankedResultRow]:

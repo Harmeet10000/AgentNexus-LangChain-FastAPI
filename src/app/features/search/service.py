@@ -10,6 +10,7 @@ from uuid import uuid4
 from returns.result import Failure, Success
 
 from app.connections import celery_app, init_db
+from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text, embed_texts
 from app.shared.langgraph_layer.retrieval_kb import GeneratedAnswer, build_retrieval_graph
 from app.shared.result import app_error_to_exception, log_expected_failure
 from app.utils import logger
@@ -35,7 +36,6 @@ from .dto import (
     SearchResultItem,
     SearchTaskStatusResponse,
 )
-from .embeddings import build_embedding_client
 from .fusion import RankedChunk, reciprocal_rank_fusion
 from .rag import SearchChunkRecord, assemble_rag_context
 from .repository import SearchRepository, build_chunk_rows
@@ -45,7 +45,6 @@ if TYPE_CHECKING:
 
     from graphiti_core.graphiti import Graphiti
     from langchain_core.language_models import BaseChatModel
-    from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,10 +166,13 @@ class SearchService:
                 response = SearchResponse.model_validate_json(cached_response)
                 return response.model_copy(update={"cache_hit": True})
 
-        embedding_client: GoogleGenerativeAIEmbeddings = build_embedding_client()
-        query_embedding = await embedding_client.aembed_query(
+        # `bypass_cache` reaches the embedding cache too, matching how `ask_legal` below hands
+        # the graph `None` for the same flag. A response-cache bypass that still served a cached
+        # query vector would be a bypass in name only for anyone debugging a stale ranking.
+        query_embedding = await embed_text(
             payload.query,
-            task_type="RETRIEVAL_QUERY",
+            task_type=EmbeddingTaskType.QUERY,
+            redis=None if payload.bypass_cache else self.redis,
         )
 
         bm25_results, vector_results, trigram_results = await _run_parallel_search(
@@ -259,7 +261,6 @@ class SearchService:
         graph = build_retrieval_graph(
             llm=self._llm,
             repo=self.repo,
-            embedding_fn=build_embedding_client(),
             redis=None if payload.bypass_cache else self.redis,
             graphiti=self.graphiti,
         )
@@ -296,7 +297,6 @@ async def process_ingestion_document(
 ) -> dict[str, object]:
     """Chunk, embed, and upsert search chunks for a document."""
     repo = SearchRepository(session)
-    embedding_client: GoogleGenerativeAIEmbeddings = build_embedding_client()
     chunks = chunk_text(
         content,
         chunk_size=INGEST_CHUNK_SIZE,
@@ -312,9 +312,13 @@ async def process_ingestion_document(
 
     chunk_payloads: list[dict[str, object]] = []
     for batch in _batched(chunks, INGEST_EMBEDDING_BATCH_SIZE):
-        embeddings = await embedding_client.aembed_documents(
+        # No `redis` here, deliberately: this is a Celery-side ingestion helper with no cache
+        # handle, and passing one would be the change, not preserving the omission. `embed_texts`
+        # batches internally as well, so the outer `_batched` loop now bounds request *payload*
+        # size rather than request count — it stays because the two limits are not the same knob.
+        embeddings = await embed_texts(
             [chunk.content for chunk in batch],
-            task_type="RETRIEVAL_DOCUMENT",
+            task_type=EmbeddingTaskType.DOCUMENT,
         )
         for chunk, embedding in zip(batch, embeddings, strict=True):
             chunk_payloads.append(

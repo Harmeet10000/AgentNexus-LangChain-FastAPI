@@ -31,17 +31,18 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from .state import EmbeddingFunction
-
 
 def build_ingestion_graph(
     extraction_llm: Any,
     db_engine: AsyncEngine,
-    embedding_fn: EmbeddingFunction,
     graphiti_service: Any,
     redis: Redis | None = None,
 ) -> CompiledStateGraph[Any]:
-    """Build the contract ingestion graph once during application startup."""
+    """Build the contract ingestion graph once during application startup.
+
+    There is deliberately no ``embedding_fn`` parameter — see ``build_retrieval_graph`` for why
+    injecting one was what allowed the duck-typing and the missing task type to coexist.
+    """
     graph = StateGraph(IngestionState)
     graph.add_node("parse_document", cast("Any", make_parse_document_node()))
     graph.add_node(
@@ -68,7 +69,7 @@ def build_ingestion_graph(
     )
     graph.add_node(
         "embed_store",
-        cast("Any", make_embed_store_node(db_engine, embedding_fn, redis)),
+        cast("Any", make_embed_store_node(db_engine, redis)),
     )
     graph.add_node("graphiti_upsert", cast("Any", make_graphiti_upsert_node(graphiti_service)))
 
