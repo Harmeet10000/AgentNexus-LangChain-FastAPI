@@ -26,7 +26,6 @@ _STUBBED_MODULES = [
     "mcp_core.server.tools",
     "tasks",
     "tasks.auth_email_tasks",
-    "tasks.search_tasks",
     "app.shared.langgraph_layer",
     "app.shared.langgraph_layer.agent_saul.state",
     "app.shared.langgraph_layer.checkpointer",

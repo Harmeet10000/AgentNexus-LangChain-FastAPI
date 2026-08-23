@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.features.search.constants import DEFAULT_PAGE_SIZE, DEFAULT_RAG_TOKEN_BUDGET, MAX_PAGE_SIZE
+from .constants import DEFAULT_PAGE_SIZE, DEFAULT_RAG_TOKEN_BUDGET, MAX_PAGE_SIZE
 
 _STRICT_CONFIG = ConfigDict(extra="forbid")
 _READ_MODEL_CONFIG = ConfigDict(extra="forbid", frozen=True, from_attributes=True)

@@ -28,7 +28,15 @@ sys.modules["mcp_core.server.middleware"] = MagicMock()
 sys.modules["mcp_core.server.tools"] = MagicMock()
 sys.modules["tasks"] = MagicMock()
 sys.modules["tasks.auth_email_tasks"] = MagicMock()
-sys.modules["tasks.search_tasks"] = MagicMock()
+
+# The twenty-one `app.features.search.*` imports that used to sit below this block were **dead**:
+# nothing in this file referenced a single one of them, and no test imports symbols from a conftest.
+# They are why step 3 of `documents-unified-schema` relocated chunking, fusion and RAG behind
+# re-export shims rather than moving them outright — the stated reason being that a missing symbol
+# here is a collection error for every test in the repository. That reason was sound in form and
+# void in fact: the imports bound names no fixture used. Worth remembering next time a shim is
+# justified by an import list — whether the imports are *used* is a different question from whether
+# they exist, and only the first one constrains a move.
 
 # `app.shared.langgraph_layer` and four of its submodules were stubbed here too. They are
 # not any more, and the entries must not come back:
@@ -66,34 +74,6 @@ from app.features.auth.repository import (
     UserRepository,
 )
 from app.features.auth.service import AuthService
-from app.features.search.chunking import chunk_text, TextChunk
-from app.features.search.constants import (
-    DEFAULT_SEARCH_CACHE_TTL_SECONDS,
-    HYBRID_CANDIDATE_LIMIT,
-    INGEST_CHUNK_OVERLAP,
-    INGEST_CHUNK_SIZE,
-    RRF_K,
-)
-from app.features.search.dto import (
-    HybridSearchRequest,
-    RagSearchRequest,
-    SearchIngestRequest,
-    SearchIngestResponse,
-    SearchResponse,
-    SearchResultItem,
-)
-from app.features.search.fusion import (
-    RankedChunk,
-    RankedResultRow,
-    reciprocal_rank_fusion,
-)
-from app.features.search.rag import (
-    ContextSection,
-    SearchChunkRecord,
-    assemble_rag_context,
-)
-from app.features.search.repository import SearchRepository
-from app.features.search.service import SearchService
 from app.utils.exceptions import (
     ConflictException,
     NotFoundException,

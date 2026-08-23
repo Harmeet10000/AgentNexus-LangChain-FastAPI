@@ -17,7 +17,6 @@ import pytest
 from app.connections.celery_task_names import (
     DOCUMENTS_INGEST,
     PAGEINDEX_INGEST,
-    SEARCH_INGEST,
     TASK_DECLARING_MODULES,
 )
 
@@ -50,7 +49,7 @@ def test_every_declaring_module_is_named_in_the_include_list(real_celery):
     assert set(TASK_DECLARING_MODULES.values()) == set(real_celery.app.conf.include)
 
 
-@pytest.mark.parametrize("task_name", [DOCUMENTS_INGEST, SEARCH_INGEST, PAGEINDEX_INGEST])
+@pytest.mark.parametrize("task_name", [DOCUMENTS_INGEST, PAGEINDEX_INGEST])
 def test_dispatched_task_modules_are_listed_explicitly(task_name, real_celery):
     """The dispatched names' own modules must be listed, not reached through a sibling."""
     assert TASK_DECLARING_MODULES[task_name] in real_celery.app.conf.include

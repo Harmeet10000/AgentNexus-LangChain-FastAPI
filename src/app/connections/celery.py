@@ -270,7 +270,6 @@ def create_celery_app() -> Celery:
             "tasks.document_tasks",
             "tasks.example",
             "tasks.pageindex_tasks",
-            "tasks.search_tasks",
         ],
     )
 
