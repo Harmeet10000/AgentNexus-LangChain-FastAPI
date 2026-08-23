@@ -732,7 +732,17 @@ def make_finalization_node(
     return finalization_node
 
 
-def make_persist_memory_node(_cognee_client: Any) -> StateNode:
+def make_persist_memory_node(memory_service: Any) -> StateNode:
+    """Persist the approved final report through the agent-memory service.
+
+    Gated on human approval (7.1): an unapproved run performs zero memory writes
+    at any trust level and still completes. Fail-open by contract (7.2): a
+    memory failure records ``COGNEE_WRITE_FAILED`` and never aborts a completed
+    legal analysis. The document knowledge graph is not touched here at all
+    (7.3) — agent memory and the entity graph are different stores with
+    different owners.
+    """
+
     async def persist_memory_node(state: LegalAgentState) -> dict[str, Any]:
         log = logger.bind(
             node="persist_memory",
@@ -740,22 +750,32 @@ def make_persist_memory_node(_cognee_client: Any) -> StateNode:
             doc_id=state["doc_id"],
         )
 
-        namespace = f"{state['user_id']}.legal"
         long_term_refs: list[str] = list(state.get("long_term_refs", []))
+        review = state.get("human_review")
+        approved = bool(review and review.approved)
+
+        final_report = state.get("final_report")
+        if final_report is None or not approved:
+            log.info("persist_memory_skipped", approved=approved)
+            return {
+                "long_term_refs": long_term_refs,
+                "status": WorkflowStatus.COMPLETED,
+            }
 
         try:
-            if state.get("final_report"):
-                ref_key = f"{namespace}.{state['doc_id']}.report"
-                long_term_refs.append(ref_key)
-
-            if state.get("relationships"):
-                rel_key = f"{namespace}.{state['doc_id']}.relationships"
-                long_term_refs.append(rel_key)
-
+            report_text = str(final_report.model_dump_json())
+            await memory_service.store_report(
+                report_text=report_text,
+                conversation_id=state["thread_id"],
+                tenant_id=str(state["user_id"]),
+            )
+            ref_key = f"legal::{state['user_id']}::reports#{state['doc_id']}"
+            long_term_refs.append(ref_key)
             log.info("persist_memory_completed", ref_count=len(long_term_refs))
 
-        except Exception as exc:
-            log.exception("persist_memory_failed", error=str(exc))
+        except Exception as exc:  # noqa: BLE001 — fail-open by contract (7.2)
+            exc.add_note("node=persist_memory")
+            log.warning("persist_memory_failed", error=str(exc))
             return {
                 **_fail(
                     "persist_memory",

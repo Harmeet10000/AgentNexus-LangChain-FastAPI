@@ -9,6 +9,8 @@ from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.shared.langchain_layer.agents.memory.cognee_client import CogneeSetupConfig
+
 from .service import GraphMemoryClient, HealthService
 
 
@@ -39,6 +41,10 @@ def get_health_graph_memory_client(request: Request) -> GraphMemoryClient | None
     return getattr(request.app.state, "graphiti", None)
 
 
+def get_health_cognee_config(request: Request) -> CogneeSetupConfig | None:
+    return getattr(request.app.state, "cognee_config", None)
+
+
 def get_health_service(
     mongo_client: AsyncIOMotorClient[Any] | None = Depends(get_health_mongodb_client),
     redis_client: Redis | None = Depends(get_health_redis_client),
@@ -49,6 +55,7 @@ def get_health_service(
     celery_app: Celery | None = Depends(get_health_celery_app),
     *,
     graph_memory_client: GraphMemoryClient | None = Depends(get_health_graph_memory_client),
+    cognee_config: CogneeSetupConfig | None = Depends(get_health_cognee_config),
 ) -> HealthService:
     return HealthService(
         mongo_client=mongo_client,
@@ -57,4 +64,5 @@ def get_health_service(
         neo4j_driver=neo4j_driver,
         celery_app=celery_app,
         graph_memory_client=graph_memory_client,
+        cognee_config=cognee_config,
     )

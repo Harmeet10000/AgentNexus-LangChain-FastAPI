@@ -72,7 +72,7 @@ def build_saul_graph(
     checkpointer: AsyncPostgresSaver,
     pro_llm: BaseChatModel,
     flash_llm: BaseChatModel,
-    cognee_client: Any,
+    memory_service: Any,
     tool_registry: ToolRegistry,
 ) -> CompiledStateGraph[Any]:
     """Build and compile the Agent Saul LangGraph."""
@@ -80,7 +80,7 @@ def build_saul_graph(
     nodes = _build_graph_nodes(
         registry=registry,
         pro_llm=pro_llm,
-        cognee_client=cognee_client,
+        memory_service=memory_service,
         tool_registry=tool_registry,
     )
 

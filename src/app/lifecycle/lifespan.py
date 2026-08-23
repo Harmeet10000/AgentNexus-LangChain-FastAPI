@@ -32,6 +32,7 @@ from app.features.auth import TokenAuditLog, User, build_websocket_security_serv
 from app.features.auth.repository import RefreshTokenRepository
 from app.middleware import initialize_fastapi_guard
 from app.shared.langchain_layer.agents.memory import setup_cognee
+from app.shared.langchain_layer.agents.memory.cognee_client import CogneeDimensionMismatchError
 from app.shared.langgraph_layer.checkpointer import teardown_langgraph_checkpointer
 from app.shared.otel import shutdown_otel
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
@@ -226,6 +227,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
         cognee_config = await setup_cognee(settings)
         app.state.cognee_config = cognee_config
         logger.info("Cognee configured")
+    except CogneeDimensionMismatchError:
+        # Decision 15 hard-fail class: incomparable embedding spaces must stop
+        # the boot rather than silently degrade retrieval quality.
+        raise
     except Exception as exc:  # noqa: BLE001 — optional dependency; app degrades without it
         exc.add_note("operation=setup_cognee")
         logger.warning("Cognee startup failed, continuing without episodic memory", error=str(exc))
