@@ -276,8 +276,13 @@ uv run alembic history --verbose
 uv run ruff check --fix
 uv run ruff format
 uv run pytest -x
-uv run celery -A celery_config worker --loglevel=info
+uv run celery -A app.connections.celery:celery_app worker --loglevel=info
 ```
+
+The worker command above is defined once in the `Makefile` (`make celery` runs exactly it, and
+`make celery-command` prints it). A unit test asserts the two are the same string, so this block
+cannot drift away from the command that is actually deployed — the previous version of both named
+a Celery configuration module that has never existed in this repository, and nothing caught it.
 
 ## Project structure
 

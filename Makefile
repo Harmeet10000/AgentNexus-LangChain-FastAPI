@@ -1,4 +1,4 @@
-.PHONY: help lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery
+.PHONY: help lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery celery-command
 
 help:
 	@echo "Available commands:"
@@ -13,6 +13,7 @@ help:
 	@echo "  make migrate-current- Show current migration"
 	@echo "  make migrate-history- Show migration history"
 	@echo "  make celery         - Start Celery worker"
+	@echo "  make celery-command - Print the worker command without running it"
 
 # Code Quality
 lint:
@@ -48,5 +49,31 @@ migrate-history:
 	uv run alembic history --verbose
 
 # Celery
+#
+# The task application is named **once**, here. Every other place that has to start a worker
+# — the README's command list, and the compose service C7 adds — references this definition
+# rather than repeating the string, because the previous arrangement had two copies and both
+# were wrong: they named a Celery configuration module that has never existed in this repository,
+# so the documented command could not start a worker at all. The name is described rather than
+# spelled here, because a test greps these files for it and a comment quoting it would defeat
+# the check.
+#
+# Written as `module:attribute` rather than the bare module. Celery would find `celery_app` by
+# probing the module for a Celery instance, but the probe picks whatever it finds first; naming
+# the attribute means adding a second instance to that module cannot silently re-target the
+# worker.
+#
+# The `app.` prefix (not `src.app.`) is deliberate and load-bearing. `src/` is on the import
+# path, so both spellings resolve — to two *different* module objects, each with its own task
+# registry, because Python keys sys.modules by the import string. The task modules are listed
+# as `tasks.*`, which is the same rooting, so `app.` is the identity the registry already uses.
+CELERY_APP := app.connections.celery:celery_app
+CELERY_WORKER_CMD := uv run celery -A $(CELERY_APP) worker --loglevel=info
+
 celery:
-	uv run celery -A celery_config worker --loglevel=info
+	$(CELERY_WORKER_CMD)
+
+# Prints the command rather than running it, so a file that must document the command can
+# assert against this instead of holding a second copy of it.
+celery-command:
+	@echo '$(CELERY_WORKER_CMD)'
