@@ -22,7 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_texts
 from app.shared.langchain_layer.models import serialize_to_toon
-from app.shared.langgraph_layer.kb_retry import retry_immediate
+from app.shared.langgraph_layer.kb_retry import (
+    TransientExternalError,
+    describe_failure,
+    retry_immediate,
+)
 from app.shared.rag.document_processing.docling_enhanced import table_markdown
 from app.shared.rag.graphiti.schemas import (
     GRAPHITI_EDGE_TYPE_MAP,
@@ -179,9 +183,20 @@ def make_segment_document_node(
                 label="gemini_segment_document",
             )
             segments: list[ClauseSegment] = ClauseSegmentationResult.model_validate(result).segments
-        except LangChainException as exc:
+        # Two types, because a model failure now reaches this branch by two distinct
+        # routes and only one of them existed before. A deterministic framework failure
+        # is excluded from the boundary's named-transient set, so it arrives here
+        # unwrapped and unretried. A genuinely transient one — a parse refusal, a quota
+        # refusal, a dropped connection — is retried and, if it outlives the budget,
+        # arrives as the boundary's transient type with the original reachable through
+        # its cause. Catching only the first was the defect: the boundary raised only the
+        # second, so this branch could not fire in production and the pipeline propagated
+        # exactly where it appeared to degrade. Chaining had been proposed as the remedy
+        # and cannot be one — it populates the cause, it does not change the type raised,
+        # so no amount of chaining makes this `except` match.
+        except (LangChainException, TransientExternalError) as exc:
             exc.add_note(f"doc_id={state.doc_id}, operation=segmentation")
-            logger.bind(doc_id=state.doc_id, error=str(exc)).warning(
+            logger.bind(doc_id=state.doc_id, error=describe_failure(exc)).warning(
                 "structured_segmentation_failed_using_fallback"
             )
             segments: list[ClauseSegment] = _fallback_segments(parsed.markdown)
@@ -245,7 +260,9 @@ def make_contextualize_chunk_node(
                 label="gemini_contextualize_chunk",
             )
             chunk: ContextualizedChunk = ContextualizedChunk.model_validate(result)
-        except LangChainException as exc:
+        # Both routes into this branch — see the segmentation node for why the pair is
+        # required and why chaining alone was not a fix.
+        except (LangChainException, TransientExternalError) as exc:
             exc.add_note(
                 f"doc_id={doc_id}, clause_id={segment.clause_id}, "
                 f"chunk_index={segment.chunk_index}, operation=contextualize"
@@ -254,7 +271,7 @@ def make_contextualize_chunk_node(
                 doc_id=doc_id,
                 clause_id=segment.clause_id,
                 chunk_index=segment.chunk_index,
-                error=str(exc),
+                error=describe_failure(exc),
             ).warning("contextualize_failed_using_deterministic_preamble")
             chunk: ContextualizedChunk = ContextualizedChunk(
                 clause_id=segment.clause_id,
@@ -302,9 +319,11 @@ def make_classify_extract_node(
                 label="gemini_entity_extraction",
             )
             extraction: EntityExtractionResult = EntityExtractionResult.model_validate(result)
-        except LangChainException as exc:
+        # Both routes into this branch — see the segmentation node for why the pair is
+        # required and why chaining alone was not a fix.
+        except (LangChainException, TransientExternalError) as exc:
             exc.add_note(f"doc_id={state.doc_id}, operation=entity_extraction")
-            logger.bind(doc_id=state.doc_id, error=str(exc)).warning(
+            logger.bind(doc_id=state.doc_id, error=describe_failure(exc)).warning(
                 "entity_extraction_failed_continuing_without_entities"
             )
             extraction = EntityExtractionResult()
