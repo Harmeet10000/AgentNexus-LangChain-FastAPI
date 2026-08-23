@@ -9,11 +9,14 @@ stores).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 
 from app.shared.langgraph_layer.agent_saul.nodes import make_persist_memory_node
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 class _Review:

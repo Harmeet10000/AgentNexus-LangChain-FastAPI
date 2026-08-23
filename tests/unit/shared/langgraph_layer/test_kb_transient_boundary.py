@@ -88,7 +88,7 @@ def _no_real_waiting() -> Iterator[list[float]]:
     class _Recording(kb_retry.AsyncRetrying):
         def __init__(self, **kwargs: Any) -> None:
             super().__init__(**kwargs)
-            self.sleep = _record  # ty: ignore[invalid-assignment]
+            self.sleep = _record
 
     with patch.object(kb_retry, "AsyncRetrying", _Recording):
         yield recorded

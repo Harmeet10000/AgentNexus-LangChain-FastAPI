@@ -158,7 +158,7 @@ class TestRateLimitingIntegration:
         accepted = 0
         rejected = 0
 
-        for i in range(attempts):
+        for _ in range(attempts):
             try:
                 await ws_security_with_repo._apply_rate_limits(context)
                 accepted += 1

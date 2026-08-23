@@ -25,9 +25,7 @@ def make_mock_user(**kwargs):
     user = MagicMock()
     user.id = kwargs.get("id", "507f1f77bcf86cd799439011")
     user.email = kwargs.get("email", "test@example.com")
-    user.hashed_password = kwargs.get(
-        "hashed_password", "$argon2id$v=19$m=65536,t=3,p=4$abc"
-    )
+    user.hashed_password = kwargs.get("hashed_password", "$argon2id$v=19$m=65536,t=3,p=4$abc")
     user.is_active = kwargs.get("is_active", True)
     user.is_verified = kwargs.get("is_verified", True)
     role_value = kwargs.get("role", "user")
@@ -113,11 +111,16 @@ class TestAuthLogin:
                 auth_service,
                 "_create_session",
                 return_value=TokenResponse(
-                    access_token="mock-at", refresh_token="mock-rt", token_type="bearer", expires_in=3600
+                    access_token="mock-at",
+                    refresh_token="mock-rt",
+                    token_type="bearer",
+                    expires_in=3600,
                 ),
             ),
         ):
-            result = await auth_service.login(LoginRequest(email="test@example.com", password="ValidPass1"))
+            result = await auth_service.login(
+                LoginRequest(email="test@example.com", password="ValidPass1")
+            )
 
             assert result.access_token == "mock-at"
             assert result.refresh_token == "mock-rt"
@@ -128,9 +131,11 @@ class TestAuthLogin:
         mock_user = make_mock_user(is_verified=True)
         mock_repo.find_by_email.return_value = mock_user
 
-        with patch("app.features.auth.service.verify_password", return_value=False):
-            with pytest.raises(UnauthorizedException, match="Invalid credentials"):
-                await auth_service.login(LoginRequest(email="test@example.com", password="WrongPass1"))
+        with (
+            patch("app.features.auth.service.verify_password", return_value=False),
+            pytest.raises(UnauthorizedException, match="Invalid credentials"),
+        ):
+            await auth_service.login(LoginRequest(email="test@example.com", password="WrongPass1"))
 
     async def test_login_nonexistent_email_raises_unauthorized(self, auth_service):
         mock_repo = auth_service._user_repo
@@ -148,9 +153,11 @@ class TestAuthLogin:
 
         with (
             patch("app.features.auth.service.verify_password", return_value=True),
+            pytest.raises(UnauthorizedException, match="Account is disabled"),
         ):
-            with pytest.raises(UnauthorizedException, match="Account is disabled"):
-                await auth_service.login(LoginRequest(email="disabled@example.com", password="ValidPass1"))
+            await auth_service.login(
+                LoginRequest(email="disabled@example.com", password="ValidPass1")
+            )
 
     async def test_login_unverified_email_raises_unauthorized(self, auth_service):
         mock_repo = auth_service._user_repo
@@ -159,9 +166,11 @@ class TestAuthLogin:
 
         with (
             patch("app.features.auth.service.verify_password", return_value=True),
+            pytest.raises(UnauthorizedException, match="Email not verified"),
         ):
-            with pytest.raises(UnauthorizedException, match="Email not verified"):
-                await auth_service.login(LoginRequest(email="unverified@example.com", password="ValidPass1"))
+            await auth_service.login(
+                LoginRequest(email="unverified@example.com", password="ValidPass1")
+            )
 
 
 class TestAuthRefresh:
@@ -171,7 +180,10 @@ class TestAuthRefresh:
         mock_repo.find_by_id_result.return_value = Success(mock_user)
 
         session_id = "test-session-id"
-        await redis.set(f"auth:session:{session_id}", make_session_json(session_id=session_id, user_id=mock_user.id))
+        await redis.set(
+            f"auth:session:{session_id}",
+            make_session_json(session_id=session_id, user_id=mock_user.id),
+        )
 
         with (
             patch(
@@ -186,17 +198,23 @@ class TestAuthRefresh:
             assert result.refresh_token == session_id
 
     async def test_refresh_expired_token_raises_unauthorized(self, auth_service):
-        with patch(
-            "app.features.auth.service.decode_token",
-            return_value=MagicMock(token_type="refresh", jti="nonexistent", sub="user-id"),
-        ), pytest.raises(UnauthorizedException):
+        with (
+            patch(
+                "app.features.auth.service.decode_token",
+                return_value=MagicMock(token_type="refresh", jti="nonexistent", sub="user-id"),
+            ),
+            pytest.raises(UnauthorizedException),
+        ):
             await auth_service.refresh("nonexistent-session")
 
     async def test_refresh_revoked_token_raises_unauthorized(self, auth_service):
-        with patch(
-            "app.features.auth.service.decode_token",
-            return_value=MagicMock(token_type="refresh", jti="unknown", sub="user-id"),
-        ), pytest.raises(UnauthorizedException):
+        with (
+            patch(
+                "app.features.auth.service.decode_token",
+                return_value=MagicMock(token_type="refresh", jti="unknown", sub="user-id"),
+            ),
+            pytest.raises(UnauthorizedException),
+        ):
             await auth_service.refresh("unknown-token")
 
 
@@ -223,7 +241,9 @@ class TestAuthSessions:
         session_id = "active-session-1"
         user_id = "user-123"
         await redis.sadd(f"auth:user_sessions:{user_id}", session_id)
-        await redis.set(f"auth:session:{session_id}", make_session_json(session_id=session_id, user_id=user_id))
+        await redis.set(
+            f"auth:session:{session_id}", make_session_json(session_id=session_id, user_id=user_id)
+        )
 
         sessions = await auth_service.list_sessions(user_id)
         assert isinstance(sessions, list)
@@ -232,7 +252,9 @@ class TestAuthSessions:
         session_id = "revoke-me"
         user_id = "user-123"
         await redis.sadd(f"auth:user_sessions:{user_id}", session_id)
-        await redis.set(f"auth:session:{session_id}", make_session_json(session_id=session_id, user_id=user_id))
+        await redis.set(
+            f"auth:session:{session_id}", make_session_json(session_id=session_id, user_id=user_id)
+        )
 
         await auth_service.revoke_session(session_id, user_id)
 
@@ -245,8 +267,14 @@ class TestAuthSessions:
         remove_session = "remove-me"
         await redis.sadd(f"auth:user_sessions:{user_id}", keep_session)
         await redis.sadd(f"auth:user_sessions:{user_id}", remove_session)
-        await redis.set(f"auth:session:{keep_session}", make_session_json(session_id=keep_session, user_id=user_id))
-        await redis.set(f"auth:session:{remove_session}", make_session_json(session_id=remove_session, user_id=user_id))
+        await redis.set(
+            f"auth:session:{keep_session}",
+            make_session_json(session_id=keep_session, user_id=user_id),
+        )
+        await redis.set(
+            f"auth:session:{remove_session}",
+            make_session_json(session_id=remove_session, user_id=user_id),
+        )
 
         await auth_service.revoke_all_sessions(user_id, except_session_id=keep_session)
 

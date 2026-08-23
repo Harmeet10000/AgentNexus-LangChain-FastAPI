@@ -1,12 +1,14 @@
 """Public exports for the shared agent memory package."""
 
-from .cognee_client import (
-    CogneeStore,
-    search_episodic_memory,
-    setup_cognee,
-    store_final_report,
-    store_relationships,
+from .agent_memory_service import (
+    AgentMemoryError,
+    AgentMemoryService,
+    ConsolidationPreconditionError,
+    ConversationIdentityRequiredError,
+    PartitionIdentityInvalidError,
+    memory_partition,
 )
+from .cognee_client import setup_cognee
 from .memory_scope import (
     COMPLIANCE_SCOPE,
     GROUNDING_SCOPE,
@@ -26,14 +28,16 @@ __all__ = [
     "ORCHESTRATOR_SCOPE",
     "PRECEDENT_SCOPE",
     "RISK_SCOPE",
-    "CogneeStore",
+    "AgentMemoryError",
+    "AgentMemoryService",
+    "ConsolidationPreconditionError",
+    "ConversationIdentityRequiredError",
     "MemoryEntityType",
     "MemoryScope",
     "MemorySource",
     "MemoryTimeFilter",
+    "PartitionIdentityInvalidError",
+    "memory_partition",
     "scope_from_router_decision",
-    "search_episodic_memory",
     "setup_cognee",
-    "store_final_report",
-    "store_relationships",
 ]

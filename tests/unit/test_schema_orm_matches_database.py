@@ -57,7 +57,7 @@ def engine() -> Engine:
     from app.connections.postgres import get_database_url
 
     url = create_engine(get_database_url(flavour="plain")).url
-    print(f"target: host={url.host} port={url.port} database={url.database}")  # noqa: T201
+    print(f"target: host={url.host} port={url.port} database={url.database}")
     return create_engine(
         get_database_url(flavour="plain"),
         connect_args={"connector": psycopg},  # driver already installed; explicit on purpose
@@ -74,7 +74,7 @@ def _scalar_set(engine: Engine, query: str) -> set[tuple[str, ...]]:
 def test_every_declared_table_exists(engine: Engine) -> None:
     from database import Base
 
-    declared = {t for t in Base.metadata.tables}
+    declared = set(Base.metadata.tables)
     existing = {
         row[0]
         for row in _scalar_set(
@@ -82,7 +82,9 @@ def test_every_declared_table_exists(engine: Engine) -> None:
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
         )
     }
-    assert declared <= existing, f"tables declared in the ORM but absent from the database: {sorted(declared - existing)}"
+    assert declared <= existing, (
+        f"tables declared in the ORM but absent from the database: {sorted(declared - existing)}"
+    )
 
 
 def test_every_declared_column_exists(engine: Engine) -> None:
@@ -120,4 +122,6 @@ def test_every_named_index_exists(engine: Engine) -> None:
             "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'",
         )
     }
-    assert declared <= existing, f"indexes declared in the ORM but absent from pg_indexes: {sorted(declared - existing)}"
+    assert declared <= existing, (
+        f"indexes declared in the ORM but absent from pg_indexes: {sorted(declared - existing)}"
+    )

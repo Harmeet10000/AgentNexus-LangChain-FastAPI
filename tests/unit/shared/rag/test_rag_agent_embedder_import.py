@@ -112,7 +112,8 @@ def test_the_unified_import_is_at_module_level() -> None:
         for node in ast.walk(node=tree)
         if isinstance(node, ast.ImportFrom) and node.module == _UNIFIED_IMPORT
     ]
-    assert unified and unified[0] in module_level
+    assert unified
+    assert unified[0] in module_level
 
 
 def test_no_embedder_import_survives() -> None:
@@ -149,7 +150,9 @@ def test_the_call_sites_reach_the_unified_query_entry_point() -> None:
     Read from the source rather than listed, so a new call site is covered.
     """
     source = _source()
-    assert "from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text" in source
+    assert (
+        "from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text" in source
+    )
     assert "embedder.embed_query" not in source
     called = sum(
         1

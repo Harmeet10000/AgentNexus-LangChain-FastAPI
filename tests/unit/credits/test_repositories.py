@@ -34,13 +34,13 @@ for _mod in (
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
-from returns.result import Success  # noqa: E402
+from returns.result import Success
 
-from app.features.credits.models.credit import CreditStatus  # noqa: E402
+from app.features.credits.models.credit import CreditStatus
 from app.features.credits.repositories.consumption_repository import (
-    ConsumptionRepository,  # noqa: E402
+    ConsumptionRepository,
 )
-from app.features.credits.repositories.credit_repository import CreditRepository  # noqa: E402
+from app.features.credits.repositories.credit_repository import CreditRepository
 
 
 def _mock_session():
@@ -62,8 +62,8 @@ def _make_row(**overrides):
     row.remaining_balance = overrides.get("remaining_balance", 1000)
     row.status = overrides.get("status", CreditStatus.ACTIVE.value)
     row.valid_from = overrides.get("valid_from", datetime.now(tz=UTC))
-    row.valid_until = overrides.get("valid_until", None)
-    row.consumed_at = overrides.get("consumed_at", None)
+    row.valid_until = overrides.get("valid_until")
+    row.consumed_at = overrides.get("consumed_at")
     row.metadata_ = overrides.get("metadata_", {})
     row.created_at = overrides.get("created_at", datetime.now(tz=UTC))
     return row

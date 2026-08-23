@@ -18,9 +18,9 @@ for _mod in (
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
-import pytest  # noqa: E402
+import pytest
 
-from app.connections.celery_reliability import (  # noqa: E402
+from app.connections.celery_reliability import (
     CircuitBreakerOpenError,
     IdempotencyLockError,
     RateLimiter,

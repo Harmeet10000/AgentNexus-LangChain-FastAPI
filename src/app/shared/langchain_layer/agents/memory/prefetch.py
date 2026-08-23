@@ -48,7 +48,9 @@ def make_prefetch_memory_node(
         task = str(state.get("task", ""))
         tenant_id = str(state.get("user_id", ""))
         conversation_id = state.get("thread_id")
-        query = str((state.get("working_memory") or {}).get("clarified_intent", state.get("user_query", "")))
+        query = str(
+            (state.get("working_memory") or {}).get("clarified_intent", state.get("user_query", ""))
+        )
 
         memory_context = ""
         try:

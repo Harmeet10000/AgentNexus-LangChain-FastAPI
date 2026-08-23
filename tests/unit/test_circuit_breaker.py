@@ -1,11 +1,9 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from app.connections.celery_reliability import (
-    CircuitBreakerOpenError,
     CircuitBreakerState,
-    get_circuit_breaker_state,
     is_circuit_breaker_open,
     record_circuit_breaker_failure,
     record_circuit_breaker_success,

@@ -149,15 +149,6 @@ class TestPreservation3RateLimitingNormalTraffic:
             await ws_security_service.register_connection(context)
 
         # Try to exceed limit
-        over_context = WebSocketSecurityContext(
-            claims=valid_token_claims,
-            user_id=user_id,
-            session_id="session-over",
-            connection_id="connection-over",
-            origin="https://example.com",
-            user_rate_limit_key=f"user:{user_id}",
-            connection_rate_limit_key="connection:over",
-        )
 
         # Should raise exception
         with pytest.raises(WebSocketException):

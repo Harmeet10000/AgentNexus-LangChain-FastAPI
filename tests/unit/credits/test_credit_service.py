@@ -40,18 +40,18 @@ for _mod in (
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
-import pytest  # noqa: E402
-from returns.result import Success  # noqa: E402
+import pytest
+from returns.result import Success
 
-from app.features.credits.dto.consumption_dto import CreditConsumptionResult  # noqa: E402
-from app.features.credits.dto.credit_dto import (  # noqa: E402
+from app.features.credits.dto.consumption_dto import CreditConsumptionResult
+from app.features.credits.dto.credit_dto import (
     CreditBalanceResponse,
     CreditGrantDTO,
     CreditGrantResponse,
     CreditHistoryResponse,
 )
-from app.features.credits.models.credit import CreditStatus, CreditType, UserCredit  # noqa: E402
-from app.features.credits.services.credit_service import CreditService  # noqa: E402
+from app.features.credits.models.credit import CreditStatus, CreditType, UserCredit
+from app.features.credits.services.credit_service import CreditService
 
 
 def _make_credit(
@@ -351,7 +351,7 @@ class TestCreditBalance:
 
         assert isinstance(result, CreditBalanceResponse)
         assert result.total_balance == 5000
-        assert result.total_balance_rupees == 50.0
+        assert result.total_balance_rupees == pytest.approx(50.0)
 
 
 class TestCreditHistory:

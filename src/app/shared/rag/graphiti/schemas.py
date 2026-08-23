@@ -57,20 +57,6 @@ class ClauseEpisodeMetadata(BaseModel):
     schema_version: int = 1
 
 
-class FinalReportEpisodeMetadata(BaseModel):
-    """Final report metadata for high-trust episode storage."""
-
-    model_config = ConfigDict(frozen=True)
-
-    doc_id: str
-    user_id: str
-    thread_id: str
-    overall_risk_label: str
-    overall_compliant: bool
-    human_approved: bool
-    schema_version: int = 1
-
-
 class GraphitiSearchResult(BaseModel):
     """Normalised result returned by GraphitiService.search_*().
     Consumers never touch raw graphiti-core types.

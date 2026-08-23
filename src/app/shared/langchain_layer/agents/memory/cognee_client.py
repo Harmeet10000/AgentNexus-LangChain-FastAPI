@@ -25,11 +25,9 @@ Initialization (in lifespan.py):
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 import cognee
-from cognee.exceptions import CogneeApiError
-from langgraph.store.base import BaseStore
 from pydantic import BaseModel, ConfigDict
 
 from app.connections.postgres import get_database_fields
@@ -37,9 +35,6 @@ from app.features.documents.model import CHUNK_EMBEDDING_DIM
 from app.utils import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-    from typing import Any
-
     from app.config import Settings
 
 
@@ -183,9 +178,7 @@ async def setup_cognee(settings: Settings) -> CogneeSetupConfig:
         )
         # Task 4.4 — explicit vector store; the library default writes embeddings
         # to local files, which is defect two of item 152.
-        cognee.config.set_vector_db_config(
-            {"vector_db_provider": settings.COGNEE_VECTOR_PROVIDER}
-        )
+        cognee.config.set_vector_db_config({"vector_db_provider": settings.COGNEE_VECTOR_PROVIDER})
     except Exception:
         logger.bind(service="cognee").exception("Failed to configure Cognee")
         raise
@@ -202,230 +195,3 @@ async def setup_cognee(settings: Settings) -> CogneeSetupConfig:
             schema_name=settings.COGNEE_DB_SCHEMA,
             access_control_enabled=settings.COGNEE_ACCESS_CONTROL_ENABLED,
         )
-
-
-# ---------------------------------------------------------------------------
-# WRITE: store final report (episodic memory)
-# ---------------------------------------------------------------------------
-
-
-async def store_final_report(
-    report_json: str,
-    user_id: str,
-    doc_id: str,
-    thread_id: str,
-) -> None:
-    """Store a human-approved final report in Cognee's episodic memory.
-
-    Dataset name: {user_id}.legal_reports
-    After remember() + improve(), the report becomes queryable via
-    recall() for future context retrieval.
-
-    Args:
-        report_json: JSON-serialized final report.
-        user_id: User ID for dataset namespacing.
-        doc_id: Document ID for tracing.
-        thread_id: Thread ID for tracing.
-    """
-    dataset_name = f"{user_id}.legal_reports"
-    logger.bind(
-        service="cognee",
-        dataset_name=dataset_name,
-        doc_id=doc_id,
-        user_id=user_id,
-        thread_id=thread_id,
-    ).info("Storing final report in Cognee")
-
-    try:
-        await cognee.remember(report_json, dataset_name=dataset_name)
-        await cognee.improve(dataset=dataset_name)
-    except Exception:
-        logger.bind(
-            service="cognee",
-            dataset_name=dataset_name,
-            doc_id=doc_id,
-            thread_id=thread_id,
-        ).exception("Failed to store final report in Cognee")
-        raise
-    else:
-        logger.bind(
-            service="cognee",
-            dataset_name=dataset_name,
-            doc_id=doc_id,
-            thread_id=thread_id,
-        ).info("Cognee improve completed successfully")
-
-
-# ---------------------------------------------------------------------------
-# WRITE: store relationship graph (procedural memory)
-# ---------------------------------------------------------------------------
-
-
-async def store_relationships(
-    relationships_text: str,
-    user_id: str,
-    doc_id: str,
-) -> None:
-    """Store the legal relationship graph summary in Cognee.
-
-    Stored in {user_id}.legal_relationships — allows querying
-    patterns like 'contracts where Party X has unlimited liability'.
-
-    Args:
-        relationships_text: Relationship graph summary text.
-        user_id: User ID for dataset namespacing.
-        doc_id: Document ID for tracing.
-    """
-    dataset_name = f"{user_id}.legal_relationships"
-    logger.bind(
-        service="cognee",
-        dataset_name=dataset_name,
-        doc_id=doc_id,
-        user_id=user_id,
-    ).info("Storing relationships in Cognee")
-
-    try:
-        await cognee.remember(relationships_text, dataset_name=dataset_name)
-        await cognee.improve(dataset=dataset_name)
-    except Exception:
-        logger.bind(
-            service="cognee",
-            dataset_name=dataset_name,
-            doc_id=doc_id,
-        ).exception("Failed to store relationships in Cognee")
-        raise
-    else:
-        logger.bind(
-            service="cognee",
-            dataset_name=dataset_name,
-            doc_id=doc_id,
-        ).info("Cognee relationships stored successfully")
-
-
-# ---------------------------------------------------------------------------
-# READ: recall episodic memory
-# ---------------------------------------------------------------------------
-
-
-async def search_episodic_memory(
-    query: str,
-    user_id: str,
-) -> list[dict[str, Any]]:
-    """Retrieve relevant past decisions from Cognee's episodic memory.
-
-    Uses recall() with auto-routing — returns structured knowledge,
-    not raw chunks. Returns empty list on any failure so callers
-    can degrade gracefully.
-
-    Args:
-        query: Search query string.
-        user_id: User ID to scope search to their memories.
-
-    Returns:
-        List of search results as dicts, empty list on failure.
-    """
-    try:
-        dataset_name = f"{user_id}.legal_reports"
-        logger.bind(
-            service="cognee",
-            query=query,
-            user_id=user_id,
-            dataset_name=dataset_name,
-        ).info("Searching Cognee episodic memory")
-
-        results = await cognee.recall(
-            query_text=query,
-            datasets=[dataset_name],
-        )
-    except CogneeApiError as exc:
-        exc.add_note(f"query={query[:80]}, user_id={user_id}")
-        logger.bind(
-            service="cognee",
-            query=query,
-            user_id=user_id,
-        ).exception("Cognee recall failed")
-        return []
-    else:
-        result_list = [dict(r) for r in (results or [])]
-        logger.bind(
-            service="cognee",
-            result_count=len(result_list),
-            user_id=user_id,
-        ).info("Cognee recall completed successfully")
-        return result_list
-
-
-# ---------------------------------------------------------------------------
-# BaseStore Implementation for LangGraph integration
-# ---------------------------------------------------------------------------
-
-
-class CogneeStore(BaseStore):
-    """Cognee-backed store for LangGraph persistent memory.
-
-    Implements BaseStore protocol to work with LangGraph's Store
-    for long-term thread memory across graph invocations.
-
-    Note: Placeholder implementation — adapt cognee API calls to actual library.
-    """
-
-    def __init__(self, cognee_client: Any) -> None:
-        self.client = cognee_client
-
-    @override
-    async def put(  # ty: ignore[invalid-method-override]
-        self,
-        namespace: Sequence[str | None],
-        key: str,
-        value: Any,  # ARG002
-    ) -> None:
-        """Store a value in the graph with embeddings."""
-
-    @override
-    async def get(  # ty: ignore[invalid-method-override]
-        self,
-        namespace: Sequence[str | None],
-        key: str,
-    ) -> Any | None:
-        """Retrieve a value by namespace + key."""
-        return None
-
-    @override
-    async def search(  # ty: ignore[invalid-method-override]
-        self,
-        _namespace: Sequence[str | None],
-        *,
-        filter_query: dict[str, Any] | None = None,
-        query: str | None = None,
-        **kwargs: Any,
-    ) -> list[Any]:
-        """Semantic search within a namespace with optional filtering."""
-        return []
-
-    @override
-    async def delete(  # ty: ignore[invalid-method-override]
-        self,
-        namespace: Sequence[str | None],
-        *,
-        key: str | None = None,
-    ) -> None:
-        """Delete a single key or entire namespace."""
-
-    async def list_keys(  # noqa: PLR6301 — placeholder stub, interface-shape only
-        self,
-        namespace: Sequence[str | None],  # noqa: ARG002
-    ) -> list[str]:
-        """List all keys in a namespace."""
-        return []
-
-    @staticmethod
-    def _make_key(namespace: Sequence[str | None], key: str) -> str:
-        """Construct a full key from namespace hierarchy + key."""
-        return "/".join(filter(None, [*namespace, key]))
-
-    @staticmethod
-    def _matches_filter(data: Any, filter_dict: dict[str, Any]) -> bool:
-        """Check if data matches the filter criteria."""
-        if not isinstance(data, dict):
-            return False
-        return all(data.get(k) == v for k, v in filter_dict.items())

@@ -256,7 +256,7 @@ def test_websocket_validation_errors_are_left_with_fastapi(client: TestClient) -
     registering the latter does not capture it. It must stay with FastAPI's handler: that handler
     closes the socket with a code, and a websocket scope has no way to send an HTTP JSON envelope.
     """
-    handler = client.app.exception_handlers[WebSocketRequestValidationError]  # ty: ignore[unresolved-attribute]
+    handler = client.app.exception_handlers[WebSocketRequestValidationError]
 
     assert handler.__name__ == "websocket_request_validation_exception_handler"
     assert not issubclass(WebSocketRequestValidationError, RequestValidationError)
@@ -279,7 +279,7 @@ def test_the_handler_registry_is_the_one_the_application_ships(client: TestClien
     """
     registered = {
         f"{key.__module__}.{key.__qualname__}": handler.__name__
-        for key, handler in client.app.exception_handlers.items()  # ty: ignore[unresolved-attribute]
+        for key, handler in client.app.exception_handlers.items()
     }
 
     assert registered == {

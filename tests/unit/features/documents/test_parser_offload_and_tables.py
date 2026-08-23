@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -36,7 +36,7 @@ from app.features.documents import parser as parser_module
 from app.features.documents.parser import parse_document
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from typing import Any
 
 pytestmark = pytest.mark.unit
 
@@ -106,9 +106,7 @@ def converter(tables: list[_FakeTable]) -> _FakeConverter:
 
 
 @pytest.fixture
-def _patched_converter(
-    monkeypatch: pytest.MonkeyPatch, converter: _FakeConverter
-) -> Iterator[None]:
+def _patched_converter(monkeypatch: pytest.MonkeyPatch, converter: _FakeConverter) -> None:
     """Substitute the converter factory the module imported.
 
     Patched at `parser_module.create_document_converter` — the name bound *in this module* — not
@@ -116,7 +114,6 @@ def _patched_converter(
     attribute would leave this module's reference pointing at the original.
     """
     monkeypatch.setattr(parser_module, "create_document_converter", lambda **_kw: converter)
-    yield
 
 
 @pytest.mark.usefixtures("_patched_converter")

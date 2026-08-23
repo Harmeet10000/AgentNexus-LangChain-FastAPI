@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 
     from .schemas import (
         ClauseEpisodeMetadata,
-        FinalReportEpisodeMetadata,
         LegalEdgeInput,
     )
 
@@ -50,12 +49,6 @@ class GraphitiService(Protocol):
     ) -> str: ...
 
     async def write_relationship_edge(self, edge: LegalEdgeInput) -> str: ...
-
-    async def write_final_report_episode(
-        self,
-        report_summary: str,
-        metadata: FinalReportEpisodeMetadata,
-    ) -> str: ...
 
     async def search_for_risk_context(
         self,
@@ -300,53 +293,6 @@ async def write_relationship_edge(
         return str(result.uuid) if hasattr(result, "uuid") else episode_name  # ty: ignore[unresolved-attribute]
     except Exception:
         logger.bind(service="graphiti").exception("Failed to write relationship edge")
-        raise
-
-
-# ---------------------------------------------------------------------------
-# WRITE: final report episode
-# ---------------------------------------------------------------------------
-
-
-async def write_final_report_episode(
-    graphiti: Graphiti,
-    report_summary: str,
-    metadata: FinalReportEpisodeMetadata,
-) -> str:
-    """Write the human-approved final report as a high-trust episode.
-
-    Args:
-        graphiti: Graphiti instance.
-        report_summary: Summary of the final report.
-        metadata: Report metadata (doc_id, user_id, human_approved, etc.).
-
-    Returns:
-        Episode UUID assigned by Graphiti.
-
-    Raises:
-        Exception: If write fails.
-    """
-    episode_name = f"report:{metadata.doc_id}:{metadata.user_id}"
-    source_description = metadata.model_dump_json()
-
-    logger.bind(
-        service="graphiti",
-        doc_id=metadata.doc_id,
-        human_approved=metadata.human_approved,
-    ).info("Writing final report episode to Graphiti")
-
-    try:
-        result = await graphiti.add_episode(
-            name=episode_name,
-            episode_body=report_summary,
-            source=EpisodeType.text,
-            source_description=source_description,
-            reference_time=datetime.now(tz=UTC),
-            group_id=metadata.user_id,
-        )
-        return str(result.uuid) if hasattr(result, "uuid") else episode_name  # ty: ignore[unresolved-attribute]
-    except Exception:
-        logger.bind(service="graphiti").exception("Failed to write final report episode")
         raise
 
 

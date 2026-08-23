@@ -109,6 +109,10 @@ BILLING_RECONCILIATION: Final = "billing.reconciliation"
 CREDITS_EXPIRE: Final = "credits.expire"
 CREDITS_RECONCILE: Final = "credits.reconcile"
 
+# --- agent memory (scheduler-dispatched, band F) ------------------------------
+
+AGENT_MEMORY_CONSOLIDATION: Final = "tasks.agent_memory_consolidation"
+
 # --- reference implementations -----------------------------------------------
 
 EXAMPLE_ADD: Final = "tasks.add"
@@ -119,6 +123,7 @@ EXAMPLE_PROCESS_DOCUMENT: Final = "tasks.process_document"
 # the task application's ``include`` list, and a unit test asserts the two agree
 # rather than deriving one from the other. Deriving would make the ``include``
 # list unreadable at the one place an operator looks for it.
+_AGENT_MEMORY_TASKS: Final = "tasks.agent_memory_tasks"
 _AUTH_EMAIL_TASKS: Final = "tasks.auth_email_tasks"
 _BILLING_TASKS: Final = "tasks.billing_tasks"
 _CREDIT_TASKS: Final = "tasks.credit_tasks"
@@ -129,6 +134,7 @@ _PAGEINDEX_TASKS: Final = "tasks.pageindex_tasks"
 
 
 TASK_DECLARING_MODULES: Final[Mapping[str, str]] = {
+    AGENT_MEMORY_CONSOLIDATION: _AGENT_MEMORY_TASKS,
     DOCUMENTS_INGEST: _DOCUMENT_TASKS,
     PAGEINDEX_INGEST: _PAGEINDEX_TASKS,
     LEGAL_BATCH_EXTRACTION: _DOCUMENT_EXTRACTION_TASKS,

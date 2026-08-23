@@ -7,12 +7,12 @@ state); what these tests pin is the ORDER and the REFUSALS, not the library.
 from __future__ import annotations
 
 import os
-from pydantic import SecretStr
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
+from pydantic import SecretStr
 
 from app.shared.langchain_layer.agents.memory.cognee_client import (
     _ACCESS_CONTROL_ENV_KEY,
@@ -21,6 +21,9 @@ from app.shared.langchain_layer.agents.memory.cognee_client import (
     CogneeSetupError,
     setup_cognee,
 )
+
+if TYPE_CHECKING:
+    from typing import Any
 
 _REAL_FIELDS = SimpleNamespace(
     host="real-db.example.com",
@@ -64,7 +67,7 @@ def real_database_fields(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     return _REAL_FIELDS
 
 
-@pytest.fixture()
+@pytest.fixture
 def fake_cognee(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
     """Record every set_*_config call in order."""
     calls: list[tuple[str, dict[str, Any]]] = []

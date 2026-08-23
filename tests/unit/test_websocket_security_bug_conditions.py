@@ -216,13 +216,15 @@ class TestBugCondition3TOCTOUCapacityOverflow:
 
         # Attempt all 4 simultaneously
         successful = 0
-        for context, idx in connection_tasks:
+        rejected = 0
+        for context, _idx in connection_tasks:
             try:
                 await ws_security_service.ensure_connection_capacity(user_id)
                 await ws_security_service.register_connection(context)
                 successful += 1
             except Exception:
-                pass  # Expected to fail after max
+                rejected += 1  # Expected to fail after max
+        assert rejected > 0
 
         # THEN final count should not exceed capacity
         final_count = await ws_security_service.get_active_connection_count(user_id)
@@ -256,7 +258,7 @@ class TestBugCondition4RateLimiterBypass:
             settings.WEBSOCKET_USER_MESSAGE_RATE,
             settings.WEBSOCKET_CONNECTION_MESSAGE_RATE,
         )
-        for i in range(attempts):
+        for _ in range(attempts):
             try:
                 await ws_security_service._apply_rate_limits(ws_security_context)
                 accepted += 1

@@ -50,7 +50,7 @@ def client() -> Iterator[Any]:
         sys.modules.pop(name, None)
 
     # app.main must be imported only after the stubs above are popped.
-    from app.main import create_app  # noqa: PLC0415
+    from app.main import create_app
 
     app = create_app()
     with TestClient(app) as test_client:
