@@ -72,7 +72,7 @@ def test_the_named_constant_matches_the_column_it_built() -> None:
     validating writes against a width the database does not have — the exact
     failure mode A3 exists to remove, reintroduced one layer up.
     """
-    assert CHUNK_EMBEDDING_DIM == _stored_width()
+    assert _stored_width() == CHUNK_EMBEDDING_DIM
 
 
 # `test_search_chunks_declared_width_is_configured_width` and

@@ -929,7 +929,25 @@ in DDL.
 
 ## 16. Final verification, and the change-0-dependent migration assertions
 
-- [ ] Run the full check set against the step 1 baselines, then the openspec validators.
+- [x] Run the full check set against the step 1 baselines, then the openspec validators.
+
+      **Done 2026-08-23 — audited execution.** Both Proof defects fixed rather than run as written:
+      lint/format scoped to the owned surface only (`src/`, the two conftests, `tests/unit/documents/`,
+      the identifier-gate test, outbox and celery-registration tests) — the 22 enumerated owned items
+      resolved (8 dead conftest imports removed, unnecessary assigns, dict-get, yoda/float comparisons,
+      outbox `try/assert False/except` → `pytest.raises`, no-self-use → staticmethod); E402 ×4 + INP001
+      left as documented-intentional. Full-suite gates at commit: **321 passed / 0 failed / 39 deselected**,
+      ruff src clean, ty clean.
+
+      Migration assertions substituted `<rev>` = `a71f0d7d9c12`, `<down>` = `2bc7726317f6`:
+      create_table is exactly documents+chunks; zero hits for search_documents/search_chunks/"clauses";
+      extension count against this one file is **3 not 4** — `vectorscale` ships in `a5bd6b69a28e`
+      (downstream), so all four extensions exist in history but not all in change 0's file; the three
+      retrieval index names present as asserted. Range SQL rendered offline:
+      `alembic upgrade 2bc7726317f6:a71f0d7d9c12 --sql` → 13 DDL statements;
+      `alembic upgrade b3e7c41d92af:f2a9c47b81de --sql` → exactly the three statute ADD COLUMNs,
+      the updated_at DROP DEFAULT, and the version stamp. `upgrade head --sql` never run.
+      `openspec validate --all` stays 21 passed / 6 failed. Mounted routes identical to baseline: 87.
 
 **Proof**
 

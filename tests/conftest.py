@@ -1,9 +1,7 @@
 import sys
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
-import fakeredis.aioredis
 import pytest
 from fakeredis.aioredis import FakeRedis
 
@@ -67,25 +65,13 @@ _tal_instance.insert = AsyncMock(return_value=None)
 _tal_mock.TokenAuditLog.return_value = _tal_instance
 sys.modules["app.features.auth.token_audit_log"] = _tal_mock
 
-from app.features.auth.dto import UserResponse
-from app.features.auth.repository import (
-    RefreshTokenRepository,
-    SessionData,
-    UserRepository,
-)
+from app.features.auth.repository import RefreshTokenRepository, UserRepository
 from app.features.auth.service import AuthService
-from app.utils.exceptions import (
-    ConflictException,
-    NotFoundException,
-    ServiceUnavailableException,
-    UnauthorizedException,
-)
 
 
 @pytest.fixture
 def redis() -> FakeRedis:
-    fake = FakeRedis(decode_responses=True)
-    return fake
+    return FakeRedis(decode_responses=True)
 
 
 @pytest.fixture
@@ -96,21 +82,18 @@ def refresh_token_repo(redis) -> RefreshTokenRepository:
 @pytest.fixture
 def auth_service(refresh_token_repo) -> AuthService:
     mock_user_repo = MagicMock(spec=UserRepository)
-    service = AuthService(mock_user_repo, refresh_token_repo)
-    return service
+    return AuthService(mock_user_repo, refresh_token_repo)
 
 
 def make_mock_user(**kwargs) -> MagicMock:
     user = MagicMock()
     user.id = kwargs.get("id", "507f1f77bcf86cd799439011")
     user.email = kwargs.get("email", "test@example.com")
-    user.hashed_password = kwargs.get(
-        "hashed_password", "$argon2id$v=19$m=65536,t=3,p=4$abc"
-    )
+    user.hashed_password = kwargs.get("hashed_password", "$argon2id$v=19$m=65536,t=3,p=4$abc")
     user.is_active = kwargs.get("is_active", True)
     user.is_verified = kwargs.get("is_verified", True)
     user.role = kwargs.get("role", "user")
-    user.full_name = kwargs.get("full_name", None)
+    user.full_name = kwargs.get("full_name")
     user.oauth_accounts = []
     user.verification_token_hash = None
     user.reset_token_hash = None

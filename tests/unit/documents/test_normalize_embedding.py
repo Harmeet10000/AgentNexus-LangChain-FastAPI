@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Unit tests for normalize_embedding() in app.utils.embedding."""
+
+from __future__ import annotations
 
 from unittest.mock import patch
 
@@ -32,7 +32,8 @@ def test_pads_undersized() -> None:
 def test_empty_vector_padded() -> None:
     result = normalize_embedding([], expected_dim=768)
     assert len(result) == 768
-    assert all(v == 0.0 for v in result)
+    # Padding writes the literal 0.0, so list identity is exact by construction.
+    assert result == [0.0] * 768
 
 
 def test_exact_oversize_boundary() -> None:
