@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SelfInfoDTO(BaseModel):
@@ -29,6 +29,8 @@ class HealthChecksDTO(BaseModel):
     celery: dict[str, Any]
     memory: dict[str, Any]
     disk: dict[str, Any]
+    # Agent memory (cognee) — distinct from `memory`, which is psutil RAM (N6).
+    agent_memory: dict[str, Any] = Field(default_factory=dict, serialization_alias="agentMemory")
 
 
 class HealthDataDTO(BaseModel):

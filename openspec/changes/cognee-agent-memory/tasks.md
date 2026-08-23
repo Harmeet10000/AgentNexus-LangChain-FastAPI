@@ -14,14 +14,14 @@
 
 ## 1. Preconditions — read-only, no code, no DDL
 
-- [ ] 1.1 Determine whether the target graph database exposes APOC and GDS. Record the answer in `design.md`
+- [x] 1.1 Determine whether the target graph database exposes APOC and GDS. Record the answer in `design.md`
       § Open Questions.
       **Proof:** `cypher-shell -a "$NEO4J_URI" -u "$NEO4J_USERNAME" --format plain
       "SHOW PROCEDURES YIELD name WHERE name STARTS WITH 'apoc.' OR name STARTS WITH 'gds.' RETURN count(name) AS n"`
       → record `n`. **If `n = 0`, take the pre-decided branch:** this change ships write-only, group 9's task is still
       registered, and the consolidation requirement's *refuses to run when its graph preconditions are absent*
       scenario becomes the observable behaviour rather than an edge case.
-- [ ] 1.2 Establish, read-only, whether the application role may create a schema and whether the vector extension is
+- [x] 1.2 Establish, read-only, whether the application role may create a schema and whether the vector extension is
       available — and re-confirm that no third-party memory table exists yet.
       **Proof:** `psql "$POSTGRES_URL" -Atc "select has_database_privilege(current_user, current_database(),
       'CREATE'), (select count(*) from pg_available_extensions where name = 'vector'), (select count(*) from
@@ -29,19 +29,19 @@
       ('entities','relationships','events','memory_versions'))"` → expect `t|1|0`. **No DDL is executed by this
       task.** A false first column takes the Decision 4 fallback (a durable file-backed store, which the delta
       permits explicitly).
-- [ ] 1.3 Determine whether a connection built from the **discrete** settings fields negotiates TLS at all — the
+- [x] 1.3 Determine whether a connection built from the **discrete** settings fields negotiates TLS at all — the
       question the retracted B1 claim was hiding (`design.md` Decision 5, § Open Questions).
       **Proof:** connect using `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_USERNAME`/`POSTGRES_DB_NAME` and run
       `select ssl, version from pg_stat_ssl where pid = pg_backend_pid()`. Record `ssl`. **If `ssl = f`**, task 4.5
       must set `database_connect_args` — a configuration line, not a design change.
-- [ ] 1.4 Prove or disprove, executably, that the memory subsystem's discrete connection settings resolve to the same
+- [x] 1.4 Prove or disprove, executably, that the memory subsystem's discrete connection settings resolve to the same
       instance the application's own engine resolves. This is the surviving B1 defect made falsifiable.
       **Proof:** `uv run python -c "from urllib.parse import urlparse; from app.config.settings import get_settings;
       from app.connections.postgres import get_database_url; s=get_settings(); u=urlparse(get_database_url());
       print(u.hostname==s.POSTGRES_HOST, u.port==s.POSTGRES_PORT, (u.path or '/').lstrip('/')==s.POSTGRES_DB_NAME)"`
       → expect `True True True`, and note in the record that today they agree only because `.env.development` sets
       both by hand (`.env.example` sets neither, and the code defaults diverge: `settings.py:140` vs `:141`/`:145`).
-- [ ] 1.5 Find out whether `openspec archive` accepts a 0/15-task change, which decides the shape of task 10.4.
+- [x] 1.5 Find out whether `openspec archive` accepts a 0/15-task change, which decides the shape of task 10.4.
       **Proof:** `openspec archive cognee-saul-memory-migration --dry-run 2>&1 | tail -5` (or the CLI's nearest
       no-op flag) — record whether it refuses. **It is an archive either way, never a delete.**
 

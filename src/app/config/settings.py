@@ -246,6 +246,21 @@ class Settings(BaseSettings):
     # --- Embedding ---
     EMBEDDING_DIMENSION: int = Field(default=768, gt=0)
 
+    # --- Agent Memory (cognee) ---
+    # Schema the memory library owns inside the application database; excluded
+    # from alembic autogenerate by src/alembic/env.py's include_object filter.
+    COGNEE_DB_SCHEMA: str = Field(default="cognee_memory")
+    # Prefix for conversation-partition names — the only tenant boundary while
+    # backend access control is unavailable on this handler/provider pair.
+    COGNEE_DATASET_PREFIX: str = Field(default="legal")
+    # Vector store the memory library writes embeddings to. Must be explicit:
+    # the library default lands them in local files (defect two, item 152).
+    COGNEE_VECTOR_PROVIDER: str = Field(default="pgvector")
+    # Written into the process environment before the first memory configuration
+    # call — left unset, cognee's default branch raises EnvironmentError on this
+    # repository's handler/provider pair.
+    COGNEE_ACCESS_CONTROL_ENABLED: bool = Field(default=True)
+
     # --- LangSmith ---
     # Renamed to match the variable in your ENV file: LANGSMITH_TRACING=true
     LANGSMITH_TRACING: bool = Field(default=False)

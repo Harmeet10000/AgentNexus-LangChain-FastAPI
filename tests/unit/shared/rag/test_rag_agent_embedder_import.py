@@ -37,7 +37,7 @@ from pathlib import Path
 # `test_module_remains_unimportable_pending_leg_e`.
 _TARGET = "app.shared.rag.document_processing.embedder"
 _SOURCE_PATH = (
-    Path(__file__).resolve().parents[4] / "src" / "app" / "shared" / "rag" / "rag_agent_advanced.py"
+    Path(__file__).resolve().parents[4] / "src" / "app" / "examples" / "rag_agent_advanced.py"
 )
 
 
@@ -80,28 +80,44 @@ def test_the_phantom_package_does_not_exist() -> None:
     assert importlib.util.find_spec("ingestion") is None
 
 
-# --- Exactly one embedder import, at module level ---
+# --- The embedder import is gone; the unified entry point replaced it ---
 
 
-def test_there_is_exactly_one_embedder_import() -> None:
-    """Four function-local imports collapsed to one. The count is the point.
+_UNIFIED_IMPORT = "app.shared.langchain_layer.embeddings"
 
-    Four copies of the same import is how the phantom survived: each was inside a
-    different function, so no single call path exercised more than one of them.
+
+def test_there_is_exactly_one_unified_embeddings_import() -> None:
+    """Zero embedder imports, exactly one unified-import line.
+
+    Before band E this file asserted one ``create_embedder`` import — four
+    function-local copies collapsed to module level by A4. Band E removed it
+    entirely: the five call sites now use ``embed_text``, imported once.
     """
-    assert len(_embedder_imports(tree=_tree())) == 1
+    imports = [
+        node
+        for node in ast.walk(node=_tree())
+        if isinstance(node, ast.ImportFrom)
+        and node.module is not None
+        and "embeddings" in node.module
+    ]
+    assert len(imports) == 1
+    assert not _embedder_imports(tree=_tree())
 
 
-def test_the_embedder_import_is_at_module_level() -> None:
+def test_the_unified_import_is_at_module_level() -> None:
     tree = _tree()
     module_level = [node for node in tree.body if isinstance(node, ast.ImportFrom)]
-    assert _embedder_imports(tree=tree)[0] in module_level
+    unified = [
+        node
+        for node in ast.walk(node=tree)
+        if isinstance(node, ast.ImportFrom) and node.module == _UNIFIED_IMPORT
+    ]
+    assert unified and unified[0] in module_level
 
 
-def test_the_embedder_import_targets_the_surviving_module() -> None:
-    node = _embedder_imports(tree=_tree())[0]
-    assert node.module == _TARGET
-    assert [alias.name for alias in node.names] == ["create_embedder"]
+def test_no_embedder_import_survives() -> None:
+    """The relocation deleted the last reason this file had to touch the embedder."""
+    assert _embedder_imports(tree=_tree()) == []
 
 
 # --- The target resolves, and exposes what the former call sites call ---
@@ -112,20 +128,45 @@ def test_the_import_target_resolves() -> None:
 
 
 def test_the_embedder_exposes_every_member_the_call_sites_invoke() -> None:
-    """``embed_query`` is the one that mattered.
+    """``embed_chunks`` is what remains after band E.
 
-    The four former call sites call ``embedder.embed_query(...)``. Retargeting the
-    import without that member would have traded ``ModuleNotFoundError`` for
-    ``AttributeError`` — a different exception at the same moment, which is not
-    what A4 asks for.
+    Band E relocated ``rag_agent_advanced.py`` to ``src/app/examples/`` and
+    repointed its **five** call sites (``:125``, ``:194``, ``:260``, ``:368``,
+    ``:432`` — the plan and this file's earlier docstring both said four; the
+    fifth is the refined-query re-search) to
+    ``embed_text(..., task_type=QUERY)``, so ``embed_query`` and
+    ``_Embedder.embed_query`` are deleted. The embedder keeps only what callers
+    still use.
     """
     embedder = importlib.import_module(name=_TARGET).create_embedder()
-    assert callable(embedder.embed_query)
     assert callable(embedder.embed_chunks)
+    assert not hasattr(embedder, "embed_query")
+
+
+def test_the_call_sites_reach_the_unified_query_entry_point() -> None:
+    """Every query-side embedding call goes through ``embed_text(QUERY)``.
+
+    Read from the source rather than listed, so a new call site is covered.
+    """
+    source = _source()
+    assert "from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text" in source
+    assert "embedder.embed_query" not in source
+    called = sum(
+        1
+        for node in ast.walk(node=_tree())
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "embed_text"
+    )
+    assert called == 5, f"expected five embed_text call sites, found {called}"
 
 
 def test_every_call_site_uses_a_member_the_embedder_provides() -> None:
-    """Derived from the source rather than listed, so a new call site is covered."""
+    """Derived from the source rather than listed, so a new call site is covered.
+
+    After band E no ``embedder.<member>`` call remains — the attribute set is
+    asserted empty rather than subset-checked.
+    """
     embedder = importlib.import_module(name=_TARGET).create_embedder()
     called = {
         node.func.attr
@@ -135,8 +176,8 @@ def test_every_call_site_uses_a_member_the_embedder_provides() -> None:
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == "embedder"
     }
-    assert called
-    assert called <= {name for name in dir(embedder) if not name.startswith("_")}
+    assert not called, f"stale embedder calls remain: {sorted(called)}"
+    assert callable(embedder.embed_chunks)
 
 
 # --- The blocker A4 does not mention, pinned so leg E must revisit it ---
@@ -147,8 +188,9 @@ def test_module_remains_unimportable_pending_leg_e() -> None:
 
     ``Agent`` and ``RunContext`` come from ``pydantic-ai``, which is not a declared
     dependency. Adding one to make a CLI that nothing imports importable is a
-    dependency decision A4 never asked for, and leg E may well delete or rewrite
-    this file instead — Q-A already decided it relocates to ``src/app/examples/``.
+    dependency decision A4 never asked for. Band E executed Q-A's relocation to
+    ``src/app/examples/`` and repointed the embedding call sites, but did **not**
+    make the file importable — it is example code now, read not run.
 
     When that happens this test fails, which is the intent: it is a tripwire, not
     an endorsement.

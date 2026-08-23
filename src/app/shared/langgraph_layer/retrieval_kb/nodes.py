@@ -1,4 +1,4 @@
-"""Nodes for clauses-backed legal retrieval graph."""
+"""Nodes for the unified-chunk-backed legal retrieval graph."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     from redis.asyncio import Redis
 
-    from app.features.search.repository import SearchRepository
+    from app.features.documents.repository import DocumentRepository
 
     from .state import RetrievalState
 
@@ -169,7 +169,7 @@ def make_graph_retrieval_node(
 
 
 def make_hybrid_retrieval_node(
-    repo: SearchRepository,
+    repo: DocumentRepository,
     redis: Redis | None,
 ) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
     async def hybrid_retrieval_node(state: RetrievalState) -> dict[str, object]:
@@ -187,8 +187,14 @@ def make_hybrid_retrieval_node(
             label="gemini_query_embedding",
         )
         chunk_ids = state.get("graph_chunk_ids") or None
+        # `user_id` is not a translation of an old argument — the reader this replaces had no
+        # tenant predicate at all, so every fused search read across all owners and was held
+        # back only by the caller never passing another user's chunk ids. The unified query
+        # scopes on the parent document's owner, which is why the state field is required here
+        # rather than optional.
         rows = await retry_immediate(
             lambda: repo.legal_rrf_search(
+                user_id=state["user_id"],
                 query_text=plan.rewritten_query,
                 query_embedding=embedding,
                 limit=20,
@@ -196,7 +202,16 @@ def make_hybrid_retrieval_node(
                 keyword_weight=plan.keyword_weight,
                 jurisdiction=plan.jurisdiction,
                 contract_type=plan.contract_type,
+                # The one filter the old reader accepted from the request and then dropped on
+                # the floor: `doc_ids_filter` reached the analyzer prompt, the Graphiti group
+                # ids and the answer cache key, but never the SQL.
+                document_ids=state.get("doc_ids_filter") or None,
                 chunk_ids=chunk_ids,
+                # Explicit, not defaulted: `QueryPlan` forbids extra fields, so the graph has
+                # nowhere to carry either of these. Passing them by name records that the
+                # omission is a property of the plan object, not an oversight here.
+                clause_type=None,
+                require_graphiti_verified=False,
                 bm25_threshold=plan.bm25_threshold,
                 exact_phrase=plan.exact_phrase,
             ),

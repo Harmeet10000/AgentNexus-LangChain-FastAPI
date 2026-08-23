@@ -169,7 +169,7 @@ def build_agent_registry(
 def _build_graph_nodes(
     registry: AgentRegistry,
     pro_llm: BaseChatModel,
-    cognee_client: Any,
+    memory_service: Any,
     tool_registry: ToolRegistry,
 ) -> SaulGraphNodes:
     return SaulGraphNodes(
@@ -192,6 +192,6 @@ def _build_graph_nodes(
         grounding_verification=make_grounding_verification_node(registry.grounding_llm),
         human_review=make_human_review_node(),
         finalization=make_finalization_node(registry.finalization_llm),
-        persist_memory=make_persist_memory_node(cognee_client),
+        persist_memory=make_persist_memory_node(memory_service),
         deep_research=make_deep_research_node(tool_registry.deep_research_tool),
     )

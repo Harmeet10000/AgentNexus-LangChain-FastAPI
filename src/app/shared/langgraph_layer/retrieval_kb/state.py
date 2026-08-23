@@ -1,4 +1,4 @@
-"""State and schemas for clauses-backed legal retrieval."""
+"""State and schemas for unified-chunk-backed legal retrieval."""
 
 from __future__ import annotations
 

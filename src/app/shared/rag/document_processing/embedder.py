@@ -361,49 +361,16 @@ def _attach_embeddings_to_chunks(
         )
 
 
-async def embed_query(query: str, model: str = _PROVIDER_EMBEDDING_MODEL) -> list[float]:
-    """
-    Generate embedding for a search query.
-
-    Args:
-        query: Search query
-        model: Embedding model to use
-
-    Returns:
-        Query embedding
-
-    Note:
-        This is a **query**-side call that produces a **document**-side vector: it delegates to
-        `generate_embedding`, which sends the module-level `GEMINI_TASK_TYPE` (`:47`) — pinned to
-        `retrieval_document`. That is the exact asymmetry B1 exists to remove, and it survives
-        here for one reason: `rag_agent_advanced.py` holds the only five call sites, and A4's
-        import guard turns deleting this into an `AttributeError` at first call.
-
-        It is not fixed in place because Decision 15 keeps this module out of the unified path,
-        and it is not worth threading a task-type argument through a function whose sole consumer
-        is leaving. Step E relocates `rag_agent_advanced.py` to `src/app/examples/`; that is the
-        point at which its five sites repoint to
-        `app.shared.langchain_layer.embeddings.embed_text(..., task_type=QUERY)` and this
-        function, along with `_Embedder.embed_query`, goes away.
-
-        Nothing in production reaches this: `rag_agent_advanced.py` has no importer outside the
-        test that asserts it imports cleanly.
-    """
-    return await generate_embedding(query, model=model)
-
-
 class _Embedder:
     """Object form of this module's functions, for callers that hold an embedder.
 
-    ``embed_query`` is here because task A4's four call sites in
-    ``rag_agent_advanced.py`` call it (``:201``, ``:270``). Retargeting their
-    imports without it would only trade ``ModuleNotFoundError`` for
-    ``AttributeError`` — still a first-call failure, still deferred, still exactly
-    what A4 says is unacceptable.
+    ``embed_query`` was removed with band E of todo-210: its only consumers —
+    the five call sites in ``rag_agent_advanced.py`` — relocated to
+    ``src/app/examples/`` and repointed to
+    ``app.shared.langchain_layer.embeddings.embed_text(..., task_type=QUERY)``.
     """
 
     embed_chunks = staticmethod(embed_chunks)
-    embed_query = staticmethod(embed_query)
 
 
 def create_embedder() -> _Embedder:
