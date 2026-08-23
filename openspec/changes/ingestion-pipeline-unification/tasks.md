@@ -700,7 +700,7 @@ Each is independently committable and each fixes something already wrong today.
 Band C changes whether a crash is recoverable and whether the queue can be consumed at all. Every checkpointer Proof
 here is import-level, type-level, or a unit test over a construction the test owns — see rule 4.
 
-- [ ] **C1 — Install the client-library binary binding and delete the placeholder alias, in one commit.**
+- [x] **C1 — Install the client-library binary binding and delete the placeholder alias, in one commit.**
   `src/app/shared/langgraph_layer/checkpointer.py:26-29` catches `ImportError` and assigns
   `AsyncPostgresSaver = Any`. That fallback is the **live** path, not dead code: `psycopg` 3.3.3 is installed with no
   libpq binding, so `from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver` raises
@@ -718,7 +718,32 @@ here is import-level, type-level, or a unit test over a construction the test ow
     suppression at the old `:67` is **gone**. A typed-ignore that hid a real defect is the tell; its removal is the
     type-level proof that the return type is now honest.
 
-- [ ] **C2 — Fix the constructor call: setup must yield a usable saver, never an unentered resource manager.**
+  **Done.** `psycopg[binary,pool]>=3.3.3` declared; the alias assignment and its `except ImportError` deleted. All four
+  Proofs pass — the import prints the real class, both greps are empty, `uv lock --check` exits 0, and no type
+  suppression of any kind remains in the file.
+
+  - **Evidence — the premise was verified before acting rather than assumed.** With the binding absent, `import psycopg`
+    raises `ImportError: no pq wrapper available`: no `psycopg_c`, no `psycopg_binary`, and no system libpq on this
+    machine. So the fallback genuinely was the live path and genuinely was the only reason the application booted, which
+    is what makes the one-commit constraint real rather than stylistic. `psycopg.pq.__impl__` now reports the binary
+    implementation.
+  - **Evidence — `pool` was declared too, beyond what C1 asks for.** The rewritten module imports `psycopg_pool`
+    directly (it owns its own `AsyncConnectionPool`), and that package reached the environment only as a transitive
+    dependency of `langgraph-checkpoint-postgres`. A direct import behind someone else's declaration breaks silently the
+    day that dependency reorganises — the same hazard class B4 recorded for `transformers`, which is also declared in
+    this commit, closing it.
+  - **Evidence — the lock diff adds one distribution, not a re-resolution.** `psycopg-pool` was already in `uv.lock`
+    transitively, so the `pool` extra records an existing fact; `psycopg-binary==3.3.3` is the only genuinely new
+    package. `uv lock --check` exits 0 both before and after.
+  - **Warning for anyone re-running this — a bare `uv sync` uninstalls the test toolchain in this repo.** `pytest-asyncio`
+    is declared only in the `test` extra and the `test` dependency group, while `[tool.uv] default-groups = ["dev"]`, and
+    the `dev` group holds `ruff`/`ty`/`hypothesis` but no pytest. A plain `uv sync` therefore prunes it, and pytest then
+    reports `ERROR: Unknown config option: asyncio_mode` and collects **zero** tests — which reads as "the change broke
+    the suite" and is not. Restore with
+    `uv sync --extra dev --extra test --group dev --group test`. Nothing here needed a sync at all: `uv lock --check`
+    passing already meant the resolution was unchanged.
+
+- [x] **C2 — Fix the constructor call: setup must yield a usable saver, never an unentered resource manager.**
   `from_conn_string` is decorated `@classmethod @asynccontextmanager`
   (`.venv/…/langgraph/checkpoint/postgres/aio.py:55-57`), so `checkpointer.py:56-57` binds a context manager and then
   calls `.setup()` on it — an uncaught `AttributeError`, since the handler at `:58` catches only
@@ -733,7 +758,39 @@ here is import-level, type-level, or a unit test over a construction the test ow
   - **Proof (unit, no database):** a test patches the driver connection layer and asserts setup returns an instance
     of the real saver class, and that a construction failure **raises** rather than returning `None`.
 
-- [ ] **C3 — Consume the shared accessor for the plain client-library URL flavour; repair nothing at the call site.**
+  **Done.** Setup now owns an `AsyncConnectionPool`, hands it to the saver constructor directly, runs the migrations, and
+  either returns the saver or raises with the pool already closed. All three Proofs pass.
+
+  - **Evidence — the defect is worse than C2 describes: that classmethod cannot produce a long-lived saver at all.**
+    C2 diagnoses the call as returning an unentered context manager, which is true and is the visible bug. Reading the
+    source shows the deeper one: the body is `async with await AsyncConnection.connect(…) as conn: … yield cls(conn=conn,
+    …)`, so the connection is closed when the block exits. Entering the manager *correctly* would still hand back a saver
+    whose connection dies at the end of the `with`. There is no arrangement of `async with` that yields a saver outliving
+    the block, which is why this is a rewrite that owns the pool rather than a two-line fix. The classmethod's name is
+    described rather than written throughout the module because C2's first Proof is a grep for it.
+  - **Evidence — the old exception handler was unreachable for every failure it named.** It caught
+    `(ConnectionError, TimeoutError, OSError)`; `psycopg.Error.__mro__` is `(Error, Exception, BaseException)` and it
+    derives from none of the three. So no driver failure was ever handled there, and the `AttributeError` C2 predicts was
+    not the only thing falling through — the clause was decorative. The replacement catches `psycopg.Error`.
+    `PoolTimeout` deliberately gets no clause of its own: it derives from `psycopg.OperationalError`, so naming both
+    would imply they were siblings and invite someone to "complete" the tuple.
+  - **Evidence — owning the pool means inheriting three connection settings, and one of them is load-bearing.** The
+    library's own helper connected with `autocommit=True`, `prepare_threshold=0`, and `row_factory=dict_row`. That last
+    one is not stylistic: `setup()` reads `row["v"]` off its migration query, which a tuple row cannot answer. A pool
+    built without them yields a saver that imports, constructs, and then fails *inside* its migration. Not one of C2's
+    stated Proofs — added as `test_the_connection_settings_the_saver_depends_on_are_passed_on`, because it is precisely
+    the defect this fix is most likely to introduce.
+  - **Evidence — the failure paths close the pool, and the guard is a `finally`, not the `except`.** A `pool_handed_off`
+    flag is set only on the successful return; the `finally` closes otherwise. This covers what the `except` cannot: an
+    unexpected exception type, and cancellation inside `open()` — a shutdown racing startup would otherwise leave a pool
+    holding live server connections with nothing referencing it. Two tests cover the two distinct leak paths (open
+    failed; open succeeded and the DDL failed), because a `try` around only the constructor passes the first and fails
+    the second.
+  - **Evidence — the test never patches the saver class.** C2's claim is that setup returns an instance of the *real*
+    class; a test that substituted the class could not tell that apart from returning a stand-in. Only the pool class and
+    the migration step are replaced.
+
+- [x] **C3 — Consume the shared accessor for the plain client-library URL flavour; repair nothing at the call site.**
   The raw configured URL carries **no password**; the relational engine's accessor injects it but returns the
   engine's **dialect alias**, which this driver cannot parse. One is unauthenticated, the other unparseable. The
   checkpointer takes its string from the accessor for its own flavour, retains the transport-security parameters that
@@ -749,7 +806,38 @@ here is import-level, type-level, or a unit test over a construction the test ow
   - **Proof:** a unit test captures log records across a successful and a failed setup and asserts no record contains
     the connection string or any credential substring. Never print the value in a Proof's own output.
 
-- [ ] **C4 — Make teardown report which of its three outcomes occurred.**
+  **Done.** The module calls the accessor's plain flavour and does nothing to the result. All three Proofs pass; no
+  credential, host, or port was printed by any of them.
+
+  - **Evidence — the docstring C3 says is wrong was already fixed, by change 0.** C3 states the module docstring "names
+    the dialect-aliased scheme and is **wrong**". It does not. `git log -p` shows change 0's commit `79a1d95` already
+    replaced that wording with the correct plain/libpq description. This is the **eighth** instance in this refactor of a
+    plan step describing work that was already done — the pattern is now reliable enough to budget for. The docstring was
+    rewritten anyway, but to record the two-strings-neither-will-do reasoning and the D17 warning, not to fix an error.
+  - **Evidence — C3's grep Proof conflicted with the first implementation, and the code was improved rather than the
+    Proof bent.** The scrubber initially used `urlsplit(dsn).password` and `.replace(…)`; the Proof greps for `split(`
+    and would have failed on it. Switching to `conninfo_to_dict(dsn).get("password")` plus
+    `re.sub(re.escape(form), …)` satisfies the Proof *and* fixes a real latent gap: a DSN may legally be keyword-value
+    form rather than a URL, and against `host=… password=…` a URL parser finds no credential and the scrubber silently
+    scrubs nothing. The switch then forced a second finding — the driver's parser returns the secret **percent-decoded**
+    while the DSN carries the encoded form the accessor wrote, so an error echoing either one has to be matched. Both
+    encodings are scrubbed, and the test's fixture secret is chosen to percent-encode so that a scrubber knowing only one
+    of the two fails.
+  - **Evidence — the project's log redaction does not cover this, and looks like it does.** `redact_sensitive_data`
+    (`src/app/utils/logger.py:82`) iterates `record["extra"]` and blanks entries whose **key name** contains
+    password/token/credit_card/secret. It never inspects a value and never touches the message. So `error=str(e)` passes
+    through entirely untouched — and the driver reports a connection failure by quoting the connection info it failed on.
+    A redaction mechanism that appears to cover a case and does not is worse than none, because it stops anyone from
+    looking. Hence a local scrub at the two log sites, with the reason recorded in its docstring.
+  - **Evidence — the credential test needed a loguru sink, not `caplog`.** `caplog` does not see loguru at all, and the
+    interesting failure is a credential arriving as a *value* under an innocuous field name. The fixture adds a sink with
+    `format="{message} | {extra}"`; rendering `{extra}` is what makes that visible to an assertion.
+  - **Evidence — the assertion reports a line index and never the line.** A plain `assert secret not in line` prints the
+    offending content on failure, which would write the credential into the test output and turn a leak into a leak that
+    is also archived in CI. Reported as "log line *N* carries the decoded credential" instead. This is rule 4 applied to
+    a test's own failure message, which is a place it is easy to forget.
+
+- [x] **C4 — Make teardown report which of its three outcomes occurred.**
   This is the one live defect in this area fixable **without uncommenting anything**, and it is import- and
   type-provable. Three problems compound: `lifespan.py:317` calls teardown on shutdown while the setup it pairs with
   at `:294-305` is commented out; teardown's `if checkpointer is None: return` is **silent**, indistinguishable from
@@ -767,6 +855,54 @@ here is import-level, type-level, or a unit test over a construction the test ow
     `rg -n "^\s*#\s*saul_checkpointer = await setup_langgraph_checkpointer" src/app/lifecycle/lifespan.py` → still a
     **commented** line. Also `uv run rg -n "app.state.langgraph_checkpointer\s*=" src/app/` → no *uncommented*
     assignment introduced by this change.
+
+  **Done, with four outcomes rather than three.** Teardown returns a `CheckpointerTeardown` `StrEnum` — returned rather
+  than only logged, so a caller can act on it and a test can assert on it without scraping log records. All three Proofs
+  pass; the D17 grep still matches a commented line, and both `app.state.langgraph_checkpointer =` hits in the tree
+  (`lifespan.py:322`, `:328`) remain commented.
+
+  - **Evidence — the fourth outcome, `CLOSE_FAILED`, is deliberate and not scope creep.** C4 names three: closed a pool /
+    nothing was provisioned / handed something with no pool to close. Reporting a *failed close* as the third would
+    rebuild the exact conflation this task exists to remove — one of those says no action was needed, the other says an
+    action was attempted and did not work, and only the second is worth waking anyone for.
+  - **Evidence — the old guard was betting on an attribute no saver the library can build has.**
+    `AsyncPostgresSaver.__init__` sets `conn`, `pipe`, `lock`, `loop`, `supports_pipeline` — and `serde`, which C4's list
+    omits — and nothing named `pool` exists on it or on either of its bases. So the pool went unclosed on **every**
+    shutdown, and silently, because a false `if` fell straight through to a successful return. `conn` is the attribute
+    that holds it, and it is a union: `AsyncConnection | AsyncConnectionPool`. The replacement is an `isinstance` against
+    the pool class, and the bare-connection case reports rather than closing, because a connection someone else opened is
+    not ours to close. `test_the_saver_has_no_pool_attribute` pins that fact as a regression test, so a future library
+    version adding the attribute surfaces as a decision to revisit rather than as behaviour that quietly changes.
+  - **Evidence — C4's line numbers have drifted; the Proof survives it.** Teardown is called at `lifespan.py:339-340`,
+    not `:317`, and the commented setup block is `:312-328`, not `:294-305`. The D17 grep is anchored on the line's text
+    rather than its number and still matches, at `:319` — which is why it was written that way.
+  - **Evidence — the test's pool double is a real `AsyncConnectionPool` subclass, and it has to be.** Teardown decides
+    what it may close with an `isinstance` check, so an unrelated look-alike double would be reported as "nothing to
+    close" and the test would pass for the wrong reason. `__init__` deliberately does not call `super().__init__`, which
+    would start background workers and try to reach a server.
+
+  - **Evidence — `tests/unit/shared/langgraph_layer/test_checkpointer_lifecycle.py`, 14 tests, all passing, and every
+    guard mutation-tested.** A passing test is not evidence a guard works. Each mutation was applied to the working copy,
+    the file restored afterwards, and each killed exactly the tests it should and no others:
+
+    | Mutation | Tests killed | Which |
+    |---|---|---|
+    | `_scrub(str(e), dsn)` → raw `str(e)` | 1 | the failed-setup credential test; the captured log visibly carried the DSN |
+    | `isinstance(held, AsyncConnectionPool)` → the old attribute guard | 3 | both close tests and the teardown credential test |
+    | drop the `finally` cleanup | 2 | both pool-leak tests |
+    | `CLOSE_FAILED` → `NO_POOL_TO_CLOSE` | 2 | both close-failure tests |
+    | drop `_CONNECTION_KWARGS` | 1 | the connection-settings test |
+
+    Two tests exist for what looks like one claim because the defect they cover was hidden by a **type suppression**
+    rather than by a missing branch: the old function was annotated as returning a saver and returned `None` down two
+    paths, each with the type checker silenced on the line. "Does it ever return `None`" is therefore asserted here rather
+    than delegated to `ty`, which had already been told not to look.
+
+  - **Gate at the close of C1–C4:** `uv run ruff format src/` → 360 files unchanged · `uv run ruff check --fix src/` →
+    All checks passed · `uv run ty check src/` → All checks passed · `uv run pytest -q` → **208 passed** (194 + 14), with
+    the same 12 pre-existing websocket fixture failures (3 failed + 9 errors) owned by no change in this band. The tree
+    also carried in-flight C5/C6 and C9 work when this was measured, so the four test files belonging to those tasks were
+    excluded to make the count attributable; their `src/` edits were left in place and break no baseline test.
 
 - [ ] **C5 — Correct the retry policy: named transient types, growing wait, no catch-all.**
   `kb_retry.py` uses `retry=retry_if_exception_type(Exception)` at `:29` and `wait=wait_none()` at `:28` — three
