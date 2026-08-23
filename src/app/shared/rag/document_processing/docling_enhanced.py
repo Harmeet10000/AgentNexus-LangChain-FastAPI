@@ -71,6 +71,24 @@ def create_document_converter(gpu_available: bool) -> DocumentConverter:
     )
 
 
+def table_markdown(doc: DoclingDocument) -> list[str]:
+    """Every table in ``doc`` rendered as markdown, in document order.
+
+    One expression replacing three copies, two of which called ``table.to_markdown()`` — a method
+    ``TableItem`` does not define. The real name is ``export_to_markdown``. The copies failed
+    differently from the same typo: the KB ingestion node guarded the call with
+    ``hasattr(table, "to_markdown")``, so the guard was false for every table and the node
+    returned an empty list for every document ever parsed; ``extract_tables`` below called it
+    bare, and because ``AttributeError`` is not a ``docling.exceptions.BaseError`` its ``except``
+    clause never caught it. A silent nothing and an uncaught crash, from one wrong method name.
+
+    ``doc=`` is passed rather than omitted. Without it the call logs a deprecation warning and
+    takes a fallback that walks ``self.data.grid`` directly; with it the table goes through
+    ``MarkdownDocSerializer``, which is the path that can resolve what a cell refers to.
+    """
+    return [table.export_to_markdown(doc=doc) for table in doc.tables]
+
+
 def extract_tables(doc: DoclingDocument) -> list[ExtractedTable]:
     """Extract tables from document."""
     tables = []
@@ -81,7 +99,7 @@ def extract_tables(doc: DoclingDocument) -> list[ExtractedTable]:
 
         for idx, table in enumerate(doc.tables):
             try:
-                md_table = table.to_markdown()
+                md_table = table.export_to_markdown(doc=doc)
                 rows = md_table.split("\n")
                 row_count = len([r for r in rows if r.strip() and not r.startswith("|---")])
                 col_count = len(rows[0].split("|")) - 2 if rows else 0
@@ -100,7 +118,14 @@ def extract_tables(doc: DoclingDocument) -> list[ExtractedTable]:
                         metadata={"source_table": idx},
                     )
                 )
-            except DoclingError as e:
+            # Deliberately not catching `AttributeError`. It was the *uncaught* exception here
+            # for as long as this function has existed, because the call named a method that does
+            # not exist — and a clause broad enough to swallow it would have logged "failed to
+            # extract table 3" for every table of every document instead of surfacing a wrong API
+            # name. `ValueError`/`IndexError`/`KeyError` are what a malformed cell grid raises,
+            # which is a per-table problem worth skipping; a missing attribute is a per-build
+            # problem worth crashing on.
+            except (DoclingError, ValueError, IndexError, KeyError) as e:
                 e.add_note(f"table_index={idx}, operation=extract_table")
                 loguru_logger.warning(f"Failed to extract table {idx}: {e}")
 

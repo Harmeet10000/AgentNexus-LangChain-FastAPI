@@ -580,7 +580,7 @@ Each is independently committable and each fixes something already wrong today.
     future edit cannot quietly reuse `kb:embedding:` and start reading text-only entries.
 
 
-- [ ] **B3 — Stop blocking the event loop during parse, and stop discarding parsed tables.**
+- [x] **B3 — Stop blocking the event loop during parse, and stop discarding parsed tables.**
   `src/app/features/documents/parser.py` calls the synchronous converter at `:25` inside `async def parse_document`
   (`:19`), blocking the loop for the whole parse, and returns `tables=[]` at `:34`, discarding structure the parser
   already extracted. Offload the synchronous call; carry the tables through.
@@ -590,6 +590,60 @@ Each is independently committable and each fixes something already wrong today.
   - **Proof:** a unit test asserts the event loop remains responsive across a parse (schedule a second coroutine and
     assert it runs before the parse completes) and that a fixture document with a table yields a non-empty table
     collection. **Mandatory** — this defect is invisible to lint and types.
+
+  **Done.** The conversion body moved into a nested `_sync_parse` returned through
+  `asyncer.asyncify`. That idiom rather than `asyncio.to_thread` deliberately: `ingestion_kb/nodes.py:420-452` already
+  offloads the same converter the same way, and change 2 consolidates these two paths — arriving there with two
+  offload idioms would make that a reconciliation instead of a deletion.
+
+  **The converter is still built per call, and that is a decision, not an omission.** Making it a cached singleton is
+  the obvious next optimisation and is wrong to do in the same step, because the offload is what first makes
+  concurrent parses possible and `DocumentConverter` holds mutable pipeline state docling does not document as
+  thread-safe. Recorded in the `parse_document` docstring so the next reader does not "fix" it.
+
+  - **Evidence — the table discard was in three places, not one, and B3 named the least harmful.** All three called
+    `table.to_markdown()`. `TableItem` has no such method; it is `export_to_markdown`. Verified directly:
+    `hasattr(TableItem, "to_markdown")` is `False`, and `inspect.signature` gives
+    `export_to_markdown(self, doc: DoclingDocument | None = None)`.
+    1. `parser.py:34` — an empty literal. Discarded openly; the one B3 describes.
+    2. `ingestion_kb/nodes.py:433-437` — the comprehension was guarded by `hasattr(table, "to_markdown")`, so the
+       guard was **false for every table** and the KB ingestion path returned an empty list for every document it has
+       ever parsed. Worse than `parser.py`'s version, because the guard made a wrong method name read as defensive
+       handling of an optional one. This is the path B3 would have been told to copy.
+    3. `docling_enhanced.py:84` (`extract_tables`) — called it bare. `AttributeError` is **not** a subclass of
+       `docling.exceptions.BaseError` (verified: `issubclass(AttributeError, BaseError)` is `False`), which is what
+       `except DoclingError` binds, so this one **raises uncaught** on any document with a table.
+       `DoclingEnhancementConfig.extract_tables` defaults to `True` (`models.py:226`), so it is on by default. Latent
+       rather than live: `convert_document` and `extract_tables` have no caller outside their own package.
+  - **Evidence — one expression now, in one place.** `docling_enhanced.table_markdown(doc)` passes `doc=` rather than
+    omitting it: without it the call logs a deprecation warning and falls back to walking `self.data.grid`, which
+    cannot resolve what a cell refers to (read from `export_to_markdown`'s source, not inferred). Imported from the
+    leaf module in both consumers, matching the leaf-import idiom `319c698` established.
+  - **Evidence — `extract_tables`'s except clause deliberately still does not catch `AttributeError`.** Widening it
+    was the tempting fix and would have been the wrong one: it converts the crash into `nodes.py`'s lie, logging
+    "Failed to extract table 3" for every table of every document. `(DoclingError, ValueError, IndexError, KeyError)`
+    is what a malformed cell grid raises — a per-table problem worth skipping. A missing attribute is a per-build
+    problem worth crashing on.
+  - **Evidence:** `tests/unit/features/documents/test_parser_offload_and_tables.py` — 7 tests, all passing.
+    Responsiveness is asserted on **interleaving, not duration**: the fake converter blocks on `time.sleep` (which
+    `asyncio.sleep` is not), a competing coroutine sets an `asyncio.Event` with no prior await, and the assertion is
+    that the flag is set by the time the parse returns. A wall-clock threshold would measure the runner instead of the
+    code. `test_two_parses_overlap_rather_than_serialising` adds the claim the first test cannot make: an offload to a
+    single serialising worker would pass it and still queue uploads.
+  - **Evidence — the fake `TableItem` mirrors the real class's asymmetry.** It defines `export_to_markdown` and
+    deliberately does *not* define `to_markdown`. A fake offering both names would have passed against the broken
+    code and proved nothing.
+  - **Evidence — both mandatory claims mutation-tested.** Replacing `await asyncer.asyncify(_sync_parse)()` with
+    `_sync_parse()` fails exactly the two responsiveness tests and no others; reverting `tables=` to an empty literal
+    fails exactly the two table tests and no others. Each guard is load-bearing, and each fails for its own reason.
+  - **Evidence:** `uv run pytest -q` → **194 passed** (187 + 7). `uv run ruff check src/` and `uv run ty check src/` →
+    **All checks passed**.
+  - **Note — the second Proof needed the codebase's own convention applied to my comment.** The replacement comment
+    first quoted the literal the proof greps for, which defeated it. Described instead, the way
+    `embedder._provider_failure` already does for A2's zero-vector grep.
+  - **Note — no `docs/relay/b3-*.md`.** B3's first subagent died on the same API error class as B4's, leaving **no**
+    file changes at all (verified by `git status` at the time). Redone here directly; this block is the record.
+
 
 - [x] **B4 — Cache the token counter, and record why the transformer dependency cannot be dropped.**
   The counter is acquired uncached and synchronously, with a first-use disk or network load, on **every** call. Cache

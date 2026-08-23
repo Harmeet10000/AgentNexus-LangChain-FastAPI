@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_texts
 from app.shared.langchain_layer.models import serialize_to_toon
 from app.shared.langgraph_layer.kb_retry import retry_immediate
+from app.shared.rag.document_processing.docling_enhanced import table_markdown
 from app.shared.rag.graphiti.schemas import (
     GRAPHITI_EDGE_TYPE_MAP,
     GRAPHITI_EDGE_TYPES,
@@ -430,11 +431,12 @@ async def _parse_document_with_docling(
             result: ConversionResult = DocumentConverter().convert(tmp.name)
             document: DoclingDocument = result.document
             markdown = document.export_to_markdown()
-            tables: list[Any] = [
-                table.to_markdown()
-                for table in getattr(document, "tables", [])
-                if hasattr(table, "to_markdown")
-            ]
+            # Was a comprehension over `table.to_markdown()` guarded by
+            # `hasattr(table, "to_markdown")`. `TableItem` has no such method — it is
+            # `export_to_markdown` — so the guard was false for every table and this list was
+            # empty for every document this node has ever parsed. The guard is what hid it: it
+            # made a wrong method name look like defensive handling of an optional one.
+            tables: list[str] = table_markdown(document)
             elements: list[Unknown] = []
             for item, _level in document.iterate_items():
                 to_dict = getattr(item, "to_dict", None)
