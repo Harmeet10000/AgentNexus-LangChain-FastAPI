@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from google.api_core.exceptions import GoogleAPIError
 from openai import OpenAIError
 
-from app.shared.rag.document_processing.embedder import create_embedder
+from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text
 from app.utils.logger import logger
 
 # Load environment variables
@@ -116,16 +116,13 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
         queries = await expand_query_variations(ctx, query)
         logger.info("Multi-query search with {} variations", len(queries))
 
-        # Generate embeddings for all queries
-        embedder = create_embedder()
-
         # Execute searches in parallel
         all_results = []
         search_tasks = []
 
         async with db_pool.acquire() as conn:
             for q in queries:
-                query_embedding = await embedder.embed_query(q)
+                query_embedding = await embed_text(q, task_type=EmbeddingTaskType.QUERY)
                 embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
 
                 task = conn.fetch(
@@ -194,8 +191,7 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
         initialize_reranker()
 
         # Stage 1: Fast vector retrieval (retrieve more candidates)
-        embedder = create_embedder()
-        query_embedding = await embedder.embed_query(query)
+        query_embedding = await embed_text(query, task_type=EmbeddingTaskType.QUERY)
         embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
 
         # Retrieve 20 candidates for re-ranking
@@ -261,8 +257,7 @@ async def search_knowledge_base(ctx: RunContext[None], query: str, limit: int = 
         if not db_pool:
             await initialize_db()
 
-        embedder = create_embedder()
-        query_embedding = await embedder.embed_query(query)
+        query_embedding = await embed_text(query, task_type=EmbeddingTaskType.QUERY)
         embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
 
         async with db_pool.acquire() as conn:
@@ -345,7 +340,7 @@ async def retrieve_full_document(ctx: RunContext[None], document_title: str) -> 
 # ======================
 
 
-async def search_with_self_reflection(ctx: RunContext[None], query: str, limit: int = 5) -> str:  # noqa: PLR0914
+async def search_with_self_reflection(ctx: RunContext[None], query: str, limit: int = 5) -> str:
     """
     Self-reflective search: evaluate results and refine if needed.
 
@@ -368,10 +363,9 @@ async def search_with_self_reflection(ctx: RunContext[None], query: str, limit: 
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        embedder = create_embedder()
 
         # Initial search
-        query_embedding = await embedder.embed_query(query)
+        query_embedding = await embed_text(query, task_type=EmbeddingTaskType.QUERY)
         embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
 
         async with db_pool.acquire() as conn:
@@ -435,7 +429,9 @@ Respond with only the improved query, nothing else."""
                 logger.info("Refined query: {}", refined_query)
 
                 # Search again with refined query
-                refined_embedding = await embedder.embed_query(refined_query)
+                refined_embedding = await embed_text(
+                    refined_query, task_type=EmbeddingTaskType.QUERY
+                )
                 refined_embedding_str = "[" + ",".join(map(str, refined_embedding)) + "]"
 
                 async with db_pool.acquire() as conn:

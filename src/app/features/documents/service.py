@@ -68,7 +68,7 @@ from .rag import SearchChunkRecord, assemble_rag_context
 from .repository import DocumentRepository, build_chunk_rows, build_search_filter_params
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from typing import Any, Literal
 
     from graphiti_core.graphiti import Graphiti
@@ -234,14 +234,25 @@ class DocumentQueryService:
     def __init__(
         self,
         repo: DocumentRepository,
-        llm: BaseChatModel,
+        llm_factory: Callable[[], BaseChatModel],
         redis: Redis | None,
         graphiti: Graphiti | None,
     ):
         self.repo: DocumentRepository = repo
-        self._llm: BaseChatModel = llm
+        # The model client is constructed on first use, not at dependency
+        # resolution: building it eagerly lets an environment failure (missing
+        # provider package, bad key) answer an unauthenticated request with a
+        # 500 that masks the 401 auth already earned.
+        self._llm: BaseChatModel | None = None
+        self._llm_factory: Callable[[], BaseChatModel] = llm_factory
         self.redis: Redis | None = redis
         self.graphiti: Graphiti | None = graphiti
+
+    @property
+    def llm(self) -> BaseChatModel:
+        if self._llm is None:
+            self._llm = self._llm_factory()
+        return self._llm
 
     async def search(self, *, user_id: str, payload: UnifiedSearchRequest) -> UnifiedSearchResponse:
         cache_key = _build_cache_key("documents:search", payload)
@@ -433,7 +444,7 @@ class DocumentQueryService:
         deletion. The graph is the better-factored of the two and is the intended survivor.
         """
         graph = build_retrieval_graph(
-            llm=self._llm,
+            llm=self.llm,
             repo=self.repo,
             redis=None if payload.bypass_cache else self.redis,
             graphiti=self.graphiti,
@@ -485,7 +496,7 @@ class DocumentQueryService:
 
         settings: Settings = get_settings()
         _ = settings
-        llm = self._llm
+        llm = self.llm
         query_llm = llm.with_structured_output(QueryPlan)
         grader_llm = llm.with_structured_output(ContextGrade)
         generator_llm = llm.with_structured_output(GeneratedAnswer)

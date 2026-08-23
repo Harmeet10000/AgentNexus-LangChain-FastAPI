@@ -15,7 +15,7 @@ argument, a schema violation, a permission denial and a bug in our own code were
 retried, three times, and then relabelled. Retrying a deterministic failure cannot
 succeed; it only triples the latency of the error report and triples the load on a
 dependency that already said no. The retryable set is now *named* — see
-``_TRANSIENT_EXTERNAL_TYPES`` and ``_RETRYABLE_STATUS_CODES`` — and naming it is the
+``TRANSIENT_EXTERNAL_TYPES`` and ``_RETRYABLE_STATUS_CODES`` — and naming it is the
 point: a set you cannot enumerate is a set you cannot reason about.
 
 **2. The wait was zero.** Three attempts fired back-to-back in roughly no wall-clock
@@ -99,7 +99,7 @@ class TransientExternalError(Exception):
 #: nondeterministic, so re-asking is a genuine remedy rather than a hopeful repeat. It is
 #: named specifically and not by way of its framework base class, because that base also
 #: covers deterministic configuration errors that retrying cannot fix.
-_TRANSIENT_EXTERNAL_TYPES: Final[tuple[type[BaseException], ...]] = (
+TRANSIENT_EXTERNAL_TYPES: Final[tuple[type[BaseException], ...]] = (
     TimeoutError,  # also covers asyncio.TimeoutError, an alias since 3.11
     ConnectionError,
     httpx.TransportError,  # connect/read/write/pool timeouts and network errors
@@ -179,7 +179,7 @@ def _status_code_of(exc: BaseException) -> int | None:
     return None
 
 
-def _is_transient(exc: BaseException) -> bool:
+def is_transient(exc: BaseException) -> bool:
     """Decide whether ``exc`` is worth another attempt.
 
     The pause check comes first and is not merely an optimisation: the graph framework's
@@ -193,7 +193,7 @@ def _is_transient(exc: BaseException) -> bool:
         # Already labelled by an inner boundary. Re-retrying a spent budget would
         # multiply the attempt count by the nesting depth.
         return False
-    if isinstance(exc, _TRANSIENT_EXTERNAL_TYPES):
+    if isinstance(exc, TRANSIENT_EXTERNAL_TYPES):
         return True
     return _status_code_of(exc) in _RETRYABLE_STATUS_CODES
 
@@ -253,7 +253,7 @@ async def retry_immediate[T](
             max=_MAX_WAIT_SECONDS,
             jitter=_JITTER_SECONDS,
         ),
-        retry=retry_if_exception(_is_transient),
+        retry=retry_if_exception(is_transient),
         reraise=True,
         before_sleep=_log_before_sleep(label, attempts),
     )
@@ -262,7 +262,7 @@ async def retry_immediate[T](
             with attempt:
                 return await operation()
     except Exception as exc:
-        if not _is_transient(exc):
+        if not is_transient(exc):
             # Not ours to relabel. A control-flow pause reaches here on its first
             # attempt and must leave as the same object: re-typing it is what makes a
             # graph silently refuse to pause. A deterministic failure reaches here for

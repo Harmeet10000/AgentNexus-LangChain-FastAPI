@@ -136,8 +136,8 @@ async def test_the_framework_base_exception_alone_is_not_retryable() -> None:
     is the same mistake one level down. Only the parse refusal below it is retryable, and
     it is named individually for that reason.
     """
-    assert not kb_retry._is_transient(LangChainException("model not configured"))
-    assert kb_retry._is_transient(OutputParserException("expected JSON, got prose"))
+    assert not kb_retry.is_transient(LangChainException("model not configured"))
+    assert kb_retry.is_transient(OutputParserException("expected JSON, got prose"))
 
 
 # --- (b) A named transient failure retries to the configured count with a growing wait ---
@@ -228,7 +228,7 @@ async def test_the_pause_hierarchy_hangs_off_a_subclass_of_exception() -> None:
     assert issubclass(GraphBubbleUp, Exception)
     assert issubclass(GraphInterrupt, GraphBubbleUp)
     assert issubclass(ParentCommand, GraphBubbleUp)
-    assert not kb_retry._is_transient(GraphInterrupt())
+    assert not kb_retry.is_transient(GraphInterrupt())
 
 
 async def test_a_subgraph_pause_propagates_on_the_first_attempt() -> None:
