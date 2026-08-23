@@ -28,11 +28,21 @@ recipients. That Proof was therefore not executed as written; `tasks.md` records
 evidence and the reason. Registration itself is proven without a broker by
 `test_task_registration.py`.
 
-C8's third Proof also asks that the documented string equal the compose service's string. No
-worker service exists in `docker-compose.yml` yet — that service is **C7**, which is blocked on an
-unanswered topology question. `test_the_compose_worker_service_runs_the_documented_command` is
-written to skip while that is true and to start asserting the moment the service appears, so C7
-cannot land a worker whose command has drifted from the documentation.
+C8's third Proof also asks that the documented string equal the compose service's string. C7 has
+since added the worker and scheduler services, so `test_the_compose_worker_service_runs_the_documented
+_command` no longer skips: the base command must appear in the compose file verbatim, and it does,
+as the shared prefix of both worker services' commands.
+
+**What C7 changed here, and why.** C7 introduced a second worker command (a dedicated ingestion
+queue) and a scheduler command, so `uv run celery ` now appears three times in the README rather
+than once. `test_the_documented_command_and_the_definition_site_are_one_string`'s
+`len(documented) == 1` could not survive that, and weakening it to `>= 1` would have let an
+undocumented or drifted command through. It is generalised instead, per the two rules that assertion
+was protecting: the set of documented commands must equal the set the `Makefile` defines — so the
+count is still pinned, to the definition site's own count rather than to the literal 1 — and every
+celery command anywhere, documented or defined or deployed, must name the application by the same
+`-A` value. That is strictly more than the original asserted: three exact strings instead of one, in
+three files instead of two.
 """
 
 import importlib
@@ -61,8 +71,28 @@ _PHANTOM_MODULE = "celery" + "_config"
 #: `test_the_application_is_named_by_its_installed_identity_not_its_source_path`.
 _SOURCE_PATH_PREFIX = "src.app."
 
+#: Every command the deployment runs, by its `Makefile` variable name. Listed rather than discovered
+#: by pattern, so that renaming one of them fails here — loudly — instead of quietly shrinking what
+#: this module compares.
+_CELERY_COMMAND_VARIABLES = (
+    "CELERY_DEFAULT_WORKER_CMD",
+    "CELERY_INGESTION_WORKER_CMD",
+    "CELERY_BEAT_CMD",
+)
+
+#: A bound on the fixed-point expansion below. The derived commands reference a variable that itself
+#: references one, so a single pass is not enough for them — but an unbounded loop over a Makefile
+#: with a self-referential assignment would hang the suite instead of failing it.
+_MAX_EXPANSION_PASSES = 8
+
 _MAKE_ASSIGNMENT = re.compile(r"^(?P<name>[A-Z_][A-Z0-9_]*)\s*:?=\s*(?P<value>.*)$", re.MULTILINE)
 _MAKE_VARIABLE_REFERENCE = re.compile(r"\$\((?P<name>[^)]+)\)")
+
+#: Compose is matched rather than parsed, deliberately: no YAML dependency, and the commands are
+#: written as plain strings precisely so a text comparison is sufficient.
+_COMPOSE_CELERY_COMMAND = re.compile(
+    r"^\s*command:\s*(?P<command>uv run celery .*?)\s*$", re.MULTILINE
+)
 
 
 def _read(path: Path) -> str:
@@ -75,15 +105,44 @@ def _make_assignments() -> dict[str, str]:
 
 
 def _makefile_worker_command() -> str:
-    """The definition site's command, with its single variable reference expanded."""
+    """The base worker command, with its single variable reference expanded.
+
+    Deliberately still a single pass, so that
+    `test_the_makefile_command_needs_exactly_one_substitution` keeps meaning what it says about this
+    one definition. The derived commands use the fixed-point expander below.
+    """
     assignments = _make_assignments()
     command = assignments["CELERY_WORKER_CMD"]
     return _MAKE_VARIABLE_REFERENCE.sub(lambda m: assignments[m["name"]], command)
 
 
-def _readme_worker_commands() -> list[str]:
+def _expand(value: str, assignments: dict[str, str]) -> str:
+    """Substitute until nothing changes, so a command built from a command resolves."""
+    for _ in range(_MAX_EXPANSION_PASSES):
+        expanded = _MAKE_VARIABLE_REFERENCE.sub(lambda m: assignments[m["name"]], value)
+        if expanded == value:
+            return value
+        value = expanded
+    return value
+
+
+def _makefile_celery_commands() -> dict[str, str]:
+    assignments = _make_assignments()
+    return {name: _expand(assignments[name], assignments) for name in _CELERY_COMMAND_VARIABLES}
+
+
+def _is_worker_command(command: str) -> bool:
+    """Distinguish a worker command from the scheduler's, by the subcommand it names."""
+    return "worker" in shlex.split(command)
+
+
+def _readme_celery_commands() -> list[str]:
     lines = _read(_README).splitlines()
     return [line.strip() for line in lines if line.strip().startswith("uv run celery ")]
+
+
+def _compose_celery_commands() -> list[str]:
+    return [m["command"] for m in _COMPOSE_CELERY_COMMAND.finditer(_read(_COMPOSE))]
 
 
 def _dash_a_value(command: str) -> str:
@@ -98,27 +157,72 @@ def _dash_a_value(command: str) -> str:
 
 
 def test_the_documented_command_and_the_definition_site_are_one_string() -> None:
-    """The mandatory C8 claim: documentation and definition cannot disagree.
+    """The mandatory C8 claim, generalised by C7: documentation and definition cannot disagree.
 
-    Compared as whole strings rather than by module name alone, because `--loglevel` and the
-    worker subcommand are equally capable of drifting, and a command that differs anywhere is a
-    command someone will run and get a different result from.
+    Compared as whole strings rather than by module name alone, because `--loglevel`, the queue
+    selection and the worker subcommand are equally capable of drifting, and a command that differs
+    anywhere is a command someone will run and get a different result from.
+
+    Set equality in both directions is what replaced C8's `len(documented) == 1`. It still pins the
+    count — to however many commands the definition site defines — and it additionally catches a
+    documented command that no longer exists, which a count alone would not.
     """
-    documented = _readme_worker_commands()
+    documented = _readme_celery_commands()
+    defined = _makefile_celery_commands()
 
-    assert len(documented) == 1, (
-        f"expected exactly one documented worker command in README.md, found {len(documented)}; "
-        "more than one copy is the drift this task removes"
+    assert len(documented) == len(defined), (
+        f"README.md documents {len(documented)} celery commands and the Makefile defines "
+        f"{len(defined)}; every command the deployment runs is documented, and nothing else is"
     )
-    assert documented[0] == _makefile_worker_command()
+    assert set(documented) == set(defined.values())
+
+
+def test_every_celery_command_anywhere_names_the_same_application() -> None:
+    """The one property that must hold of a celery command no matter what it is for.
+
+    A worker, a scheduler, and any future subcommand each have their own flags, so whole-string
+    equality cannot be asked of all of them together. What can: they must all resolve to the same
+    task application. Two `-A` values in one deployment means two task registries, and a producer
+    and consumer that agree about every task name while sharing none of them.
+    """
+    expected = _dash_a_value(_makefile_worker_command())
+    everywhere = (
+        _readme_celery_commands()
+        + list(_makefile_celery_commands().values())
+        + _compose_celery_commands()
+    )
+
+    assert everywhere, "no celery command found in any of the three files — the search is broken"
+
+    for command in everywhere:
+        assert _dash_a_value(command) == expected, (
+            f"{command!r} names a different application than the definition site's {expected!r}"
+        )
+
+
+def test_every_deployed_celery_command_is_a_definition_site_command() -> None:
+    """Compose holds copies because YAML cannot reference a Makefile variable — so pin the copies.
+
+    Stricter than the substring check further down, which only asks that the base command appear
+    somewhere. This asks that every celery command compose runs is exactly one of the defined ones,
+    which is what stops a queue selection or a concurrency figure being edited in compose alone.
+    """
+    deployed = _compose_celery_commands()
+    defined = _makefile_celery_commands()
+
+    assert len(deployed) == len(defined), (
+        f"docker-compose.yml runs {len(deployed)} celery commands and the Makefile defines "
+        f"{len(defined)}; a service without a definition is a command nothing checks"
+    )
+    assert set(deployed) == set(defined.values())
 
 
 def test_the_makefile_command_needs_exactly_one_substitution() -> None:
-    """Guards the expansion above, so the equality test cannot pass by checking the wrong string.
+    """Guards the base expansion, so the equality tests cannot pass by checking the wrong string.
 
-    `_makefile_worker_command` performs a plain textual substitution rather than deferring to
-    `make`. That is only faithful while the command line references exactly one variable, and
-    while that variable's own value references none. Both are asserted, so extending the
+    `_makefile_worker_command` performs a single textual substitution rather than deferring to
+    `make`. That is only faithful while the base command line references exactly one variable, and
+    while that variable's own value references none. Both are asserted, so extending the base
     definition fails here with an explanation instead of silently making the comparison vacuous.
     """
     assignments = _make_assignments()
@@ -131,6 +235,53 @@ def test_the_makefile_command_needs_exactly_one_substitution() -> None:
     assert not _MAKE_VARIABLE_REFERENCE.search(assignments["CELERY_APP"]), (
         "CELERY_APP now references another variable, so one substitution pass is not enough"
     )
+
+
+def test_the_derived_commands_expand_completely() -> None:
+    """The same guard for the fixed-point expander: nothing may be left unexpanded.
+
+    `_expand` gives up after a bounded number of passes rather than looping forever, so a Makefile
+    it cannot resolve would otherwise leave a literal `$(...)` in the string and every comparison
+    above would still pass — comparing two equally-unexpanded strings.
+    """
+    for name, command in _makefile_celery_commands().items():
+        assert not _MAKE_VARIABLE_REFERENCE.search(command), (
+            f"{name} still holds an unexpanded reference after {_MAX_EXPANSION_PASSES} passes: "
+            f"{command!r}"
+        )
+
+
+def test_exactly_one_of_the_defined_commands_is_the_scheduler() -> None:
+    """Pins the worker/scheduler split this module's `-A`-only comparison relies on.
+
+    Without it, `_is_worker_command` returning False for everything would leave
+    `test_every_celery_command_anywhere_names_the_same_application` as the only check on any of
+    them, and the whole-string comparisons would still pass while proving less than they read as.
+    """
+    commands = _makefile_celery_commands().values()
+    workers = [command for command in commands if _is_worker_command(command)]
+    schedulers = [command for command in commands if not _is_worker_command(command)]
+
+    assert len(workers) == 2, f"expected two worker commands, found {workers}"
+    assert len(schedulers) == 1, f"expected one scheduler command, found {schedulers}"
+
+
+def test_every_worker_command_selects_its_queues_explicitly() -> None:
+    """`-Q` is not tidiness, and this is the assertion that says so.
+
+    A worker started without `-Q` consumes **every** queue the application declares — measured, not
+    assumed — which includes the dead-letter queue. Such a worker re-runs precisely the messages
+    that were parked there for a human to look at, and it looks completely healthy while doing it.
+    Two workers over disjoint queues is also the whole mechanism that stops minutes-long ingestion
+    from delaying sub-second billing work, and it collapses to nothing the moment a `-Q` is dropped.
+    """
+    for command in _makefile_celery_commands().values():
+        if not _is_worker_command(command):
+            continue
+        assert "-Q" in shlex.split(command), (
+            f"{command!r} starts a worker without naming its queues, so it consumes all of them, "
+            "the dead-letter queue included"
+        )
 
 
 # --------------------------------------------------------------------------------------
@@ -216,12 +367,17 @@ def test_the_module_that_never_existed_is_gone_from_every_deployable_file(path: 
 
 
 def test_the_compose_worker_service_runs_the_documented_command() -> None:
-    """C8's third Proof, armed for C7 rather than deferred to it.
+    """C8's third Proof, armed for C7 and now satisfied by it.
 
-    C7 adds the worker and scheduler services and is blocked on an unanswered question about queue
-    topology, so there is nothing to compare against today. This skips while that is true and
-    begins asserting as soon as the compose file mentions the worker at all — which means C7 cannot
-    introduce a service whose command has drifted from the documentation without turning this red.
+    Written while C7 was blocked on an unanswered topology question, so it skipped while the compose
+    file did not mention the worker and began asserting the moment it did. C7 has since added two
+    worker services and a scheduler, so this is live: the base command must appear verbatim, which it
+    does as the shared prefix of both worker commands.
+
+    The skip branch is kept rather than deleted. It is the honest behaviour if the services are ever
+    removed again — there is nothing to compare — and `test_every_deployed_celery_command_is_a_
+    definition_site_command` is the check that would then go red, which is the right place for that
+    failure to surface.
 
     The check is a substring rather than a parse: no YAML dependency, and it holds whether the
     command is written as a string or a list, since either spelling contains the command's text.

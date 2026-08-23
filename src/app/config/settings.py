@@ -177,6 +177,15 @@ class Settings(BaseSettings):
     CELERY_DEAD_LETTER_EXCHANGE: str = Field(default="tasks.dlx")
     CELERY_DEAD_LETTER_QUEUE: str = Field(default="default.dlq")
     CELERY_DEAD_LETTER_ROUTING_KEY: str = Field(default="task.default.dlq")
+    # Ingestion gets its own queue on the same task exchange, consumed by its own
+    # worker service. Document ingestion is minutes of model work per message;
+    # sharing one queue with sub-second billing and transactional-email tasks
+    # means those wait behind it whenever every worker slot is busy. The
+    # prefetch-of-one setting does not help: it stops one worker hoarding
+    # messages, and does nothing about head-of-line blocking once every slot is
+    # occupied. Two queues with disjoint consumers is what removes the coupling.
+    CELERY_INGESTION_QUEUE: str = Field(default="ingestion")
+    CELERY_INGESTION_ROUTING_KEY: str = Field(default="task.ingestion")
     CELERY_RETRY_MAX_RETRIES: int = Field(default=5)
     CELERY_RETRY_BACKOFF_MAX: int = Field(default=600)
     CELERY_DEFAULT_RETRY_DELAY: int = Field(default=5)

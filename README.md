@@ -276,13 +276,23 @@ uv run alembic history --verbose
 uv run ruff check --fix
 uv run ruff format
 uv run pytest -x
-uv run celery -A app.connections.celery:celery_app worker --loglevel=info
+uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q default --concurrency=8
+uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q ingestion --concurrency=2
+uv run celery -A app.connections.celery:celery_app beat --loglevel=info
 ```
 
-The worker command above is defined once in the `Makefile` (`make celery` runs exactly it, and
-`make celery-command` prints it). A unit test asserts the two are the same string, so this block
-cannot drift away from the command that is actually deployed — the previous version of both named
-a Celery configuration module that has never existed in this repository, and nothing caught it.
+Those three commands are defined once in the `Makefile` — `make celery`, `make celery-ingestion` and
+`make celery-beat` run exactly them, and `make celery-command` prints all three. A unit test asserts
+the block above, the `Makefile` and the compose services are the same strings, so they cannot drift
+apart: the previous version named a Celery configuration module that has never existed in this
+repository, and nothing caught it.
+
+Two details worth knowing before changing them. **`-Q` is mandatory** — a worker started without it
+consumes every queue the application declares, the dead-letter queue included, and so re-runs the
+messages that were parked there for someone to look at. And **the two workers are two processes on
+purpose**: ingestion is minutes of model work per message, while the default queue carries
+sub-second billing and transactional-email tasks, so a single shared pool makes those wait behind
+ingestion whenever every slot is busy.
 
 ## Project structure
 
