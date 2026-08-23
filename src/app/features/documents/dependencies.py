@@ -27,6 +27,11 @@ async def get_document_repository(
 
 
 def _get_document_llm() -> BaseChatModel:
+    # Deliberately NOT called at dependency-resolution time. Constructing the
+    # model provider client while the caller is still unauthenticated lets its
+    # failure (missing package, bad key) surface as a 500 that masks the 401
+    # the request had already earned — FastAPI resolves a path operation's
+    # dependencies as a set and answers with whichever raised first.
     return _build_chat_model(
         model_name=None,
         temperature=0.1,
@@ -53,7 +58,7 @@ async def get_document_query_service(
 ) -> DocumentQueryService:
     return DocumentQueryService(
         repo=repo,
-        llm=_get_document_llm(),
+        llm_factory=_get_document_llm,
         redis=redis,
         graphiti=getattr(request.app.state, "graphiti", None),
     )

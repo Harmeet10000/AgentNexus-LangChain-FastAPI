@@ -38,7 +38,10 @@ if TYPE_CHECKING:
 
 
 async def get_saul_graph(request: Request) -> CompiledStateGraph[Any]:
-    graph = request.app.state.saul_graph
+    # getattr, not attribute access: Starlette's State *raises* on an unknown
+    # attribute, so a bare read turns "never provisioned" into an unhandled
+    # AttributeError and a 500 instead of the typed 503 below.
+    graph = getattr(request.app.state, "saul_graph", None)
     if graph is None:
         msg = "Saul graph is not wired"
         raise ServiceUnavailableException(msg)
@@ -46,7 +49,7 @@ async def get_saul_graph(request: Request) -> CompiledStateGraph[Any]:
 
 
 async def get_saul_checkpointer(request: Request) -> AsyncPostgresSaver:
-    checkpointer = request.app.state.langgraph_checkpointer
+    checkpointer = getattr(request.app.state, "langgraph_checkpointer", None)
     if checkpointer is None:
         message = "Persistence layer is unavailable"
         raise ServiceUnavailableException(message)
@@ -54,7 +57,11 @@ async def get_saul_checkpointer(request: Request) -> AsyncPostgresSaver:
 
 
 async def get_redis(request: Request) -> Redis:
-    return request.app.state.redis
+    redis = request.app.state.redis
+    if redis is None:
+        message = "Cache layer is unavailable"
+        raise ServiceUnavailableException(message)
+    return redis
 
 
 async def get_websocket_security_service(websocket: WebSocket) -> WebSocketSecurityService:

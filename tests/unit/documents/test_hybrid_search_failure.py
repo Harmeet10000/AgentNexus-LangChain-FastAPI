@@ -74,7 +74,8 @@ def _service(repo: _StubRepository) -> DocumentQueryService:
     # `llm`, `redis` and `graphiti` are unreachable from the fused-search path. Passing `None`
     # through a cast rather than a mock is deliberate: if a future edit makes this path touch the
     # model or the cache, these tests fail with an `AttributeError` on `None` instead of quietly
-    # exercising a mock that answers everything.
+    # exercising a mock that answers everything. The LLM arrives as a factory since band E; the
+    # factory is never invoked here, so `None` keeps the same tripwire property.
     return DocumentQueryService(cast("Any", repo), cast("Any", None), None, None)
 
 

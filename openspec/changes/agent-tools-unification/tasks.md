@@ -63,21 +63,26 @@
 Both files already call the survivor API; only their import lines point at the shadow. Zero call-site edits are
 expected — if one is needed, the premise in `design.md` phase 1 is wrong and the discrepancy goes in the PR body.
 
-- [ ] 2.1 Rewrite `src/app/features/legal/.../get_obligation_chain.py:29` to import `IdempotencyGuard` / `ToolResult` /
+- [x] 2.1 Rewrite `src/app/features/legal/.../get_obligation_chain.py:29` to import `IdempotencyGuard` / `ToolResult` /
       `MemoryScope` from the D6/D6.1 survivor modules instead of `app.shared.agents.*`.
       **Proof:** `rg -n "app\.shared\.agents\." <file>` prints nothing;
       `uv run python -c "import <module>"` exits 0; the call sites at `:67` are unedited
       (`git diff -U0 <file> | rg "^[-+]" | rg -v "^[-+]{3}"` shows import lines only).
-- [ ] 2.2 Rewrite `precedent_tools.py:21,22` the same way. Its scope usage already assumes the **real** `MemoryScope`
+- [x] 2.2 Rewrite `precedent_tools.py:21,22` the same way. Its scope usage already assumes the **real** `MemoryScope`
       (`scope.top_k` at `:104`, `scope=scope` into `expand_from_seeds` at `:115`, call opening `:113`) against a
       one-line `str` stub, so this is the fix, not a rename.
       **Proof:** `rg -n "app\.shared\.agents\." src/app/.../precedent_tools.py` prints nothing;
       `uv run python -c "import <module>"` exits 0; `git diff` touches only lines 21–22.
-- [ ] 2.3 Drive the `ty` gate. Expect **≤31** from 46 (15 diagnostics localised to these two files).
+- [x] 2.3 Drive the `ty` gate. Expect **≤31** from 46 (15 diagnostics localised to these two files).
       **If diagnostics survive, the task does not fail — enumerate the residue by file and line and record the gate as
       ≤31+N with the residue named.** Do not suppress with `# type: ignore`.
       **Proof:** `uv run ty check src/ 2>&1 | tail -1` shows ≤31, or the residue list is in the PR body.
-- [ ] 2.4 **Report the predecessor as discharged.** This is the task change 0 waits on.
+- [x] 2.4 **Report the predecessor as discharged.** This is the task change 0 waits on.
+
+      **Verified discharged 2026-08-23** (measured at band E execution): `rg -c "app\.shared\.agents\." src/`
+      prints nothing; `uv run python -c "import app.main"` exits 0; `uv run ty check src/` reports
+      **All checks passed** (0 diagnostics — far under the ≤31 gate). Band A's `6525c6f` did the rewrite;
+      these boxes were left unchecked only because no one had re-measured.
       **Proof:** `rg -c "app\.shared\.agents\." src/` prints **0**, and
       `uv run python -c "import app.main"` exits 0. Post both lines to change 0.
 
@@ -241,19 +246,22 @@ Q2 is closed: the mechanism exists and is wired to the survivor factory. The gap
 
 Closed by user decision: the file is **moved**, not deleted and not harvested. The two accepted losses are Non-Goals.
 
-- [ ] 10.1 `git mv src/app/shared/rag/rag_agent_advanced.py src/app/examples/rag_agent_advanced.py`.
-      **Proof:** `git log --follow --oneline -1 -- src/app/examples/rag_agent_advanced.py` shows the rename, and
-      `git show --stat HEAD | rg "rag_agent_advanced"` shows a pure rename (`R100`) with no line changes:
-      `git diff --find-renames --numstat HEAD~1 HEAD | rg rag_agent_advanced` prints `0	0	...`.
-- [ ] 10.2 Confirm nothing imported it and nothing does now (it had **zero** importers; its entry point is
-      `run_cli()` at `:517`).
-      **Proof:** `rg -n "rag_agent_advanced" src/ --glob '!examples/**'` prints nothing;
-      `uv run python -c "import app.main"` exits 0.
-- [ ] 10.3 Record the two accepted losses as landed Non-Goals, not as future work. The
-      `f"Search error: {e!s}"` strings survive at `:172,244,293,345,481` (re-measured; earlier drafts were off by three) (**quarantined**, not fixed) and the
-      iterative-RAG prior art stays unused — **no harvest task exists, by decision**.
-      **Proof:** `rg -c 'Search error' src/app/examples/rag_agent_advanced.py` prints **5** — i.e. the bodies were
-      deliberately not edited — and `rg -n "harvest" tasks.md` returns only this line.
+- [x] 10.1 `git mv src/app/shared/rag/rag_agent_advanced.py src/app/examples/rag_agent_advanced.py`.
+      **Amended 2026-08-23:** done, but **not** as a pure rename — the todo-210 D14→F handover
+      instructed repointing the five `embedder.embed_query` sites to
+      ``app.shared.langchain_layer.embeddings.embed_text(..., task_type=QUERY)`` in the same leg, so
+      the body changed and the R100 proof below no longer describes reality. The rename is still
+      visible via `git log --follow`.
+- [x] 10.2 Confirm nothing imported it and nothing does now (it had **zero** importers; its entry point is
+      `run_cli()`).
+      **Proof passed 2026-08-23:** `rg -n "rag_agent_advanced" src/ --glob '!examples/**'` prints only
+      the embedder docstring note; `uv run python -c "import app.main"` exits 0.
+- [x] 10.3 Record the two accepted losses as landed Non-Goals, not as future work. The
+      `f"Search error: {e!s}"` strings survive (**quarantined**, not fixed) and the iterative-RAG prior
+      art stays unused — **no harvest task exists, by decision**.
+      **Proof amended 2026-08-23:** `rg -c 'Search error' src/app/examples/rag_agent_advanced.py`
+      prints **4** (`:168`, `:237`, `:283`, `:471`) — the "re-measured … 5" claim here was itself off
+      by one, confirmed against the pre-move blob at HEAD.
 
 ## 11. Phase 4 — the floating retarget (D-11). **Blocked by change 2.**
 
