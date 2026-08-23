@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from pyrate_limiter import BucketFullException, Limiter, Rate
 from pyrate_limiter.buckets import InMemoryBucket, RedisBucket
 from returns.result import Failure
 
+from app.features.auth.security import TokenClaims
 from app.utils import logger
 
 if TYPE_CHECKING:
@@ -22,7 +24,6 @@ if TYPE_CHECKING:
 
     from app.config import Settings
     from app.features.auth.repository import RefreshTokenRepository
-    from app.features.auth.security import TokenClaims
 
 # Task 3.2: New sorted set key patterns
 _USER_PRESENCE_KEY = "ws:user:{}"  # Sorted set: member=connection_id, score=last_touch_epoch
@@ -91,6 +92,11 @@ class WebSocketIdleTimeoutError(WebSocketSecurityViolationError):
 WebSocketIdleTimeout = WebSocketIdleTimeoutError
 
 
+# `claims: TokenClaims` was historically a TYPE_CHECKING-only import; resolve the
+# forward reference so WebSocketSecurityContext can validate at runtime.
+WebSocketSecurityContext.model_rebuild(_types_namespace={"TokenClaims": TokenClaims})
+
+
 def _raise_websocket_rate_limit(*_: object, **__: object) -> None:
     raise WebSocketRateLimitExceededError
 
@@ -100,13 +106,17 @@ async def build_websocket_security_service(
     settings: Settings,
     token_repo: RefreshTokenRepository | None = None,
 ) -> WebSocketSecurityService:
+    # pyrate v3's Rate takes milliseconds; settings are in seconds.
     user_rates = [
-        Rate(settings.WEBSOCKET_USER_MESSAGE_RATE, settings.WEBSOCKET_USER_MESSAGE_PERIOD_SECONDS)
+        Rate(
+            settings.WEBSOCKET_USER_MESSAGE_RATE,
+            settings.WEBSOCKET_USER_MESSAGE_PERIOD_SECONDS * 1000,
+        )
     ]
     connection_rates = [
         Rate(
             settings.WEBSOCKET_CONNECTION_MESSAGE_RATE,
-            settings.WEBSOCKET_CONNECTION_MESSAGE_PERIOD_SECONDS,
+            settings.WEBSOCKET_CONNECTION_MESSAGE_PERIOD_SECONDS * 1000,
         )
     ]
 
@@ -159,6 +169,14 @@ class WebSocketSecurityService:
         self._token_repo = token_repo
         # Task 3.2: Track last touch time per connection for throttling
         self._last_touch_time: dict[str, float] = {}
+        # Task 3.4: live connection registry so a connection id can be closed
+        # without holding the WebSocket object at the call site.
+        self._live_connections: dict[str, tuple[WebSocket, WebSocketSecurityContext]] = {}
+
+    @property
+    def redis(self) -> Redis | None:
+        """Expose the Redis client (satisfies AuthService's WebSocketConnectionCloser)."""
+        return self._redis
 
     def ensure_origin_allowed(self, origin: str | None) -> None:
         allowed_origins = self._settings.WEBSOCKET_ALLOWED_ORIGINS or [self._settings.FRONTEND_URL]
@@ -217,13 +235,36 @@ class WebSocketSecurityService:
                 reason="Maximum concurrent WebSocket connections exceeded",
             )
 
-    async def register_connection(self, context: WebSocketSecurityContext) -> None:
-        """Task 3.2: Register connection in sorted sets."""
+    async def register_connection(
+        self,
+        context: WebSocketSecurityContext,
+        websocket: WebSocket | None = None,
+    ) -> None:
+        """Task 3.2/3.4: Register connection with an atomic capacity gate."""
         if self._redis is None:
             return
 
         current_epoch = time()
         ttl = self._settings.WEBSOCKET_PRESENCE_TTL_SECONDS
+        user_key = _USER_PRESENCE_KEY.format(context.user_id)
+
+        # Atomic check-and-increment: eviction, add, and count execute as one
+        # Redis transaction, so concurrent registrations are serialized and the
+        # count each transaction observes includes all prior ones. If we
+        # overflow, roll back our own entry — final count never exceeds max.
+        async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.zremrangebyscore(user_key, "-inf", current_epoch - ttl)
+            pipe.zadd(user_key, {context.connection_id: current_epoch})
+            pipe.zcard(user_key)
+            results = await pipe.execute()
+
+        active_count = int(results[2]) if len(results) > 2 else 0
+        if active_count > self._settings.WEBSOCKET_MAX_CONNECTIONS_PER_USER:
+            await self._redis.zrem(user_key, context.connection_id)
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Maximum concurrent WebSocket connections exceeded",
+            )
 
         metadata = json.dumps(
             {
@@ -234,20 +275,13 @@ class WebSocketSecurityService:
         )
 
         async with self._redis.pipeline(transaction=True) as pipe:
-            # Add to user presence sorted set
-            pipe.zadd(
-                _USER_PRESENCE_KEY.format(context.user_id),
-                {context.connection_id: current_epoch},
-            )
-            pipe.expire(_USER_PRESENCE_KEY.format(context.user_id), ttl)
+            pipe.expire(user_key, ttl)
 
             # Add to session presence sorted set (for revocation lookup)
             if context.session_id is not None:
-                pipe.zadd(
-                    _SESSION_PRESENCE_KEY.format(context.session_id),
-                    {context.connection_id: current_epoch},
-                )
-                pipe.expire(_SESSION_PRESENCE_KEY.format(context.session_id), ttl)
+                session_key = _SESSION_PRESENCE_KEY.format(context.session_id)
+                pipe.zadd(session_key, {context.connection_id: current_epoch})
+                pipe.expire(session_key, ttl)
 
             # Store connection metadata
             pipe.setex(_CONNECTION_METADATA_KEY.format(context.connection_id), ttl, metadata)
@@ -256,6 +290,9 @@ class WebSocketSecurityService:
 
         # Initialize last touch time for throttling
         self._last_touch_time[context.connection_id] = current_epoch
+
+        if websocket is not None:
+            self._live_connections[context.connection_id] = (websocket, context)
 
     async def unregister_connection(self, context: WebSocketSecurityContext) -> None:
         """Task 3.2: Unregister connection from sorted sets."""
@@ -278,8 +315,9 @@ class WebSocketSecurityService:
 
             await pipe.execute()
 
-        # Clean up touch time tracking
+        # Clean up touch time tracking and live registry
         self._last_touch_time.pop(context.connection_id, None)
+        self._live_connections.pop(context.connection_id, None)
 
     async def touch_connection(self, context: WebSocketSecurityContext) -> None:
         """Task 3.2: Update connection presence with throttling (Finding 1)."""
@@ -371,23 +409,85 @@ class WebSocketSecurityService:
     async def close_with_violation(
         self,
         websocket: WebSocket,
-        context: WebSocketSecurityContext,
         violation: WebSocketSecurityViolationError,
     ) -> None:
         with suppress(Exception):
-            await self.send_json(
-                websocket,
-                {
-                    "type": "error",
-                    "node": None,
-                    "code": violation.error_code,
-                    "message": violation.message,
-                    "retryable": violation.retryable,
-                },
-                context,
-            )
+            await websocket.send_json(self._violation_frame(violation))
         with suppress(Exception):
             await websocket.close(code=violation.close_code, reason=violation.message)
+
+    @staticmethod
+    def _violation_frame(violation: WebSocketSecurityViolationError) -> dict[str, object]:
+        return {
+            "type": "error",
+            "node": None,
+            "code": violation.error_code,
+            "message": violation.message,
+            "retryable": violation.retryable,
+        }
+
+    async def close_connection(self, connection_id: str, /, *, reason: str) -> None:
+        """Task 3.4: Close a live connection by id.
+
+        No-op when the connection is not registered in this process (e.g. it
+        belongs to another worker or already disconnected).
+        """
+        entry = self._live_connections.pop(connection_id, None)
+        if entry is None:
+            return
+
+        websocket, context = entry
+        violation = WebSocketSecurityViolationError(
+            error_code="SESSION_REVOKED",
+            message=f"Connection closed: {reason}",
+            retryable=False,
+        )
+        with suppress(Exception):
+            await websocket.send_json(self._violation_frame(violation))
+        with suppress(Exception):
+            await websocket.close(code=violation.close_code, reason=reason)
+        await self.unregister_connection(context)
+
+    async def run_revocation_loop(self, interval_seconds: float = 30.0) -> None:
+        """Task 3.1: Periodic pull-based revocation sweep over live connections.
+
+        Every ``interval_seconds`` each live connection's session is re-read
+        from Redis; connections whose session is gone are closed with a
+        SESSION_REVOKED violation. Bounded staleness: one interval.
+        """
+        while True:
+            await asyncio.sleep(interval_seconds)
+            try:
+                await self._sweep_revoked_connections()
+            except Exception as exc:  # noqa: BLE001 — monitor must survive any failure
+                logger.warning("Revocation sweep failed", error=str(exc))
+
+    async def _sweep_revoked_connections(self) -> None:
+        if self._token_repo is None:
+            return
+
+        for connection_id, (_websocket, context) in list(self._live_connections.items()):
+            if context.session_id is None:
+                continue
+
+            result = await self._token_repo.get_session(context.session_id)
+            if isinstance(result, Failure):
+                # Fail open on infrastructure errors — same policy as the
+                # per-message check in _check_session_validity.
+                logger.warning(
+                    "Failed to check session validity",
+                    session_id=context.session_id,
+                    error=str(result.failure()),
+                )
+                continue
+
+            if result.unwrap() is None:
+                logger.info(
+                    "Session revoked or expired - closing connection",
+                    session_id=context.session_id,
+                    user_id=context.user_id,
+                )
+                await self.close_connection(connection_id, reason="session_revoked")
 
     async def _check_session_validity(
         self,
@@ -419,19 +519,27 @@ class WebSocketSecurityService:
             )
             raise WebSocketSessionRevokedError
 
+    @staticmethod
+    async def _acquire_rate(limiter: Limiter, key: str) -> None:
+        # pyrate v3 semantics: with the default raise_when_fail=True a full
+        # bucket raises BucketFullException (mapped below); otherwise
+        # try_acquire returns False. It also returns an Awaitable when the
+        # bucket is async-backed (RedisBucket) — not awaiting it silently
+        # disables the rate limit entirely.
+        try:
+            result = limiter.try_acquire(key)
+            if inspect.isawaitable(result):
+                result = await result
+        except BucketFullException as e:
+            raise WebSocketRateLimitExceededError from e
+        if result is False:
+            raise WebSocketRateLimitExceededError
+
     async def _apply_rate_limits(
         self,
         context: WebSocketSecurityContext,
     ) -> None:
         """Task 3.3: Direct rate limiter calls without state mutation."""
-        try:
-            # Check user rate limit
-            self._user_limiter.try_acquire(context.user_rate_limit_key)
-        except BucketFullException as e:
-            raise WebSocketRateLimitExceededError from e
-
-        try:
-            # Check connection rate limit
-            self._connection_limiter.try_acquire(context.connection_rate_limit_key)
-        except BucketFullException as e:
-            raise WebSocketRateLimitExceededError from e
+        # Check user rate limit, then connection rate limit
+        await self._acquire_rate(self._user_limiter, context.user_rate_limit_key)
+        await self._acquire_rate(self._connection_limiter, context.connection_rate_limit_key)

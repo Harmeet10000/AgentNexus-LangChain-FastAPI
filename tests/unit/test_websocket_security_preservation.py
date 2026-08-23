@@ -7,14 +7,12 @@ Run with: uv run pytest tests/unit/test_websocket_security_preservation.py -v
 """
 
 import asyncio
-from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 from fastapi import WebSocketException
 
 from app.config import get_settings
-from app.features.auth.repository import SessionData
 from app.features.auth.security import TokenClaims
 from app.features.auth.websocket_security import (
     WebSocketSecurityContext,
@@ -31,22 +29,8 @@ def mock_settings():
 
 @pytest.fixture
 async def ws_security_service(redis, mock_settings):
-    """Build WebSocketSecurityService with mocked rate limiters to avoid background tasks."""
-    from unittest.mock import MagicMock, patch
-
-    # Create mock limiters BEFORE building service
-    mock_user_limiter = MagicMock()
-    mock_user_limiter.try_acquire = MagicMock()
-
-    mock_connection_limiter = MagicMock()
-    mock_connection_limiter.try_acquire = MagicMock()
-
-    # Patch Limiter class to return mocks
-    with patch("app.features.auth.websocket_security.Limiter") as MockLimiter:
-        MockLimiter.side_effect = [mock_user_limiter, mock_connection_limiter]
-        service = await build_websocket_security_service(redis, mock_settings)
-
-    return service
+    """Build WebSocketSecurityService with real in-memory rate limiters."""
+    return await build_websocket_security_service(redis, mock_settings)
 
 
 @pytest.fixture
@@ -54,9 +38,9 @@ def valid_token_claims():
     return TokenClaims(
         sub="user-preserve",
         sid="session-preserve",
-        exp=datetime.now(UTC) + timedelta(minutes=15),
-        iat=datetime.now(UTC),
         jti="jti-preserve",
+        role="user",
+        permissions=[],
         token_type="access",
     )
 
@@ -185,14 +169,21 @@ class TestPreservation4OriginValidation:
 
     def test_invalid_origin_rejected(self, ws_security_service, mock_settings):
         """Invalid origins should still be rejected."""
-        mock_settings.WEBSOCKET_ALLOWED_ORIGINS = ["https://allowed.com"]
+        # Settings is frozen — build an updated copy instead of mutating
+        frozen = mock_settings.model_copy(
+            update={"WEBSOCKET_ALLOWED_ORIGINS": ["https://allowed.com"]},
+        )
+        ws_security_service._settings = frozen
 
         with pytest.raises(WebSocketException, match="Origin not allowed"):
             ws_security_service.ensure_origin_allowed("https://malicious.com")
 
     def test_valid_origin_allowed(self, ws_security_service, mock_settings):
         """Valid origins should be allowed."""
-        mock_settings.WEBSOCKET_ALLOWED_ORIGINS = ["https://allowed.com"]
+        frozen = mock_settings.model_copy(
+            update={"WEBSOCKET_ALLOWED_ORIGINS": ["https://allowed.com"]},
+        )
+        ws_security_service._settings = frozen
 
         # Should not raise
         ws_security_service.ensure_origin_allowed("https://allowed.com")
