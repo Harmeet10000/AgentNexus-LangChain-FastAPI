@@ -20,6 +20,7 @@ from returns.result import Failure
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_texts
 from app.shared.langchain_layer.models import serialize_to_toon
 from app.shared.langgraph_layer.kb_retry import retry_immediate
 from app.shared.rag.graphiti.schemas import (
@@ -29,7 +30,6 @@ from app.shared.rag.graphiti.schemas import (
 )
 from app.shared.result import ValidationAppError, log_expected_failure
 from app.utils import logger
-from app.utils.embedding import normalize_embedding
 
 from .prompts import (
     _CLASSIFY_EXTRACT_SYSTEM_PROMPT,
@@ -61,7 +61,6 @@ if TYPE_CHECKING:
     from app.shared.result import AppError
 
     from .state import (
-        EmbeddingFunction,
         IngestionState,
         StructuredRunnable,
     )
@@ -318,7 +317,6 @@ def make_classify_extract_node(
 
 def make_embed_store_node(
     db_engine: AsyncEngine,
-    embedding_fn: EmbeddingFunction,
     redis: Redis | None = None,
 ) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def embed_store_node(state: IngestionState) -> dict[str, object]:
@@ -348,7 +346,6 @@ def make_embed_store_node(
                 parsed=parsed,
                 metadata=metadata,
                 parent_doc_id=parent_doc_id,
-                embedding_fn=embedding_fn,
                 redis=redis,
             )
             await retry_immediate(
@@ -649,15 +646,36 @@ async def _store_chunks(
     parsed: ParsedDocument,
     metadata: ContractMetadata,
     parent_doc_id: str,
-    embedding_fn: EmbeddingFunction,
     redis: Redis | None,
 ) -> list[StoredChunk]:
     stored: list[StoredChunk] = []
-    for chunk in sorted(state.contextualized_chunks, key=lambda item: item.chunk_index):
+    ordered = sorted(state.contextualized_chunks, key=lambda item: item.chunk_index)
+    if not ordered:
+        return stored
+
+    # Bound once and reused for both the provider call and the `text` column, because those two
+    # must be the same string. The column is not a copy of the chunk body — `chunk_text` is that
+    # — it is a record of *what was embedded*, and a retrieval path that re-embeds it to compare
+    # against the stored vector depends on that identity. Two separate expressions could drift.
+    embedded_texts: list[str] = [f"{chunk.preamble}\n\n{chunk.text}" for chunk in ordered]
+
+    # Embedded as one batch before the loop, not once per chunk inside it. The prior code made
+    # one provider round-trip per chunk, so a 400-clause contract cost 400 requests where it
+    # now costs four. The task type is `DOCUMENT` because these vectors are what a query is
+    # later compared *against* — passing none, as the prior code did, stored query-projection
+    # vectors on the document side and degraded every subsequent search without ever erroring.
+    embeddings: list[list[float]] = await retry_immediate(
+        lambda: embed_texts(
+            embedded_texts,
+            task_type=EmbeddingTaskType.DOCUMENT,
+            redis=redis,
+        ),
+        label="gemini_embedding",
+    )
+
+    for chunk, text_to_embed, embedding in zip(ordered, embedded_texts, embeddings, strict=True):
         row_id = str(uuid4())
         chunk_id = row_id
-        text_to_embed = f"{chunk.preamble}\n\n{chunk.text}"
-        embedding = await _cached_embedding(redis, embedding_fn, text_to_embed)
         metadata_json = _chunk_metadata_json(
             metadata=metadata,
             source=parsed.source,
@@ -727,39 +745,6 @@ async def _store_chunks(
             )
         )
     return stored
-
-
-async def _cached_embedding(
-    redis: Redis | None,
-    embedding_fn: EmbeddingFunction,
-    text_to_embed: str,
-) -> list[float]:
-    key = "kb:embedding:" + hashlib.sha256(text_to_embed.encode("utf-8")).hexdigest()
-    if redis is not None:
-        cached = await redis.get(key)
-        if cached:
-            raw = str(cached)
-            return cast("list[float]", json.loads(raw))
-
-    embedding = await retry_immediate(
-        lambda: _call_embedding_fn(embedding_fn, text_to_embed),
-        label="gemini_embedding",
-    )
-    embedding = normalize_embedding(embedding)
-    if redis is not None:
-        await redis.setex(key, 60 * 60 * 24, json.dumps(embedding))
-    return embedding
-
-
-async def _call_embedding_fn(embedding_fn: EmbeddingFunction, text_to_embed: str) -> list[float]:
-    if hasattr(embedding_fn, "aembed_query"):
-        return cast("list[float]", await embedding_fn.aembed_query(text_to_embed))
-    if hasattr(embedding_fn, "ainvoke"):
-        return cast("list[float]", await embedding_fn.ainvoke(text_to_embed))
-    result = embedding_fn(text_to_embed)
-    if hasattr(result, "__await__"):
-        return cast("list[float]", await result)
-    return cast("list[float]", result)
 
 
 async def _force_merge_bm25(session: AsyncSession) -> None:

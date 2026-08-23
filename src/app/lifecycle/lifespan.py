@@ -257,10 +257,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     # app.state.ingestion_graph = build_ingestion_graph(
     #     extraction_llm=ingestion_llm,
     #     db_engine=app.state.db_engine,
-    #     embedding_fn=build_embedding_client(),
     #     graphiti_service=graphiti,
     #     redis=app.state.redis,
     # )
+    # NOTE: no `embedding_fn=` here. The graph resolves the embedding client itself, from
+    # `app.shared.langchain_layer.embeddings`, and passing one is now a TypeError. If this
+    # block is ever uncommented, do not restore the argument from an older revision.
     # logger.info("Contract KB ingestion graph initialized")
     # app.state.pageindex_client = PageIndexClient()
     # Initialize HTTPX client (HTTP/2 + connection pooling)

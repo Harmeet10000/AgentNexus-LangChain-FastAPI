@@ -453,7 +453,7 @@ Each is independently committable and each fixes something already wrong today.
 
 ## Band B — the seams: unify what both pipelines duplicate, while both still exist
 
-- [ ] **B1 — One embedding path replacing four, with task type declared on both sides.**
+- [x] **B1 — One embedding path replacing four, with task type declared on both sides.**
   Four paths exist with two mutually incompatible dimensions: one builds a fresh provider client per call with a
   hard-coded width and no cache; one imports that same client (so two features are already one path); one duck-types
   the embedding callable through three candidate method names, embeds one text per call, and passes **no task type**,
@@ -469,7 +469,71 @@ Each is independently committable and each fixes something already wrong today.
     cache entries.
   - **Proof:** `uv run pytest tests/unit -q 2>&1 | tail -3` — count risen, failed count `0`.
 
-- [ ] **B2 — Collapse the two digest-keyed embedding caches into one, and record the rejection of the framework wrapper.**
+  **Done.** `src/app/shared/langchain_layer/embeddings.py` is the one path: `get_embedding_client()` under
+  `lru_cache(maxsize=1)`, `EmbeddingTaskType.QUERY`/`.DOCUMENT` required keyword-only on both `embed_text` and
+  `embed_texts`, width from `settings.EMBEDDING_DIMENSION`, `DOCUMENT_BATCH_SIZE = 100` pinned rather than inherited.
+  Both `_call_embedding_fn` copies deleted; `features/search/embeddings.py` deleted via `git rm`; `embedding_fn` removed
+  from `build_ingestion_graph`, `build_retrieval_graph`, `make_embed_store_node`, `make_hybrid_retrieval_node`, and the
+  commented lifespan block (with a note there not to restore it). Repointed: `features/search/service.py`,
+  `features/documents/service.py`, both `nodes.py`.
+
+  **The count was six, not four, and then seven.** The design named four. Two more were found by reading:
+  `langchain_layer/models.aembed_text`/`aembed_batch` — dead, and offloading the *synchronous* provider method to a
+  thread while the client has native async methods. Deleting that pair orphaned a seventh,
+  `_build_embedding_model_gemini_full`, which was the worst-shaped of all: it bound `task_type` at **construction**
+  (`models.py:216`) and set no `output_dimensionality`, so it produced provider-default-width vectors against a
+  configured-width column and could never have served a query. All three deleted. The module docstring enumerates all
+  six prior paths so the count is on the record rather than in this file alone.
+
+  **Two extensions beyond Decision 4, both deliberate, both pinned by tests.** Decision 4 names text, model, and task
+  type in the cache key. Added: (a) the **configured width**, because the same model serves several widths, so without
+  it a deployment that changes `EMBEDDING_DIMENSION` reads back previous-width vectors from a warm cache — the one
+  failure this cache could cause that re-embedding would not fix, because a wrong-width vector looks valid; (b) **NUL
+  separators**, because bare concatenation collides across field boundaries (`model="m"`+`dim=7`+`text="68:x"` and
+  `model="m"`+`dim=768`+`text=":x"` both yield `mRETRIEVAL_QUERY768:x`).
+
+  **A defect the tests found in my own module.** `from_json_float_list(str(cached))` is correct only because
+  `connections/redis.py:48` sets `decode_responses=True`. Against a client without it, `str()` on `bytes` yields the
+  *repr* `"b'[0.1]'"`, and the failure surfaces as a pydantic `Invalid JSON` error naming neither Redis nor the
+  encoding. Fixed with `_decode_cached`; pinned by `test_a_client_that_returns_bytes_is_read_correctly`, verified
+  load-bearing by reverting the guard and watching that test alone go red.
+
+  **Retry placement unchanged, deliberately.** The unified module embeds no retry: `retry_immediate` lives in
+  `shared/langgraph_layer/kb_retry`, so importing it into `langchain_layer` would invert the layer dependency, and
+  C5/C6 rewrite it. Callers keep their existing `retry_immediate` wrapper, so this change alters no retry semantics.
+
+  **`bypass_cache` reaches the embedding cache, not only the response cache.** `ask_legal` already passed
+  `redis=None if payload.bypass_cache else self.redis`; the three new call sites follow that convention rather than
+  inventing a second policy, so a debugger chasing a stale ranking is not served a cached query vector.
+
+  - **Evidence — first Proof does not come back empty, and cannot.** Residual hits, each classified:
+    `embeddings.py:8,10` are the docstring's own historical record of the deleted resolvers; `embeddings.py:209,261`
+    are the one path's own provider calls; `rag/strategies.py` hits are all inside a commented-out block;
+    `rag/document_processing/embedder.py:365` is `embed_query` in the Decision 15 carve-out; and
+    `rag/rag_agent_advanced.py` has five `embedder.embed_query(...)` sites that resolve to it.
+  - **Evidence — the residual is a real query/document asymmetry, scoped to E.** `embedder.embed_query` delegates to
+    `generate_embedding`, which sends the module-level `GEMINI_TASK_TYPE` (`embedder.py:46`), pinned to
+    `retrieval_document`. So it is a query-side call producing a document-side vector — precisely what B1 removes
+    elsewhere. It is **not** fixed here: Decision 15 keeps this module out of the unified path, and A4's import guard
+    (`tests/unit/shared/rag/test_rag_agent_embedder_import.py`) means deleting `embed_query` trades
+    `ModuleNotFoundError` for `AttributeError` at first call. `rag_agent_advanced.py` has **no production importer** —
+    its only reference is that guard — so nothing in a request or ingestion path reaches it. Step E relocates the file
+    to `src/app/examples/`; that is where its five sites repoint to `embed_text(..., task_type=QUERY)` and where
+    `embedder.embed_query` and `_Embedder.embed_query` are deleted. Recorded in the `embed_query` docstring so the
+    finding travels with the code, not only with this file.
+  - **Evidence:** `tests/unit/shared/langchain_layer/test_embeddings_unified.py` — 25 tests, all passing.
+    Construction-once (`test_the_client_is_constructed_once_per_process`) plus its complement
+    (`test_the_first_call_in_a_cold_process_does_construct`), so the assertion is not vacuous against a spy that never
+    fires. Omission rejected two ways: by signature (`test_the_task_type_has_no_default_so_it_cannot_be_omitted`
+    asserts `default is inspect.Parameter.empty` and `kind is KEYWORD_ONLY`) and at runtime
+    (`test_omitting_the_task_type_raises_rather_than_guessing`).
+  - **Evidence:** `test_query_and_document_vectors_for_one_text_occupy_distinct_cache_entries`, plus three key-level
+    tests separating task types, widths, and models, and `test_the_separators_stop_two_different_requests_from_colliding`.
+  - **Evidence:** `uv run pytest -q` → **187 passed**, up from 154 at Band A close (+25 here, +8 from B4). The 3
+    failures and 9 errors are the pre-existing websocket fixture-drift set, owned by no change in this band.
+  - **Evidence:** `uv run ruff check src/` and `uv run ty check src/` → **All checks passed** on both.
+
+- [x] **B2 — Collapse the two digest-keyed embedding caches into one, and record the rejection of the framework wrapper.**
   The shared-cache mechanism already exists in this exact shape twice in the codebase; those two collapse into one,
   keyed by a digest of text together with model and task type, with a documented expiry. The framework's
   cache-backed embeddings wrapper is **rejected** on two independent grounds recorded in Decision 4 and ADR-1
@@ -482,6 +546,40 @@ Each is independently committable and each fixes something already wrong today.
     and that the entry is visible to a second process (assert against the shared cache backend, not an in-process
     dict).
 
+  **Done, and it had to land with B1.** The two byte-identical `_cached_embedding` copies shared the
+  `kb:embedding:` prefix with a **text-only** SHA-256 key. That collision was harmless *only* because neither declared
+  a task type — the moment one side declares one, a text-only key serves the query side a document-side vector. So B1
+  alone would have been **worse than the status quo**, and the two shipped together. The new namespace
+  `embedding:v1` is deliberately distinct from the prefixes it replaces, so entries written under the old keying are
+  orphaned rather than read back under the new contract; they expire within `CACHE_TTL_SECONDS` and nothing deletes
+  them.
+
+  **Normalisation moved to before the cache write.** `documents/service` wrote the raw vector and normalised only the
+  value it returned, so a miss produced a width-corrected vector and a hit produced the raw one — divergent exactly
+  when A3's width guard matters, and dependent on cache warmth. `normalize_embedding` is idempotent
+  (`utils/embedding.py:77-100` returns its input unchanged at the expected width), so it is also applied on read: a
+  no-op for anything this module wrote, and a logged warning for an entry written by something else.
+
+  - **Evidence — a third cache existed and is deleted.** The design named two. `embedder.py` held a third:
+    `EmbeddingCache` (in-memory, LRU by access time, **MD5 on text alone**) plus `create_embedding_cache` and
+    `create_cached_embedder`. All three had **zero references** anywhere — not in that module, not re-exported from
+    `document_processing/__init__.py`, not in any test. Deleted rather than left: a dead cache of exactly the shape
+    B2 forbids, in the module a future caller reaches for first, is how it comes back — the same argument applied to
+    `models.aembed_text` under B1. Per-process on top of text-only keying, so it also failed the replica test that
+    rejects the framework wrapper. `uv run pytest -q` → **187 passed, unchanged**, confirming it was dead.
+  - **Evidence — second Proof now resolves to one implementation.** Hits remain in three files; read, they are
+    `embeddings.py` (the implementation), `features/search/service.py:169` (a comment about `bypass_cache`), and
+    `embedder.py:413-421` (the comment recording this deletion). One implementation.
+  - **Evidence:** `test_a_repeated_text_is_served_from_the_cache_not_the_provider`, and
+    `test_the_cache_is_visible_to_a_second_process` — asserted across **two `FakeRedis` clients sharing one
+    `FakeServer`**, which is what makes it a shared-backend claim rather than an in-process-dict claim.
+  - **Evidence:** `test_the_vector_is_normalised_before_it_is_written_not_only_on_return` pins the write-side
+    normalisation; `test_batch_cache_granularity_is_per_text_not_per_batch` pins per-text granularity, so one edited
+    clause does not invalidate a document's whole batch.
+  - **Evidence:** `test_the_namespace_is_distinct_from_the_prefixes_it_replaces` pins the namespace change, so a
+    future edit cannot quietly reuse `kb:embedding:` and start reading text-only entries.
+
+
 - [ ] **B3 — Stop blocking the event loop during parse, and stop discarding parsed tables.**
   `src/app/features/documents/parser.py` calls the synchronous converter at `:25` inside `async def parse_document`
   (`:19`), blocking the loop for the whole parse, and returns `tables=[]` at `:34`, discarding structure the parser
@@ -493,7 +591,7 @@ Each is independently committable and each fixes something already wrong today.
     assert it runs before the parse completes) and that a fixture document with a table yields a non-empty table
     collection. **Mandatory** — this defect is invisible to lint and types.
 
-- [ ] **B4 — Cache the token counter, and record why the transformer dependency cannot be dropped.**
+- [x] **B4 — Cache the token counter, and record why the transformer dependency cannot be dropped.**
   The counter is acquired uncached and synchronously, with a first-use disk or network load, on **every** call. Cache
   it. Separately, the counter in force is **not the embedding model's counter**: chunks are budgeted by one model's
   token count and embedded by a different provider, so the token bound is enforced against the wrong counter. Either
@@ -505,6 +603,41 @@ Each is independently committable and each fixes something already wrong today.
   - **Proof:** `uv run rg -n "AutoTokenizer|from_pretrained" src/app/` → every hit is behind the cached accessor.
   - **Proof:** `rg -n "Decision 19|sentence" openspec/changes/ingestion-pipeline-unification/design.md` → the
     dependency decision is on the record with its reason, not silently dropped.
+
+  **Done.** `chunker.py` gains `DEFAULT_TOKENIZER_MODEL_ID`, `_TOKENIZER_CACHE_SIZE = 4`, an
+  `@lru_cache(maxsize=_TOKENIZER_CACHE_SIZE) def _load_tokenizer(model_id)`, and a signature-compatible
+  `get_tokenizer(model_id=DEFAULT_TOKENIZER_MODEL_ID)` wrapper. The wrapper is **not** decoration: a default argument
+  is not part of an `lru_cache` key, so `get_tokenizer()` and `get_tokenizer(DEFAULT)` would hash to two entries and
+  load the tokenizer twice. Normalising in the wrapper and memoising the inner function is what makes "once" true for
+  both call shapes.
+
+  **Chose Decision 3's second option: state the divergence.** Matching the counter to the embedding model was
+  rejected because the real bound on the embedding side is not a token bound at all. `embedder.py:146,210` applies
+  `_MAX_INPUT_TOKENS * 4` as a **character** limit, by silent truncation. Against a 512-token chunk budget that leaves
+  roughly 4x headroom, and the divergence degrades in only one direction: WordPiece maps an unsegmentable run of up to
+  100 characters onto a single unknown token, so the local counter can *under*-count a pathological input, never
+  over-count a normal one. Recorded in the module docstring with the computed margins, because a safety margin nobody
+  can find is not a safety margin.
+
+  - **Evidence:** `tests/unit/shared/rag/test_chunker_tokenizer_cache.py` — 8 tests, all passing. Construction is
+    counted by a `_ConstructionSpy` substituted for the module-global `AutoTokenizer`, with an autouse fixture
+    clearing the cache on **both** entry and exit — entry because a prior test could have warmed it, exit because a
+    later one would inherit a spy that no longer exists.
+  - **Evidence:** the fake tokenizer subclasses `PreTrainedTokenizerBase` and overrides `__len__`, which is not
+    incidental: Docling's legacy tokenizer-coercion path evaluates the tokenizer for **truthiness**, and a subclass
+    with an empty vocabulary is falsy, so without the override the fake is silently rejected and the test measures
+    nothing.
+  - **Evidence — beyond the task, correctness fix.** Six annotations named `AutoTokenizer` as the *type* of a
+    tokenizer. `AutoTokenizer` is a **factory class**: `from_pretrained` returns a `PreTrainedTokenizerBase` subclass
+    instance, never an `AutoTokenizer`. All six corrected to `PreTrainedTokenizerBase`. `ty` accepted both, because
+    the wrong one was never contradicted by a call — it was wrong documentation that typechecked.
+  - **Evidence:** `uv run rg -n "AutoTokenizer|from_pretrained" src/app/` → two hits, both in `chunker.py`: the import
+    (`:55`) and the single call inside `_load_tokenizer` (`:87`). No uncached acquisition remains.
+  - **Note — no `docs/relay/b4-tokenizer-cache.md`.** The B4 subagent died on an API error
+    (`StreamNoEventsError`, HTTP 200 with an empty body) after its work was green but before writing its report, the
+    same failure class that killed B3's. Its diff and test file were verified directly rather than taken on faith;
+    this block is the record.
+
 
 ---
 

@@ -57,7 +57,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import (
     ChatGoogleGenerativeAI,
-    GoogleGenerativeAIEmbeddings,
     create_context_cache,
 )
 from pydantic import BaseModel
@@ -69,7 +68,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
     from typing import Any, Literal
 
-    from langchain_core.embeddings import Embeddings
     from langchain_core.language_models import BaseChatModel
     from langchain_core.messages import BaseMessage
     from langchain_core.messages.ai import AIMessage
@@ -166,58 +164,6 @@ async def acreate_gemini_context_cache(
         ttl=resolved_ttl,
         tools=tools,
         tool_choice=tool_choice,
-    )
-
-
-def _build_embedding_model_gemini_full(
-    model_name: str | None = None,
-    *,
-    task_type: str = "RETRIEVAL_DOCUMENT",
-    title: str | None = None,
-    client: Any | None = None,
-    **kwargs: Any,
-) -> GoogleGenerativeAIEmbeddings:
-    """
-    Build a Gemini embedding model with full configuration.
-
-    Args:
-        model_name: Embedding model (e.g., "embedding-001").
-                   Defaults to configured model.
-        task_type: Task for embedding optimization:
-                  - "RETRIEVAL_DOCUMENT": Retrieving documents (default).
-                  - "RETRIEVAL_QUERY": Querying documents.
-                  - "SEMANTIC_SIMILARITY": Comparing phrases for similarity.
-                  - "CLASSIFICATION": Embedding text for classification.
-                  - "CLUSTERING": Embedding text for clustering.
-        title: Optional content title (used with task_type).
-        client: Custom Google API client (advanced use cases).
-        **kwargs: Additional config (user_agent, request_options, etc.).
-
-    Example::
-
-        # For document indexing (high recall)
-        doc_embedder = build_embedding_model_gemini_full(
-            task_type="RETRIEVAL_DOCUMENT",
-            title="Knowledge base documents",
-        )
-
-        # For query embedding (paired with above)
-        query_embedder = build_embedding_model_gemini_full(
-            task_type="RETRIEVAL_QUERY",
-        )
-
-        # For semantic similarity
-        sim_embedder = build_embedding_model_gemini_full(
-            task_type="SEMANTIC_SIMILARITY",
-        )
-    """
-    _ = title
-    return GoogleGenerativeAIEmbeddings(
-        model=model_name or settings.GEMINI_EMBEDDING_MODEL,
-        task_type=task_type,
-        # title=title,
-        client=client,
-        **kwargs,
     )
 
 
@@ -472,46 +418,3 @@ async def awith_structured_output(
     """
     llm = model or _build_chat_model()
     return llm.with_structured_output(schema=schema, method=method)
-
-
-# ---------------------------------------------------------------------------
-# Embeddings
-# ---------------------------------------------------------------------------
-
-
-async def aembed_text(
-    text: str,
-    *,
-    model: Embeddings | None = None,
-) -> list[float]:
-    """
-    Embed a single string asynchronously.
-
-    Args:
-        text: The text to embed.
-        model: Embedding model. Defaults to Gemini embeddings.
-    """
-    emb = model or _build_embedding_model_gemini_full()
-    return await asyncio.to_thread(emb.embed_query, text)
-
-
-async def aembed_batch(
-    texts: list[str],
-    *,
-    model: Embeddings | None = None,
-    max_concurrency: int | None = None,
-) -> list[list[float]]:
-    """
-    Embed multiple strings, respecting concurrency limits.
-    GoogleGenerativeAIEmbeddings.embed_documents handles batching internally.
-
-    Args:
-        texts: List of texts to embed.
-        model: Embedding model. Defaults to Gemini embeddings.
-        max_concurrency: Max concurrent requests (note: GoogleGenerativeAI
-                        handles batch requests server-side).
-    """
-    _ = max_concurrency  # Note: Gemini batching is server-side; limit isn't used here
-    emb = model or _build_embedding_model_gemini_full()
-    # embed_documents is synchronous; run in thread pool
-    return await asyncio.to_thread(emb.embed_documents, texts)

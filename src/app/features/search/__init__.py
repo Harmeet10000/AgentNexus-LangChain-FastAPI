@@ -7,7 +7,6 @@ from .constants import (
     INGEST_EMBEDDING_BATCH_SIZE,
     RRF_K,
 )
-from .embeddings import build_embedding_client
 from .fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
 from .model import SearchChunk, SearchDocument
 from .rag import SearchChunkRecord, assemble_rag_context
@@ -26,7 +25,6 @@ __all__ = [
     "SearchChunkRecord",
     "SearchDocument",
     "assemble_rag_context",
-    "build_embedding_client",
     "chunk_text",
     "reciprocal_rank_fusion",
     "router",

@@ -25,7 +25,6 @@ against the configured model.
 """
 
 import asyncio
-import hashlib
 from collections.abc import Callable
 from datetime import UTC, datetime
 
@@ -372,6 +371,23 @@ async def embed_query(query: str, model: str = _PROVIDER_EMBEDDING_MODEL) -> lis
 
     Returns:
         Query embedding
+
+    Note:
+        This is a **query**-side call that produces a **document**-side vector: it delegates to
+        `generate_embedding`, which sends the module-level `GEMINI_TASK_TYPE` (`:47`) — pinned to
+        `retrieval_document`. That is the exact asymmetry B1 exists to remove, and it survives
+        here for one reason: `rag_agent_advanced.py` holds the only five call sites, and A4's
+        import guard turns deleting this into an `AttributeError` at first call.
+
+        It is not fixed in place because Decision 15 keeps this module out of the unified path,
+        and it is not worth threading a task-type argument through a function whose sole consumer
+        is leaving. Step E relocates `rag_agent_advanced.py` to `src/app/examples/`; that is the
+        point at which its five sites repoint to
+        `app.shared.langchain_layer.embeddings.embed_text(..., task_type=QUERY)` and this
+        function, along with `_Embedder.embed_query`, goes away.
+
+        Nothing in production reaches this: `rag_agent_advanced.py` has no importer outside the
+        test that asserts it imports cleanly.
     """
     return await generate_embedding(query, model=model)
 
@@ -394,69 +410,13 @@ def create_embedder() -> _Embedder:
     return _Embedder()
 
 
-class EmbeddingCache:
-    """Simple in-memory cache for embeddings."""
-
-    def __init__(self, max_size: int = 1000):
-        """Initialize cache."""
-        self.cache: dict[str, list[float]] = {}
-        self.access_times: dict[str, datetime] = {}
-        self.max_size = max_size
-
-    def get(self, text: str) -> list[float] | None:
-        """Get embedding from cache."""
-        text_hash = self._hash_text(text)
-        if text_hash in self.cache:
-            self.access_times[text_hash] = datetime.now(tz=UTC)
-            return self.cache[text_hash]
-        return None
-
-    def put(self, text: str, embedding: list[float]) -> None:
-        """Store embedding in cache."""
-        text_hash = self._hash_text(text)
-
-        # Evict oldest entries if cache is full
-        if len(self.cache) >= self.max_size:
-            oldest_key = min(self.access_times.keys(), key=lambda k: self.access_times[k])
-            del self.cache[oldest_key]
-            del self.access_times[oldest_key]
-
-        self.cache[text_hash] = embedding
-        self.access_times[text_hash] = datetime.now(tz=UTC)
-
-    @staticmethod
-    def _hash_text(text: str) -> str:
-        """Generate hash for text."""
-        return hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()
-
-
-def create_embedding_cache(max_size: int = 1000) -> EmbeddingCache:
-    """Factory function to create embedding cache."""
-    return EmbeddingCache(max_size)
-
-
-def create_cached_embedder(
-    model: str = _PROVIDER_EMBEDDING_MODEL, cache_max_size: int = 1000
-) -> callable:
-    """
-    Create a cached embedding generator.
-
-    Args:
-        model: Embedding model to use
-        cache_max_size: Maximum cache size
-
-    Returns:
-        Cached embedding generation function
-    """
-    cache = EmbeddingCache(cache_max_size)
-
-    async def cached_generate_embedding(text: str) -> list[float]:
-        cached = cache.get(text)
-        if cached is not None:
-            return cached
-
-        embedding = await generate_embedding(text, model=model)
-        cache.put(text, embedding)
-        return embedding
-
-    return cached_generate_embedding
+# B2 removed a third embedding cache from here: an in-memory `EmbeddingCache` (LRU by access
+# time, MD5-keyed on text alone) plus `create_embedding_cache` and `create_cached_embedder`.
+# Nothing referenced any of the three — not this module, not `document_processing/__init__.py`,
+# not a test. It is deleted rather than left because B2's whole subject is that a text-only
+# embedding cache key is unsound once task type is declared, and this one was per-process on top
+# of that: each worker would have kept its own copy. Leaving a dead cache of exactly the shape
+# B2 forbids, in the module a future caller reaches for first, is how it comes back.
+#
+# `app.shared.langchain_layer.embeddings` is the one embedding cache. It is Redis-backed, so it
+# is shared across replicas, and its key digests model, task type, and configured width.
