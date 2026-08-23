@@ -286,24 +286,7 @@ class DocumentRepository:
         if width_error is not None:
             return Failure(inner_value=width_error)
         try:
-            statement: Insert = insert(table=UnifiedChunk).values(rows)
-            statement: Insert = statement.on_conflict_do_update(
-                constraint="uq_chunks_document_chunk_index",
-                set_={
-                    "chunk_kind": statement.excluded.chunk_kind,
-                    "content": statement.excluded.content,
-                    "preamble": statement.excluded.preamble,
-                    "clause_type": statement.excluded.clause_type,
-                    "page_no": statement.excluded.page_no,
-                    "embedding": statement.excluded.embedding,
-                    "metadata_": statement.excluded.metadata_,
-                    "custom_metadata": statement.excluded.custom_metadata,
-                    "quality_warnings": statement.excluded.quality_warnings,
-                    "graphiti_episode_id": statement.excluded.graphiti_episode_id,
-                    "graphiti_verified": statement.excluded.graphiti_verified,
-                },
-            )
-            await self.session.execute(statement)
+            await self.session.execute(build_chunk_upsert_statement(rows))
             return Success(inner_value=None)
         except IntegrityError as exc:
             return Failure(
@@ -673,10 +656,53 @@ class DocumentRepository:
         return [dict(row) for row in result.mappings().all()]
 
 
+def build_chunk_upsert_statement(rows: list[dict[str, Any]]) -> Insert:
+    """The chunk upsert: bulk insert with conflict-resolved refresh.
+
+    Extracted from ``upsert_chunks`` so tests can compile the statement against
+    the PostgreSQL dialect without a session. The conflict set must name every
+    column a re-ingest may refresh — SQLAlchemy does not merge ``onupdate``
+    defaults into an explicit ``DO UPDATE SET``, so anything absent from ``set_``
+    keeps its first-written value forever even though the ORM hook exists.
+    """
+    statement: Insert = insert(table=UnifiedChunk).values(rows)
+    return statement.on_conflict_do_update(
+        constraint="uq_chunks_document_chunk_index",
+        set_={
+            "chunk_kind": statement.excluded.chunk_kind,
+            "content": statement.excluded.content,
+            "preamble": statement.excluded.preamble,
+            "clause_type": statement.excluded.clause_type,
+            "page_no": statement.excluded.page_no,
+            "embedding": statement.excluded.embedding,
+            "metadata_": statement.excluded.metadata_,
+            "custom_metadata": statement.excluded.custom_metadata,
+            "quality_warnings": statement.excluded.quality_warnings,
+            "graphiti_episode_id": statement.excluded.graphiti_episode_id,
+            "graphiti_verified": statement.excluded.graphiti_verified,
+            "updated_at": statement.excluded.updated_at,
+            "instrument_name": statement.excluded.instrument_name,
+            "section_ref": statement.excluded.section_ref,
+            "instrument_year": statement.excluded.instrument_year,
+        },
+    )
+
+
 def build_chunk_rows(
     *, document_id: str, user_id: str, chunks: Sequence[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    return [{**chunk, "document_id": document_id, "user_id": user_id} for chunk in chunks]
+    now = datetime.now(tz=UTC)
+    return [
+        {
+            **chunk,
+            "document_id": document_id,
+            "user_id": user_id,
+            # The upsert's DO UPDATE SET refreshes updated_at from the row, so
+            # every write path carries it; callers may pin their own value.
+            "updated_at": chunk.get("updated_at", now),
+        }
+        for chunk in chunks
+    ]
 
 
 def build_search_filter_params(*, metadata_filter: dict[str, Any]) -> dict[str, Any]:
