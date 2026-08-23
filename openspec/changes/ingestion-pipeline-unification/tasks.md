@@ -904,7 +904,7 @@ here is import-level, type-level, or a unit test over a construction the test ow
     also carried in-flight C5/C6 and C9 work when this was measured, so the four test files belonging to those tasks were
     excluded to make the count attributable; their `src/` edits were left in place and break no baseline test.
 
-- [ ] **C5 — Correct the retry policy: named transient types, growing wait, no catch-all.**
+- [x] **C5 — Correct the retry policy: named transient types, growing wait, no catch-all.**
   `kb_retry.py` uses `retry=retry_if_exception_type(Exception)` at `:29` and `wait=wait_none()` at `:28` — three
   immediate attempts against a rate-limited endpoint produce three refusals in about zero milliseconds, and a
   catch-all around node-internal code will swallow a framework control-flow pause, which pauses **by raising**.
@@ -919,7 +919,57 @@ here is import-level, type-level, or a unit test over a construction the test ow
   - **Proof:** `uv run rg -n "retry_immediate" src/app/` → every call site wraps a client call, not a node body
     (verify by reading each hit).
 
-- [ ] **C6 — Raise one typed transient failure at the boundary, and convert the callers that catch around it.**
+  **Done.** `kb_retry.py` rewritten, 46 → 279 lines. All three Proofs pass. Proof 1 returns no matches. Proof 3 was
+  performed by reading all 22 sites: none wraps a node body, and the restriction is now recorded in the function's own
+  docstring, because it is what makes the pause exclusion *sufficient* rather than merely correct.
+
+  - **Evidence — the Proof 3 count reconciles to 22, not the 27 a raw grep reports.** `rg -c "retry_immediate"`
+    returns 27 lines: 1 definition, 4 imports, 22 calls. Recorded so the next reader does not conclude four sites went
+    missing.
+  - **Evidence — the pause hierarchy was verified against the installed package, not assumed.**
+    `GraphBubbleUp.__mro__` is `(GraphBubbleUp, Exception, BaseException, object)` and
+    `issubclass(GraphInterrupt, GraphBubbleUp)` is `True`. Two consequences follow from that single fact, and they pull
+    in opposite directions: a predicate keyed on `Exception` **does** match a pause, so the old catch-all retried it —
+    re-running side effects that had already landed, then relabelling the pause as an external error, at which point
+    the graph never pauses and the resume value is lost. `GraphBubbleUp` is now excluded from the retryable set **and**
+    from the wrapping, in that order, ahead of every positive test, so widening a later test cannot re-capture it.
+  - **Evidence — `jitter < initial` is load-bearing for the test, and the bound was checked arithmetically rather than
+    empirically.** `wait_exponential_jitter(initial=0.5, max=8.0, jitter=0.25)` draws attempt *n* from
+    `[0.5·2ⁿ, 0.5·2ⁿ + 0.25]`. Attempt *n*'s **maximum** is strictly below attempt *n+1*'s **minimum** at every step
+    (0.750 < 1.000, 1.250 < 2.000, 2.250 < 4.000, 4.250 < 8.000), so the sequence increases for *every possible draw*.
+    The monotonicity assertion is non-flaky by construction, not by tolerance.
+  - **Evidence — no test measures elapsed time, and the interception seam is not the obvious one.** tenacity assigns
+    `self.sleep` as an **instance** attribute in `AsyncRetrying.__init__` and `__anext__` awaits `self.sleep(do)`, so
+    patching a module-level sleep would intercept nothing. The test patches the *class* in `kb_retry`'s own namespace
+    with a subclass that swaps its sleep for a recorder; the real wait strategy, stop condition and predicate all still
+    run, so the recorded durations are the ones production would have slept for rather than durations the test chose.
+    Monotonicity is asserted across three gaps (4 attempts), because a single comparison can pass by coincidence in a
+    way a chain cannot.
+  - **Evidence — the retryable set is named rather than inherited, and the status check exists to avoid an import.**
+    `TimeoutError`, `ConnectionError`, `httpx.TransportError`, redis `ConnectionError`/`TimeoutError`, SQLAlchemy
+    `OperationalError`/`InterfaceError`, `OutputParserException`, plus a structural status check against
+    `{408, 425, 429, 500, 502, 503, 504}` so a quota refusal is retried **without importing a provider SDK into a
+    shared boundary**. `_status_code_of` reads `status_code`, then `code`, then `response.status_code`, and accepts
+    only `int` excluding `bool` — several libraries use `code` for a *string* identifier, and a string compared against
+    a set of integers silently never matches, which is indistinguishable from "not retryable". 401/403/404/422 are
+    pointedly absent: credentials do not become valid by waiting.
+  - **Evidence — `TransientExternalError` is itself non-retryable (`kb_retry.py:192`).** Without that, nesting two
+    boundaries would multiply the attempt budget by the nesting depth.
+  - **Evidence — the suppression was removed, not relocated.** The original module carried
+    `# ty: ignore[unresolved-attribute]`; the lambda became `_log_before_sleep(label, attempts)`, which checks
+    `state.outcome is not None` instead of asserting it. This is the stale-baseline hazard this work has already been
+    bitten by once: a moved suppression keeps a gate green while the thing it hid moves house.
+  - **Evidence — every guard mutation-tested, each killing exactly its intended tests.**
+
+    | Mutation | Newly red | What it proves |
+    |---|---|---|
+    | M1 `_is_transient` → `return True` (the old catch-all) | 7 | every "does not retry" claim, including all three pause tests |
+    | M2 `initial=0.0, jitter=0.0` (the old no-wait) | 2 | the wait defect is invisible to every other assertion — which is why it survived |
+    | M3 drop `if not _is_transient(exc): raise` | 8 | every "must not be relabelled" claim, across both test files |
+    | M4 un-convert the segmentation caller | 2 | the caller conversion is load-bearing independently of the boundary fix |
+    | M5 `describe_failure(exc)` → `str(exc)` | 1 | the mutation's own output is the argument for the helper — see C6 |
+
+- [x] **C6 — Raise one typed transient failure at the boundary, and convert the callers that catch around it.**
   **This task replaces a remedy that could not work, and the reason must not be re-lost.** The earlier contract said
   chain via `raise … from exc` "so a caller's existing degradation branch still matches". Chaining sets `__cause__`;
   it does **not** change the type raised. `kb_retry.py:41-43` raises `TransientExternalError(msg) from exc`, and
@@ -938,6 +988,72 @@ here is import-level, type-level, or a unit test over a construction the test ow
     cause. This is the scenario the old contract failed; it must pass.
   - **Proof:** a unit test asserts authentication, quota, and malformed-response failures remain distinguishable by
     their chained causes rather than collapsing into one opaque failure.
+
+  **Done, and the conversion is a *tuple*, not a replacement.** Three callers converted in
+  `ingestion_kb/nodes.py`; 9 tests in `test_kb_transient_boundary.py`. Proofs 2, 3 and 4 pass as written. **Proof 1's
+  stated expectation cannot hold and is amended below.**
+
+  - **Evidence — Proof 1 asks for something a correct fix makes impossible; the command survives, the expectation
+    inverts.** The Proof asks that every remaining `except LangChainException` hit *also* catch the transient type. A
+    correct conversion writes `except (LangChainException, TransientExternalError)`, which **deletes the exact string
+    the Proof greps for**. A fully converted codebase returns *fewer* hits, never annotated ones — so as written the
+    Proof can only ever surface **unconverted** sites. **Amendment:** keep the command, invert the expectation to
+    "every hit is a site that has *not* been converted; classify each", and add the positive command
+    `rg -n "except \(LangChainException, TransientExternalError\)" src/app/shared/langgraph_layer/`, expecting **3**
+    hits in `ingestion_kb/nodes.py`. Both were run: the positive command returns exactly 3, and the original returns 2
+    residuals, classified below.
+  - **Evidence — the tuple, not a replacement, because two routes now reach one branch and both had to stay open.** A
+    **deterministic** framework failure is outside the named retryable set, so it arrives unretried and as its own type
+    — the original `except` still matches it. A **transient** failure is retried and, once the budget is spent, arrives
+    as `TransientExternalError` with the original recoverable through `__cause__`. Replacing rather than extending
+    would have traded one silently-dead degradation branch for another. Written literally at each site rather than
+    hoisted into a named constant, so `LangChainException` stays lexically visible where a future reader decides what a
+    branch catches.
+  - **Evidence — the reason the old remedy could not work is recorded in three places, deliberately.** Chaining
+    populates `__cause__`; it does not change the type of the object raised, so `TransientExternalError` is not an
+    instance of `LangChainException` however carefully the chain is built. That reasoning sits in `kb_retry.py`'s module
+    docstring, in the C6 test module's docstring, and in an 11-line comment at the first converted site — because it is
+    the kind of "obvious" fix that gets re-proposed.
+  - **Evidence — the task's own line numbers were already stale, and the Proof's read-each-hit instruction is what
+    caught it.** The task names `nodes.py:182`, `:236`, `:289`. Measured **pre-edit**: 182, **248**, **305**.
+    **Post-edit**: **197**, **265**, **324**. Verified independently after the fact — `rg -c` on the converted pattern
+    returns 3, at exactly those lines.
+  - **Evidence — two residual `except LangChainException` hits, one a genuine instance of the same defect.**
+    `retrieval_kb/nodes.py:118` wraps a `retry_immediate` call and degrades on `LangChainException`, so its degradation
+    branch **cannot fire for a wrapped transient failure** — the identical defect, unfixed, needing the identical
+    one-line change. It sits outside C6's file scope; it needs either an explicit extension of that scope or its own
+    task. `open_deep_search/graph.py:332` is out of scope by **D7** and was confirmed harmless by reading it: no
+    `retry_immediate` anywhere in that module, so no wrapped failure can reach that `except`.
+  - **Evidence — seven further unconverted callers exist beyond the task's list, found by sweeping every
+    `retry_immediate` site for an enclosing degradation branch.** `retrieval_kb/nodes.py:118` and `:155` (the latter
+    catches `GraphitiError`, same defect against the retried `graphiti.search`); `documents/service.py:733`, `:767`,
+    `:797`, `:816` and `documents/legal_metadata.py:76` catch `(ValueError, TypeError)`. The four in `service.py` are
+    the subtle ones: they **do** still catch a pydantic `ValidationError` raised by `model_validate` *outside* the
+    retry, so those branches are not wholly dead — but they can never catch a retry-exhausted provider failure. **A
+    half-live branch is harder to notice than a dead one.** None was fixed; all sit outside the exclusive file list.
+  - **Evidence — `describe_failure(exc)` was added because the degraded record was a diagnosis with no diagnosis in
+    it.** Without it a degraded record reads `"gemini_segment_document failed after 3 attempts"`. It walks `__cause__`
+    joining with `" <- caused by "`, carrying an `id()` seen-set, because `__cause__` is caller-assignable and a cycle
+    would hang the logging path — a degradation handler is the last place that can afford to be the thing that fails.
+    Mutation M5 replaced it with `str(exc)` and produced exactly the uninformative string above.
+  - **Evidence — an edit outside the named exclusive files: A5's tripwire was retired, on its own instructions.**
+    `test_ingestion_degraded_identity.py`'s `test_the_boundary_still_converts_the_type_the_handler_catches` asserted the
+    *defect* and its own docstring designated C6 as owner. Fixing C6 turned it red, correctly — a bare
+    `LangChainException` is no longer in the transient set, so it propagates unwrapped and
+    `pytest.raises(TransientExternalError)` stops matching. **Considered and rejected:** adding `LangChainException` to
+    the transient set to keep it green — that base also covers deterministic configuration errors ("model not
+    configured for structured output" is not a thing waiting fixes), so it would re-create the catch-all one level down.
+    `OutputParserException` is named individually instead, and `test_the_framework_base_exception_alone_is_not_retryable`
+    pins that distinction so the tempting widening cannot land silently. Replaced with
+    `test_the_boundary_now_reaches_the_handler_by_both_routes`, plus two now-false paragraphs of that file's module
+    docstring corrected.
+  - **Evidence — three `except Exception` handlers would swallow a pause one frame after the boundary protects it.**
+    `retrieval_kb/nodes.py:255`, `:298`, and `ingestion_kb/nodes.py:791` (`_graphiti_add_episode`). These are not
+    *broken* — `except Exception` catches `TransientExternalError` fine — so they need no conversion. But
+    `ingestion_kb/nodes.py:791` sits directly around a retried call whose boundary now guarantees a pause escapes
+    intact, and then catches it anyway. Deliberately not fixed: narrowing a blanket handler is a behaviour change with
+    its own blast radius and no C5/C6 Proof covers it. **Belongs with change 3**, which is when a pause first exists to
+    be swallowed.
 
 - [ ] **C7 — Add a worker process and a scheduler process to the deployment.**
   Nothing consumes the queue today, so every dispatched ingestion task enqueues forever. This is the actual blocker
@@ -959,7 +1075,23 @@ here is import-level, type-level, or a unit test over a construction the test ow
     executing without waiting for them. Under a shared-queue answer this Proof is expected to **fail**, which is
     exactly the cost the open question is about; record the result rather than adjusting the check.
 
-- [ ] **C8 — Fix the documented worker start command so it matches the deployed one exactly.**
+  **BLOCKED — the only unfinished task in Band C.** Open Question 1 (`design.md:768-775`) is unanswered and C7 forbids
+  defaulting a topology, so this is waiting on a decision, not on work. Two things are already in place for whoever
+  resumes it:
+
+  - **C8 has armed Proof 3 on C7's behalf.** `tests/unit/celery/test_documented_worker_command.py::test_the_compose_worker_service_runs_the_documented_command`
+    currently **skips** because the compose file does not mention a worker, and starts asserting the moment one appears.
+    It requires the service's command to equal the documented command **verbatim**. The command has a single definition
+    site — `CELERY_APP` / `CELERY_WORKER_CMD` in the `Makefile` — so the compose service should reference that rather
+    than repeat it. Adding a worker whose command has drifted turns that test red; this was mutation-proven, not assumed.
+  - **A safety note that outranks C7's second Proof.** The configured broker is a **live managed instance**, and the
+    registered task set includes `billing.*`, `credits.*` and `auth.send_password_reset_email`. C7's Proof asks for a
+    running worker reporting its queues — that means a **consuming** worker, which against this broker could execute real
+    queued work including sending mail to real recipients. Bring up a scratch broker for that Proof, or obtain explicit
+    authorization first, exactly as the checkpointer Proofs use a local scratch Postgres rather than the managed
+    instance. See C8's evidence for the non-consuming substitute that covers application loading and task registration.
+
+- [x] **C8 — Fix the documented worker start command so it matches the deployed one exactly.**
   The documented command names an application module that does not exist. Fix it to name the real task application,
   and make the documented command and the command the deployed service runs the same string, so they cannot drift.
   - **Proof:** `uv run rg -n "\-A app|celery -A" Makefile docker-compose.yml README.md docs/` → every occurrence
@@ -970,7 +1102,87 @@ here is import-level, type-level, or a unit test over a construction the test ow
   - **Proof:** the string in the documentation and the string in the compose service definition are identical
     (`diff <(…) <(…)` or an equality assertion in a check script).
 
-- [ ] **C9 — Make task registration explicit and typed, harvesting the archived registry contract.**
+  **Done, with one Proof armed rather than satisfied and one Proof deliberately not executed.** The command is now
+  defined **once**, in the `Makefile` (`CELERY_APP` + `CELERY_WORKER_CMD`), and
+  `tests/unit/celery/test_documented_worker_command.py` — 8 tests, 1 skip — asserts every other copy equals it.
+  Depends on C9, which settled the task-application module; that dependency is now discharged.
+
+  - **Evidence — the defect was worse than "a wrong name": the documented command could not start a worker at all.**
+    `Makefile:52` and `README.md:279` both named a Celery configuration module that **has never existed** in this
+    repository — confirmed three ways: `find` over the tree returns nothing, the import raises `ModuleNotFoundError`,
+    and `src/` contains only `alembic app database lynk mcp_core tasks`. The correct target is
+    `app.connections.celery:celery_app`. Nothing in the suite noticed, because nothing compared the documentation to
+    anything.
+  - **Evidence — fixing both literals would have left the actual defect in place.** Two copies of one command are free
+    to diverge again, which is why the task says "so they cannot drift". The command has one definition site; the README
+    keeps a copy-pasteable literal (a README's job) and a test asserts equality. C8's third Proof explicitly permits
+    "an equality assertion in a check script" — a test was chosen over a script because it runs on every commit rather
+    than when someone remembers.
+  - **Evidence — the `-A` value names an attribute, and the `app.` prefix is not cosmetic.** Written
+    `module:attribute` rather than the bare module: Celery *would* find the instance by probing, but the probe takes
+    whatever it finds first, so naming the attribute means adding a second `Celery` instance to that module cannot
+    silently re-target the worker. The prefix matters more. **Both** `app.connections.celery` and
+    `src.app.connections.celery` import successfully — and they are **two different module objects**, because Python
+    keys `sys.modules` by the import string, so each carries its own `Celery` instance and its own task registry. A
+    worker started under one and a producer importing the other would agree about every task name and share none of
+    them. Measured from `/tmp`: the installed spelling imports, the source-path spelling **fails** — `src/` reaches the
+    path through the editable install, while the source-path spelling resolves only when the working directory happens
+    to be the repository root. A container with any other `WORKDIR` would fail to boot with the `src.` spelling.
+    Mutation M3 confirms the identity claim empirically rather than by argument: switching the command to the `src.`
+    spelling turns the `resolved is real_celery.app` assertion red, because it really is a different object.
+  - **Evidence — Proof 1's scope needs amending: it names all of `docs/`, and `docs/relay/` quotes the broken command
+    as evidence.** Every `celery -A` occurrence under `docs/` is in `docs/relay/` (6 files: `plan-change1.md`,
+    `c9-task-registration.md`, `scout-ingestion-graphs.md`, `plan-change4.md`, `findings-deployment.md`,
+    `dispositions.md`) and each is a working note recording the defect. **Rewriting evidence to satisfy a grep is the
+    wrong direction.** Amended scope: the files that are executed or copy-pasted — `Makefile`, `README.md`,
+    `docker-compose.yml`. Rescoped, Proof 1 returns 2 hits, both naming a module that imports.
+  - **Evidence — Proof 2 was NOT executed as written, for a safety reason that overrides it.** The Proof asks that the
+    documented command be run verbatim so a worker reports its registered tasks. **The configured broker is a live
+    managed instance** (checked by opening a socket to it; scheme, host and port only, no credential printed), and the
+    registered task set includes `billing.*`, `credits.*` and `auth.send_password_reset_email`. Starting a *consuming*
+    worker against it could execute real queued work, up to and including sending mail to real recipients — an
+    irreversible outward-facing side effect that no Proof in this change authorises. **Substitute evidence, which
+    exercises the same machinery without consuming anything:** `celery.app.utils.find_app("app.connections.celery:celery_app")`
+    — the function Celery's own `-A` handling uses — returns a `Celery` instance, and `app.loader.import_default_modules()`,
+    which is precisely what a worker performs at boot, registers **all 16** declared task names. No broker connection is
+    opened. Registration is separately proven without a broker by C9's `test_task_registration.py`.
+  - **Evidence — Proof 3 is armed, not deferred, and the arming was mutation-proven.** No worker service exists in
+    `docker-compose.yml` (services are `rabbitmq`, `timescale`, `caddy`), because that service is **C7**, blocked on
+    Open Question 1. `test_the_compose_worker_service_runs_the_documented_command` skips while the compose file does not
+    mention the worker and begins asserting the moment it does — so **C7 cannot land a worker whose command has drifted
+    from the documentation.** A skipped test can hide a broken assertion, so mutation M6 added a worker service with a
+    drifted command: the suite went to `1 failed, 8 passed` with **no skip**, proving the arming fires.
+  - **Evidence — the regression guard initially failed on the text documenting the fix.** The first version of the
+    `Makefile` comment and the README note *quoted* the phantom module name, so the test greping those files for it went
+    red on the explanation. The constant is now assembled from two fragments and the prose describes the name without
+    spelling it. **Third occurrence of this pattern in this work: a comment containing a proof's grep literal defeats
+    the proof.**
+  - **Evidence — `make` is parsed, not invoked, and the parser's honesty is itself asserted.** Invoking `make` needs
+    `subprocess`, and bandit's rules are **enabled** here (`"S"` appears under `unfixable`, not `ignore`; the tests'
+    per-file-ignores lift only `S101`), so it would need two suppressions — against CLAUDE.md's preference for
+    satisfying a check over silencing it — and would make the suite depend on `make` being installed. Parsing risks
+    testing the parser instead of the Makefile, so `test_the_makefile_command_needs_exactly_one_substitution` pins that
+    the definition stays simple enough for one textual substitution to be complete. Add a second variable to that line
+    and it fails **with instructions**, rather than the comparison silently going vacuous.
+  - **Evidence — six mutations, each killing its intended guard.**
+
+    | Mutation | Newly red | What it proves |
+    |---|---|---|
+    | M1 Makefile names the phantom module again | 4 | the original defect is caught from four independent directions |
+    | M2 README drifts by one flag (`--loglevel=debug`) | 1 | equality is on the whole string, not just the module name |
+    | M3 Makefile uses the `src.` spelling | 4 | the two spellings really are different objects — the identity assertion fails |
+    | M4 a second documented copy appears in README | 1 | "exactly one documented command" is enforced, not assumed |
+    | M5 the command grows a second variable | 1 | the expander refuses to keep comparing once it is no longer faithful |
+    | M6 a drifted worker service appears in compose | 1 | the skipped Proof-3 test genuinely arms itself |
+
+    All three touched files restored byte-identically (`sha256`), and `docker-compose.yml` is absent from
+    `git status` afterwards.
+  - **Evidence — one finding outside C8's scope.** `README.md:263` starts uvicorn with `src.app.main:app`, the
+    source-path spelling this task rejected for the worker. It works today only because the documented invocation runs
+    from the repository root. Not changed here: it is the API process's command, C8 owns the worker's, and a
+    behaviour-affecting edit to the documented boot command of the running service deserves its own task.
+
+- [x] **C9 — Make task registration explicit and typed, harvesting the archived registry contract.**
   The ingestion task **is** registered today, but only transitively: one package initialiser imports it, and
   importing any listed sibling imports that initialiser first. That is a **latent fragility**, and it becomes live
   precisely when change 0 tidies that initialiser — a genuine cross-change hazard where one change edits the file
@@ -997,7 +1209,112 @@ here is import-level, type-level, or a unit test over a construction the test ow
   - **Proof:** a declared-but-unimplemented task is registered, and invoking it fails with an explicit
     not-implemented error rather than an unknown-task error.
 
-- [ ] **C10 — Do NOT put the pipeline graph or the checkpointer on shared application state; prove the block stays disabled.**
+  **Done, with one repair the task did not ask for and could not have known to ask for.** New
+  `src/app/connections/celery_task_names.py` is the single definition site for all **16** dispatchable names plus
+  `TASK_DECLARING_MODULES` (name → declaring module). `include=` went from 5 entries to 8 explicit literals.
+  `celery_registry.py` harvested with one tightening and one repair. 18 new test items across
+  `test_task_registration.py` and `test_typed_dispatch.py`, plus `tests/unit/celery/conftest.py`. The change-0
+  dependency was honoured: Proof 2 was run **after** reducing the task package initialiser to what change 0's tidy
+  leaves.
+
+  - **Evidence — the harvested contract validated nothing in the only process that used it.** Registration is a side
+    effect of importing the declaring module, and **nothing under `src/` imports the task package at all** — verified,
+    not assumed: `rg -o 'from tasks(\.[\w.]+)? import' src/` returns exactly one hit, inside a Markdown example. So the
+    API process that runs the outbox relay held an **empty** registry, and every payload was validated against the
+    archived text's permissive fallback. `ensure_declared_module_imported()` is the repair; the fallback
+    (`LegacyTaskPayload`) is deleted.
+  - **Evidence — the tightening the task asked for, and why the *base class* of the refusal is load-bearing.**
+    `validate()` now raises `UnregisteredTaskError` for a name with no registered model, where the archived text
+    substituted a permissive model, logged a warning and sent anyway — producing a well-formed message addressed to
+    nobody, which Celery discards in silence. Both refusals derive from `TaskDispatchError(CeleryError)`, and that is
+    not decoration: `OutboxRelay._publish` catches `(CeleryError, PostgresError)` to mark an event failed and retry it
+    toward the dead-letter table — **verified by reading `src/app/shared/outbox/relay.py`**. A bare pydantic
+    `ValidationError` would escape that catch into the relay's outer blanket handler, which logs a warning and drops the
+    event, putting the invisibility back one layer up. The original is preserved as `__cause__` and on
+    `.validation_error`. `NoKwargsPayload` was added for scheduler-dispatched jobs, so "nothing, and nothing extra" is
+    stated as a contract rather than left unregistered.
+  - **Evidence — registration verified independently of the agent's own report.** `find_app` on the settled module,
+    then `loader.import_default_modules()` — what a worker does at boot — registers all 16 names: the five `tasks.*`
+    (`add`, `documents_ingest`, `pageindex_ingest`, `process_document`, `search_ingest`), two `auth.*`, six `billing.*`,
+    two `credits.*`, and `document_extraction.legal_batch`. Note that a *bare* import of the application registers
+    **zero** — `include` is resolved lazily at worker boot, not at construction — which is the trap a registration test
+    can silently fall into. This directory's conftest resolves it through `importlib` rather than trusting a bare
+    import.
+  - **Evidence — Proof 1 does not display what it checks; amended.** As written, `rg -n "include=|imports\s*="` prints
+    only the `include=` line, so the list itself is invisible, and the `imports` half of the alternation matches nothing
+    (that Celery setting is unused here). **Amendment:** `rg -n -A 10 "include=" src/app/connections/celery*.py`, which
+    returns the eight module literals. Eight is every module under `src/tasks/` that declares a task **except**
+    `auth_email_tasks_typed`, excluded on purpose — see the finding below.
+  - **Evidence — Proof 4's stated expectation cannot be met by its pattern, and the pattern is blind to most of what it
+    polices; amended.** `rg -n '"tasks\.' src/app/ src/tasks/` returns 31 hits, and it *must*: 8 are the `include`
+    module paths Proof 1 requires, 1 is a routing glob `"tasks.*"`, 1 is the dead-letter **exchange** `"tasks.dlx"`, 13
+    are the definition site itself, and 6 are Markdown examples. Worse, **only 5 of the 16 declared names begin with
+    `tasks.`** — independently confirmed by the 16-name registry dump above — so the `auth.*`, `billing.*`, `credits.*`
+    and `document_extraction.*` families are invisible to it, including two live dispatch-side literals.
+    **Amendment — a name-agnostic form that cannot go stale, because it builds its alternation from the definition
+    module:**
+
+    ```python
+    alt = "|".join(re.escape(n) for n in sorted(TASK_DECLARING_MODULES))
+    rg -n f'"({alt})"' src/ -g '!*.md' -g '!celery_task_names.py'
+    ```
+
+    15 hits: **four genuine residual dispatch-side literals** — `documents/service.py:184`, `search/service.py:109`,
+    `auth/service.py:271`, `auth/service.py:298` — and eleven `logger.bind(operation="...")` labels in
+    `billing_tasks.py`/`credit_tasks.py`. The eleven were **deliberately left as literals**: the same files also bind
+    `operation="billing.invoice_backfill"` and `"billing.receipt_backfill"`, which are not task names at all, so that
+    taxonomy is independent of the registry and merely coincides with it. Coupling it would make a task rename silently
+    re-label existing dashboards and alerts — the opposite of what stability means for a log field. The four dispatch
+    sites are not C9's files and were left untouched; each needs one import and one substitution from
+    `app.connections.celery_task_names`. The documents and search payloads were checked against their registered models
+    and match, so those two are name-only; the two auth payloads do **not** — see the next item.
+  - **Evidence — a producer/consumer gap on the auth emails, now a loud refusal instead of a silent one.**
+    `auth/service.py:272` and `:299` emit `{user_id, email, token}`; both task bodies require `idempotency_key` as well
+    (`auth_email_tasks.py:91`, `:130`) — verified directly. The payload models were registered faithful to the
+    **declarations**, so this gap now surfaces as a dispatch refusal rather than a `None` lock key inside the worker. No
+    live behaviour change today, because the outbox tables do not exist; **it will fire the moment change 0's tables are
+    created.** Fix belongs to whoever owns `auth/service.py`.
+  - **Evidence — two live defects fixed on the way.** `document_extraction_tasks.py` declared `bind=True` while its body
+    takes no `self`, so Celery would have passed the `Task` instance as the first positional argument (`urls`) —
+    removed, with a comment recording why (the file now carries the explanation at `:26` and no `bind=True`). And
+    `tasks.auth_email_tasks_typed` declares the **same two task names** as the live email module, so listing both in
+    `include` would let import order pick the winner; it is excluded and documented in place, and is a deletion
+    candidate.
+  - **Evidence — a new conftest rather than an edit to a file three concurrent tasks share.** `tests/conftest.py` puts
+    `MagicMock()` into `sys.modules` for the task application and the task package. A `MagicMock` has no `__path__`, so
+    under those entries the declaring modules are not merely mocked but **unimportable** ("`tasks` is not a package"),
+    and every C9 proof is unwritable while they stand. `tests/unit/celery/conftest.py` provides an opt-in,
+    module-scoped `real_celery` fixture that lifts them and restores at teardown. It is **not** autouse, so the sibling
+    module in that directory that wants the mocks keeps them. It also lifts `app.utils` at its top level only, because
+    another unit test in the suite replaces that module at import time with a two-attribute proxy whose logger is an
+    `AsyncMock` and never restores it — a module imported into that state binds a logger whose `.bind()` returns a
+    coroutine, so the first diagnostic a refusal writes raises `AttributeError` instead. Verified non-leaky: the
+    pre-existing red set is byte-identical before and after, across 7 mutation runs.
+  - **Evidence — the three `tasks*` stubs in `tests/conftest.py` are dead.** `rg -o 'from tasks(\.[\w.]+)? import' src/`
+    — the command that conftest's own comment says regenerates the list — now returns nothing under `src/` but a
+    Markdown example. Removing them would let `real_celery` shrink to nothing. **Not done: not this task's file.**
+  - **Evidence — seven mutations, each killing exactly the intended tests, with no pre-existing red item turned green.**
+
+    | Mutation | Newly red | What it proves |
+    |---|---|---|
+    | M1 `include` drops `tasks.document_tasks` | 3 | explicit listing is enforced in both directions |
+    | M2 unregistered name falls through permissively | 2 | the pre-tightening behaviour was a **silent send** — the dispatch reaches the spy |
+    | M3 payload mismatch warns and passes through | 4 | it reaches the spy with a payload the consumer cannot accept |
+    | M4 helper stops importing the declaring module | 5 | **the production defect, reproduced**: the registry is empty, so every name looks unregistered |
+    | M5 refusals stop deriving from `CeleryError` | 2 | the relay's retry path would stop catching them |
+    | M6 declaration drifts from the definition | 2 | the single definition site is load-bearing, not stylistic |
+    | M7 unimplemented task returns instead of raising | 1 | a declared-but-unimplemented name fails explicitly |
+
+  - **Evidence — two document-path inaccuracies in C9's own dispatch, recorded so they are not re-followed.**
+    `openspec/changes/decisions.md` and `openspec/changes/critical-path-210.md` do not exist; both live under
+    `docs/relay/`. And **"Decision 16" is ambiguous**: `docs/relay/decisions.md`'s Decision 16 concerns `UnifiedChunk`
+    gaining `updated_at`, while the harvest-vs-delta ruling C9's text invokes is in `design.md` (~line 592). Two
+    numbering schemes share one label.
+  - **Evidence — `document_extraction.legal_batch` and `tasks.pageindex_ingest` have zero dispatchers.** Both are
+    registered and bound, so a future dispatch gets a real diagnostic rather than an unknown-task error, but nothing
+    dispatches either today.
+
+- [x] **C10 — Do NOT put the pipeline graph or the checkpointer on shared application state; prove the block stays disabled.**
   The plan's original step here was to wire both onto shared application state. **That step cannot be performed.**
   The user confirmed both commented blocks are deliberate and D17 forbids re-enabling them, so this task is the
   recorded non-goal plus the check that keeps it true. Ingestion runs in the **queue worker process**, which never
@@ -1014,3 +1331,72 @@ here is import-level, type-level, or a unit test over a construction the test ow
     error, and **not** a success status.
   - **Proof:** `uv run rg -n "INGESTION_GRAPH_ENABLED|CHECKPOINTER_ENABLED" src/app/` → **no matches**. A flag
     defaulting to enabled is the forbidden thing with extra steps.
+
+  **Done, and it found a live defect the task did not name plus a much larger one it could not have.** Nothing was
+  provisioned and nothing should be; `tests/unit/features/ingestion/test_unprovisioned_graph_fails_closed.py` is 7 tests
+  holding the non-goal true. Proof 1 and Proof 3 pass; **Proof 2 passes on its substance but not on its wording**, for a
+  reason recorded below and pinned by a tripwire.
+
+  - **Evidence — the guard that looked careful was unreachable, which is the third instance of that pattern in this
+    change.** `dependencies.py` read `request.app.state.ingestion_graph` directly and then tested `if graph is None`.
+    Starlette's `State` **raises** on an unknown attribute, and the attribute is never *set* — not set to `None` — so
+    the read raised `AttributeError` before the test could run: the guard that looks like it produces a typed 503
+    produced an unhandled attribute error and a **500**. Now read through `getattr(..., None)`, which collapses "never
+    provisioned" and "explicitly provisioned as absent" into one branch **deliberately** — from a caller's position they
+    are the same condition, and keeping them apart is what produced two status codes for one situation. (The two earlier
+    instances: B3's `hasattr(t, "to_markdown")` filter and C4's `hasattr(checkpointer, "pool")`.)
+  - **Evidence — the fix removes the read site from Proof 1's literal grep, so Proof 1 needs a second command.**
+    `getattr(request.app.state, "ingestion_graph", None)` contains no `app.state.ingestion_graph` substring, so the
+    Proof's pattern **cannot see the very site it exists to check**. Amendment: run it alongside
+    `rg -n '"ingestion_graph"|"langgraph_checkpointer"' src/app/`, a by-name check that catches the `getattr` form.
+    Both were run. The literal form returns 6 hits: 3 commented (`lifespan.py:257`, `:322`, `:328`), 1 docstring line,
+    1 teardown call at `lifespan.py:340` already guarded by `hasattr` at `:339`, and **1 genuinely unguarded read at
+    `agent_saul/dependencies.py:49`** — which is **change 3's step 1 per D17** and correctly not fixed here. Proof 3
+    returns no matches: no enabling flag was introduced.
+  - **Evidence — Proof 2 asks for the standard error envelope, and no exception in the `APIException` family can produce
+    one. This is a live application-wide defect.** Starlette splits `add_exception_handler` across two middlewares:
+    `Exception` goes to `ServerErrorMiddleware` as a **500-only** net, while every other class is resolved by
+    `ExceptionMiddleware` walking the raised exception's **MRO** against its registry. FastAPI pre-registers
+    `HTTPException`, and `APIException` inherits from it, so the walk short-circuits three classes before `Exception` is
+    ever considered. **Consequence: the entire `isinstance(exc, APIException)` branch of
+    `global_exception_handler` is dead in the deployed app** — verified against `create_app()`, which selects
+    `('HTTPException', 'http_exception_handler')`. Every `APIException` returns `{"detail": …}`, never the documented
+    `{success, statusCode, request, message, data, error}` envelope. The structural tell: a handler branch inspecting
+    `isinstance(exc, APIException)` can only run if `APIException` or a subclass is a registry **key**.
+  - **Evidence — recorded and pinned rather than fixed, because the fix is not an ingestion change's to make.**
+    Registering the family would change the body of **every** error response in the application — auth, users, billing,
+    documents. `test_the_project_envelope_is_still_unreachable_tripwire` asserts the *defect* and **must fail when it is
+    fixed**, carrying the instruction to delete the tripwire and restore C10's envelope Proof rather than adjust the
+    assertion to keep it green. The capability is still asserted structurally in the meantime:
+    `APIException.__init__` folds `data` into `rich_detail["data"]`, so `{"capability": "ingestion_graph"}` is reachable
+    at `body["detail"]["data"]["capability"]` even through FastAPI's default handler — a caller can branch on it without
+    parsing a sentence.
+  - **Evidence — the test app is hand-built, and that choice is itself asserted rather than trusted.** `create_app()`
+    imports the full stack and its lifespan opens connections. The registry that matters is reproducible exactly: the
+    real app holds precisely `HTTPException`, `RequestValidationError`, `WebSocketRequestValidationError` and
+    `Exception` — the first three are FastAPI's defaults on any `FastAPI()`, the fourth is the single line `main.py:110`
+    adds. `test_the_handler_registry_matches_the_real_application` asserts that 4-entry registry, so a bare app plus one
+    registration is not an approximation of the real registry but the same registry — and if FastAPI's defaults change,
+    the claim fails loudly instead of the file quietly testing something else.
+  - **Evidence — `raise_server_exceptions=False` is load-bearing, and there is a positive control.** Without it an
+    unhandled exception is re-raised into the test as a traceback and the assertion cannot distinguish "failed closed"
+    from "fell over"; with it the 500 is observable as a status code, which is exactly the distinction this task exists
+    to make. `test_a_provisioned_graph_is_handed_through` prevents the other failure mode: without it every test here
+    would still pass against a dependency hard-coded to refuse, and the file would prove only that a constant is a
+    constant.
+  - **Evidence — three mutations, each killing exactly its intended tests.** M1 revert to the direct attribute read → 3;
+    M2 drop the `capability` data → 2; M3 return `None` instead of raising → 4. File restored from a pristine copy
+    afterwards; 7 passing.
+  - **Evidence — ruff on the new test file, and one rule that would have broken the app.** `TC002` demanded
+    `IngestionGraphDep` move into a `TYPE_CHECKING` block. **Obeying it breaks the application at import time**: FastAPI
+    calls `get_type_hints()` on every endpoint to build its dependency graph, so an `Annotated[..., Depends(...)]` alias
+    must exist at runtime. Resolved by omitting `from __future__ import annotations`, which is what
+    `src/app/features/ingestion/dependencies.py` and `documents/router.py` already do — matching the module under test
+    rather than suppressing a rule. `TC003` on `Any` still fired afterwards, correcting an earlier belief that it only
+    fires under the future import: it keys on annotation **position**, and PEP 526 local-variable annotations are never
+    evaluated at runtime, so `Any` used only there is genuinely type-only either way (a function *return* annotation is
+    evaluated at def time, which is why `Iterator` stays a runtime import). `implicit-namespace-package` was left as-is:
+    it is endemic across `tests/` (9 pre-existing, including the sibling `documents` package) and the documented gate is
+    **`src/` only**.
+  - **Evidence — CLAUDE.md's "Key files" table has a stale path.** It lists `src/app/shared/response_type.py`, which
+    does not exist. The real paths are `src/app/utils/response_type.py` and `src/app/utils/http_response.py`.
