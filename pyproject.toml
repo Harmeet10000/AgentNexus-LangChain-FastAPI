@@ -759,7 +759,7 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "-m",
-    "not integration",
+    "not integration and not requires_db",
 ]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
@@ -770,6 +770,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "requires_db: marks tests that need a live database (deselect with -m 'not requires_db')",
 ]
 
 [tool.coverage.run]
