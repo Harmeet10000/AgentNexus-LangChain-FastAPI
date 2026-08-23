@@ -9,18 +9,21 @@ behaviour if it is ever reached.
 
 **Why the app is hand-built rather than `create_app()`.** The real factory imports the full stack
 (cognee, graphiti, the model layer) and its lifespan opens connections. The registration that matters
-is reproducible exactly: the real app's handler registry holds precisely `HTTPException`,
-`RequestValidationError`, `WebSocketRequestValidationError`, and `Exception` — the first three are
-FastAPI's own defaults on any `FastAPI()`, and the fourth is the one line `main.py:110` adds. A bare
-app plus that one registration is therefore not an approximation of the real registry; it is the same
-registry. `test_the_handler_registry_matches_the_real_application` asserts that rather than trusting
-it.
+is reproducible exactly, because it is a single function: `register_exception_handlers`, the same one
+`create_app()` calls. A bare app plus that call is therefore not an approximation of the real registry;
+it is the same registry. `test_the_handler_registry_matches_the_real_application` asserts that rather
+than trusting it. `RequestStateLoggingMiddleware` is added for the same reason — it sets the
+ContextVars the handler and `http_error` read, and without it every enveloped response here would be
+a bodiless 500.
 
-**Why no test here asserts the project's response envelope.** C10's Proof asks for the standard error
-envelope, and it is currently **unreachable for every exception in the `APIException` family** — a
-finding well outside this change's scope and recorded in `tasks.md` rather than fixed here.
-`test_the_project_envelope_is_still_unreachable_tripwire` pins the cause so the day it is fixed shows
-up as a failing tripwire with instructions, not as a silent divergence between the Proof and reality.
+**The envelope is now asserted here, and used to be pinned as unreachable.** C10's Proof asks for the
+standard error envelope. When this file was written the envelope was unreachable for the entire
+`APIException` family, and `test_the_project_envelope_is_still_unreachable_tripwire` recorded the
+cause so the day it was fixed would show up as a failing tripwire rather than as a silent divergence
+between the Proof and reality. That day came: the tripwire is now
+`test_the_project_envelope_is_reachable_for_the_api_exception_family`, asserting the same mechanism
+with the opposite expectation, and C10's envelope Proof is live in
+`test_the_failure_names_the_capability_that_is_missing`.
 **Why this file has no `from __future__ import annotations`.** With it, ruff's type-checking rules
 demand that `IngestionGraphDep` move into a `TYPE_CHECKING` block, because the alias appears only in
 an annotation. Obeying that breaks the app at import time: FastAPI resolves every endpoint's type
@@ -34,12 +37,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fastapi import FastAPI
-from fastapi.exception_handlers import http_exception_handler
 from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.features.ingestion.dependencies import IngestionGraphDep, get_ingestion_graph
-from app.middleware import global_exception_handler
+from app.middleware import (
+    RequestStateLoggingMiddleware,
+    global_exception_handler,
+    register_exception_handlers,
+)
 from app.utils import APIException, ErrorCode, ServiceUnavailableException
 
 if TYPE_CHECKING:
@@ -62,7 +68,8 @@ _A_GRAPH = object()
 def _build_app() -> FastAPI:
     """A FastAPI app whose exception-handler registry equals the real one. See the module docstring."""
     app = FastAPI()
-    app.add_exception_handler(exc_class_or_status_code=Exception, handler=global_exception_handler)
+    app.add_middleware(RequestStateLoggingMiddleware)
+    register_exception_handlers(app)
 
     @app.get(_PATH)
     async def _probe(graph: IngestionGraphDep) -> dict[str, bool]:
@@ -111,17 +118,26 @@ def test_an_unprovisioned_graph_yields_service_unavailable_not_a_server_error(
 
 
 def test_the_failure_names_the_capability_that_is_missing(client: TestClient) -> None:
-    """Naming it structurally, not in prose.
+    """Naming it structurally, not in prose — and this is C10's standard-envelope Proof.
 
-    The capability travels as `data`, which `APIException` folds into its detail object, so a caller
-    can branch on it without parsing a sentence. Asserted through the shape the *default* handler
-    produces — see the envelope tripwire below for why that is the shape and not the project's.
+    The capability travels as `data`, which `APIException` folds into `detail["data"]`, so a caller
+    can branch on it without parsing a sentence. **The path to it changed.** Under FastAPI's default
+    handler the body was `{"detail": {"message", "error_code", "data"}}`; now that the family reaches
+    the project's own handler, the same value is at `error.data` inside the standard envelope, and
+    `error_code` has become `error.code`. Both the envelope and the capability are asserted here, so
+    a regression in either one fails a test whose name says what was lost.
     """
-    body: dict[str, Any] = client.get(_PATH).json()
+    response = client.get(_PATH)
+    body: dict[str, Any] = response.json()
 
-    detail = body["detail"]
-    assert detail["error_code"] == ErrorCode.SERVICE_UNAVAILABLE
-    assert detail["data"] == {"capability": _CAPABILITY}
+    assert set(body) == {"success", "statusCode", "request", "message", "data", "error"}
+    assert body["success"] is False
+    assert body["statusCode"] == 503
+    assert "detail" not in body, "FastAPI's default handler is back; the envelope is unreachable"
+
+    error = body["error"]
+    assert error["code"] == ErrorCode.SERVICE_UNAVAILABLE
+    assert error["data"] == {"capability": _CAPABILITY}
 
 
 def test_a_graph_explicitly_set_to_absent_also_fails_closed(app: FastAPI) -> None:
@@ -177,38 +193,45 @@ async def test_the_dependency_raises_the_typed_exception_rather_than_returning_n
 def test_the_handler_registry_matches_the_real_application(app: FastAPI) -> None:
     """Justifies building the app by hand instead of calling the real factory.
 
-    If FastAPI's defaults change, or `main.py` registers something new, this fails and the module
-    docstring's claim stops being true — which is the point of asserting it rather than stating it.
+    Compared against a reference registry produced by the *same* function `main.py` calls, rather
+    than against a hand-copied list of class names. Two reasons. Both `HTTPException` classes share
+    a `__name__`, so the name-keyed comparison this test used to make could not tell the working
+    registration from the broken one. And a literal list has to be edited every time the registration
+    surface changes, which is how the docstring's claim would quietly stop being true — the failure
+    mode this test exists to prevent. The by-key-object literal lives once, in
+    `tests/unit/middleware/test_error_envelope_is_universal.py`.
     """
-    registered = {
-        getattr(key, "__name__", str(key)): handler.__name__
-        for key, handler in app.exception_handlers.items()
-    }
+    reference = FastAPI()
+    register_exception_handlers(reference)
 
-    assert registered == {
-        "HTTPException": "http_exception_handler",
-        "RequestValidationError": "request_validation_exception_handler",
-        "WebSocketRequestValidationError": "websocket_request_validation_exception_handler",
-        "Exception": "global_exception_handler",
-    }
+    assert app.exception_handlers == reference.exception_handlers
+    # Guard against the reference itself being empty or FastAPI's untouched defaults: if
+    # `register_exception_handlers` ever became a no-op, the equality above would still hold.
+    assert app.exception_handlers[APIException] is global_exception_handler
 
 
-def test_the_project_envelope_is_still_unreachable_tripwire(app: FastAPI) -> None:
-    """**A tripwire, not a specification.** It asserts a defect, and must fail when that is fixed.
+def test_the_project_envelope_is_reachable_for_the_api_exception_family(app: FastAPI) -> None:
+    """The mechanism that makes the registration load-bearing. **Was a tripwire asserting the defect.**
 
-    C10's second Proof asks for the standard error envelope. No exception in the `APIException`
-    family can produce it: `add_exception_handler(Exception, ...)` installs a 500-only net on the
-    outermost middleware, while every other class is resolved by walking the raised exception's MRO
-    against the registry — and FastAPI pre-registers `HTTPException`, which `APIException` inherits
-    from. The walk therefore stops three classes early, and the elaborate `APIException` branch in
-    the project's own handler never executes for any request.
+    C10's second Proof asks for the standard error envelope. For most of this application's life no
+    exception in the `APIException` family could produce it, and the reason is worth keeping written
+    down, because nothing about the code makes it visible:
+    `add_exception_handler(Exception, ...)` installs a 500-only net on the *outermost* middleware,
+    while every other class is resolved by walking the raised exception's MRO against the registry on
+    the *innermost* one — and FastAPI pre-registers `HTTPException`, which `APIException` inherits
+    from. The walk therefore stopped three classes early, and the elaborate `APIException` branch in
+    the project's own handler never executed for any request. Because FastAPI installs its entries
+    with `setdefault`, omitting the registration produced no error and no warning.
 
-    Fixing that means registering the family explicitly, which changes the body of **every** error
-    response in the application — auth, users, billing, documents — and is not a decision an
-    ingestion change gets to make. So it is recorded and pinned here.
+    `register_exception_handlers` closes that by registering the family explicitly, which changed the
+    body of **every** error response in the application — auth, users, billing, documents. That was
+    too large a decision for an ingestion change to make, so this test spent its first life as
+    `test_the_project_envelope_is_still_unreachable_tripwire`, asserting that the selected handler
+    *was* FastAPI's, and instructing whoever closed the gap to invert it. This is that inversion.
 
-    **When this test fails, the gap has been closed.** Delete this test and restore C10's envelope
-    Proof; do not adjust the assertion to keep it green.
+    Asserted at the level of handler *selection*, not response body: the body is covered elsewhere,
+    and what is uniquely worth pinning here is the MRO walk itself — the step that was silently
+    wrong and that no response assertion explains.
     """
     selected = next(
         app.exception_handlers[cls]
@@ -217,7 +240,8 @@ def test_the_project_envelope_is_still_unreachable_tripwire(app: FastAPI) -> Non
     )
 
     assert issubclass(ServiceUnavailableException, (APIException, StarletteHTTPException))
-    assert selected is http_exception_handler, (
-        "the project's own handler now receives APIException: the envelope gap is closed, so "
-        "delete this tripwire and restore C10's standard-envelope Proof"
+    assert selected is global_exception_handler, (
+        "the MRO walk no longer reaches the project's handler for the APIException family: the "
+        "envelope gap has reopened and C10's standard-envelope Proof is void. Check that "
+        "register_exception_handlers still registers APIException and starlette's HTTPException"
     )

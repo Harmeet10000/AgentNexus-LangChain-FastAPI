@@ -20,7 +20,12 @@ def _serialize_data(data: Any) -> Any:
 def _build_request_meta() -> RequestMeta:
     """Build request metadata from the current request context."""
     settings = get_settings()
-    ctx = request_state.get()
+    # The `{}` default is required on the error path, not merely tidy. `request_state` is set
+    # by `RequestStateLoggingMiddleware` and reset in its `finally` block, so an exception
+    # that escapes as far as `ServerErrorMiddleware` reaches `global_exception_handler` with
+    # the ContextVar already unset. A bare `.get()` then raises `LookupError` *inside* the
+    # error handler and the client receives a bodiless 500 instead of the envelope.
+    ctx = request_state.get({})
 
     ip = ctx.get("ip")
     if settings.ENVIRONMENT.lower() == "production":

@@ -18,7 +18,7 @@ from .middleware import (
     build_fastapi_guard_config,
     default_span_details,
     get_metrics,
-    global_exception_handler,
+    register_exception_handlers,
 )
 from .shared.langchain_layer import configure_langsmith
 from .shared.otel import setup_otel
@@ -106,8 +106,16 @@ def create_app() -> FastAPI:
 
     # ============================================================================
     # EXCEPTION HANDLERS (Register after middleware, before routes)
+    #
+    # One call, four registrations, and every one of them is required: Starlette resolves
+    # non-`Exception` handlers by walking the raised class's MRO, and FastAPI has already
+    # `setdefault`-ed its own entries for `HTTPException` and `RequestValidationError`. The
+    # single `add_exception_handler(Exception, ...)` that used to live on this line therefore
+    # left three of `global_exception_handler`'s four branches unreachable and the documented
+    # error envelope absent from every response except an unhandled 500. See
+    # `register_exception_handlers` for the full mechanism before editing this.
     # ============================================================================
-    app.add_exception_handler(exc_class_or_status_code=Exception, handler=global_exception_handler)
+    register_exception_handlers(app)
 
     # ============================================================================
     # ROUTES
