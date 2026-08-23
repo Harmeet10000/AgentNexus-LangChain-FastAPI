@@ -125,7 +125,11 @@ dependencies = [
     "icecream>=2.1.10",
     "pendulum>=3.2.0",
     "perfect",
-    "psycopg>=3.3.3",
+    # `binary` ships the libpq wrapper: without it `import psycopg` raises ImportError on this
+    # machine (no psycopg_c, no system libpq). `pool` is imported directly by the LangGraph
+    # checkpointer, which owns its own AsyncConnectionPool; it arrives transitively through
+    # langgraph-checkpoint-postgres today, and a direct import deserves a direct declaration.
+    "psycopg[binary,pool]>=3.3.3",
     "python-docx>=1.2.0",
     "resend>=2.24.0",
     "sqlmodel>=0.0.37",
@@ -178,6 +182,7 @@ dependencies = [
     "pint>=0.25.3",
     "faker>=40.11.0",
     "zensical>=0.0.54",
+    "transformers>=5.12.0",
 ]
 
 [project.scripts]
