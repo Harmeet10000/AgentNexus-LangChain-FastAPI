@@ -15,7 +15,6 @@ import app.features.invoices.report
 import app.features.payments.currency
 import app.features.payments.model
 import app.features.plans.model
-import app.features.search.model
 import app.features.subscriptions.model
 import app.features.subscriptions.trial_extension
 import app.features.webhooks.email_template
@@ -62,7 +61,6 @@ _MODEL_MODULES = (
     app.features.payments.currency,
     app.features.payments.model,
     app.features.plans.model,
-    app.features.search.model,
     app.features.subscriptions.model,
     app.features.subscriptions.trial_extension,
     app.features.webhooks.email_template,

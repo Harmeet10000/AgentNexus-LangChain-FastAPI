@@ -44,7 +44,6 @@ if TYPE_CHECKING:
 # --- ingestion ---------------------------------------------------------------
 
 DOCUMENTS_INGEST: Final = "tasks.documents_ingest"
-SEARCH_INGEST: Final = "tasks.search_ingest"
 PAGEINDEX_INGEST: Final = "tasks.pageindex_ingest"
 LEGAL_BATCH_EXTRACTION: Final = "document_extraction.legal_batch"
 
@@ -89,9 +88,7 @@ LEGAL_BATCH_EXTRACTION: Final = "document_extraction.legal_batch"
 #: Acceptance is behavioural, not structural: with a ``legal_batch`` message in
 #: flight, a task dispatched to ``default`` must still start. Asserting the
 #: fourth queue exists only proves it was declared.
-INGESTION_TASK_NAMES: Final[frozenset[str]] = frozenset(
-    {DOCUMENTS_INGEST, SEARCH_INGEST, PAGEINDEX_INGEST}
-)
+INGESTION_TASK_NAMES: Final[frozenset[str]] = frozenset({DOCUMENTS_INGEST, PAGEINDEX_INGEST})
 
 # --- transactional email -----------------------------------------------------
 
@@ -129,12 +126,10 @@ _DOCUMENT_EXTRACTION_TASKS: Final = "tasks.document_extraction_tasks"
 _DOCUMENT_TASKS: Final = "tasks.document_tasks"
 _EXAMPLE_TASKS: Final = "tasks.example"
 _PAGEINDEX_TASKS: Final = "tasks.pageindex_tasks"
-_SEARCH_TASKS: Final = "tasks.search_tasks"
 
 
 TASK_DECLARING_MODULES: Final[Mapping[str, str]] = {
     DOCUMENTS_INGEST: _DOCUMENT_TASKS,
-    SEARCH_INGEST: _SEARCH_TASKS,
     PAGEINDEX_INGEST: _PAGEINDEX_TASKS,
     LEGAL_BATCH_EXTRACTION: _DOCUMENT_EXTRACTION_TASKS,
     SEND_VERIFICATION_EMAIL: _AUTH_EMAIL_TASKS,

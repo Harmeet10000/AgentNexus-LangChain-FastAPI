@@ -770,7 +770,7 @@ async def _store_chunks(
 
 async def _force_merge_bm25(session: AsyncSession) -> None:
     try:
-        await session.execute(text("SELECT bm25_force_merge('clauses_bm25_idx')"))
+        await session.execute(text("SELECT bm25_force_merge('chunks_bm25_idx')"))
     except Exception as exc:  # noqa: BLE001 — extension/index may be absent in local/dev DBs
         exc.add_note("operation=bm25_force_merge")
         logger.bind(error=str(exc)).warning("bm25_force_merge_skipped")

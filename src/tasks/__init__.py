@@ -3,12 +3,10 @@
 from .auth_email_tasks import send_password_reset_email, send_verification_email
 from .document_tasks import ingest_document
 from .example import add, process_document
-from .search_tasks import ingest_search_document
 
 __all__ = [
     "add",
     "ingest_document",
-    "ingest_search_document",
     "process_document",
     "send_password_reset_email",
     "send_verification_email",

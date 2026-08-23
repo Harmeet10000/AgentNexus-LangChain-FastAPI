@@ -12,15 +12,15 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.features.search.constants import (
-    DISKANN_QUERY_RESCORE,
-    DISKANN_QUERY_SEARCH_LIST_SIZE,
-    TRIGRAM_SIMILARITY_THRESHOLD,
-)
 from app.shared.result import ConflictAppError, InfrastructureAppError, NotFoundAppError
 from app.utils import ErrorCode
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 
+from .constants import (
+    DISKANN_QUERY_RESCORE,
+    DISKANN_QUERY_SEARCH_LIST_SIZE,
+    TRIGRAM_SIMILARITY_THRESHOLD,
+)
 from .model import CHUNK_EMBEDDING_DIM, UnifiedChunk, UnifiedDocument
 
 if TYPE_CHECKING:

@@ -1,6 +1,6 @@
 """Unit tests for task A3 — persisted vector width derives from configuration.
 
-A3 replaced a hard-coded ``Vector(768)`` on both chunk relations with the single
+A3 replaced a hard-coded ``Vector(768)`` on the chunk relation with the single
 configured value. Its fourth Proof is explicitly a *stub* test rather than a data
 check, and the reason is worth keeping in front of whoever edits this file: there
 are **zero stored vectors anywhere in this project**. A test that read a real
@@ -24,7 +24,6 @@ from returns.result import Failure, Success
 from app.config import get_settings
 from app.features.documents.model import CHUNK_EMBEDDING_DIM, UnifiedChunk
 from app.features.documents.repository import DocumentRepository
-from app.features.search.model import SearchChunk
 from app.utils.embedding import (
     assert_stored_width_matches_configured,
     stored_width_mismatch,
@@ -59,7 +58,7 @@ def _mock_session() -> MagicMock:
 # nothing at all; every check below goes through isinstance.
 
 
-# --- Declared width equals configured width, on both relations ---
+# --- Declared width equals configured width ---
 
 
 def test_chunks_declared_width_is_configured_width() -> None:
@@ -76,21 +75,18 @@ def test_the_named_constant_matches_the_column_it_built() -> None:
     assert CHUNK_EMBEDDING_DIM == _stored_width()
 
 
-def test_search_chunks_declared_width_is_configured_width() -> None:
-    assert SearchChunk.__table__.c.embedding.type.dim == get_settings().EMBEDDING_DIMENSION
-
-
-def test_the_two_relations_agree_with_each_other() -> None:
-    """A query vector is embedded once and searched against both relations.
-
-    Divergent widths would surface as a psycopg insert error at ingestion time
-    rather than a validation error at startup, which is strictly worse — the
-    failure would land on whoever uploaded a document, not on whoever changed the
-    configuration.
-    """
-    assert UnifiedChunk.__table__.c.embedding.type.dim == (
-        SearchChunk.__table__.c.embedding.type.dim
-    )
+# `test_search_chunks_declared_width_is_configured_width` and
+# `test_the_two_relations_agree_with_each_other` stood here. Both compared `chunks.embedding`
+# against `search_chunks.embedding`, and step 10 of `documents-unified-schema` deleted the second
+# relation along with the rest of `app.features.search`. There is now exactly one chunk relation, so
+# the cross-relation agreement they asserted is no longer a property that can drift — it is enforced
+# structurally rather than by a test.
+#
+# Their reasoning is kept because it is the argument for *why* one relation: a query vector is
+# embedded once. Two relations meant two column widths that could disagree, and a disagreement
+# surfaced as an insert error at ingestion time rather than a validation error at startup — landing
+# on whoever uploaded a document instead of whoever changed the configuration. Deleting the twin
+# removed the failure mode; it did not merely stop testing for it.
 
 
 # --- A3 Proof N6: a stored width differing from configured refuses new writes ---
