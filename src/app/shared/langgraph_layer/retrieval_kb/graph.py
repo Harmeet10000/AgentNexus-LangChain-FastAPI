@@ -1,4 +1,4 @@
-"""Retrieval graph factory for canonical clauses KB."""
+"""Retrieval graph factory for the canonical unified-chunk KB."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def build_retrieval_graph(
     graphiti: Any = None,
     reranker: CrossEncoderReranker | None = None,
 ) -> CompiledStateGraph[Any]:
-    """Build a request-scoped retrieval graph over clauses.
+    """Build a request-scoped retrieval graph over unified chunks.
 
     There is deliberately no ``embedding_fn`` parameter. It was annotated ``Any``, which erased
     the contract and forced the node to duck-type the injected object through three candidate

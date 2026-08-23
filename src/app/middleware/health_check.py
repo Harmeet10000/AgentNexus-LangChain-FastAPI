@@ -7,6 +7,7 @@ are created.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import TYPE_CHECKING
 
@@ -90,10 +91,40 @@ async def check_graphiti(app: FastAPI) -> DependencyHealth:
     return DependencyHealth.ok("graphiti", latency)
 
 
+async def check_cognee(app: FastAPI) -> DependencyHealth:
+    """Probe agent memory with three states — a boolean cannot express this one.
+
+    * degraded: the subsystem was never configured (startup degraded or skipped);
+    * fail: configured, but the shared graph it writes through does not answer —
+      every memory write would fail too;
+    * ok: configured and the shared graph answers.
+    """
+    start = time.perf_counter()
+    config = getattr(app.state, "cognee_config", None)
+    if config is None:
+        return DependencyHealth.degraded("cognee", "not configured")
+
+    driver = getattr(app.state, "neo4j_driver", None)
+    if driver is None:
+        # Configured but its write path has no graph to write through.
+        return DependencyHealth.fail("cognee", "configured but no graph driver available")
+
+    try:
+        async with asyncio.timeout(_HEALTH_TIMEOUT_S):
+            await driver.verify_connectivity()
+    except (OSError, TimeoutError) as exc:
+        latency = (time.perf_counter() - start) * 1000
+        logger.warning("Health check failed", dependency="cognee", error=str(exc))
+        return DependencyHealth.fail("cognee", str(exc), latency)
+    latency = (time.perf_counter() - start) * 1000
+    return DependencyHealth.ok("cognee", latency)
+
+
 ALL_PROBES = [
     check_postgres,
     check_redis,
     check_mongodb,
     check_neo4j,
     check_graphiti,
+    check_cognee,
 ]

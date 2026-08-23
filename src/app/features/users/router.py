@@ -33,7 +33,7 @@ async def list_users(
     is_active: Annotated[bool | None, Query()] = None,
     search: Annotated[str | None, Query(max_length=100)] = None,
 ) -> APIResponse[PaginatedData[UserAdminResponse]]:
-    result = await service.list_users(
+    result: PaginatedData[UserAdminResponse] = await service.list_users(
         page=page,
         per_page=per_page,
         role=role,
@@ -51,7 +51,7 @@ async def get_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
 ) -> APIResponse[UserAdminResponse]:
-    result = await service.get_user(user_id)
+    result: UserAdminResponse = await service.get_user(user_id)
     return http_response("User retrieved", data=result)
 
 
@@ -65,7 +65,7 @@ async def update_user_role(
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
 ) -> APIResponse[UserAdminResponse]:
-    result = await service.update_role(
+    result: UserAdminResponse = await service.update_role(
         user_id=user_id,
         new_role=body.role,
         requesting_admin_id=claims.sub,
@@ -82,7 +82,7 @@ async def activate_user(
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
 ) -> APIResponse[UserAdminResponse]:
-    result = await service.set_active(
+    result: UserAdminResponse = await service.set_active(
         user_id=user_id,
         is_active=True,
         requesting_admin_id=claims.sub,
@@ -99,7 +99,7 @@ async def deactivate_user(
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
 ) -> APIResponse[UserAdminResponse]:
-    result = await service.set_active(
+    result: UserAdminResponse = await service.set_active(
         user_id=user_id,
         is_active=False,
         requesting_admin_id=claims.sub,
@@ -133,7 +133,7 @@ async def impersonate_user(
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_role(UserRole.ADMIN))],
 ) -> APIResponse[ImpersonateResponse]:
-    result = await service.impersonate(
+    result: ImpersonateResponse = await service.impersonate(
         target_user_id=user_id,
         admin_user_id=claims.sub,
     )

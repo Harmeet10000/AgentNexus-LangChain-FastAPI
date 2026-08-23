@@ -12,17 +12,6 @@ from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.connections import init_db
-from app.features.search import (
-    ANALYZE_THRESHOLD_CHUNKS,
-    DEFAULT_SEARCH_CACHE_TTL_SECONDS,
-    INGEST_EMBEDDING_BATCH_SIZE,
-    RRF_K,
-    RankedChunk,
-    RankedResultRow,
-    SearchChunkRecord,
-    assemble_rag_context,
-    reciprocal_rank_fusion,
-)
 from app.shared.langchain_layer import serialize_to_toon
 from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text, embed_texts
 from app.shared.langchain_layer.models import _build_chat_model
@@ -34,6 +23,7 @@ from app.shared.langgraph_layer.retrieval_kb import (
     QueryPlan,
     RetrievedChunk,
     _extract_postgres_chunk_ids,
+    build_retrieval_graph,
 )
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.result import app_error_to_exception, log_expected_failure
@@ -47,6 +37,12 @@ from app.utils import (
 )
 
 from .classification import classify_document, segment_chunks
+from .constants import (
+    ANALYZE_THRESHOLD_CHUNKS,
+    DEFAULT_SEARCH_CACHE_TTL_SECONDS,
+    INGEST_EMBEDDING_BATCH_SIZE,
+    RRF_K,
+)
 from .dto import (
     DocumentSearchResultItem,
     DocumentStatusResponse,
@@ -59,6 +55,7 @@ from .dto import (
     UnifiedSearchRequest,
     UnifiedSearchResponse,
 )
+from .fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
 from .graphiti_verifier import write_and_verify_chunk
 from .ingestion_graph import build_document_ingestion_graph
 from .legal_metadata import (
@@ -67,10 +64,11 @@ from .legal_metadata import (
     extract_legal_metadata,
 )
 from .parser import parse_document
+from .rag import SearchChunkRecord, assemble_rag_context
 from .repository import DocumentRepository, build_chunk_rows, build_search_filter_params
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from typing import Any, Literal
 
     from graphiti_core.graphiti import Graphiti
@@ -79,7 +77,7 @@ if TYPE_CHECKING:
     from ty_extensions import Unknown
 
     from app.config.settings import Settings
-    from app.features.search.rag import ContextSection
+    from app.features.documents.rag import ContextSection
     from app.shared.result import AppResult
 
     from . import dto as documents_dto
@@ -98,6 +96,12 @@ _FALLBACK_ANSWER = (
     "I do not have enough grounded document context to answer this reliably. "
     "Please narrow the question or ingest the relevant document sections."
 )
+# Positional, and `zip(..., strict=True)` below is what keeps it honest: these names label the
+# three coroutines handed to `asyncio.gather` in order, and `gather` preserves argument order
+# regardless of completion order. Reorder the gather without reordering this and the strict zip
+# still passes while every failure is attributed to the wrong branch — so the pairing is asserted
+# by a unit test, not by this comment.
+_SEARCH_BRANCHES = ("bm25", "vector", "trigram")
 
 
 class DocumentCommandService:
@@ -230,14 +234,25 @@ class DocumentQueryService:
     def __init__(
         self,
         repo: DocumentRepository,
-        llm: BaseChatModel,
+        llm_factory: Callable[[], BaseChatModel],
         redis: Redis | None,
         graphiti: Graphiti | None,
     ):
         self.repo: DocumentRepository = repo
-        self._llm: BaseChatModel = llm
+        # The model client is constructed on first use, not at dependency
+        # resolution: building it eagerly lets an environment failure (missing
+        # provider package, bad key) answer an unauthenticated request with a
+        # 500 that masks the 401 auth already earned.
+        self._llm: BaseChatModel | None = None
+        self._llm_factory: Callable[[], BaseChatModel] = llm_factory
         self.redis: Redis | None = redis
         self.graphiti: Graphiti | None = graphiti
+
+    @property
+    def llm(self) -> BaseChatModel:
+        if self._llm is None:
+            self._llm = self._llm_factory()
+        return self._llm
 
     async def search(self, *, user_id: str, payload: UnifiedSearchRequest) -> UnifiedSearchResponse:
         cache_key = _build_cache_key("documents:search", payload)
@@ -270,6 +285,58 @@ class DocumentQueryService:
         filter_params = build_search_filter_params(
             metadata_filter=payload.metadata_filter.model_dump()
         )
+        fused_result: AppResult[list[RankedChunk]] = await self._fuse_search_branches(
+            user_id=user_id,
+            payload=payload,
+            query_embedding=query_embedding,
+            filter_params=filter_params,
+        )
+        if isinstance(fused_result, Failure):
+            error = fused_result.failure()
+            log_expected_failure(error, operation="hybrid_search")
+            # The setnx lock above is not released on this path. It carries a 15s expiry for
+            # exactly this reason, and every other raise in this method already relied on it.
+            raise app_error_to_exception(error)
+        fused_results: list[RankedChunk] = fused_result.unwrap()
+        chunk_lookup = await self.repo.fetch_chunks_by_ids(
+            [item.chunk_id for item in fused_results]
+        )
+        items: list[DocumentSearchResultItem] = _build_search_items(
+            fused_results=fused_results, chunk_lookup=chunk_lookup
+        )
+        response = UnifiedSearchResponse(items=items, cache_hit=False)
+        if not payload.bypass_cache and self.redis is not None:
+            await self.redis.setex(
+                name=cache_key,
+                time=DEFAULT_SEARCH_CACHE_TTL_SECONDS,
+                value=response.model_dump_json(),
+            )
+            if lock_acquired:
+                await self.redis.delete(lock_key)
+        return response
+
+    async def _fuse_search_branches(
+        self,
+        *,
+        user_id: str,
+        payload: UnifiedSearchRequest,
+        query_embedding: list[float],
+        filter_params: dict[str, Any],
+    ) -> AppResult[list[RankedChunk]]:
+        """Run the three retrieval modes and fuse them, or fail naming the branch that broke.
+
+        The distinction this method exists to draw: **an empty result from a healthy branch is
+        not a failure.** A keyword branch that legitimately matches nothing contributes an empty
+        rank list and the fusion proceeds over two modes; a keyword branch that *raised* used to
+        contribute an identical empty rank list, so a partially-broken index answered `200` with
+        results silently fused from fewer modes than the caller asked for. The two cases were
+        indistinguishable in the response, which is what made the old degrade path a correctness
+        problem rather than a resilience feature.
+
+        Returned as a `Result` rather than raised because the branch identity is the payload: the
+        caller is the ownership boundary, and a test can assert the branch name without having to
+        catch an exception and re-parse its message.
+        """
         results = await asyncio.gather(
             self.repo.bm25_search(
                 user_id=user_id,
@@ -291,33 +358,32 @@ class DocumentQueryService:
             ),
         )
         row_sets: list[list[RankedResultRow]] = []
-        for r in results:
-            if isinstance(r, Success):
-                row_sets.append(_to_ranked_rows(r.unwrap()))
-            elif isinstance(r, Failure):
-                log_expected_failure(r.failure(), operation="hybrid_search")
-                row_sets.append([])
-        fused_results: list[RankedChunk] = reciprocal_rank_fusion(
-            *row_sets,
-            k=RRF_K,
-            limit=payload.limit,
-        )
-        chunk_lookup = await self.repo.fetch_chunks_by_ids(
-            [item.chunk_id for item in fused_results]
-        )
-        items: list[DocumentSearchResultItem] = _build_search_items(
-            fused_results=fused_results, chunk_lookup=chunk_lookup
-        )
-        response = UnifiedSearchResponse(items=items, cache_hit=False)
-        if not payload.bypass_cache and self.redis is not None:
-            await self.redis.setex(
-                name=cache_key,
-                time=DEFAULT_SEARCH_CACHE_TTL_SECONDS,
-                value=response.model_dump_json(),
+        for branch, branch_result in zip(_SEARCH_BRANCHES, results, strict=True):
+            if isinstance(branch_result, Failure):
+                error = branch_result.failure()
+                # `model_copy` rather than a fresh `InfrastructureAppError`: re-wrapping would
+                # flatten the taxonomy and turn a 422 from one branch into a 503 for the whole
+                # request. This keeps the branch's own error kind, so `app_error_to_exception`
+                # still maps it to the status the branch earned, and only adds the attribution.
+                return Failure(
+                    error.model_copy(
+                        update={
+                            "message": f"{branch} retrieval branch failed: {error.message}",
+                            "details": {**(error.details or {}), "branch": branch},
+                        }
+                    )
+                )
+            # `else`, not `elif isinstance(..., Success)`. The old form had no final branch, so a
+            # value that was neither would have been dropped from `row_sets` entirely — shrinking
+            # the fusion input with no log line and no failure.
+            row_sets.append(_to_ranked_rows(branch_result.unwrap()))
+        return Success(
+            reciprocal_rank_fusion(
+                *row_sets,
+                k=RRF_K,
+                limit=payload.limit,
             )
-            if lock_acquired:
-                await self.redis.delete(lock_key)
-        return response
+        )
 
     async def rag(
         self, *, user_id: str, payload: documents_dto.UnifiedRagRequest
@@ -357,6 +423,56 @@ class DocumentQueryService:
             cache_hit=response.cache_hit,
         )
 
+    async def ask_via_retrieval_graph(
+        self, *, user_id: str, payload: documents_dto.UnifiedAskRequest
+    ) -> UnifiedAskResponse:
+        """Answer through the compiled retrieval graph rather than the inline loop in `ask`.
+
+        **Deliberately not exposed by any router**, and that is the whole point of it existing.
+        `build_retrieval_graph` is change 1's foundation — the compiled plan/retrieve/grade/generate
+        machine in `shared/langgraph_layer/retrieval_kb/` — and its only caller in the tree was
+        `features/search/service.py:ask_legal`, which this change deletes. Deleting the last caller
+        would leave the graph builder, its nodes and the retarget at step 5 with nothing reaching
+        them: type-checked, unit-tested, and unreferenced from the application. So the caller moves
+        here rather than disappearing.
+
+        It is honest to say what this costs. `ask` above re-implements the same node sequence inline
+        as module-level helpers (`_build_query_plan`, `_grade_context`, `_generate_answer`) and is
+        the path the mounted router actually serves, so the two are duplicate expressions of one
+        behaviour. That duplication is recorded as debt in this change's notes rather than resolved
+        here: collapsing them is a behavioural change to a live endpoint, and this step is a
+        deletion. The graph is the better-factored of the two and is the intended survivor.
+        """
+        graph = build_retrieval_graph(
+            llm=self.llm,
+            repo=self.repo,
+            redis=None if payload.bypass_cache else self.redis,
+            graphiti=self.graphiti,
+        )
+        result = await graph.ainvoke(
+            {
+                "user_id": user_id,
+                "query": payload.query,
+                "doc_ids_filter": payload.doc_ids_filter,
+                "messages": [],
+                "iteration_count": 0,
+            }
+        )
+        answer = GeneratedAnswer.model_validate(result["generated_answer"])
+        return UnifiedAskResponse(
+            answer=answer.answer,
+            citations=[
+                LegalCitationResponse(
+                    chunk_id=citation.chunk_id,
+                    clause_type=citation.clause_type,
+                    claim=citation.claim,
+                )
+                for citation in answer.citations
+            ],
+            confidence=answer.confidence,
+            cache_hit=bool(result.get("cache_hit")),
+        )
+
     async def ask(  # noqa: PLR0914
         self,
         *,
@@ -380,7 +496,7 @@ class DocumentQueryService:
 
         settings: Settings = get_settings()
         _ = settings
-        llm = self._llm
+        llm = self.llm
         query_llm = llm.with_structured_output(QueryPlan)
         grader_llm = llm.with_structured_output(ContextGrade)
         generator_llm = llm.with_structured_output(GeneratedAnswer)

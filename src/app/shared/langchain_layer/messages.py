@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import (
     AIMessage,
+    HumanMessage,
     RemoveMessage,
     SystemMessage,
     ToolMessage,
@@ -24,11 +25,10 @@ from app.config import get_settings
 from .models import ainvoke_text
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
+    from typing import Any
 
-    from langchain_core.messages import (
-        BaseMessage,
-    )
+    from langchain_core.messages import BaseMessage
 
 settings = get_settings()
 
@@ -202,3 +202,70 @@ def mark_for_removal(message_ids: list[str]) -> list[RemoveMessage]:
     Use inside a graph node to delete specific messages from state.
     """
     return [RemoveMessage(id=mid) for mid in message_ids]
+
+
+# ---------------------------------------------------------------------------
+# Agent-context assembly (harvested from the retired memory pipeline, band F)
+# ---------------------------------------------------------------------------
+
+
+def filter_tool_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Remove ToolMessage and AI tool_call turns; replace with one summary.
+
+    LangChain's filter_messages removes by type. We additionally strip AI
+    messages that are pure tool_call turns (no text content), then inject a
+    single compact HumanMessage summary so the model knows tools were called
+    without re-reasoning over the raw plumbing noise.
+    """
+    tool_summaries = [
+        f"[Tool {msg.name or 'unknown'}: {str(msg.content)[:200]}]"
+        for msg in messages
+        if isinstance(msg, ToolMessage)
+    ]
+    filtered = [
+        m
+        for m in messages
+        if not isinstance(m, ToolMessage)
+        and not (isinstance(m, AIMessage) and not m.content and m.tool_calls)
+    ]
+    if tool_summaries:
+        summary_text = "Tool results summary:\n" + "\n".join(tool_summaries[:10])
+        filtered = [*filtered, HumanMessage(content=summary_text)]
+    return filtered
+
+
+def build_structured_context_prefix(
+    *,
+    base_system_prompt: str,
+    task: str,
+    user_query: str,
+    working_memory: Mapping[str, Any] | None = None,
+    memory_context: str = "",
+    risk_warnings: str = "",
+) -> SystemMessage:
+    """Structured context assembly: goal, format, warnings, memory — no raw concat.
+
+    The prefix is a SystemMessage so it does not compete with the human turn for
+    token budget.
+    """
+    working_memory = working_memory or {}
+    goal = working_memory.get("clarified_intent", user_query)
+    doc_type = working_memory.get("document_type", "legal document")
+    jurisdiction = working_memory.get("jurisdiction", "India")
+
+    if not risk_warnings:
+        findings = working_memory.get("risk_findings") or []
+        critical_risks = [f.title for f in findings if getattr(f, "label", None) in {"critical", "high"}]
+        if critical_risks:
+            risk_warnings = "HIGH PRIORITY RISKS DETECTED: " + ", ".join(critical_risks[:5])
+
+    context_block = (
+        f"GOAL: {goal}\n"
+        f"TASK: {task}\n"
+        f"DOCUMENT TYPE: {doc_type}\n"
+        f"JURISDICTION: {jurisdiction}\n"
+        f"RETURN FORMAT: Structured Pydantic schema — no prose outside schema fields.\n"
+        f"WARNINGS: {risk_warnings or 'None.'}\n"
+        f"CONTEXT FROM MEMORY:\n{memory_context or 'No prior context available.'}\n"
+    )
+    return SystemMessage(content=f"{base_system_prompt}\n\n---\n{context_block}")

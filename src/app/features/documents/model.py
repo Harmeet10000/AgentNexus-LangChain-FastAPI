@@ -16,7 +16,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -171,16 +170,23 @@ class UnifiedChunk(Base):
         default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
-    # Server-side default, unlike UnifiedDocument's Python-side one: revision
-    # a5bd6b69a28e added this column as NOT NULL DEFAULT now() precisely so the
-    # database can satisfy it alone. Declaring it here closes the inverse
-    # hazard — a column in the database and absent from the registry is one
-    # `alembic check` proposes to DROP, which loses data rather than speed.
+    # ORM-owned, mirroring UnifiedDocument: the row builder supplies the
+    # timestamp and the chunk upsert's conflict set refreshes it explicitly.
+    # SQLAlchemy does not merge `onupdate` into an explicit DO UPDATE SET, so a
+    # server_default here would leave every chunk's updated_at equal to its
+    # creation time forever — populated, non-null, and dead. Revision
+    # f2a9c47b81de dropped the server default when ownership was settled.
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+        default=lambda: datetime.now(tz=UTC),
+        onupdate=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
+    # Statute attributes, written through and read by change 3's
+    # legal-corpus-retrieval. Nullable until that change populates them;
+    # added to the database by revision f2a9c47b81de.
+    instrument_name: Mapped[str | None] = mapped_column(String(length=255), nullable=True)
+    section_ref: Mapped[str | None] = mapped_column(String(length=255), nullable=True)
+    instrument_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     document: Mapped[UnifiedDocument] = relationship(back_populates="chunks")

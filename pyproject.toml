@@ -476,7 +476,10 @@ section-order = [
     "TRY400",
     "T100",    # Allow debugger calls in examples
 ]
-"src/app/shared/rag/rag_agent_advanced.py" = [
+# Relocated from src/app/shared/rag by todo-210 band E. Deliberately NOT
+# importable: pydantic-ai is an undeclared dependency by decision (see the A4
+# tripwire test) — F821 covers the names that package would supply.
+"src/app/examples/rag_agent_advanced.py" = [
     "ANN201",
     "ARG001",
     "ASYNC250",
@@ -759,7 +762,7 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "-m",
-    "not integration",
+    "not integration and not requires_db",
 ]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
@@ -770,6 +773,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "requires_db: marks tests that need a live database (deselect with -m 'not requires_db')",
 ]
 
 [tool.coverage.run]

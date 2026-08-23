@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_texts
 from app.shared.langchain_layer.models import serialize_to_toon
 from app.shared.langgraph_layer.kb_retry import (
+    TRANSIENT_EXTERNAL_TYPES,
     TransientExternalError,
     describe_failure,
     retry_immediate,
@@ -770,7 +771,7 @@ async def _store_chunks(
 
 async def _force_merge_bm25(session: AsyncSession) -> None:
     try:
-        await session.execute(text("SELECT bm25_force_merge('clauses_bm25_idx')"))
+        await session.execute(text("SELECT bm25_force_merge('chunks_bm25_idx')"))
     except Exception as exc:  # noqa: BLE001 — extension/index may be absent in local/dev DBs
         exc.add_note("operation=bm25_force_merge")
         logger.bind(error=str(exc)).warning("bm25_force_merge_skipped")
@@ -800,7 +801,11 @@ async def _graphiti_add_episode(
             label="graphiti_add_episode",
         )
         return str(getattr(result, "uuid", name))
-    except Exception as exc:  # noqa: BLE001 — graph write failure must not roll back Postgres ingestion
+    except (TransientExternalError, *TRANSIENT_EXTERNAL_TYPES) as exc:
+        # Only the shapes retry_immediate itself calls transient may degrade the
+        # graph write to None; anything else (a bug, a LangGraph pause) must
+        # propagate rather than be swallowed as "graph unavailable". The write
+        # still never rolls back Postgres ingestion — that property is kept.
         exc.add_note(f"name={name}, operation=graphiti_add_episode")
         logger.bind(name=name, error=str(exc)).warning("graphiti_episode_upsert_failed")
         return None

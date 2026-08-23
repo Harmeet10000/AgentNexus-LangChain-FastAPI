@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.shared.langchain_layer.agents.memory.cognee_client import CogneeSetupConfig
 from app.utils import logger
 
 from .dto import HealthChecksDTO, HealthDataDTO, HealthResultDTO, SelfInfoDTO
@@ -60,6 +61,7 @@ class HealthService:
         celery_app: Celery | None,
         *,
         graph_memory_client: GraphMemoryClient | None = None,
+        cognee_config: CogneeSetupConfig | None = None,
     ) -> None:
         self.mongo_client = mongo_client
         self.redis_client = redis_client
@@ -67,6 +69,7 @@ class HealthService:
         self.neo4j_driver = neo4j_driver
         self.celery_app = celery_app
         self.graph_memory_client = graph_memory_client
+        self.cognee_config = cognee_config
         self.start_time = time.time()
 
     @staticmethod
@@ -99,6 +102,7 @@ class HealthService:
         celery_check = self._check_celery()
         memory_check = self._check_memory()
         disk_check = self._check_disk()
+        agent_memory_check = await self._check_agent_memory()
 
         checks = HealthChecksDTO(
             database=database_check,
@@ -109,6 +113,7 @@ class HealthService:
             celery=celery_check,
             memory=memory_check,
             disk=disk_check,
+            agent_memory=agent_memory_check,
         )
 
         overall_status = self._compute_overall_status(checks=checks)
@@ -240,6 +245,55 @@ class HealthService:
             "status": "healthy",
             "state": "connected",
             "responseTime": f"{response_time:.2f}ms",
+        }
+
+    async def _check_agent_memory(self) -> dict[str, Any]:
+        """Probe agent memory (cognee), mirroring the middleware probe's three states.
+
+        The graph-procedure precondition (APOC/GDS) is reported as a **named sub-field**
+        and does not fail the whole check: it is the only way a silently failing
+        consolidation is ever observed, and its absence means consolidation refuses to
+        run — not that the subsystem is down.
+        """
+        if self.cognee_config is None:
+            return {"status": "degraded", "state": "not_configured"}
+
+        graph_procedures_available = False
+        graph_reachable = False
+        if self.neo4j_driver is not None:
+            try:
+                async with asyncio.timeout(_GRAPH_MEMORY_PROBE_TIMEOUT_S):
+                    records, _, _ = await self.neo4j_driver.execute_query(
+                        "SHOW PROCEDURES YIELD name WHERE name STARTS WITH 'apoc.' "
+                        "OR name STARTS WITH 'gds.' RETURN count(name) AS n"
+                    )
+                graph_reachable = True
+                # neo4j Record supports mapping access; a test double may not.
+                count = (
+                    records[0].get("n", 0)
+                    if hasattr(records[0], "get")
+                    else getattr(records[0], "n", 0)
+                )
+                graph_procedures_available = bool(records and count > 0)
+            except (Neo4jError, DriverError, OSError, TimeoutError) as exc:
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Agent memory health check failed"
+                )
+                return {
+                    "status": "unhealthy",
+                    "state": "disconnected",
+                    "error": type(exc).__name__,
+                    "graphProceduresAvailable": graph_procedures_available,
+                }
+
+        return {
+            "status": "healthy",
+            "state": "configured",
+            "graphReachable": graph_reachable,
+            # Absent procedures mean consolidation will refuse to run; they do NOT
+            # mean this check should fail.
+            "graphProceduresAvailable": graph_procedures_available,
+            "embeddingDimension": self.cognee_config.embedding_dimension,
         }
 
     def _check_celery(self) -> dict[str, Any]:

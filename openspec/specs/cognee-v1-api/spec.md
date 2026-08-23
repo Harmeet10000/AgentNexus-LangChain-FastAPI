@@ -1,3 +1,10 @@
+# Cognee v1 API
+
+## Purpose
+Long-term episodic and procedural memory for Agent Saul via the cognee v1 API: remember/improve/recall replace the deprecated add/cognify/search surface.
+
+## Requirements
+
 ### Requirement: Store content via remember
 The system SHALL use `cognee.remember()` to store content in episodic memory, replacing the deprecated `cognee.add()`.
 
