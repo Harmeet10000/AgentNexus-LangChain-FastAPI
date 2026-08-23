@@ -13,26 +13,30 @@ degraded contextualization was attributable to a clause but never to a document,
 the diagnostic.
 
 Proof 2(a) and 2(b) — that the branch returns a degraded result rather than raising, and
-that the diagnostic names the original cause — are **deferred to C6**, and
-`test_the_boundary_still_converts_the_type_the_handler_catches` below records exactly why:
-`retry_immediate` converts every failure to `TransientExternalError`, which
-`except LangChainException` cannot match, so in production this branch is unreachable. The
-tests here reach it by patching that boundary, which isolates the handler under test and
-keeps the boundary's own defect where C6 can fix it once for all three call sites.
+that the diagnostic names the original cause — were **deferred to C6** and are now
+discharged there: `test_kb_transient_boundary.py` drives real exhausted retries through all
+three converted callers. What remains here is
+`test_the_boundary_now_reaches_the_handler_by_both_routes`, which pins the *interface*
+between the two tasks so neither side can drift back. The tests below still patch the
+boundary, which keeps this file about the handler's own logic rather than about the retry
+policy — that separation is the reason the identity fix could be tested before C6 landed
+and is worth keeping now that it has.
 """
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from langchain_core.exceptions import LangChainException
+from langchain_core.exceptions import LangChainException, OutputParserException
 
 from app.shared.langgraph_layer.ingestion_kb import nodes as nodes_module
 from app.shared.langgraph_layer.ingestion_kb.nodes import (
     dispatch_contextualize_chunks,
     make_contextualize_chunk_node,
+    make_segment_document_node,
 )
 from app.shared.langgraph_layer.ingestion_kb.state import (
     ClauseSegment,
@@ -66,13 +70,12 @@ def _payload(**overrides: Any) -> dict[str, Any]:
 
 
 def _raising_boundary(error: Exception) -> Any:
-    """Stand in for `retry_immediate`, raising `error` without converting its type.
+    """Stand in for the retry boundary, raising `error` without applying the retry policy.
 
-    Patching here rather than making the language-model double fail is deliberate: the
-    real boundary converts every exception to `TransientExternalError` (C6), so a test
-    that failed the model would never reach the handler. Isolating the handler is the
-    only way to test it before C6 lands, and it leaves the conversion defect in one
-    place instead of working around it three times.
+    Patching here rather than making the language-model double fail keeps these tests about
+    the handler: the real boundary decides whether a failure is retryable and may wrap it,
+    and none of those decisions belong to A5's subject. C6's own tests exercise the real
+    boundary end to end; this one isolates the handler above it.
     """
 
     async def _boundary(_operation: Any, *, label: str) -> Any:  # noqa: ARG001 — signature parity
@@ -208,31 +211,53 @@ async def test_the_success_path_is_unchanged_by_the_identity_fix() -> None:
     assert chunk.tokens == 9
 
 
-# --- Why 2(a) and 2(b) are deferred, pinned so C6 must revisit it ---
+# --- The A5/C6 interface, pinned from A5's side ---
 
 
-async def test_the_boundary_still_converts_the_type_the_handler_catches() -> None:
-    """C6's defect, confirmed — and broader than C6 states.
+async def test_the_boundary_now_reaches_the_handler_by_both_routes() -> None:
+    """C6's defect is fixed, and this is the assertion that says so from A5's side.
 
-    `retry_immediate` catches `Exception` and raises `TransientExternalError from exc`.
-    Every degraded branch in `nodes.py` catches `LangChainException`, which is not a base
-    of `TransientExternalError`, so **none** of the three branches can fire in production:
-    segmentation, contextualize, and entity extraction alike. The pipeline propagates
-    where it appears to degrade.
+    Before C6 the boundary retried on the base exception type and relabelled *every*
+    failure as one transient type — a type the handlers did not catch — so none of the
+    three degraded branches could fire in production: segmentation, contextualize and
+    entity extraction alike. The pipeline propagated exactly where it appeared to degrade.
 
-    This test fails once C6 makes the boundary raise a type the callers catch, which is
-    the intent — A5's Proof 2(a)/2(b) belong to the test C6's third Proof already asks
-    for, and this is the tripwire that forces it to be written.
+    Chaining had been offered as the remedy and could not be one. It populates `__cause__`;
+    it does not change the type raised. This test asserted that gap; it now asserts its
+    closure, which arrived as *two* routes rather than one conversion:
+
+    * a deterministic framework failure is outside the boundary's named retryable set, so
+      it reaches the handler unretried and **as its own type**;
+    * a genuinely transient failure is retried and, once the budget is spent, reaches the
+      handler as the transient type with the original recoverable through the cause.
+
+    The handlers were converted to catch both, so closing either route alone would have
+    traded one silently-dead degradation branch for another.
     """
-    original = LangChainException("provider refused")
+    deterministic = LangChainException("provider refused")
 
     async def _always_fails() -> object:
-        raise original
+        raise deterministic
 
-    with pytest.raises(TransientExternalError) as exc_info:
+    # Route 1 — type preserved, so the handler's original `except` still matches.
+    with pytest.raises(LangChainException) as framework_info:
         await retry_immediate(_always_fails, label="contextualize_chunk", attempts=1)
+    assert framework_info.value is deterministic
 
-    # The original survives as the cause, which is all `reraise=True` buys here.
-    assert exc_info.value.__cause__ is original
-    # But the type the handlers catch does not survive, which is the whole problem.
-    assert not isinstance(exc_info.value, LangChainException)
+    transient = OutputParserException("expected JSON, got prose")
+
+    async def _always_fails_transiently() -> object:
+        raise transient
+
+    # Route 2 — wrapped, with the original reachable rather than discarded.
+    with pytest.raises(TransientExternalError) as transient_info:
+        await retry_immediate(_always_fails_transiently, label="contextualize_chunk", attempts=1)
+    assert transient_info.value.__cause__ is transient
+
+    # And the handlers catch both, which is what makes either route survivable.
+    for node_source in (
+        inspect.getsource(make_contextualize_chunk_node),
+        inspect.getsource(make_segment_document_node),
+    ):
+        assert "TransientExternalError" in node_source
+        assert "LangChainException" in node_source
