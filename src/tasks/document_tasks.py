@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import asyncio
 
-from app.connections import celery_app
-from app.connections.celery import ResilientTask
+from app.connections.celery import ResilientTask, celery_app
 from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery_task_names import DOCUMENTS_INGEST
 from app.features.documents.service import run_document_ingestion_task
 from app.utils import logger
 
 
 class DocumentIngestPayload(CeleryTaskPayload):
-    """Typed payload for tasks.documents_ingest."""
+    """Typed payload for the unified document ingestion task."""
 
     document_id: str
     user_id: str
@@ -21,11 +21,11 @@ class DocumentIngestPayload(CeleryTaskPayload):
     object_uri: str
 
 
-CeleryTaskRegistry.register("tasks.documents_ingest", DocumentIngestPayload)
+CeleryTaskRegistry.register(DOCUMENTS_INGEST, DocumentIngestPayload)
 
 
 @celery_app.task(
-    name="tasks.documents_ingest",
+    name=DOCUMENTS_INGEST,
     bind=True,
     base=ResilientTask,
 )

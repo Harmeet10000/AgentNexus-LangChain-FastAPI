@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import asyncio
 
-from app.connections import celery_app
-from app.connections.celery import ResilientTask
+from app.connections.celery import ResilientTask, celery_app
 from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery_task_names import SEARCH_INGEST
 from app.features.search.service import run_ingestion_task
 from app.utils import logger
 
 
 class SearchIngestPayload(CeleryTaskPayload):
-    """Typed payload for tasks.search_ingest."""
+    """Typed payload for the search ingestion task."""
 
     document_id: str
     content: str
@@ -22,11 +22,11 @@ class SearchIngestPayload(CeleryTaskPayload):
     doc_metadata: dict[str, object] | None = None
 
 
-CeleryTaskRegistry.register("tasks.search_ingest", SearchIngestPayload)
+CeleryTaskRegistry.register(SEARCH_INGEST, SearchIngestPayload)
 
 
 @celery_app.task(
-    name="tasks.search_ingest",
+    name=SEARCH_INGEST,
     bind=True,
     base=ResilientTask,
 )

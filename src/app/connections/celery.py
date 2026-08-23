@@ -29,6 +29,14 @@ from .celery_reliability import (
     release_idempotency_processing_lock,
     run_with_circuit_breaker,
 )
+from .celery_task_names import (
+    BILLING_DUNNING,
+    BILLING_INVOICE_GENERATION,
+    BILLING_RECEIPT_GENERATION,
+    BILLING_RECONCILIATION,
+    CREDITS_EXPIRE,
+    CREDITS_RECONCILE,
+)
 
 settings = get_settings()
 
@@ -183,17 +191,43 @@ class ResilientTask(Task):
 
 
 def create_celery_app() -> Celery:
-    """Create and configure Celery application."""
+    """Create and configure Celery application.
+
+    Every module declaring a task is named in ``include`` — the list below is the
+    authoritative one an operator reads, and a unit test asserts it agrees with
+    the task-name definition module rather than either being derived from the
+    other. Four modules were missing before, among them the unified document
+    ingestion task, and they were registered only because the task package's
+    initialiser happens to import them: importing any listed sibling imports that
+    initialiser first, which imported the rest. Registration therefore rested on
+    an import side effect in a file with no reason to know it was load-bearing,
+    and tidying that file would have silently stopped ingestion from being
+    consumed while dispatch carried on succeeding.
+
+    ``include`` is lazy — Celery imports these when the application is finalised
+    (worker start), not when it is constructed — so listing a module here costs a
+    dispatching process nothing. The consequence is that a process which only
+    dispatches holds no payload registrations at all; the typed dispatch helper
+    handles that itself rather than forcing the whole list to be imported.
+
+    The typed reference implementation of the two email tasks is deliberately
+    absent: it declares the same two task names as the live email module, so
+    listing both would make the winner depend on import order and silently
+    replace a live implementation with a demonstration of one.
+    """
     app = Celery(
         main="langchain_fastapi",
         broker=settings.RABBITMQ_URL,
         backend="rpc://",
         include=[
             "tasks.auth_email_tasks",
-            "tasks.example",
-            "tasks.search_tasks",
             "tasks.billing_tasks",
             "tasks.credit_tasks",
+            "tasks.document_extraction_tasks",
+            "tasks.document_tasks",
+            "tasks.example",
+            "tasks.pageindex_tasks",
+            "tasks.search_tasks",
         ],
     )
 
@@ -259,30 +293,30 @@ def create_celery_app() -> Celery:
         },
         beat_schedule={
             "billing-invoice-daily": {
-                "task": "billing.invoice_generation",
+                "task": BILLING_INVOICE_GENERATION,
                 "schedule": crontab(hour=0, minute=15),
             },
             "billing-dunning-daily": {
-                "task": "billing.dunning",
+                "task": BILLING_DUNNING,
                 "schedule": crontab(hour=1, minute=0),
             },
             "billing-receipt-daily": {
-                "task": "billing.receipt_generation",
+                "task": BILLING_RECEIPT_GENERATION,
                 "schedule": crontab(hour=1, minute=45),
             },
             "billing-reconciliation-daily": {
-                "task": "billing.reconciliation",
+                "task": BILLING_RECONCILIATION,
                 "schedule": crontab(hour=2, minute=0),
             },
             "credits-expire-daily": {
-                "task": "credits.expire",
+                "task": CREDITS_EXPIRE,
                 "schedule": crontab(
                     hour=settings.CREDIT_EXPIRATION_CRON_HOUR,
                     minute=settings.CREDIT_EXPIRATION_CRON_MINUTE,
                 ),
             },
             "credits-reconcile-weekly": {
-                "task": "credits.reconcile",
+                "task": CREDITS_RECONCILE,
                 "schedule": crontab(
                     hour=settings.CREDIT_RECONCILIATION_CRON_HOUR,
                     minute=settings.CREDIT_RECONCILIATION_CRON_MINUTE,

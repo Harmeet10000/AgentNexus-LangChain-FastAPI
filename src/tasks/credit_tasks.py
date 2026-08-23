@@ -7,7 +7,10 @@ import asyncio
 from returns.result import Failure
 from sqlalchemy import select
 
-from app.connections import ResilientTask, celery_app, init_db
+from app.connections.celery import ResilientTask, celery_app
+from app.connections.celery_registry import CeleryTaskRegistry, NoKwargsPayload
+from app.connections.celery_task_names import CREDITS_EXPIRE, CREDITS_RECONCILE
+from app.connections.postgres import init_db
 from app.features.audit.model import AuditLog
 from app.features.audit.repository import AuditLogRepository
 from app.features.credits.models.credit import UserCredit
@@ -106,7 +109,13 @@ async def _reconcile_credits_job() -> dict[str, int]:
         await engine.dispose()
 
 
-@celery_app.task(name="credits.expire", base=ResilientTask)
+# Scheduler-dispatched with no keyword arguments; see the equivalent note in the
+# billing jobs for why the empty contract is registered rather than left absent.
+CeleryTaskRegistry.register(CREDITS_EXPIRE, NoKwargsPayload)
+CeleryTaskRegistry.register(CREDITS_RECONCILE, NoKwargsPayload)
+
+
+@celery_app.task(name=CREDITS_EXPIRE, base=ResilientTask)
 def credits_expire() -> dict[str, int]:
     """Daily job to expire past-due credits (Requirement 51)."""
     logger.bind(operation="credits.expire").info("Starting credit expiration job")
@@ -117,7 +126,7 @@ def credits_expire() -> dict[str, int]:
     return result
 
 
-@celery_app.task(name="credits.reconcile", base=ResilientTask)
+@celery_app.task(name=CREDITS_RECONCILE, base=ResilientTask)
 def credits_reconcile() -> dict[str, int]:
     """Weekly job to verify credit ledger integrity (Requirement 53.1)."""
     logger.bind(operation="credits.reconcile").info("Starting credit reconciliation job")

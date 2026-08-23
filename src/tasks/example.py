@@ -1,11 +1,29 @@
 """Example Celery tasks."""
 
-from app.connections import celery_app
-from app.connections.celery import ResilientTask
+from app.connections.celery import ResilientTask, celery_app
+from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery_task_names import EXAMPLE_ADD, EXAMPLE_PROCESS_DOCUMENT
 from app.utils import logger
 
 
-@celery_app.task(name="tasks.add", base=ResilientTask)
+class AddPayload(CeleryTaskPayload):
+    """Typed payload for the arithmetic example task."""
+
+    x: int
+    y: int
+
+
+class ProcessDocumentPayload(CeleryTaskPayload):
+    """Typed payload for the document-processing example task."""
+
+    document_id: str
+
+
+CeleryTaskRegistry.register(EXAMPLE_ADD, AddPayload)
+CeleryTaskRegistry.register(EXAMPLE_PROCESS_DOCUMENT, ProcessDocumentPayload)
+
+
+@celery_app.task(name=EXAMPLE_ADD, base=ResilientTask)
 def add(x: int, y: int) -> int:
     """Example task: Add two numbers."""
     result = x + y
@@ -14,7 +32,7 @@ def add(x: int, y: int) -> int:
 
 
 @celery_app.task(
-    name="tasks.process_document",
+    name=EXAMPLE_PROCESS_DOCUMENT,
     bind=True,
     base=ResilientTask,
 )
