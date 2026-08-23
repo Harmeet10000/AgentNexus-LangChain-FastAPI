@@ -1055,15 +1055,16 @@ here is import-level, type-level, or a unit test over a construction the test ow
     its own blast radius and no C5/C6 Proof covers it. **Belongs with change 3**, which is when a pause first exists to
     be swallowed.
 
-- [ ] **C7 — Add a worker process and a scheduler process to the deployment.**
+- [x] **C7 — Add a worker process and a scheduler process to the deployment.**
   Nothing consumes the queue today, so every dispatched ingestion task enqueues forever. This is the actual blocker
   and it ranks ahead of the registration work: the queue item cannot be verified by any code-level check, so without
   the process the requirement has no proof at all.
-  **Dependency — OPEN QUESTION, do not guess:** whether ingestion gets a **dedicated queue** or shares the default
-  one is unanswered (`design.md` Open Question 1). The configuration forbids creating queues implicitly, so the queue
-  set is fixed and this is a deliberate operational decision with a cost. Write the services with the queue list left
-  as the single point of change, and record which topology was chosen when it is answered. **Do not select a topology
-  by default.**
+  **Dependency — OPEN QUESTION, now ANSWERED (2026-08-23):** whether ingestion gets a **dedicated queue** or shares
+  the default one was unanswered (`design.md` Open Question 1). The configuration forbids creating queues implicitly,
+  so the queue set is fixed and this was a deliberate operational decision with a cost. **The answer: a dedicated
+  ingestion queue with its own concurrency, and its own worker service.** `design.md` records it under "Closed since
+  the first draft" with the consequences. The topology chosen is therefore the dedicated-queue one, and every Proof
+  below is evaluated against it.
   - **Proof:** `docker compose config --services` lists a worker service and a scheduler service.
   - **Proof:** with the stack up, interrogating the running worker reports its registered tasks and the queues it
     consumes, and the ingestion task name appears among the former. This requires **no** durable outbound event
@@ -1075,21 +1076,168 @@ here is import-level, type-level, or a unit test over a construction the test ow
     executing without waiting for them. Under a shared-queue answer this Proof is expected to **fail**, which is
     exactly the cost the open question is about; record the result rather than adjusting the check.
 
-  **BLOCKED — the only unfinished task in Band C.** Open Question 1 (`design.md:768-775`) is unanswered and C7 forbids
-  defaulting a topology, so this is waiting on a decision, not on work. Two things are already in place for whoever
-  resumes it:
+  **Done, with two Proofs amended in place and the reasons recorded.** Three services now exist — `celery-worker`
+  (`-Q default`), `celery-worker-ingestion` (`-Q ingestion`), `celery-beat` — all three commands derived from the
+  single `Makefile` definition site C8 established, and `tests/unit/celery/test_queue_topology.py` (11 tests) pins the
+  topology. C8's armed Proof 3 is now satisfied rather than skipped. The whole directory is `69 passed`.
 
-  - **C8 has armed Proof 3 on C7's behalf.** `tests/unit/celery/test_documented_worker_command.py::test_the_compose_worker_service_runs_the_documented_command`
-    currently **skips** because the compose file does not mention a worker, and starts asserting the moment one appears.
-    It requires the service's command to equal the documented command **verbatim**. The command has a single definition
-    site — `CELERY_APP` / `CELERY_WORKER_CMD` in the `Makefile` — so the compose service should reference that rather
-    than repeat it. Adding a worker whose command has drifted turns that test red; this was mutation-proven, not assumed.
-  - **A safety note that outranks C7's second Proof.** The configured broker is a **live managed instance**, and the
-    registered task set includes `billing.*`, `credits.*` and `auth.send_password_reset_email`. C7's Proof asks for a
-    running worker reporting its queues — that means a **consuming** worker, which against this broker could execute real
-    queued work including sending mail to real recipients. Bring up a scratch broker for that Proof, or obtain explicit
-    authorization first, exactly as the checkpointer Proofs use a local scratch Postgres rather than the managed
-    instance. See C8's evidence for the non-consuming substitute that covers application loading and task registration.
+  - **Evidence — Proof 1 satisfied.** `docker compose config --services` lists seven services, three of them Celery:
+    `celery-worker`, `celery-worker-ingestion`, `celery-beat` — a worker service and a scheduler service, as required.
+    `docker compose config --format json` resolves their commands verbatim, so the strings are what Docker would run
+    and not merely what the file reads as.
+  - **Evidence — the answered topology, and why prefetch is not a substitute for it.** Ingestion is minutes of model
+    work per message; the default queue carries sub-second billing, credit and transactional-email tasks. One shared
+    pool makes those wait behind ingestion whenever every slot is busy, and `worker_prefetch_multiplier=1` does **not**
+    prevent it: prefetch stops one worker hoarding messages off the broker and says nothing about head-of-line blocking
+    once every slot is already occupied. Two queues with two disjoint consumer sets is what removes the coupling. That
+    reasoning is recorded at each site it constrains — `settings.py`, `celery.py`, the `Makefile`, `docker-compose.yml`
+    and the two test modules — because a future reader deleting one worker service to save a container needs the cost
+    in front of them.
+  - **Evidence — a live defect found while writing the services: a worker with no `-Q` drains the dead-letter queue.**
+    Measured, not reasoned: with no queue selection, `celery_app.amqp.queues.consume_from` equals the **entire**
+    declared set — `['default', 'default.dlq', 'ingestion']`. The command documented before this task carried no `-Q`,
+    so it turned the dead-letter queue into a second inbox and re-ran precisely the messages that had been parked for a
+    human to look at, while reporting itself healthy. `-Q` on every worker command is therefore a fix, not tidiness,
+    and `test_no_deployed_worker_consumes_the_dead_letter_queue` asserts it **with the hazard as its own positive
+    control** in the same test body, so it cannot be read as defending against something that does not happen.
+  - **Evidence — the routing table was rewritten, because 11 of 16 names were never explicitly routed.** The single
+    route was a `tasks.*` glob, which matches only the five `tasks.*` names; every `auth.*`, `billing.*`, `credits.*`
+    and `document_extraction.*` name reached the default queue through `task_default_queue` instead. Two mechanisms
+    delivering to one queue read as one mechanism right up until a name needs a different queue — which is exactly what
+    C7 does. This change's own spec requires it (`specs/celery-worker-deployment/spec.md`, "Routing is explicit for
+    every dispatched task": every dispatched name SHALL resolve to an explicitly configured destination rather than an
+    implicit default), and C7 is the last task in the change, so nothing else would have implemented it. `task_routes`
+    is now derived from `TASK_DECLARING_MODULES` with membership taken from `INGESTION_TASK_NAMES`; all **16** names
+    resolve with `router.lookup_route(...) is not None`, and behaviour for the eleven is unchanged — they reached the
+    default queue before and after.
+  - **Evidence — a library-precedence fact checked rather than assumed, and then designed around anyway.**
+    `celery.app.routes.MapRoute.__init__` partitions its mapping into exact keys (`self.map`) and globs
+    (`self.patterns`, via `fnmatch.translate`), and `__call__` consults `self.map` **first** — so exact task names beat
+    a glob regardless of dict insertion order. Verified by constructing both orderings and resolving. The glob was
+    deleted regardless: that is a fact about one library version, and a config whose correctness depends on it is a
+    config that breaks on upgrade with no test to say why. Each name also gets its **own** route dict, because
+    `Router.expand_destination` **pops** `queue` out of the dict it is handed.
+  - **Evidence — Proof 2 AMENDED: registration and consumed queues proven without a running worker.** As written the
+    Proof requires interrogating a running worker, i.e. a **consuming** worker, and the configured broker is a live
+    managed instance whose registered task set includes `billing.*`, `credits.*` and `auth.send_password_reset_email` —
+    such a worker could execute real queued work including sending mail to real recipients. C8 recorded that
+    non-execution deliberately and C7 inherits it. **Amended form, which exercises the same machinery:**
+    `app.loader.import_default_modules()` — precisely what a worker performs at boot — registers all **16** declared
+    names, `tasks.documents_ingest` among them; and the queues each deployed worker consumes are read from the `-Q`
+    text of the commands Docker resolves, which is the same string the worker would parse. No broker connection is
+    opened anywhere in this task. Both halves are asserted in tests rather than left as a one-time observation.
+  - **Evidence — Proof 3 satisfied, as set equality in both directions.** The queues tasks route to and the queues the
+    deployed workers consume are compared as sets: `{'default', 'ingestion'}` both sides. Equality rather than
+    containment because both failure directions are silent — a routed queue nobody consumes accepts messages forever
+    and nothing runs them, which is the state this whole change began from; a consumed queue nothing routes to gives a
+    worker that reports itself healthy and processes nothing. The two sides have **no mechanical link** (compose cannot
+    read the application's settings), so this is the drift guard for a hand-maintained agreement, and mutations M7 and
+    M8 break it from each side in turn.
+  - **Evidence — Proof 4 AMENDED: the starvation property is asserted structurally, which is strictly stronger than the
+    latency check.** As written the Proof needs a broker and two *consuming* workers — the same safety bar as Proof 2.
+    The property that check would observe is that the two worker pools' queue sets are **disjoint**: neither pool's
+    slots can ever be occupied by the other pool's messages, so there is no ordering, timing or load under which one
+    delays the other. `test_the_two_worker_pools_share_no_queue` asserts exactly that, plus that the ingestion queue and
+    the latency-sensitive queue are different queues and that only one pool consumes ingestion. A single latency
+    measurement would have been one observation of a property that now holds universally. The Proof's own note — "under
+    a shared-queue answer this Proof is expected to fail, which is exactly the cost the open question is about" — is
+    what the answer resolved: the dedicated-queue topology is the one under which it holds.
+  - **Evidence — C8's `len(documented) == 1` had to be generalised, and was strengthened rather than relaxed.** C7
+    introduces three deployed commands, so `uv run celery ` now appears three times in `README.md`. Weakening the
+    assertion to `>= 1` would have let an undocumented or drifted command through. Instead: the set of documented
+    commands must **equal** the set the `Makefile` defines (count still pinned — to the definition site's own count
+    rather than to the literal 1, and now catching a documented command that no longer exists), every celery command in
+    any of the three files must resolve to the same `-A` value, every deployed command must be exactly one of the
+    defined ones, exactly one defined command is the scheduler, and every worker command carries `-Q`. Three exact
+    strings across three files where there was one across two. `CELERY_WORKER_CMD` itself is left byte-identical so
+    `test_the_makefile_command_needs_exactly_one_substitution` keeps meaning what it says; the three deployed commands
+    are derived from it, and a bounded fixed-point expander with its own guard
+    (`test_the_derived_commands_expand_completely`) resolves them.
+  - **Evidence — eighteen mutations, and one of them found a real hole in a test rather than confirming it.**
+
+    | Mutation | Site | Newly red | What it proves |
+    |---|---|---|---|
+    | M1 delete the ingestion `Queue` declaration | `celery.py` | 1 | the queue set is closed, so the declaration is load-bearing |
+    | M2 drop the ingestion queue's dead-letter arguments | `celery.py` | 1 | a rejected ingestion message parks rather than vanishing |
+    | M3 restore the `tasks.*` glob | `celery.py` | 1 | explicit routing is enforced, and names 11 offenders |
+    | M4 route every name to `default` | `celery.py` | 3 | **found a hole** — see below |
+    | M5 route every name to `ingestion` | `celery.py` | 1 | the split cannot pass by moving everything |
+    | M6 `task_create_missing_queues=True` | `celery.py` | 1 | the positive control really can fail |
+    | M7 typo the compose `-Q` value | `docker-compose.yml` | 1 | drift caught from the deployment side |
+    | M8 rename the queue in settings | `settings.py` | 1 | drift caught from the configuration side |
+    | M9 add `default.dlq` to a worker's `-Q` | `docker-compose.yml` | 1 | the dead-letter queue stays a parking space |
+    | M10 give the ingestion worker `default` too | `docker-compose.yml` | 1 | the disjointness the anti-starvation claim rests on |
+    | M11 rewrite the beat command so the parse misses it | `docker-compose.yml` | 1 | the regex fails loudly instead of comparing empty sets |
+    | M12 remove one worker's `-Q` entirely | `docker-compose.yml` | 1 | "two worker pools" is counted, not assumed |
+    | M13 drop `-Q default` from the definition site | `Makefile` | 1 | the `-Q` requirement is enforced where it is defined |
+    | M14 make the scheduler command a worker | `Makefile` | 1 | the worker/scheduler split the `-A`-only check relies on |
+    | M15 make a Makefile variable self-referential | `Makefile` | 1 | the expander refuses to compare unexpanded strings |
+    | M16 drift the README by one concurrency figure | `README.md` | 1 | documentation equality is on the whole string |
+    | M17 drift a compose concurrency figure | `docker-compose.yml` | 1 | deployed commands are pinned to the definitions |
+    | M18 use the `src.` spelling in compose | `docker-compose.yml` | 1 | one `-A` identity across every file |
+
+    Every touched file restored byte-identically (`sha256` compared before and after each mutation), and the harness
+    restores from an in-memory copy rather than `git checkout`, because the working tree is deliberately dirty and HEAD
+    does not contain this change.
+  - **Evidence — M4 survived on the first run, and the test was wrong, not the mutation.**
+    `test_the_ingest_names_route_to_the_ingestion_queue` originally asserted
+    `routed_queue(name) == routed_queue(DOCUMENTS_INGEST)` — the ingest names compared to **one another**. Routing all
+    16 names back to the default queue left the three still equal, so the test passed while the ingestion queue had no
+    producers at all: the exact defect C7 exists to prevent, invisible to its own guard. Rewritten to name the
+    configured queue and to assert the two queue names differ. M4 now kills it with `assert 'default' == 'ingestion'`.
+    This is the value of mutating a guard rather than trusting a green run.
+  - **Evidence — a credential was leaked into a traceback by this task's own test design, and the fix is structural.**
+    An early version read `real_celery.app.conf.CELERY_DEAD_LETTER_QUEUE` — Celery's own config object, which does not
+    hold project settings. The `AttributeError` came from inside the library, and pytest rendered that frame's locals,
+    **which include the broker URL with its credentials**. Reading the value from the project's settings object instead
+    removes the whole class of exposure, because its secret fields are `SecretStr` and mask on repr. The reason is
+    recorded beside `_settings` in `test_queue_topology.py` so the next person does not reintroduce it.
+  - **Evidence — the Makefile gained two targets and the docs stopped lying.** `make celery` (default queue),
+    `make celery-ingestion`, `make celery-beat`, and `make celery-command` prints all three without running them.
+    C8's single-definition-site discipline is kept exactly: one `CELERY_APP`, one `CELERY_WORKER_CMD`, queue selection
+    and concurrency appended — never a second copy of the `-A` string. `src/app/examples/CELERY.md` documented two
+    queues and worker commands without `-Q`; it now names three queues, explains the split, and points at the `make`
+    targets rather than holding a fourth uncontrolled copy of the command.
+  - **Evidence — the concurrency figures are a decision, not a default.** `--concurrency=8` on the default queue: its
+    tasks are short and mostly waiting on other services. `--concurrency=2` on ingestion: each slot holds a
+    document-conversion and embedding pipeline, so raising it multiplies peak memory by whatever the largest document
+    costs. The comment at both sites says to scale that service's **replicas** rather than its concurrency. Exactly one
+    `celery-beat` replica may run — a second would publish every scheduled task twice, and the billing and credit tasks
+    it emits are not all idempotent.
+  - **Evidence — `RABBITMQ_URL` is overridden on all three services as a safety property, not a convenience.**
+    `.env.development` points at the managed broker carrying real billing, credit and password-reset work; a worker that
+    inherited it would consume and execute that work. Compose's `environment` beats `env_file`, which is what makes the
+    override effective, and that is recorded in the file because deleting the line looks harmless.
+  - **Evidence — two findings outside C7's scope, with locations, deliberately unfixed.**
+    - `src/app/features/documents/service.py:184` and `src/app/features/search/service.py:109` pass raw task-name
+      string literals as `event_type` (`"tasks.documents_ingest"`, `"tasks.search_ingest"`), and
+      `src/app/shared/outbox/relay.py:136` hands `event_type` straight to `CeleryTaskRegistry.typed_send(...)` — so
+      those literals **are** task names. A C9 Proof-4 residual; fixing it is an edit to two feature services, which
+      C7 does not own.
+
+      **Corrected 2026-08-23 — the hazard is real, the mechanism described was not.** This entry said a rename would
+      "silently misroute them, and C7 makes that worse, because a misrouted name now also lands on the wrong queue."
+      Measured: both literals currently **match** registered names, so nothing is mis-dispatched today; and a rename
+      would not misroute at all. `typed_send` calls `ensure_declared_module_imported` then `validate` **before**
+      `send_task`, so an unregistered name raises `UnregisteredTaskError` and, as its own docstring puts it, "a
+      refused dispatch never reaches a broker" — it cannot land on the wrong queue because it lands on no queue.
+      `UnregisteredTaskError` and `TaskPayloadValidationError` both subclass `CeleryError` through
+      `TaskDispatchError`, which the relay's `except (CeleryError, PostgresError)` at `:139` therefore catches: the
+      row is marked **failed**, the `event_type` is attached with `add_note`, `outbox_publish_failed` is logged, and
+      the loop continues to the next row. C9 rooting its exceptions under `CeleryError` is what makes that work, and
+      it is load-bearing — a registry error outside that hierarchy would escape `_publish` into the caller at `:73`
+      and `:125`.
+
+      So the true consequence of a rename is **lost events, loudly and per-row**, pending a fix: the affected rows
+      sit in a failed state, nothing is misdelivered, and no other event type is affected. Worth fixing (one import
+      and one substitution each) because a durable store holding literals that must match a constant elsewhere will
+      also strand rows written *before* any rename. Not worth fixing as an urgent misrouting bug, because it is not
+      one.
+    - `LEGAL_BATCH_EXTRACTION` (`document_extraction.legal_batch`, `src/tasks/document_extraction_tasks.py`) is also
+      minutes of model work per message via langextract, and stays on the **default** queue. The answer that closed
+      Open Question 1 named the three ingest names; a third queue needs a third consumer or it silently accumulates, so
+      moving it is a topology decision to be **asked for**, not inferred from the fact that it looks similar. The
+      reason is recorded beside `INGESTION_TASK_NAMES` so the omission reads as deliberate.
 
 - [x] **C8 — Fix the documented worker start command so it matches the deployed one exactly.**
   The documented command names an application module that does not exist. Fix it to name the real task application,
@@ -1106,6 +1254,9 @@ here is import-level, type-level, or a unit test over a construction the test ow
   defined **once**, in the `Makefile` (`CELERY_APP` + `CELERY_WORKER_CMD`), and
   `tests/unit/celery/test_documented_worker_command.py` — 8 tests, 1 skip — asserts every other copy equals it.
   Depends on C9, which settled the task-application module; that dependency is now discharged.
+  **Superseded in one detail by C7:** the armed Proof 3 below is now satisfied, not skipped, and the module is 14 tests
+  with no skip. The counts here record the state at C8's completion and are left as written; C7's evidence records the
+  change and why the assertion was generalised rather than relaxed.
 
   - **Evidence — the defect was worse than "a wrong name": the documented command could not start a worker at all.**
     `Makefile:52` and `README.md:279` both named a Celery configuration module that **has never existed** in this
@@ -1151,7 +1302,9 @@ here is import-level, type-level, or a unit test over a construction the test ow
     Open Question 1. `test_the_compose_worker_service_runs_the_documented_command` skips while the compose file does not
     mention the worker and begins asserting the moment it does — so **C7 cannot land a worker whose command has drifted
     from the documentation.** A skipped test can hide a broken assertion, so mutation M6 added a worker service with a
-    drifted command: the suite went to `1 failed, 8 passed` with **no skip**, proving the arming fires.
+    drifted command: the suite went to `1 failed, 8 passed` with **no skip**, proving the arming fires. **C7 has since
+    landed the services and the arming held** — the base command appears verbatim in `docker-compose.yml` as the shared
+    prefix of both worker commands, and the test now asserts instead of skipping.
   - **Evidence — the regression guard initially failed on the text documenting the fix.** The first version of the
     `Makefile` comment and the README note *quoted* the phantom module name, so the test greping those files for it went
     red on the explanation. The constant is now assembled from two fragments and the prose describes the name without

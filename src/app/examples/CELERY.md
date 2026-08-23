@@ -44,31 +44,60 @@ CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT=60
 ## Queue Topology
 
 The current worker config creates:
-- main queue: `default`
+- work queues: `default` and `ingestion`
 - main exchange: `tasks`
 - dead-letter exchange: `tasks.dlx`
-- dead-letter queue: `default.dlq`
+- dead-letter queue: `default.dlq`, shared by both work queues
 
 Normal flow:
 1. FastAPI or another producer publishes to the main exchange.
-2. Celery consumes from the main queue.
+2. A worker consumes from the work queue its `-Q` names.
 3. Transient failures are retried with backoff and jitter.
 4. Messages that are rejected or dead-lettered land in the DLQ.
+
+Two work queues rather than one, and they are consumed by two separate worker
+processes. Document ingestion is minutes of model work per message; the default
+queue carries sub-second billing and transactional-email tasks. A single shared
+pool makes those wait behind ingestion whenever every slot is busy, and
+`worker_prefetch_multiplier=1` does not prevent it — prefetch stops one worker
+hoarding messages off the broker and says nothing about head-of-line blocking
+once every slot is already occupied. Disjoint queues with disjoint consumers is
+what removes the coupling.
+
+Which names go where is not decided in `task_routes` by hand. The names that run
+for minutes are listed in `INGESTION_TASK_NAMES` in
+`src/app/connections/celery_task_names.py`, and the routing table is derived from
+that list, so the two cannot disagree.
 
 Important:
 - The app is configured for at-least-once delivery, not exactly-once delivery.
 - Because of that, idempotency is required for side-effecting tasks.
+- Every dispatchable name is routed explicitly. There is no glob and no default
+  fallthrough, so routing a name that is not in the table is a publish-time
+  failure rather than a message on a queue nobody expected.
 
 ## Start The Worker
 
+Both workers and the scheduler are defined once, in the `Makefile`, and the
+README and compose services are pinned to those definitions by a unit test.
+Start them from there rather than by hand:
+
 ```bash
-uv run celery -A app.connections.celery:celery_app worker --loglevel=info
+make celery            # the default queue, higher concurrency
+make celery-ingestion  # the ingestion queue, low concurrency
+make celery-beat       # the scheduler; publishes only, consumes nothing
+make celery-command    # print all three without running them
 ```
 
-Useful worker variants:
+`-Q` is mandatory and every one of those worker commands carries it. A worker
+started without it consumes **every** queue the application declares, dead-letter
+queue included, and so re-runs precisely the messages that were parked there for
+a human to look at — while reporting itself perfectly healthy.
+
+Inspection commands talk to whichever broker the environment configures, so check
+that first if the environment may point at a shared or managed one:
 
 ```bash
-uv run celery -A app.connections.celery:celery_app worker --loglevel=info --concurrency=4
 uv run celery -A app.connections.celery:celery_app inspect active
 uv run celery -A app.connections.celery:celery_app inspect registered
 uv run celery -A app.connections.celery:celery_app inspect stats

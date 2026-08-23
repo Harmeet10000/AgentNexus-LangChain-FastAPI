@@ -48,6 +48,51 @@ SEARCH_INGEST: Final = "tasks.search_ingest"
 PAGEINDEX_INGEST: Final = "tasks.pageindex_ingest"
 LEGAL_BATCH_EXTRACTION: Final = "document_extraction.legal_batch"
 
+#: The names whose work is measured in minutes, and which therefore consume the
+#: dedicated ingestion queue rather than the default one. Membership lives here,
+#: beside the names, so the routing table and the worker's queue can be derived
+#: from one list instead of agreeing by hand.
+#:
+#: ``LEGAL_BATCH_EXTRACTION`` is deliberately absent even though it sits in this
+#: section and also runs minutes of model work per message. Which names share a
+#: queue is an operational decision with a cost — a third queue needs a third
+#: consumer or it silently accumulates — and the answer that was given covered
+#: the three ingest names. Moving it is a decision to be asked for, not inferred
+#: from the fact that it looks similar.
+#:
+#: TODO(queues): give ``LEGAL_BATCH_EXTRACTION`` its own queue and consumer.
+#: Deferred 2026-08-23 as a scope decision, not a technical blocker. It is
+#: minutes-long model work (``src/tasks/document_extraction_tasks.py:31``) still
+#: routed to ``default``, where one message head-of-line blocks every short task
+#: behind it — ``worker_prefetch_multiplier=1`` stops a worker *hoarding*
+#: messages but cannot stop the message already in its hands from occupying the
+#: slot. Do NOT simply add the name to the frozenset above: that shares the
+#: ingestion queue and reintroduces the same blocking between the two workloads.
+#: The full change is six files —
+#:   1. ``app/config/settings.py`` — new ``CELERY_EXTRACTION_QUEUE``, mirroring
+#:      ``CELERY_INGESTION_QUEUE`` (same default-plus-env shape).
+#:   2. ``app/connections/celery.py`` — a fourth ``Queue(...)`` with
+#:      ``x-queue-type: quorum`` and the existing DLX, and ``_task_routes()``
+#:      must stop being a two-way ternary (``ingestion_route if name in
+#:      INGESTION_TASK_NAMES else default_route``). Three buckets need an
+#:      explicit name→route mapping; extending the ternary is where this
+#:      silently goes wrong.
+#:   3. ``Makefile`` and 4. ``docker-compose.yml`` — a third ``worker -Q`` entry.
+#:      A *declared* queue with no consumer accumulates forever and raises no
+#:      error, and this is invisible locally because a worker started with no
+#:      ``-Q`` consumes every declared queue including ``default.dlq``.
+#:   5. ``tests/unit/celery/test_documented_worker_command.py`` — it asserts the
+#:      documented command covers every declared queue, so it fails first and is
+#:      the tripwire for forgetting 3/4.
+#:   6. ``src/app/examples/CELERY.md`` — the queue table and the prose at :68
+#:      that describes this frozenset as *the* minutes-long set.
+#: Acceptance is behavioural, not structural: with a ``legal_batch`` message in
+#: flight, a task dispatched to ``default`` must still start. Asserting the
+#: fourth queue exists only proves it was declared.
+INGESTION_TASK_NAMES: Final[frozenset[str]] = frozenset(
+    {DOCUMENTS_INGEST, SEARCH_INGEST, PAGEINDEX_INGEST}
+)
+
 # --- transactional email -----------------------------------------------------
 
 SEND_VERIFICATION_EMAIL: Final = "auth.send_verification_email"

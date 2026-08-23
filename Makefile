@@ -1,4 +1,4 @@
-.PHONY: help lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery celery-command
+.PHONY: help lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery celery-ingestion celery-beat celery-command
 
 help:
 	@echo "Available commands:"
@@ -12,8 +12,10 @@ help:
 	@echo "  make migrate-down   - Rollback last migration"
 	@echo "  make migrate-current- Show current migration"
 	@echo "  make migrate-history- Show migration history"
-	@echo "  make celery         - Start Celery worker"
-	@echo "  make celery-command - Print the worker command without running it"
+	@echo "  make celery         - Start the default-queue Celery worker"
+	@echo "  make celery-ingestion - Start the ingestion-queue Celery worker"
+	@echo "  make celery-beat    - Start the Celery scheduler"
+	@echo "  make celery-command - Print the worker and scheduler commands without running them"
 
 # Code Quality
 lint:
@@ -70,10 +72,39 @@ migrate-history:
 CELERY_APP := app.connections.celery:celery_app
 CELERY_WORKER_CMD := uv run celery -A $(CELERY_APP) worker --loglevel=info
 
-celery:
-	$(CELERY_WORKER_CMD)
+# The three commands the deployment actually runs, all derived from the one above so
+# that the application reference exists in exactly one place. Two workers, not one:
+# ingestion is minutes of model work per message and the default queue carries
+# sub-second billing and transactional-email tasks, so one shared worker pool means
+# those wait behind ingestion whenever every slot is busy. `worker_prefetch_multiplier=1`
+# does not prevent that — prefetch stops a worker hoarding messages off the broker and
+# says nothing about head-of-line blocking once every slot is occupied. Disjoint
+# queues with disjoint consumers is what removes the coupling.
+#
+# `-Q` is mandatory, not tidiness. A worker started without it consumes every queue
+# the application declares, dead-letter queue included, so it re-runs the messages
+# that were parked for a human to look at.
+#
+# The concurrency figures: the default queue's tasks are short and mostly waiting on
+# other services, so it can afford slots; ingestion holds a document-conversion and
+# embedding pipeline per slot, so two is deliberate rather than conservative — raising
+# it multiplies peak memory by whatever the largest document costs.
+CELERY_DEFAULT_WORKER_CMD := $(CELERY_WORKER_CMD) -Q default --concurrency=8
+CELERY_INGESTION_WORKER_CMD := $(CELERY_WORKER_CMD) -Q ingestion --concurrency=2
+CELERY_BEAT_CMD := uv run celery -A $(CELERY_APP) beat --loglevel=info
 
-# Prints the command rather than running it, so a file that must document the command can
-# assert against this instead of holding a second copy of it.
+celery:
+	$(CELERY_DEFAULT_WORKER_CMD)
+
+celery-ingestion:
+	$(CELERY_INGESTION_WORKER_CMD)
+
+celery-beat:
+	$(CELERY_BEAT_CMD)
+
+# Prints the commands rather than running them, so a file that must document them can
+# assert against these instead of holding a second copy.
 celery-command:
-	@echo '$(CELERY_WORKER_CMD)'
+	@echo '$(CELERY_DEFAULT_WORKER_CMD)'
+	@echo '$(CELERY_INGESTION_WORKER_CMD)'
+	@echo '$(CELERY_BEAT_CMD)'

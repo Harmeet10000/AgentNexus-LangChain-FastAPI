@@ -83,6 +83,116 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  # --- Background processing -------------------------------------------------
+  #
+  # Three services, because a queue with no consumer is the failure this change
+  # exists to remove: before these existed, every dispatched ingestion task
+  # enqueued forever and the only symptom was a document that never finished.
+  #
+  # Two workers rather than one. Ingestion is minutes of model work per message;
+  # the default queue carries sub-second billing and transactional-email tasks.
+  # One shared pool means those wait behind ingestion whenever every slot is
+  # busy, and `worker_prefetch_multiplier=1` does not prevent it — prefetch stops
+  # a worker hoarding messages off the broker and does nothing about head-of-line
+  # blocking once every slot is occupied. Disjoint queues with disjoint consumers
+  # is what removes the coupling.
+  #
+  # Every command below is the fully expanded form of a `Makefile` variable
+  # (`make celery-command` prints all three). YAML cannot reference a Makefile
+  # variable, so these are copies — and a unit test asserts they are equal to the
+  # definitions, because the last time this command existed in two places both
+  # copies were wrong.
+  #
+  # `-Q` is mandatory, not tidiness: a worker started without it consumes every
+  # queue the application declares, dead-letter queue included, and so re-runs the
+  # messages that were parked there for someone to look at.
+  #
+  # `RABBITMQ_URL` is overridden here exactly as it is for the API service, and
+  # for these services it is a safety property rather than a convenience:
+  # `.env.development` points at a managed broker carrying real billing, credit
+  # and password-reset work. A worker that inherited that value would consume and
+  # execute it. `environment` wins over `env_file` in compose, which is what makes
+  # the override effective.
+  celery-worker:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+      target: dev
+    container_name: celery-worker
+    command: uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q default --concurrency=8
+    volumes:
+      - ./src:/app/src:ro
+      - ./data:/app/data
+    environment:
+      ENVIRONMENT: development
+      POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your_secure_password}@timescale:5432/${POSTGRES_DB:-langchain_db}
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672//
+    env_file:
+      - .env.development
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    depends_on:
+      timescale:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Low concurrency is deliberate, not conservative: each slot holds a document
+  # conversion and embedding pipeline, so raising it multiplies peak memory by
+  # whatever the largest document costs. Scale this service's replicas rather than
+  # its concurrency.
+  celery-worker-ingestion:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+      target: dev
+    container_name: celery-worker-ingestion
+    command: uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q ingestion --concurrency=2
+    volumes:
+      - ./src:/app/src:ro
+      - ./data:/app/data
+    environment:
+      ENVIRONMENT: development
+      POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your_secure_password}@timescale:5432/${POSTGRES_DB:-langchain_db}
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672//
+    env_file:
+      - .env.development
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    depends_on:
+      timescale:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # The scheduler only publishes; it consumes nothing, so it needs no queue
+  # selection. Exactly one replica of this service may run: a second one would
+  # publish every scheduled task twice, and the billing and credit tasks it emits
+  # are not all idempotent.
+  celery-beat:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+      target: dev
+    container_name: celery-beat
+    command: uv run celery -A app.connections.celery:celery_app beat --loglevel=info
+    volumes:
+      - ./src:/app/src:ro
+    environment:
+      ENVIRONMENT: development
+      POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your_secure_password}@timescale:5432/${POSTGRES_DB:-langchain_db}
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672//
+    env_file:
+      - .env.development
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
 networks:
   langchain-network:
     driver: bridge

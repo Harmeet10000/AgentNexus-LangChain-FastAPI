@@ -36,6 +36,8 @@ from .celery_task_names import (
     BILLING_RECONCILIATION,
     CREDITS_EXPIRE,
     CREDITS_RECONCILE,
+    INGESTION_TASK_NAMES,
+    TASK_DECLARING_MODULES,
 )
 
 settings = get_settings()
@@ -50,6 +52,47 @@ TASK_DLX_EXCHANGE = Exchange(
     type="direct",
     durable=True,
 )
+
+
+def _task_routes() -> dict[str, dict[str, str]]:
+    """Give every dispatchable name an explicit destination — no glob, no fallthrough.
+
+    What this replaced was a single ``tasks.*`` glob, and the glob was close to
+    decorative: only 5 of the 16 declared names begin with ``tasks.``, so the
+    other 11 matched no route at all and arrived on the default queue through
+    ``task_default_queue`` instead. Two mechanisms delivering to one queue read as
+    one mechanism until the day a name needs a different queue, and then the
+    question "which of these decides?" has to be answered from Celery's internals
+    rather than from this file.
+
+    Now the table is built from the single task-name definition site, so a name
+    added there cannot be dispatched to an unrouted destination, and the answer to
+    "where does this task go" is visible without knowing anything about matching
+    order. Measured while making the change, and recorded because the tempting
+    smaller edit — three exact entries left sitting beside the glob that also
+    matches them — depends on it: ``MapRoute`` splits the mapping in its
+    constructor, exact keys into one dict and globs into another, and consults the
+    exact dict first, so exact names do win regardless of the order they are
+    written in. That is a fact about a library version, not about this
+    configuration, so the configuration no longer relies on it.
+
+    Each name gets its own copy of the route mapping. ``Router.expand_destination``
+    **pops** ``queue`` out of the dict it is handed; today ``MapRoute`` hands it a
+    fresh copy so shared dicts would survive, but one shared dict emptied by the
+    first lookup is a failure that would present as "routing works once".
+    """
+    default_route = {
+        "queue": settings.CELERY_DEFAULT_QUEUE,
+        "routing_key": settings.CELERY_DEFAULT_ROUTING_KEY,
+    }
+    ingestion_route = {
+        "queue": settings.CELERY_INGESTION_QUEUE,
+        "routing_key": settings.CELERY_INGESTION_ROUTING_KEY,
+    }
+    return {
+        name: dict(ingestion_route if name in INGESTION_TASK_NAMES else default_route)
+        for name in TASK_DECLARING_MODULES
+    }
 
 
 class ResilientTask(Task):
@@ -265,11 +308,36 @@ def create_celery_app() -> Celery:
         task_soft_time_limit=settings.CELERY_TASK_SOFT_TIME_LIMIT,
         task_time_limit=settings.CELERY_TASK_TIME_LIMIT,
         result_expires=settings.CELERY_TASK_RESULT_EXPIRES,
+        # Three queues, and a worker must name the one it wants with `-Q`. Without
+        # `-Q` Celery consumes **every** queue declared here — measured, not
+        # assumed — which means a bare worker also drains the dead-letter queue and
+        # re-runs the very messages that were parked for a human to look at. The
+        # deployed services and the documented commands all carry `-Q` for that
+        # reason; it is not there to save a connection.
+        #
+        # The ingestion queue dead-letters to the same exchange and routing key as
+        # the default one, so ingestion failures park in the existing dead-letter
+        # queue rather than a fourth queue nobody watches. A separate ingestion
+        # dead-letter queue was the alternative and was rejected: a dead-letter
+        # queue with no consumer and no dashboard is indistinguishable from a
+        # message that vanished, and the task name inside each parked message is
+        # already enough to tell ingestion failures from billing ones.
         task_queues=(
             Queue(
                 name=settings.CELERY_DEFAULT_QUEUE,
                 exchange=TASK_EXCHANGE,
                 routing_key=settings.CELERY_DEFAULT_ROUTING_KEY,
+                durable=True,
+                queue_arguments={
+                    "x-queue-type": "quorum",
+                    "x-dead-letter-exchange": settings.CELERY_DEAD_LETTER_EXCHANGE,
+                    "x-dead-letter-routing-key": settings.CELERY_DEAD_LETTER_ROUTING_KEY,
+                },
+            ),
+            Queue(
+                name=settings.CELERY_INGESTION_QUEUE,
+                exchange=TASK_EXCHANGE,
+                routing_key=settings.CELERY_INGESTION_ROUTING_KEY,
                 durable=True,
                 queue_arguments={
                     "x-queue-type": "quorum",
@@ -285,12 +353,7 @@ def create_celery_app() -> Celery:
                 queue_arguments={"x-queue-type": "quorum"},
             ),
         ),
-        task_routes={
-            "tasks.*": {
-                "queue": settings.CELERY_DEFAULT_QUEUE,
-                "routing_key": settings.CELERY_DEFAULT_ROUTING_KEY,
-            }
-        },
+        task_routes=_task_routes(),
         beat_schedule={
             "billing-invoice-daily": {
                 "task": BILLING_INVOICE_GENERATION,

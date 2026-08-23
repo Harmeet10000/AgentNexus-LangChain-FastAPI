@@ -765,14 +765,11 @@ across the change's spec files must return zero, run as the final check before v
 
 ## Open Questions
 
-1. **Does ingestion get its own queue, or share the default one?** Recommendation is a dedicated queue with its own
-   concurrency, because minutes-long model work will otherwise starve sub-second billing and transactional-email
-   tasks. But the configuration forbids creating queues implicitly, so the queue set is fixed and this is a
-   deliberate operational decision with a cost, and **no locked decision covers it**. It changes the task breakdown,
-   so it must be **asked, not guessed**. It is **still unanswered**, and the task list was written anyway rather than
-   held: the tasks whose content depends on the topology are written with the dependency named in the task and their
-   Proof expressed against whichever topology is chosen, and no task assumes a topology. The capability states the
-   behaviour (long work must not starve latency-sensitive work) and leaves the topology to this answer.
+Numbering is stable, not sequential: question 1 has closed and is recorded below, and the remaining two keep the
+numbers they were written with. Five places — C7's task body, two of its Proofs, and two of its evidence bullets —
+refer to "Open Question 1" and mean the queue-topology one. Renumbering would silently re-point every one of those
+references at a different question.
+
 2. **Does the bare graph builder still accept a validated-model state type on the installed framework version?**
    Inherited and deliberately left open. It does not block this change, which only shrinks channels, but it blocks
    change 3's conversion decision. Resolve from the graph builder's own documentation, not from another pass over
@@ -784,6 +781,34 @@ across the change's spec files must return zero, run as the final check before v
    recorded because the answer changes the fold's shape.
 
 ### Closed since the first draft
+
+- **Question 1 — does ingestion get its own queue, or share the default one?** **CLOSED, answered by the user on
+  2026-08-23: a dedicated ingestion queue with its own concurrency, and its own worker service.** This was the one
+  question here that no amount of reading could settle — the configuration forbids creating queues implicitly, so the
+  queue set is fixed, and an extra queue is an operational commitment with a cost: it needs a consumer, or it
+  accumulates silently. It changed C7's content, so C7 was written with the dependency named and held blocked rather
+  than defaulting a topology.
+
+  The rationale, which is now recorded in code at every site it constrains: minutes-long model work will otherwise
+  starve sub-second billing and transactional-email tasks, and `worker_prefetch_multiplier=1` does **not** prevent
+  that — prefetch stops one worker hoarding messages off the broker and does nothing about head-of-line blocking once
+  every worker slot is already occupied. Two queues with two disjoint consumer sets is what removes the coupling.
+
+  Four consequences, all landed in C7:
+  1. `task_queues` gained a third quorum queue on the existing task exchange with its own routing key, dead-lettering
+     to the **existing** dead-letter exchange rather than a fourth queue nobody watches.
+  2. `task_routes` is derived from the declared task list, with the three ingest names taken from a single
+     `INGESTION_TASK_NAMES` set. The `tasks.*` glob is gone, so all 16 names are now routed explicitly — which the
+     capability required and nothing else in this change would have delivered.
+  3. The deployment is **three** services: a default-queue worker at concurrency 8, an ingestion worker at
+     concurrency 2, and the scheduler. `-Q` on both workers is mandatory, because a worker without it consumes every
+     declared queue including the dead-letter queue.
+  4. The capability's "long work must not starve latency-sensitive work" requirement is now provable without a broker:
+     disjoint queues with disjoint consumers is a structural guarantee, not a measurement.
+
+  `LEGAL_BATCH_EXTRACTION` is also minutes-long model work and was **not** moved: the answer named the three ingest
+  names, and a further queue is a further decision to be asked for. It is listed here rather than deleted so that a
+  reader who remembers this as open can see how it closed.
 
 - **F8 — is the lexical extension's index access method literally named `bm25`?** **CLOSED, answered `bm25`.** It was
   the one question here that could not be settled read-only; it needed the user's authorisation for a single
