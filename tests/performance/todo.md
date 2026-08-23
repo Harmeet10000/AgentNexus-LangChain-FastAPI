@@ -333,6 +333,15 @@ need to standardise w\hat happens in except block
  223. need to make standardise alembic file naming scheme
  224. fix this def _celery_meters() -> tuple[Any, Any, Any]:
     global _otel_celery_meters  # noqa: PLW0603 — module-level lazy init
+225. always write why Use Block-Level HTML Comments: Since Claude Code strips HTML comments from the context it reads, you can include detailed notes for human maintainers without increasing token usage (3:02-3:12).
+The "Incident-Why-Outcome" Framework: The host recommends structuring your comments to record three specific pieces of information for every rule (3:14-3:43):
+The Failure/Incident: Describe the specific event or bug that necessitated the rule (e.g., citing a specific incident number or date).
+Why the Rule Helps: Explain how the specific instruction prevents that failure from reoccurring.
+The Outcome: Provide evidence of the rule's success (e.g., "no orphan rows in 11 months").
+Additionally, the host personally recommends adding a commit reference to these comments to help future developers trace the history of the decision (3:45-3:49). The host warns that vague comments like "added to fix an issue" are ineffective and perform no better than having no comments at all 
+226. remove redis client protocol and use from cache/ and remove any datamodels
+227. agentState should be typedDict and not a baseModel
+228. fix the failing websocket tests
 ```
 summarise these chapters in great detail and take video's transcript as reference for summarising
 
