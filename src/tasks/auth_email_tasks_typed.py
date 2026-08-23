@@ -1,7 +1,13 @@
-"""Example typed Celery task — send_verification_email.
+"""Reference implementation of the typed registry pattern for the two email tasks.
 
-Demonstrates the typed registry pattern.  Existing tasks are migrated
-incrementally (one per PR) using this as the reference implementation.
+**This module declares the same two task names as the live email task module and
+must not be added to the task application's ``include`` list.** Both declarations
+bind the same names on the same application, so whichever module is imported last
+wins, and listing both would let import order decide whether production sends
+email through the live implementation or through this demonstration of one. The
+payload models it introduced now live with the live declarations, which is where
+the registry can see them; what is left here is the pattern, not a second
+implementation, and it is a deletion candidate rather than something to wire up.
 """
 
 from __future__ import annotations
@@ -9,9 +15,12 @@ from __future__ import annotations
 from functools import partial
 
 from app.config import get_settings
-from app.connections import celery_app
-from app.connections.celery import ResilientTask
+from app.connections.celery import ResilientTask, celery_app
 from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery_task_names import (
+    SEND_PASSWORD_RESET_EMAIL,
+    SEND_VERIFICATION_EMAIL,
+)
 from app.shared.services.mailer import config_from_settings, send_template
 from app.utils import logger
 
@@ -43,7 +52,7 @@ def _send_password_reset_email(email: str, token: str) -> dict[str, str]:
 
 
 class VerificationEmailPayload(CeleryTaskPayload):
-    """Typed payload for auth.send_verification_email."""
+    """Typed payload for the email-verification delivery task."""
 
     user_id: str
     email: str
@@ -52,7 +61,7 @@ class VerificationEmailPayload(CeleryTaskPayload):
 
 
 class PasswordResetEmailPayload(CeleryTaskPayload):
-    """Typed payload for auth.send_password_reset_email."""
+    """Typed payload for the password-reset delivery task."""
 
     user_id: str
     email: str
@@ -61,12 +70,12 @@ class PasswordResetEmailPayload(CeleryTaskPayload):
 
 
 # Register typed payloads
-CeleryTaskRegistry.register("auth.send_verification_email", VerificationEmailPayload)
-CeleryTaskRegistry.register("auth.send_password_reset_email", PasswordResetEmailPayload)
+CeleryTaskRegistry.register(SEND_VERIFICATION_EMAIL, VerificationEmailPayload)
+CeleryTaskRegistry.register(SEND_PASSWORD_RESET_EMAIL, PasswordResetEmailPayload)
 
 
 @celery_app.task(
-    name="auth.send_verification_email",
+    name=SEND_VERIFICATION_EMAIL,
     bind=True,
     base=ResilientTask,
 )
@@ -110,7 +119,7 @@ def send_verification_email(
 
 
 @celery_app.task(
-    name="auth.send_password_reset_email",
+    name=SEND_PASSWORD_RESET_EMAIL,
     bind=True,
     base=ResilientTask,
 )

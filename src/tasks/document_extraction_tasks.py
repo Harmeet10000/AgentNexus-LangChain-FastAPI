@@ -3,14 +3,32 @@ from typing import Any
 
 import langextract
 
-from app.connections import celery_app
+from app.connections.celery import celery_app
+from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery_task_names import LEGAL_BATCH_EXTRACTION
 from app.shared.rag.langextract.langextract_batch_processor import (
     LangExtractBatchContext,
     run_legal_extraction_batch,
 )
 
 
-@celery_app.task(bind=True, name="document_extraction.legal_batch")
+class LegalBatchExtractionPayload(CeleryTaskPayload):
+    """Typed payload for the batched legal-document extraction task."""
+
+    urls: list[str]
+    prompt_description: str
+    examples: list[dict[str, Any]]
+
+
+CeleryTaskRegistry.register(LEGAL_BATCH_EXTRACTION, LegalBatchExtractionPayload)
+
+
+# `bind=True` was set here while the body takes no `self`, so Celery would have
+# passed the task instance as `urls` and the batch would have iterated a Task.
+# Nothing dispatches this name yet, which is why the mistake survived; registering
+# the module is what makes it reachable, so it is corrected rather than registered
+# broken.
+@celery_app.task(name=LEGAL_BATCH_EXTRACTION)
 def legal_document_extraction_batch_task(
     urls: list[str],
     prompt_description: str,

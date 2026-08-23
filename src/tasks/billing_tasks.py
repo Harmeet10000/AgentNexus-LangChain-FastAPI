@@ -9,7 +9,17 @@ from returns.result import Failure
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.connections import ResilientTask, celery_app, init_db
+from app.connections.celery import ResilientTask, celery_app
+from app.connections.celery_registry import CeleryTaskRegistry, NoKwargsPayload
+from app.connections.celery_task_names import (
+    BILLING_DUNNING,
+    BILLING_INVOICE_GENERATION,
+    BILLING_PAUSE_RESUME,
+    BILLING_RECEIPT_GENERATION,
+    BILLING_RECONCILIATION,
+    BILLING_RENEWAL,
+)
+from app.connections.postgres import init_db
 from app.features.audit.model import AuditAction, AuditLog
 from app.features.audit.repository import AuditLogRepository
 from app.features.dunning.service import DunningService
@@ -338,31 +348,44 @@ async def _reconciliation_job(session) -> dict[str, int]:
     return {"reconciled": reconciled, "missing": missing}
 
 
-@celery_app.task(name="billing.renewal", base=ResilientTask)
+# These are dispatched by the scheduler with no keyword arguments. Registering a
+# field-less payload states that as the contract, so a scheduler entry that starts
+# passing arguments is refused at dispatch rather than reaching a body that cannot
+# accept them — and so no dispatchable name is left with nothing registered
+# against it, which is the state the dispatch helper now refuses outright.
+CeleryTaskRegistry.register(BILLING_RENEWAL, NoKwargsPayload)
+CeleryTaskRegistry.register(BILLING_DUNNING, NoKwargsPayload)
+CeleryTaskRegistry.register(BILLING_INVOICE_GENERATION, NoKwargsPayload)
+CeleryTaskRegistry.register(BILLING_RECEIPT_GENERATION, NoKwargsPayload)
+CeleryTaskRegistry.register(BILLING_PAUSE_RESUME, NoKwargsPayload)
+CeleryTaskRegistry.register(BILLING_RECONCILIATION, NoKwargsPayload)
+
+
+@celery_app.task(name=BILLING_RENEWAL, base=ResilientTask)
 def billing_renewal() -> dict[str, int]:
     return asyncio.run(_run(_renewal_job))
 
 
-@celery_app.task(name="billing.dunning", base=ResilientTask)
+@celery_app.task(name=BILLING_DUNNING, base=ResilientTask)
 def billing_dunning() -> dict[str, int]:
     return asyncio.run(_run(_dunning_job))
 
 
-@celery_app.task(name="billing.invoice_generation", base=ResilientTask)
+@celery_app.task(name=BILLING_INVOICE_GENERATION, base=ResilientTask)
 def billing_invoice_generation() -> dict[str, int]:
     return asyncio.run(_run(_invoice_backfill))
 
 
-@celery_app.task(name="billing.receipt_generation", base=ResilientTask)
+@celery_app.task(name=BILLING_RECEIPT_GENERATION, base=ResilientTask)
 def billing_receipt_generation() -> dict[str, int]:
     return asyncio.run(_run(_receipt_backfill))
 
 
-@celery_app.task(name="billing.pause_resume", base=ResilientTask)
+@celery_app.task(name=BILLING_PAUSE_RESUME, base=ResilientTask)
 def billing_pause_resume() -> dict[str, int]:
     return asyncio.run(_run(_pause_resume_job))
 
 
-@celery_app.task(name="billing.reconciliation", base=ResilientTask)
+@celery_app.task(name=BILLING_RECONCILIATION, base=ResilientTask)
 def billing_reconciliation() -> dict[str, int]:
     return asyncio.run(_run(_reconciliation_job))
