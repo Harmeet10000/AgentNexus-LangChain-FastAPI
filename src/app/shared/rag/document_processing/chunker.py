@@ -6,27 +6,101 @@ Features:
 - Document structure preservation (headings, sections, tables)
 - Semantic boundary respect (paragraphs, code blocks)
 - Contextualized output (chunks include heading hierarchy)
+
+The token counter is loaded once per process, and it is not the embedding model's
+--------------------------------------------------------------------------------
+Two facts about the counter, both deliberate, recorded here because neither is
+visible from a call site.
+
+**It is loaded once per process.** ``get_tokenizer`` used to run the transformers
+auto-class loader on every call, so every entry point that did not hoist the
+result by hand paid a fresh load: a disk read once the local model cache is warm,
+a network download before that. The load now happens inside ``_load_tokenizer``,
+memoised for the life of the process; ``get_tokenizer`` is a normalising wrapper
+over it and keeps the old signature, so no call site changes.
+
+**It is not the counter the embedding provider uses.** Chunks are budgeted at
+``IngestionConfig.max_tokens`` (512) counted by this WordPiece counter, then
+embedded by the Gemini provider in ``embedder.py``. The divergence is *stated*
+here rather than closed — the second of the two options Decision 3 of the
+``ingestion-pipeline-unification`` design leaves open — because the installed
+provider SDK exposes token counting only as a remote call, so matching the two
+would put a network round trip inside every chunk-boundary decision. The margin,
+computed from this repository's own two constants:
+
+- the bound that actually applies downstream is ``embedder.py``'s, and it is a
+  **character** bound, not a token bound: ``_MAX_INPUT_TOKENS * 4`` = 8192
+  characters (``embedder.py:146,210``), applied by silent truncation;
+- at the ~4 characters-per-token density that same guard assumes, a 512-token
+  chunk is ~2048 characters, so the headroom is ~**4x**. The character-bounded
+  paths are wider still: ``_simple_fallback_chunk`` cuts at ``config.chunk_size``
+  (1000), ~8x;
+- the margin degrades in exactly one direction. WordPiece maps an unsegmentable
+  run of up to 100 characters onto a *single* unknown token, so this counter
+  undercounts without bound on base64 blobs, hex digests and long URL path
+  segments. A chunk of 512 such tokens can exceed 8192 characters and lose its
+  tail to that truncation with no diagnostic.
+
+Enforcing the bound belongs on the embedding side, where the constant already
+lives, and to task B1, which collapses the four embedding paths into one — a
+chunker cannot see which provider will embed what it emits.
 """
 
+from functools import lru_cache
 from typing import Any
 
 from docling.chunking import HybridChunker
 from docling.exceptions import BaseError as DoclingError
 from docling_core.types.doc import DoclingDocument
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from app.utils.logger import logger as loguru_logger
 
 from .models import Chunk, IngestionConfig
 
+DEFAULT_TOKENIZER_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 
-def get_tokenizer(model_id: str = "sentence-transformers/all-MiniLM-L6-v2") -> AutoTokenizer:
-    """Initialize tokenizer for token-aware chunking."""
-    loguru_logger.info("Initializing tokenizer: {}", model_id)
+# Bounded, not unbounded, because the cache key is caller-supplied: an unbounded
+# cache lets a caller sweeping model ids pin an unbounded number of
+# multi-megabyte counters for the life of the process. Exactly one id is passed
+# anywhere in ``src/`` today, so any bound above one is spare capacity for the
+# real workload; four leaves room for a comparison run, and an eviction costs a
+# reload that hits the local model cache rather than the network.
+_TOKENIZER_CACHE_SIZE = 4
+
+
+@lru_cache(maxsize=_TOKENIZER_CACHE_SIZE)
+def _load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:
+    """Load the counter for ``model_id``, once per process.
+
+    Kept separate from ``get_tokenizer`` so the memoised key is always a
+    *resolved* model id. A default argument is not part of an ``lru_cache`` key:
+    a call that omits the argument and a call that passes the identical default
+    value hash to different entries and would each load their own copy.
+    Normalising in the wrapper is what makes those two calls indistinguishable.
+
+    The log line lives here rather than in the wrapper so that it reports a real
+    load. Emitted per call it would be false for every call after the first,
+    which is what it was before this became a cache.
+    """
+    loguru_logger.info("Loading tokenizer (first use in this process): {}", model_id)
     return AutoTokenizer.from_pretrained(model_id)
 
 
-def create_hybrid_chunker(tokenizer: AutoTokenizer, config: IngestionConfig) -> HybridChunker:
+def get_tokenizer(model_id: str = DEFAULT_TOKENIZER_MODEL_ID) -> PreTrainedTokenizerBase:
+    """Return the process-wide token counter for ``model_id``.
+
+    Signature-compatible with the uncached version it replaces, so callers that
+    acquire a counter per document — ``ingest_v2.py:184`` — and callers that
+    hoist one by hand — ``ingest_v2.py:334`` — both get the cache without
+    changing, and the hand-rolled hoist becomes redundant rather than wrong.
+    """
+    return _load_tokenizer(model_id)
+
+
+def create_hybrid_chunker(
+    tokenizer: PreTrainedTokenizerBase, config: IngestionConfig
+) -> HybridChunker:
     """Create HybridChunker instance."""
     loguru_logger.info("HybridChunker initialized (max_tokens={})", config.max_tokens)
     return HybridChunker(
@@ -41,7 +115,7 @@ async def chunk_document(
     title: str,
     source: str,
     config: IngestionConfig,
-    tokenizer: AutoTokenizer,
+    tokenizer: PreTrainedTokenizerBase,
     *,
     hybrid_chunker: HybridChunker | None = None,
     metadata: dict[str, Any] | None = None,
@@ -95,7 +169,7 @@ async def chunk_document(
 def _hybrid_chunk_documents(
     hybrid_chunker: HybridChunker,
     docling_doc: DoclingDocument,
-    tokenizer: AutoTokenizer,
+    tokenizer: PreTrainedTokenizerBase,
     base_metadata: dict[str, Any],
 ) -> list[Chunk]:
     chunk_iter = hybrid_chunker.chunk(dl_doc=docling_doc)
@@ -125,7 +199,7 @@ def _simple_fallback_chunk(
     content: str,
     base_metadata: dict[str, Any],
     config: IngestionConfig,
-    tokenizer: AutoTokenizer,
+    tokenizer: PreTrainedTokenizerBase,
 ) -> list[Chunk]:
     """
     Simple fallback chunking when HybridChunker can't be used.
@@ -264,7 +338,7 @@ async def chunk_document_simple(
 
 async def initialize_chunking(
     config: IngestionConfig,
-) -> tuple[AutoTokenizer, HybridChunker]:
+) -> tuple[PreTrainedTokenizerBase, HybridChunker]:
     """
     Initialize chunking dependencies.
 

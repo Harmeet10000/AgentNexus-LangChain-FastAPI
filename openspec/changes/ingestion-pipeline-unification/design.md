@@ -214,6 +214,58 @@ enforced against the wrong counter. That mismatch is a genuine correctness gap i
 is the finding the item would have surfaced by accident. It is recorded in the chunking capability as an explicit
 requirement: either the counter matches the embedding model, or the divergence and its safety margin are stated.
 
+**Resolution (B4, measured 2026-08-23).** Both halves of "what survives" are now settled, and one sentence of this
+decision's own premise is withdrawn.
+
+*The cache.* The counter is loaded once per process. The load moved out of the public accessor into a memoised
+loader keyed on a **resolved** model id, with the accessor normalising the default before delegating — a default
+argument is not part of a memoisation key, so decorating the accessor directly would have given a call that omits
+the argument and a call that passes the identical default value two entries and two loads. The cache is bounded
+rather than unbounded because its key is caller-supplied. The log line moved inside the loader, so a line in the log
+now means a load actually happened; emitted per call, as before, it was false for every call after the first.
+
+*The counter mismatch: the divergence is **stated**, not closed* — the second of the two options above. Matching is
+not available on the terms this project can meet: the embedding provider is Gemini (`gemini-embedding-001` as passed
+by `embedder.py`, against `gemini-embedding-2-preview` in configuration — a second divergence that is **B1's**, not
+this task's), and the installed provider SDK exposes token counting only as a remote call. Matching the counters
+would therefore put a network round trip inside every chunk-boundary decision, inside a synchronous chunker. It
+would also change chunk boundaries, which is a corpus change, not a seam change, and so outside Band B.
+
+The margin, derived entirely from this repository's own two constants rather than from any external claim:
+
+| Quantity | Value | Source |
+|---|---|---|
+| Chunk budget, enforced | 512 tokens, counted by a WordPiece counter | `IngestionConfig.max_tokens` |
+| Bound that actually applies downstream | 8192 **characters**, applied by silent truncation | `embedder.py:146,210` — `_MAX_INPUT_TOKENS * 4` |
+| Budget expressed in the downstream unit | ~2048 characters, at the ~4 characters-per-token density that same guard assumes | derived |
+| **Headroom** | **~4x** | 8192 / 2048 |
+
+Two things that table makes visible and that were not on the record before. First, the downstream bound is a
+**character** bound, not a token bound — the provider's token limit is only ever approximated here by a
+four-characters-per-token rule of thumb, so the two guards are not merely counted by different tokenizers, they are
+counted in different units. Second, the margin degrades in exactly one direction: WordPiece maps an unsegmentable
+run of up to 100 characters onto a *single* unknown token, so the counter undercounts without bound on base64
+blobs, hex digests and long URL path segments, and a chunk of 512 such tokens can exceed 8192 characters and lose
+its tail to that truncation with no diagnostic. The 4x is a statistical margin, not a proof. Enforcement belongs on
+the embedding side, where the constant already lives, and therefore to **B1**; a chunker cannot see which provider
+will embed what it emits.
+
+*Correction to this decision's premise.* "Both are declared direct dependencies" is **false**, and the error makes
+the conclusion stronger rather than weaker. Only the sentence-transformer package is declared (`pyproject.toml:51`);
+`transformers` is declared nowhere and arrives transitively by four independent paths — through the
+sentence-transformer package, through `docling` → `docling-ibm-models`, through `docling-core[chunking]`, and
+through `headroom-ai[all]`. So the tokenizer half cannot be dropped by deleting a declaration, because there is no
+declaration to delete: `transformers` would still be installed by the parser this change is built on (Decision 7).
+Combined with Decision 19 settling that the sentence-transformer package stays for the cross-encoder re-ranker
+— verified directly: `retrieval_kb/reranker.py:8` imports `CrossEncoder` at module scope — the item is
+unachievable in **both** halves, for two different reasons, neither of which is the one originally given.
+
+That leaves a hazard worth its own task, which no task in `tasks.md` currently owns: `src/` imports `transformers`
+directly at `rag/document_processing/chunker.py:55` while `pyproject.toml` does not declare it. The import is
+protected by nothing but the resolution graph of four other packages. It should either be declared explicitly or
+not imported directly; it is recorded here rather than fixed under B4 because `pyproject.toml` and the lock file are
+contended by C1.
+
 ### Decision 4 — The framework's cache-backed embedding wrapper is rejected; the shared cache satisfies the intent
 
 The reference documentation names the exact defect (every batch call hits the API) and prescribes the framework's
