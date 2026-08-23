@@ -325,7 +325,7 @@ class InvoiceService:
         void_result = await self.invoices.update_status(invoice, status=InvoiceStatus.VOID.value)
         if isinstance(void_result, Failure):
             _repo_failure(void_result.failure(), "void_invoice")
-        voided = void_result.unwrap()
+        voided: Invoice = void_result.unwrap()
 
         await self.audit.create(
             AuditLog(

@@ -126,6 +126,16 @@ the request path.
 - **THEN** the write SHALL be rejected before it reaches the memory library
 - **AND** the rejection SHALL be reported as a caller error, not as a memory-store failure
 
+#### Scenario: Store final report
+
+- **WHEN** `store_final_report()` is called with an approved report and its conversation identity
+- **THEN** `cognee.remember(report_json, dataset_name=dataset_name)` is called
+
+#### Scenario: Store relationships
+
+- **WHEN** relationship data is produced for a document
+- **THEN** it SHALL NOT reach `cognee.remember()` — the summary is written to the document knowledge graph instead
+
 #### Scenario: Relationship summaries are no longer stored in agent memory
 
 - **WHEN** relationship data is produced for a document
@@ -144,6 +154,16 @@ when it is not conversation-scoped.
 - **WHEN** content is successfully stored in agent memory on the request path
 - **THEN** no consolidation call SHALL follow that write
 
+#### Scenario: Process report after store
+
+- **WHEN** a report is stored on the request path
+- **THEN** `cognee.improve(dataset=dataset_name)` is NOT called by that write
+
+#### Scenario: Process relationships after store
+
+- **WHEN** relationship data is produced for a document
+- **THEN** no enrichment pass runs for it in agent memory, because nothing was stored there
+
 #### Scenario: Consolidation is invoked only on a schedule
 
 - **WHEN** the scheduled consolidation job runs
@@ -160,6 +180,27 @@ query type SHALL be auto-routed by Cognee (default `auto_route=True`) — no exp
 - **WHEN** agent memory is queried during a run
 - **THEN** `cognee.recall()` SHALL be called with the caller's memory partition and conversation identity
 - **AND** results from another tenant's partition SHALL NOT be returned
+
+#### Scenario: Search episodic memory
+
+- **WHEN** the agent-memory service is called with a query and partition identity
+- **THEN** `cognee.recall(query_text=query, datasets=[partition])` is called
+
+#### Scenario: Search returns results as dicts
+
+- **WHEN** `cognee.recall()` returns a list of results
+- **THEN** each result is converted to a dict and returned as a list
+
+#### Scenario: Search handles failures gracefully
+
+- **WHEN** `cognee.recall()` raises an exception
+- **THEN** an empty list SHALL be returned and the error SHALL be logged
+- **AND** the caller's run SHALL continue
+
+#### Scenario: Search returns results as serialisable mappings
+
+- **WHEN** `cognee.recall()` returns a list of results
+- **THEN** each result is converted to a fully serialisable mapping and returned as a list
 
 #### Scenario: Recall results are fully serialisable and retain their origin
 

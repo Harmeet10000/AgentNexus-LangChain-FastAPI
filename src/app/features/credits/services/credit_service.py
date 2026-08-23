@@ -83,7 +83,7 @@ class CreditService:
         if dto.credit_type == CreditType.ADMIN_GRANT.value and "admin_user_id" not in dto.metadata_:
             raise CreditMetadataMissingException
 
-        now = datetime.now(tz=UTC)
+        now: datetime = datetime.now(tz=UTC)
         credit = UserCredit(
             id=uuid4(),
             user_id=user_id,

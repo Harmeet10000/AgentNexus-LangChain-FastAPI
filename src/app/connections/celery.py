@@ -263,6 +263,7 @@ def create_celery_app() -> Celery:
         broker=settings.RABBITMQ_URL,
         backend="rpc://",
         include=[
+            "tasks.agent_memory_tasks",
             "tasks.auth_email_tasks",
             "tasks.billing_tasks",
             "tasks.credit_tasks",
@@ -384,6 +385,15 @@ def create_celery_app() -> Celery:
                     minute=settings.CREDIT_RECONCILIATION_CRON_MINUTE,
                     day_of_week=settings.CREDIT_RECONCILIATION_CRON_DAY_OF_WEEK,
                 ),
+            },
+            # Agent-memory consolidation (band F). Named distinctly from the
+            # billing reconciliation entries — they share only the word
+            # "reconciliation", which this key avoids entirely. Inert until a
+            # worker and beat service exist (NG14).
+            "agent-memory-consolidation-nightly": {
+                "task": "tasks.agent_memory_consolidation",
+                "schedule": crontab(hour=3, minute=30),
+                "args": ([],),
             },
         },
     )

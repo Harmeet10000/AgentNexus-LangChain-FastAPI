@@ -27,7 +27,7 @@ Lifespan wiring (in src/app/lifecycle/lifespan.py):
         checkpointer=app.state.saul_checkpointer,
         pro_llm=pro_llm,
         flash_llm=flash_llm,
-        cognee_client=app.state.cognee_config,
+        memory_service=app.state.agent_memory_service,
         tool_registry=tool_registry,
     )
 """

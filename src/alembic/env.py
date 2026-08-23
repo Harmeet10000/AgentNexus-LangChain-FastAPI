@@ -77,6 +77,24 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# The agent-memory library creates its own tables inside a dedicated schema. They are
+# the library's business, not this migration chain's: autogenerate must never propose
+# creating or dropping them, because their lifecycle belongs to whoever owns the schema.
+# The filter is wired into BOTH configure calls below — protecting only the online
+# branch would leave `--autogenerate` against a connection free to emit memory-schema
+# DDL into a revision file nobody reviews that closely.
+MEMORY_SCHEMA_NAME = "cognee_memory"
+
+
+def exclude_non_app_schema(obj: object, name: str, type_: str) -> bool:  # noqa: ARG001 — alembic callback signature
+    """``include_object`` predicate: keep app tables, drop everything foreign.
+
+    An object living in the memory schema (or any other non-default schema) is
+    excluded; an ordinary table in ``Base.metadata`` passes through.
+    """
+    schema = getattr(obj, "schema", None)
+    return not (schema is not None and schema != "public")
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
@@ -96,6 +114,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         compare_server_default=True,
+        include_object=exclude_non_app_schema,
     )
 
     with context.begin_transaction():
@@ -114,6 +133,7 @@ def do_run_migrations(connection: Connection) -> None:
         compare_type=True,
         compare_server_default=True,
         render_as_batch=True,  # For compatibility with certain dialects
+        include_object=exclude_non_app_schema,
     )
 
     with context.begin_transaction():

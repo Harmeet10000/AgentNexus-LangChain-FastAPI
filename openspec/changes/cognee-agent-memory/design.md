@@ -734,6 +734,26 @@ step 7. Steps 10–11 are the only irreversible ones, and they come last for exa
 All of the following are **precondition checks with both branches already decided**, not unresolved design. None
 would change the specs. Each names what closes it.
 
+> **Answered 2026-08-23 (band F execution, group 1 probes).** Measured values, host/port/database printed only:
+>
+> - **APOC/GDS present?** The configured Neo4j instance (`*.databases.neo4j.io:7687`) does **not DNS-resolve** from
+>   the execution environment — `ServiceUnavailable: Failed to DNS resolve address`. Unreachable is stronger than
+>   absent, so the pre-decided branch applies a fortiori: this change ships **write-only**, group 9's task is still
+>   registered (registration-only), and the consolidation *refuses to run when its graph preconditions are absent*
+>   scenario is the observable behaviour. The probe must be re-run against a reachable instance before the
+>   consolidation requirement can ever be read as satisfied.
+> - **May the role create a schema / is vector available / do memory tables exist?** `psql`-equivalent probe
+>   (psycopg, read-only): `create_schema=True`, `vector_available=1`, `memory_tables_present=0` — the expected
+>   `t|1|0`. Decision 4's primary branch (database-backed store) is available; the file fallback stays unused.
+> - **TLS on the discrete-fields connection?** Connected via `POSTGRES_HOST/PORT/USERNAME/DB_NAME` and inspected
+>   `pg_stat_ssl` for the backend: `ssl=True, TLSv1.3`. Task 4.5 needs **no** `database_connect_args`.
+> - **Do discrete settings agree with the accessor?** `get_database_url()` vs `POSTGRES_HOST/PORT/DB_NAME`:
+>   `True True True` — agreeing today only because `.env.development` sets both by hand; task 4.5 still asserts
+>   equality at startup so hand-synced env files cannot silently drift.
+> - **Does `openspec archive` accept a 0/15-task change?** The CLI has no `--dry-run` flag (`error: unknown option`),
+>   so the answer cannot be obtained without performing an archive. Task 10.4 proceeds by hand if the CLI refuses;
+>   decided there, not here.
+
 - **Are APOC and GDS present on the target graph database?** Cannot be answered from the repository — there is no
   graph service in the compose stack. *Closes with:* `SHOW PROCEDURES` against the real instance, in step 1. *If
   absent:* consolidation is inoperable, this change ships write-only, and that is recorded as a blocking risk rather
