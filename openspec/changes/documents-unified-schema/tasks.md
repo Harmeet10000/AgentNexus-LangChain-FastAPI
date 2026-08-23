@@ -813,10 +813,17 @@ through `addopts` at `pyproject.toml:758-763`, not at the `:753` this step used 
 must be added to is at `:769-773`. The `[tool.pytest.ini_options]` table starts at `:756`. Same class of staleness
 as the one rule 2 records; the instruction itself was always correct.)
 
-- [ ] Run the static gate in the default suite. Add the real-database gate marked `requires_db`, deselected by
+- [x] Run the static gate in the default suite. Add the real-database gate marked `requires_db`, deselected by
       default so the default suite stays offline. **Autogenerate comparison is deliberately not added**: it cannot
       distinguish a drifted model from migrations that never ran, and stays unusable until change 0 rebuilds the
       database by upgrade rather than stamp.
+
+      **Done 2026-08-23.** Marker registered; `addopts` edited in place to `-m "not integration and not requires_db"`
+      (the CLI form would have replaced it). `tests/unit/test_schema_identifier_gate.py` gained
+      `test_the_gate_guards_this_repository` — `audit(src, src/alembic/versions)` resolved from `__file__` returns zero
+      findings over the real tree. `tests/unit/test_schema_orm_matches_database.py` is the `requires_db` half:
+      information_schema.tables/columns + pg_indexes against every declared table, column and named index;
+      read-only; prints host/port/database only. Default suite at commit: 318 passed, 39 deselected.
 
 **Proof**
 
@@ -872,10 +879,28 @@ principle that "the ORM owns the application-side defaults and change 0 must not
 actually diverge. Decide which side owns it, make both models agree, and add `updated_at` to the list if the answer
 is the ORM.
 
-- [ ] Add the **three statute attributes** to the model. `updated_at` is already there.
-- [ ] Add all four to the upsert conflict-resolution set — including `updated_at`, which is the live defect.
-- [ ] Ensure the row builder carries `updated_at`; it currently carries only what the caller's chunk dict holds.
-- [ ] Reconcile `updated_at`'s default ownership across `UnifiedDocument` and `UnifiedChunk`.
+- [x] Add the **three statute attributes** to the model. `updated_at` is already there.
+- [x] Add all four to the upsert conflict-resolution set — including `updated_at`, which is the live defect.
+- [x] Ensure the row builder carries `updated_at`; it currently carries only what the caller's chunk dict holds.
+- [x] Reconcile `updated_at`'s default ownership across `UnifiedDocument` and `UnifiedChunk`.
+
+      **Amended 2026-08-23 (execution).** The premise "no `ALTER` accompanies any of them; they ship in change 0's
+      `CREATE TABLE`" is **false** — measured: neither `a71f0d7d9c12` nor any of the other 15 revisions creates
+      `instrument_name`, `section_ref` or `instrument_year`. Adding them ORM-only would have been invisible
+      divergence (the gate checks index and constraint names, not columns). Resolution per the step's own fallback:
+      columns added to the ORM **and** revision `f2a9c47b81de` added on top of `b3e7c41d92af`, which also executes
+      `ALTER TABLE chunks ALTER COLUMN updated_at DROP DEFAULT`.
+
+      **Ownership settled: ORM-owned.** Both models now carry Python-side default + `onupdate`; the chunk's
+      `server_default=func.now()` was removed from the model and its DB default dropped by the revision — this is why
+      `updated_at` may join the Proof's `appdefaults` set, which now passes with it included.
+
+      **Refactor:** statement construction extracted from `upsert_chunks` into module-level
+      `build_chunk_upsert_statement(rows)` so the test compiles against the PostgreSQL dialect without a session;
+      conflict set carries all four new names. `build_chunk_rows` stamps `updated_at` (caller may pin).
+      `tests/unit/documents/test_chunk_upsert_columns.py` written with both required halves. Gates at commit:
+      321 passed / 0 failed, ruff src clean, ty clean, single head `f2a9c47b81de`, identifier gate over real tree
+      still zero findings.
 
 **Proof**
 
