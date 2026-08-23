@@ -29,7 +29,8 @@ class TestTaxSplits:
 
     def test_inter_state_uses_igst(self) -> None:
         cgst, sgst, igst = split_tax_for_gst(1800, seller_state_code="27", buyer_state_code="08")
-        assert cgst == 0 and sgst == 0
+        assert cgst == 0
+        assert sgst == 0
         assert igst == 1800
 
     def test_unknown_buyer_state_treated_as_intra(self) -> None:

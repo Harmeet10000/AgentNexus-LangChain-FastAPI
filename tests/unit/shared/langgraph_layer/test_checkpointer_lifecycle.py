@@ -15,7 +15,7 @@ missing branch. The version this replaces was annotated as returning a saver and
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import psycopg
 import pytest
@@ -34,6 +34,7 @@ from app.utils.logger import logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from typing import Any
 
 pytestmark = pytest.mark.unit
 
@@ -339,7 +340,8 @@ async def test_a_close_that_fails_is_reported_as_a_failure_not_as_nothing_to_clo
 
     async def _failing_close(timeout: float = 5.0) -> None:
         del timeout
-        raise psycopg.OperationalError("server closed the connection unexpectedly")
+        msg = "server closed the connection unexpectedly"
+        raise psycopg.OperationalError(msg)
 
     spy.pool.close = _failing_close
 
@@ -360,7 +362,8 @@ async def test_teardown_never_logs_a_credential_when_a_close_fails(
 
     async def _failing_close(timeout: float = 5.0) -> None:
         del timeout
-        raise psycopg.OperationalError(f'closing: dsn="{_SOURCE_URL}"')
+        msg = f'closing: dsn="{_SOURCE_URL}"'
+        raise psycopg.OperationalError(msg)
 
     spy.pool.close = _failing_close
 

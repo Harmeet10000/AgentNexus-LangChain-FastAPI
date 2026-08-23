@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,6 +22,9 @@ from app.shared.langchain_layer.agents.memory.agent_memory_service import (
     PartitionIdentityInvalidError,
     memory_partition,
 )
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 class _Recorder:
@@ -106,7 +109,7 @@ async def test_a_typed_write_reaches_the_library_conversation_scoped() -> None:
     await service.store_typed_entry(
         entry_text="t", entry_kind="qa", conversation_id="conv-2", tenant_id="acme"
     )
-    ((_, call_kwargs), *_ ) = remember.calls
+    ((_, call_kwargs), *_) = remember.calls
     assert call_kwargs["session_id"] == "conv-2"
     assert call_kwargs["self_improvement"] is False
 
@@ -138,7 +141,7 @@ async def test_recall_passes_the_caller_partition_only() -> None:
     recall = _Recorder()
     service = _service(recall=recall)
     await service.recall(query_text="q", tenant_id="acme")
-    ((_, call_kwargs), *_ ) = recall.calls
+    ((_, call_kwargs), *_) = recall.calls
     assert call_kwargs["datasets"] == ["legal::acme::reports"]
 
 
@@ -176,7 +179,8 @@ async def test_consolidation_refuses_when_graph_procedures_are_absent() -> None:
 
 async def test_a_store_failure_surfaces_as_the_chosen_idiom_not_an_empty_list() -> None:
     async def failing(*_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError("store down")
+        msg = "store down"
+        raise RuntimeError(msg)
 
     service = _service(remember=_Recorder())
     service._remember = failing

@@ -135,7 +135,7 @@ async def test_correct_width_passes_through_unchanged() -> None:
     assert len(result) == 1
     assert len(result[0]) == width
     # Not a zero vector: the old failure shape was degenerate in exactly this way.
-    assert any(value != 0.0 for value in result[0])
+    assert any(abs(value) > 1e-12 for value in result[0])
 
 
 # --- Blank input is a chunking defect, so it fails loudly rather than aligning ---

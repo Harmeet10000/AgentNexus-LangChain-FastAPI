@@ -431,6 +431,21 @@ section-order = [
     "N802",    # Allow invalid function names in tests
     "N806",    # Allow invalid variable names in test fixtures
     "T100",    # Allow debugger calls in test code
+    "PLR6301", # no-self-use: test classes use self for fixtures/mocks
+    "PLC0415", # import-outside-top-level: lazy imports are a common test pattern
+    "S105",    # hardcoded-password-string: fake credentials
+    "S106",    # hardcoded-password-func-arg: fake credentials
+    "INP001",  # implicit-namespace-package: test dirs need not be packages
+    "ASYNC109", # timeout parameter on async fixtures is pytest convention
+    "A002",    # builtin-argument-shadowing: fixture names like `id` are fine
+    "B903",    # class-as-data-structure: test data containers
+    "E402",    # module-import-not-at-top-of-file: sys.path/env setup first
+    "PLC2701", # import-private-name: testing internals is the point
+    "PLC1901", # compare-to-empty-string: explicitness reads better in tests
+    "RUF002",  # ambiguous-unicode-docstring: legal text fixtures
+    "ARG002",  # unused-method-argument: interface-conforming stubs
+    "BLE001",  # blind-except: asserting on error paths
+    "PLR0914", # too-many-locals: long scenario tests
 ]
 "src/alembic/versions/*.py" = [
     "ANN",
@@ -573,7 +588,7 @@ line-ending = "auto"
 # Inferred from requires-python, but be explicit
 [tool.ty.environment]
 python-version = "3.12"
-root = ["src"]          # Matches your src layout
+root = ["src", "tests"]  # Matches your src layout; tests are type-checked too
 
 
 
@@ -698,6 +713,26 @@ ineffective-final = "warn"           # Catch final(type(...)) misuse
 
 [tool.ty.terminal]
 output-format = "full"
+
+# Tests deliberately use duck-typed fakes, monkeypatched attributes, and
+# pytest.raises(TypeError) probes. Relax type-shape rules there while keeping
+# runtime-critical rules (unresolved-import/reference, invalid-return-type,
+# await correctness) at full strength.
+[[tool.ty.overrides]]
+include = ["tests/**"]
+
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"          # FakeRedis/_FakeApp/dict passed where protocols are declared
+unresolved-attribute = "ignore"           # Mock attributes (assert_awaited_once, fake call logs)
+missing-argument = "ignore"               # Pydantic Annotated[Field(default=...)] defaults misread as required
+not-subscriptable = "ignore"              # object-typed results from fakes
+unsupported-operator = "ignore"           # datetime | None comparisons in hypothesis properties
+too-many-positional-arguments = "ignore"  # Deliberate TypeError probes on public API
+unknown-argument = "ignore"               # Deliberate-typo state keys asserting ValidationError
+invalid-method-override = "ignore"        # Test doubles subclassing external bases
+missing-override-decorator = "ignore"     # Same test doubles
+invalid-assignment = "ignore"             # Monkeypatching module/class attributes
+invalid-type-form = "ignore"              # cast("any", ...) escape hatches for redis fakes
 
 [tool.ty.src]
 # Remove `build` from the excluded directories.

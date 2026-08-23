@@ -44,7 +44,11 @@ class Settings(BaseSettings):
     @model_validator(mode="before")
     @classmethod
     def enable_otel_in_production(cls, values: dict[str, object]) -> dict[str, object]:
-        if isinstance(values, dict) and "OTEL_ENABLED" not in values and values.get("ENVIRONMENT") == "production":
+        if (
+            isinstance(values, dict)
+            and "OTEL_ENABLED" not in values
+            and values.get("ENVIRONMENT") == "production"
+        ):
             values["OTEL_ENABLED"] = True
         return values
 

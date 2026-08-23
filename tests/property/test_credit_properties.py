@@ -8,7 +8,6 @@ from typing import NamedTuple
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-
 # ---------------------------------------------------------------------------
 # In-memory domain model (no ORM, no DB)
 # ---------------------------------------------------------------------------
@@ -46,6 +45,7 @@ def _apply_consumption(credit: Credit, amount: int) -> Credit:
 # Strategies
 # ---------------------------------------------------------------------------
 
+
 @st.composite
 def credit_strategy(draw) -> Credit:
     credit_amount = draw(st.integers(min_value=1, max_value=100_000))
@@ -53,9 +53,7 @@ def credit_strategy(draw) -> Credit:
     now = datetime.now(tz=UTC)
     has_expiry = draw(st.booleans())
     valid_until = (
-        now + timedelta(days=draw(st.integers(min_value=1, max_value=365)))
-        if has_expiry
-        else None
+        now + timedelta(days=draw(st.integers(min_value=1, max_value=365))) if has_expiry else None
     )
     created_at = now - timedelta(days=draw(st.integers(min_value=0, max_value=30)))
     # New credits are always active
@@ -75,9 +73,7 @@ def credit_with_consumptions_strategy(draw) -> tuple[Credit, list[Consumption]]:
     now = datetime.now(tz=UTC)
     has_expiry = draw(st.booleans())
     valid_until = (
-        now + timedelta(days=draw(st.integers(min_value=1, max_value=365)))
-        if has_expiry
-        else None
+        now + timedelta(days=draw(st.integers(min_value=1, max_value=365))) if has_expiry else None
     )
     created_at = now - timedelta(days=draw(st.integers(min_value=0, max_value=30)))
 
@@ -122,11 +118,9 @@ def credit_with_consumptions_strategy(draw) -> tuple[Credit, list[Consumption]]:
 
     consumptions = []
     base_time = created_at
-    for i, amt in enumerate(consumption_amounts):
+    for amt in consumption_amounts:
         base_time += timedelta(hours=1)
-        consumptions.append(
-            Consumption(credit_id=1, consumed_amount=amt, created_at=base_time)
-        )
+        consumptions.append(Consumption(credit_id=1, consumed_amount=amt, created_at=base_time))
 
     return credit, consumptions
 
@@ -134,6 +128,7 @@ def credit_with_consumptions_strategy(draw) -> tuple[Credit, list[Consumption]]:
 # ---------------------------------------------------------------------------
 # 11.1 — Ledger Integrity
 # ---------------------------------------------------------------------------
+
 
 class TestLedgerIntegrity:
     """credit_amount == remaining_balance + sum(consumed_amount)."""
@@ -149,6 +144,7 @@ class TestLedgerIntegrity:
 # ---------------------------------------------------------------------------
 # 11.4 — Status Transition
 # ---------------------------------------------------------------------------
+
 
 class TestStatusTransition:
     """CONSUMED only when remaining_balance==0, EXPIRED only when now > valid_until and was ACTIVE."""
@@ -186,6 +182,7 @@ class TestStatusTransition:
 # 11.5 — Consumption Order
 # ---------------------------------------------------------------------------
 
+
 class TestConsumptionOrder:
     """Verify soonest valid_until consumed first, then oldest created_at, no-expiry last."""
 
@@ -203,12 +200,8 @@ class TestConsumptionOrder:
         sorted_credits = sorted(credits, key=consumption_sort_key)
 
         # Credits with valid_until should come before those without
-        expiry_indices = [
-            i for i, c in enumerate(sorted_credits) if c.valid_until is not None
-        ]
-        no_expiry_indices = [
-            i for i, c in enumerate(sorted_credits) if c.valid_until is None
-        ]
+        expiry_indices = [i for i, c in enumerate(sorted_credits) if c.valid_until is not None]
+        no_expiry_indices = [i for i, c in enumerate(sorted_credits) if c.valid_until is None]
 
         if expiry_indices and no_expiry_indices:
             assert max(expiry_indices) < min(no_expiry_indices)
@@ -227,6 +220,7 @@ class TestConsumptionOrder:
 # 11.8 — Balance Calculation
 # ---------------------------------------------------------------------------
 
+
 class TestBalanceCalculation:
     """Balance equals sum of remaining_balance for ACTIVE, non-expired credits."""
 
@@ -240,9 +234,7 @@ class TestBalanceCalculation:
         def is_eligible(c: Credit) -> bool:
             if c.status != "active":
                 return False
-            if c.valid_until is not None and c.valid_until <= now:
-                return False
-            return True
+            return not (c.valid_until is not None and c.valid_until <= now)
 
         expected_balance = sum(c.remaining_balance for c in credits if is_eligible(c))
 

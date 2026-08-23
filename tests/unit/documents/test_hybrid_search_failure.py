@@ -23,7 +23,7 @@ from app.features.documents.repository import DocumentRepository
 # `_SEARCH_BRANCHES` is private and imported deliberately: the pairing between these labels and
 # `asyncio.gather`'s positional results is the thing under test, so asserting on it through a
 # public re-export would only test the re-export.
-from app.features.documents.service import _SEARCH_BRANCHES, DocumentQueryService  # noqa: PLC2701
+from app.features.documents.service import _SEARCH_BRANCHES, DocumentQueryService
 from app.shared.result import InfrastructureAppError, ValidationAppError
 from app.utils.exceptions import APIException
 

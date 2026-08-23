@@ -26,7 +26,7 @@ and is worth keeping now that it has.
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -43,6 +43,9 @@ from app.shared.langgraph_layer.ingestion_kb.state import (
     IngestionState,
 )
 from app.shared.langgraph_layer.kb_retry import TransientExternalError, retry_immediate
+
+if TYPE_CHECKING:
+    from typing import Any
 
 _DOC_ID = "doc-42"
 _CLAUSE_ID = "clause-7"
@@ -78,7 +81,7 @@ def _raising_boundary(error: Exception) -> Any:
     boundary end to end; this one isolates the handler above it.
     """
 
-    async def _boundary(_operation: Any, *, label: str) -> Any:  # noqa: ARG001 — signature parity
+    async def _boundary(_operation: Any, *, label: str) -> Any:
         raise error
 
     return _boundary
@@ -200,7 +203,7 @@ async def test_the_success_path_is_unchanged_by_the_identity_fix() -> None:
         "tokens": 9,
     }
 
-    async def _boundary(_operation: Any, *, label: str) -> Any:  # noqa: ARG001 — signature parity
+    async def _boundary(_operation: Any, *, label: str) -> Any:
         return returned
 
     with patch.object(nodes_module, "retry_immediate", _boundary):

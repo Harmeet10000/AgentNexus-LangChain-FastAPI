@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -15,6 +15,9 @@ from app.shared.langchain_layer.agents.memory.prefetch import (
     eligible_for_supplement,
     make_prefetch_memory_node,
 )
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 def _service(recall: Any = None) -> AgentMemoryService:
@@ -48,7 +51,8 @@ async def test_ineligible_tasks_fetch_no_supplement_and_proceed_on_memory_alone(
     task: str,
 ) -> None:
     async def search(**_kwargs: Any) -> str:
-        raise AssertionError("supplement must not be fetched for ineligible tasks")
+        msg = "supplement must not be fetched for ineligible tasks"
+        raise AssertionError(msg)
 
     node = make_prefetch_memory_node(_service(), graphiti_search=search)
     result = await node({"task": task, "user_id": "acme", "user_query": "q", "working_memory": {}})
@@ -66,7 +70,8 @@ def test_the_gate_predicate_agrees_with_the_node() -> None:
 async def test_a_recall_failure_fails_open() -> None:
     class _BrokenService:
         async def recall(self, **_kw: Any) -> list[dict[str, Any]]:
-            raise RuntimeError("recall down")
+            msg = "recall down"
+            raise RuntimeError(msg)
 
     node = make_prefetch_memory_node(_BrokenService())  # type: ignore[arg-type]
     result = await node(
@@ -81,7 +86,9 @@ async def test_a_recall_failure_fails_open() -> None:
 
 async def test_deeper_retrieval_permits_risk_analysis_role() -> None:
     service = _service()
-    results = await deeper_retrieval(service, role="risk_analysis", tenant_id="acme", query_text="q")
+    results = await deeper_retrieval(
+        service, role="risk_analysis", tenant_id="acme", query_text="q"
+    )
     assert results == []
 
 

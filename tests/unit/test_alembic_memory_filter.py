@@ -14,10 +14,13 @@ import sys
 import types
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import Column, Integer, MetaData, Table
+
+if TYPE_CHECKING:
+    from typing import Any
 
 _ENV_PATH = Path(__file__).resolve().parents[2] / "src" / "alembic" / "env.py"
 
@@ -42,13 +45,14 @@ def _load_env(monkeypatch: pytest.MonkeyPatch) -> Any:
         config=_FakeConfig(),
         is_offline_mode=lambda: True,
         configure=lambda **kwargs: configured.append(kwargs),
-        begin_transaction=lambda: nullcontext(),
+        begin_transaction=nullcontext,
         run_migrations=lambda: None,
     )
     monkeypatch.setitem(sys.modules, "alembic.context", fake_context)
 
     spec = importlib.util.spec_from_file_location("_alembic_env", _ENV_PATH)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module._configured_calls = configured
@@ -60,7 +64,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> Any:
     return _load_env(monkeypatch)
 
 
-@pytest.fixture()
+@pytest.fixture
 def configured_calls(env: Any) -> list[dict[str, Any]]:
     return env._configured_calls
 

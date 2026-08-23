@@ -255,7 +255,9 @@ def build_structured_context_prefix(
 
     if not risk_warnings:
         findings = working_memory.get("risk_findings") or []
-        critical_risks = [f.title for f in findings if getattr(f, "label", None) in {"critical", "high"}]
+        critical_risks = [
+            f.title for f in findings if getattr(f, "label", None) in {"critical", "high"}
+        ]
         if critical_risks:
             risk_warnings = "HIGH PRIORITY RISKS DETECTED: " + ", ".join(critical_risks[:5])
 

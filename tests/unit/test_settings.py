@@ -1,5 +1,3 @@
-import re
-
 import pytest
 
 from app.config.settings import Settings
@@ -40,4 +38,4 @@ class TestSettingsProductionValidation:
             Settings(ENVIRONMENT="production")
         message = str(exc_info.value)
         assert "super-secret-change-this-in-production" not in message
-        assert "password" not in message.split("\n")[-1]
+        assert "password" not in message.rsplit("\n", maxsplit=1)[-1]

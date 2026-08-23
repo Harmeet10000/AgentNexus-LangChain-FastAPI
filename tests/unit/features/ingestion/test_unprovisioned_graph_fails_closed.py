@@ -179,7 +179,7 @@ async def test_the_dependency_raises_the_typed_exception_rather_than_returning_n
         app = FastAPI()
 
     with pytest.raises(ServiceUnavailableException) as caught:
-        await get_ingestion_graph(_RequestWithNoState())  # ty: ignore[invalid-argument-type]
+        await get_ingestion_graph(_RequestWithNoState())
 
     assert caught.value.status_code == 503
     assert caught.value.data == {"capability": _CAPABILITY}

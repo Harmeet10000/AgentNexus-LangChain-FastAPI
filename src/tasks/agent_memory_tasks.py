@@ -15,8 +15,12 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from pydantic import Field
+
 from app.config import get_settings
 from app.connections.celery import celery_app
+from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery_task_names import AGENT_MEMORY_CONSOLIDATION
 from app.shared.langchain_layer.agents.memory.agent_memory_service import (
     AgentMemoryService,
     memory_partition,
@@ -27,12 +31,25 @@ if TYPE_CHECKING:
     from typing import Any
 
 
+class AgentMemoryConsolidationPayload(CeleryTaskPayload):
+    """Tenant ids to consolidate; empty means the scheduler's default sweep."""
+
+    tenant_ids: list[str] = Field(default_factory=list)
+
+
+CeleryTaskRegistry.register(AGENT_MEMORY_CONSOLIDATION, AgentMemoryConsolidationPayload)
+
+
 @celery_app.task(
     name="tasks.agent_memory_consolidation",
     bind=True,
     max_retries=0,
 )
-def agent_memory_consolidation(self: Any, tenant_ids: list[str] | None = None) -> dict[str, Any]:  # noqa: ARG001 — bound task signature
+def agent_memory_consolidation(
+    _self: Any,
+    *,
+    tenant_ids: list[str] | None = None,
+) -> dict[str, Any]:
     """Consolidate conversation-scoped memory into the permanent graph.
 
     Runs nightly via beat. Each tenant's conversation partition is consolidated
@@ -51,7 +68,9 @@ def agent_memory_consolidation(self: Any, tenant_ids: list[str] | None = None) -
             consolidated.append(tenant_id)
         except Exception as exc:  # noqa: BLE001 — one tenant's refusal must not stop the rest
             exc.add_note(f"task=agent_memory_consolidation, tenant={tenant_id}")
-            logger.bind(tenant=tenant_id, error=str(exc)).warning("agent_memory_consolidation_refused")
+            logger.bind(tenant=tenant_id, error=str(exc)).warning(
+                "agent_memory_consolidation_refused"
+            )
             refused.append({"tenant": tenant_id, "error": type(exc).__name__})
 
     logger.bind(

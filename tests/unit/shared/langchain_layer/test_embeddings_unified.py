@@ -27,9 +27,14 @@ would have caught that, and it is the reason the two tasks are one commit.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from fakeredis import FakeServer
 from fakeredis.aioredis import FakeRedis
+
+if TYPE_CHECKING:
+    from typing import ClassVar
 
 from app.config import get_settings
 from app.shared.langchain_layer import embeddings as embeddings_module
@@ -60,7 +65,7 @@ class _ClientSpy:
     back through a cache the test cannot reach into for a second copy.
     """
 
-    constructions: list[dict[str, object]] = []
+    constructions: ClassVar[list[dict[str, object]]] = []
 
     def __init__(self, **kwargs: object) -> None:
         type(self).constructions.append(kwargs)
@@ -222,13 +227,13 @@ def test_the_task_type_has_no_default_so_it_cannot_be_omitted() -> None:
 
 async def test_omitting_the_task_type_raises_rather_than_guessing(spy) -> None:
     with pytest.raises(TypeError):
-        await embed_text(_TEXT)  # ty: ignore[missing-argument]
+        await embed_text(_TEXT)
 
 
 async def test_an_unknown_task_type_is_rejected_before_the_provider_is_called(spy) -> None:
     """Named here, or named nowhere until the provider answers."""
     with pytest.raises(ValidationException) as caught:
-        await embed_text(_TEXT, task_type="SEMANTIC_SIMILARITY")  # ty: ignore[invalid-argument-type]
+        await embed_text(_TEXT, task_type="SEMANTIC_SIMILARITY")
 
     assert "RETRIEVAL_QUERY" in str(caught.value.detail)
     assert spy.count() == 0, "the provider client must not be built for a rejected task type"
@@ -236,7 +241,7 @@ async def test_an_unknown_task_type_is_rejected_before_the_provider_is_called(sp
 
 async def test_a_valid_task_type_string_is_coerced(spy) -> None:
     """The untyped edges — a value read from configuration — still work."""
-    await embed_text(_TEXT, task_type="RETRIEVAL_DOCUMENT")  # ty: ignore[invalid-argument-type]
+    await embed_text(_TEXT, task_type="RETRIEVAL_DOCUMENT")
 
     assert get_embedding_client().query_calls == [(_TEXT, "RETRIEVAL_DOCUMENT")]
 
@@ -330,7 +335,7 @@ async def test_the_vector_is_normalised_before_it_is_written_not_only_on_return(
     for, and the two paths disagreeing is the bug regardless of how often it fires.
     """
 
-    async def _short_vector(self, text: str, **_kw: object) -> list[float]:  # noqa: ARG001
+    async def _short_vector(self, text: str, **_kw: object) -> list[float]:
         return [0.5, 0.5, 0.5]
 
     monkeypatch.setattr(_ClientSpy, "aembed_query", _short_vector)
@@ -383,7 +388,7 @@ async def test_a_provider_returning_the_wrong_count_raises_rather_than_misaligni
 ) -> None:
     """Without the guard, every vector after the first gap is stored against the wrong clause."""
 
-    async def _too_few(self, texts: list[str], **_kw: object) -> list[list[float]]:  # noqa: ARG001
+    async def _too_few(self, texts: list[str], **_kw: object) -> list[list[float]]:
         return [_vector()]
 
     monkeypatch.setattr(_ClientSpy, "aembed_documents", _too_few)
@@ -426,8 +431,12 @@ def test_the_key_separates_the_configured_widths() -> None:
 
 
 def test_the_key_separates_the_models() -> None:
-    first = _cache_key(_TEXT, model="gemini-embedding-001", task_type=EmbeddingTaskType.QUERY, dimension=768)
-    second = _cache_key(_TEXT, model="gemini-embedding-2", task_type=EmbeddingTaskType.QUERY, dimension=768)
+    first = _cache_key(
+        _TEXT, model="gemini-embedding-001", task_type=EmbeddingTaskType.QUERY, dimension=768
+    )
+    second = _cache_key(
+        _TEXT, model="gemini-embedding-2", task_type=EmbeddingTaskType.QUERY, dimension=768
+    )
 
     assert first != second
 

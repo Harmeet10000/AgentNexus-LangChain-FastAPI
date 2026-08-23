@@ -14,14 +14,14 @@ class TestHealthEndpoint:
     """Verify /health returns correct status codes and dependency info."""
 
     @pytest.fixture(autouse=True)
-    def _setup(self, client):  # noqa: ANN001 — test fixture, annotation not required
+    def _setup(self, client):
         self.client = client
 
     def test_healthy_returns_200(self) -> None:
         resp = self.client.get("/health")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["status"] in ("healthy", "degraded")
+        assert body["status"] in {"healthy", "degraded"}
 
     def test_healthy_has_version(self) -> None:
         resp = self.client.get("/health")
@@ -40,7 +40,7 @@ class TestHealthEndpoint:
         for dep in body["dependencies"]:
             assert "name" in dep
             assert "status" in dep
-            assert dep["status"] in ("healthy", "degraded", "unhealthy")
+            assert dep["status"] in {"healthy", "degraded", "unhealthy"}
             assert "latency_ms" in dep
 
     def test_postgres_dependency_present(self) -> None:

@@ -44,7 +44,6 @@ from .client import (
     setup_graphiti,
     setup_graphiti_indices,
     write_clause_episode,
-    write_final_report_episode,
     write_relationship_edge,
 )
 
@@ -56,6 +55,5 @@ __all__ = [
     "setup_graphiti",
     "setup_graphiti_indices",
     "write_clause_episode",
-    "write_final_report_episode",
     "write_relationship_edge",
 ]

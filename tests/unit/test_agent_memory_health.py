@@ -9,11 +9,12 @@ observed.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
-
-import pytest
+from typing import TYPE_CHECKING
 
 from app.middleware.health_check import check_cognee
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 class _FakeState:
@@ -84,9 +85,7 @@ async def test_features_surface_reports_graph_procedures_as_a_named_subfield() -
         neo4j_driver=_Driver(),
     )
     report = await service._check_agent_memory()
-    assert report["status"] != "unhealthy", (
-        "absent graph procedures must not fail the whole check"
-    )
+    assert report["status"] != "unhealthy", "absent graph procedures must not fail the whole check"
     assert report["graphProceduresAvailable"] is False
 
 
@@ -120,4 +119,5 @@ def test_the_psutil_memory_field_is_not_collided_with() -> None:
     from app.features.health.dto import HealthChecksDTO
 
     fields = set(HealthChecksDTO.model_fields)
-    assert "memory" in fields and "agent_memory" in fields
+    assert "memory" in fields
+    assert "agent_memory" in fields
