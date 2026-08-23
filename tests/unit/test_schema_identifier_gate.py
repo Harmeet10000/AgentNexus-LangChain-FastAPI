@@ -8,7 +8,7 @@ a table no migration creates.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from app.utils.schema_identifier_gate import (
     MISSING_CREATOR,
@@ -16,9 +16,6 @@ from app.utils.schema_identifier_gate import (
     UNPARSED_SOURCE,
     audit,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _tree(tmp_path: Path, *, source: str, migration: str) -> tuple[Path, Path]:
@@ -162,3 +159,19 @@ def test_a_creation_split_across_concatenated_literals_is_still_found(tmp_path: 
     )
 
     assert audit(src, versions) == []
+
+
+def test_the_gate_guards_this_repository() -> None:
+    """The gate over the real tree — the reason the module exists.
+
+    The synthetic cases above pin the contract; this one points the gate at the
+    checkout it lives in, so drift in this repository itself is a red test rather
+    than an unrun CLI. Paths resolve from ``__file__``, not the process CWD:
+    pytest can be invoked from anywhere, and a gate that silently scans an empty
+    directory reports clean.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+
+    findings = audit(repo_root / "src", repo_root / "src" / "alembic" / "versions")
+
+    assert findings == []
