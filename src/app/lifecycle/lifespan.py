@@ -29,6 +29,7 @@ from app.connections import (
     init_neo4j,
 )
 from app.features.auth import TokenAuditLog, User, build_websocket_security_service
+from app.features.auth.repository import RefreshTokenRepository
 from app.middleware import initialize_fastapi_guard
 from app.shared.langchain_layer.agents.memory import setup_cognee
 from app.shared.langgraph_layer.checkpointer import teardown_langgraph_checkpointer
@@ -208,9 +209,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     else:
         app.state.neo4j_driver = None
 
+    # Task 3.1/3.4: the security service needs the token repo so it can
+    # re-read session state (pull-based revocation) for active connections.
+    ws_redis = getattr(app.state, "redis", None)
     app.state.websocket_security = await build_websocket_security_service(
-        redis=getattr(app.state, "redis", None),
+        redis=ws_redis,
         settings=settings,
+        token_repo=RefreshTokenRepository(ws_redis) if ws_redis is not None else None,
+    )
+    app.state.websocket_revocation_task = asyncio.create_task(
+        coro=app.state.websocket_security.run_revocation_loop(),
     )
 
     # Setup Cognee for episodic + procedural memory (optional)
@@ -343,6 +351,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
         if hasattr(app.state, "outbox_relay_task") and app.state.outbox_relay_task is not None:
             app.state.outbox_relay_task.cancel()
             logger.info("Outbox relay stopped")
+
+        # Stop WebSocket revocation loop
+        revocation_task = getattr(app.state, "websocket_revocation_task", None)
+        if revocation_task is not None:
+            revocation_task.cancel()
+            logger.info("WebSocket revocation loop stopped")
 
         # Close HTTPX client
         httpx_client = getattr(app.state, "httpx_client", None)

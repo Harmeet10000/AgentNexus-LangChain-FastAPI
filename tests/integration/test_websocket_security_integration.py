@@ -9,7 +9,6 @@ Tests the full flow of:
 Run with: uv run pytest tests/integration/test_websocket_security_integration.py -v
 """
 
-import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -37,21 +36,8 @@ def mock_settings():
 
 @pytest.fixture
 async def ws_security_with_repo(redis, mock_settings):
-    """Build WebSocketSecurityService with token repo and mocked rate limiters."""
-    from unittest.mock import MagicMock, patch
-
-    # Create mock limiters BEFORE building service
-    mock_user_limiter = MagicMock()
-    mock_user_limiter.try_acquire = MagicMock()
-
-    mock_connection_limiter = MagicMock()
-    mock_connection_limiter.try_acquire = MagicMock()
-
-    # Patch Limiter class to return mocks
-    with patch('app.features.auth.websocket_security.Limiter') as MockLimiter:
-        MockLimiter.side_effect = [mock_user_limiter, mock_connection_limiter]
-        service = await build_websocket_security_service(redis, mock_settings)
-
+    """Build WebSocketSecurityService with token repo and real in-memory rate limiters."""
+    service = await build_websocket_security_service(redis, mock_settings)
     service._token_repo = RefreshTokenRepository(redis)
     return service
 
@@ -66,16 +52,16 @@ class TestSessionRevocationIntegration:
     ):
         """End-to-end: revocation should cause connection to close on next check."""
         # SETUP: Create session and connection
-        user_id = "user-integration-1"
+        user_id = "507f1f77bcf86cd799439013"
         session_id = "session-integration-1"
         connection_id = str(uuid4())
 
         claims = TokenClaims(
             sub=user_id,
             sid=session_id,
-            exp=datetime.now(UTC) + timedelta(minutes=15),
-            iat=datetime.now(UTC),
             jti="jti-1",
+            role="user",
+            permissions=[],
             token_type="access",
         )
 
@@ -144,9 +130,9 @@ class TestRateLimitingIntegration:
         claims = TokenClaims(
             sub=user_id,
             sid="session-rl",
-            exp=datetime.now(UTC) + timedelta(minutes=15),
-            iat=datetime.now(UTC),
             jti="jti-rl",
+            role="user",
+            permissions=[],
             token_type="access",
         )
 
@@ -160,13 +146,19 @@ class TestRateLimitingIntegration:
             connection_rate_limit_key=f"connection:{connection_id}",
         )
 
-        # Try to send more messages than the rate limit allows
-        user_rate_limit = ws_security_with_repo._settings.WEBSOCKET_USER_MESSAGE_RATE
+        # Try to send more messages than the rate limit allows over a single
+        # connection — the per-connection limit binds before the per-user limit.
+        settings = ws_security_with_repo._settings
+        expected_accepted = min(
+            settings.WEBSOCKET_USER_MESSAGE_RATE,
+            settings.WEBSOCKET_CONNECTION_MESSAGE_RATE,
+        )
+        attempts = settings.WEBSOCKET_USER_MESSAGE_RATE + 10
 
         accepted = 0
         rejected = 0
 
-        for i in range(user_rate_limit + 10):
+        for i in range(attempts):
             try:
                 await ws_security_with_repo._apply_rate_limits(context)
                 accepted += 1
@@ -174,10 +166,12 @@ class TestRateLimitingIntegration:
                 rejected += 1
 
         # Verify rate limit was enforced
-        assert accepted == user_rate_limit, (
-            f"Expected {user_rate_limit} messages accepted, got {accepted}"
+        assert accepted == expected_accepted, (
+            f"Expected {expected_accepted} messages accepted, got {accepted}"
         )
-        assert rejected == 10, f"Expected 10 messages rejected, got {rejected}"
+        assert rejected == attempts - expected_accepted, (
+            f"Expected {attempts - expected_accepted} messages rejected, got {rejected}"
+        )
 
 
 class TestCapacityEnforcementIntegration:
@@ -194,9 +188,9 @@ class TestCapacityEnforcementIntegration:
         claims = TokenClaims(
             sub=user_id,
             sid="session-cap",
-            exp=datetime.now(UTC) + timedelta(minutes=15),
-            iat=datetime.now(UTC),
             jti="jti-cap",
+            role="user",
+            permissions=[],
             token_type="access",
         )
 
@@ -239,9 +233,9 @@ class TestPresenceTrackingWithSortedSets:
         claims = TokenClaims(
             sub=user_id,
             sid=session_id,
-            exp=datetime.now(UTC) + timedelta(minutes=15),
-            iat=datetime.now(UTC),
             jti="jti-presence",
+            role="user",
+            permissions=[],
             token_type="access",
         )
 
@@ -301,9 +295,9 @@ class TestThrottledTouchConnection:
         claims = TokenClaims(
             sub=user_id,
             sid="session-throttle",
-            exp=datetime.now(UTC) + timedelta(minutes=15),
-            iat=datetime.now(UTC),
             jti="jti-throttle",
+            role="user",
+            permissions=[],
             token_type="access",
         )
 

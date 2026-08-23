@@ -13,8 +13,9 @@ validation of the first inbound frame, and structured error emission.
 from contextlib import suppress
 from uuid import uuid4
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 
+from app.config import get_settings
 from app.features.auth import CurrentClaims, WebSocketSecurityViolation
 from app.utils import APIResponse, ErrorCode, ValidationException, http_response, logger
 
@@ -42,6 +43,31 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
+def get_websocket_url(request: Request, path: str) -> str:
+    """Task 3.5: Proxy-aware absolute WebSocket URL.
+
+    Honors X-Forwarded-Proto / X-Forwarded-Host only when
+    FASTAPI_GUARD_TRUSTED_PROXIES is configured — the same trust decision the
+    HTTP middleware applies to forwarded headers.
+    """
+    settings = get_settings()
+    trusted = bool(settings.FASTAPI_GUARD_TRUSTED_PROXIES)
+    forwarded_proto = request.headers.get("x-forwarded-proto") if trusted else None
+    forwarded_host = request.headers.get("x-forwarded-host") if trusted else None
+
+    scheme = (
+        forwarded_proto.split(",")[0].strip()
+        if forwarded_proto
+        else ("wss" if request.url.scheme == "https" else "ws")
+    )
+    host = (
+        forwarded_host.split(",")[0].strip()
+        if forwarded_host
+        else request.headers.get("host") or request.url.netloc
+    )
+    return f"{scheme}://{host}{path}"
+
+
 @router.post(
     "/sessions",
     summary="Create a new Agent Saul session and receive a thread_id + WS URL",
@@ -50,9 +76,11 @@ async def create_session(
     body: CreateSessionRequest,
     _deps: AgentSaulDepsAnnotated,
     claims: CurrentClaims,
+    request: Request,
 ) -> APIResponse[CreateSessionResponse]:
     thread_id = str(uuid4())
-    ws_url = f"ws://{{host}}/api/v1/agent-saul/ws/{thread_id}"
+    ws_path = f"{get_settings().API_PREFIX}/agent-saul/ws/{thread_id}"
+    ws_url = get_websocket_url(request, ws_path)
 
     log = logger.bind(user_id=claims.sub, thread_id=thread_id, doc_id=body.doc_id)
     log.info("saul_session_created")
@@ -96,7 +124,7 @@ async def saul_ws_endpoint(
     async def _handle_ws_session() -> None:
         security_service = websocket.app.state.websocket_security
         await websocket.accept()
-        await security_service.register_connection(security_context)
+        await security_service.register_connection(security_context, websocket)
         raw = await security_service.receive_json(websocket, security_context)
         first_msg = ws_inbound_adapter.validate_python(raw)
         if not isinstance(first_msg, WSStartMessage):
@@ -144,7 +172,7 @@ async def saul_ws_endpoint(
         await _handle_ws_session()
     except WebSocketSecurityViolation as exc:
         security_service = websocket.app.state.websocket_security
-        await security_service.close_with_violation(websocket, security_context, exc)
+        await security_service.close_with_violation(websocket, exc)
 
     except WebSocketDisconnect as exc:
         log.info("saul_ws_disconnected", code=exc.code)

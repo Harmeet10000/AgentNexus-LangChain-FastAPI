@@ -59,15 +59,14 @@ class WebSocketConnectionCloser(Protocol):
     reasons: only these two members are used, and ``AuthService`` must not acquire an
     import edge onto the WebSocket transport layer to obtain a parameter annotation.
 
-    KNOWN GAP — ``WebSocketSecurityService`` does **not** satisfy this protocol today.
-    It keeps its client private as ``_redis`` and exposes no ``close_connection``; the
-    nearest member, ``close_with_violation``, needs a live ``WebSocket`` object and
-    cannot be reached from a connection id. Closing the gap means adding those members
-    to ``websocket_security.py``, which is outside this annotation fix.
+    ``WebSocketSecurityService`` satisfies this protocol: it exposes a ``redis``
+    property (``Redis | None`` — closure is best-effort and skipped when Redis is
+    unavailable) and ``close_connection(connection_id, *, reason)``, which resolves
+    the live WebSocket from the service's in-process registry.
     """
 
     @property
-    def redis(self) -> Redis: ...
+    def redis(self) -> Redis | None: ...
 
     async def close_connection(self, connection_id: str, /, *, reason: str) -> None: ...
 
@@ -510,9 +509,11 @@ class AuthService:
             raise app_error_to_exception(revoke_result.failure())
 
         # Look up active connections for this session from sorted set
-        # ws_security_service has Redis access to ws:session:{session_id}
         closed_connection_ids: list[str] = []
         try:
+            if ws_security_service.redis is None:
+                logger.warning("No Redis client - skipping WebSocket connection closure")
+                return closed_connection_ids
             # Retrieve all connections for this session from the sorted set
             # The sorted set key is ws:session:{session_id}
             connections = await ws_security_service.redis.zrange(

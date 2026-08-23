@@ -17,7 +17,7 @@ Run with: uv run pytest tests/unit/test_websocket_security_bug_conditions.py -v
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -44,33 +44,19 @@ def mock_settings():
 @pytest.fixture
 def mock_token_claims():
     return TokenClaims(
-        sub="user-123",
+        sub="507f1f77bcf86cd799439011",
         sid="session-abc",
-        exp=datetime.now(UTC) + timedelta(minutes=15),
-        iat=datetime.now(UTC),
         jti="jti-123",
+        role="user",
+        permissions=[],
         token_type="access",
     )
 
 
 @pytest.fixture
 async def ws_security_service(redis, mock_settings):
-    """Build WebSocketSecurityService with mocked rate limiters to avoid background tasks."""
-    from unittest.mock import MagicMock, patch
-
-    # Create mock limiters BEFORE building service
-    mock_user_limiter = MagicMock()
-    mock_user_limiter.try_acquire = MagicMock()
-
-    mock_connection_limiter = MagicMock()
-    mock_connection_limiter.try_acquire = MagicMock()
-
-    # Patch Limiter class to return mocks
-    with patch("app.features.auth.websocket_security.Limiter") as MockLimiter:
-        MockLimiter.side_effect = [mock_user_limiter, mock_connection_limiter]
-        service = await build_websocket_security_service(redis, mock_settings)
-
-    return service
+    """Build WebSocketSecurityService with real in-memory rate limiters."""
+    return await build_websocket_security_service(redis, mock_settings)
 
 
 @pytest.fixture
@@ -151,7 +137,7 @@ class TestBugCondition2JWTExpiryIgnored:
         """Expired sessions should be detected by pull-based check."""
         # GIVEN a session that has expired
         expired_session_id = "expired-session"
-        user_id = "user-expired"
+        user_id = "507f1f77bcf86cd799439012"
 
         token_repo = RefreshTokenRepository(redis)
 
@@ -171,8 +157,16 @@ class TestBugCondition2JWTExpiryIgnored:
 
         # AND check session validity
         ws_security_service._token_repo = token_repo
+        claims = TokenClaims(
+            sub=user_id,
+            sid=expired_session_id,
+            jti="jti-expired",
+            role="user",
+            permissions=[],
+            token_type="access",
+        )
         context = WebSocketSecurityContext(
-            claims=MagicMock(sub=user_id, sid=expired_session_id),
+            claims=claims,
             user_id=user_id,
             session_id=expired_session_id,
             connection_id=str(uuid4()),
@@ -250,24 +244,32 @@ class TestBugCondition4RateLimiterBypass:
         ws_security_context: WebSocketSecurityContext,
     ):
         """Rate limiting should enforce message rate limits."""
-        user_message_rate = ws_security_service._settings.WEBSOCKET_USER_MESSAGE_RATE
+        settings = ws_security_service._settings
+        attempts = settings.WEBSOCKET_USER_MESSAGE_RATE + 5
 
         accepted = 0
         rejected = 0
 
-        # Try to send more than the rate limit
-        for i in range(user_message_rate + 5):
+        # Try to send more than the rate limit over a single connection —
+        # the per-connection limit (20/10s) binds before the per-user limit.
+        expected_accepted = min(
+            settings.WEBSOCKET_USER_MESSAGE_RATE,
+            settings.WEBSOCKET_CONNECTION_MESSAGE_RATE,
+        )
+        for i in range(attempts):
             try:
                 await ws_security_service._apply_rate_limits(ws_security_context)
                 accepted += 1
             except WebSocketRateLimitExceededError:
                 rejected += 1
 
-        # THEN exactly user_message_rate should be accepted
-        assert accepted == user_message_rate, (
-            f"Expected {user_message_rate} accepted, got {accepted}"
+        # THEN exactly expected_accepted should get through
+        assert accepted == expected_accepted, (
+            f"Expected {expected_accepted} accepted, got {accepted}"
         )
-        assert rejected == 5, f"Expected 5 rejected, got {rejected}"
+        assert rejected == attempts - expected_accepted, (
+            f"Expected {attempts - expected_accepted} rejected, got {rejected}"
+        )
 
 
 class TestBugCondition5SessionConnectionsSetRead:

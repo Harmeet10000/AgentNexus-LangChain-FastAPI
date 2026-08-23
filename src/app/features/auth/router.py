@@ -326,14 +326,20 @@ async def list_sessions(
     return http_response("Active sessions", data=sessions)
 
 
-@router.delete("/sessions/{session_id}", response_model=APIResponse[None])
+@router.delete("/sessions/{session_id}")
 async def revoke_session(
     session_id: Annotated[str, Path()],
     claims: CurrentClaims,
     service: AuthServiceDep,
-) -> APIResponse[None]:
-    await service.revoke_session(session_id=session_id, user_id=claims.sub)
-    return http_response("Session revoked")
+    request: Request,
+) -> APIResponse[list[str]]:
+    # Task 3.4: revoke and close any live WebSocket connections for the session
+    closed_connection_ids = await service.revoke_session_and_close_connections(
+        session_id=session_id,
+        user_id=claims.sub,
+        ws_security_service=request.app.state.websocket_security,
+    )
+    return http_response("Session revoked", data=closed_connection_ids)
 
 
 @router.delete("/sessions", response_model=APIResponse[None])

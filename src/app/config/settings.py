@@ -43,9 +43,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def validate_embedding_dimension(cls, values: dict[str, object]) -> dict[str, object]:
-        if "OTEL_ENABLED" not in values and values.get("ENVIRONMENT") == "production":
+    def enable_otel_in_production(cls, values: dict[str, object]) -> dict[str, object]:
+        if isinstance(values, dict) and "OTEL_ENABLED" not in values and values.get("ENVIRONMENT") == "production":
             values["OTEL_ENABLED"] = True
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_embedding_dimension(cls, values: dict[str, object]) -> dict[str, object]:
+        if not isinstance(values, dict):
+            return values
 
         dim = values.get("EMBEDDING_DIMENSION")
         model = values.get("GEMINI_EMBEDDING_MODEL", "")
