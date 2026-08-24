@@ -2,9 +2,9 @@
 
 One service, one failure idiom, one partition-name builder. The library's
 full-rebuild operation is structurally unreachable from here (Trap3), and there
-is deliberately no prune method — the permanent memory graph shares a Neo4j
-instance with the document entity graph, so pruning here would destroy another
-library's data.
+is deliberately no destructive-cleanup operation: the permanent memory graph
+shares a Neo4j instance with the document entity graph, so wiping there would
+destroy another library's data.
 """
 
 from __future__ import annotations
