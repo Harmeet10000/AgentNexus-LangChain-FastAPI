@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-if TYPE_CHECKING:
-    from datetime import datetime
-
-    from app.features.plans.model import BillingInterval
+from app.features.plans.model import BillingInterval
 
 
 class PlanCreateDTO(BaseModel):
