@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
@@ -19,8 +19,6 @@ from sqlalchemy import text
 from app.utils import logger
 
 if TYPE_CHECKING:
-    from typing import Any
-
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -71,7 +69,6 @@ class IdempotencyGuard:
         self._db_engine = db_engine
         self._log = logger.bind(component="idempotency_guard")
 
-    @staticmethod
     @staticmethod
     def _canon(value: Any) -> Any:
         """Canonicalise free-text so trivial wording differences share a key."""
