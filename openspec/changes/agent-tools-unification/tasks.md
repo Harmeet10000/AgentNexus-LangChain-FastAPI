@@ -35,24 +35,33 @@
 
 ## 1. Preconditions — read-only, no edits
 
-- [ ] 1.1 Record every gate baseline **as measured at task start**, not as quoted from `design.md`. Tasks that run
+- [x] 1.1 Record every gate baseline **as measured at task start**, not as quoted from `design.md`. Tasks that run
       before change 0 compare against these numbers, not against the post-change-0 gate.
       **Proof:** `uv run ty check src/ 2>&1 | tail -1; uv run ruff check src/ 2>&1 | tail -1;
       uv run pytest 2>&1 | tail -1; ast-grep scan src/ 2>&1 | tail -3;
       /home/harmeet/.bun/bin/openspec validate --all 2>&1 | tail -3` — paste the five lines into the PR body.
-- [ ] 1.2 Confirm the defect surface still matches the design: **four** envelope definitions and **three**
+- [x] 1.2 Confirm the defect surface still matches the design: **four** envelope definitions and **three**
       `ToolRegistry` classes.
       **Proof:** `rg -n "class Tool(Result|Output)\b" src/` prints 4 lines
       (`shared/agents/tools/idempotency.py:11`, `langchain_layer/agents/tools/base.py:30`,
       `langchain_layer/agents/tools/idempotency.py:34`, `rag/document_processing/models.py:318`);
       `rg -n "^class ToolRegistry" src/` prints 3. If either count differs, stop — the plan's arithmetic is stale.
-- [ ] 1.3 Confirm the shadow package is still present, so group 2 is still a bug fix and still precedes change 0.
+- [x] 1.3 Confirm the shadow package is still present, so group 2 is still a bug fix and still precedes change 0.
       **Proof:** `test -f src/app/shared/agents/tools/idempotency.py && rg -c "app\.shared\.agents\." src/` prints a
       non-zero count.
-- [ ] 1.4 Record that the lifespan wiring is **commented** and that this change leaves it that way (D17 precondition).
+- [x] 1.4 Record that the lifespan wiring is **commented** and that this change leaves it that way (D17 precondition).
       **Proof:** `rg -n "^\s*#.*(agent|tool).*(router|lifespan|include_router)" src/app/lifecycle/lifespan.py
       src/app/main.py` — capture the output verbatim; task 11.4 diffs against it.
-- [ ] 1.5 Confirm `ToolRetryMiddleware` is already wired to the survivor factory, so group 9 installs an existing
+      **Measured 2026-08-24 (main @ 0bfbd6f).** Baselines: pytest **371 passed / 39 deselected / 0 failed**;
+      ruff src clean; ty clean; openspec --all 23/5. Defect surface matches design exactly: `class Tool(Result|Output)`
+      prints the four expected lines (`agents/tools/idempotency.py:11`, `langchain_layer/.../base.py:30` — as
+      `ToolOutput`, `langchain_layer/.../idempotency.py:34`, `rag/document_processing/models.py:318`);
+      `^class ToolRegistry` prints 3. Shadow package present (30 bytes). Lifespan wiring: the commented block is
+      documented at `graphiti/registry.py:5` ("currently commented out pending the graph wiring") rather than in
+      lifespan.py itself; captured for task 11.4. ToolRetryMiddleware wired at guardrails `:345,:369`; factory
+      middleware= present; saul factory carries zero middleware references.
+
+- [x] 1.5 Confirm `ToolRetryMiddleware` is already wired to the survivor factory, so group 9 installs an existing
       mechanism rather than designing one (Q2).
       **Proof:** `rg -n "ToolRetryMiddleware" src/app/shared/langchain_layer/agents/middlewares/guardrails.py` prints
       `:345` and `:369`; `rg -n "middleware=" src/app/shared/langchain_layer/agents/factory.py` prints `:188`;
@@ -88,29 +97,38 @@ expected — if one is needed, the premise in `design.md` phase 1 is wrong and t
 
 ## 3. Phase 2 — registry: populate, adopt, rename
 
-- [ ] 3.1 Add an **explicit registration entry point** that populates the registry. Import must remain side-effect
+- [x] 3.1 Add an **explicit registration entry point** that populates the registry. Import must remain side-effect
       free (D-1(c); the spec requirement is *"populated by explicit registration before any consumer resolves a
       tool"*).
       **Proof:** one command asserting both halves —
       `uv run python -c "import app.shared.langchain_layer.agents.tools as t; r=t.get_tool_registry();
       assert len(r) == 0, 'import must register nothing'; t.register_default_tools();
       assert len(r) > 0; print('empty-on-import then populated: OK')"`
-- [ ] 3.2 Make registration **idempotent** and make resolution of an unregistered name **fail loudly**.
+- [x] 3.2 Make registration **idempotent** and make resolution of an unregistered name **fail loudly**.
       **Proof:** `uv run python -c "...; register_default_tools(); n=len(r); register_default_tools();
       assert len(r)==n; import pytest; pytest.raises(KeyError, r.get, 'no_such_tool'); print('OK')"`
-- [ ] 3.3 Tag the tools, including `web` on `web_search.py:80` and `crawl.py:114`, so `by_tags` selection is real.
+- [x] 3.3 Tag the tools, including `web` on `web_search.py:80` and `crawl.py:114`, so `by_tags` selection is real.
       **Proof:** `uv run python -c "...; register_default_tools();
       assert {'web'} <= set(r.tags()); assert len(r.by_tags('web')) >= 2; print(sorted(r.tags()))"`
-- [ ] 3.4 Adopt the registry in `agents/factory.py`, making the string branch at `:146`
+- [x] 3.4 Adopt the registry in `agents/factory.py`, making the string branch at `:146`
       (`resolved_tools.append(get_tool_registry().get(t))`) reachable for the first time.
       **Proof:** a unit test builds a spec with a **string** tool name and asserts a resolved tool object comes back;
       `uv run pytest tests/ -k registry_adoption 2>&1 | tail -1` shows the new tests passing.
-- [ ] 3.5 Rename the Graphiti bundle to **`AgentToolBundle`** per ADR 2, keeping `ToolRegistry = AgentToolBundle` as a
+- [x] 3.5 Rename the Graphiti bundle to **`AgentToolBundle`** per ADR 2, keeping `ToolRegistry = AgentToolBundle` as a
       deprecation alias **for one commit only**, sequenced after 3.4.
       **Proof:** `rg -c "^class ToolRegistry" src/` prints **1**;
       `uv run python -c "from app.shared.rag.graphiti.registry import AgentToolBundle, ToolRegistry;
       assert ToolRegistry is AgentToolBundle; print('alias OK')"`
-- [ ] 3.6 Remove the alias and fix the misleading docstrings at `graphiti/registry.py:9,25`.
+      **Executed 2026-08-24.** Proofs pass verbatim, plus two findings the proofs exposed:
+      (a) `CrawlUrlTool` had no `_run` — newer langchain declares it abstract, so the tool could never be
+      instantiated; sync-fallback added (mirrors web_search).
+      (b) `AgentSpec` raised PydanticUserError "not fully defined" on first construction (BaseTool was
+      TYPE_CHECKING-only) — model_rebuild added.
+      The 3.4 adoption test drives the real `create_production_agent` with `create_agent` and
+      `build_default_middleware_stack` stubbed at the module boundary: full agent construction needs provider
+      packages absent here (the D13 finding), and resolution — not agent assembly — is what task 3.4 pins.
+
+- [x] 3.6 Remove the alias and fix the misleading docstrings at `graphiti/registry.py:9,25`.
       **Proof:** `rg -c "ToolRegistry" src/app/shared/rag/graphiti/registry.py` prints **0**;
       `uv run ty check src/ 2>&1 | tail -1` shows **≤28**; `uv run python -c "import app.main"` exits 0.
 

@@ -36,6 +36,7 @@ class CrawlUrlTool(BaseTool):
     """
     args_schema: type[CrawlUrlInput] = CrawlUrlInput
 
+    @override
     def _run(self, *args: Any, **kwargs: Any) -> str:
         """Synchronous fallback — langchain declares _run abstract; async-first tools bridge it."""
 
