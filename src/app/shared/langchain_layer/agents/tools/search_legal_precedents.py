@@ -19,9 +19,10 @@ result from a live retrieval — nor should it.  Determinism is the goal.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import tool
+from langchain_core.tools.base import BaseTool
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -29,16 +30,13 @@ from app.utils import logger
 
 from .idempotency import IdempotencyGuard, ToolResult
 
-if TYPE_CHECKING:
-    from typing import Any
+_MIN_SOURCE_THRESHOLD: int = 2
+_STATUTE_SEARCH_LIMIT: int = 5
 
-    from langchain_core.tools.base import BaseTool
+if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from app.shared.rag.graphiti.client import GraphitiService
-
-_MIN_SOURCE_THRESHOLD: int = 2
-_STATUTE_SEARCH_LIMIT: int = 5
 
 
 def make_search_legal_precedents_tool(
@@ -100,12 +98,21 @@ def make_search_legal_precedents_tool(
         )
 
         # --- Postgres: statute text retrieval --------------------------------
-        statute_results = await _search_statutes_postgres(
-            db_engine=db_engine,
-            query=query,
-            jurisdiction=jurisdiction,
-            limit=_STATUTE_SEARCH_LIMIT,
-        )
+        try:
+            statute_results = await _search_statutes_postgres(
+                db_engine=db_engine,
+                query=query,
+                jurisdiction=jurisdiction,
+                limit=_STATUTE_SEARCH_LIMIT,
+            )
+        except SQLAlchemyError as exc:
+            # Honesty (group 6): a missing corpus must never read as "no results".
+            logger.warning("statute_postgres_search_failed", error=str(exc))
+            unavailable = ToolResult.unavailable_result(
+                reason=f"statute corpus unreachable ({type(exc).__name__})",
+                clause_id=clause_id,
+            )
+            return unavailable.model_dump()
 
         total_sources = len(graphiti_results) + len(statute_results)
         insufficient_basis = total_sources < _MIN_SOURCE_THRESHOLD
@@ -176,9 +183,6 @@ async def _search_statutes_postgres(
             fts_vector  TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', body)) STORED
         )
         CREATE INDEX ON statutes USING gin(fts_vector);
-
-    Falls back to empty list on schema-not-found — lets you deploy before
-    the statutes table is populated.
     """
     query_sql = text(
         """
@@ -199,32 +203,28 @@ async def _search_statutes_postgres(
         LIMIT :limit
         """
     )
-    try:
-        async with db_engine.connect() as conn:
-            rows = (
-                await conn.execute(
-                    query_sql,
-                    {
-                        "query": query,
-                        "jurisdiction": f"%{jurisdiction}%",
-                        "limit": limit,
-                    },
-                )
-            ).fetchall()
-            return [
+    async with db_engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                query_sql,
                 {
-                    "id": str(row[0]),
-                    "title": row[1],
-                    "section_ref": row[2],
-                    "excerpt": row[3],
-                    "jurisdiction": row[4],
-                    "act_name": row[5],
-                    "year": row[6],
-                    "rank": float(row[7]),
-                    "source": "postgres_statutes",
-                }
-                for row in rows
-            ]
-    except SQLAlchemyError as exc:
-        logger.warning("statute_postgres_search_failed", error=str(exc))
-        return []
+                    "query": query,
+                    "jurisdiction": f"%{jurisdiction}%",
+                    "limit": limit,
+                },
+            )
+        ).fetchall()
+        return [
+                {
+            "id": str(row[0]),
+            "title": row[1],
+            "section_ref": row[2],
+            "excerpt": row[3],
+            "jurisdiction": row[4],
+            "act_name": row[5],
+            "year": row[6],
+            "rank": float(row[7]),
+            "source": "postgres_statutes",
+        }
+        for row in rows
+    ]

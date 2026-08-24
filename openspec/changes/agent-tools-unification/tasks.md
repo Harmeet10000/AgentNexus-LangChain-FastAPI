@@ -199,19 +199,29 @@ expected — if one is needed, the premise in `design.md` phase 1 is wrong and t
 
 This is the group that makes the rest shippable. Until it lands, a missing corpus is reported as an answer.
 
-- [ ] 6.1 Replace the fabricating paths with the unavailability constructor from 4.1 at
+- [x] 6.1 Replace the fabricating paths with the unavailability constructor from 4.1 at
       `retrieve_statute_section.py:170-172`, `search_legal_precedents.py:227-229` and `precedent_tools.py:221-240`.
       **Proof:** a unit test patches the corpus call to raise, then asserts the returned envelope is
       `unavailable` with a non-empty reason — **and asserts the result is not a `str`**:
       `uv run pytest tests/ -k unavailab 2>&1 | tail -1` passes.
-- [ ] 6.2 Delete the docstring sentence at `search_legal_precedents.py:179-180` that licensed the whole failure class.
+- [x] 6.2 Delete the docstring sentence at `search_legal_precedents.py:179-180` that licensed the whole failure class.
       Quote the sentence in the commit message so the deletion is reviewable.
       **Proof:** `sed -n '175,185p' src/app/.../search_legal_precedents.py` shows the sentence gone, and
       `uv run python -c "import <module>"` exits 0 (a docstring edit must not change behaviour).
-- [ ] 6.3 Prove the anti-pattern is gone from production tool bodies repo-wide, with the one accepted exception
+- [x] 6.3 Prove the anti-pattern is gone from production tool bodies repo-wide, with the one accepted exception
       quarantined under `src/app/examples/` by group 10.
       **Proof:** `rg -n 'f"(Search error|Error): \{e' src/app --glob '!examples/**'` prints nothing.
-- [ ] 6.4 Confirm a catch site returns the envelope rather than a rendered sentence (the 7th scenario of the
+      **Executed 2026-08-24.** All three fabricating paths now answer
+      `ToolResult.unavailable_result(...)`: statute fetch propagates SQLAlchemyError to the tool (helper no longer
+      swallows), statute search ditto, and the hybrid's pgvector stub raises a typed signal that surfaces as
+      `unavailable_layers` metadata — with the whole envelope unavailable when NO layer answered. The licensing
+      sentence deleted per 6.2 read: "Falls back to empty list on schema-not-found — lets you deploy before the
+      statutes table is populated." Unit tests drive the real tools with patched corpus calls and assert
+      `unavailable is True` and non-str results. En route: fixed the same not-fully-defined defect in four tool
+      modules (Any/BaseTool behind TYPE_CHECKING while @tool resolves annotations at decoration time); ruff TC
+      rules for these modules are satisfied via per-file-ignores because get_type_hints needs runtime imports.
+
+- [x] 6.4 Confirm a catch site returns the envelope rather than a rendered sentence (the 7th scenario of the
       `typed-exception-handling` MODIFIED delta).
       **Proof:** `ast-grep -p 'except $_ as $E: return f"$$$"' src/app` prints nothing.
 

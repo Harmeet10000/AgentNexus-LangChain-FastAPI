@@ -16,9 +16,10 @@ same output.  Cached in Redis for the session TTL, Postgres for 30 days.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import tool
+from langchain_core.tools.base import BaseTool
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -27,9 +28,6 @@ from app.utils import logger
 from .idempotency import IdempotencyGuard, ToolResult
 
 if TYPE_CHECKING:
-    from typing import Any
-
-    from langchain_core.tools.base import BaseTool
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 
@@ -78,12 +76,22 @@ def make_retrieve_statute_section_tool(
             log.debug("statute_section_cache_hit")
             return cached.model_dump()
 
-        row = await _fetch_statute_section(
-            db_engine=db_engine,
-            act_name=act_name,
-            section_ref=section_ref,
-            jurisdiction=jurisdiction,
-        )
+        try:
+            row = await _fetch_statute_section(
+                db_engine=db_engine,
+                act_name=act_name,
+                section_ref=section_ref,
+                jurisdiction=jurisdiction,
+            )
+        except SQLAlchemyError as exc:
+            # Honesty (group 6): an unreachable corpus is NOT a missing section.
+            logger.warning("statute_fetch_failed", error=str(exc))
+            unavailable = ToolResult.unavailable_result(
+                reason=f"statute corpus unreachable ({type(exc).__name__})",
+                act_name=act_name,
+                section_ref=section_ref,
+            )
+            return unavailable.model_dump()
 
         if row is None:
             result = ToolResult.fail(
@@ -145,29 +153,25 @@ async def _fetch_statute_section(
         LIMIT 1
         """
     )
-    try:
-        async with db_engine.connect() as conn:
-            row = (
-                await conn.execute(
-                    query,
-                    {
-                        "act_name": f"%{act_name}%",
-                        "section_ref": section_ref.strip(),
-                        "jurisdiction": f"%{jurisdiction}%",
-                    },
-                )
-            ).fetchone()
-            if row is None:
-                return None
-            return {
-                "id": row[0],
-                "act_name": row[1],
-                "section_ref": row[2],
-                "title": row[3],
-                "body": row[4],
-                "jurisdiction": row[5],
-                "year": row[6],
-            }
-    except SQLAlchemyError as exc:
-        logger.warning("statute_fetch_failed", error=str(exc))
-        return None
+    async with db_engine.connect() as conn:
+        row = (
+            await conn.execute(
+                query,
+                {
+                    "act_name": f"%{act_name}%",
+                    "section_ref": section_ref.strip(),
+                    "jurisdiction": f"%{jurisdiction}%",
+                },
+            )
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "act_name": row[1],
+            "section_ref": row[2],
+            "title": row[3],
+            "body": row[4],
+            "jurisdiction": row[5],
+            "year": row[6],
+        }

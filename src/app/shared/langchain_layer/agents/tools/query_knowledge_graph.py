@@ -15,19 +15,16 @@ instead of a plain vector search: context + connections, not just similarity.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import tool
+from langchain_core.tools.base import BaseTool
 
 from app.utils import logger
 
 from .idempotency import IdempotencyGuard, ToolResult
 
 if TYPE_CHECKING:
-    from typing import Any
-
-    from langchain_core.tools.base import BaseTool
-
     from app.shared.rag.graphiti.client import GraphitiService
 
 

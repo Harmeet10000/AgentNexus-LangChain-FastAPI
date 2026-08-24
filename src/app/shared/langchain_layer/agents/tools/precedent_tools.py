@@ -14,9 +14,10 @@ scope=PRECEDENT_SCOPE enforced: all entity types, all sources, depth=3, all time
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import tool
+from langchain_core.tools.base import BaseTool
 
 from app.utils import logger
 
@@ -24,9 +25,6 @@ from ..memory.memory_scope import PRECEDENT_SCOPE
 from .idempotency import IdempotencyGuard, ToolResult
 
 if TYPE_CHECKING:
-    from typing import Any
-
-    from langchain_core.tools.base import BaseTool
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from app.shared.rag.graphiti.client import GraphitiService
@@ -89,14 +87,19 @@ def make_hybrid_retrieve_precedents_tool(
             log.debug("precedent_hybrid_cache_hit")
             return cached.model_dump()
 
-        # Layer 1: pgvector clause similarity
-        vector_results = await _vector_search_clauses(
-            _db_engine=db_engine,
-            _user_id=user_id,
-            _query=query,
-            _num_results=num_results,
-            _time_filter="all",
-        )
+        # Layer 1: pgvector clause similarity — may be genuinely unavailable.
+        unavailable_layers: list[str] = []
+        try:
+            vector_results = await _vector_search_clauses(
+                _db_engine=db_engine,
+                _user_id=user_id,
+                _query=query,
+                _num_results=num_results,
+                _time_filter="all",
+            )
+        except RuntimeError:
+            unavailable_layers.append("pgvector_clauses")
+            vector_results = []
 
         # Layer 2: Graphiti semantic entity search
         graphiti_results = await graphiti_service.search_for_precedent_chains(
@@ -114,8 +117,17 @@ def make_hybrid_retrieve_precedents_tool(
             group_ids=group_ids,
         )
 
+        if unavailable_layers and not graphiti_results:
+            # Nothing answered: report unavailability, never a fabricated empty answer.
+            unavailable = ToolResult.unavailable_result(
+                reason="no precedent layer available: " + ", ".join(unavailable_layers),
+                tool="hybrid_retrieve_precedents",
+            )
+            return unavailable.model_dump()
+
         result = ToolResult.ok(
             data={
+                "unavailable_layers": unavailable_layers,
                 "vector_clauses": vector_results[:num_results],
                 "graphiti_precedents": [
                     {
@@ -231,10 +243,11 @@ async def _vector_search_clauses(
     """pgvector cosine similarity search on clauses table.
 
     Time filter: "recent" = last 90 days; "all" = no constraint.
-    TODO: embed query using same model as ingestion and pass as vector.
-    Until then returns empty — prevents hallucinated precedents.
+
+    Raises:
+        RuntimeError: always, until the query embedding lands. The caller
+            reports this layer as UNAVAILABLE instead of folding a silent empty
+            list into results that read as "no precedents exist".
     """
-    # TODO: embed query and use <=> cosine operator  # noqa: FIX002
-    # query_vector = await embedding_fn(query)
-    # Currently returns empty — safe default
-    return []
+    msg = "pgvector clause layer not provisioned: query embedding not implemented"
+    raise RuntimeError(msg)
