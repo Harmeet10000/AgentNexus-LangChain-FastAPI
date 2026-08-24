@@ -1,5 +1,6 @@
 """LangChain tool for web crawling."""
 
+import asyncio
 import contextlib
 from typing import Any, override
 
@@ -34,6 +35,11 @@ class CrawlUrlTool(BaseTool):
     Returns markdown content, optionally with structured data extraction or summary.
     """
     args_schema: type[CrawlUrlInput] = CrawlUrlInput
+
+    def _run(self, *args: Any, **kwargs: Any) -> str:
+        """Synchronous fallback — langchain declares _run abstract; async-first tools bridge it."""
+
+        return asyncio.run(self._arun(*args, **kwargs))
 
     @override
     async def _arun(
