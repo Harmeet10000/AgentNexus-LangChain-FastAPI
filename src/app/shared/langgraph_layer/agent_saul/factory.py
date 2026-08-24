@@ -3,10 +3,15 @@
 from typing import Any, cast
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import ToolRetryMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict
 
+from app.shared.langchain_layer.agents.tools.registry import (
+    get_tool_registry,
+    register_default_tools,
+)
 from app.shared.rag.graphiti.registry import AgentToolBundle
 
 from .nodes import (
@@ -108,17 +113,28 @@ def build_agent_registry(
       Pro  (thinking_level=high)  → deep reasoning: orchestrator, risk, compliance
       Flash (thinking_level=none) → fast structural: qna, planner, pipeline nodes
     """
-    # --- create_agent nodes (Pro LLM + tool stubs) -------------------------
+    # --- create_agent nodes (Pro LLM + bound tools) ------------------------
+    # Tools resolve through the explicit registry (group 3); the handoff tools
+    # make the orchestrator reachable from sub-agents. Errors surface through
+    # the standard retry middleware — the only mechanism create_agent runs.
+    registry_tools = get_tool_registry
+    risk_tools = ["transfer_to_orchestrator", "transfer_to_compliance"]
+    compliance_tools = ["transfer_to_orchestrator", "transfer_to_risk"]
+    if len(get_tool_registry()) == 0:
+        register_default_tools()
+
     risk_agent = create_agent(
         model=pro_llm,
-        tools=[],  # TODO: add search_caselaw, retrieve_statute tools  # noqa: FIX002
+        tools=[registry_tools().get(name) for name in risk_tools],
         system_prompt=_RISK_ANALYSIS_SYSTEM_PROMPT,
+        middleware=[ToolRetryMiddleware(max_retries=3)],
     )
 
     compliance_agent = create_agent(
         model=pro_llm,
-        tools=[],  # TODO: add retrieve_precedent, check_statute tools  # noqa: FIX002
+        tools=[registry_tools().get(name) for name in compliance_tools],
         system_prompt=_COMPLIANCE_SYSTEM_PROMPT,
+        middleware=[ToolRetryMiddleware(max_retries=3)],
     )
 
     # --- with_structured_output chains (Flash LLM) -------------------------

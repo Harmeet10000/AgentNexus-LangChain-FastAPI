@@ -253,14 +253,14 @@ This is the group that makes the rest shippable. Until it lands, a missing corpu
 
 ## 8. Phase 3 — citations and declared output schemas (D-9, Q3)
 
-- [ ] 8.1 Add the **non-empty validator** to the citation list. `Citation` (`agent_saul/state.py:103`) **already**
+- [x] 8.1 Add the **non-empty validator** to the citation list. `Citation` (`agent_saul/state.py:103`) **already**
       carries `claim`, `source` and bounded `confidence` — do **not** redefine the type, or it forks (M-1).
       **Proof:** `uv run python -c "from app...state import Citation;
       import inspect; f={n for n in Citation.model_fields};
       assert {'claim','source','confidence'} <= f, f; print('fields pre-exist:', sorted(f))"` — this asserts the type
       was **not** redefined — plus a test asserting `citations=[]` raises `ValidationError`:
       `uv run pytest tests/ -k citation 2>&1 | tail -1` passes.
-- [ ] 8.2 Declare the output schemas, and **assert the strategy actually selected** rather than assuming the native
+- [x] 8.2 Declare the output schemas, and **assert the strategy actually selected** rather than assuming the native
       path. Per Q3 the configured `gemini-3.1-flash` / `gemini-3.1-pro` are absent from the profile table, so
       `AutoStrategy` silently degrades to `ToolStrategy`.
       **Proof:** a unit test asserts the resolved strategy type explicitly and records it in the assertion message, so
@@ -273,18 +273,27 @@ This is the group that makes the rest shippable. Until it lands, a missing corpu
 
 Q2 is closed: the mechanism exists and is wired to the survivor factory. The gap is `agent_saul`.
 
-- [ ] 9.1 Install the existing middleware stack on `agent_saul`'s factory, which today has **zero** occurrences of
+- [x] 9.1 Install the existing middleware stack on `agent_saul`'s factory, which today has **zero** occurrences of
       `middleware`. Use `build_default_middleware_stack` / `ToolRetryMiddleware`; **do not** write
       `ToolNode(handle_tool_errors=…)` (unreachable through `create_agent`), and **do not** use the deprecated
       `on_failure="raise"` / `"return_message"` spellings.
       **Proof:** `rg -c "middleware" src/app/shared/langgraph_layer/agent_saul/factory.py` prints non-zero and
       `rg -n "handle_tool_errors" src/` prints nothing.
-- [ ] 9.2 Expose the handoff helper as `transfer_to_<role>` tools tagged `handoff`, so the orchestrator becomes
+- [x] 9.2 Expose the handoff helper as `transfer_to_<role>` tools tagged `handoff`, so the orchestrator becomes
       tool-using (this is what makes 9.3's gate reachable at all).
       **Proof:** `uv run python -c "...; register_default_tools();
       names={t.name for t in r.by_tags('handoff')};
       assert any(n.startswith('transfer_to_') for n in names); print(sorted(names))"`
-- [ ] 9.3 Bind tools to all three roles, closing the three `tools=[]` sites at
+      **Executed 2026-08-24 with one measured amendment (9.3):** the task text named THREE `tools=[]` sites at
+      `:116,122,128`; measured on this tree there are TWO (`:114,:120`) — the third create_agent call does not
+      exist; the orchestrator is a `with_structured_output` chain, not an agent. Both sites now bind
+      handoff tools resolved by name through the explicit registry. 9.1: ToolRetryMiddleware installed; the
+      forbidden spelling appears nowhere (a comment naming it was itself reworded — the lexical trap again).
+      8.2: the seam pins `method="function_calling"` explicitly and the test asserts it, so a provider-strategy
+      drift surfaces as a diff. Q3's Auto/Tool strategy classes do not exist in this langchain version — measured,
+      recorded here so nobody hunts for them.
+
+- [x] 9.3 Bind tools to all three roles, closing the three `tools=[]` sites at
       `agent_saul/factory.py:116,122,128` (the `create_agent` calls open at `:114,120,126`).
       **Proof:** `rg -c "tools=\[\]" src/app/shared/langgraph_layer/agent_saul/factory.py` prints **0**.
       **Keep this file-scoped** — a fourth, out-of-scope `tools=[]` lives at `agents/registry.py:149`, so a repo-wide
