@@ -109,3 +109,52 @@ ends.
   the app continues without a task queue, as designed.
 * Neo4j was resumed partway through the session; F1's fix additionally covers
   the down case permanently.
+
+---
+
+## Second pass — 2026-08-24 (later same day)
+
+### F4 — P1 — `/health` returned 500 under `src.app.main:app` launches — FIXED
+
+**What happened.** With the app launched as `uvicorn src.app.main:app`, `GET /health`
+consistently returned 500: pydantic rejected the probe results with
+`Input should be a valid dictionary or instance of DependencyHealth` even though
+the probes *did* return `DependencyHealth` instances. The same code served 200
+when launched as `app.main:app`.
+
+**Why it broke.** Dual module identity. The launch string `src.app.main:app`
+makes Python import every module twice under two names (`src.app.utils.response_type`
+vs `app.utils.response_type`), because internal imports are absolute (`from app.…`).
+`main.py` builds `HealthResponse` against one class; the middleware probes
+returned instances of the other; pydantic's isinstance check failed.
+
+**Fix.** `src/app/middleware/health_check.py` imports `DependencyHealth`
+relatively (`from ..utils import …`) so probe instances always match the class
+`main.py` validates against, whichever entrypoint spelling is used.
+Verified: `/health` → 200 under **both** `app.main:app` and `src.app.main:app`.
+
+### F5 — P2 — Postgres probe always reported `unknown/unhealthy` — FIXED
+
+**What happened.** The deep-health dependency list showed postgres as
+`unknown` + unhealthy on every request even while Postgres was connected and
+serving traffic.
+
+**Why it broke.** Two stacked bugs in `check_postgres`: it re-wrapped
+`app.state.db_engine` (already an `AsyncEngine`) in another `AsyncEngine`,
+which makes SQLAlchemy fall back to a sync driver and raise
+*"required an async execution but none was detected"* (xd1r) on every probe;
+and its `except (OSError, TimeoutError)` list did not include
+`SQLAlchemyError`, so the error escaped as an unnamed failure instead of
+`fail("postgres", …)`.
+
+**Fix.** Use the engine directly; catch `SQLAlchemyError` too.
+Verified live: all six dependencies report healthy.
+
+### Startup-failure triage note
+
+The user-reported startup exit (`PostgreSQL startup failed` at
+`lifespan.py:181`) was caused by total DNS loss in that shell
+(`gaierror: Temporary failure in name resolution` for Postgres, Redis and
+LangSmith simultaneously). Postgres fail-fast is deliberate — it is the primary
+store; Neo4j/Celery/Graphiti degrade to 503s instead. If graceful degradation
+is preferred for Postgres too, that is a one-line policy change in lifespan.
