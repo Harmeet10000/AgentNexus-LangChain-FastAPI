@@ -1,0 +1,58 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "AgentNexus FastAPI",
+  "description": "Production LangChain + FastAPI platform for legal AI agents.",
+  "colors": {
+    "primary": "#1a56db",
+    "light": "#3b82f6",
+    "dark": "#1d4ed8"
+  },
+  "logo": {
+    "light": "/images/logo-light.svg",
+    "dark": "/images/logo-dark.svg"
+  },
+  "favicon": "/images/favicon.svg",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "pages": ["get-started/overview", "get-started/quickstart", "get-started/project-structure"]
+      },
+      { "group": "Core Concepts", "pages": ["concepts/index"] },
+      { "group": "Architecture", "pages": ["architecture/index"] },
+      { "group": "Guides", "pages": ["guides/index"] },
+      {
+        "group": "API Reference",
+        "pages": ["api-reference/overview", "api-reference/authentication", "api-reference/errors"]
+      },
+      { "group": "Configuration", "pages": ["configuration/environment-variables"] },
+      { "group": "Deployment", "pages": ["deployment/index"] },
+      { "group": "Development", "pages": ["development/index"] },
+      { "group": "Resources", "pages": ["resources/security", "resources/faq"] }
+    ]
+  },
+  "topbarLinks": [
+    { "name": "API Reference", "url": "/api-reference" }
+  ],
+  "topbarCtaButton": {
+    "name": "GitHub",
+    "url": "https://github.com/Harmeet10000/langchain-fastapi-production"
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Harmeet10000/langchain-fastapi-production"
+    }
+  },
+  "seo": {
+    "metatags": {
+      "description": "Production documentation for the AgentNexus LangChain-FastAPI legal AI platform."
+    }
+  },
+  "integrations": {
+    "options": {}
+  },
+  "redirects": [
+    { "source": "/security", "destination": "/resources/security" }
+  ]
+}

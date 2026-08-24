@@ -1,20 +1,35 @@
 ## 1. Scaffold and Configuration
 
-- [ ] 1.1 Create `docs-site/` directory with full directory structure (all navigation groups as subdirectories, `images/`, `scripts/`)
-- [ ] 1.2 Write `mint.json` with complete 9-group navigation (Get Started, Core Concepts, Architecture, Guides, API Reference, Configuration, Deployment, Development, Resources), colors, favicon, logo, topbar, footer, SEO, integrations, feedback
-- [ ] 1.3 Create light and dark mode logo SVGs in `docs-site/images/`
-- [ ] 1.4 Create favicon SVG in `docs-site/images/`
-- [ ] 1.5 Write `404.mdx` with navigation help and search bar
-- [ ] 1.6 Configure redirects in `mint.json` (at minimum: `/security` → `/resources/security`)
-- [ ] 1.7 Write `.gitignore` entries for `docs-site/.mintlify/` and `docs-site/node_modules/`
-- [ ] 1.8 Delete `docs-mint.json` from repo root (moved into this change)
+- [x] 1.1 Create `docs-site/` directory with full directory structure (all navigation groups as subdirectories, `images/`, `scripts/`)
+- [x] 1.2 Write `mint.json` with complete 9-group navigation (Get Started, Core Concepts, Architecture, Guides, API Reference, Configuration, Deployment, Development, Resources), colors, favicon, logo, topbar, footer, SEO, integrations, feedback
+- [x] 1.3 Create light and dark mode logo SVGs in `docs-site/images/`
+- [x] 1.4 Create favicon SVG in `docs-site/images/`
+- [x] 1.5 Write `404.mdx` with navigation help and search bar
+- [x] 1.6 Configure redirects in `mint.json` (at minimum: `/security` → `/resources/security`)
+- [x] 1.7 Write `.gitignore` entries for `docs-site/.mintlify/` and `docs-site/node_modules/`
+      **Executed 2026-08-24 (first tranche).** Scaffold complete: 9-group mint.json (colors, logos, favicon,
+      topbar, footer, SEO, redirects incl. /security -> /resources/security), 14 MDX pages + 404.mdx seeded,
+      SVG logos/favicon. `docs-mint.json` deleted (content absorbed; its page slugs intentionally reorganised
+      under group directories — Mintlify requires file paths to match navigation).
+      1.9 (`npx mintlify dev`) NOT verified: requires an interactive browser session; left open.
+
+- [x] 1.8 Delete `docs-mint.json` from repo root (moved into this change)
 - [ ] 1.9 Verify `npx mintlify dev` starts and renders the empty site without errors
 
 ## 2. OpenAPI Spec Extraction
 
-- [ ] 2.1 Write `scripts/extract_openapi.py` — starts FastAPI app in subprocess, fetches `/openapi.json`, validates against OpenAPI 3.1 schema, saves to `docs-site/openapi.json`
-- [ ] 2.2 Run extraction script and commit the initial `openapi.json` snapshot
-- [ ] 2.3 Configure `mint.json` API Reference navigation group with `"openapi": "openapi.json"`
+- [x] 2.1 Write `scripts/extract_openapi.py` — starts FastAPI app in subprocess, fetches `/openapi.json`, validates against OpenAPI 3.1 schema, saves to `docs-site/openapi.json`
+- [x] 2.2 Run extraction script and commit the initial `openapi.json` snapshot
+      **Executed 2026-08-24.** Script rewritten after measuring two environment facts: (a) the app serves its
+      schema at `/swagger.json` under production hardening (main.py:62), not `/openapi.json`; (b) uvicorn-under-
+      subprocess made readiness polling flaky and lifespan blocks on a graph host that does not resolve here.
+      Final form builds the real app in-process and fetches through an ASGI transport with lifespan never run;
+      snapshot committed at **74 paths**. Extraction surfaced and fixed SEVEN latent not-fully-defined defects
+      across plans/subscriptions/payments/invoices/agent_saul DTOs and dependencies — OpenAPI generation walks
+      every response model, which no test had ever done.
+      2.4/2.5 (browser rendering + playground) need a human with a browser; left open.
+
+- [x] 2.3 Configure `mint.json` API Reference navigation group with `"openapi": "openapi.json"`
 - [ ] 2.4 Manually verify that Mintlify renders all 30+ endpoints grouped by tag
 - [ ] 2.5 Verify interactive API playground works (users can test endpoints from browser)
 

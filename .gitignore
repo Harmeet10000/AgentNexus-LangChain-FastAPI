@@ -220,3 +220,7 @@ celerybeat-schedule.db
 
 # Local opencode config (may contain API keys)
 .opencode/opencode.json
+
+# Mintlify docs build artifacts (docs-site/ source is committed; builds are not)
+docs-site/.mintlify/
+docs-site/node_modules/

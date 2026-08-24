@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.features.invoices.report import ReportFormat
-
-if TYPE_CHECKING:
-    from datetime import datetime
-
-    from app.features.invoices.report import ReportType
+from app.features.invoices.report import ReportFormat, ReportType
 
 
 class InvoiceLineItemDTO(BaseModel):
