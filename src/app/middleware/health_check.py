@@ -12,9 +12,12 @@ import time
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.utils import DependencyHealth, logger
+# Relative import is deliberate: when launched as `src.app.main:app`, absolute
+# `app.*` imports create a second module identity, and DependencyHealth
+# instances would fail HealthResponse's isinstance validation in main.py.
+from ..utils import DependencyHealth, logger
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -26,12 +29,14 @@ async def check_postgres(app: FastAPI) -> DependencyHealth:
     """Verify PostgreSQL connectivity via a lightweight SELECT 1."""
     start = time.perf_counter()
     try:
+        # db_engine IS an AsyncEngine already — re-wrapping it makes SQLAlchemy
+        # fall back to the sync driver and raises xd1r on every probe.
         engine = app.state.db_engine
-        async with AsyncEngine(engine).connect() as conn:
+        async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         latency = (time.perf_counter() - start) * 1000
         return DependencyHealth.ok("postgres", latency)
-    except (OSError, TimeoutError) as exc:
+    except (OSError, TimeoutError, SQLAlchemyError) as exc:
         latency = (time.perf_counter() - start) * 1000
         logger.warning("Health check failed", dependency="postgres", error=str(exc))
         return DependencyHealth.fail("postgres", str(exc), latency)
