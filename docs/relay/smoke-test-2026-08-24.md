@@ -158,3 +158,29 @@ The user-reported startup exit (`PostgreSQL startup failed` at
 LangSmith simultaneously). Postgres fail-fast is deliberate — it is the primary
 store; Neo4j/Celery/Graphiti degrade to 503s instead. If graceful degradation
 is preferred for Postgres too, that is a one-line policy change in lifespan.
+
+### F6 — Crawl4AI browser failed to start on Ubuntu 26.04 — FIXED
+
+**What happened.** Startup logged
+`Crawl4AI browser startup failed … BrowserType.launch: Executable doesn't exist
+at ~/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome`, and Playwright's
+own `playwright install chromium` refused with *"Playwright does not support
+chromium on ubuntu26.04-x64"*.
+
+**Why it broke.** Playwright 1.58 gates browser downloads on a host-platform tag
+derived from `/etc/os-release`; Ubuntu 26.04 has no entry in its registry, so
+the resolver never produced a download path — and Crawl4AI's lifespan step
+therefore had no executable to launch.
+
+**Fix.** Playwright honours `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE`. The ubuntu-24.04
+build is glibc-forward-compatible on 26.04:
+
+1. `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64 uv run playwright install chromium`
+2. `src/app/connections/crawl4ai.py` now sets that override automatically at
+   import time when unset, only on Linux hosts with VERSION_ID > 24 — an
+   operator's explicit env value always wins.
+
+**Verification.** Direct headless launch renders a page; app startup logs
+`Crawl4AI browser initialized`; full battery green with Neo4j resumed:
+all six dependencies healthy, v1/v2 parity intact (31/56 paths), auth cycle
+correct.

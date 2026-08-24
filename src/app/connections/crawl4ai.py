@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import pathlib
+import sys
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
@@ -15,6 +18,32 @@ if TYPE_CHECKING:
 
     from app.shared.crawler import WebCrawler
     from app.shared.crawler.config import CrawlerConfig
+
+
+def _ensure_playwright_platform_override() -> None:
+    """Playwright refuses to resolve browsers on Ubuntu > 24.04 (unsupported tag).
+
+    The ubuntu-24.04 build is glibc-forward-compatible, so point the resolver at
+    it when no explicit override is set. Only on Linux, only when unset — an
+    operator's own override always wins.
+    """
+    if sys.platform != "linux" or os.environ.get("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE"):
+        return
+    try:
+        version_id = ""
+        with pathlib.Path("/etc/os-release").open(encoding="ascii") as release:
+            for line in release:
+                if line.startswith("VERSION_ID="):
+                    version_id = line.split("=", maxsplit=1)[1].strip().strip('"')
+                    break
+        major = int(version_id.split(".")[0])
+    except (OSError, ValueError, IndexError):
+        return
+    if major > 24:
+        os.environ["PLAYWRIGHT_HOST_PLATFORM_OVERRIDE"] = "ubuntu24.04-x64"
+
+
+_ensure_playwright_platform_override()
 
 
 async def create_crawl4ai_crawler() -> AsyncWebCrawler:
