@@ -16,7 +16,7 @@ from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -276,6 +276,16 @@ class FinalReport(BaseModel, frozen=True):
     human_overrides: list[ReviewOverride]
     suggested_actions: list[str]
     citations: list[Citation]
+
+    @field_validator("citations")
+    @classmethod
+    def _citations_non_empty(cls, value: list[Citation]) -> list[Citation]:
+        # D-9: an uncited report reads as grounded. An empty citation list must
+        # fail validation, not flow downstream as a legitimate answer.
+        if not value:
+            msg = "a final report must carry at least one citation"
+            raise ValueError(msg)
+        return value
 
 
 # ---------------------------------------------------------------------------
