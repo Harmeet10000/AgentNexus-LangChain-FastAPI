@@ -82,7 +82,8 @@ def make_search_legal_precedents_tool(
 
         idem_key = IdempotencyGuard.make_key(
             step_id=step_id,
-            input_data={"query": query, "clause_id": clause_id, "jurisdiction": jurisdiction},
+            structural={"clause_id": clause_id, "jurisdiction": jurisdiction},
+            content={"query": query},
             user_id=user_id,
         )
         cached = await idempotency.get(idem_key)

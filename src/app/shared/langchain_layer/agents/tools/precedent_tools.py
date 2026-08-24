@@ -80,7 +80,8 @@ def make_hybrid_retrieve_precedents_tool(
 
         idem_key = IdempotencyGuard.make_key(
             step_id=step_id,
-            input_data={"query": query, "user_id": user_id, "num_results": num_results},
+            structural={"num_results": num_results},
+            content={"query": query},
             user_id=user_id,
         )
         cached = await idempotency.get(idem_key)
@@ -188,7 +189,8 @@ def make_detect_graph_conflicts_tool(
         log = logger.bind(tool="detect_graph_conflicts", doc_id=doc_id)
         idem_key = IdempotencyGuard.make_key(
             step_id=step_id,
-            input_data={"doc_id": doc_id},
+            structural={"doc_id": doc_id},
+            content=None,
             user_id=user_id,
         )
         cached = await idempotency.get(idem_key)

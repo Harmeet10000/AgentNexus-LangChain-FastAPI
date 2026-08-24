@@ -165,7 +165,8 @@ async def _write_single_clause_episode(
 ) -> ClauseWriteResult:
     idem_key = IdempotencyGuard.make_key(
         step_id=f"clause_episode:{segment.clause_id}",
-        input_data={"doc_id": doc_id, "clause_id": segment.clause_id},
+        structural={"doc_id": doc_id, "clause_id": segment.clause_id},
+        content=None,
         user_id=user_id,
     )
 
@@ -234,7 +235,8 @@ async def _write_single_relationship_edge(
 ) -> RelationshipWriteResult:
     idem_key = IdempotencyGuard.make_key(
         step_id=f"rel_edge:{relationship.edge_id}",
-        input_data={"doc_id": doc_id, "edge_id": relationship.edge_id},
+        structural={"doc_id": doc_id, "edge_id": relationship.edge_id},
+        content=None,
         user_id=user_id,
     )
 

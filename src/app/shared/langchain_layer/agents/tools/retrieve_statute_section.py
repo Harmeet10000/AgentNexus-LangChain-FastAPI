@@ -65,11 +65,12 @@ def make_retrieve_statute_section_tool(
 
         idem_key = IdempotencyGuard.make_key(
             step_id=step_id,
-            input_data={
+            structural={
                 "act_name": act_name,
                 "section_ref": section_ref,
                 "jurisdiction": jurisdiction,
             },
+            content=None,
             user_id=user_id,
         )
         cached = await idempotency.get(idem_key)
