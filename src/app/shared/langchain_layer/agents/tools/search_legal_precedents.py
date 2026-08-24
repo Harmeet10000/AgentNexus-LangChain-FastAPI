@@ -169,36 +169,27 @@ async def _search_statutes_postgres(
     jurisdiction: str,
     limit: int,
 ) -> list[dict[str, Any]]:
-    """Full-text search against the statutes table.
+    """Full-text statute search over the unified chunk corpus.
 
-    Assumes schema:
-        statutes (
-            id          UUID PRIMARY KEY,
-            title       TEXT,
-            section_ref VARCHAR(64),
-            body        TEXT,
-            jurisdiction VARCHAR(128),
-            act_name    VARCHAR(255),
-            year        INT,
-            fts_vector  TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', body)) STORED
-        )
-        CREATE INDEX ON statutes USING gin(fts_vector);
+    Task 11.1: the superseded `statutes` relation is created by no migration;
+    retrieval resolves against `chunks.search_text`, which change 0 indexes
+    (trgm GIN) and ranks by trigram similarity.
     """
     query_sql = text(
         """
         SELECT
             id::text,
-            title,
+            instrument_name AS title,
             section_ref,
-            LEFT(body, 500) AS excerpt,
-            jurisdiction,
-            act_name,
-            year,
-            ts_rank(fts_vector, plainto_tsquery('english', :query)) AS rank
-        FROM statutes
+            LEFT(content, 500) AS excerpt,
+            document_id::text AS document_id,
+            instrument_name AS act_name,
+            instrument_year AS year,
+            similarity(search_text, :query) AS rank
+        FROM chunks
         WHERE
-            jurisdiction ILIKE :jurisdiction
-            AND fts_vector @@ plainto_tsquery('english', :query)
+            instrument_name IS NOT NULL
+            AND search_text %% :query ::text
         ORDER BY rank DESC
         LIMIT :limit
         """
@@ -215,16 +206,16 @@ async def _search_statutes_postgres(
             )
         ).fetchall()
         return [
-                {
-            "id": str(row[0]),
-            "title": row[1],
-            "section_ref": row[2],
-            "excerpt": row[3],
-            "jurisdiction": row[4],
-            "act_name": row[5],
-            "year": row[6],
-            "rank": float(row[7]),
-            "source": "postgres_statutes",
-        }
-        for row in rows
-    ]
+            {
+                "id": str(row[0]),
+                "title": row[1],
+                "section_ref": row[2],
+                "excerpt": row[3],
+                "jurisdiction": None,
+                "act_name": row[5],
+                "year": row[6],
+                "rank": float(row[7]),
+                "source": "unified_corpus",
+            }
+            for row in rows
+        ]

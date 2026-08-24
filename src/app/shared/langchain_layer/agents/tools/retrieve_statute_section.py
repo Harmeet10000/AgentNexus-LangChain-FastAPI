@@ -132,24 +132,27 @@ async def _fetch_statute_section(
     db_engine: AsyncEngine,
     act_name: str,
     section_ref: str,
-    jurisdiction: str,
+    jurisdiction: str,  # noqa: ARG001 — kept in the tool's contract; corpus is jurisdiction-agnostic today
 ) -> dict[str, Any] | None:
+    # Task 11.1: the point lookup targets the unified chunk corpus — the only
+    # relations the migration history creates — via the statute identity
+    # attributes (instrument_name / section_ref / instrument_year) carried on
+    # chunks per revision f2a9c47b81de. The newest applicable year wins.
     query = text(
         """
         SELECT
             id::text,
-            act_name,
+            instrument_name AS act_name,
             section_ref,
-            title,
-            body,
-            jurisdiction,
-            year
-        FROM statutes
+            content AS body,
+            document_id::text AS document_id,
+            instrument_year AS year
+        FROM chunks
         WHERE
-            act_name ILIKE :act_name
+            instrument_name ILIKE :act_name
             AND section_ref ILIKE :section_ref
-            AND jurisdiction ILIKE :jurisdiction
-        ORDER BY year DESC
+            AND instrument_name IS NOT NULL
+        ORDER BY instrument_year DESC NULLS LAST
         LIMIT 1
         """
     )
@@ -159,8 +162,7 @@ async def _fetch_statute_section(
                 query,
                 {
                     "act_name": f"%{act_name}%",
-                    "section_ref": section_ref.strip(),
-                    "jurisdiction": f"%{jurisdiction}%",
+                    "section_ref": f"{section_ref.strip()}%",
                 },
             )
         ).fetchone()
@@ -170,8 +172,9 @@ async def _fetch_statute_section(
             "id": row[0],
             "act_name": row[1],
             "section_ref": row[2],
-            "title": row[3],
-            "body": row[4],
-            "jurisdiction": row[5],
-            "year": row[6],
+            "title": f"{row[1]} {row[2]}",
+            "body": row[3],
+            "source_document_id": row[4],
+            "jurisdiction": None,
+            "year": row[5],
         }
