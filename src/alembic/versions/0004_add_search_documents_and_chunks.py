@@ -1,7 +1,7 @@
 """Add search documents and chunks schema
 
-Revision ID: 8a7d9b1c2e3f
-Revises: 2bc7726317f6
+Revision ID: 0004
+Revises: 0002
 Create Date: 2026-04-05 00:00:00.000000
 
 """
@@ -15,8 +15,8 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "8a7d9b1c2e3f"
-down_revision: str | None = "2bc7726317f6"
+revision: str = "0004"
+down_revision: str | None = "0002"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -94,7 +94,7 @@ ORPHANED_TABLE = "ORPHANED_TABLE"
 UNPARSED_SOURCE = "UNPARSED_SOURCE"
 
 # Implicit string concatenation is how long DDL actually gets written, and it defeats every
-# pattern above. `0004_subscriptions_allow_resubscribe.py` reads:
+# pattern above. `0009_subscriptions_allow_resubscribe.py` reads:
 #
 #     op.execute(
 #         f"CREATE UNIQUE INDEX uq_subscriptions_user_plan_active "

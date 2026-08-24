@@ -1,7 +1,7 @@
 """add unified documents and chunks
 
-Revision ID: a71f0d7d9c12
-Revises: 2bc7726317f6
+Revision ID: 0003
+Revises: 0002
 Create Date: 2026-06-13 00:00:00.000000
 """
 
@@ -13,8 +13,8 @@ from pgvector.sqlalchemy import Vector
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "a71f0d7d9c12"
-down_revision = "2bc7726317f6"
+revision = "0003"
+down_revision = "0002"
 branch_labels = None
 depends_on = None
 

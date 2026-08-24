@@ -1,7 +1,7 @@
 """rename_metadata_to_meta_data
 
-Revision ID: 2bc7726317f6
-Revises: c0c17c6eb1cc
+Revision ID: 0002
+Revises: 0001
 Create Date: 2026-02-24 21:00:12.262132
 
 """
@@ -11,8 +11,8 @@ from collections.abc import Sequence
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "2bc7726317f6"
-down_revision: str | None = "c0c17c6eb1cc"
+revision: str = "0002"
+down_revision: str | None = "0001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

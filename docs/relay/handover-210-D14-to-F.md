@@ -164,7 +164,7 @@ Nothing has been edited for step 14. What is already known:
 **Verify this first, before writing a line.** Step 15 adds three columns to the ORM with **no
 `ALTER`**, on the stated basis that they ship in change 0's `CREATE TABLE`. Change 0 is *done*.
 So go read `src/alembic/versions/a71f0d7d9c12_add_unified_documents_and_chunks.py` and
-`b3e7c41d92af_create_the_five_phantom_relations.py` and confirm they create `instrument_name`,
+`0014_create_the_five_phantom_relations.py` and confirm they create `instrument_name`,
 `section_ref` and `instrument_year` on `chunks`. **If they do not, adding them to the ORM creates
 ORM/DB divergence, and the static gate will not catch it — it checks index and constraint names,
 not columns.** In that case the honest move is to add the columns *and* a migration, or to stop and

@@ -1,7 +1,7 @@
 """Authoritative target shape: outbox, unified documents/chunks, retrieval indexes.
 
-Revision ID: a5bd6b69a28e
-Revises: 9b6bf3d1d548
+Revision ID: 0013
+Revises: 0012
 Create Date: 2026-08-22 23:05:00.000000
 
 Defines the whole target shape in one place, forward-only and idempotent.
@@ -10,7 +10,7 @@ Why raw ``IF NOT EXISTS`` DDL instead of ORM operations
 -------------------------------------------------------
 Two load-bearing reasons, not a style preference:
 
-1. ``a71f0d7d9c12`` is **unstamped and will execute on the next upgrade**,
+1. ``0008`` is **unstamped and will execute on the next upgrade**,
    creating ``documents`` and ``chunks`` *before* this revision runs.
    Non-idempotent DDL would fail on a duplicate relation.
 2. An inspector-based guard needs a **live connection**, which would destroy
@@ -71,7 +71,7 @@ failure is recognised as an environment prerequisite and not read as a defect
 in this revision.
 
 ``pg_trgm`` is the one genuine repair in this block: it is absent from the
-deployed instance, it is ``trusted``, and ``a71f0d7d9c12`` — which executes
+deployed instance, it is ``trusted``, and ``0008`` — which executes
 before this revision — opens by creating it alongside ``uuid-ossp``. Both were
 verified creatable under the deployed role by executing the statement inside a
 rolled-back transaction, so the chain's first revision cannot abort on them.
@@ -84,7 +84,7 @@ index of the right shape under a different name **matches nothing and reports
 no error**. The binding contract for these relations is therefore the literal
 ``'chunks_bm25_idx'``, which appears six times in
 ``features/documents/repository.py`` (``:331``, ``:335``, ``:339``, ``:543``, …)
-and matches the name ``a71f0d7d9c12`` already declares. Every retrieval index
+and matches the name ``0008`` already declares. Every retrieval index
 below is created under the exact name that revision uses, so the two converge
 instead of producing two differently-named indexes of the same shape.
 
@@ -118,9 +118,9 @@ declaration is what makes it safe.
 
 Reversal
 --------
-``downgrade()`` is an intentional no-op. See ``9b6bf3d1d548`` — reversal below
+``downgrade()`` is an intentional no-op. See ``0012`` — reversal below
 that merge is unsupported, and dropping these relations here would re-break
-the two public endpoints above while leaving ``0001`` and ``a71f0d7d9c12``
+the two public endpoints above while leaving ``0006`` and ``0008``
 still claiming to have created them.
 """
 
@@ -128,8 +128,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "a5bd6b69a28e"
-down_revision: str | Sequence[str] | None = "9b6bf3d1d548"
+revision: str = "0013"
+down_revision: str | Sequence[str] | None = "0012"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

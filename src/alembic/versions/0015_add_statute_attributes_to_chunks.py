@@ -30,8 +30,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "f2a9c47b81de"
-down_revision: str | tuple[str, ...] | None = "b3e7c41d92af"
+revision: str = "0015"
+down_revision: str | tuple[str, ...] | None = "0014"
 branch_labels: str | tuple[str, ...] | None = None
 depends_on: str | tuple[str, ...] | None = None
 

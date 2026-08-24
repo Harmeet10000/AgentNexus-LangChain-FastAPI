@@ -1,29 +1,29 @@
 """Create the five relations the phantom revisions never created.
 
-Revision ID: b3e7c41d92af
-Revises: a5bd6b69a28e
+Revision ID: 0014
+Revises: 0013
 Create Date: 2026-08-23 01:40:00.000000
 
 Why this revision exists
 ------------------------
 The deployed database was **stamped, not migrated**: ``alembic_version`` was set
-to ``0004`` without ``0004``'s ancestors having executed. Five of the eight
+to ``0009`` without ``0009``'s ancestors having executed. Five of the eight
 revisions that stamp marks applied left no relations behind, and because they
 are recorded as applied they will **never execute again**:
 
 ======================  ===============================================
 revision                relations it should have created
 ======================  ===============================================
-``c0c17c6eb1cc``        ``chat_sessions``, ``chat_messages``,
+``0006``        ``chat_sessions``, ``chat_messages``,
                         ``document_vectors``
-``8a7d9b1c2e3f``        ``search_documents``, ``search_chunks``
-``2bc7726317f6``        (a column rename that never happened)
-``9f4a1b7c6d2e``        ``parent_documents``, ``clauses``
-``0001``                ``outbox_events``, ``dead_letter_events``
+``0009``        ``search_documents``, ``search_chunks``
+``0007``        (a column rename that never happened)
+``0010``        ``parent_documents``, ``clauses``
+``0006``                ``outbox_events``, ``dead_letter_events``
 ======================  ===============================================
 
-``0001``'s two relations were repaired by ``a5bd6b69a28e``. This revision
-repairs the five from ``c0c17c6eb1cc`` and ``8a7d9b1c2e3f``. ``9f4a1b7c6d2e``'s
+``0006``'s two relations were repaired by ``0013``. This revision
+repairs the five from ``0006`` and ``0009``. ``0010``'s
 two are deliberately **not** repaired here: ``parent_documents`` and ``clauses``
 were removed from the ORM registry by this same change as dead trees, so
 creating them would reintroduce relations nothing maps.
@@ -50,7 +50,7 @@ Consequences of taking the shape from the ORM rather than from the dead
 revisions, both intentional:
 
 - ``document_vectors`` gets a column named ``metadata``, **not** ``meta_data``.
-  ``2bc7726317f6`` ("rename_metadata_to_meta_data") is one of the phantoms; it
+  ``0007`` ("rename_metadata_to_meta_data") is one of the phantoms; it
   never ran, and the ORM still declares ``metadata``. The ORM is what
   ``alembic check`` compares against, so matching the ORM is what makes the
   drift close.
@@ -62,7 +62,7 @@ revisions, both intentional:
   another. The unindexed ``embedding`` column is real technical debt, and it is
   recorded as such rather than silently patched here: the retrieval path this
   change consolidates onto is ``chunks``, whose three index branches
-  ``a5bd6b69a28e`` creates under their contract names.
+  ``0013`` creates under their contract names.
 
 The enum needs a guard that ``IF NOT EXISTS`` cannot give it
 ------------------------------------------------------------
@@ -87,23 +87,23 @@ Ordering
 --------
 ``search_documents`` precedes ``search_chunks``, which carries
 ``fk_search_chunks_document_id_search_documents``. The three
-``c0c17c6eb1cc`` relations have no foreign keys and no ordering constraint
+``0006`` relations have no foreign keys and no ordering constraint
 among them.
 
 Reversal
 --------
-``downgrade()`` is an intentional no-op, consistent with ``9b6bf3d1d548`` and
-``a5bd6b69a28e``. Reversal below that merge is unsupported, and dropping these
+``downgrade()`` is an intentional no-op, consistent with ``0012`` and
+``0013``. Reversal below that merge is unsupported, and dropping these
 relations would restore precisely the drift this revision closes while leaving
-``c0c17c6eb1cc`` and ``8a7d9b1c2e3f`` still recorded as having created them.
+``0006`` and ``0009`` still recorded as having created them.
 """
 
 from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "b3e7c41d92af"
-down_revision: str | Sequence[str] | None = "a5bd6b69a28e"
+revision: str = "0014"
+down_revision: str | Sequence[str] | None = "0013"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -123,7 +123,7 @@ def upgrade() -> None:
     """)
 
     # ------------------------------------------------------------------
-    # 1. c0c17c6eb1cc's relations: chat + document_vectors.
+    # 1. 0006's relations: chat + document_vectors.
     # ------------------------------------------------------------------
     op.execute("""
         CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -162,7 +162,7 @@ def upgrade() -> None:
     )
     op.execute("CREATE INDEX IF NOT EXISTS ix_chat_messages_user_id ON chat_messages (user_id)")
 
-    # The column is named ``metadata`` because 2bc7726317f6's rename is a
+    # The column is named ``metadata`` because 0002's rename is a
     # phantom — see the docstring. This matches the ORM, which is the
     # comparand ``alembic check`` uses.
     op.execute("""
@@ -188,7 +188,7 @@ def upgrade() -> None:
     )
 
     # ------------------------------------------------------------------
-    # 2. 8a7d9b1c2e3f's relations. search_documents first — search_chunks
+    # 2. 0009's relations. search_documents first — search_chunks
     #    carries the foreign key onto it.
     # ------------------------------------------------------------------
     op.execute("""
