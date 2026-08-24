@@ -40,6 +40,7 @@ class ToolResult(BaseModel):
     )
 
     success: bool
+    unavailable: bool = False
     data: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -51,6 +52,15 @@ class ToolResult(BaseModel):
     @classmethod
     def fail(cls, error: str, **meta: Any) -> ToolResult:
         return cls(success=False, data={}, error=error, metadata=meta)
+
+    @classmethod
+    def unavailable_result(cls, reason: str, **meta: Any) -> ToolResult:
+        """A dependency was not configured / not reachable — distinct from a failure.
+
+        The agent can act on this (skip, degrade, ask the user) where a bare
+        failure reads as "the tool is broken".
+        """
+        return cls(success=False, unavailable=True, data={}, error=reason, metadata=meta)
 
 
 class IdempotencyGuard:

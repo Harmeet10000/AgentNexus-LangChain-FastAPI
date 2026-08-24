@@ -38,10 +38,6 @@ class DeepResearchOutput(BaseModel):
 
     final_report: str
 
-    def to_agent_string(self) -> str:
-        """Return a compact string for tool observations."""
-        return self.final_report
-
 
 def make_deep_research_tool(
     *,
@@ -67,8 +63,7 @@ def make_deep_research_tool(
                 }
             },
         )
-        output = DeepResearchOutput(final_report=str(result.get("final_report", "")))
-        return output.to_agent_string()
+        return str(result.get("final_report", ""))
 
     return StructuredTool.from_function(
         coroutine=run_deep_research,
