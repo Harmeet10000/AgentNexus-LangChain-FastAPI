@@ -68,7 +68,8 @@ def make_query_knowledge_graph_tool(
 
         idem_key = IdempotencyGuard.make_key(
             step_id=step_id,
-            input_data={"query": query, "doc_id": doc_id, "num_results": num_results},
+            structural={"doc_id": doc_id, "num_results": num_results},
+            content={"query": query},
             user_id=user_id,
         )
         cached = await idempotency.get(idem_key)

@@ -67,11 +67,8 @@ def make_get_obligation_chain_tool(
 
         idempotency_key = IdempotencyGuard.make_key(
             step_id=step_id,
-            input_data={
-                "doc_id": doc_id,
-                "entity_name": entity_name,
-                "depth": depth,
-            },
+            structural={"doc_id": doc_id, "depth": depth},
+            content={"entity_name": entity_name},
             user_id=user_id,
         )
 

@@ -28,7 +28,7 @@ from redis.exceptions import RedisError
 
 _REDIS_TTL_SECONDS = 86_400
 _POSTGRES_TTL_DAYS = 30
-_REDIS_KEY_PREFIX = "idempotency:"
+_REDIS_KEY_PREFIX = "idempotency:v2:"
 
 
 class ToolResult(BaseModel):
@@ -72,14 +72,40 @@ class IdempotencyGuard:
         self._log = logger.bind(component="idempotency_guard")
 
     @staticmethod
+    @staticmethod
+    def _canon(value: Any) -> Any:
+        """Canonicalise free-text so trivial wording differences share a key."""
+        if isinstance(value, str):
+            return " ".join(value.lower().split())
+        if isinstance(value, dict):
+            return {k: IdempotencyGuard._canon(v) for k, v in sorted(value.items())}
+        if isinstance(value, list):
+            return [IdempotencyGuard._canon(v) for v in value]
+        return value
+
+    @staticmethod
     def make_key(
+        *,
         step_id: str,
-        input_data: dict[str, Any],
+        structural: dict[str, Any],
         user_id: str,
+        content: dict[str, Any] | None = None,
     ) -> str:
-        """Build a deterministic SHA-256 key for a tool invocation."""
+        """Build a deterministic SHA-256 key for a tool invocation.
+
+        ``structural`` carries the identity parameters that must match exactly;
+        ``content`` carries free-text input, canonicalised before hashing so
+        wording-only drift neither splits the cache nor collides across
+        meaning. Write paths pass ``content=None`` — replaying an identical
+        write must hit.
+        """
         payload = json.dumps(
-            {"step_id": step_id, "input": input_data, "user_id": user_id},
+            {
+                "step_id": step_id,
+                "structural": IdempotencyGuard._canon(structural),
+                "content": IdempotencyGuard._canon(content),
+                "user_id": user_id,
+            },
             sort_keys=True,
             default=str,
         )

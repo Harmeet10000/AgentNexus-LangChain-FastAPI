@@ -171,20 +171,26 @@ expected — if one is needed, the premise in `design.md` phase 1 is wrong and t
 
 ## 5. Phase 2 — the idempotency key contract (D-4)
 
-- [ ] 5.1 Make `make_key` (`idempotency.py:65-76`) keyword-only with an explicit `structural: dict` and optional
+- [x] 5.1 Make `make_key` (`idempotency.py:65-76`) keyword-only with an explicit `structural: dict` and optional
       `content: dict | None`. The opaque `input_data` dict is what allowed the drift.
       **Proof:** `uv run python -c "import inspect; from <mod> import IdempotencyGuard as G;
       p=inspect.signature(G.make_key).parameters;
       assert all(v.kind is v.KEYWORD_ONLY for k,v in p.items() if k!='self');
       assert 'structural' in p and 'content' in p; print(inspect.signature(G.make_key))"`
-- [ ] 5.2 Move the read/search callers onto `structural=` **plus** canonicalised `content=`, and the write path
+- [x] 5.2 Move the read/search callers onto `structural=` **plus** canonicalised `content=`, and the write path
       (`graphiti/write_clause_episodes.py` — `:35` is the *import* of `IdempotencyGuard`; **locate the `make_key` call
       yourself, do not trust `:35`**) onto `content=None`.
       **Proof:** `rg -n "make_key\(" src/` shows every call using keywords;
       `rg -n "make_key\([^)]*content=None" src/app/shared/rag/graphiti/` matches the write path;
       a unit test asserts two differently-worded search queries produce **different** keys and that one write
       replayed twice produces the **same** key.
-- [ ] 5.3 Bump `_REDIS_KEY_PREFIX` (`idempotency.py:31` — distinct from `_POSTGRES_TTL_DAYS` at `:30`). **One cold
+      **Executed 2026-08-24.** All eight call sites retargeted (five read/search onto structural+content, three —
+      statute retrieve, conflict-detect and both graphiti writes — onto explicit `content=None`). Prefix bumped to
+      `idempotency:v2:` (single definition; the second hit is its use in `_redis_key`). Unit tests pin: keyword-only
+      signature, differently-worded queries diverge, whitespace/case drift collapses, write replay collides,
+      content=None ≠ content present.
+
+- [x] 5.3 Bump `_REDIS_KEY_PREFIX` (`idempotency.py:31` — distinct from `_POSTGRES_TTL_DAYS` at `:30`). **One cold
       cache is accepted; no dual read.**
       **Proof:** `rg -n "_REDIS_KEY_PREFIX" src/` shows the bumped literal and exactly one definition;
       `rg -c "_REDIS_KEY_PREFIX" src/` confirms no second prefix was introduced for a fallback read.
