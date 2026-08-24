@@ -104,6 +104,7 @@ class SaulGraphNodes(BaseModel):
 def build_agent_registry(
     pro_llm: BaseChatModel,
     flash_llm: BaseChatModel,
+    tools: AgentToolBundle | None = None,
 ) -> AgentRegistry:
     """
     Instantiate all agents + LLM chains once.
@@ -114,25 +115,38 @@ def build_agent_registry(
       Flash (thinking_level=none) → fast structural: qna, planner, pipeline nodes
     """
     # --- create_agent nodes (Pro LLM + bound tools) ------------------------
-    # Tools resolve through the explicit registry (group 3); the handoff tools
-    # make the orchestrator reachable from sub-agents. Errors surface through
-    # the standard retry middleware — the only mechanism create_agent runs.
-    registry_tools = get_tool_registry
-    risk_tools = ["transfer_to_orchestrator", "transfer_to_compliance"]
-    compliance_tools = ["transfer_to_orchestrator", "transfer_to_risk"]
-    if len(get_tool_registry()) == 0:
-        register_default_tools()
+    # Each role binds the tools its spec assigns (agent-tool-registry):
+    #   risk       -> knowledge-graph query + obligation chain (+ handoff)
+    #   compliance -> precedent search + statute retrieval (+ handoff)
+    # Evidence tools come from the AgentToolBundle wired at graph-build time;
+    # handoff tools resolve through the explicit global registry. Errors
+    # surface through the standard retry middleware — the only mechanism
+    # create_agent runs.
+    register_default_tools()
+    handoff = get_tool_registry()
+
+    def _transfer(name: str) -> Any:
+        return handoff.get(name)
+
+    risk_tools: list[Any] = [_transfer("transfer_to_orchestrator")]
+    compliance_tools: list[Any] = [
+        _transfer("transfer_to_orchestrator"),
+        _transfer("transfer_to_risk"),
+    ]
+    if tools is not None:
+        risk_tools += [tools.query_knowledge_graph, tools.get_obligation_chain]
+        compliance_tools += [tools.search_legal_precedents, tools.retrieve_statute_section]
 
     risk_agent = create_agent(
         model=pro_llm,
-        tools=[registry_tools().get(name) for name in risk_tools],
+        tools=risk_tools,
         system_prompt=_RISK_ANALYSIS_SYSTEM_PROMPT,
         middleware=[ToolRetryMiddleware(max_retries=3)],
     )
 
     compliance_agent = create_agent(
         model=pro_llm,
-        tools=[registry_tools().get(name) for name in compliance_tools],
+        tools=compliance_tools,
         system_prompt=_COMPLIANCE_SYSTEM_PROMPT,
         middleware=[ToolRetryMiddleware(max_retries=3)],
     )

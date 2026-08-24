@@ -76,7 +76,7 @@ def build_saul_graph(
     tool_registry: AgentToolBundle,
 ) -> CompiledStateGraph[Any]:
     """Build and compile the Agent Saul LangGraph."""
-    registry = build_agent_registry(pro_llm, flash_llm)
+    registry = build_agent_registry(pro_llm, flash_llm, tools=tool_registry)
     nodes = _build_graph_nodes(
         registry=registry,
         pro_llm=pro_llm,

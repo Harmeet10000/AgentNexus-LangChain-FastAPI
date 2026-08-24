@@ -360,3 +360,52 @@ Closed by user decision: the file is **moved**, not deleted and not harvested. T
       valid, and `/home/harmeet/.bun/bin/openspec validate --all 2>&1 | tail -3` still shows **21 passed / 6 failed**
       of 27. `spec/typed-exception-handling` is a **pre-existing** failure of the deployed spec and is not caused by
       this change's MODIFIED delta.
+
+---
+
+## Spec verification — all 8 capabilities audited 2026-08-24
+
+Every requirement in `specs/*/spec.md` checked against the tree with executable
+proofs. Four gaps found and closed in the same pass:
+
+1. **agent-tool-registry — role/tool assignment.** The spec assigns specific
+   evidence tools to the reasoning roles; group 9 had bound only handoff tools.
+   `build_agent_registry` now receives the `AgentToolBundle`: risk binds
+   query_knowledge_graph + get_obligation_chain (+ transfer_to_orchestrator),
+   compliance binds search_legal_precedents + retrieve_statute_section (+
+   transfers). Deviation recorded: the orchestrator remains a
+   structured-output chain — it delegates via graph routing, so "receives the
+   handoff tools" is satisfied by its sub-agents' transfer-back tools rather
+   than by binding tools to a chain that cannot call them.
+2. **agent-tool-contract — basis-unknown on partial source sets.** Both
+   aggregating tools (search_legal_precedents, hybrid precedent) now expose
+   `basis_unknown` + `unavailable_layers` and withhold `insufficient_basis`
+   (None) whenever a leg was unreachable, keeping whatever the surviving leg
+   found. All-legs-dead still answers an unavailable envelope. Test added.
+3. **agent-prompt-assembly — salience edges.** The evidence block now places
+   rank 1 at the head and rank 2 at the tail (attention sandwich); intermediate
+   ranks keep relative order. Tests updated to pin it.
+4. **agent-tool-contract — exactly one reachable definition.** The shadow
+   `src/app/shared/agents/` tree still carried a second ToolResult after its
+   importers were removed. With groups 3–9 done the deferral expired: tree
+   deleted, zero importers confirmed first. `rg "class Tool(Result|Output)"`
+   prints exactly one line.
+
+Verified-satisfied without changes (proofs re-run): single registry of record;
+explicit registration empty-on-import, idempotent, loud on unknown; tag
+selection incl. web + handoff groups; envelope extra=forbid; no self-rendering
+anywhere outside quarantined examples; unavailability vs absence distinguishable
+from fields alone; idempotency identity structural-for-writes /
+canonical-for-reads / cross-process stable; persisted-shape invalidation (the
+make_key payload change re-derives every hash, so pre-change Postgres rows are
+unreachable by construction); retrieval targets only migration-created
+relations; newest-year selection; shared ranking SQL lives solely in
+documents/repository; fail-closed agent dependencies; bounded retries at the
+middleware seam; graph never constructed at startup; prompt kind ordering,
+cacheable preamble, byte-exact payload survival, label-agnostic primitive
+untouched; citations non-empty; output strategy pinned explicitly.
+
+Known open items (unchanged): point-lookup serving index requires a follow-up
+revision + applied migration before 11.2's EXPLAIN proof; the chat-ready entry
+point of the prompt seam ships as the plain assembler only (the capability's
+own recorded boundary).
