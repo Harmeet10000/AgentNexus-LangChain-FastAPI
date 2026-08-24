@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence  # noqa: TC003 — runtime parameter in build_assembled_prompt
+from dataclasses import dataclass
+from enum import StrEnum
 from string import Template
 from typing import Any  # noqa: TC003 — Any resolved at runtime by Pydantic models
 
@@ -9,7 +12,9 @@ from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder,
 )
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .models import serialize_to_toon
 
 # ---------------------------------------------------------------------------
 # System prompt templates
@@ -258,3 +263,122 @@ LAWYER_SYSTEM_PROMPT = SystemPromptParts(
         "change the analysis."
     ),
 )
+
+
+# ---------------------------------------------------------------------------
+# Kinded assembly seam (band: agent-tools-unification, group 7)
+# ---------------------------------------------------------------------------
+
+
+class SectionKind(StrEnum):
+    """What a section IS, not what it is labelled.
+
+    Ordering lives here — the assembler sorts by kind, so two callers using
+    different label prose emit byte-identical ordering.
+    """
+
+    INSTRUCTION = "instruction"
+    OUTPUT_CONTRACT = "output_contract"
+    EVIDENCE = "evidence"
+    TASK = "task"
+
+    @classmethod
+    def order(cls) -> list[SectionKind]:
+        """Standing instruction first, output contract second, evidence third, task last."""
+        return [cls.INSTRUCTION, cls.OUTPUT_CONTRACT, cls.EVIDENCE, cls.TASK]
+
+
+class PromptSection(BaseModel):
+    """One prompt section: its kind carries the ordering; the label is cosmetic."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: SectionKind
+    body: str
+    label: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _require_body(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            body = values.get("body")
+            if not body or not str(body).strip():
+                msg = "a prompt section must carry a non-empty body"
+                raise ValueError(msg)
+        return values
+
+
+def assemble_kinded_sections(sections: list[PromptSection]) -> str:
+    """Assemble sections in KIND order, regardless of the order given.
+
+    Labels never influence ordering: two different label strings with the same
+    kind sort identically, which is the property that makes downstream caches
+    stable when callers reword headers.
+    """
+    order = SectionKind.order()
+    by_kind: dict[SectionKind, list[PromptSection]] = {}
+    for section in sections:
+        by_kind.setdefault(section.kind, []).append(section)
+
+    rendered: list[str] = []
+    for kind in order:
+        for section in by_kind.get(kind, []):
+            header = section.label or section.kind.value.replace("_", " ").upper()
+            rendered.append(f"{header}\n{section.body.strip()}")
+    return "\n\n".join(rendered)
+
+
+@dataclass(frozen=True)
+class AssembledPrompt:
+    """Cacheable preamble separated from per-turn content.
+
+    Retrieved evidence NEVER enters the preamble: the prefix stays
+    byte-identical across turns with different evidence, so a provider-side
+    prefix cache can actually hit. Evidence is carried as a ranked sequence and
+    only joined at render time, after the preamble and before the task.
+    """
+
+    preamble: str
+    task: str
+    evidence: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence", tuple(item.strip() for item in self.evidence))
+
+    @property
+    def evidence_block(self) -> str:
+        """Ranked evidence, order preserved (rank first = listed first)."""
+        if not self.evidence:
+            return ""
+        return "\n\n".join(
+            f"[{rank}] {item}" for rank, item in enumerate(self.evidence, start=1)
+        )
+
+    def render(self) -> str:
+        parts = [self.preamble]
+        if self.evidence_block:
+            parts.append(f"RETRIEVED EVIDENCE\n{self.evidence_block}")
+        parts.append(f"TASK\n{self.task.strip()}")
+        return "\n\n".join(parts)
+
+
+def build_assembled_prompt(
+    parts: SystemPromptParts,
+    *,
+    task: str,
+    evidence: Sequence[Any] = (),
+) -> AssembledPrompt:
+    """Build the assembled prompt from standing parts + per-turn content.
+
+    The preamble is derived from ``parts`` alone; evidence influences only the
+    per-turn block. Tabular (dict) payloads are serialised with
+    :func:`serialize_to_toon` here — at the seam, so individual call sites never
+    hand-format tables.
+    """
+    normalised: list[str] = []
+    for item in evidence:
+        if isinstance(item, dict):
+            normalised.append(serialize_to_toon(item))
+        else:
+            normalised.append(str(item))
+    return AssembledPrompt(preamble=parts.build(), task=task, evidence=tuple(normalised))
