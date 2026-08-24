@@ -1,7 +1,7 @@
 """Contract KB parent documents and pg_textsearch clauses.
 
-Revision ID: 9f4a1b7c6d2e
-Revises: 8a7d9b1c2e3f
+Revision ID: 0005
+Revises: 0004
 Create Date: 2026-04-20 00:00:00.000000
 
 """
@@ -14,8 +14,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "9f4a1b7c6d2e"
-down_revision: str | None = "8a7d9b1c2e3f"
+revision: str = "0005"
+down_revision: str | None = "0004"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

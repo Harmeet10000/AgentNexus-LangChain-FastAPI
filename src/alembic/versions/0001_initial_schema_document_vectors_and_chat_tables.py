@@ -1,6 +1,6 @@
 """Initial schema: document_vectors and chat tables
 
-Revision ID: c0c17c6eb1cc
+Revision ID: 0001
 Revises:
 Create Date: 2026-02-21 00:06:28.505086
 
@@ -14,7 +14,7 @@ from pgvector.sqlalchemy import Vector
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "c0c17c6eb1cc"
+revision: str = "0001"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

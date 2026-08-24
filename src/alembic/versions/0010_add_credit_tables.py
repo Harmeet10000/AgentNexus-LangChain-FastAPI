@@ -1,7 +1,7 @@
 """Add credit tables.
 
 Revision ID: 0005
-Revises: 0004
+Revises: 0009
 Create Date: 2026-08-17 00:00:00.000000
 
 """
@@ -13,8 +13,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0005"
-down_revision: str | None = "0004"
+revision: str = "0010"
+down_revision: str | None = "0009"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

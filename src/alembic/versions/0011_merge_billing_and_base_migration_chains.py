@@ -1,7 +1,7 @@
 """merge billing and base migration chains
 
-Revision ID: 6c42587c7195
-Revises: 0004, a71f0d7d9c12
+Revision ID: 0011
+Revises: 0009, 0003
 Create Date: 2026-08-21 00:40:15.910025
 
 """
@@ -14,8 +14,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "6c42587c7195"
-down_revision: str | None = ("0004", "a71f0d7d9c12")
+revision: str = "0011"
+down_revision: str | None = ("0009", "0003")
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

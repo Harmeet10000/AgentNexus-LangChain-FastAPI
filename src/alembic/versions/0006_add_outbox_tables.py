@@ -1,7 +1,7 @@
 """Add outbox_events and dead_letter_events tables.
 
 Revision ID: 0001
-Revises: 9f4a1b7c6d2e
+Revises: 0005
 Create Date: 2026-06-22 00:00:00.000000
 
 """
@@ -13,8 +13,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0001"
-down_revision: str | None = "9f4a1b7c6d2e"
+revision: str = "0006"
+down_revision: str | None = "0005"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

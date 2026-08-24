@@ -1,7 +1,7 @@
 """Allow re-subscribe after cancellation (Requirement 2.8).
 
 Revision ID: 0004
-Revises: 0003
+Revises: 0008
 Create Date: 2026-08-17 00:00:00.000000
 
 Replace the hard unique ``(user_id, plan_id)`` constraint with a partial
@@ -14,8 +14,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0004"
-down_revision: str | None = "0003"
+revision: str = "0009"
+down_revision: str | None = "0008"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

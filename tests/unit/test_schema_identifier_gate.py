@@ -139,7 +139,7 @@ def test_the_migrations_root_is_not_scanned_as_source(tmp_path: Path) -> None:
 def test_a_creation_split_across_concatenated_literals_is_still_found(tmp_path: Path) -> None:
     """The gate's own first false positive, kept as a fixture.
 
-    `0004_subscriptions_allow_resubscribe.py` writes its `CREATE UNIQUE INDEX` as adjacent
+    `0009_subscriptions_allow_resubscribe.py` writes its `CREATE UNIQUE INDEX` as adjacent
     f-string literals, so in the file text a quote, a newline, indentation and a string prefix sit
     between the index name and its `ON` clause. Without collapsing that glue the gate reports a
     live index as uncreated — a false positive indistinguishable from the real defect it hunts.
