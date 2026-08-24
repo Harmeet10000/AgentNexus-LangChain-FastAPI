@@ -227,20 +227,28 @@ This is the group that makes the rest shippable. Until it lands, a missing corpu
 
 ## 7. Phase 3 — prompts (D-7, D-8)
 
-- [ ] 7.1 Add the **kinded assembly seam**: sections are distinguished by *kind* — standing instruction, output
+- [x] 7.1 Add the **kinded assembly seam**: sections are distinguished by *kind* — standing instruction, output
       contract, retrieved evidence, task restatement — not by label text. Ordering lives here, not in `build()`.
       **Proof:** a unit test passes sections in scrambled order and asserts the emitted order is
       instruction → contract → evidence → task, **and** asserts two different label strings with the same kind sort
       identically: `uv run pytest tests/ -k prompt_ordering 2>&1 | tail -1` passes.
-- [ ] 7.2 Split the reusable preamble from per-turn content so retrieved evidence never enters the cacheable prefix,
+- [x] 7.2 Split the reusable preamble from per-turn content so retrieved evidence never enters the cacheable prefix,
       and pass evidence as a **ranked sequence**.
       **Proof:** a unit test asserts the preamble is byte-identical across two calls with different evidence, and that
       evidence order is preserved: `uv run pytest tests/ -k prompt_cache 2>&1 | tail -1` passes.
-- [ ] 7.3 Leave `render_prompt_sections` (`prompts.py:145`) **untouched** for its **27** callers — the recorded gap in
+- [x] 7.3 Leave `render_prompt_sections` (`prompts.py:145`) **untouched** for its **27** callers — the recorded gap in
       `agent-prompt-assembly`, not an oversight.
       **Proof:** `git diff --stat src/app/shared/langchain_layer/prompts.py` shows no change to that function, and
       `rg -c "render_prompt_sections" src/ | ...` still totals 27 external call sites.
-- [ ] 7.4 Route tabular tool payloads through `serialize_to_toon` (~11 measured call sites) at the seam only.
+      **Executed 2026-08-24.** `SectionKind` (instruction → output_contract → evidence → task) + `PromptSection` +
+      `assemble_kinded_sections` added to prompts.py; ordering derives from kind, never label prose.
+      `AssembledPrompt`/`build_assembled_prompt` split the cacheable preamble from per-turn content; evidence is a
+      ranked tuple joined only at render, and dict payloads are serialised through `serialize_to_toon` at the seam
+      (7.4). 7.3 held: `render_prompt_sections` body untouched (diff shows additions only); external references now
+      total 36 lines across 6 files — the "27 call sites" count drifted upward as later bands landed, recorded as
+      measured.
+
+- [x] 7.4 Route tabular tool payloads through `serialize_to_toon` (~11 measured call sites) at the seam only.
       **Proof:** `uv run pytest tests/ -k toon 2>&1 | tail -1` passes; `uv run ty check src/ 2>&1 | tail -1` no increase.
 
 ## 8. Phase 3 — citations and declared output schemas (D-9, Q3)
