@@ -698,13 +698,23 @@ result, not evidence of a no-op.
 **Six groups remain** (group 1 landed in step 2). Four carry a coupled edit, and **no commit may leave the
 application unbootable** — so the coupled edit ships in the *same* commit as its deletion, never after.
 
-- [ ] **(2)** the inverted 36-line parser `src/app/utils/toon_parser.py`.
-- [ ] **(3)** the zero-byte vector-store package — **coupled:** `src/app/shared/__init__.py` imports *and*
+      **Verified deleted 2026-08-24 (measured on main @ b0ab780+).** All six trees were already removed by the
+      parallel sessions' refactors (the search retirement and foundation sweeps) — none existed at measurement
+      time, and every coupled edit is in place: `tasks/__init__.py` imports only auth/document/example;
+      `database/schemas/__init__.py` carries no memory-schema import; no stale per-file lint key names a deleted
+      file. Proof run: import probe OK for all six entry points; zero-byte scan clean (the three remaining empty
+      `__init__` files — `examples/`, `shared/agents/`, `shared/circuit_breaker/` — are live package initialisers,
+      not part of the six trees); suite 371 passed / 0 failed, identical failure count. The emptiness search's
+      remaining hits are all homonyms of live code (billing/credit reconciliation tasks and settings, the filter
+      test's own name) — recorded here so nobody re-runs the grep and reads them as findings.
+
+- [x] **(2)** the inverted 36-line parser `src/app/utils/toon_parser.py`.
+- [x] **(3)** the zero-byte vector-store package — **coupled:** `src/app/shared/__init__.py` imports *and*
       re-exports it, so deleting the directory alone is an `ImportError` in every module in the application.
-- [ ] **(4)** the zero-byte orchestration-type package (five files, `__init__` included).
-- [ ] **(5)** the zero-byte `knowledge_base` feature package — **coupled:** `src/app/features/__init__.py:3,8,9`.
-- [ ] **(6)** the zero-byte `web_scraping` feature package — **coupled:** same import list.
-- [ ] **(7)** the 1,129-line reconciliation subsystem: its 618-line package, its 209-line worker module, and the
+- [x] **(4)** the zero-byte orchestration-type package (five files, `__init__` included).
+- [x] **(5)** the zero-byte `knowledge_base` feature package — **coupled:** `src/app/features/__init__.py:3,8,9`.
+- [x] **(6)** the zero-byte `web_scraping` feature package — **coupled:** same import list.
+- [x] **(7)** the 1,129-line reconciliation subsystem: its 618-line package, its 209-line worker module, and the
       302-line private-registry schema module — **coupled:** `src/tasks/__init__.py:6-9` imports the reconciliation
       helpers and re-exports at `:18-20`, so deleting without editing this **breaks every Celery worker at import**;
       and a per-file lint-ignore key in `pyproject.toml` names a file inside the tree, which leaves no signal at all
