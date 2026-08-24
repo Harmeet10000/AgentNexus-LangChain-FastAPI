@@ -782,24 +782,11 @@ exclude = [
 ]
 
 # ────────────────────────────────────────
-# Other sections unchanged (alembic, pytest, coverage, bandit)
+# Alembic is configured in alembic.ini (the [tool.alembic] section was dead
+# config — alembic only reads it via the `pyproject` init template, which this
+# project does not use; its hooks also used the wrong REVISION_SCRIPT_FILENAME
+# placeholder).
 # ────────────────────────────────────────
-
-[tool.alembic]
-script_location = "src/alembic"
-version_locations = "src/alembic/versions"
-
-[[tool.alembic.post_write_hooks]]
-name = "ruff-format"
-type = "exec"
-executable = "ruff"
-options = "format REVISION_SCRIPT_FILENAME"
-
-[[tool.alembic.post_write_hooks]]
-name = "ruff-fix"
-type = "exec"
-executable = "ruff"
-options = "check --fix REVISION_SCRIPT_FILENAME"
 
 [tool.setuptools.packages.find]
 where = ["src"]
