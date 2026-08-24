@@ -494,6 +494,9 @@ section-order = [
 # Relocated from src/app/shared/rag by todo-210 band E. Deliberately NOT
 # importable: pydantic-ai is an undeclared dependency by decision (see the A4
 # tripwire test) — F821 covers the names that package would supply.
+# factory.py declares pydantic models whose fields reference typing.Any at
+# runtime (model_rebuild), so the import cannot live behind TYPE_CHECKING.
+"src/app/shared/langchain_layer/agents/factory.py" = ["TC003"]
 "src/app/examples/rag_agent_advanced.py" = [
     "ANN201",
     "ARG001",

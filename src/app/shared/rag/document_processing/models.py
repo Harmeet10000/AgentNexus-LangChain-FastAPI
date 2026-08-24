@@ -315,10 +315,3 @@ class ExtractionResult(BaseModel):
 
 
 # Tool Models
-class ToolResult(BaseModel):
-    """Result of tool execution."""
-
-    success: bool
-    data: Any = None
-    error: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)

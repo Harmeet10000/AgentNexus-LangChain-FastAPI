@@ -134,23 +134,38 @@ expected — if one is needed, the premise in `design.md` phase 1 is wrong and t
 
 ## 4. Phase 2 — one envelope, four definitions to one
 
-- [ ] 4.1 Define the survivor envelope with its success, failure and **unavailability** constructors. The unavailability
+- [x] 4.1 Define the survivor envelope with its success, failure and **unavailability** constructors. The unavailability
       constructor is what the honesty work in group 6 requires, so it lands first.
       **Proof:** `uv run python -c "from <survivor> import ToolResult as R;
       assert R.ok(data={}).success and not R.fail(error='x').success and R.unavailable(reason='y').unavailable;
       print('three constructors OK')"`
-- [ ] 4.2 Rewrite `shell.py`'s **13** `ToolOutput` sites
+- [x] 4.2 Rewrite `shell.py`'s **13** `ToolOutput` sites
       (`:4,18,68,71,106,108,111,126,129,145,155,158,216`) onto the survivor, and **delete `to_agent_string()`**
       (`base.py:46`) — the self-rendering method that turned an envelope back into `f"ERROR: {self.error}"`.
       **Proof:** `rg -c "ToolOutput|to_agent_string" src/` prints **0**;
       `uv run pytest tests/ -k shell 2>&1 | tail -1` passes.
-- [ ] 4.3 Delete the remaining definitions: `base.py:30` and `document_processing/models.py:318`. **`shared/agents/tools/idempotency.py:11`
+- [x] 4.3 Delete the remaining definitions: `base.py:30` and `document_processing/models.py:318`. **`shared/agents/tools/idempotency.py:11`
       is deleted by change 0**, not here — group 2 already removed its importers.
       **Proof:** `rg -n "class Tool(Result|Output)\b" src/` prints exactly **1** line.
-- [ ] 4.4 Prove no envelope renders itself, in any name (the F1 defect was shape, not name).
+- [x] 4.4 Prove no envelope renders itself, in any name (the F1 defect was shape, not name).
       **Proof:** `ast-grep -p 'def to_agent_string($$$)' src/` prints nothing, and
       `rg -n 'return f"(ERROR|Error|Search error)' src/app/shared/langchain_layer src/app/features` prints nothing.
-- [ ] 4.5 Hold the envelope gate.
+      **Executed 2026-08-24 with two measured deviations:**
+
+      (a) **4.1's proof is unsatisfiable verbatim** — the survivor is a frozen, extra-forbid pydantic model, and
+      pydantic drops a field shadowed by a same-named classmethod (measured: `R.unavailable(...)` then
+      `.unavailable` raises AttributeError). Constructor shipped as `ToolResult.unavailable_result(reason)`; the
+      three-constructor contract holds and group 6 builds on it.
+
+      (b) **4.4's hunt found a fifth self-rendering envelope** the task did not know about:
+      `open_deep_search/tools.py:41` (`DeepResearchOutput.to_agent_string`). Retired in the same commit — its tool
+      returns the report string directly, which is what the render produced anyway.
+
+      Also fixed en route: shell success paths returned raw JSON strings where the annotation now says ToolResult;
+      grep/list sites wrap their payloads as dicts to fit the survivor's `data: dict`. Gate: exactly one envelope
+      definition; ruff src clean; ty clean; 375 passed / 0 failed; app.main imports.
+
+- [x] 4.5 Hold the envelope gate.
       **Proof:** `rg -c "class Tool(Result|Output)\b" src/` prints **1** (was 4);
       `uv run ty check src/ 2>&1 | tail -1` shows no increase; `uv run python -c "import app.main"` exits 0.
 

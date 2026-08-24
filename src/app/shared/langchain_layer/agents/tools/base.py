@@ -11,7 +11,7 @@ import logging
 from typing import TYPE_CHECKING, Annotated
 
 from langchain_core.tools import InjectedToolArg, StructuredTool
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 from pydantic.v1 import ValidationError as ValidationErrorV1
 
 if TYPE_CHECKING:
@@ -25,29 +25,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Structured base output
 # ---------------------------------------------------------------------------
-
-
-class ToolOutput(BaseModel):
-    """Standard wrapper for all tool outputs."""
-
-    success: bool
-    data: Any = None
-    error: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    @classmethod
-    def ok(cls, data: Any, **metadata: Any) -> ToolOutput:
-        return cls(success=True, data=data, metadata=metadata)
-
-    @classmethod
-    def fail(cls, error: str, **metadata: Any) -> ToolOutput:
-        return cls(success=False, error=error, metadata=metadata)
-
-    def to_agent_string(self) -> str:
-        """Return a string the agent can parse."""
-        if self.success:
-            return str(self.data)
-        return f"ERROR: {self.error}"
 
 
 # ---------------------------------------------------------------------------

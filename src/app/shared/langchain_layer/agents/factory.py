@@ -56,8 +56,6 @@ from .tools.registry import get_tool_registry
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from langchain_core.tools import BaseTool
-
 settings = get_settings()
 
 
