@@ -139,8 +139,14 @@ class DocumentCommandService:
                     duplicate=True,
                 )
         elif isinstance(existing_result, Failure):
-            log_expected_failure(error=existing_result.failure(), operation="document_upload")
-            raise app_error_to_exception(existing_result.failure())
+            failure = existing_result.failure()
+            # A miss on the duplicate check is the NORMAL first-upload path,
+            # not an error — only real infrastructure failures abort here.
+            from app.shared.result.errors import NotFoundAppError
+
+            if not isinstance(failure, NotFoundAppError):
+                log_expected_failure(error=failure, operation="document_upload")
+                raise app_error_to_exception(failure)
 
         document_id = str(object=uuid4())
         object_key = build_s3_key(
