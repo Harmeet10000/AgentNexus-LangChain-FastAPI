@@ -71,11 +71,22 @@ def test_preamble_is_byte_identical_across_different_evidence() -> None:
     assert p1.preamble in p1.render() and p1.preamble in p2.render()
 
 
-def test_evidence_order_is_preserved_and_ranked() -> None:
-    assembled = build_assembled_prompt(SystemPromptParts(), task="t", evidence=["first", "second", "third"])
+def test_highest_salience_evidence_occupies_the_block_edges() -> None:
+    """Rank 1 leads, rank 2 closes — the attention-sandwich ordering."""
+    assembled = build_assembled_prompt(
+        SystemPromptParts(), task="t", evidence=["r1", "r2", "r3", "r4", "r5"]
+    )
+    positions = {name: assembled.evidence_block.index(name) for name in ("r1", "r2", "r3", "r5")}
+    first_item = assembled.evidence_block.split("[1] ")[1].splitlines()[0]
+    last_item = assembled.evidence_block.rstrip().splitlines()[-1].split("] ", 1)[-1]
+    assert first_item == "r1" and last_item == "r2"
+    assert positions["r1"] < positions["r3"] < positions["r5"]
+
+
+def test_short_evidence_keeps_ranked_order() -> None:
+    assembled = build_assembled_prompt(SystemPromptParts(), task="t", evidence=["a", "b"])
     block = assembled.evidence_block
-    assert block.index("first") < block.index("second") < block.index("third")
-    assert "[1] first" in block and "[3] third" in block
+    assert block.index("a") < block.index("b")
 
 
 def test_task_comes_after_evidence_in_render() -> None:

@@ -98,6 +98,10 @@ def make_search_legal_precedents_tool(
         )
 
         # --- Postgres: statute text retrieval --------------------------------
+        # Contract (agent-tool-contract): when one leg is unreachable the
+        # sufficiency verdict must NOT be computed from the surviving source
+        # alone — expose basis-unknown and keep whatever the other leg found.
+        unavailable_layers: list[str] = []
         try:
             statute_results = await _search_statutes_postgres(
                 db_engine=db_engine,
@@ -106,16 +110,24 @@ def make_search_legal_precedents_tool(
                 limit=_STATUTE_SEARCH_LIMIT,
             )
         except SQLAlchemyError as exc:
-            # Honesty (group 6): a missing corpus must never read as "no results".
             logger.warning("statute_postgres_search_failed", error=str(exc))
+            unavailable_layers.append("statutes")
+            statute_results = []
+
+        basis_unknown = bool(unavailable_layers)
+        if unavailable_layers and not graphiti_results:
+            # Every leg failed or answered empty while one was unreachable:
+            # report unavailability rather than a fabricated "no results".
             unavailable = ToolResult.unavailable_result(
-                reason=f"statute corpus unreachable ({type(exc).__name__})",
+                reason="no precedent layer available: " + ", ".join(unavailable_layers),
                 clause_id=clause_id,
             )
             return unavailable.model_dump()
 
         total_sources = len(graphiti_results) + len(statute_results)
-        insufficient_basis = total_sources < _MIN_SOURCE_THRESHOLD
+        insufficient_basis: bool | None = (
+            None if basis_unknown else total_sources < _MIN_SOURCE_THRESHOLD
+        )
 
         if insufficient_basis:
             log.warning(
@@ -126,6 +138,8 @@ def make_search_legal_precedents_tool(
 
         result = ToolResult.ok(
             data={
+                "unavailable_layers": unavailable_layers,
+                "basis_unknown": basis_unknown,
                 "precedents": [
                     {
                         "name": r.name,

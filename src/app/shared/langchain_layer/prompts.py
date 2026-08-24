@@ -347,11 +347,17 @@ class AssembledPrompt:
 
     @property
     def evidence_block(self) -> str:
-        """Ranked evidence, order preserved (rank first = listed first)."""
+        """Ranked evidence with the two highest-salience items at the edges.
+
+        Attention concentrates at a block's head and tail, so rank 1 leads and
+        rank 2 closes the block; intermediate ranks keep their relative order.
+        """
         if not self.evidence:
             return ""
+        ranked = list(self.evidence)
+        ordered = [ranked[0], *ranked[2:], ranked[1]] if len(ranked) > 2 else list(ranked)
         return "\n\n".join(
-            f"[{rank}] {item}" for rank, item in enumerate(self.evidence, start=1)
+            f"[{self.evidence.index(item) + 1}] {item}" for item in ordered
         )
 
     def render(self) -> str:

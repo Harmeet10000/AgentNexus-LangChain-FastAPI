@@ -128,6 +128,7 @@ def make_hybrid_retrieve_precedents_tool(
         result = ToolResult.ok(
             data={
                 "unavailable_layers": unavailable_layers,
+                "basis_unknown": bool(unavailable_layers),
                 "vector_clauses": vector_results[:num_results],
                 "graphiti_precedents": [
                     {

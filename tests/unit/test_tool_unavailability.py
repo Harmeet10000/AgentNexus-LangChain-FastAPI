@@ -6,6 +6,7 @@ fabricated "no results" answer and never as a rendered string.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -14,7 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
 
 
-async def _async_none(_key: str) -> None:
+async def _async_none(*_a: Any, **_k: Any) -> None:
     return None
 
 
@@ -24,6 +25,7 @@ def _idempotency() -> Any:
 
     redis = MagicMock()
     redis.get = _async_none
+    redis.set = _async_none
 
     class _FailingEngine:
         """connect() fails like an unreachable database."""
@@ -161,3 +163,42 @@ async def test_hybrid_tool_reports_the_vector_layer_unavailable() -> None:
     assert not isinstance(result, str)
     assert result["unavailable"] is True
     assert "pgvector" in result["error"]
+
+
+async def test_a_partial_source_set_sets_basis_unknown_and_keeps_the_survivor(
+    monkeypatch: Any,
+) -> None:
+    """One leg unreachable + one leg answered → ok envelope, basis_unknown=True,
+    insufficient_basis withheld (None), survivor results retained."""
+    from app.shared.langchain_layer.agents.tools.search_legal_precedents import (
+        make_search_legal_precedents_tool,
+    )
+
+    class _Graphiti:
+        async def search_for_precedent_chains(self, **_kw: Any) -> list[Any]:
+            return [SimpleNamespace(name="p", content="c", relevance_score=0.9, uuid="u1")]
+
+    async def _raise(**_kw: Any) -> list[dict[str, Any]]:
+        raise SQLAlchemyError("schema missing")
+
+    tool = make_search_legal_precedents_tool(_Graphiti(), object(), _idempotency())
+    monkeypatch.setattr(
+        "app.shared.langchain_layer.agents.tools.search_legal_precedents._search_statutes_postgres",
+        _raise,
+    )
+    result = await tool.ainvoke(
+        {
+            "query": "penalty clauses",
+            "clause_id": "c1",
+            "jurisdiction": "India",
+            "user_id": "u",
+            "thread_id": "t",
+            "step_id": "s",
+        }
+    )
+    assert not isinstance(result, str)
+    assert result["success"] is True, "the surviving source must still be returned"
+    assert result["data"]["basis_unknown"] is True
+    assert result["data"]["insufficient_basis"] is None
+    assert result["data"]["unavailable_layers"] == ["statutes"]
+    assert len(result["data"]["precedents"]) == 1
