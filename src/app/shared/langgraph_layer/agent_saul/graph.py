@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     from langgraph.graph.state import CompiledStateGraph
 
-    from app.shared.rag.graphiti.registry import ToolRegistry
+    from app.shared.rag.graphiti.registry import AgentToolBundle
 
     from .factory import SaulGraphNodes
 
@@ -73,7 +73,7 @@ def build_saul_graph(
     pro_llm: BaseChatModel,
     flash_llm: BaseChatModel,
     memory_service: Any,
-    tool_registry: ToolRegistry,
+    tool_registry: AgentToolBundle,
 ) -> CompiledStateGraph[Any]:
     """Build and compile the Agent Saul LangGraph."""
     registry = build_agent_registry(pro_llm, flash_llm)

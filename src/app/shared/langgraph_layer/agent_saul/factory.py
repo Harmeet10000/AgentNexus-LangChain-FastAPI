@@ -7,7 +7,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict
 
-from app.shared.rag.graphiti.registry import ToolRegistry
+from app.shared.rag.graphiti.registry import AgentToolBundle
 
 from .nodes import (
     ClauseSegmentationOutput,
@@ -170,7 +170,7 @@ def _build_graph_nodes(
     registry: AgentRegistry,
     pro_llm: BaseChatModel,
     memory_service: Any,
-    tool_registry: ToolRegistry,
+    tool_registry: AgentToolBundle,
 ) -> SaulGraphNodes:
     return SaulGraphNodes(
         gateway=make_gateway_node(),

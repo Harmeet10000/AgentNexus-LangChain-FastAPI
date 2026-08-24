@@ -1,13 +1,15 @@
 """
-ToolRegistry: all LangChain tools assembled once at graph-build time.
+AgentToolBundle: all LangChain tools assembled once at graph-build time.
 
-build_tool_registry() is called wherever the Saul graph is wired (see
-lifespan.py — currently commented out pending the graph wiring). The
-ToolRegistry is passed into build_agent_registry() in factory.py so agents
-can get their tools at compile time — never at node execution time.
+build_tool_bundle() is called wherever the Saul graph is wired (see
+lifespan.py — currently commented out pending the graph wiring; task 11.4
+retargets it when group 11 lands). The bundle is passed into
+build_agent_registry() in factory.py so agents get their tools at compile
+time — never at node execution time. The old class name collided with the
+unrelated tool-registry in agents/tools/base.py and is retired.
 
 Lifespan wiring (in src/app/lifecycle/lifespan.py):
-    from app.shared.rag.graphiti.registry import ToolRegistry, build_tool_registry
+    from app.shared.rag.graphiti.registry import AgentToolBundle, build_tool_bundle
     from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
 
     idempotency_guard = IdempotencyGuard(
@@ -54,9 +56,6 @@ if TYPE_CHECKING:
     from .client import GraphitiService
 
 
-#: Deprecation alias — removed in the next commit (task 3.6).
-ToolRegistry = AgentToolBundle
-
 class AgentToolBundle(BaseModel):
     """
     Immutable collection of all pre-built LangChain tools.
@@ -90,7 +89,7 @@ class AgentToolBundle(BaseModel):
         return self.search_legal_precedents
 
 
-def build_tool_registry(
+def build_tool_bundle(
     graphiti_service: GraphitiService,
     db_engine: AsyncEngine,
     idempotency: IdempotencyGuard,
