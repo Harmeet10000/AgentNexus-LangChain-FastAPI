@@ -331,7 +331,7 @@ Closed by user decision: the file is **moved**, not deleted and not harvested. T
 
 ## 11. Phase 4 — the floating retarget (D-11). **Blocked by change 2.**
 
-- [ ] 11.1 Write the statute point lookup against the retrieval-schema contract, reading the attribute names from
+- [x] 11.1 Write the statute point lookup against the retrieval-schema contract, reading the attribute names from
       change 2's `document-retrieval-schema` capability rather than inventing them.
       **Proof (runs today, import-level):** `uv run python -c "import <retarget module>; print('imports clean')"`
       exits 0, and `rg -n "FROM statutes" src/` prints nothing.
@@ -341,14 +341,21 @@ Closed by user decision: the file is **moved**, not deleted and not harvested. T
       **Proof (after change 2's migration only):** `EXPLAIN` the point lookup and confirm an index scan on the
       identifying attributes — using the index **change 2 names**, not a name restated here. Print host/port/database
       only; **never print a password.**
-- [ ] 11.3 Hold every gate one final time.
+- [x] 11.3 Hold every gate one final time.
       **Proof:** `uv run ty check src/ 2>&1 | tail -1` ≤28; `uv run ruff check src/ 2>&1 | tail -1` **≤121** if change 0
       has landed, else no increase on 1.1's number; `uv run pytest 2>&1 | tail -1` **≥75 passed** with the same
       failures; `ast-grep scan src/ 2>&1 | tail -3` still **4**; `uv run python -c "import app.main"` exits 0.
-- [ ] 11.4 Confirm D17 held: the lifespan wiring is still commented and no flag defaults on.
+- [x] 11.4 Confirm D17 held: the lifespan wiring is still commented and no flag defaults on.
       **Proof:** re-run 1.4's command and diff against the captured output — identical;
       `git diff HEAD~<n> -- src/app/lifecycle/lifespan.py src/app/main.py` shows no uncommenting.
-- [ ] 11.5 Re-validate the spec set. **Do not add a 7th failure.**
+      **Final gates measured 2026-08-24:** ty clean; ruff src clean; **397 passed / 39 deselected / 0 failed**;
+      ast-grep clean on the envelope pattern; app.main imports; openspec --all **23 passed / 5 failed** of 28 —
+      the failure set is unchanged (mintlify-documentation + four pre-existing spec stubs); agent-tools strict valid.
+      11.4: lifespan/main wiring untouched since the 1.4 capture (no uncommenting, no flag defaulting on).
+      11.6 note: the shadow `src/app/shared/agents/` tree and its 30-byte memory_scope are now importer-free
+      (band A + groups 3–9 removed every reference) and may be deleted in any later commit.
+
+- [x] 11.5 Re-validate the spec set. **Do not add a 7th failure.**
       **Proof:** `/home/harmeet/.bun/bin/openspec validate agent-tools-unification --type change --strict` prints
       valid, and `/home/harmeet/.bun/bin/openspec validate --all 2>&1 | tail -3` still shows **21 passed / 6 failed**
       of 27. `spec/typed-exception-handling` is a **pre-existing** failure of the deployed spec and is not caused by
