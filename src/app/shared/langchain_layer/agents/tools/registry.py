@@ -1,60 +1,61 @@
-"""Tool registry for LangChain agents."""
+"""Explicit tool registration (band: agent-tools-unification, group 3).
 
-from typing import Any
+Import registers nothing — the registry is populated only when a consumer calls
+:data:`register_default_tools`, so "what tools exist" is one readable call, not
+an import-order accident. Registration is idempotent; resolving an unknown name
+raises :class:`KeyError` instead of returning ``None`` and failing three frames
+later.
+"""
 
-from .crawl import CrawlUrlTool, get_crawl_url_tool
-from .web_search import WebSearchTool, get_web_search_tool
+from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-class ToolRegistry:
-    """Registry for web search and crawl tools."""
+from .base import ToolRegistry
+from .crawl import get_crawl_url_tool
+from .web_search import get_web_search_tool
 
-    def __init__(self):
-        self._tools: list[Any] = []
+if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
 
-    def get_tools(self) -> list[Any]:
-        """Get all registered tools."""
-        if not self._tools:
-            self._tools = [
-                get_web_search_tool(),
-                get_crawl_url_tool(),
-            ]
-        return self._tools
-
-    def get_tool(self, name: str) -> Any:
-        """Get a specific tool by name."""
-        for tool in self.get_tools():
-            if tool.name == name:
-                return tool
-        return None
-
-    @staticmethod
-    def get_search_tool() -> WebSearchTool:
-        """Get the web search tool."""
-        return get_web_search_tool()
-
-    @staticmethod
-    def get_crawl_tool() -> CrawlUrlTool:
-        """Get the crawl URL tool."""
-        return get_crawl_url_tool()
-
-
-_tool_registry: ToolRegistry | None = None
+_registry: ToolRegistry | None = None
 
 
 def get_tool_registry() -> ToolRegistry:
-    """Get the tool registry instance."""
-    global _tool_registry  # noqa: PLW0603
-    if _tool_registry is None:
-        _tool_registry = ToolRegistry()
-    return _tool_registry
+    """The process-wide registry. Empty until :func:`register_default_tools` runs."""
+    global _registry  # noqa: PLW0603
+    if _registry is None:
+        _registry = ToolRegistry()
+    return _registry
 
 
-def get_all_tools() -> list[Any]:
-    """Get all web search and crawl tools."""
-    return get_tool_registry().get_tools()
+def register_default_tools() -> ToolRegistry:
+    """Register the default tool set. Idempotent by construction.
+
+    The web tools carry the ``web`` tag so tag-based selection is real, not
+    decorative.
+    """
+    r = get_tool_registry()
+    r.register(get_web_search_tool(), tags=["web", "search"])
+    r.register(get_crawl_url_tool(), tags=["web", "crawl"])
+    return r
 
 
-def get_web_tools() -> list[Any]:
-    """Get all web-related tools for agents."""
-    return get_tool_registry().get_tools()
+def get_all_tools() -> list[BaseTool]:
+    """Convenience: register the defaults, then return everything."""
+    register_default_tools()
+    return get_tool_registry().all()
+
+
+def get_web_tools() -> list[BaseTool]:
+    """Convenience: the ``web``-tagged tools."""
+    register_default_tools()
+    return get_tool_registry().by_tags("web")
+
+
+__all__ = [
+    "get_all_tools",
+    "get_tool_registry",
+    "get_web_tools",
+    "register_default_tools",
+]

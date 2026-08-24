@@ -91,6 +91,13 @@ class ToolRegistry:
     def names(self) -> list[str]:
         return list(self._tools.keys())
 
+    def tags(self) -> set[str]:
+        """Every tag any registered tool carries."""
+        return {tag for tags in self._tags.values() for tag in tags}
+
+    def __len__(self) -> int:
+        return len(self._tools)
+
     def descriptions(self) -> dict[str, str]:
         return {name: t.description for name, t in self._tools.items()}
 

@@ -54,7 +54,10 @@ if TYPE_CHECKING:
     from .client import GraphitiService
 
 
-class ToolRegistry(BaseModel):
+#: Deprecation alias — removed in the next commit (task 3.6).
+ToolRegistry = AgentToolBundle
+
+class AgentToolBundle(BaseModel):
     """
     Immutable collection of all pre-built LangChain tools.
 
@@ -91,9 +94,9 @@ def build_tool_registry(
     graphiti_service: GraphitiService,
     db_engine: AsyncEngine,
     idempotency: IdempotencyGuard,
-) -> ToolRegistry:
+) -> AgentToolBundle:
     """Build all tools once.  Call at lifespan startup only."""
-    return ToolRegistry(
+    return AgentToolBundle(
         search_legal_precedents=make_search_legal_precedents_tool(
             graphiti_service=graphiti_service,
             db_engine=db_engine,

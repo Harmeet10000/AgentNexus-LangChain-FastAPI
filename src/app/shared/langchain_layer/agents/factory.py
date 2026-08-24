@@ -39,10 +39,11 @@ from __future__ import annotations
 
 import asyncio
 import itertools
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import get_settings
@@ -54,7 +55,6 @@ from .tools.registry import get_tool_registry
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from typing import Any
 
     from langchain_core.tools import BaseTool
 
@@ -127,6 +127,10 @@ class AgentSpec(BaseModel):
     debug: bool = False
 
 
+# `BaseTool` is a TYPE_CHECKING-only import; resolve the forward reference so the
+# spec validates at runtime instead of raising "not fully defined" on first use.
+AgentSpec.model_rebuild(_types_namespace={"BaseTool": BaseTool})
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -143,7 +147,7 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
     resolved_tools: list[BaseTool] = []
     for t in spec.tools:
         if isinstance(t, str):
-            resolved_tools.append(get_tool_registry().get(t))  # ty: ignore[unresolved-attribute]
+            resolved_tools.append(get_tool_registry().get(t))
         else:
             resolved_tools.append(t)
 
