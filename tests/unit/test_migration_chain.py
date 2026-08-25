@@ -18,5 +18,9 @@ def test_migration_chain_has_exactly_one_head() -> None:
 def test_revision_ids_are_sequential() -> None:
     """Every revision ID must be 4-digit zero-padded (the project convention)."""
     script = ScriptDirectory.from_config(Config("alembic.ini"))
-    bad = [rev.revision for rev in script.walk_revisions() if not (len(rev.revision) == 4 and rev.revision.isdigit())]
+    bad = [
+        rev.revision
+        for rev in script.walk_revisions()
+        if not (len(rev.revision) == 4 and rev.revision.isdigit())
+    ]
     assert not bad, f"non-sequential revision IDs: {sorted(bad)}"

@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.shared.langchain_layer.agents.memory.cognee_client import CogneeSetupConfig
+from app.shared.langchain_layer.agents.memory.setup_types import CogneeSetupConfig
 from app.utils import logger
 
 from .dto import HealthChecksDTO, HealthDataDTO, HealthResultDTO, SelfInfoDTO
