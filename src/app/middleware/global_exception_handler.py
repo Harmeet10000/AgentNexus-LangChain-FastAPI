@@ -105,7 +105,7 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
             message,
         )
 
-        payload = http_error(
+        payload: APIResponse[Any] = http_error(
             message=message,
             status_code=status_code,
             data={"errors": validation_errors},

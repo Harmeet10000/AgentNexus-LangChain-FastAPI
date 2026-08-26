@@ -12,7 +12,7 @@ Design rules:
 
 import operator
 from enum import StrEnum
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, Final, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -311,6 +311,74 @@ class ClauseExtractionInput(BaseModel, frozen=True):
 
 
 # ---------------------------------------------------------------------------
+# State schema versioning — one constant governs writing and reading (D-5).
+# Bump STATE_SCHEMA_VERSION in the same commit that changes LegalAgentState;
+# extend hydrate_state so older recognised shapes upgrade deterministically.
+# ---------------------------------------------------------------------------
+
+STATE_SCHEMA_VERSION: Final[int] = 1
+
+# States persisted before the schema_version field existed carry no key at
+# all; they are treated as version 0 and backfilled from these defaults.
+# Existing values always win — defaults only fill what is missing.
+_LEGACY_STATE_DEFAULTS: dict[str, Any] = {
+    "user_id": "",
+    "thread_id": "",
+    "correlation_id": "",
+    "doc_id": "",
+    "document_text": None,
+    "messages": [],
+    "user_query": "",
+    "qna_confidence": 0.0,
+    "plan": [],
+    "current_step": 0,
+    "plan_approved": False,
+    "orchestrator_action": None,
+    "normalized_document": None,
+    "segments": [],
+    "extracted_entities": [],
+    "relationships": [],
+    "risk_analysis": None,
+    "compliance_result": None,
+    "grounding": None,
+    "human_review": None,
+    "final_report": None,
+    "long_term_refs": [],
+    "working_memory": {},
+    "deep_research_results": None,
+    "status": WorkflowStatus.INITIALIZED,
+    "errors": [],
+    "retry_count": 0,
+    "permissions": {},
+}
+
+
+class StateSchemaVersionError(ValueError):
+    """Persisted agent state carries a schema version this runtime refuses."""
+
+
+def hydrate_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Version-check persisted state before any reasoning step reads it.
+
+    Matching version passes through unchanged; the recognised legacy shape
+    (version 0 / missing key) is upgraded deterministically; anything else is
+    refused with a typed error naming both versions. Pure — never mutates the
+    input dict.
+    """
+    recorded = state.get("schema_version")
+    if recorded == STATE_SCHEMA_VERSION:
+        return state
+    if recorded is not None and recorded != 0:
+        msg = (
+            f"refusing agent state: recorded schema_version={recorded!r} "
+            f"cannot be loaded by this runtime "
+            f"(expected {STATE_SCHEMA_VERSION!r})"
+        )
+        raise StateSchemaVersionError(msg)
+    return {**_LEGACY_STATE_DEFAULTS, **state, "schema_version": STATE_SCHEMA_VERSION}
+
+
+# ---------------------------------------------------------------------------
 # LegalAgentState
 #
 # Reducers:
@@ -391,7 +459,7 @@ class LegalAgentInputState(BaseModel, frozen=True):
     user_id: str
     thread_id: str
     correlation_id: str
-    schema_version: int = 1
+    schema_version: int = STATE_SCHEMA_VERSION
     doc_id: str
     user_query: str
     permissions: dict[str, bool]

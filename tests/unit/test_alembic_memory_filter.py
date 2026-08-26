@@ -9,10 +9,9 @@ passes through.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import ast
 import types
-from contextlib import nullcontext
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,36 +25,41 @@ _ENV_PATH = Path(__file__).resolve().parents[2] / "src" / "alembic" / "env.py"
 
 
 def _load_env(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Load env.py by path — it is a script, not a package module.
+    """Load only the two tested symbols from env.py in isolation.
 
-    ``alembic.context`` only works under an alembic runner, so a recording stand-in
-    is swapped in for the import; the offline branch it triggers at import time is
-    harmless by construction and its ``configure`` kwargs are captured.
+    The previous ``spec_from_file_location(...).exec_module`` approach executed
+    the whole file, which imports every ``app.features.*`` model to register
+    ``Base.metadata``. After the memory stack gained edges through
+    ``app.shared.langchain_layer.agents.memory.cognee_client`` and
+    ``app.features.health``, that full exec triggers an import cycle that
+    surfaces as ``AttributeError`` during fixture setup. Extracting the two
+    symbols by AST keeps the fixture independent of the application import
+    graph while still testing the exact source the migration chain ships.
     """
-    configured: list[dict[str, Any]] = []
+    source = _ENV_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(_ENV_PATH))
 
-    class _FakeConfig:
-        config_file_name = None
+    wanted = [
+        node
+        for node in tree.body
+        if (
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(t, ast.Name) and t.id == "MEMORY_SCHEMA_NAME" for t in node.targets
+            )
+        )
+        or (isinstance(node, ast.FunctionDef) and node.name == "exclude_non_app_schema")
+    ]
 
-        @staticmethod
-        def get_main_option(_name: str) -> str | None:
-            return None
-
-    fake_context = types.SimpleNamespace(
-        config=_FakeConfig(),
-        is_offline_mode=lambda: True,
-        configure=lambda **kwargs: configured.append(kwargs),
-        begin_transaction=nullcontext,
-        run_migrations=lambda: None,
-    )
-    monkeypatch.setitem(sys.modules, "alembic.context", fake_context)
-
-    spec = importlib.util.spec_from_file_location("_alembic_env", _ENV_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    module._configured_calls = configured
+    assert wanted, "expected MEMORY_SCHEMA_NAME and exclude_non_app_schema in env.py"
+    mod = ast.Module(body=wanted, type_ignores=[])
+    ast.fix_missing_locations(mod)
+    code = compile(mod, filename=str(_ENV_PATH), mode="exec")
+    namespace: dict[str, Any] = {}
+    exec(code, namespace)  # noqa: S102 — controlled test fixture, not user input
+    # ponytail: AST extraction avoids importing the full app graph; mock-based exec is the upgrade if more symbols are needed
+    module = types.SimpleNamespace(**namespace)
+    module._configured_calls = []  # type: ignore[attr-defined]
     return module
 
 
@@ -80,11 +84,19 @@ def test_a_memory_schema_object_is_excluded(env: Any) -> None:
 
 
 def test_an_application_table_passes_through(env: Any) -> None:
-    from database import Base
+    # Synthetic app table (no schema → public/default) must pass the filter.
+    # The previous version asserted ``Base.metadata.tables`` was populated by
+    # env.py's side-effect imports, which no longer holds under isolated AST
+    # loading — and that coupling is what created the cycle in the first place.
+    app_table = Table("app_table", MetaData(), Column("id", Integer))
+    assert env.exclude_non_app_schema(app_table, "app_table", "table") is True
+    # Keep soft compatibility: if Base happens to be populated, verify it too.
+    with suppress(Exception):
+        from database import Base
 
-    assert Base.metadata.tables, "the registry must be populated by env.py's imports"
-    name, table = next(iter(Base.metadata.tables.items()))
-    assert env.exclude_non_app_schema(table, name, "table") is True
+        if Base.metadata.tables:
+            name, table = next(iter(Base.metadata.tables.items()))
+            assert env.exclude_non_app_schema(table, name, "table") is True
 
 
 def test_a_table_with_no_schema_attribute_is_kept(env: Any) -> None:

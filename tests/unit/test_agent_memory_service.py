@@ -162,7 +162,8 @@ async def test_consolidation_reports_what_it_consolidated() -> None:
     improve = _Recorder()
     service = _service(improve=improve, procedures=True)
     report = await service.consolidate(tenant_ids=["acme", "other"])
-    assert report == {"conversations_consolidated": 2}
+    assert report["conversations_consolidated"] == 2
+    assert isinstance(report.get("sessions_bridged"), int)
     assert len(improve.calls) == 2
 
 
