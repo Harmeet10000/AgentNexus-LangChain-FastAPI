@@ -1,0 +1,86 @@
+---
+title: "Legal Q&A"
+description: "Choose between /search/rag, /search/ask, and /legal/ask — citations, confidence, verified grounding."
+---
+
+**Goal:** get an answer to a legal question, with citations you can defend.
+
+## Three endpoints, one contract family
+
+All three take the same base request and return `answer` + `citations` + `confidence`. They differ in retrieval strategy:
+
+| Endpoint | Strategy | When to use |
+| --- | --- | --- |
+| `POST /search/rag` | Hybrid search → context sections → answer | You want retrieved passages *and* a synthesized answer |
+| `POST /search/ask` | Retrieval-graph QA over your corpus | Direct question; corpus-only grounding |
+| `POST /legal/ask` | Same as `/search/ask` but **requires Graphiti verification** | Questions where knowledge-graph consistency is mandatory |
+
+The only difference between the last two is server-side: `/legal/ask` calls the same handler with `require_graphiti_verified=True`, so candidates that are not anchored in the Neo4j knowledge graph are excluded. That makes it stricter — and empty-handed more often.
+
+## Request
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `query` | str | required (min 1) |
+| `doc_ids_filter` | list[str] | `[]` — restrict to documents |
+| `jurisdiction` | str \| null | `null` |
+| `contract_type` | str \| null | `null` |
+| `clause_type` | str \| null | `null` |
+| `bypass_cache` | bool | `false` |
+
+(`/search/rag` additionally accepts `limit`, `candidate_limit`, `metadata_filter`, and `max_tokens` — default 2000, cap 20000 — the context token budget.)
+
+<CodeGroup>
+```bash
+curl -s -X POST http://localhost:5000/api/v1/legal/ask \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Is this indemnity clause enforceable in India?", "jurisdiction": "India"}'
+```
+
+```python
+r = client.post(
+    "/legal/ask",
+    json={"query": "Is this indemnity clause enforceable in India?", "jurisdiction": "India"},
+)
+data = r.json()["data"]
+print(data["confidence"])
+for c in data["citations"]:
+    print(f"[{c['clause_type']}] {c['claim']}")
+```
+</CodeGroup>
+
+## Response
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Grounded legal answer",
+  "data": {
+    "answer": "The clause imposes unlimited liability ... under Section 27 considerations ...",
+    "citations": [
+      {"chunk_id": "...", "clause_type": "indemnity", "claim": "Supplier indemnifies Buyer for all third-party claims"}
+    ],
+    "confidence": "high",
+    "warnings": [],
+    "cache_hit": false
+  }
+}
+```
+
+## Reading the fields
+
+- **Citations** are enforced, not optional: every claim the model makes carries `{chunk_id, clause_type, claim}` pointing at source chunks. If the model cannot cite it, it should not say it.
+- **Confidence** is one of `high`, `medium`, `uncertain`. Treat `uncertain` as "human must read the sources", especially from `/legal/ask`.
+- **Warnings** carry quality signals (`{stage, code, message, severity}`) such as weak context grading.
+- `POST /search/rag` also returns `context`: grouped `{document_id, title, content, chunk_indices}` sections used for generation.
+- `cache_hit: true` means a cached answer matched query + filters exactly; pass `bypass_cache: true` after re-ingesting documents.
+
+## Verified vs standard answers
+
+Graphiti-verified answers (`/legal/ask`) are cross-checked against extracted entities and relationships — parties, obligations, precedent chains — before chunks qualify. Standard RAG (`/search/rag`, `/search/ask`) grounds in retrieved text alone. Background: [Graph memory](/architecture/graph-memory).
+
+## Errors
+
+401 unauthenticated · 422 validation · empty results with strict filters — loosen `doc_ids_filter` or drop filters. Rate limits on these endpoints follow the global limiter ([Rate limits](/configuration/rate-limits)).

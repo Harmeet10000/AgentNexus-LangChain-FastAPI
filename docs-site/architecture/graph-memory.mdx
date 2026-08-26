@@ -1,0 +1,47 @@
+---
+title: "Graph Memory"
+description: "Neo4j + Graphiti knowledge graph: model, extraction, verification, and graph-backed retrieval."
+---
+
+<Frame caption="Memory stack architecture">
+  ![Memory stack architecture](/images/memory_stack_architecture.svg)
+</Frame>
+
+## Two memory systems, one discipline
+
+| System | Store | Holds | Lifetime |
+| --- | --- | --- | --- |
+| Conversational recall | Cognee → Postgres schema `cognee_memory` (+pgvector) | Summaries and facts from past sessions | Long-term, per-user partitions |
+| Knowledge graph | Neo4j via Graphiti | Entities and relationships extracted from contracts | Long-term, cross-document |
+
+Both are *projections* of state, not independent sources of truth. Memory shaping (filters, trimming, bounded context) governs what gets read back into prompts.
+
+## Graph model
+
+Ingestion extracts typed nodes and relationships from contract content:
+
+**Node/entity types** include Party, Person, Contract, Clause — plus clause classifications such as indemnity, limitation_of_liability, arbitration, termination, governing_law, confidentiality, payment, ip_ownership.
+
+**Relationship types** capture legal semantics, not just co-occurrence:
+
+| Relationship | Meaning |
+| --- | --- |
+| `INDEMNIFIES` | Party A indemnifies party B |
+| `OBLIGES` / `RESTRICTS` | Obligation or restriction imposed on a party |
+| `TRIGGERED_BY` | Clause activates on an event |
+| `DEADLINE` | Time-bound obligation |
+| `OVERRIDDEN_BY` | Precedence between clauses or rulings |
+
+Risk levels (`low` → `critical`) attach to findings; every claim extracted into the graph carries a Citation `{claim, source, confidence}` — uncited claims do not persist.
+
+## Write path: extract, verify, episode
+
+During ingestion (`write_and_verify_chunk`), verified chunks become Graphiti episodes via `graphiti.add_episode(...)`. The resulting `graphiti_episode_id` is stored on the chunk row and surfaces to clients as `graphiti_verified: true`. This flag is the difference between "the model said so" and "this is consistent with the verified knowledge graph".
+
+## Read path: graph-backed retrieval
+
+Legal Q&A can traverse the graph before touching vectors: find the parties, obligations, and precedent chains related to the question, then use those entity anchors to filter/boost candidate chunks (see [RAG pipeline](/architecture/rag-pipeline)). This matters in Indian legal work because judgment interpretation is not optional context — the system must preserve judgment context, surface conflicting rulings, and distinguish what binds a District Court, a High Court, and the Supreme Court of India.
+
+## Configuration
+
+Neo4j connection: `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `NEO4J_DATABASE`. Cognee behavior: `COGNEE_DB_SCHEMA`, `COGNEE_DATASET_PREFIX` (tenant partition prefix), `COGNEE_VECTOR_PROVIDER=pgvector`, and `COGNEE_ACCESS_CONTROL_ENABLED=false` (must stay false on this handler pair — partition naming is the tenant boundary). Full tables in [Environment variables](/configuration/environment-variables).

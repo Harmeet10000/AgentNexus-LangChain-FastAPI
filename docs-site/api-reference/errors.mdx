@@ -1,8 +1,155 @@
 ---
-title: "Api Reference/Errors"
-description: "API Reference documentation."
+title: "Errors"
+description: "The APIResponse error envelope, the full APIException hierarchy with status codes and error codes, and example error bodies."
 ---
 
-# Api Reference/Errors
+## Error envelope
 
-API Reference documentation.
+Every failure returns the same `APIResponse` shape as success, with `success: false`, a populated `error` object, and `data: null`. The `error` object fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `code` | string | Stable machine-readable code, e.g. `VALIDATION_ERROR` |
+| `message` | string | Human-readable summary |
+| `data` | object \| null | Extra context — validation field errors, original errors |
+| `trace` | string \| null | Stack trace reference (never in production output for unhandled errors) |
+| `innerError` | string \| null | Underlying exception message, if any |
+| `flow` | string \| null | Server call chain that produced the error, for support |
+
+A single global exception handler renders every uncaught error into this shape, so you only ever parse one format.
+
+## Exception hierarchy
+
+All handled errors derive from `APIException`. The table lists every class, its HTTP status, and its default error `code`.
+
+| Exception class | Status | `code` | Raised when |
+| --- | --- | --- | --- |
+| `ValidationException` | 422 | `VALIDATION_ERROR` | Input failed validation; `data` maps field → messages |
+| `NotFoundException` | 404 | `NOT_FOUND` | Resource does not exist |
+| `UnauthorizedException` | 401 | `UNAUTHORIZED` | Missing/invalid credentials; sets `WWW-Authenticate: Bearer` |
+| `ForbiddenException` | 403 | `FORBIDDEN` | Authenticated but lacks role/permission |
+| `ConflictException` | 409 | `CONFLICT` | Already exists / invalid state transition |
+| `TooManyRequestsException` | 429 | `TOO_MANY_REQUESTS` | Rate limit exceeded; see [Rate limiting](/api-reference/rate-limiting) |
+| `ServiceUnavailableException` | 503 | `SERVICE_UNAVAILABLE` | Dependency temporarily down, retryable |
+| `InfrastructureException` | 500 or 503 | `INFRASTRUCTURE_ERROR` | Network/I/O/resource failure; 503 when marked retryable |
+| `DatabaseException` | 500 | `DATABASE_ERROR` | Database operation failed after handling |
+| `ExternalServiceException` | 502 | `EXTERNAL_SERVICE_ERROR` | Third-party call failed (Gemini, Razorpay, OAuth providers) |
+| `InvalidTokenException` | 401 | `INVALID_TOKEN` | JWT malformed or bad signature |
+| `ExpiredTokenException` | 401 | `TOKEN_EXPIRED` | JWT past `exp`; refresh and retry |
+| `InvalidRefreshTokenException` | 401 | `REFRESH_TOKEN_INVALID` | Refresh token revoked, rotated, or unknown |
+
+Three statuses come from outside the hierarchy but use the same envelope:
+
+| Source | Status | `code` |
+| --- | --- | --- |
+| Request body fails Pydantic validation | 422 | `VALIDATION_ERROR` |
+| Plain Starlette/FastAPI `HTTPException` | its own status | `INTERNAL_SERVER_ERROR` fallback |
+| Unhandled server exception | 500 | `INTERNAL_SERVER_ERROR` |
+
+## Example bodies
+
+### Validation error (422)
+
+```json
+{
+  "success": false,
+  "statusCode": 422,
+  "request": {
+    "ip": "127.0.0.1",
+    "method": "POST",
+    "url": "/api/v1/auth/register",
+    "correlationId": "5a7d8e9f-0a1b-2c3d-4e5f-6a7b8c9d0e1f"
+  },
+  "message": "Request validation failed",
+  "data": null,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Request validation failed",
+    "data": {
+      "errors": [
+        {
+          "field": "body → email",
+          "message": "value is not a valid email address",
+          "type": "value_error"
+        }
+      ]
+    },
+    "trace": null,
+    "innerError": null,
+    "flow": null
+  }
+}
+```
+
+### Not found (404)
+
+```json
+{
+  "success": false,
+  "statusCode": 404,
+  "request": { },
+  "message": "Document with ID '665f1c2b3a4d5e6f7a8b9c0d' not found",
+  "data": null,
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Document with ID '665f1c2b3a4d5e6f7a8b9c0d' not found",
+    "data": null,
+    "trace": null,
+    "innerError": null,
+    "flow": null
+  }
+}
+```
+
+### Token expired (401)
+
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "request": { },
+  "message": "Token has expired",
+  "data": null,
+  "error": {
+    "code": "TOKEN_EXPIRED",
+    "message": "Token has expired",
+    "data": null,
+    "trace": null,
+    "innerError": null,
+    "flow": null
+  }
+}
+```
+
+On `TOKEN_EXPIRED`, call `POST /auth/refresh` once and retry the original request. On `REFRESH_TOKEN_INVALID`, restart the login flow.
+
+## Handling errors
+
+<CodeGroup>
+```curl
+curl -s -i -X POST http://localhost:5000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "not-an-email", "password": "x"}'
+# HTTP/1.1 422 Unprocessable Content → parse body.error.code
+```
+
+```python
+import httpx
+
+
+async def register(client: httpx.AsyncClient, payload: dict) -> None:
+    res = await client.post("/auth/register", json=payload)
+    body = res.json()
+    if not body["success"]:
+        err = body["error"]
+        if err["code"] == "VALIDATION_ERROR" and err["data"]:
+            for item in err["data"]["errors"]:
+                print(f"{item['field']}: {item['message']}")
+        elif err["code"] == "CONFLICT":
+            print("Email already registered")
+        else:
+            print(f"{res.status_code}: {err['code']} — {err['message']}")
+```
+</CodeGroup>
+
+Always branch on `error.code`, never on `message` text — codes are stable across releases.

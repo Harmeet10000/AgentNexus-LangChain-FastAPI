@@ -1,0 +1,41 @@
+---
+title: "Stateful Agents"
+description: "Resumability via checkpointing, deterministic replay, and session-based execution."
+---
+
+## The problem with stateless agents
+
+A stateless agent loses everything between calls: plan progress, intermediate findings, human decisions. Restart the process mid-run and you start over — or worse, you cannot prove what a run did. For legal analysis that is disqualifying.
+
+## Resumability via checkpointing
+
+Agent Saul runs on a LangGraph compiled with `AsyncPostgresSaver`. After every super-step, the full typed state (`LegalAgentState`) persists to PostgreSQL keyed by `thread_id`. Consequences:
+
+- A crash mid-pipeline is an interruption, not a loss.
+- The client can disconnect and reconnect; the run continues from the last checkpoint.
+- Long-running work (ingestion is minutes of model time) survives deploys.
+
+The state carries a `schema_version` field so hydration code can detect and reject checkpoint shapes from older graph versions instead of failing mysteriously.
+
+## Deterministic replay
+
+> If your system cannot deterministically replay a run, you do not control your agent.
+
+Replay requires three properties:
+
+1. **Typed, serializable state** — Pydantic models throughout (`PlanStep`, `OrchestratorAction`, `Citation`), no opaque blobs.
+2. **Pure node functions** — nodes transform state deterministically; randomness lives only inside explicitly-marked LLM calls whose inputs are recorded.
+3. **Persisted decisions** — every routing decision (orchestrator actions, HITL outcomes) is part of state, so re-executing nodes reproduces the same path.
+
+This is why the mental model is *plan → deterministic execution → validated output → persisted state*, expanded in [Deterministic execution](/concepts/deterministic-execution).
+
+## Session-based execution
+
+Sessions bind HTTP to WebSocket to checkpoints:
+
+1. `POST /agent-saul/sessions` creates a `thread_id` and returns its WS URL.
+2. The WebSocket's first frame must be `start` (optionally carrying the same `thread_id` to resume).
+3. All streaming flows through frames tagged by node and step number.
+4. On disconnect + reconnect, supplying `thread_id` resumes the persisted thread.
+
+Protocol details: [Agent Saul workflow guide](/guides/agent-saul-workflow).

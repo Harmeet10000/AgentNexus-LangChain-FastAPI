@@ -1,8 +1,40 @@
 ---
-title: "Development/Index"
-description: "Development documentation."
+title: "Development"
+description: "Local workflow, code quality gates, testing, and contribution conventions."
 ---
 
-# Development/Index
+## Daily workflow
 
-Development documentation.
+```bash
+uv sync --extra dev                       # install/refresh dependencies
+uv run uvicorn src.app.main:app --reload --reload-dir src --port 5000   # API
+uv run pytest -x                          # tests
+uv run ruff check --fix && uv run ruff format   # lint + format
+uv run alembic revision --autogenerate -m "Add table"   # migration
+```
+
+## Quality gates
+
+| Tool | Role |
+| --- | --- |
+| `ruff` | Formatting and linting — source of truth, including async-blocking and security rule families |
+| `ty` | Static type checking; strict on unresolved imports and async correctness |
+| `pre-commit` | `uv run pre-commit run --all-files` before opening a PR |
+
+Run all three locally; CI expects clean output.
+
+## Conventions
+
+- **Layering**: routers stay thin; business logic in services; persistence in repositories. No HTTP concerns below the router.
+- **Async-first**: all I/O is async; blocking calls are bridged deliberately.
+- **Errors**: raise typed exceptions from `src/app/utils/exceptions.py`; every response uses the shared envelope.
+- **Secrets**: settings fields that hold secrets are `SecretStr`; never log them.
+- **Migrations**: generate with alembic autogenerate, review the diff, never edit applied revisions.
+
+## Testing
+
+`uv run pytest -x` stops at the first failure. Tests exercise services through their public methods; repository tests hit real databases in CI.
+
+## Reporting issues
+
+Bug reports and feature proposals go through GitHub issues. Security vulnerabilities do **not** — see [Security](/resources/security) for the private reporting channel and response timeline.

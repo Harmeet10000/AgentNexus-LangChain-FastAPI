@@ -1,0 +1,111 @@
+---
+title: "Hybrid Search"
+description: "Query the corpus with POST /search: filters, fusion scoring, pagination, and result format."
+---
+
+**Goal:** find relevant contract chunks with a single request — semantic and keyword retrieval fused into one ranked list.
+
+## The endpoint
+
+`POST /search` (authenticated). Request body:
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `query` | str | required | min length 1 |
+| `limit` | int | `20` | page size, 1–100 |
+| `candidate_limit` | int | `50` | per-branch candidates fetched before fusion, 1–200 |
+| `metadata_filter` | object | `{}` | see below |
+| `bypass_cache` | bool | `false` | skip the 15-minute search cache |
+
+Unknown fields are rejected (`extra="forbid"`) — typos fail loudly instead of silently ignoring.
+
+<CodeGroup>
+```bash
+curl -s -X POST http://localhost:5000/api/v1/search \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "unlimited liability indemnity clauses",
+    "limit": 10,
+    "metadata_filter": {
+      "document_kind": "contract",
+      "jurisdiction": "India"
+    }
+  }'
+```
+
+```python
+r = client.post(
+    "/search",
+    json={
+        "query": "unlimited liability indemnity clauses",
+        "limit": 10,
+        "metadata_filter": {"document_kind": "contract", "jurisdiction": "India"},
+    },
+)
+for item in r.json()["data"]["items"]:
+    print(item["rank"], item["score"], item["title"])
+```
+</CodeGroup>
+
+## Filters
+
+All filters live inside `metadata_filter`:
+
+| Field | Type | Use |
+| --- | --- | --- |
+| `document_kind` | str \| null | e.g. `contract` |
+| `jurisdiction` | str \| null | e.g. `India` |
+| `contract_type` | str \| null | vendor agreement, NDA, ... |
+| `parties` | list[str] | match by party name |
+| `clause_type` | str \| null | indemnity, termination, governing_law, ... |
+| `document_ids` | list[str] | restrict to specific documents |
+| `metadata_` | dict | free-form metadata match |
+| `require_graphiti_verified` | bool | only chunks verified in the knowledge graph |
+
+Filters are part of the cache key — changing a filter never returns a stale hit.
+
+## Fusion scoring, briefly
+
+Three retrievers run in parallel (vector via pgvector, BM25, trigram); ranks fuse with reciprocal rank fusion (k=60) using per-query branch weights. Each returned item carries its final `score` and `rank`. Full mechanics: [RAG pipeline](/architecture/rag-pipeline).
+
+## Result format
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Unified search results",
+  "data": {
+    "items": [
+      {
+        "chunk_id": "...",
+        "document_id": "b7e2...",
+        "title": "Vendor Agreement",
+        "content": "The Supplier shall indemnify...",
+        "chunk_index": 12,
+        "chunk_kind": "clause",
+        "clause_type": "indemnity",
+        "chunk_metadata": {"jurisdiction": "India"},
+        "quality_warnings": [],
+        "graphiti_verified": true,
+        "score": 0.0314,
+        "rank": 1
+      }
+    ],
+    "cache_hit": false
+  }
+}
+```
+
+## Pagination
+
+Page through results by increasing `limit` (up to 100) or narrowing filters. There is no offset parameter — for exhaustive scanning prefer `POST /search/rag` with a larger token budget, which returns grouped context sections.
+
+## Errors
+
+- 401 unauthenticated / expired token.
+- 422 validation errors list the offending field.
+- Empty `items` means genuinely no match — loosen filters before assuming breakage.
+
+Want an answer instead of a list? See [Legal Q&A](/guides/legal-qa).

@@ -1,8 +1,106 @@
 ---
-title: "Api Reference/Overview"
-description: "API Reference documentation."
+title: "API Overview"
+description: "Base URL, versioning policy, response envelope, and endpoint organization for the AgentNexus REST API."
 ---
 
-# Api Reference/Overview
+## Base URL
 
-API Reference documentation.
+All endpoints are served from a versioned prefix:
+
+```
+https://<host>/api/v1
+```
+
+The default development server runs on `http://localhost:5000`, so the full base URL in development is `http://localhost:5000/api/v1`. Newer billing, credits, and subscription endpoints live under `/api/v2`.
+
+Every request and response body is `application/json`, with two exceptions: file upload accepts `multipart/form-data`, and streaming endpoints return `text/event-stream` or raw bytes.
+
+<Info>
+Health (`GET /health`, `GET /api/v1/health/`) and metrics (`GET /metrics`) are intentionally unversioned and exempt from auth, rate limiting, and deprecation headers.
+</Info>
+
+## Versioning
+
+**v1 is deprecated. Sunset date: 2027-06-15.**
+
+Every `/api/v1/*` response carries three headers injected by `ApiDeprecationMiddleware`:
+
+| Header | Example value | Meaning |
+| --- | --- | --- |
+| `Deprecation` | `true` | This version is deprecated |
+| `Sunset` | `2027-06-15` | Date after which v1 may stop responding |
+| `Link` | `</api/v2/auth/me>; rel="successor-version"` | Machine-readable pointer to the v2 equivalent |
+
+Migrate before the sunset date. Every v1 route has a v2 successor at the same path suffix under `/api/v2` (see the `Link` header), and billing lives exclusively in v2.
+
+## Response envelope
+
+Every JSON response — success or failure — uses one envelope, `APIResponse[T]`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "request": {
+    "ip": "127.0.0.1",
+    "method": "POST",
+    "url": "/api/v1/auth/login",
+    "correlationId": "8f14e45f-ea9b-4d3f-9f3e-1c2b5a6d7e8f"
+  },
+  "message": "Login successful",
+  "data": { },
+  "error": null
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `success` | boolean | `true` on success, `false` on any error |
+| `statusCode` | number | HTTP status code, mirrored in the body |
+| `request` | object | Echo of your request: `ip`, `method`, `url`, `correlationId` |
+| `message` | string | Human-readable summary |
+| `data` | `T \| null` | Typed payload on success; `null` on errors |
+| `error` | object \| null | Populated only when `success` is `false` — see [Errors](/api-reference/errors) |
+
+The `correlationId` from the `request` block appears in server logs. Send it with bug reports to make your request findable.
+
+## Endpoint organization
+
+Routes are grouped by feature tag. The complete machine-readable spec is served at `/swagger.json` and rendered in this site's API playground.
+
+| Area | Prefix | Highlights |
+| --- | --- | --- |
+| Auth | `/api/v1/auth` | register, login, refresh, sessions, OAuth2 (Google/GitHub) |
+| Users | `/api/v1/users` | admin listing, role changes, activation, impersonation |
+| Profile | `/api/v1/profile` | own profile read/update, avatar, password change |
+| Documents | `/api/v1/documents` | contract upload, ingestion status |
+| Search | `/api/v1/search` | hybrid search, RAG query, verified legal Q&A |
+| Legal | `/api/v1/legal` | `POST /ask` for Graphiti-backed answers |
+| Agent Saul | `/api/v1/agent-saul` | agent session creation (WebSocket connects separately) |
+| Health | `/api/v1/health` | liveness + dependency probes |
+| Billing (v2) | `/api/v2/plans`, `/api/v2/subscriptions`, `/api/v2/invoices`, `/api/v2/payments`, `/api/v2/credits` | plans, lifecycle, invoices, refunds, credit balance |
+| Webhooks (v2) | `/api/v2/webhooks` | Razorpay payment events |
+
+## First call
+
+<CodeGroup>
+```curl
+curl -s http://localhost:5000/api/v1/health/self | python3 -m json.tool
+```
+
+```python
+import httpx
+
+async with httpx.AsyncClient(base_url="http://localhost:5000/api/v1") as client:
+    res = await client.get("/health/self")
+    body = res.json()
+    assert body["success"], body["error"]["message"]
+    print(body["data"])
+```
+</CodeGroup>
+
+## Where to next
+
+- [Authentication](/api-reference/authentication) — JWT, cookies, OAuth2, RBAC
+- [Rate limiting](/api-reference/rate-limiting) — limits per endpoint, `Retry-After`
+- [Errors](/api-reference/errors) — error codes and exception taxonomy

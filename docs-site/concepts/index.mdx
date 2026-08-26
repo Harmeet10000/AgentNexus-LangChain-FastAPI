@@ -1,8 +1,34 @@
 ---
-title: "Concepts/Index"
-description: "Core Concepts documentation."
+title: "Core Concepts"
+description: "The ideas the platform is built on: stateful agents, human oversight, memory, and context discipline."
 ---
 
-# Concepts/Index
+## The mental model
 
-Core Concepts documentation.
+The platform rejects the "LLM decides and hopes" pattern. Every workflow follows:
+
+**Plan → deterministic execution → validated output → persisted state.**
+
+The model proposes; a typed graph executes; validation gates persistence. These pages unpack that idea from four angles.
+
+## Stateful agents
+
+Agent runs are checkpointed and resumable. A crash mid-pipeline is an interruption, not a loss — execution replays deterministically from the last checkpoint. If your system cannot deterministically replay a run, you do not control your agent.
+
+## Human in the loop
+
+For legal work, HITL is not a feature, it is a liability requirement. Risk approvals, clause corrections, and reviewer reasoning are captured as first-class data before anything is persisted — producing an audit trail, not just a chat log.
+
+## Memory architecture
+
+Two complementary systems: Cognee for long-term semantic recall of conversations, Graphiti for the evolving knowledge graph of parties, contracts, clauses, and obligations. Both are shaped through filters, trimming, and bounded context windows.
+
+## Context discipline
+
+Context windows are budgets, not landfills. System prompt, bootstrap files, retrieved memory, conversation history, and tool output each get an allocation; compaction summarizes when a section overruns.
+
+## Where these show up in code
+
+- The LangGraph layer under `src/app/shared/langgraph_layer/` implements checkpointing and node strategy.
+- `src/app/features/agent_saul/` is the orchestrator: planner → ingestion → retrieval → reconciliation → synthesis → finalization.
+- [API Reference](/api-reference/overview) shows how runs are started and sessions are managed over HTTP + WebSocket.

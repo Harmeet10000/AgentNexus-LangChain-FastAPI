@@ -1,0 +1,71 @@
+---
+title: "Error and Result Pattern"
+description: "returns.Result for expected failures, AppError hierarchy, the exception bridge, and APIException types."
+---
+
+The codebase distinguishes two failure worlds, with one bridge between them:
+
+- **Expected failures** (not found, conflict, upstream 4xx) travel as values: `AppResult[T] = Result[T, AppError]`.
+- **Unexpected failures** (bugs, violated invariants) raise.
+
+Why: expected failures are part of a function's contract; forcing callers to catch exceptions makes control flow invisible in signatures and encourages catching too broadly.
+
+## AppError hierarchy
+
+All five subclasses live in `src/app/shared/result/errors.py`; each is a frozen Pydantic model carrying `code`, `message`, optional `details`.
+
+| Class | kind | Default code | Retryable | Extra fields |
+| --- | --- | --- | --- | --- |
+| `ValidationAppError` | validation | `VALIDATION_ERROR` | false | — |
+| `NotFoundAppError` | not_found | `NOT_FOUND` | false | `resource`, `identifier` |
+| `ConflictAppError` | conflict | `CONFLICT` | false | — |
+| `InfrastructureAppError` | infrastructure | `INFRASTRUCTURE_ERROR` | true | — |
+| `ExternalServiceAppError` | external_service | `EXTERNAL_SERVICE_ERROR` | true | `service` |
+
+## The standard unwrapping pattern
+
+Repositories return `_result` variants; services unwrap with `isinstance(result, Failure)` and answer expected failures with `http_error(...)` — they do **not** raise:
+
+```python
+result = await self._user_repo.find_by_email_result(dto.email)
+if isinstance(result, Failure):
+    error = result.failure()
+    log_expected_failure(error, operation="find_by_email")
+    return http_error(
+        message=error.message,
+        status_code=...,          # derive from error.kind
+        error_code=error.code,
+        data=error.details,
+    )
+user = result.unwrap()
+```
+
+Rules that keep this pattern honest:
+
+- `Failure.failure` is a **method** in this version of `returns` — call it, don't index it.
+- Log first, then return `http_error(...)` as two statements — never `log_expected_failure(e) or raise ...`.
+- Inside DB transaction blocks, raise for rollback; translate to `Failure()` only after the boundary.
+- When "not found" is the only signal and the caller needs nothing else, plain `None` beats a Result.
+
+## The bridge: `app_error_to_exception()`
+
+Where Results meet transport boundaries (legacy call sites, LangGraph node edges), `src/app/shared/result/mappers.py` translates the typed hierarchy into project exceptions using structural `match`/`case` — most-specific first, guard on `retryable=True` distinguishing retryable infrastructure from permanent database faults, catch-all `AppError()` at the end.
+
+## APIException hierarchy
+
+Transport-facing exceptions live in `src/app/utils/exceptions.py`. All subclass `APIException` (itself an `HTTPException`) and render through the single global handler into the standard error envelope.
+
+| Exception | HTTP status |
+| --- | --- |
+| `ValidationException` | 422 |
+| `NotFoundException` | 404 |
+| `UnauthorizedException` | 401 |
+| `ForbiddenException` | 403 |
+| `ConflictException` | 409 |
+| `TooManyRequestsException` | 429 |
+| `ServiceUnavailableException` | 503 |
+| `DatabaseException` | 500 |
+| `ExternalServiceException` | 502 |
+| `InfrastructureException` | dynamic (retryable → 503, else 500) |
+
+Wire format and examples: [Errors](/api-reference/errors).

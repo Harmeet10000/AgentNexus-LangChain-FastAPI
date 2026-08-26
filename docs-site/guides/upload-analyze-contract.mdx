@@ -1,0 +1,109 @@
+---
+title: "Upload and Analyze a Contract"
+description: "End-to-end: authenticate, upload a contract, poll ingestion status, read the results."
+---
+
+**Goal:** get a contract from your disk into the analyzed corpus.
+
+## 0. Authenticate
+
+Documents belong to users — every endpoint below requires a JWT (cookie or `Authorization: Bearer`):
+
+<CodeGroup>
+```bash
+curl -s -X POST http://localhost:5000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"..."}'
+# verify via email link, then:
+curl -s -X POST http://localhost:5000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -c cookies.txt \
+  -d '{"email":"you@example.com","password":"..."}'
+```
+
+```python
+import httpx
+
+base = "http://localhost:5000/api/v1"
+client = httpx.Client(base_url=base)
+client.post("/auth/register", json={"email": "you@example.com", "password": "..."})
+client.post("/auth/login", json={"email": "you@example.com", "password": "..."})
+```
+</CodeGroup>
+
+## 1. Upload
+
+`POST /documents/upload` takes multipart form data with a single `file` field. Returns **201 Created**:
+
+<CodeGroup>
+```bash
+curl -s -X POST http://localhost:5000/api/v1/documents/upload \
+  -b cookies.txt \
+  -F file=@vendor-agreement.pdf
+```
+
+```python
+with open("vendor-agreement.pdf", "rb") as f:
+    r = client.post("/documents/upload", files={"file": f})
+print(r.json()["data"])
+```
+</CodeGroup>
+
+```json
+{
+  "success": true,
+  "statusCode": 201,
+  "message": "Document queued for ingestion",
+  "data": {
+    "doc_id": "b7e2...",
+    "status": "queued",
+    "task_id": "celery-task-id",
+    "duplicate": false,
+    "document_kind": "contract",
+    "chunk_count": null,
+    "warning_count": 0,
+    "warnings": []
+  }
+}
+```
+
+Re-uploading identical content returns `duplicate: true` with the original `doc_id`.
+
+## 2. Poll status
+
+Ingestion runs on Celery (minutes for model work). Poll `GET /documents/{doc_id}/status`:
+
+<CodeGroup>
+```bash
+curl -s http://localhost:5000/api/v1/documents/b7e2.../status -b cookies.txt
+```
+
+```python
+import time
+
+while True:
+    data = client.get(f"/documents/{doc_id}/status").json()["data"]
+    if data["status"].startswith("completed"):
+        break
+    time.sleep(10)
+```
+</CodeGroup>
+
+Status walks `queued → parsed → stored_postgres → completed | completed_with_warnings`. The final payload includes `title`, `document_kind`, `jurisdiction`, `chunk_count`, `verified_chunk_count`, and typed `warnings` (`{stage, code, message, severity}`).
+
+## 3. What next
+
+- Search it: [Hybrid search](/guides/hybrid-search)
+- Ask questions about it: [Legal Q&A](/guides/legal-qa)
+- Full analysis with human review: [Agent Saul workflow](/guides/agent-saul-workflow)
+
+## Handling errors
+
+| Situation | Response |
+| --- | --- |
+| Missing filename or empty body | 422 validation error from the envelope's `error` field |
+| File > 10 MB (`MAX_UPLOAD_SIZE`) | 422 — split or compress before upload |
+| Extension not in pdf/txt/docx/xlsx/pptx/md/html | 422 unsupported type |
+| Not authenticated / token expired | 401 — refresh via `POST /auth/refresh` |
+
+All errors share one envelope shape; see [Errors](/api-reference/errors).

@@ -1,0 +1,111 @@
+---
+title: "Installation"
+description: "Full setup: prerequisites, dependencies, environment, migrations, and verification."
+---
+
+## Prerequisites
+
+| Requirement | Notes |
+| --- | --- |
+| Python **3.12+** | PEP 695 syntax is used throughout |
+| [`uv`](https://docs.astral.sh/uv/) | Package manager — all tooling runs through `uv run` |
+| PostgreSQL (or TigerData Postgres) | Relational store + `pgvector`, `pgvectorscale`, `pg_textsearch` extensions for retrieval |
+| Neo4j | Knowledge graph memory via Graphiti |
+| Redis | Cache, rate limits, sessions, Celery broker backend |
+| MongoDB | User profiles and document metadata (Beanie ODM) |
+| Google Gemini API key | All model calls |
+| Optional: LangSmith API key | LLM tracing |
+
+`ruff` and `ty` are used for linting and type checking and install as dev dependencies.
+
+## 1. Clone
+
+```bash
+git clone https://github.com/Harmeet10000/langchain-fastapi-production.git
+cd langchain-fastapi-production
+```
+
+## 2. Create virtualenv and sync
+
+```bash
+uv venv
+source .venv/bin/activate
+uv sync
+uv sync --extra dev
+```
+
+`uv sync` resolves from `uv.lock` for reproducible installs.
+
+## 3. Set up environment
+
+Create `.env.development` in the repository root (the settings loader reads exactly that filename). Start from the minimum set and add what you need:
+
+```bash
+# Required
+GEMINI_API_KEY=your-gemini-key
+POSTGRES_URL=postgresql://user:pass@localhost:5432/db
+MONGODB_URI=mongodb://localhost:27017/langchain_db
+REDIS_URL=redis://localhost:6379
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=change-me
+
+# Recommended
+JWT_SECRET_KEY=<openssl rand -hex 32>
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your-langsmith-key
+
+# Storage (document uploads land in object storage)
+S3_BUCKET_NAME=contracts
+S3_ENDPOINT_URL=https://<account>.r2.cloudflarestorage.com
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+
+# Web research features
+TAVILY_API_KEY=your-tavily-key
+```
+
+Names are case-sensitive and secret fields are `SecretStr`. The complete reference with every default lives in [Environment variables](/configuration/environment-variables).
+
+<Note>
+If `ENVIRONMENT=production`, startup fails while any secret still holds its documented insecure default (`JWT_SECRET_KEY=super-secret-change-this-in-production`, `NEO4J_PASSWORD=password`, etc.). Development environments get a warning instead.
+</Note>
+
+## 4. Run database migrations
+
+PostgreSQL schema changes are managed by Alembic:
+
+```bash
+uv run alembic upgrade head        # apply all pending
+uv run alembic current             # show applied revision
+uv run alembic history --verbose   # full revision history
+```
+
+MongoDB collections are created lazily by Beanie; Neo4j constraints are ensured at Graphiti setup time.
+
+## 5. Verify installation
+
+Start the API ([Quickstart step 4](/get-started/quickstart#4-start-the-api)) and check health:
+
+<CodeGroup>
+```bash
+curl -s http://localhost:5000/api/v1/health/self
+curl -s http://localhost:5000/api/v1/health/
+```
+
+```python
+import httpx
+
+print(httpx.get("http://localhost:5000/api/v1/health/self").json())
+```
+</CodeGroup>
+
+`GET /health/` reports per-dependency status — postgres, redis, mongodb, neo4j, graphiti, cognee. Anything reporting unhealthy points at the corresponding `.env.development` value.
+
+Then confirm tooling works inside the repo:
+
+```bash
+uv run ruff check src/
+uv run ty check src/
+uv run pytest -x
+```

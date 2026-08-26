@@ -1,8 +1,46 @@
 ---
-title: "Get Started/Overview"
-description: "Get Started documentation."
+title: "Overview"
+description: "What Agent Saul is, the philosophy behind it, and what the platform can do."
 ---
 
-# Get Started/Overview
+## What is this?
 
-Get Started documentation.
+Agent Saul is a graph-backed, human-verified legal intelligence platform for Indian contracts. Upload a contract, and the platform ingests it, extracts parties and obligations into a knowledge graph, answers questions with cited sources — and keeps a human in command of every consequential decision.
+
+It is built with FastAPI, LangChain, LangGraph, Gemini, PostgreSQL (TigerData-backed), Neo4j, Graphiti, Redis, MongoDB, and Celery. It is not a generic agent sandbox. It is a stateful legal reasoning system designed around resumability, memory discipline, human review, and deterministic execution.
+
+## Philosophy: AI-assisted, not AI-replacing
+
+> AI Agents should never be replacing Humans. They should be your devoted digital companions, ever-ready to absorb the soul-crushing repetition and mindless grunt work that slowly poisons the very profession you once chased with youthful fire.
+
+You should not use agents end-to-end either. The goal is AI-assisted work that feels like a genuinely ergonomic work chair: removing avoidable strain, cutting down existential second-guessing, lowering the quiet terror of *"what if I chose wrong?"*. If your agents free time otherwise wasted on repetitive cognitive drag, that time goes back to being more human.
+
+## Why this exists
+
+Legal work has a strange cruelty to it: the most expensive human judgment sits behind a wall of repetitive reading, clause sorting, calendar math, template comparison, and anxious second-guessing. The people who need clarity most are usually least able to buy it continuously — founders signing vendor terms, families reading settlement papers, small businesses trying not to discover a liability clause after the damage is done.
+
+The pain in India is specific:
+
+- Small startups often cannot access strong legal teams.
+- Individuals get intimidated by fine print and legal notices.
+- Much legal work is repetitive, high-volume, low-judgment grunt work.
+- Most contract AI products were trained around US/UK assumptions, not Indian statutes, procedures, and enforcement realities.
+
+High-volume work worth automating: clause tagging, risk flagging (one-sided indemnity, unlimited liability), deadline tracking, template comparison, stamp duty and jurisdiction sanity checks — "is this clause enforceable in India?"
+
+Time is a symptom. Risk and uncertainty are the disease.
+
+## Capabilities
+
+- **Contract ingestion** — Docling-powered parsing through a LangGraph pipeline: classify, extract, segment, contextualize, embed.
+- **Hybrid search** — vector + BM25 + trigram retrieval fused with reciprocal rank fusion over PostgreSQL pgvector.
+- **Graph-backed legal Q&A** — answers cross-checked against a Neo4j knowledge graph of parties, contracts, clauses, and obligations.
+- **Stateful agent runs** — Agent Saul orchestrates planner → workers → synthesizer graphs with checkpointed, resumable execution over WebSocket.
+- **Human review gates** — risk approvals and clause corrections recorded as an audit trail before anything persists.
+- **Operational hardening** — JWT/OAuth2 auth with claims-based RBAC, layered rate limiting, transactional outbox events, OpenTelemetry tracing.
+
+## Start here
+
+- [Quickstart](/get-started/quickstart) — running locally in five minutes
+- [Installation](/get-started/installation) — full setup walkthrough
+- [Architecture overview](/architecture/overview) — how the pieces compose

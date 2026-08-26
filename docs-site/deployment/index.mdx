@@ -1,8 +1,49 @@
 ---
-title: "Deployment/Index"
-description: "Deployment documentation."
+title: "Deployment"
+description: "Running the platform in production: configuration, migrations, workers, and observability."
 ---
 
-# Deployment/Index
+## Configuration
 
-Deployment documentation.
+Set `ENVIRONMENT=production`. This flips several safety defaults automatically:
+
+- FastAPI Guard leaves passive mode and enforces HTTPS.
+- OpenTelemetry turns on (`OTEL_ENABLED` defaults to true).
+- Startup fails if any secret field still holds its documented default — the app will not boot with `JWT_SECRET_KEY=super-secret-change-this-in-production`, an empty `GEMINI_API_KEY`, or similar.
+- The schema is served at `/swagger.json`; `/openapi.json` is not exposed.
+
+## Process topology
+
+| Process | Command | Notes |
+| --- | --- | --- |
+| API | `uvicorn src.app.main:app --host 0.0.0.0 --port 5000 --workers $WORKERS` | Behind a TLS proxy |
+| Default worker | `celery -A app.connections.celery:celery_app worker -Q default` | Billing, email, short tasks |
+| Ingestion worker | `celery -A app.connections.celery:celery_app worker -Q ingestion --concurrency=2` | Minutes-long model work, isolated queue |
+| Beat scheduler | `celery -A app.connections.celery:celery_app beat` | Credit expiration/reconciliation crons |
+
+The ingestion queue exists because document ingestion occupies a worker slot for minutes; sharing a queue with sub-second billing tasks caused head-of-line blocking.
+
+## Migrations
+
+```bash
+uv run alembic upgrade head        # apply
+uv run alembic current             # inspect
+uv run alembic downgrade -1        # roll back one revision
+```
+
+Run migrations as a release step before rolling new API workers.
+
+## Dependencies to provision
+
+PostgreSQL (with pgvector), MongoDB, Redis, Neo4j, RabbitMQ, and S3/R2-compatible storage. Deep health probes for each run at `GET /api/v1/health/` with per-dependency latency — wire it into your load balancer.
+
+## Observability
+
+- **Tracing/metrics/logs** via OTLP (`OTEL_EXPORTER_OTLP_ENDPOINT`, default collector port 4317); Prometheus metrics at `GET /metrics`.
+- **Structured logs**: loguru JSON format with rotation (`LOG_ROTATION`, default 10 MB) and retention (default 7 days).
+- **Security log**: FastAPI Guard writes violations to `logs/security.log`.
+- Every response carries a `correlationId`; search logs by it when triaging.
+
+## v1 sunset
+
+v1 responses carry `Deprecation: true` and `Sunset: 2027-06-15`. Plan client migrations before that date; billing endpoints are already v2-only.

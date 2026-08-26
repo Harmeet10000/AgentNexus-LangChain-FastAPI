@@ -1,0 +1,60 @@
+---
+title: "Observability"
+description: "OpenTelemetry tracing/metrics/logs, LangSmith tracing, and structured logging configuration."
+---
+
+Three observability surfaces, each independently configurable: OpenTelemetry for infrastructure signals, LangSmith for LLM execution traces, and loguru structured logs for everything else.
+
+## OpenTelemetry
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `OTEL_ENABLED` | `false` | Master switch — **auto-forced true when `ENVIRONMENT=production`** |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP/gRPC collector endpoint |
+| `OTEL_SERVICE_NAME` | `langchain-fastapi` | Service resource attribute |
+| `OTEL_TRACES_EXPORTER` | `otlp` | Trace exporter selection |
+| `OTEL_METRICS_EXPORTER` | `otlp` | Metrics exporter selection |
+| `OTEL_LOGS_EXPORTER` | `otlp` | Log exporter selection |
+| `OTEL_SAMPLE_RATE` | `1.0` | Trace sampling ratio (0.0–1.0) |
+
+All three signal types ship to one collector. Point them anywhere by changing the exporters — e.g. `OTEL_TRACES_EXPORTER=console` for local debugging.
+
+<Note>
+Because production auto-enables OTel via a settings validator, an explicitly-set `OTEL_ENABLED=false` wins — auto-enable only applies when the variable is absent.
+</Note>
+
+## LangSmith
+
+LangSmith traces every LangChain/LangGraph execution — graph runs, node durations, prompts, and tool calls.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `LANGSMITH_TRACING` | `false` | Enable trace export |
+| `LANGSMITH_API_KEY` | — | Workspace API key |
+| `LANGSMITH_ENDPOINT` | `https://api.smith.langchain.com` | Ingest endpoint |
+| `LANGSMITH_PROJECT` | `langchain-production` | Target project |
+| `LANGCHAIN_PROJECT` | `langchain-production` | Legacy alias kept for env compatibility |
+
+Precompiled agents (see [LangGraph orchestration](/architecture/langgraph-orchestration)) produce stable, comparable traces because the runtime shape is built once — rebuilding agents per node would fragment trace comparisons.
+
+## Structured logging
+
+Loguru with JSON output by default:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `LOG_LEVEL` | `INFO` | Minimum level |
+| `LOG_FORMAT` | `json` | `json` for machines; change for local dev |
+| `LOG_FILE` | `logs/app.log` | Sink file |
+| `LOG_DIR` | `logs` | Log directory |
+| `LOG_ROTATION` | `10 MB` | Rotate trigger |
+| `LOG_RETENTION` | `7 days` | Delete rotated files after |
+| `LOG_COMPRESSION` | `zip` | Compress rotated files |
+| `LOG_BACKTRACE` | `true` | Include tracebacks on errors |
+| `LOG_DIAGNOSE` | `true` | Annotate tracebacks with variable values |
+
+<Note>
+Set `LOG_DIAGNOSE=false` in production — annotated tracebacks can leak variable values into log sinks.
+</Note>
+
+Conventions: services use `logger.bind(user_id=..., operation=...)` for contextual fields, expected failures go through `log_expected_failure()` (see [Error & Result pattern](/architecture/error-and-result-pattern)), and every Agent Saul WebSocket session binds `user_id`, `thread_id`, and `correlation_id`.

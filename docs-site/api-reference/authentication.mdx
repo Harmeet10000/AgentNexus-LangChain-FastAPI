@@ -1,8 +1,135 @@
 ---
-title: "Api Reference/Authentication"
-description: "API Reference documentation."
+title: "Authentication"
+description: "JWT access and refresh tokens, the access_token cookie, Authorization header, OAuth2 providers, and claims-based RBAC."
 ---
 
-# Api Reference/Authentication
+## Token model
 
-API Reference documentation.
+Two JWTs are issued at login:
+
+| Token | Purpose | Lifetime (default) | Transport |
+| --- | --- | --- | --- |
+| Access token | Authenticates every API call | 15 min (`ACCESS_TOKEN_EXPIRE_MINUTES`) | `access_token` cookie or `Authorization: Bearer` header |
+| Refresh token | Mints new access tokens | 30 days (`REFRESH_TOKEN_EXPIRE_DAYS`) | Request body only — never a cookie |
+
+Signing algorithm is HS256 (`JWT_ALGORITHM`) with `JWT_SECRET_KEY`. Both lifetimes are configurable via environment variables.
+
+<Note>
+Access tokens are short-lived by design. Never store the refresh token in browser `localStorage`; the server sets it in request/response bodies only, and the OAuth callback delivers it in a URL fragment so it never reaches the server.
+</Note>
+
+## Sending credentials
+
+The API accepts credentials in two places, checked in this order:
+
+1. **Authorization header** (takes priority):
+
+```http
+Authorization: Bearer <access_token>
+```
+
+2. **Cookie fallback**: an HttpOnly `access_token` cookie, set automatically by `/auth/login`, `/auth/refresh`, and the OAuth callback with `Secure` + `SameSite=Lax`.
+
+Header-first ordering means browsers (cookie path) and API clients (header path) work with zero special-casing on the server.
+
+## Core flows
+
+### Register and login
+
+`POST /auth/register` creates the account (201, email verification required). `POST /auth/login` returns a `TokenResponse`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Login successful",
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIs...",
+    "refresh_token": "dGhpcyBpcyBhIHJlZnJlc2g...",
+    "token_type": "bearer",
+    "expires_in": 900
+  },
+  "request": { },
+  "error": null
+}
+```
+
+<CodeGroup>
+```curl
+curl -s -X POST http://localhost:5000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -c cookies.txt \
+  -d '{"email": "advocate@example.in", "password": "correct-horse"}'
+```
+
+```python
+import httpx
+
+async with httpx.AsyncClient(base_url="http://localhost:5000/api/v1") as client:
+    res = await client.post(
+        "/auth/login",
+        json={"email": "advocate@example.in", "password": "correct-horse"},
+    )
+    tokens = res.json()["data"]
+    auth = {"Authorization": f"Bearer {tokens['access_token']}"}
+    me = await client.get("/auth/me", headers=auth)
+    print(me.json()["data"])
+```
+</CodeGroup>
+
+### Refresh and logout
+
+- `POST /auth/refresh` — body `{ "refresh_token": "..." }`, returns fresh tokens and resets the cookie.
+- `POST /auth/logout` — revokes the refresh token server-side and clears the cookie.
+- `GET /auth/sessions` and `DELETE /auth/sessions/{session_id}` / `DELETE /auth/sessions` — list and revoke sessions; revocation also closes any live WebSocket connections for that session.
+
+## OAuth2
+
+Google and GitHub are supported. The flow is authorization-code with a signed state cookie:
+
+1. `GET /auth/oauth/{provider}/authorize` — returns `{ "authorization_url", "provider" }` and sets an HttpOnly `oauth_state` cookie (5-minute max age).
+2. Redirect the user to `authorization_url`.
+3. The provider calls back `GET /auth/oauth/{provider}/callback?code=...&state=...`. The server validates state against the cookie, issues tokens, then 302-redirects to `{FRONTEND_URL}/auth/callback#refresh_token=...` with the access token set as a cookie.
+
+Supported `provider` values: `google`, `github`. Anything else raises a validation error.
+
+## RBAC via JWT claims
+
+Roles and permissions are embedded in the access token at login time, so authorization checks cost zero database round trips.
+
+| Claim | Type | Description |
+| --- | --- | --- |
+| `sub` | string | User ID |
+| `jti` | string | Token ID (used for revocation) |
+| `sid` | string \| null | Session ID |
+| `role` | string | `admin`, `moderator`, or `user` |
+| `permissions` | list | e.g. `["users:read", "users:write"]` |
+| `token_type` | string | `access` or `refresh` |
+
+Role → permission mapping: `admin` has all permissions; `moderator` has content and profile permissions plus `users:read`; `user` has profile-only permissions. Insufficient role yields `403 FORBIDDEN`; missing/expired token yields `401 UNAUTHORIZED`.
+
+<Note>
+Revoking a user's role does not invalidate tokens already issued — claims are valid until the access token expires (max 15 minutes). Immediate revocation: delete the user's sessions, which invalidates their refresh tokens.
+</Note>
+
+## Protected endpoint example
+
+`GET /auth/me` requires a verified, active user:
+
+<CodeGroup>
+```curl
+curl -s http://localhost:5000/api/v1/auth/me \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+```python
+import httpx
+
+res = await client.get("/auth/me", headers={"Authorization": f"Bearer {access_token}"})
+if not res.json()["success"] and res.status_code == 401:
+    # TOKEN_EXPIRED — call POST /auth/refresh and retry once
+    ...
+```
+</CodeGroup>
+
+Auth errors use the standard [error envelope](/api-reference/errors) with codes `UNAUTHORIZED`, `INVALID_TOKEN`, `TOKEN_EXPIRED`, or `REFRESH_TOKEN_INVALID`.

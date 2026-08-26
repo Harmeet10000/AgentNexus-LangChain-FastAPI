@@ -1,0 +1,41 @@
+---
+title: "Deterministic Execution"
+description: "Plan → deterministic execution → validated output → persisted state — and why the alternative fails."
+---
+
+## The mental model
+
+```text
+Plan → deterministic execution → validated output → persisted state
+```
+
+Not:
+
+```text
+LLM → decide → act → hope it works
+```
+
+The difference is where control lives. In the second model, the model is the runtime: each step's next action emerges from a probabilistic completion, so behavior drifts, failures are unreproducible, and nobody can audit *why* something happened. In the first, the model proposes inside a typed graph that executes deterministically.
+
+## Each stage earns its name
+
+| Stage | Guarantee | Mechanism |
+| --- | --- | --- |
+| **Plan** | Structured, inspectable intent | Orchestrator emits `PlanStep` objects (action, inputs, dependencies) — not prose |
+| **Deterministic execution** | Same state in, same path out | Pure node functions over `LegalAgentState`, declared edges, precompiled agents |
+| **Validated output** | Nothing unverified crosses forward | Grounding verification, citation enforcement (`{claim, source, confidence}`), grading |
+| **Persisted state** | Survives crashes, supports audit | Postgres checkpointing per super-step; trusted persistence only after human review |
+
+## What "deterministic" does not mean
+
+It does not mean LLM outputs are reproducible. It means *control flow* is: given a recorded state, the graph takes the same route through the same nodes with the same tools available. Model nondeterminism is contained inside single nodes whose inputs and outputs are persisted. That containment is what makes replay meaningful — expanded in [Stateful agents](/concepts/stateful-agents).
+
+## Why the workflow is correct for legal work
+
+- **No cycles before human review** — avoids compounding hallucinations; errors get caught at gates instead of amplified by loops.
+- **Risk and compliance are separated** from synthesis — legal correctness matters more than linguistic fluency.
+- **Human gate before persistence** — memory becomes trusted memory.
+
+## The test
+
+Ask of any agent system: *can you replay yesterday's run and show why it did what it did?* If the answer needs "the model felt like it", you do not control your agent. If the answer is a chain of persisted states and routing decisions, you do.

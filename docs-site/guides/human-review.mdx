@@ -1,0 +1,84 @@
+---
+title: "Human Review"
+description: "Approve, reject, and annotate at the human gate — what to send and what gets stored."
+---
+
+**Goal:** complete the mandatory review step of an Agent Saul run — the gate between analysis and trusted persistence.
+
+## Why you are being asked
+
+The run paused at `human_review` after risk analysis, compliance, and grounding verification. Nothing persists until a person decides. This is by design: no cycles before human review, and memory only becomes *trusted* memory after it ([Human in the loop](/concepts/human-in-the-loop)).
+
+## The interrupt frame
+
+When the graph pauses, you receive:
+
+```json
+{
+  "type": "hitl_interrupt",
+  "thread_id": "9f0c...",
+  "interrupt_type": "human_review_required",
+  "payload": { "...": "risks, clause findings, verification results" },
+  "message": "Review required before persistence"
+}
+```
+
+`interrupt_type` is one of `clarification_needed`, `plan_approval`, `ocr_reupload`, `human_review_required`.
+
+## Answering the gate
+
+Send one `resume` frame on the same socket:
+
+```json
+{
+  "type": "resume",
+  "thread_id": "9f0c...",
+  "action": "approve",
+  "feedback": "Indemnity cap acceptable; flagged termination notice period as business decision.",
+  "reviewer_role": "legal_counsel"
+}
+```
+
+| Field | Values | Use |
+| --- | --- | --- |
+| `action` | `approve`, `reject`, `modify` | The decision |
+| `feedback` | string ≤ 8192 chars | Annotated reasoning |
+| `modified_plan` | list of plan steps | With `modify`: corrected plan |
+| `overrides` | list of objects | Clause-level corrections (risk verdicts, classifications) |
+| `reviewer_role` | string | Who is deciding — recorded for audit |
+
+<CodeGroup>
+```bash
+# WS frames cannot be sent with curl; use any websocket client:
+websocat "$(cat ws_url)"
+```
+
+```python
+await ws.send(json.dumps({
+    "type": "resume",
+    "thread_id": session["thread_id"],
+    "action": "approve",
+    "feedback": "Risks reviewed; proceed.",
+    "reviewer_role": "legal_counsel",
+}))
+```
+</CodeGroup>
+
+After `resume`, streaming continues: finalization → persist_memory → `done`.
+
+## What gets stored
+
+- **Overrides** — your corrections, attached to the run state.
+- **Comments** — `feedback` text.
+- **Reviewer role** — accountability for the decision.
+
+These become training data and audit data. Because they live in checkpointed state, the audit trail replays exactly who decided what, when, on which findings.
+
+## Practical rules
+
+1. Read the `payload` risks before approving — approval transfers responsibility.
+2. Use `reject` when findings are wrong at the root; use `modify` + overrides for surgical corrections.
+3. Annotate reasoning even on approvals — future runs and auditors inherit the context.
+4. If the run asked for `ocr_reupload`, re-upload a cleaner scan and start a new session referencing the same document.
+
+Session mechanics and frame reference: [Agent Saul workflow](/guides/agent-saul-workflow).

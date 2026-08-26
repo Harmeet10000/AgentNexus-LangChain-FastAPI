@@ -1,8 +1,28 @@
 ---
-title: "Guides/Index"
-description: "Guides documentation."
+title: "Guides"
+description: "Task-oriented walkthroughs for the platform's main workflows."
 ---
 
-# Guides/Index
+## What you can do
 
-Guides documentation.
+Each guide below walks a concrete task end to end with working requests. All HTTP examples assume the local base URL `http://localhost:5000/api/v1` and use the [standard envelope](/api-reference/overview).
+
+| Workflow | Where to start | Auth |
+| --- | --- | --- |
+| Register, log in, and hold a session | `POST /auth/register`, then `POST /auth/login` | none |
+| Upload and analyze a contract | `POST /documents/upload`, poll `GET /documents/{doc_id}/status` | verified user |
+| Search the corpus | `POST /search` (hybrid), `POST /search/rag` (cited answer) | verified user |
+| Ask the legal knowledge graph | `POST /legal/ask` — Graphiti-verified answers with citations | verified user |
+| Run an agent session | `POST /agent-saul/sessions`, then connect to the WebSocket | verified user |
+| Crawl and research the web | crawler endpoints (rate-limited per minute and hour) | verified user |
+| Manage billing | `/api/v2/plans`, `/api/v2/subscriptions`, `/api/v2/invoices` | verified user |
+
+## Conventions used in every guide
+
+1. **Authenticate first** — see [Authentication](/api-reference/authentication); examples pass `-H "Authorization: Bearer $ACCESS_TOKEN"`.
+2. **Expect the envelope** — check `success` before reading `data`; errors arrive as `{ error: { code, message } }`.
+3. **Respect rate limits** — sensitive endpoints return 429 with `Retry-After`; see [Rate limiting](/api-reference/rate-limiting).
+
+## Setup
+
+If you have not started the server yet, follow the [Quickstart](/get-started/quickstart). Health can be checked any time at `GET /api/v1/health/self`.

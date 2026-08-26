@@ -17,16 +17,64 @@
     "groups": [
       {
         "group": "Get Started",
-        "pages": ["get-started/overview", "get-started/quickstart", "get-started/project-structure"]
+        "pages": [
+          "get-started/overview",
+          "get-started/quickstart",
+          "get-started/installation",
+          "get-started/project-structure"
+        ]
       },
-      { "group": "Core Concepts", "pages": ["concepts/index"] },
-      { "group": "Architecture", "pages": ["architecture/index"] },
-      { "group": "Guides", "pages": ["guides/index"] },
+      {
+        "group": "Core Concepts",
+        "pages": [
+          "concepts/index",
+          "concepts/stateful-agents",
+          "concepts/human-in-the-loop",
+          "concepts/memory-architecture",
+          "concepts/context-discipline",
+          "concepts/deterministic-execution"
+        ]
+      },
+      {
+        "group": "Architecture",
+        "pages": [
+          "architecture/overview",
+          "architecture/system-design",
+          "architecture/langgraph-orchestration",
+          "architecture/rag-pipeline",
+          "architecture/graph-memory",
+          "architecture/document-ingestion",
+          "architecture/outbox-pattern",
+          "architecture/error-and-result-pattern",
+          "architecture/security-architecture"
+        ]
+      },
+      {
+        "group": "Guides",
+        "pages": [
+          "guides/index",
+          "guides/upload-analyze-contract",
+          "guides/hybrid-search",
+          "guides/legal-qa",
+          "guides/agent-saul-workflow",
+          "guides/human-review",
+          "guides/web-crawl-research"
+        ]
+      },
       {
         "group": "API Reference",
-        "pages": ["api-reference/overview", "api-reference/authentication", "api-reference/errors"]
+        "pages": ["api-reference/overview", "api-reference/authentication", "api-reference/rate-limiting", "api-reference/errors"]
       },
-      { "group": "Configuration", "pages": ["configuration/environment-variables"] },
+      {
+        "group": "Configuration",
+        "pages": [
+          "configuration/environment-variables",
+          "configuration/llm-models",
+          "configuration/rate-limits",
+          "configuration/caching",
+          "configuration/observability"
+        ]
+      },
       { "group": "Deployment", "pages": ["deployment/index"] },
       { "group": "Development", "pages": ["development/index"] },
       { "group": "Resources", "pages": ["resources/security", "resources/faq"] }

@@ -1,8 +1,49 @@
 ---
-title: "Resources/Security"
-description: "Resources documentation."
+title: "Security"
+description: "Auth flows, RBAC, rate limiting, guard middleware, secret management, and how to report vulnerabilities."
 ---
 
-# Resources/Security
+## Authentication
 
-Resources documentation.
+- **JWT access + refresh**: access tokens live 15 minutes, refresh tokens 30 days, signed HS256 with `JWT_SECRET_KEY`. Refresh tokens are stored server-side (Redis) and revocable per session.
+- **Transport**: the `Authorization: Bearer` header takes priority; browsers fall back to an HttpOnly, Secure, SameSite=Lax `access_token` cookie set by login/refresh/OAuth.
+- **OAuth2**: Google and GitHub via authorization-code flow with a signed, HttpOnly state cookie (5-minute TTL). The refresh token returns in a URL fragment so it never touches server logs.
+
+Details and examples: [Authentication](/api-reference/authentication).
+
+## Authorization
+
+Roles (`admin`, `moderator`, `user`) and permissions (`users:read`, `users:write`, ...) are embedded in JWT claims at login. Route guards validate claims directly — zero database round trips per request. Trade-off: role changes propagate when the access token expires; immediate revocation is available by deleting sessions.
+
+## Rate limiting and abuse protection
+
+Three layers: a global FastAPI Guard limit (100 req/60 s default), Redis-backed per-endpoint token buckets on sensitive routes (login 5/min, register 3/min), and auto-banning after repeated violations (threshold 10, duration 1 hour) plus penetration-attempt detection. Full table: [Rate limiting](/api-reference/rate-limiting).
+
+## Transport and headers
+
+Guard middleware enforces HTTPS in production and stamps HSTS (1 year, subdomains), `X-Frame-Options: DENY`, `nosniff`, and a strict referrer/permissions policy. CORS is allowlist-based with credentials enabled.
+
+## Secret management
+
+Every credential field in settings is a Pydantic `SecretStr`: values are redacted in logs, reprs, and serialization; consumers must call `.get_secret_value()` explicitly. Startup in production refuses to run while any secret still holds its documented default value.
+
+## Session controls
+
+Users can list active sessions (`GET /auth/sessions`) and revoke any or all of them; revoking a session invalidates its refresh token and closes its live WebSocket connections.
+
+## Reporting a vulnerability
+
+**Do not open a public issue.** Report privately:
+
+- Email harmeetsinghfbd@gmail.com, or
+- Use GitHub's private vulnerability reporting.
+
+Include a description, reproduction steps, impact, and any suggested fix.
+
+| Stage | Target |
+| --- | --- |
+| Initial response | within 48 hours |
+| Status update | within 7 days |
+| Fix | severity-dependent, 1–30 days |
+
+Automated analysis runs through Codacy; dependency updates are tracked continuously.

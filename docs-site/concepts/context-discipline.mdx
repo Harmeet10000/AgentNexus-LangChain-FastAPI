@@ -1,0 +1,39 @@
+---
+title: "Context Discipline"
+description: "The context window as an operating budget: allocations, silent killers, practical rules."
+---
+
+Agents do not only spend tokens on user prompts. The context window fills from several sources:
+
+```text
+system prompt             2K–5K tokens
+bootstrap files           varies, often large
+memory files              grows over time
+skills and instructions   per selected skill
+conversation history      primary recurring cost
+tool output history       silent killer — can reach huge character counts
+compaction summaries      usually 1K–3K tokens
+```
+
+Treat context as an **operating budget**, not a junk drawer.
+
+## Why it matters
+
+Every token of drag competes with reasoning quality and money: longer contexts cost more and attend worse. The classic decay path is incremental — one verbose tool result here, one untrimmed turn there — until retrieval quality collapses for reasons nobody can point to. Tool output history earns its "silent killer" label because each individual dump looks justified.
+
+## Practical rules
+
+1. **Keep state canonical; keep memory as indexed projections of state.** Never let memory become a second source of truth.
+2. **Summarize or truncate tool outputs** before they become permanent conversation drag.
+3. **Prefer retrieval of focused facts** over loading entire documents.
+4. **Keep prompts stable and small enough to audit.** A prompt nobody re-reads is a prompt nobody trusts.
+5. **Preserve citations, IDs, and decision points** rather than every intermediate paragraph — the anchors that make replay and audit possible.
+6. **Design nodes for minimum state**: each LangGraph node declares and receives only the fields it needs.
+
+## How this shows up in the code
+
+- RAG answers are generated within an explicit token budget (`max_tokens`, default 2000) rather than "as much context as fits" — see [RAG pipeline](/architecture/rag-pipeline).
+- Search results are fused and ranked *before* generation so the model sees the top slice, not the candidate pool.
+- Compaction produces short summaries instead of verbatim history, matching the 1K–3K allocation above.
+
+Related: [Memory architecture](/concepts/memory-architecture) covers where retrievable knowledge lives; [Stateful agents](/concepts/stateful-agents) covers why canonical state makes trimming safe.

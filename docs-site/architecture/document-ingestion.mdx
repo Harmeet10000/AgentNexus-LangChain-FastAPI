@@ -1,0 +1,45 @@
+---
+title: "Document Ingestion"
+description: "The ingestion pipeline: Docling parsing, classification, segmentation, embedding, Graphiti verification."
+---
+
+Ingestion turns an uploaded file into verified, searchable, graph-anchored chunks. It runs as a LangGraph task on the dedicated `ingestion` Celery queue — minutes of model work per document, isolated from sub-second billing and email tasks.
+
+## Pipeline stages
+
+```text
+upload → parse → classify → extract legal metadata → segment
+       → contextualize/enrich → embed → store (pgvector)
+       → Graphiti episodes + chunk verification → completed
+```
+
+| Stage | What happens | Code |
+| --- | --- | --- |
+| Parse | Docling converts the file to markdown in a worker thread (conversion is sync/CPU-bound); tables are structured with `do_table_structure` enabled; title inferred from content or filename | `parser.py` |
+| Classify | Document kind, jurisdiction, contract type, parties detected; sets `graphiti_required` for contracts | `classification.py` |
+| Extract metadata | For Graphiti-eligible documents, an LLM pass extracts parties, jurisdiction, contract type, event dates with citations | `legal_metadata.py` |
+| Segment | Chunking at 512 tokens with 64 overlap (`INGEST_CHUNK_SIZE`, `INGEST_CHUNK_OVERLAP`) | `chunking.py` |
+| Contextualize | Chunks enriched with legal metadata so retrieval sees party/clause context per chunk | `service.py` |
+| Embed | Batches of 200 (`INGEST_EMBEDDING_BATCH_SIZE`) embedded with the Gemini embedding model | `service.py` |
+| Store | Chunk rows upserted into Postgres/pgvector; `ANALYZE` triggered above 10,000 chunks | `repository.py` |
+| Verify | If `graphiti_required`: event-date episodes written to Neo4j, then each chunk is written to Graphiti and verified — producing `graphiti_episode_id` and the `graphiti_verified` flag | `graphiti_verifier.py` |
+
+## Statuses a client can observe
+
+Polling `GET /documents/{doc_id}/status` walks through:
+
+```text
+queued → parsed → stored_postgres → completed | completed_with_warnings
+```
+
+Final status is `completed_with_warnings` when any quality warning exists — e.g. verification covered fewer than all chunks, segmentation anomalies, classification uncertainty. Warnings arrive as typed objects: `{stage, code, message, severity: info|warning|error}`.
+
+## Duplicate and re-ingestion handling
+
+Uploads are content-addressed: re-uploading the same document returns `duplicate: true` with the original `doc_id` instead of ingesting twice. Chunk upserts are idempotent per `(document_id, chunk_index)` — a unique constraint enforced by `uq_chunks_document_chunk_index`.
+
+## Supported types
+
+`ALLOWED_EXTENSIONS` defaults to **pdf, txt, docx, xlsx, pptx, md, html** with a 10 MB cap (`MAX_UPLOAD_SIZE`). Anything else is rejected at upload with a validation error.
+
+Walkthrough with real requests: [Upload & analyze guide](/guides/upload-analyze-contract).

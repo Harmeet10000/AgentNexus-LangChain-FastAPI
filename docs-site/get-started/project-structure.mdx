@@ -1,8 +1,73 @@
 ---
-title: "Get Started/Project Structure"
-description: "Get Started documentation."
+title: "Project Structure"
+description: "Tour of the repository layout and what each directory owns."
 ---
 
-# Get Started/Project Structure
+## Repository layout
 
-Get Started documentation.
+<FileTree>
+- src/
+  - app/
+    - api/                  # APIRouter aggregation under /api/v1
+    - config/               # Pydantic Settings — every env-driven field
+    - connections/          # Clients: postgres, mongodb, redis, neo4j, celery
+    - features/             # Feature modules — the heart of the codebase
+      - agent_saul/         #   Orchestrator: sessions, WebSocket, HITL
+      - documents/          #   Ingestion, hybrid search, legal Q&A
+      - auth/ users/ profile/ audit/
+      - crawler/            #   Crawl4AI + Tavily web research
+      - ingestion/ search/  #   Pipeline triggers and retrieval
+      - plans/ subscriptions/ payments/ invoices/ credits/ dunning/ webhooks/  # v2 billing suite
+    - lifecycle/            # FastAPI lifespan wiring (clients → app.state)
+    - middleware/           # Versioning, guard, global exception handler, OTel
+    - shared/               # Cross-feature infrastructure
+      - agents/             #   Agent factories and registries
+      - langgraph_layer/    #   Agent Saul graph, ingestion KB graph, nodes, state
+      - langchain_layer/    #   LLM/tool wrappers
+      - rag/                #   Graphiti setup, document processing, vectorstore
+      - outbox/             #   Transactional outbox helper, model, NOTIFY relay
+      - result/             #   AppError hierarchy, Result mappers
+      - services/           #   Rate limiter and friends
+      - otel/ circuit_breaker/ crawler/
+    - utils/                # Exceptions, response envelope, cache helpers
+    - examples/             # Reference snippets (logger, Celery usage)
+    - main.py               # App factory and middleware stack
+    - server.py             # Uvicorn entrypoint
+  - alembic/                # PostgreSQL migrations
+  - database/               # SQLAlchemy base, schemas, seeders
+  - tasks/                  # Celery task definitions per domain
+  - mcp_core/               # MCP server integration
+- docs/
+  - diagrams/               # Architecture SVGs (mirrored into docs-site/images)
+- tests/                    # unit/, integration/, e2e/, performance/
+- infra/ docker/ caddy/     # Deployment assets
+- docs-site/                # This documentation site (Mintlify)
+- openspec/                 # Change specifications
+- pyproject.toml · uv.lock  # Authoritative deps; ruff + ty config
+</FileTree>
+
+## The feature module convention
+
+Everything user-facing lives in `src/app/features/<name>/` with the same internal shape:
+
+| File | Responsibility |
+| --- | --- |
+| `router.py` | Thin HTTP layer: routing, status codes, response envelope |
+| `dto.py` | Pydantic request/response models |
+| `dependencies.py` | DI wiring: repositories → services → guards |
+| `service.py` | Business logic, structured logging, error mapping |
+| `repository.py` | Persistence only — no HTTP concerns |
+| `model.py` / `constants.py` | Domain models and shared constants |
+
+Adding a feature means adding a directory with this shape and registering its router in `src/app/api/` — nothing else.
+
+## Where the important machinery lives
+
+| Concern | Location | Read more |
+| --- | --- | --- |
+| Agent orchestration graphs | `src/app/shared/langgraph_layer/agent_saul/` | [LangGraph orchestration](/architecture/langgraph-orchestration) |
+| Retrieval & fusion | `src/app/features/documents/` (`fusion.py`, `rag.py`) | [RAG pipeline](/architecture/rag-pipeline) |
+| Knowledge-graph memory | `src/app/shared/rag/graphiti/`, Cognee settings | [Graph memory](/architecture/graph-memory) |
+| Reliable side effects | `src/app/shared/outbox/` | [Outbox pattern](/architecture/outbox-pattern) |
+| Error handling model | `src/app/utils/exceptions.py`, `src/app/shared/result/` | [Error & Result pattern](/architecture/error-and-result-pattern) |
+| Auth, RBAC, guard | `src/app/features/auth/`, `src/app/middleware/` | [Security architecture](/architecture/security-architecture) |

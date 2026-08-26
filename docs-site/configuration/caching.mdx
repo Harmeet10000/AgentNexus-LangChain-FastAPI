@@ -1,0 +1,49 @@
+---
+title: "Caching"
+description: "Redis cache layers, TTL defaults, and idempotency key configuration."
+---
+
+Redis is the single cache substrate: search result caching, answer caching, crawler results, rate-limit counters, refresh-token sessions, and Celery idempotency keys. All TTLs are environment-tunable.
+
+## Core settings
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `REDIS_URL` | `redis://localhost:6379` | Connection URL |
+| `REDIS_DB` | `0` | Logical database |
+| `CACHE_TTL` | `3600` | Default cache TTL (seconds) |
+
+The Redis client is created once in the FastAPI lifespan and read from `app.state` — never constructed ad hoc.
+
+## Search caching
+
+| Cache | TTL (seconds) | Variable / constant | Key inputs |
+| --- | --- | --- | --- |
+| Hybrid search (`POST /search`) | 900 | `DEFAULT_SEARCH_CACHE_TTL_SECONDS` in `documents/constants.py` | query + limit + filters |
+| RAG context (`POST /search/rag`) | 900 | same constant | query + filters + token budget |
+| Ask answers (`/search/ask`, `/legal/ask`) | derived from `CACHE_TTL`-based key builder | query + doc filter + jurisdiction/type |
+
+Every request DTO exposes `bypass_cache: bool` (default `false`). Responses report `cache_hit: true|false` so clients can tell fresh from cached. The cache key includes all filter fields — changing a filter is always a miss, never a wrong hit.
+
+## Crawler cache
+
+Crawl results are cached per URL with `REDIS_CRAWL_CACHE_TTL` (default `3600` s). Clients skip it per-request with `bypass_cache: true` on `POST /crawler/crawl`.
+
+## Idempotency
+
+Celery task submissions carry an idempotency key; duplicates inside the window are no-ops.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CELERY_IDEMPOTENCY_TTL_SECONDS` | `86400` | How long a task's completion marker blocks re-execution (24 h) |
+
+This pairs with the [outbox pattern](/architecture/outbox-pattern): at-least-once delivery plus idempotent consumers equals effectively-once processing.
+
+## Auth state
+
+Refresh-token session records live in Redis (not a database table), which is why logout/revoke is immediate across workers and why `REDIS_URL` availability gates login. Rate-limit counters for auth endpoints share this instance.
+
+## Operational notes
+
+- All layers degrade loudly: if Redis is unreachable, health checks report it and rate limiting fails closed rather than silently unlimited.
+- No cache invalidation API is exposed over HTTP; tune TTLs instead of purging.
