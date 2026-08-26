@@ -1,8 +1,76 @@
 ---
-title: "Get Started/Quickstart"
-description: "Get Started documentation."
+title: "Quickstart"
+description: "From zero to a running API in five minutes."
 ---
 
-# Get Started/Quickstart
+## Prerequisites
 
-Get Started documentation.
+- Python 3.12+ and [`uv`](https://docs.astral.sh/uv/)
+- PostgreSQL, MongoDB, Redis, and Neo4j reachable locally (Docker is the easy path)
+- A Google Gemini API key
+- Optional: LangSmith API key if you want LLM tracing on
+
+## 1. Clone and install
+
+```bash
+git clone https://github.com/Harmeet10000/langchain-fastapi-production.git
+cd langchain-fastapi-production
+uv venv && source .venv/bin/activate
+uv sync --extra dev
+```
+
+## 2. Configure environment
+
+The settings loader reads `.env.development` by default. Minimum viable config:
+
+```bash
+GEMINI_API_KEY=your-key-here
+POSTGRES_URL=postgresql://user:pass@localhost:5432/db
+MONGODB_URI=mongodb://localhost:27017/langchain_db
+REDIS_URL=redis://localhost:6379
+NEO4J_URI=bolt://localhost:7687
+NEO4J_PASSWORD=change-me
+```
+
+Every variable and default is catalogued in [Environment variables](/configuration/environment-variables). In production the app refuses to start while any secret still holds its documented default — in development it only warns.
+
+## 3. Run migrations
+
+```bash
+uv run alembic upgrade head
+```
+
+## 4. Start the API
+
+```bash
+uv run uvicorn src.app.main:app --reload --reload-dir src --host 0.0.0.0 --port 5000 --no-access-log
+```
+
+Background work runs in Celery workers on two queues, deliberately as two processes — ingestion is minutes of model work per message; the default queue carries sub-second billing and email tasks that must not wait behind it:
+
+```bash
+uv run celery -A app.connections.celery:celery_app worker -Q default --loglevel=info --concurrency=8
+uv run celery -A app.connections.celery:celery_app worker -Q ingestion --loglevel=info --concurrency=2
+```
+
+(`make celery`, `make celery-ingestion`, `make celery-beat` wrap these.)
+
+## 5. Try it
+
+<CodeGroup>
+```bash
+curl -s http://localhost:5000/api/v1/health/self
+```
+
+```python
+import httpx
+
+print(httpx.get("http://localhost:5000/api/v1/health/self").json())
+```
+</CodeGroup>
+
+A healthy response reports server info; `GET /api/v1/health/` reports status per dependency.
+
+## What next?
+
+Register a user and upload your first contract with the [upload & analyze guide](/guides/upload-analyze-contract), or understand *why* the system is shaped this way in [Architecture overview](/architecture/overview).

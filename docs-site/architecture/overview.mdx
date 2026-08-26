@@ -1,0 +1,53 @@
+---
+title: "Architecture Overview"
+description: "The three-layer model, the stack, and how a request travels through the system."
+---
+
+Agent Saul is a stateful legal reasoning system, not a chatbot with tools. The architecture is deliberately shaped around four commitments: resumable execution, memory discipline, mandatory human review, and deterministic replay.
+
+<Frame caption="Agent Saul full system architecture">
+  ![Agent Saul full architecture](/images/agent_saul_full_architecture.svg)
+</Frame>
+
+## Three layers
+
+The system separates concerns that monolithic agent apps usually blur:
+
+1. **Memory shaping** — what the model sees. Filters, trimming, and bounded budgets decide which memories, documents, and history enter context. State is canonical; memory is an indexed projection of state.
+2. **Runtime control** — LangGraph owns execution: typed state, checkpointing, deterministic replay, human gates between nodes.
+3. **Execution durability** — side effects survive crashes via the transactional outbox; Celery workers drain queues; a PostgreSQL NOTIFY/LISTEN relay publishes committed events.
+
+Deep dive in [System design](/architecture/system-design).
+
+## Stack
+
+| Concern | Technology |
+| --- | --- |
+| API layer | FastAPI, Pydantic v2 |
+| Orchestration | LangGraph |
+| LLM layer | LangChain + Google Gemini |
+| Observability | LangSmith, OpenTelemetry |
+| Vector & text retrieval | PostgreSQL (TigerData) with pgvector, pgvectorscale, pg_textsearch |
+| Graph memory | Neo4j + Graphiti |
+| Documents / sessions | MongoDB (Beanie) |
+| Cache, rate limits, refresh tokens | Redis |
+| Background execution | Celery + RabbitMQ |
+| Document processing | Docling, LangExtract, PageIndex |
+| Crawling / search | Crawl4AI, Tavily |
+| MCP integration | FastMCP |
+
+## A request's path
+
+1. **FastAPI Guard middleware** inspects the request — IP reputation, penetration-pattern detection, global rate limit.
+2. **Version middleware** stamps `Deprecation`/`Sunset` headers on `/api/v1/*`.
+3. **Router dependencies** authenticate the JWT and check RBAC claims — authorization is zero database hits per request.
+4. **Service layer** executes business logic through repositories, logging structurally and mapping expected failures to typed errors.
+5. **One envelope leaves**, success or failure: `{success, statusCode, data}` or `{success, statusCode, error, request}`.
+
+## Where to go next
+
+- [System design](/architecture/system-design) — the three layers in depth
+- [LangGraph orchestration](/architecture/langgraph-orchestration) — how graphs are built and why
+- [RAG pipeline](/architecture/rag-pipeline) · [Graph memory](/architecture/graph-memory) · [Document ingestion](/architecture/document-ingestion)
+- [Outbox pattern](/architecture/outbox-pattern) — reliable side effects
+- [Error & Result pattern](/architecture/error-and-result-pattern) · [Security architecture](/architecture/security-architecture)

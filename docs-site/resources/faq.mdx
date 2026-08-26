@@ -1,8 +1,60 @@
 ---
-title: "Resources/Faq"
-description: "Resources documentation."
+title: "FAQ"
+description: "Answers to the questions developers ask most about the platform."
 ---
 
-# Resources/Faq
+<AccordionGroup>
 
-Resources documentation.
+<Accordion title="Which LLMs does the platform support?">
+Google Gemini across four slots: fast (`GEMINI_FLASH_MODEL`, default `gemini-3.1-flash`), deep reasoning (`GEMINI_PRO_MODEL`), vision (`GEMINI_VISION_MODEL`), and embeddings (`GEMINI_EMBEDDING_MODEL`). Sampling defaults (`GEMINI_TEMPERATURE=0.7`, `MAX_TOKENS=2048`) are environment-tunable.
+</Accordion>
+
+<Accordion title="Do I need Neo4j to run this?">
+Neo4j powers the knowledge-graph features — Graphiti-backed Q&A and entity extraction. Without it those subsystems report `degraded` on the health endpoint; vector search over pgvector keeps working. For full functionality, run Neo4j.
+</Accordion>
+
+<Accordion title="Is this only useful for Indian contracts?">
+The domain focus is Indian contract law — billing even ships GST configuration by default. The infrastructure (agents, RAG, ingestion, auth) is jurisdiction-neutral; adapting prompts and extractors is a content change, not an architectural one.
+</Accordion>
+
+<Accordion title="How is this different from a generic RAG chatbot?">
+Three structural differences: execution runs through typed LangGraph pipelines with checkpointed replay instead of free-form model loops; consequential outputs pass human review gates that persist overrides and reviewer reasoning as audit data; and answers can be verified against a knowledge graph of parties, contracts, and obligations rather than retrieved chunks alone.
+</Accordion>
+
+<Accordion title="What happens if the agent crashes mid-run?">
+Runs are checkpointed. On restart, execution resumes from the last checkpoint rather than restarting — side effects are protected further by the transactional outbox, so committed events are delivered exactly once even across crashes.
+</Accordion>
+
+<Accordion title="Cognee vs Graphiti — which one does what?">
+Cognee handles long-term conversational memory (what was discussed, per dataset partition); Graphiti maintains the evolving entity-relationship graph (who signed what, who is obligated to whom). Both write through Neo4j in the default configuration.
+</Accordion>
+
+<Accordion title="Why PostgreSQL for vectors instead of a dedicated vector DB?">
+pgvector keeps embeddings next to relational data with transactional consistency and one less service to operate. Pinecone variables exist in settings if you prefer a managed vector backend, but the default path is self-contained.
+</Accordion>
+
+<Accordion title="Do I need Docker?">
+No — any reachable PostgreSQL, MongoDB, Redis, Neo4j, and RabbitMQ will do. Docker is simply the fastest way to get all five locally.
+</Accordion>
+
+<Accordion title="Can humans reject agent output?">
+That is the design center. Risk approvals, clause corrections, and annotated reasoning happen through review gates before persistence, and every decision is stored with the reviewer's role — the audit trail is the product, not an afterthought.
+</Accordion>
+
+<Accordion title="How do I add support for more document types?">
+Extend `ALLOWED_EXTENSIONS` (default: pdf, txt, docx, xlsx, pptx, md, html) and check `MAX_UPLOAD_SIZE` (default 10 MB). The ingestion pipeline classifies documents after upload, so new formats also need extractor coverage there.
+</Accordion>
+
+<Accordion title="How do I monitor the system in production?">
+Prometheus metrics at `/metrics`, OTLP traces/logs/metrics to your collector (`OTEL_EXPORTER_OTLP_ENDPOINT`), deep dependency probes at `/api/v1/health/`, JSON logs with rotation, and FastAPI Guard security events in `logs/security.log`.
+</Accordion>
+
+<Accordion title="I'm getting 429s — what should my client do?">
+Read the `Retry-After` header and wait at least that long, then back off exponentially with jitter. Sensitive endpoints have tight budgets (login 5/min, register 3/min) by design. Full budgets: [Rate limiting](/api-reference/rate-limiting).
+</Accordion>
+
+<Accordion title="My token expired mid-request — now what?">
+A 401 with error code `TOKEN_EXPIRED` means call `POST /auth/refresh` once and retry. If refresh fails with `REFRESH_TOKEN_INVALID`, the session was revoked — log in again. Codes, not messages, are the stable contract: [Errors](/api-reference/errors).
+</Accordion>
+
+</AccordionGroup>

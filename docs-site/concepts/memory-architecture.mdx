@@ -1,0 +1,37 @@
+---
+title: "Memory Architecture"
+description: "Cognee for long-term recall, Graphiti for the knowledge graph, and memory shaping."
+---
+
+## State vs memory
+
+The platform's deepest structural rule: **state is canonical, memory is an indexed projection of state.** Nothing in memory is authoritative; anything can be rebuilt from state plus source documents. This is what makes memory safe to trim, summarize, and shape.
+
+## Cognee: conversational long-term recall
+
+After human review completes, session outcomes persist through Cognee into a Postgres schema owned by the memory library (`COGNEE_DB_SCHEMA=cognee_memory`, excluded from Alembic autogenerate) with embeddings in pgvector (`COGNEE_VECTOR_PROVIDER=pgvector`).
+
+Tenant isolation is by dataset naming: `AgentMemoryService.memory_partition` builds conversation-partition names prefixed with `COGNEE_DATASET_PREFIX` (`legal`). That prefix boundary is deliberate — enabling the library's multi-user access control raises errors inside its Neo4j-handler migrations, so `COGNEE_ACCESS_CONTROL_ENABLED=false` stays fixed.
+
+## Graphiti: the evolving knowledge graph
+
+Neo4j holds what contracts *mean*: parties, obligations, deadlines, clause precedence — extracted during ingestion and verified before persistence (see [Graph memory](/architecture/graph-memory)). Where Cognee answers "what happened in past sessions", Graphiti answers "what does this document assert about whom".
+
+## Memory shaping
+
+Raw history grows monotonically; context windows do not. Shaping controls what gets read back:
+
+| Technique | Applied to |
+| --- | --- |
+| Filters (relevance, entity anchors) | Retrieval from both stores |
+| Trimming | Conversation history entering prompts |
+| Bounded budgets | Total prompt composition per node |
+| Summarization | Tool output and old turns |
+
+Each graph node receives the minimum state it needs — nodes declare their inputs rather than reading everything.
+
+## Context budget discipline
+
+Shaping serves a budget: system prompt, bootstrap material, retrieved memory, history, and tool output each get an allocation, and compaction summarizes when a section overruns. The full accounting lives in [Context discipline](/concepts/context-discipline).
+
+The failure mode being avoided has a name: context rot — where every turn drags slightly more stale content forward until reasoning quality collapses.

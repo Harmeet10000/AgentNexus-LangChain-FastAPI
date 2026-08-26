@@ -1,0 +1,49 @@
+---
+title: "RAG Pipeline"
+description: "Hybrid search: vector + BM25 + trigram branches, RRF fusion, pgvector internals."
+---
+
+<Frame caption="Hybrid query pipeline">
+  ![Hybrid query pipeline](/images/hybrid_query_pipeline.svg)
+</Frame>
+
+## Why hybrid
+
+Single-retriever RAG fails in predictable ways: pure vector search misses exact statutory references ("Section 27 of the Indian Contract Act, 1872"), and pure keyword search misses paraphrase. Legal text contains both failure modes at high frequency. The pipeline runs three retrievers and fuses them.
+
+## Three branches
+
+| Branch | Mechanism | Catches |
+| --- | --- | --- |
+| `vector` | pgvector embeddings (768-dim Gemini), DiskANN index | Semantic paraphrase |
+| `bm25` | BM25 index over chunk text | Exact terms, section numbers |
+| `trigram` | Trigram similarity (threshold 0.1) | Fuzzy name/party matches |
+
+Each branch fetches up to `candidate_limit` candidates (default 50, max 200). DiskANN query parameters are tuned via constants: `DISKANN_QUERY_SEARCH_LIST_SIZE = 100`, `DISKANN_QUERY_RESCORE = 50`.
+
+## Fusion scoring
+
+Branch results are combined with **reciprocal rank fusion**:
+
+```text
+score(chunk) = Σ_branches weight_b / (RRF_K + rank_b)      # RRF_K = 60
+```
+
+- Rank-based, so incomparable raw scores never need calibrating against each other.
+- Branch weights come from a per-query plan (`_build_query_plan`) — e.g. a query that looks like a citation skews toward keyword; a natural-language question skews toward vector. Weights are normalized before fusion.
+- Ties break deterministically by `chunk_id`, then final ranks are assigned 1..N.
+
+The fused result set is what `/search` returns; each item carries its `score`, `rank`, `chunk_kind`, `clause_type`, and a `graphiti_verified` flag.
+
+## Graphiti as a retrieval filter
+
+For legal questions the pipeline can consult Neo4j first: `_graphiti_filter_chunk_ids` searches Graphiti for entities related to the query and boosts/filters candidate chunks by whether they participate in verified graph episodes. This is how `/legal/ask` achieves Graphiti-verified grounding — see [Graph memory](/architecture/graph-memory).
+
+## Answer generation (`/search/rag`, `/search/ask`)
+
+1. Retrieve fused chunks within the token budget (`max_tokens`, default 2000).
+2. Grade context relevance with the fast model.
+3. Generate the answer with citations enforced — every claim carries `{claim, source, confidence}`.
+4. Cache by query + filter signature; responses report `cache_hit`.
+
+Field-level request/response contracts: [Hybrid search guide](/guides/hybrid-search) and [Legal Q&A guide](/guides/legal-qa).

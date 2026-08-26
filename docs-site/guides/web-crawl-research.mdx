@@ -1,0 +1,89 @@
+---
+title: "Web Crawl and Research"
+description: "Crawl pages with Crawl4AI and search the web via Tavily — endpoints, options, rate limits."
+---
+
+**Goal:** bring external web content into your research flow — crawl specific URLs or search the open web.
+
+Both endpoints are authenticated and rate-limited per client IP:
+
+| Endpoint | Minute | Hour |
+| --- | --- | --- |
+| `POST /crawler/crawl` | 10 | 100 |
+| `GET /crawler/search` | 30 | 500 |
+
+Check remaining budget any time with `GET /crawler/rate-limit` → `{remaining_minute, remaining_hour}`. Exceeding either returns 429 with `retry_after` in the error envelope.
+
+## Crawl a URL
+
+`POST /crawler/crawl`. Request fields:
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `url` | str | required | Target URL |
+| `mode` | markdown \| html \| text \| summary | `markdown` | Output format |
+| `max_depth` | int 1–5 | `1` | 1 = single page; 2+ follows internal links |
+| `max_pages` | int 1–50 | `10` | Cap for recursive crawls |
+| `use_proxy` | bool | `false` | Route through configured proxy |
+| `bypass_cache` | bool | `false` | Skip cached result (TTL 1 h) |
+| `extract_structured` | bool | `false` | Extract structured data using Gemini |
+| `schema_type` | product \| article \| person \| job \| custom | `null` | Predefined extraction schema |
+| `custom_schema` | object | `null` | Your own JSON schema (with `custom`) |
+| `summary` | bool | `false` | Gemini summary |
+| `timeout` | int 5–120 s | `30` | Per-request timeout |
+
+<CodeGroup>
+```bash
+curl -s -X POST http://localhost:5000/api/v1/crawler/crawl \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/contract-guide", "mode": "markdown", "max_depth": 1}'
+```
+
+```python
+r = client.post(
+    "/crawler/crawl",
+    json={"url": "https://example.com/contract-guide", "mode": "markdown"},
+)
+page = r.json()["results"][0]
+print(page["title"], page["word_count"], page["crawl_time_ms"])
+```
+</CodeGroup>
+
+Response: `{success, query_url, results[], total_pages, successful_pages, failed_pages, total_word_count, processing_time_ms}`. Each result item carries `url`, `success`, `title`, `markdown`/`html`/`text`, optional `summary`, `extracted_data`, `word_count`, `crawl_time_ms`, `cached`, and per-page `error_message`.
+
+## Search the web
+
+`GET /crawler/search` (Tavily-backed):
+
+| Query param | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `query` | str | required | max 500 chars |
+| `max_results` | int 1–20 | `10` | hard-capped by `TAVILY_MAX_RESULTS_LIMIT` |
+| `include_answer` | bool | `true` | Tavily AI-generated answer |
+
+<CodeGroup>
+```bash
+curl -s "http://localhost:5000/api/v1/crawler/search?query=Indian+Contract+Act+section+27&max_results=5" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+```python
+r = client.get(
+    "/crawler/search",
+    params={"query": "Indian Contract Act section 27", "max_results": 5},
+)
+data = r.json()
+print(data["answer"])
+for item in data["results"]:
+    print(item["score"], item["url"])
+```
+</CodeGroup>
+
+Results: `{query, answer?, results[{url, title, content, score, published_date?}], total_results}`.
+
+## Behavior notes
+
+- Crawl results cache in Redis for 1 hour (`REDIS_CRAWL_CACHE_TTL`); politeness delays between pages are randomized 0.5–1.0 s (`CRAWL4AI_RATE_LIMIT_DELAY_*`).
+- Content over 100 KB per page is trimmed (`CRAWL4AI_MAX_CONTENT_SIZE`); boilerplate tags (`nav,footer,header,aside,form`) are stripped before extraction.
+- Browser behavior (headless, viewport, stealth mode, proxies) is server-side config — see [Crawl4AI settings](/configuration/environment-variables#crawl4ai).

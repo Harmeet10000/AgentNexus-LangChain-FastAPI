@@ -1,0 +1,56 @@
+---
+title: "Rate Limits"
+description: "Every rate limit layer, its defaults, and how to configure them."
+---
+
+Rate limiting is layered: a global middleware limiter, per-feature budgets enforced in service code, WebSocket message budgets, and FastAPI Guard's abuse detection. All counters live in Redis so limits hold across workers.
+
+## Global API limiter
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `RATE_LIMIT_ENABLED` | `true` | Master switch |
+| `RATE_LIMIT_REQUESTS` | `100` | Requests per window, per client |
+| `RATE_LIMIT_PERIOD` | `60` | Window length (seconds) |
+
+Exceeding it returns `429` with a `Retry-After` header. Client guidance in [Rate limiting](/api-reference/rate-limiting).
+
+## Crawler and web search
+
+Enforced inside the crawler endpoints before any work starts:
+
+| Scope | Minute | Hour | Variables |
+| --- | --- | --- | --- |
+| `POST /crawler/crawl` | 10 | 100 | `CRAWL_RATE_LIMIT_PER_MINUTE`, `CRAWL_RATE_LIMIT_PER_HOUR` |
+| `GET /crawler/search` | 30 | 500 | `SEARCH_RATE_LIMIT_PER_MINUTE`, `SEARCH_RATE_LIMIT_PER_HOUR` |
+
+Both scopes return remaining budget via `GET /crawler/rate-limit`:
+
+```json
+{ "remaining_minute": 9, "remaining_hour": 97 }
+```
+
+A rejected crawl raises `TooManyRequestsException` (429) with `data.retry_after` in the error envelope.
+
+## WebSocket budgets
+
+| Limit | Budget | Variable(s) |
+| --- | --- | --- |
+| User messages | 60 / 60 s | `WEBSOCKET_USER_MESSAGE_RATE`, `_PERIOD_SECONDS` |
+| Control frames (ping/pong) | 20 / 10 s | `WEBSOCKET_CONNECTION_MESSAGE_RATE`, `_PERIOD_SECONDS` |
+| Concurrent connections | 3 per user | `WEBSOCKET_MAX_CONNECTIONS_PER_USER` |
+| Idle timeout | 180 s | `WEBSOCKET_IDLE_TIMEOUT_SECONDS` |
+
+Violations close the socket with a security-violation close code rather than a 429 — see the [WebSocket guide](/guides/agent-saul-workflow).
+
+## MCP tool calls
+
+Server-side tool invocation is limited by `MCP_RATE_LIMIT_BURST` / `MCP_RATE_LIMIT_RATE` (20) per `MCP_RATE_LIMIT_PERIOD_SECONDS` (60), plus a 512 KB result cap (`MCP_MAX_RESULT_BYTES`).
+
+## Auth endpoints
+
+Login and registration have dedicated limiter dependencies (`limit_login`, `limit_register`) that run ahead of credential checks — brute-force attempts burn the same budget as legitimate traffic.
+
+## FastAPI Guard layering
+
+Guard sits in front of everything: IP blacklist/whitelist, auto-ban after `FASTAPI_GUARD_AUTO_BAN_THRESHOLD` (10) violations for `AUTO_BAN_DURATION` (3600 s), optional country and cloud-provider blocking. Configuration table in [Environment variables](/configuration/environment-variables#fastapi-guard).

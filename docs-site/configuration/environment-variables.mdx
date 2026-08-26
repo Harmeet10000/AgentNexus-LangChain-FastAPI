@@ -1,8 +1,298 @@
 ---
-title: "Configuration/Environment Variables"
-description: "Configuration documentation."
+title: "Environment Variables"
+description: "Complete settings reference: every env var, its type, default, and what it controls."
 ---
 
-# Configuration/Environment Variables
+All configuration lives in `Settings` (`src/app/config/settings.py`), a frozen Pydantic Settings model loaded from `.env.development` or the process environment. Names are **case-sensitive**. Secret-valued fields are `SecretStr` — automatically redacted in logs, reprs, and dumps.
 
-Configuration documentation.
+<Note>
+Production guardrail: when `ENVIRONMENT=production`, startup fails if any secret field still holds its documented default (`JWT_SECRET_KEY`, `NEO4J_PASSWORD`, `GEMINI_API_KEY`, `POSTGRES_PASSWORD`, `RABBITMQ_DEFAULT_PASS`, OAuth/S3/Tavily/Pinecone keys). Outside production the same condition logs a warning.
+</Note>
+
+## App
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `APP_NAME` | str | `LangChain FastAPI Production` | Service name |
+| `APP_VERSION` | str | `1.0.0` | Reported by `/health/self` |
+| `ENVIRONMENT` | str | `development` | `development` / `production` / other; drives prod guardrails and auto-enables OTel |
+| `HOST` | str | `0.0.0.0` | Uvicorn bind address |
+| `PORT` | int | `5000` | Uvicorn port |
+| `WORKERS` | int | `1` | Uvicorn worker count |
+| `DEBUG` | bool | `false` | Debug mode |
+| `CORS_ORIGINS` | list[str] | `["*"]` | Allowed origins |
+| `CORS_ALLOW_METHODS` | list[str] | GET, POST, PUT, DELETE, PATCH, OPTIONS | Allowed methods |
+| `CORS_ALLOW_HEADERS` | list[str] | Content-Type, Authorization, X-Correlation-ID, Accept, Cache-Control, Connection | Allowed request headers |
+| `CORS_EXPOSE_HEADERS` | list[str] | X-Total-Count, X-Correlation-ID, X-Process-Time, Link, Deprecation, Sunset | Response headers readable by browsers |
+| `CORS_ALLOW_CREDENTIALS` | bool | `true` | Allow cookies over CORS |
+| `CORS_MAX_AGE` | int | `3600` | Preflight cache (seconds) |
+
+## Databases
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `MONGODB_URI` | str | `mongodb://localhost:27017/langchain_db` | Users, profiles, sessions |
+| `MONGODB_DB_NAME` | str | `langchain_db` | Mongo database |
+| `POSTGRES_URL` | str | `postgresql://user:pass@host/db` | Full DSN (overrides parts below) |
+| `POSTGRES_HOST` | str | `localhost` | Postgres host |
+| `POSTGRES_PORT` | int | `5432` | Postgres port |
+| `POSTGRES_USERNAME` | str | `user` | Postgres user |
+| `POSTGRES_PASSWORD` | SecretStr | `pass` | Postgres password |
+| `POSTGRES_DB_NAME` | str | `db` | Database name |
+| `POSTGRES_POOL_SIZE` | int | `5` | SQLAlchemy pool size |
+| `POSTGRES_MAX_OVERFLOW` | int | `10` | Extra connections beyond pool size |
+| `NEO4J_URI` | str | `bolt://localhost:7687` | Knowledge graph (Graphiti) |
+| `NEO4J_USERNAME` | str | `neo4j` | Graph user |
+| `NEO4J_PASSWORD` | SecretStr | `password` | Graph password |
+| `NEO4J_DATABASE` | str | `neo4j` | Graph database name |
+
+## Auth / JWT
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `JWT_SECRET_KEY` | SecretStr | `super-secret-change-this-in-production` | HS256 signing key |
+| `JWT_ISSUER` | str | `your-app` | Token `iss` claim |
+| `JWT_ALGORITHM` | str | `HS256` | Signing algorithm |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | int | `15` | Access token lifetime |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | int | `30` | Refresh token lifetime |
+| `PASSWORD_RESET_EXPIRE_MINUTES` | int | `30` | Reset link validity |
+| `OAUTH_STATE_SECRET` | SecretStr | `your-oauth-state-secret` | Signs OAuth state cookies |
+| `GOOGLE_CLIENT_ID` | str | — | Google OAuth client |
+| `GOOGLE_CLIENT_SECRET` | SecretStr | — | Google OAuth secret |
+| `GITHUB_CLIENT_ID` | str | — | GitHub OAuth client |
+| `GITHUB_CLIENT_SECRET` | SecretStr | — | GitHub OAuth secret |
+| `BACKEND_URL` | str | `http://localhost:5000` | Public API URL (OAuth callbacks) |
+| `FRONTEND_URL` | str | `http://localhost:3000` | OAuth redirect target |
+
+## Gemini
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `GEMINI_API_KEY` | SecretStr | — | Google Gemini access |
+| `GEMINI_FLASH_MODEL` | str | `gemini-3.1-flash` | Fast model |
+| `GEMINI_PRO_MODEL` | str | `gemini-3.1-pro` | Deep-reasoning model |
+| `GEMINI_VISION_MODEL` | str | `gemini-2.5-flash-image` | Vision model |
+| `GEMINI_EMBEDDING_MODEL` | str | `gemini-embedding-2-preview` | Embedding model (768-dim) |
+| `GEMINI_TEMPERATURE` | float | `0.7` | Sampling temperature (0.0–2.0) |
+| `GEMINI_TOP_P` | float | `0.8` | Nucleus sampling cutoff |
+| `GEMINI_TOP_K` | int | `20` | Top-K sampling |
+| `GEMINI_MAX_TOKENS` | int | `2048` | Default output cap |
+| `GEMINI_CONTEXT_CACHE_TTL` | str | `3600s` | Context-cache TTL suffix included |
+| `LANGEXTRACT_API_KEY` | SecretStr | `empty-langextract-api-key` | LangExtract service key |
+
+Details on [LLM models](/configuration/llm-models).
+
+## Redis
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `REDIS_URL` | str | `redis://localhost:6379` | Cache, rate limits, refresh tokens |
+| `REDIS_HOST` | str | `localhost` | Redis host |
+| `REDIS_PORT` | int | `6379` | Redis port |
+| `REDIS_USERNAME` | str | `default` | Redis ACL user |
+| `REDIS_PASSWORD` | SecretStr \| null | `null` | Redis password |
+| `REDIS_DB` | int | `0` | Logical database index |
+| `CACHE_TTL` | int | `3600` | Default cache TTL (seconds) |
+| `REDIS_CRAWL_CACHE_TTL` | int | `3600` | Crawler result TTL (seconds) |
+
+## Celery / RabbitMQ
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `RABBITMQ_URL` | str | `amqp://guest:guest@localhost:5672//` | Broker URL |
+| `RABBITMQ_PRIVATE_URL` | str | same as above | Internal broker URL |
+| `RABBITMQ_DEFAULT_USER` | str | `guest` | Broker admin user |
+| `RABBITMQ_DEFAULT_PASS` | SecretStr | `guest` | Broker admin password |
+| `RABBITMQ_NODENAME` | str | `rabbit@localhost` | Broker node name |
+| `CELERY_DEFAULT_QUEUE` | str | `default` | Sub-second tasks (billing, email) |
+| `CELERY_DEFAULT_EXCHANGE` | str | `tasks` | Task exchange |
+| `CELERY_DEFAULT_ROUTING_KEY` | str | `task.default` | Default routing key |
+| `CELERY_DEAD_LETTER_EXCHANGE` | str | `tasks.dlx` | Dead-letter exchange |
+| `CELERY_DEAD_LETTER_QUEUE` | str | `default.dlq` | Dead-letter queue |
+| `CELERY_DEAD_LETTER_ROUTING_KEY` | str | `task.default.dlq` | Dead-letter routing key |
+| `CELERY_INGESTION_QUEUE` | str | `ingestion` | Isolated queue for minutes-long ingestion work |
+| `CELERY_INGESTION_ROUTING_KEY` | str | `task.ingestion` | Ingestion routing key |
+| `CELERY_RETRY_MAX_RETRIES` | int | `5` | Per-task retry budget |
+| `CELERY_RETRY_BACKOFF_MAX` | int | `600` | Max backoff (seconds) |
+| `CELERY_DEFAULT_RETRY_DELAY` | int | `5` | Base retry delay (seconds) |
+| `CELERY_TASK_SOFT_TIME_LIMIT` | int | `270` | Soft task ceiling (seconds) |
+| `CELERY_TASK_TIME_LIMIT` | int | `300` | Hard task kill (seconds) |
+| `CELERY_TASK_RESULT_EXPIRES` | int | `3600` | Result backend TTL (seconds) |
+| `CELERY_WORKER_MAX_TASKS_PER_CHILD` | int | `500` | Worker process recycling |
+| `CELERY_IDEMPOTENCY_TTL_SECONDS` | int | `86400` | Task deduplication window (seconds) |
+| `CELERY_CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int | `5` | Failures before breaker opens |
+| `CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT` | int | `60` | Breaker recovery wait (seconds) |
+
+Credit-system cron schedules ride on Celery beat: `CREDIT_EXPIRATION_CRON_HOUR`/`_MINUTE` (default 03:00), `CREDIT_RECONCILIATION_CRON_HOUR`/`_MINUTE`/`_DAY_OF_WEEK` (default 04:00, Sunday).
+
+## Crawl4AI
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `CRAWL4AI_HEADLESS` | bool | `true` | Run browser headless |
+| `CRAWL4AI_TIMEOUT` | int | `30000` | Global timeout (ms) |
+| `CRAWL4AI_PAGE_TIMEOUT` | int | `30000` | Per-page timeout (ms) |
+| `CRAWL4AI_USER_AGENT` | str | Chrome-like UA string | Browser identity |
+| `CRAWL4AI_PROXY` | str \| null | `null` | Proxy URL |
+| `CRAWL4AI_PROXY_ENABLED` | bool | `false` | Route crawls through proxy |
+| `CRAWL4AI_MAX_DEPTH` | int | `3` | Recursive crawl depth |
+| `CRAWL4AI_MAX_PAGES` | int | `10` | Max pages per recursive crawl |
+| `CRAWL4AI_MAX_CONTENT_SIZE` | int | `102400` | Max content kept per page (bytes, 100 KB) |
+| `CRAWL4AI_EXCLUDED_TAGS` | str | `nav,footer,header,aside,form` | Tags stripped before extraction |
+| `CRAWL4AI_WORD_COUNT_THRESHOLD` | int | `30` | Min words per retained block |
+| `CRAWL4AI_PRUNING_THRESHOLD` | float | `0.5` | Content-pruning aggressiveness (0–1) |
+| `CRAWL4AI_WAIT_UNTIL` | str \| null | `null` | Playwright `wait_until` override |
+| `CRAWL4AI_WAIT_FOR` | str \| null | `null` | Playwright `wait_for` selector |
+| `CRAWL4AI_VIEWPORT_WIDTH` / `_HEIGHT` | int | `1280` / `720` | Browser viewport |
+| `CRAWL4AI_STEALTH` | bool | `false` | Stealth browsing mode |
+| `CRAWL4AI_MAGIC` | bool | `false` | Magic anti-bot handling |
+| `CRAWL4AI_LOCALE` / `_TIMEZONE_ID` / `_GEO_LAT` / `_GEO_LON` | various | `null` | Geolocation hints |
+| `CRAWL4AI_ENABLE_MONITOR` | bool | `false` | Performance monitor |
+| `CRAWL4AI_RATE_LIMIT_DELAY_MIN` / `_MAX` | float | `0.5` / `1.0` | Politeness delay between pages (s) |
+| `TAVILY_API_KEY` | SecretStr | — | Tavily web search access |
+| `TAVILY_BASE_URL` | str | `https://api.tavily.com` | Tavily API endpoint |
+| `TAVILY_MAX_RESULTS_LIMIT` | int | `20` | Hard cap on search results |
+| `TAVILY_TIMEOUT_SECONDS` | float | `30.0` | Search timeout |
+| `PAGEINDEX_API_KEY` | SecretStr | — | PageIndex service key |
+
+## OpenTelemetry
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `OTEL_ENABLED` | bool | `false` | Auto-forced `true` when `ENVIRONMENT=production` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | str | `http://localhost:4317` | OTLP collector (gRPC) |
+| `OTEL_SERVICE_NAME` | str | `langchain-fastapi` | Service attribute on all telemetry |
+| `OTEL_TRACES_EXPORTER` | str | `otlp` | Trace exporter |
+| `OTEL_METRICS_EXPORTER` | str | `otlp` | Metrics exporter |
+| `OTEL_LOGS_EXPORTER` | str | `otlp` | Log exporter |
+| `OTEL_SAMPLE_RATE` | float | `1.0` | Trace sampling ratio (0.0–1.0) |
+
+See [Observability](/configuration/observability).
+
+## Rate Limiting
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `RATE_LIMIT_ENABLED` | bool | `true` | Global limiter switch |
+| `RATE_LIMIT_REQUESTS` | int | `100` | Requests per window |
+| `RATE_LIMIT_PERIOD` | int | `60` | Window length (seconds) |
+| `CRAWL_RATE_LIMIT_PER_MINUTE` | int | `10` | Crawler budget / minute |
+| `CRAWL_RATE_LIMIT_PER_HOUR` | int | `100` | Crawler budget / hour |
+| `SEARCH_RATE_LIMIT_PER_MINUTE` | int | `30` | Web-search budget / minute |
+| `SEARCH_RATE_LIMIT_PER_HOUR` | int | `500` | Web-search budget / hour |
+
+Per-endpoint behavior in [Rate limits](/configuration/rate-limits).
+
+## S3 / R2 Storage
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `S3_BUCKET_NAME` | str | — | Target bucket |
+| `S3_ENDPOINT_URL` | str \| null | `null` | Custom endpoint (R2, MinIO) |
+| `S3_ACCESS_KEY_ID` | SecretStr | — | Access key |
+| `S3_SECRET_ACCESS_KEY` | SecretStr | — | Secret key |
+| `S3_REGION` | str | `auto` | Region (R2 uses `auto`) |
+| `S3_FORCE_PATH_STYLE` | bool | `true` | Path-style addressing |
+| `S3_PUBLIC_URL` | str | — | Public base URL for objects |
+
+## File Upload
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `MAX_UPLOAD_SIZE` | int | `10485760` | Upload cap (10 MB) |
+| `ALLOWED_EXTENSIONS` | list[str] | pdf, txt, docx, xlsx, pptx, md, html | Accepted file types |
+
+## WebSocket
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `WEBSOCKET_ALLOWED_ORIGINS` | list[str] | `[]` | Origin allowlist |
+| `WEBSOCKET_REQUIRE_ORIGIN` | bool | `true` | Reject connections without Origin |
+| `WEBSOCKET_IDLE_TIMEOUT_SECONDS` | int | `180` | Idle disconnect threshold |
+| `WEBSOCKET_USER_MESSAGE_RATE` / `_PERIOD_SECONDS` | int | `60` / `60` | Per-user message budget |
+| `WEBSOCKET_CONNECTION_MESSAGE_RATE` / `_PERIOD_SECONDS` | int | `20` / `10` | Control-frame budget |
+| `WEBSOCKET_MAX_CONNECTIONS_PER_USER` | int | `3` | Concurrent sockets per user |
+| `WEBSOCKET_PRESENCE_TTL_SECONDS` | int | `360` | Presence record TTL |
+| `UVICORN_WS_MAX_SIZE` | int | `1048576` | Max inbound frame bytes (1 MiB) |
+| `UVICORN_WS_MAX_QUEUE` | int | `32` | Buffered inbound messages |
+| `UVICORN_WS_PING_INTERVAL` / `_PING_TIMEOUT` | float | `20.0` / `20.0` | Keepalive probe cadence |
+
+## Email
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `RESEND_API_KEY` | SecretStr | — | Resend API access |
+| `RESEND_FROM_EMAIL` | str | `noreply@yourdomain.com` | Sender address |
+| `RESEND_SEND_URL` | str | `https://api.resend.com/emails` | Send endpoint |
+| `RESEND_VERIFICATION_TEMPLATE_ID` | str | — | Verification email template |
+| `RESEND_PASSWORD_RESET_TEMPLATE_ID` | str | — | Password-reset template |
+
+## Logging
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `LOG_LEVEL` | str | `INFO` | Loguru level |
+| `LOG_FORMAT` | str | `json` | Output format |
+| `LOG_FILE` | str | `logs/app.log` | Log file path |
+| `LOG_DIR` | Path | `logs` | Log directory |
+| `LOG_BACKTRACE` | bool | `true` | Include tracebacks |
+| `LOG_DIAGNOSE` | bool | `true` | Loguru variable annotation |
+| `LOG_ROTATION` | str | `10 MB` | Rotation trigger |
+| `LOG_RETENTION` | str | `7 days` | Retention window |
+| `LOG_COMPRESSION` | str | `zip` | Rotated-file compression |
+
+## API Versioning
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `API_PREFIX` | str | `/api/v1` | v1 base path |
+| `API_SUNSET_DATE` | str | `2027-06-15` | Date emitted in v1 `Sunset` headers |
+| `API_V2_BASE_PATH` | str | `/api/v2` | Successor base path |
+
+## MCP
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `MCP_ENABLE_STDIO` | bool | `true` | Serve over stdio |
+| `MCP_ENABLE_HTTP` | bool | `true` | Serve over HTTP |
+| `MCP_SERVER_NAME` | str | `LangChain FastAPI MCP` | Server identity |
+| `MCP_HTTP_PATH` | str | `/mcp` | HTTP endpoint path |
+| `MCP_HTTP_TRANSPORT` / `MCP_RUN_TRANSPORT` | str | `http` / `stdio` | Transport selection |
+| `MCP_HOST` | str | `0.0.0.0` | HTTP bind address |
+| `MCP_PORT` | int | `8001` | HTTP port |
+| `MCP_LOG_LEVEL` | str | `INFO` | Server log level |
+| `MCP_REQUIRE_AUTH` | bool | `true` | Authenticate MCP calls |
+| `MCP_REQUEST_TIMEOUT_SECONDS` | int | `30` | Tool call timeout |
+| `MCP_DEFAULT_PAGE_SIZE` / `MCP_MAX_PAGE_SIZE` | int | `10` / `50` | Pagination bounds |
+| `MCP_MAX_RESULT_BYTES` | int | `524288` | Result payload cap (512 KB) |
+| `MCP_SERVER_ENABLED_TOOLS` | list[str] | `[]` | Tool allowlist (empty = all) |
+| `MCP_RATE_LIMIT_BURST` / `_RATE` / `_PERIOD_SECONDS` | int | `20` / `20` / `60` | Tool-call budget |
+| `MCP_CLIENT_ENABLED` | bool | `true` | Outbound MCP client |
+| `MCP_CLIENT_SERVER_CONFIGS` | str (JSON) | `[]` | Upstream server definitions |
+| `MCP_CLIENT_DEFAULT_TIMEOUT_SECONDS` | int | `15` | Upstream call timeout |
+| `MCP_CLIENT_MAX_CONCURRENCY` | int | `10` | Parallel upstream calls |
+| `MCP_CLIENT_RETRY_ATTEMPTS` | int | `3` | Upstream retries |
+| `MCP_CLIENT_CIRCUIT_BREAKER_THRESHOLD` / `_COOLDOWN_SECONDS` | int | `3` / `60` | Client breaker |
+
+## FastAPI Guard
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `FASTAPI_GUARD_PASSIVE_MODE` | bool \| null | `null` (auto: true outside production) | Observe-only mode |
+| `FASTAPI_GUARD_ENFORCE_HTTPS` | bool \| null | `null` (auto in production) | Reject plain HTTP |
+| `FASTAPI_GUARD_ENABLE_REDIS` | bool | `true` | Distributed state in Redis |
+| `FASTAPI_GUARD_TRUSTED_PROXIES` | list[str] | `[]` | Proxy IPs allowed to set forwarded headers |
+| `FASTAPI_GUARD_TRUSTED_PROXY_DEPTH` | int | `1` | Hop count to trust |
+| `FASTAPI_GUARD_WHITELIST` | list[str] \| null | `null` | Never-blocked IPs |
+| `FASTAPI_GUARD_BLACKLIST` | list[str] | `[]` | Always-blocked IPs |
+| `FASTAPI_GUARD_BLOCKED_USER_AGENTS` | list[str] | `[]` | Blocked user agents |
+| `FASTAPI_GUARD_AUTO_BAN_THRESHOLD` | int | `10` | Violations before auto-ban |
+| `FASTAPI_GUARD_AUTO_BAN_DURATION` | int | `3600` | Ban length (seconds) |
+| `FASTAPI_GUARD_BLOCKED_COUNTRIES` / `_WHITELIST_COUNTRIES` | list[str] | `[]` | Geo rules (needs IPInfo token) |
+| `FASTAPI_GUARD_BLOCK_CLOUD_PROVIDERS` | list[str] | `[]` | e.g. `AWS`, `GCP` |
+| `FASTAPI_GUARD_IPINFO_TOKEN` | SecretStr \| null | `null` | IP geolocation lookup token |
+| `FASTAPI_GUARD_LOG_FORMAT` | str | `text` | Guard log format |
+
+## Also defined but not listed here
+
+Billing/Razorpay (`RAZORPAY_*`, GST fields), agent memory (`COGNEE_*`), Pinecone legacy fields, LangSmith tracing (`LANGSMITH_*`), embedding dimension (`EMBEDDING_DIMENSION`). See [LLM models](/configuration/llm-models), [Caching](/configuration/caching), and [Observability](/configuration/observability) for those groups.

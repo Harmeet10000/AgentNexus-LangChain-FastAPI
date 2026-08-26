@@ -1,0 +1,105 @@
+---
+title: "Rate Limiting"
+description: "Per-endpoint rate limits, the Retry-After header, 429 response format, and client backoff strategy."
+---
+
+## How limiting works
+
+Two independent layers sit in front of every request:
+
+| Layer | Scope | Backing store |
+| --- | --- | --- |
+| Global limiter (FastAPI Guard) | All routes: `RATE_LIMIT_REQUESTS` (100) per `RATE_LIMIT_PERIOD` (60 s) by default | Redis (`FASTAPI_GUARD_ENABLE_REDIS`) |
+| Endpoint limiters | Sensitive endpoints only — token-bucket dependency per route | Redis, atomic Lua script |
+
+Endpoint limiters use a GCRA leaky-bucket: `burst` is how many requests you can make instantly, `rate` is tokens refilled over `period` seconds. The bucket key is your user ID when authenticated, otherwise your client IP (first entry of `X-Forwarded-For` when behind a proxy).
+
+If Redis is unreachable, endpoint limiters **fail open** — requests pass through and the incident is logged — so a cache outage never takes the API down.
+
+## Limits by endpoint
+
+All values below are code defaults; operators can tune the crawl/search and WebSocket numbers via environment variables.
+
+| Endpoint / channel | Limit | Reset window |
+| --- | --- | --- |
+| `POST /auth/register` | 3 requests (burst 3) | 60 s |
+| `POST /auth/login` | 5 requests (burst 5) | 60 s |
+| `POST /auth/forgot-password` | 3 requests (burst 3) | 300 s |
+| `POST /auth/resend-verification` | 2 requests (burst 2) | 300 s |
+| Document crawler | 10/min, 100/hour (`CRAWL_RATE_LIMIT_*`) | rolling |
+| Search endpoints | 30/min, 500/hour (`SEARCH_RATE_LIMIT_*`) | rolling |
+| WebSocket user messages | 60 (`WEBSOCKET_USER_MESSAGE_RATE`) | 60 s |
+| WebSocket connection frames | 20 (`WEBSOCKET_CONNECTION_MESSAGE_RATE`) | 10 s |
+| Everything else | 100 (FastAPI Guard `RATE_LIMIT_REQUESTS`) | 60 s |
+
+<Info>
+Abusive clients face a third mechanism: FastAPI Guard auto-bans an IP after `FASTAPI_GUARD_AUTO_BAN_THRESHOLD` (10) violations for `FASTAPI_GUARD_AUTO_BAN_DURATION` (3600 s), and runs penetration-attempt detection on every request.
+</Info>
+
+## 429 response
+
+When a limit trips, you get HTTP 429 with a `Retry-After` header in whole seconds — computed from exactly how long until the next token becomes available:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 12
+```
+
+The body uses the standard error envelope with code `TOO_MANY_REQUESTS`:
+
+```json
+{
+  "success": false,
+  "statusCode": 429,
+  "request": {
+    "ip": "203.0.113.7",
+    "method": "POST",
+    "url": "/api/v1/auth/login",
+    "correlationId": "b1c9d5e0-3f2a-4a8b-9c6d-0e5f7a8b9c1d"
+  },
+  "message": "Rate limit exceeded. Please slow down.",
+  "data": null,
+  "error": {
+    "code": "TOO_MANY_REQUESTS",
+    "message": "Rate limit exceeded. Please slow down.",
+    "data": null,
+    "trace": null,
+    "innerError": null,
+    "flow": null
+  }
+}
+```
+
+## Backoff strategy
+
+1. Read `Retry-After` and wait at least that many seconds before retrying.
+2. Use exponential backoff with jitter for subsequent retries (for example 1 s, 2 s, 4 s, capped at the reset window).
+3. Honor the per-window budgets above rather than probing: batch searches, and cache crawler results client-side where possible.
+4. A 429 without `Retry-After` can come from the global Guard layer; fall back to waiting the full window (60 s).
+
+<CodeGroup>
+```curl
+# See the headers on a rejected request
+curl -s -i -X POST http://localhost:5000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "advocate@example.in", "password": "wrong"}' \
+  | grep -i "retry-after\|HTTP/"
+```
+
+```python
+import asyncio
+
+import httpx
+
+
+async def login_with_backoff(client: httpx.AsyncClient, payload: dict) -> dict:
+    delay = 1.0
+    for attempt in range(5):
+        res = await client.post("/auth/login", json=payload)
+        if res.status_code != 429:
+            return res.json()
+        retry_after = int(res.headers.get("Retry-After", delay))
+        await asyncio.sleep(retry_after + attempt * delay)
+    raise RuntimeError("Rate limited beyond retry budget")
+```
+</CodeGroup>

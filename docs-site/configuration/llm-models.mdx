@@ -1,0 +1,62 @@
+---
+title: "LLM Models"
+description: "Gemini model selection, sampling defaults, embedding dimensions, and LangSmith tracing config."
+---
+
+All model behavior is configured through environment variables in `src/app/config/settings.py` — no model names are hardcoded in feature code. Code reads a lookup table built from these settings.
+
+## Model roles
+
+| Role | Variable | Default | Used for |
+| --- | --- | --- | --- |
+| Fast | `GEMINI_FLASH_MODEL` | `gemini-3.1-flash` | Classification, grading, extraction, streaming chat |
+| Deep reasoning | `GEMINI_PRO_MODEL` | `gemini-3.1-pro` | Planning, risk analysis, synthesis |
+| Vision | `GEMINI_VISION_MODEL` | `gemini-2.5-flash-image` | Image understanding |
+| Embedding | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-2-preview` | Document and query embeddings |
+
+Swap any role by setting the variable — e.g. `GEMINI_PRO_MODEL=gemini-3.5-pro` — with no code change.
+
+## Sampling defaults
+
+| Variable | Default | Constraint |
+| --- | --- | --- |
+| `GEMINI_TEMPERATURE` | `0.7` | 0.0–2.0 |
+| `GEMINI_TOP_P` | `0.8` | 0.0–1.0 |
+| `GEMINI_TOP_K` | `20` | > 0 |
+| `GEMINI_MAX_TOKENS` | `2048` | Output token cap |
+| `GEMINI_CONTEXT_CACHE_TTL` | `3600s` | Gemini context-cache TTL |
+
+<Note>
+Legal risk analysis benefits from lower temperature than chat. Pipelines that need determinism override sampling per call; these settings are the platform-wide fallback.
+</Note>
+
+## Embeddings
+
+- `EMBEDDING_DIMENSION` (default `768`) must match the embedding model's output size.
+- The settings validator warns at startup if the dimension does not match the known model:
+
+| `GEMINI_EMBEDDING_MODEL` | Expected dimension |
+| --- | --- |
+| `gemini-embedding-2-preview` | 768 |
+| `text-embedding-004` | 768 |
+| `text-embedding-3-small` | 1536 |
+| `text-embedding-3-large` | 3072 |
+
+Changing the embedding model after documents are ingested requires re-embedding the corpus — vectors of different dimensions cannot coexist in one pgvector index.
+
+## Legacy vector store
+
+Pinecone fields (`PINECONE_API_KEY`, `PINECONE_ENVIRONMENT`, `PINECONE_INDEX_NAME`, `PINECONE_DIMENSION`, `PINECONE_METRIC`) remain defined but the current storage direction is Postgres with `pgvector` + `pgvectorscale` + `pg_textsearch`.
+
+## Agent memory (Cognee)
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `COGNEE_DB_SCHEMA` | `cognee_memory` | Postgres schema owned by Cognee |
+| `COGNEE_DATASET_PREFIX` | `legal` | Conversation-partition name prefix (tenant boundary) |
+| `COGNEE_VECTOR_PROVIDER` | `pgvector` | Where Cognee writes embeddings |
+| `COGNEE_ACCESS_CONTROL_ENABLED` | `false` | Must stay false on this Neo4j handler pair — enabling raises errors in Cognee's migrations; partition naming is the tenant boundary instead |
+
+## Tracing
+
+LangSmith export is controlled by `LANGSMITH_TRACING` (default `false`), `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` / `LANGCHAIN_PROJECT` (both default `langchain-production`), and `LANGSMITH_ENDPOINT`. See [Observability](/configuration/observability).

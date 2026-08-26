@@ -1,0 +1,76 @@
+---
+title: "LangGraph Orchestration"
+description: "Graph design patterns: precompiled agents, orchestrator-worker routing, node strategy."
+---
+
+<Frame caption="Search system architecture overview">
+  ![Search system architecture](/images/search_system_architecture_overview.svg)
+</Frame>
+
+## The core performance rule
+
+Do not initialize models or compile agents inside LangGraph nodes. That is the fast path to slow requests, memory churn, noisy traces, and production pain.
+
+**Bad pattern:**
+
+```python
+def research_node(state):
+    model = init_chat_model("gpt-4o")
+    agent = create_agent(model, tools)
+    return agent.invoke(state)
+```
+
+Why it hurts: model initialization costs 100–500 ms fetching config; agent construction adds ~50 ms more; ten nodes across ten concurrent requests become hundreds of avoidable constructions per second; LangSmith traces become incomparable because the runtime shape keeps changing.
+
+**Correct pattern:**
+
+```python
+research_agent = create_agent(
+    init_chat_model("gpt-4o"),
+    tools=[search_caselaw],
+)
+
+def research_node(state):
+    return research_agent.invoke(state)
+```
+
+Compile models, tools, and agents once at startup (in the FastAPI lifespan), then pass compiled callables into `graph.add_node(...)`. Node functions execute workflow logic; they do not rebuild the runtime.
+
+## Orchestrator pattern
+
+Main agent plans → delegates to workers → synthesizes. This maps cleanly onto the actual requirements:
+
+| Requirement | How the pattern meets it |
+| --- | --- |
+| Deterministic workflows | Explicit plan → worker → reflect loop |
+| Multi-step planning | Orchestrator generates typed plan steps |
+| Repeated tool calls | Workers loop until their step completes |
+| Self-reflection | Orchestrator reviews worker outputs |
+| Error recovery | Orchestrator handles failures, replans or retries a node |
+| Agent coordination | Workers are specialized precompiled sub-agents |
+| Shared state | Orchestrator owns `LegalAgentState`; workers read/write through controlled surfaces |
+
+## The Agent Saul node pipeline
+
+The graph is built once at startup (`build_saul_graph`) with a Postgres checkpointer, then served for every session:
+
+```text
+gateway → qna            # clarify what the user wants
+gateway → orchestrator   # route analysis requests
+orchestrator → planner → ingestion → normalization → segmentation
+         → entity_extraction → relationship_mapping
+         → risk_analysis / compliance / deep_research
+         → grounding_verification → human_review
+         → finalization → persist_memory
+```
+
+The orchestrator emits structured actions (`start_pipeline`, `continue`, `synthesize`, `done`) dispatched with `match`/`case`; worker outputs feed reflection before the next routing decision. Node names are exported as `GRAPH_NODE_NAMES` and used by the WebSocket service to filter streaming events.
+
+## Node strategy checklist
+
+- Precompile `create_agent(...)` outside the graph; pass callables into `add_node`.
+- Use per-node or per-workflow checkpointers where isolation matters.
+- Use explicit model lookup tables for dynamic model selection — never string-guess inside a node.
+- Initialize heavy resources (DB pools, Redis, Graphiti) in lifespan; read them from `app.state`.
+
+The result: lower latency, stable memory, reusable traces, and a graph that behaves like infrastructure instead of improvisation.

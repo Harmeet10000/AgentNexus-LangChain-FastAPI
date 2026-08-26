@@ -1,0 +1,65 @@
+---
+title: "Security Architecture"
+description: "JWT auth, claims-based RBAC, OAuth2, rate limiting, FastAPI Guard, secret management, headers."
+---
+
+## JWT authentication
+
+- **Access tokens**: short-lived (15 min, `ACCESS_TOKEN_EXPIRE_MINUTES`), HS256-signed with `JWT_SECRET_KEY`, issuer `JWT_ISSUER`.
+- **Refresh tokens**: 30 days (`REFRESH_TOKEN_EXPIRE_DAYS`), stored as session records in Redis — revocation is immediate and global.
+- **Transport**: the browser flow uses an `access_token` cookie; API clients may send `Authorization: Bearer <token>` instead.
+- Password reset links expire in 30 minutes. Full flows in [Authentication](/api-reference/authentication).
+
+## RBAC: zero database hits per request
+
+Authorization never touches the database. Roles and permissions are baked into JWT claims; dependencies verify them in memory:
+
+```python
+Depends(require_permission(Permission.USERS_READ))
+Depends(require_role(UserRole.ADMIN, UserRole.MODERATOR))
+```
+
+The single source of truth for role → permission mapping is `ROLE_PERMISSIONS` (`features/auth/model.py`):
+
+| Role | Permissions |
+| --- | --- |
+| `ADMIN` | all permissions (frozenset(Permission) — auto-includes new ones) |
+| `MODERATOR` | users:read, content:* , profile:* |
+| `USER` | content:read, profile:read/write |
+
+Permission catalog: `users:read|write|delete`, `content:read|write|delete`, `admin:panel`, `profile:read|write`.
+
+## OAuth2 providers
+
+Google and GitHub sign-in via `GET /auth/oauth/{provider}/authorize` → provider callback → `GET /auth/oauth/{provider}/callback`. The state cookie is signed with `OAUTH_STATE_SECRET`; client credentials come from `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET`. Redirects land on `FRONTEND_URL`.
+
+## Rate limiting architecture
+
+Layered and Redis-backed so limits hold across workers:
+
+1. **Global limiter** — `RATE_LIMIT_REQUESTS` per `RATE_LIMIT_PERIOD` seconds.
+2. **Feature budgets** — crawler (10/min, 100/h), web search (30/min, 500/h), enforced before work starts.
+3. **Auth limiters** — dedicated budgets on register/login ahead of credential checks.
+4. **WebSocket budgets** — message rates, connection caps, idle timeouts.
+
+Details: [Rate limits](/configuration/rate-limits).
+
+## FastAPI Guard
+
+ASGI middleware providing perimeter defense:
+
+- **IP blocking** — static blacklist plus auto-ban after `FASTAPI_GUARD_AUTO_BAN_THRESHOLD` (10) violations for `AUTO_BAN_DURATION` (3600 s).
+- **Pen-test detection** — known attack patterns trigger violations that feed the ban counter.
+- **Geo/cloud rules** — optional country and cloud-provider blocking (requires `IPINFO_TOKEN`).
+- **Proxy trust** — forwarded headers honored only from `FASTAPI_GUARD_TRUSTED_PROXIES`; the same trust decision governs WebSocket URL generation.
+- **Passive mode** — defaults to observe-only outside production.
+
+## Secret management
+
+Every credential is a Pydantic `SecretStr`: redacted in reprs, logs, and dumps; consumers call `.get_secret_value()` explicitly. A startup validator fails production boot while any secret still holds its documented default — see the guardrail note in [Environment variables](/configuration/environment-variables).
+
+## CORS and security headers
+
+CORS is settings-driven: origins default `["*"]` in dev (tighten for production), credentials allowed, exposed headers include `X-Correlation-ID`, `Deprecation`, `Sunset`.
+
+Security headers are set by server middleware when Guard enforces HTTPS (auto in production): HSTS (1 year, subdomains), `X-Frame-Options: DENY`, `nosniff`, referrer policy `strict-origin-when-cross-origin`, and a restrictive permissions policy (camera/geolocation/microphone/payment disabled). WebSocket connections additionally enforce origin allowlists (`WEBSOCKET_ALLOWED_ORIGINS`) and reject missing Origin headers by default.

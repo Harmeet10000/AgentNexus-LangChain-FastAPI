@@ -1,0 +1,113 @@
+---
+title: "Agent Saul Workflow"
+description: "Run a full contract analysis: create a session, stream over WebSocket, handle HITL interrupts."
+---
+
+**Goal:** drive the orchestrator — planner → workers → synthesizer — over a streaming, resumable session.
+
+## The shape of a run
+
+1. **Create a session** (HTTP): `POST /agent-saul/sessions` returns a `thread_id` and a ready-to-use `ws_url`.
+2. **Connect and start** (WebSocket): first frame must be `{"type": "start", ...}`.
+3. **Stream**: node lifecycle frames and tokens arrive as the graph executes.
+4. **Decide at gates**: on `hitl_interrupt`, send a `resume` frame with your decision.
+5. **Finish**: terminal `done` frame; close the socket.
+
+Pipeline: gateway → orchestrator → planner → ingestion → normalization → segmentation → entity_extraction → relationship_mapping → risk_analysis / compliance / deep_research → grounding_verification → human_review → finalization → persist_memory.
+
+## 1. Create the session
+
+<CodeGroup>
+```bash
+curl -s -X POST http://localhost:5000/api/v1/agent-saul/sessions \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"doc_id": "b7e2...", "user_query": "Analyze liability exposure in this contract"}'
+```
+
+```python
+r = client.post(
+    "/agent-saul/sessions",
+    json={"doc_id": doc_id, "user_query": "Analyze liability exposure in this contract"},
+)
+session = r.json()["data"]
+print(session["thread_id"], session["ws_url"])
+```
+</CodeGroup>
+
+Request fields: `doc_id` (from [upload](/guides/upload-analyze-contract)), `user_query` (1–4096 chars), optional `permissions` dict.
+
+## 2. Connect and stream
+
+<CodeGroup>
+```bash
+# browsers: new WebSocket(ws_url); python:
+```
+
+```python
+import asyncio
+import json
+
+import websockets
+
+
+async def run(ws_url: str) -> None:
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({
+            "type": "start",
+            "doc_id": doc_id,
+            "user_query": "Analyze liability exposure in this contract",
+        }))
+        async for raw in ws:
+            frame = json.loads(raw)
+            match frame["type"]:
+                case "token":
+                    print(frame["token"], end="")
+                case "node_start":
+                    print(f"\n▶ {frame['node']} (step {frame['step']})")
+                case "hitl_interrupt":
+                    await handle_gate(ws, frame)
+                case "done":
+                    print("\n✓ complete:", frame.get("summary"))
+                    return
+                case "error":
+                    print("error:", frame["code"], frame["message"])
+                    if not frame["retryable"]:
+                        return
+
+
+asyncio.run(run(session["ws_url"]))
+```
+</CodeGroup>
+
+## 3. Frame reference
+
+**Client → server**
+
+| Frame | Fields | Purpose |
+| --- | --- | --- |
+| `start` | `doc_id`, `user_query`, `thread_id?`, `permissions?` | Kick off or resume a thread |
+| `resume` | `thread_id`, `action`: approve/reject/modify, `feedback?`, `modified_plan?`, `overrides?`, `reviewer_role?` | Answer an HITL gate |
+| `ping` | — | Keepalive |
+
+**Server → client**
+
+| Frame | Meaning |
+| --- | --- |
+| `node_start` / `node_end` | Node began/finished (`node`, `step`; end carries changed `output_keys`) |
+| `token` | Streaming LLM token from within a node |
+| `state_update` | Coarse status transition (`status`, `step`, `total_steps`) |
+| `hitl_interrupt` | Graph paused — respond with `resume` (`interrupt_type`, `payload`, `message`) |
+| `error` | `{node?, code, message, retryable}` |
+| `pong` | Reply to ping |
+| `done` | Terminal — client should close (`thread_id`, optional `summary`) |
+
+## 4. Handling HITL interrupts
+
+See the dedicated walkthrough: [Human review guide](/guides/human-review).
+
+## Reconnection and errors
+
+- Disconnect mid-run is recoverable: reconnect to the same `ws_url` pattern and send `start` with the original `thread_id` — execution resumes from the last checkpoint ([Stateful agents](/concepts/stateful-agents)).
+- First frame must be `start` or the server closes with code **4000** after an `INVALID_FIRST_FRAME` error; URL/body `thread_id` mismatch closes with **4001**; validation failures close with **4002**; unexpected server faults emit a retryable `INTERNAL_ERROR` frame then close **1011**.
+- Budgets: 3 concurrent sockets per user, 60 user messages/min, idle timeout 180 s — configured via [WebSocket settings](/configuration/environment-variables#websocket).

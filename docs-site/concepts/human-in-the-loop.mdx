@@ -1,0 +1,39 @@
+---
+title: "Human in the Loop"
+description: "Why HITL is mandatory for legal work, what humans do, what gets stored."
+---
+
+## Why it is mandatory
+
+Three reasons, in order of severity:
+
+1. **Legal liability** — a model cannot bear responsibility for advice on a contract. A person must.
+2. **Continuous improvement** — human corrections are the highest-quality training signal the system will ever get.
+3. **Trust formation** — people trust tools they can correct, and correctly distrust tools they cannot.
+
+In Indian legal work this is structural, not decorative: judgment interpretation, conflicting rulings across courts, and enforceability questions require context the system must surface for a qualified reviewer, not silently resolve.
+
+## Where the gate sits
+
+There are no cycles before human review — avoiding compounding hallucinations. The graph pipeline reaches `human_review` after risk analysis, compliance, and grounding verification have produced their findings, and before finalization or memory persistence. Execution pauses via LangGraph's `interrupt()`; the run sits in `awaiting_human_review`.
+
+Interrupt types: `clarification_needed`, `plan_approval`, `ocr_reupload`, `human_review_required`.
+
+## What humans do
+
+| Action | Mechanism |
+| --- | --- |
+| Approve or reject risks | `resume` frame with `action: "approve" | "reject"` |
+| Correct clauses | `modified_plan` / override entries in the resume payload |
+| Annotate reasoning | free-text `feedback` (up to 8192 chars) |
+| Take responsibility | `reviewer_role` recorded alongside the decision |
+
+## What gets stored
+
+Overrides, comments, and reviewer role persist as first-class data attached to the run's state — becoming training data and audit data, not just UI feedback. Persisted memory is *trusted* memory precisely because only reviewed output crosses the gate.
+
+## Audit trail
+
+Because decisions are state, they replay: who decided what, when, on which document version, with which annotation. That satisfies compliance review and gives future runs defensible provenance.
+
+Walkthrough of a review cycle over the wire: [Human review guide](/guides/human-review).

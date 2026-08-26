@@ -1,0 +1,62 @@
+---
+title: "System Design"
+description: "The three-layer model — memory shaping, runtime control, execution durability — in depth."
+---
+
+<Frame caption="Agent Saul deployment topology">
+  ![Deployment topology](/images/agent_saul_deployment_topology.svg)
+</Frame>
+
+## Layer 1: Memory shaping
+
+The question this layer answers: *what does the model see right now?*
+
+- **State is the source of truth.** The LangGraph `LegalAgentState` TypedDict holds the canonical run state; nothing else is authoritative.
+- **Memory is an indexed projection of state**, not a second brain. Cognee stores long-term conversational recall in a dedicated Postgres schema (`cognee_memory`, partitioned per user by dataset naming); Graphiti maintains the evolving knowledge graph of parties, contracts, clauses, and obligations.
+- **Bounded context.** Filters and trimming decide what enters a prompt. Retrieval pulls focused facts, not whole documents. Tool output is summarized or truncated before it becomes permanent conversation drag.
+
+Details: [Memory architecture](/concepts/memory-architecture), [Context discipline](/concepts/context-discipline).
+
+## Layer 2: Runtime control
+
+The question: *who decides what happens next?*
+
+- **LangGraph owns execution.** Nodes are pure functions over typed state; edges are declared up front; the orchestrator routes between planner, workers, and synthesizer.
+- **Checkpoints make runs durable.** Every super-step persists to `AsyncPostgresSaver`. A crashed run resumes from its last checkpoint — an interruption, not a loss.
+- **Human gates are graph nodes**, not UI decorations. `human_review` pauses execution with `interrupt()` until a person approves, rejects, or modifies.
+
+Details: [LangGraph orchestration](/architecture/langgraph-orchestration), [Stateful agents](/concepts/stateful-agents).
+
+## Layer 3: Execution durability
+
+The question: *what happens to side effects if the process dies mid-flight?*
+
+- **Transactional outbox.** Domain events are written into `outbox_events` in the same database transaction as the state change they describe. No dual-write window, no lost event.
+- **NOTIFY/LISTEN relay.** Committing the transaction also delivers a PostgreSQL notification; the relay publishes the event and marks it published. Events that fail five times go to `dead_letter_events`.
+- **Celery for background work** on two disjoint queues — sub-second billing/email on `default`, minutes-long ingestion on `ingestion` — so neither starves the other.
+
+Details: [Outbox pattern](/architecture/outbox-pattern).
+
+## The real architecture, compressed
+
+```text
+LLM     = stateless reasoning engine
+State   = source of truth
+Memory  = indexed projections of state
+```
+
+Each layer exists because its absence has a named failure mode: unshaped memory produces context rot; runtime without checkpoints produces unreproducible agents; side effects without outboxes produce silent data loss. The deployment topology above shows how these layers map onto running processes — API pods, Celery workers, the relay, and the data stores behind them.
+
+## Mental model
+
+```text
+Plan → deterministic execution → validated output → persisted state
+```
+
+Not:
+
+```text
+LLM → decide → act → hope it works
+```
+
+Expanded in [Deterministic execution](/concepts/deterministic-execution).
