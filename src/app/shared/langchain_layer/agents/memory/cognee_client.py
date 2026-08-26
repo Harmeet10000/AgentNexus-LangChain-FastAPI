@@ -28,11 +28,12 @@ import os
 from typing import TYPE_CHECKING
 
 import cognee
-from pydantic import BaseModel, ConfigDict
 
-from app.connections.postgres import get_database_fields
+from app.connections.postgres import get_database_fields as _database_fields
 from app.features.documents.model import CHUNK_EMBEDDING_DIM
 from app.utils import logger
+
+from .setup_types import CogneeSetupConfig
 
 if TYPE_CHECKING:
     from app.config import Settings
@@ -56,28 +57,6 @@ class CogneeSetupError(RuntimeError):
 
 class CogneeDimensionMismatchError(CogneeSetupError):
     """Memory embeddings would not match document embeddings. Boot-stopping."""
-
-
-class CogneeSetupConfig(BaseModel):
-    """Typed result of :func:`setup_cognee`.
-
-    Deliberately carries no credential-shaped field: this object reaches
-    ``app.state.cognee_config``, where any string that looked like a URL or a
-    password would be one log line away from leaking.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    service: str = "cognee"
-    llm_model: str
-    embedding_model: str
-    embedding_dimension: int
-    neo4j_uri: str
-    postgres_host: str
-    postgres_database: str
-    vector_provider: str
-    schema_name: str
-    access_control_enabled: bool
 
 
 async def setup_cognee(settings: Settings) -> CogneeSetupConfig:
@@ -108,9 +87,22 @@ async def setup_cognee(settings: Settings) -> CogneeSetupConfig:
         "true" if settings.COGNEE_ACCESS_CONTROL_ENABLED else "false"
     )
 
+    # Cognee's schema migrations run in a SUBPROCESS (`python -m alembic`),
+    # which inherits only real environment variables — the in-memory
+    # set_relational_db_config call below never reaches them. Export the
+    # system-database identity so `cognee.run_startup_migrations()` targets
+    # the same Postgres as everything else instead of a local sqlite file.
+    database_fields = _database_fields()
+    os.environ.setdefault("DB_PROVIDER", "postgres")
+    os.environ["DB_HOST"] = database_fields.host
+    os.environ["DB_PORT"] = str(database_fields.port)
+    os.environ["DB_USERNAME"] = database_fields.username
+    os.environ["DB_PASSWORD"] = database_fields.password.get_secret_value()
+    os.environ["DB_NAME"] = database_fields.database
+
     # Task 4.5 — the relational identity comes from the application's own accessor,
     # so agent memory and the application pool cannot disagree silently.
-    database_fields = get_database_fields()
+    database_fields = _database_fields()
     if database_fields.host in _PLACEHOLDER_VALUES or database_fields.database in (
         _PLACEHOLDER_VALUES
     ):
@@ -132,6 +124,8 @@ async def setup_cognee(settings: Settings) -> CogneeSetupConfig:
 
     # Task 4.3 — memory embeddings must be comparable with document embeddings;
     # pin both model and dimension, and refuse to boot on divergence.
+    # Imported lazily: a module-level import edges this transport-adjacent module
+    # into app.features' package init and creates an import cycle.
     expected_dimension = CHUNK_EMBEDDING_DIM
     if expected_dimension != settings.EMBEDDING_DIMENSION:
         msg = (
@@ -144,14 +138,14 @@ async def setup_cognee(settings: Settings) -> CogneeSetupConfig:
     try:
         cognee.config.set_llm_config(
             config_dict={
-                "llm_provider": "google_genai",
+                "llm_provider": "gemini",
                 "llm_model": settings.GEMINI_FLASH_MODEL,
                 "llm_api_key": settings.GEMINI_API_KEY.get_secret_value(),
             }
         )
         cognee.config.set_embedding_config(
             config_dict={
-                "embedding_provider": "google_genai",
+                "embedding_provider": "gemini",
                 "embedding_model": settings.GEMINI_EMBEDDING_MODEL,
                 "embedding_dimensions": settings.EMBEDDING_DIMENSION,
                 "embedding_api_key": settings.GEMINI_API_KEY.get_secret_value(),

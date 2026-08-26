@@ -261,9 +261,11 @@ class Settings(BaseSettings):
     # the library default lands them in local files (defect two, item 152).
     COGNEE_VECTOR_PROVIDER: str = Field(default="pgvector")
     # Written into the process environment before the first memory configuration
-    # call — left unset, cognee's default branch raises EnvironmentError on this
-    # repository's handler/provider pair.
-    COGNEE_ACCESS_CONTROL_ENABLED: bool = Field(default=True)
+    # call. MUST stay False on this repository's neo4j+ladybug handler pair:
+    # enabling multi-user access control there raises EnvironmentError inside
+    # cognee's vector migrations (Decision 6 / NG6). The partition name built by
+    # AgentMemoryService.memory_partition is the tenant boundary instead.
+    COGNEE_ACCESS_CONTROL_ENABLED: bool = Field(default=False)
 
     # --- LangSmith ---
     # Renamed to match the variable in your ENV file: LANGSMITH_TRACING=true

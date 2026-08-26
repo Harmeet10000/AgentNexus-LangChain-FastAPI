@@ -49,6 +49,7 @@ def agent_memory_consolidation(
     _self: Any,
     *,
     tenant_ids: list[str] | None = None,
+    session_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Consolidate conversation-scoped memory into the permanent graph.
 
@@ -58,7 +59,10 @@ def agent_memory_consolidation(
     """
     settings = get_settings()
     resolved_tenants = tenant_ids or []
-    service = AgentMemoryService(partition_prefix=settings.COGNEE_DATASET_PREFIX)
+    service = AgentMemoryService(
+        partition_prefix=settings.COGNEE_DATASET_PREFIX,
+        pending_sessions=set(session_ids or []),
+    )
 
     consolidated: list[str] = []
     refused: list[dict[str, str]] = []

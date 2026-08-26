@@ -17,10 +17,10 @@ from pydantic import SecretStr
 from app.shared.langchain_layer.agents.memory.cognee_client import (
     _ACCESS_CONTROL_ENV_KEY,
     CogneeDimensionMismatchError,
-    CogneeSetupConfig,
     CogneeSetupError,
     setup_cognee,
 )
+from app.shared.langchain_layer.agents.memory.setup_types import CogneeSetupConfig
 
 if TYPE_CHECKING:
     from typing import Any
@@ -63,7 +63,10 @@ def real_database_fields(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """
     import app.shared.langchain_layer.agents.memory.cognee_client as client
 
-    monkeypatch.setattr(client, "get_database_fields", lambda: _REAL_FIELDS)
+    # cognee_client imports get_database_fields as _database_fields (private alias)
+    # after the setup_types extraction — patch the actual attribute it uses.
+    target = "_database_fields" if hasattr(client, "_database_fields") else "get_database_fields"
+    monkeypatch.setattr(client, target, lambda: _REAL_FIELDS)
     return _REAL_FIELDS
 
 
@@ -129,9 +132,10 @@ async def test_placeholder_connection_fields_are_refused(
 ) -> None:
     import app.shared.langchain_layer.agents.memory.cognee_client as client
 
-    client.get_database_fields = lambda: SimpleNamespace(  # type: ignore[assignment]
-        host="localhost", port=5432, username="u", password="p", database="db"
-    )
+    target = "_database_fields" if hasattr(client, "_database_fields") else "get_database_fields"
+    setattr(client, target, lambda: SimpleNamespace(  # type: ignore[attr-defined]
+        host="localhost", port=5432, username="u", password=SecretStr("p"), database="db"
+    ))
     settings = _settings(POSTGRES_HOST="localhost", POSTGRES_DB_NAME="db")
     with pytest.raises(CogneeSetupError, match="placeholder"):
         await setup_cognee(settings)

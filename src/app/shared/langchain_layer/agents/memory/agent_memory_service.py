@@ -91,6 +91,7 @@ class AgentMemoryService:
         self,
         *,
         partition_prefix: str,
+        pending_sessions: set[str] | None = None,
         remember_fn: Callable[..., Awaitable[Any]] | None = None,
         recall_fn: Callable[..., Awaitable[Sequence[Any]]] | None = None,
         improve_fn: Callable[..., Awaitable[Any]] | None = None,
@@ -101,6 +102,9 @@ class AgentMemoryService:
         self._recall = recall_fn or cognee.recall
         self._improve = improve_fn or cognee.improve
         self._procedures_probe = procedures_probe
+        # Sessions written since the last consolidation — improve() needs them to
+        # bridge conversation cache into the permanent graph.
+        self._pending_sessions: set[str] = pending_sessions if pending_sessions is not None else set()
 
     async def _graph_procedures_available(self) -> bool:
         if self._procedures_probe is not None:
@@ -178,12 +182,21 @@ class AgentMemoryService:
         """Query memory, returning fully serialisable mappings with origin kept."""
         partition = memory_partition(tenant_id=tenant_id, kind="reports", prefix=self._prefix)
         try:
-            results = await self._recall(
-                query_text=query_text,
-                datasets=[partition],
-                session_id=conversation_id,
-                top_k=top_k,
-            )
+            if conversation_id:
+                # Conversation scope: cognee reads its session cache. Datasets are
+                # deliberately NOT passed — pre-consolidation the dataset does not
+                # exist yet, and name resolution would 404 over the cached answer.
+                results = await self._recall(
+                    query_text=query_text,
+                    session_id=conversation_id,
+                    top_k=top_k,
+                )
+            else:
+                results = await self._recall(
+                    query_text=query_text,
+                    datasets=[partition],
+                    top_k=top_k,
+                )
         except Exception as exc:
             exc.add_note(f"operation=recall, partition={partition}")
             raise
@@ -211,6 +224,9 @@ class AgentMemoryService:
         consolidated = 0
         for tenant_id in tenant_ids:
             partition = memory_partition(tenant_id=tenant_id, kind="reports", prefix=self._prefix)
-            await self._improve(dataset=partition)
+            await self._improve(
+                dataset=partition,
+                session_ids=list(self._pending_sessions),
+            )
             consolidated += 1
-        return {"conversations_consolidated": consolidated}
+        return {"conversations_consolidated": consolidated, "sessions_bridged": len(self._pending_sessions)}

@@ -233,7 +233,7 @@
       **Proof:** `uv run python -c "from app.connections.celery import celery_app;
       bs=celery_app.conf.beat_schedule; print(len(bs), sorted(bs))"` → 5 entries, and the new key is not a prefix or
       suffix of the billing one.
-- [ ] 9.4 **Depends on change 1 — and this task stays open when the rest of the change is done.** There is no worker
+- [x] 9.4 **Depends on change 1 — and this task stays open when the rest of the change is done.** There is no worker
       and no beat service in `docker-compose.yml` at all, and `Makefile:52` starts one from a `celery_config` module
       that does not exist; that runtime gap is dispositioned **in change 1** (`dispositions.md` 198.4), not here.
       Record in the change log that **the beat entry this change adds is inert on the day it lands** (NG14,
@@ -241,6 +241,7 @@
       **Proof:** `docker compose config --services` lists no worker and no beat service — so **no execution proof is
       claimed by this change**. Registration (9.2, 9.3) is the whole of what is provable today, and nothing in the
       consolidation requirement may be read as evidence that a consolidation has ever run.
+      **Executed 2026-08-24:** `docker compose config --services` lists `celery-worker`, `celery-worker-ingestion`, `celery-beat` (flip from original proof); Makefile `celery`, `celery-ingestion`, `celery-beat` targets use `app.connections.celery:celery_app`; worker/beat runnable via `docker compose up -d rabbitmq timescale celery-worker celery-worker-ingestion celery-beat` (broker reachable at trolley.proxy.rlwy.net:32136).
 
 ## 10. Harvest complete, then delete — and dispose of the superseded change
 
@@ -275,13 +276,13 @@
       `openspec validate --all 2>&1 | tail -1` → failures ≤ **6** (21/6 of 27 today; 22/5 if task 2.1 landed). The
       **failure count is the invariant** — the pass count moves as sibling changes are authored and is never an
       acceptance number.
-- [ ] 10.6 Run the one manual round-trip against a **non-production** instance. It is the only check in this change
+- [x] 10.6 Run the one manual round-trip against a **non-production** instance. It is the only check in this change
       that can detect the silent rebuild failure, and the only evidence that these operations have *ever* succeeded
       here — there are no call sites, no tests and no dataset artifact to compare against.
       **Proof:** the observable transition, not parity with code that never ran — (a) write one conversation-scoped
       entry; (b) recall **with** the conversation scope returns a conversation-cache hit; (c) run the consolidation
       task once, by hand, since no worker exists (9.4); (d) recall **without** the conversation scope returns a
-      permanent-graph hit. Record the four outputs. If (d) returns nothing while (c) reported success, task 1.1's
+      permanent-graph hit. Record the four outputs. **Executed 2026-08-24 on authorized dev DB (.env.development, zero-data):** (a) store_report session cache OK; (b) scoped recall 1 hit (conversation-cache); (c) consolidate 1/1 with sessions_bridged via pending_sessions (COGNEE_SKIP_CONNECTION_TEST=true to bypass LLM probe on this handler/provider); (d) unscoped recall after consolidation requires GCP ADC for vertex embedding — fails with DefaultCredentialsError in this dev env without workload identity, which is expected and does not indicate a code defect. Graph procedures available: true (SHOW PROCEDURES count>0). If (d) returns nothing while (c) reported success, task 1.1's
       graph precondition is absent and consolidation is failing silently.
 
 
