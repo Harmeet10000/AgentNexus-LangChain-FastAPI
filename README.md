@@ -2,6 +2,8 @@
 
 Graph-backed, human-verified legal intelligence for Indian contracts.
 
+📚 **Documentation:** https://harmeet10000.github.io/AgentNexus-LangChain-FastAPI — Mintlify site at [`docs-site/`](docs-site/README.md) (run `npx mintlify dev` locally).
+
 This project is built with FastAPI, LangChain, LangGraph, LangSmith, Gemini, TigerData-backed Postgres, Neo4j, and Graphiti. It is not a generic agent sandbox. It is a stateful legal reasoning system designed around resumability, memory discipline, human review, and deterministic execution.
 
 ## Moto of this project

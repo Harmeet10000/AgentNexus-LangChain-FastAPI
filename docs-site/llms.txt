@@ -1,0 +1,13 @@
+# AgentNexus — LLM Context
+
+Site: AgentNexus FastAPI — Production LangChain + FastAPI legal AI platform
+Docs: https://harmeet10000.github.io/AgentNexus-LangChain-FastAPI
+
+## Sections
+- Get Started: /get-started/overview, /get-started/quickstart, /get-started/project-structure, /get-started/installation
+- Core Concepts: /concepts/stateful-agents, /concepts/human-in-the-loop, /concepts/memory-architecture, /concepts/context-discipline, /concepts/deterministic-execution, /concepts/glossary
+- Architecture: /architecture/overview, /architecture/system-design, /architecture/langgraph-orchestration, /architecture/rag-pipeline, /architecture/graph-memory, /architecture/document-ingestion, /architecture/outbox-pattern, /architecture/error-and-result-pattern, /architecture/security-architecture
+- Guides: /guides/upload-analyze-contract, /guides/hybrid-search, /guides/legal-qa, /guides/agent-saul-workflow, /guides/human-review, /guides/web-crawl-research, /guides/websocket-guide, /guides/faq, /guides/troubleshooting
+- API Reference: /api-reference/overview, /api-reference/authentication, /api-reference/rate-limiting, /api-reference/errors
+- Configuration: /configuration/environment-variables, /configuration/llm-models, /configuration/rate-limits, /configuration/caching, /configuration/observability
+- Deployment, Development, Resources: see mint.json navigation

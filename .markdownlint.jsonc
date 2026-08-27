@@ -1,0 +1,15 @@
+{
+  // Minimal, compatible with markdownlint-cli / markdownlint-cli2.
+  // Enforces: heading levels, list indentation, no bare URLs.
+  "default": true,
+  // heading levels should increment by one (H1 -> H2 -> H3)
+  "MD001": true,
+  // unordered list indentation (2 spaces)
+  "MD007": { "indent": 2 },
+  // no bare URLs — require markdown link syntax
+  "MD034": true,
+  // repo-specific relaxations for Mintlify MDX:
+  "MD013": false, // line length — MDX + tables are long
+  "MD033": false, // inline HTML — Mintlify components use it (<Frame>, <CodeGroup>)
+  "MD041": false // first line heading — frontmatter precedes heading
+}
