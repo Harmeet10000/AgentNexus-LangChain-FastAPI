@@ -17,6 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import (  # noqa: TC002 — Mapped resolved at runtime by SQLAlchemy mapper
@@ -126,6 +127,16 @@ class UnifiedChunk(Base):
             "search_text",
             postgresql_using="gin",
             postgresql_ops={"search_text": "gin_trgm_ops"},
+        ),
+        # Serves the legal-corpus statute point lookup (instrument + section).
+        # Year DESC NULLS LAST lets the newest dated version come off the
+        # same scan; NULL years (unversioned rows) sort after dated ones
+        # under PostgreSQL's DESC ordering. Created by revision 0016.
+        Index(
+            "ix_chunks_instrument_section",
+            "instrument_name",
+            "section_ref",
+            sa_text("instrument_year DESC NULLS LAST"),
         ),
     )
 

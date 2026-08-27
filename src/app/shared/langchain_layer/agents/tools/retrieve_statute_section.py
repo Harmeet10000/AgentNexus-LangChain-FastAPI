@@ -149,9 +149,8 @@ async def _fetch_statute_section(
             instrument_year AS year
         FROM chunks
         WHERE
-            instrument_name ILIKE :act_name
-            AND section_ref ILIKE :section_ref
-            AND instrument_name IS NOT NULL
+            instrument_name = :act_name
+            AND section_ref = :section_ref
         ORDER BY instrument_year DESC NULLS LAST
         LIMIT 1
         """
@@ -161,8 +160,8 @@ async def _fetch_statute_section(
             await conn.execute(
                 query,
                 {
-                    "act_name": f"%{act_name}%",
-                    "section_ref": f"{section_ref.strip()}%",
+                    "act_name": act_name.strip(),
+                    "section_ref": section_ref.strip(),
                 },
             )
         ).fetchone()
