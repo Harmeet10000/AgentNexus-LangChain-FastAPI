@@ -30,7 +30,7 @@ jobs:
           node-version: "20"
 
       - name: Install Mintlify CLI
-        run: npm i -g mintlify@latest
+        run: npm i -g mintlify@4.2.835
 
       - name: Build Mintlify site
         working-directory: docs-site
