@@ -3,6 +3,7 @@ Runs `npx mintlify dev --port 3001` and checks the page via an HTTP request
 using `requests`. Exits 0 on pass, 1 on fail.
 """
 
+import contextlib
 import subprocess
 import sys
 import os
@@ -78,17 +79,14 @@ def main() -> int:
         return 1
     finally:
         if proc is not None:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            except Exception:
-                pass
             try:
                 proc.wait(timeout=5)
-            except Exception:
-                try:
+            except subprocess.TimeoutExpired:
+                with contextlib.suppress(ProcessLookupError):
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                except Exception:
-                    pass
+                proc.wait()
 
 
 if __name__ == "__main__":
