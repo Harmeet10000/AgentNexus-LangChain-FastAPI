@@ -72,7 +72,8 @@ async def test_an_approved_run_calls_the_service_write_exactly_once() -> None:
     call = service.calls[0]
     assert call["conversation_id"] == "thread-9"
     assert call["tenant_id"] == "acme"
-    assert result["status"].value == "completed" or result["status"] == "completed"
+    status = result["status"]
+    assert getattr(status, "value", status) == "completed"  # ponytail: normalize enum-or-str once
     assert any("reports#doc-1" in ref for ref in result["long_term_refs"])
 
 
@@ -89,7 +90,8 @@ async def test_an_unapproved_run_calls_the_service_zero_times_and_still_complete
     node = make_persist_memory_node(service)
     result = await node(state)
     assert service.calls == []
-    assert result["status"] is not None
+    status = result["status"]
+    assert getattr(status, "value", status) == "completed"  # must still complete
     assert "COGNEE_WRITE_FAILED" not in str(result)
 
 
@@ -97,7 +99,8 @@ async def test_a_service_failure_records_cognee_write_failed_and_does_not_propag
     service = _RecordingService(error=RuntimeError("store down"))
     node = make_persist_memory_node(service)
     result = await node(_state())
-    assert result["status"] is not None  # the run still completes
+    status = result["status"]
+    assert getattr(status, "value", status) == "completed"  # run still completes
     assert "COGNEE_WRITE_FAILED" in str(result)
 
 

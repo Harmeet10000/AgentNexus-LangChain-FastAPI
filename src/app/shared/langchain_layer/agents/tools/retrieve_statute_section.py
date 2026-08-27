@@ -137,7 +137,14 @@ async def _fetch_statute_section(
     # Task 11.1: the point lookup targets the unified chunk corpus — the only
     # relations the migration history creates — via the statute identity
     # attributes (instrument_name / section_ref / instrument_year) carried on
-    # chunks per revision f2a9c47b81de. The newest applicable year wins.
+    # chunks per revision f2a9c47b81de. The newest applicable year wins
+    # (NULLS LAST). Exact equality is intentional: the predecessor used
+    # ILIKE '%...%' prefix matching which could match the wrong statute
+    # and could not be index-served. Corpus ingestion normalizes
+    # instrument_name/section_ref (strip), and the LLM prompt constrains the
+    # tool to canonical identifiers; case/prefix variants are thus a caller
+    # contract, not a query concern. A functional LOWER index can be added
+    # if case-variant traffic is observed.
     query = text(
         """
         SELECT
@@ -151,7 +158,7 @@ async def _fetch_statute_section(
         WHERE
             instrument_name = :act_name
             AND section_ref = :section_ref
-        ORDER BY instrument_year DESC NULLS LAST
+        ORDER BY instrument_year DESC
         LIMIT 1
         """
     )

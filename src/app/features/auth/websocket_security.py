@@ -481,7 +481,8 @@ class WebSocketSecurityService:
                 )
                 continue
 
-            if result.unwrap() is None:
+            session = result.unwrap()
+            if session is None or session.expires_at < datetime.now(UTC):
                 logger.info(
                     "Session revoked or expired - closing connection",
                     session_id=context.session_id,
@@ -514,6 +515,14 @@ class WebSocketSecurityService:
             # Session has been revoked or expired
             logger.info(
                 "Session revoked or expired - closing connection",
+                session_id=context.session_id,
+                user_id=context.user_id,
+            )
+            raise WebSocketSessionRevokedError
+        # ponytail: expires_at is authoritative; Redis TTL may lag or be 0
+        if session_data.expires_at < datetime.now(UTC):
+            logger.info(
+                "Session expired (expires_at in past) - closing connection",
                 session_id=context.session_id,
                 user_id=context.user_id,
             )
