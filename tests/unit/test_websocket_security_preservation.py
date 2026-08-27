@@ -6,7 +6,7 @@ They establish a baseline before the fix and confirm no regressions after.
 Run with: uv run pytest tests/unit/test_websocket_security_preservation.py -v
 """
 
-import asyncio
+from time import time
 from uuid import uuid4
 
 import pytest
@@ -104,22 +104,25 @@ class TestPreservation2PresenceUpdates:
         valid_context,
         redis,
     ):
-        """Touch should update presence scores."""
+        """Touch throttles 30s; force expiry via _last_touch_time to prove it writes."""
         # GIVEN a registered connection
         await ws_security_service.register_connection(valid_context)
 
-        # Get initial score
         user_key = f"ws:user:{valid_context.user_id}"
         initial_score = await redis.zscore(user_key, valid_context.connection_id)
-
-        # WHEN touched
-        await asyncio.sleep(0.1)
-        await ws_security_service.touch_connection(valid_context)
-
-        # THEN score should be updated (unless throttled)
-        # Note: throttle is 30s, so this may not update immediately
-        # But subsequent calls after 30s should update
         assert initial_score is not None
+
+        # WHEN throttled (immediate touch) → score unchanged
+        await ws_security_service.touch_connection(valid_context)
+        throttled_score = await redis.zscore(user_key, valid_context.connection_id)
+        assert throttled_score == initial_score
+
+        # WHEN throttle window elapsed → score advances
+        ws_security_service._last_touch_time[valid_context.connection_id] = time() - 31
+        await ws_security_service.touch_connection(valid_context)
+        updated_score = await redis.zscore(user_key, valid_context.connection_id)
+        assert updated_score is not None
+        assert float(updated_score) > float(initial_score)
 
 
 class TestPreservation3RateLimitingNormalTraffic:
