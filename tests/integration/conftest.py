@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 # The root tests/conftest.py stubs heavy/cyclic modules with MagicMock so unit
 # tests stay import-light. The real app needs the real modules, so drop the
 # stubs before building it. Kept in one place so Phase 6 can retire them.
+# ponytail: single source is tests/conftest.py; this list must mirror it minus langgraph (retired in 319c698/6525c6f)
 _STUBBED_MODULES = [
     "app.connections.mcp",
     "app.connections.celery",
@@ -30,11 +31,6 @@ _STUBBED_MODULES = [
     "mcp_core.server.tools",
     "tasks",
     "tasks.auth_email_tasks",
-    "app.shared.langgraph_layer",
-    "app.shared.langgraph_layer.agent_saul.state",
-    "app.shared.langgraph_layer.checkpointer",
-    "app.shared.langgraph_layer.kb_retry",
-    "app.shared.langgraph_layer.retrieval_kb",
     "app.features.auth.token_audit_log",
 ]
 

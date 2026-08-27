@@ -223,6 +223,9 @@ It will be compatible before version 2.0.0.
 215. add knowledge from other projects and this to OFK folder including agent, DB, python, JS/TS optimisations, skills, BDD, research for SDD from gemini chat history, set of best practices for deployment, version pinning, maintaining docker image history with git commit hash, terraform practices, book wisdom. add research done in Kiro. use OpenWiki if it suits and see cole medin videos for organising files in a scalable manner, ring buffers, debugging tips, eBPF, how ABI works, how to make FFIs, SGLang and vLLM, webhooks, errors best practices, finance and other stuff as well  DONE
 211. check agent router usage  DONE
 136. use LangExtract outputs to build rich graph knowledge from your legal documents.  ABANDONDED
+220. check the alembic warning having 2 heads   DONE
+223. need to make standardise alembic file naming scheme  DONE
+228. fix the failing websocket tests  DONE
 
 161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
 type Composable = Callable[[Any], Any]
@@ -232,7 +235,7 @@ def compose(*functions: Composable) -> Composable:
 
     return lambda data: reduce(apply, functions, data)   DELAYED
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
-155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses     DELAYED    
+155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses can be used to make the lynk linter     DELAYED    
 156. check the page https://docs.langchain.com/langsmith/deployments#
 153. set up performance tests 
 157. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
@@ -299,7 +302,12 @@ todos:-
 
 218. add a small gloassary of the project from the screenshot, we are open at the core, we share about are roadmap, how we think about things, and of course we share all our code and should strive to be in that way. its important to maintian the things they live and iterate over the product. 
 219.  add in the system prompt to add a search, implementation, verifier, reviewer, check if i can give specific system propmts, skills, tools, MCP servers to subagents, defining models for subagents, permissions
-220. check the alembic warning having 2 heads
+always write why Use Block-Level HTML Comments: Since Claude Code strips HTML comments from the context it reads, you can include detailed notes for human maintainers without increasing token usage (3:02-3:12).
+The "Incident-Why-Outcome" Framework: The host recommends structuring your comments to record three specific pieces of information for every rule (3:14-3:43):
+The Failure/Incident: Describe the specific event or bug that necessitated the rule (e.g., citing a specific incident number or date).
+Why the Rule Helps: Explain how the specific instruction prevents that failure from reoccurring.
+The Outcome: Provide evidence of the rule's success (e.g., "no orphan rows in 11 months").
+Additionally, the host personally recommends adding a commit reference to these comments to help future developers trace the history of the decision (3:45-3:49). The host warns that vague comments like "added to fix an issue" are ineffective and perform no better than having no comments at all 
 221. fix the files tht are scrambled in utils, shared and other places
 222. RESULT-PATTERN.md currently documents the envelope style as "project standard" — it now contradicts the code (users/service.py raises). Optional follow-up: update the doc to match. Say the word and I'll include it.
 there are 2-3 error handling that i need to figure out
@@ -329,19 +337,15 @@ except SQLAlchemyError as exc:
                 )
 and also need to check where to put log_expected_failure(error, operation=operation) in the final one
 also need to check how exactly error msg should be written. should it be string message, StringEnum or something else. need to chec the best practice.
-need to standardise w\hat happens in except block
- 223. need to make standardise alembic file naming scheme
+need to standardise what happens in except block
  224. fix this def _celery_meters() -> tuple[Any, Any, Any]:
     global _otel_celery_meters  # noqa: PLW0603 — module-level lazy init
-225. always write why Use Block-Level HTML Comments: Since Claude Code strips HTML comments from the context it reads, you can include detailed notes for human maintainers without increasing token usage (3:02-3:12).
-The "Incident-Why-Outcome" Framework: The host recommends structuring your comments to record three specific pieces of information for every rule (3:14-3:43):
-The Failure/Incident: Describe the specific event or bug that necessitated the rule (e.g., citing a specific incident number or date).
-Why the Rule Helps: Explain how the specific instruction prevents that failure from reoccurring.
-The Outcome: Provide evidence of the rule's success (e.g., "no orphan rows in 11 months").
-Additionally, the host personally recommends adding a commit reference to these comments to help future developers trace the history of the decision (3:45-3:49). The host warns that vague comments like "added to fix an issue" are ineffective and perform no better than having no comments at all 
 226. remove redis client protocol and use from cache/ and remove any datamodels
 227. agentState should be typedDict and not a baseModel
-228. fix the failing websocket tests
+225. think where to add models in databse/schemas or somewhere else? what can i do to follow industry convention. improve the env.py seeder and other files for that make it include in ruff and ty 
+228. disable memory in claude code, opencode
+229. need to have a proper versioning of docker images ties to the git commit and see how the industry standard does this
+230. need to have a standard for marking the task done in openspec spec gated with a DONE sections that is detailed and summary of how it is done
 ```
 summarise these chapters in great detail and take video's transcript as reference for summarising
 

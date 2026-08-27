@@ -86,7 +86,9 @@ def auth_service(refresh_token_repo) -> AuthService:
 
 
 def make_mock_user(**kwargs) -> MagicMock:
-    user = MagicMock()
+    from app.features.auth.model import User  # local import to avoid import-order side effects
+
+    user = MagicMock(spec=User)
     user.id = kwargs.get("id", "507f1f77bcf86cd799439011")
     user.email = kwargs.get("email", "test@example.com")
     user.hashed_password = kwargs.get("hashed_password", "$argon2id$v=19$m=65536,t=3,p=4$abc")
@@ -101,3 +103,19 @@ def make_mock_user(**kwargs) -> MagicMock:
     user.created_at = datetime.now(UTC)
     user.updated_at = datetime.now(UTC)
     return user
+
+
+# ponytail: fail fast if marker contradicts directory (e.g. requires_db in tests/unit)
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    for item in items:
+        fspath = str(getattr(item, "fspath", ""))
+        markers = {m.name for m in item.iter_markers()}
+        # requires_db and integration must live under tests/integration
+        if "requires_db" in markers and "/tests/unit/" in fspath:
+            msg = f"{item.nodeid}: @pytest.mark.requires_db must live under tests/integration, not tests/unit"
+            raise pytest.UsageError(msg)
+        if "integration" in markers and "/tests/unit/" in fspath:
+            msg = f"{item.nodeid}: @pytest.mark.integration must live under tests/integration"
+            raise pytest.UsageError(msg)
