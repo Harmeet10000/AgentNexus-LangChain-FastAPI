@@ -107,36 +107,36 @@
 **Focus:** Self-service and orientation. These pages fill gaps that the source-extraction agents don't cover.
 
 ### 4.1 Glossary and Reference Pages
-- [ ] 4.1.1 Scan all generated `.mdx` files for domain terms not yet defined in the glossary
-- [ ] 4.1.2 Generate `concepts/glossary.mdx` — 30+ terms alphabetized with `<AccordionGroup>`, each with definition and "See also" links
-- [ ] 4.1.3 Generate `resources/data-model-reference.mdx` — document User (MongoDB/Beanie), outbox_events/dead_letter_events (PostgreSQL/SQLAlchemy), Neo4j graph model (entity types + relationship types from `state.py`)
-- [ ] 4.1.4 Generate `resources/changelog.mdx` — distilled from git log and OpenSpec archive: all archived changes with dates, summaries, and links
+- [x] 4.1.1 Scan all generated `.mdx` files for domain terms not yet defined in the glossary
+- [x] 4.1.2 Generate `concepts/glossary.mdx` — 30+ terms alphabetized with `<AccordionGroup>`, each with definition and "See also" links
+- [x] 4.1.3 Generate `resources/data-model-reference.mdx` — document User (MongoDB/Beanie), outbox_events/dead_letter_events (PostgreSQL/SQLAlchemy), Neo4j graph model (entity types + relationship types from `state.py`)
+- [x] 4.1.4 Generate `resources/changelog.mdx` — distilled from git log and OpenSpec archive: all archived changes with dates, summaries, and links
 
 ### 4.2 User Support Pages
-- [ ] 4.2.1 Generate `guides/faq.mdx` — 12+ questions (model support, Neo4j requirement, India-only, vs generic RAG chatbot, production readiness, Cognee vs Graphiti, Pinecone migration, Docker requirement, cost, HITL mandate, adding document types, monitoring)
-- [ ] 4.2.2 Generate `guides/troubleshooting.mdx` — infrastructure errors (Neo4j, Redis, Celery, PostgreSQL, MongoDB, OTel) + application errors (Gemini API key, JWT expiry, rate limit 429, WebSocket disconnect, upload failures, empty search, human review timeout)
-- [ ] 4.2.3 Verify FAQ and troubleshooting pages cross-reference the relevant architecture and API reference pages
+- [x] 4.2.1 Generate `guides/faq.mdx` — 12+ questions (model support, Neo4j requirement, India-only, vs generic RAG chatbot, production readiness, Cognee vs Graphiti, Pinecone migration, Docker requirement, cost, HITL mandate, adding document types, monitoring)
+- [x] 4.2.2 Generate `guides/troubleshooting.mdx` — infrastructure errors (Neo4j, Redis, Celery, PostgreSQL, MongoDB, OTel) + application errors (Gemini API key, JWT expiry, rate limit 429, WebSocket disconnect, upload failures, empty search, human review timeout)
+- [x] 4.2.3 Verify FAQ and troubleshooting pages cross-reference the relevant architecture and API reference pages
 
 ### 4.3 WebSocket Guide
-- [ ] 4.3.1 Read WebSocket handler code and Agent Saul session management
-- [ ] 4.3.2 Generate `guides/websocket-guide.mdx` — full protocol documentation: create session (`POST /agent-saul/sessions`), connect (`WS /agent-saul/ws/{thread_id}`), message format (client→server and server→client JSON), heartbeat/ping-pong, reconnection strategy, error codes, rate limiting
-- [ ] 4.3.3 Include `<CodeGroup>` with `curl` (session creation), `python` (websockets library full example), and `python-sdk` tabs
+- [x] 4.3.1 Read WebSocket handler code and Agent Saul session management
+- [x] 4.3.2 Generate `guides/websocket-guide.mdx` — full protocol documentation: create session (`POST /agent-saul/sessions`), connect (`WS /agent-saul/ws/{thread_id}`), message format (client→server and server→client JSON), heartbeat/ping-pong, reconnection strategy, error codes, rate limiting
+- [x] 4.3.3 Include `<CodeGroup>` with `curl` (session creation), `python` (websockets library full example), and `python-sdk` tabs
 
 ### 4.4 Migration and Onboarding
-- [ ] 4.4.1 Generate `deployment/migration-guide-v1-to-v2.mdx` — endpoint equivalence table, header changes (Deprecation/Sunset), base URL change, schema differences, compatibility timeline (sunset 2027-06-15)
-- [ ] 4.4.2 Generate `development/contributing.mdx` — setup workflow, pre-commit hooks, test conventions, PR workflow, branch naming, CI checks, security reporting
-- [ ] 4.4.3 Generate `resources/security.mdx` — expand SECURITY.md into full guide: auth flows (JWT, OAuth2, session management), RBAC model, rate limiting, FastAPI Guard, CORS, security headers, secret management (SecretStr), vulnerability reporting
-- [ ] 4.4.4 Generate navigation fragments for Resources, Deployment, and Development groups
+- [x] 4.4.1 Generate `deployment/migration-guide-v1-to-v2.mdx` — endpoint equivalence table, header changes (Deprecation/Sunset), base URL change, schema differences, compatibility timeline (sunset 2027-06-15)
+- [x] 4.4.2 Generate `development/contributing.mdx` — setup workflow, pre-commit hooks, test conventions, PR workflow, branch naming, CI checks, security reporting
+- [x] 4.4.3 Generate `resources/security.mdx` — expand SECURITY.md into full guide: auth flows (JWT, OAuth2, session management), RBAC model, rate limiting, FastAPI Guard, CORS, security headers, secret management (SecretStr), vulnerability reporting
+- [x] 4.4.4 Generate navigation fragments for Resources, Deployment, and Development groups
 
 ## 5. Phase 2 — Composition and Review
 
 - [ ] 5.1 Run mint.json composer — merge all 6 navigation fragments, validate against `https://mintlify.com/docs.json` schema
-- [ ] 5.2 Run review agent check 1: frontmatter completeness — every `.mdx` has `title` and `description`
-- [ ] 5.3 Run review agent check 2: broken links — no dead internal or external links
-- [ ] 5.4 Run review agent check 3: orphan pages — every `.mdx` is in nav, every nav path has a file
-- [ ] 5.5 Run review agent check 4: tone consistency — all pages match the project voice (philosophical but precise, human-first)
-- [ ] 5.6 Run review agent check 5: cross-reference validity — every `/concepts/glossary`, `/api-reference/`, `/architecture/` link resolves
-- [ ] 5.7 Run review agent check 6: glossary coverage — every distinctive domain term used across pages has a glossary entry
+- [x] 5.2 Run review agent check 1: frontmatter completeness — every `.mdx` has `title` and `description`
+- [x] 5.3 Run review agent check 2: broken links — no dead internal or external links
+- [x] 5.4 Run review agent check 3: orphan pages — every `.mdx` is in nav, every nav path has a file
+- [x] 5.5 Run review agent check 4: tone consistency — all pages match the project voice (philosophical but precise, human-first)
+- [x] 5.6 Run review agent check 5: cross-reference validity — every `/concepts/glossary`, `/api-reference/`, `/architecture/` link resolves
+- [x] 5.7 Run review agent check 6: glossary coverage — every distinctive domain term used across pages has a glossary entry
 - [ ] 5.8 Manually review generated content for accuracy, tone, and readability
 - [ ] 5.9 Fix issues found during review
 
@@ -150,9 +150,9 @@
 
 ## 7. Final Verification
 
-- [ ] 7.1 Run `npx mintlify dev` and verify all pages render without errors
+- [x] 7.1 Run `npx mintlify dev` and verify all pages render without errors
 - [ ] 7.2 Click through all navigation links — verify no dead ends
-- [ ] 7.3 API Reference: verify all 30+ endpoints render with correct schemas
+- [x] 7.3 API Reference: verify all 30+ endpoints render with correct schemas
 - [ ] 7.4 API Reference: verify interactive playground works (try an endpoint)
 - [ ] 7.5 API Reference: verify code examples show correctly in `<CodeGroup>` tabs
 - [ ] 7.6 Verify all 5 diagrams render correctly in their pages with `<Frame>` captions
