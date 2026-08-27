@@ -286,9 +286,12 @@ class TestThrottledTouchConnection:
 
     async def test_touch_connection_throttles_redis_writes(
         self,
+        redis,
         ws_security_with_repo,
     ):
-        """Touch should throttle updates to reduce Redis pressure."""
+        """Throttled touch leaves zscore unchanged; post-window touch advances it."""
+        from time import time
+
         user_id = "user-throttle"
         connection_id = str(uuid4())
 
@@ -311,14 +314,19 @@ class TestThrottledTouchConnection:
             connection_rate_limit_key=f"connection:{connection_id}",
         )
 
-        # Register connection
         await ws_security_with_repo.register_connection(context)
+        user_key = f"ws:user:{user_id}"
+        s0 = await redis.zscore(user_key, connection_id)
+        assert s0 is not None
 
-        # Touch immediately (should not execute Redis call due to throttle)
-        # This is hard to test directly, but we verify it doesn't error
+        # Two immediate touches are throttled → score unchanged
         await ws_security_with_repo.touch_connection(context)
         await ws_security_with_repo.touch_connection(context)
-        await ws_security_with_repo.touch_connection(context)
+        assert await redis.zscore(user_key, connection_id) == s0
 
-        # All should complete without error (throttling working)
-        assert True
+        # After throttle window → score advances
+        ws_security_with_repo._last_touch_time[connection_id] = time() - 31
+        await ws_security_with_repo.touch_connection(context)
+        s1 = await redis.zscore(user_key, connection_id)
+        assert s1 is not None
+        assert float(s1) > float(s0)

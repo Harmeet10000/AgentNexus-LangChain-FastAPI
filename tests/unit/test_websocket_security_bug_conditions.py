@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from fastapi import WebSocketException
 from returns.result import Success
 
 from app.config import get_settings
@@ -214,17 +215,18 @@ class TestBugCondition3TOCTOUCapacityOverflow:
             )
             connection_tasks.append((context, i))
 
-        # Attempt all 4 simultaneously
-        successful = 0
-        rejected = 0
-        for context, _idx in connection_tasks:
+        # Attempt all 4 concurrently to expose TOCTOU race; gate must be atomic
+        async def _try_register(ctx: WebSocketSecurityContext) -> bool:
             try:
                 await ws_security_service.ensure_connection_capacity(user_id)
-                await ws_security_service.register_connection(context)
-                successful += 1
-            except Exception:
-                rejected += 1  # Expected to fail after max
-        assert rejected > 0
+                await ws_security_service.register_connection(ctx)
+                return True
+            except WebSocketException:
+                return False  # ponytail: narrow catch; any other exception is a bug and must fail loud
+
+        results = await asyncio.gather(*[_try_register(ctx) for ctx, _ in connection_tasks])
+        rejected = results.count(False)
+        assert rejected > 0, "capacity overflow not enforced under concurrent registrations"
 
         # THEN final count should not exceed capacity
         final_count = await ws_security_service.get_active_connection_count(user_id)

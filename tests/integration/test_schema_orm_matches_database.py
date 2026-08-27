@@ -19,7 +19,7 @@ import pytest
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
 
-pytestmark = pytest.mark.requires_db
+pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 
 # Every model module must be imported before ``Base.metadata`` is read; this mirrors
 # the side-effect import block in src/alembic/env.py.
