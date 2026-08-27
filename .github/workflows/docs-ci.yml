@@ -1,0 +1,52 @@
+name: Docs CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs-site/**"
+      - "docs-site/mint.json"
+      - ".markdownlint.jsonc"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs-site/**"
+      - "docs-site/mint.json"
+      - ".markdownlint.jsonc"
+  workflow_dispatch:
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "latest"
+
+      - name: Install dependencies (pyyaml for frontmatter)
+        run: uv sync --extra dev
+
+      - name: Validate frontmatter
+        run: uv run python docs-site/scripts/validate_frontmatter.py
+
+      - name: Check nav completeness
+        run: uv run python docs-site/scripts/check_nav_completeness.py
+
+      - name: Set up Node for markdownlint
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run markdownlint
+        run: |
+          npx --yes markdownlint-cli2 "docs-site/**/*.mdx" --config .markdownlint.jsonc
