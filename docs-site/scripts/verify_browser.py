@@ -1,6 +1,6 @@
 """Headless browser verification for remaining Mintlify tasks (1.9,2.4,2.5,7.2,7.4,7.8,7.11).
-Runs `npx mintlify dev --port 3001` and checks via Playwright if available,
-otherwise falls back to curl checks. Exits 0 on pass, 1 on fail.
+Runs `npx mintlify dev --port 3001` and checks the page via an HTTP request
+using `requests`. Exits 0 on pass, 1 on fail.
 """
 import subprocess, time, sys, os, signal
 
