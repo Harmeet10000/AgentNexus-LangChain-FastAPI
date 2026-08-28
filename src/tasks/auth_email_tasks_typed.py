@@ -15,8 +15,7 @@ from __future__ import annotations
 from functools import partial
 
 from app.config import get_settings
-from app.connections.celery import ResilientTask, celery_app
-from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, ResilientTask, celery_app
 from app.connections.celery_task_names import (
     SEND_PASSWORD_RESET_EMAIL,
     SEND_VERIFICATION_EMAIL,

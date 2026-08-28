@@ -18,8 +18,7 @@ from typing import TYPE_CHECKING
 from pydantic import Field
 
 from app.config import get_settings
-from app.connections.celery import celery_app
-from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, celery_app
 from app.connections.celery_task_names import AGENT_MEMORY_CONSOLIDATION
 from app.shared.langchain_layer.agents.memory.agent_memory_service import (
     AgentMemoryService,

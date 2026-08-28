@@ -9,8 +9,7 @@ from returns.result import Failure
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.connections.celery import ResilientTask, celery_app
-from app.connections.celery_registry import CeleryTaskRegistry, NoKwargsPayload
+from app.connections.celery import CeleryTaskRegistry, NoKwargsPayload, ResilientTask, celery_app
 from app.connections.celery_task_names import (
     BILLING_DUNNING,
     BILLING_INVOICE_GENERATION,
