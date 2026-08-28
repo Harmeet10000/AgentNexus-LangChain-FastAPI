@@ -7,7 +7,7 @@ as a shim re-exporting these for one release (import path deprecation).
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Enum, Integer, String, Text, func
+from sqlalchemy import JSON, Enum, Integer, String, Text
 from sqlalchemy.orm import (
     Mapped,
     mapped_column,
@@ -26,11 +26,10 @@ class ChatSession(Base):
     user_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    # ponytail: server_default so DB clock is single truth, not Python lambda drift.
-    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now(), onupdate=func.now()
-    )
+    # ponytail: legacy columns keep Python-side defaults to match existing DB
+    # (no server_default in 0014). New tables should use server_default=func.now().
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(nullable=False)
 
 
 class ChatMessage(Base):
@@ -49,4 +48,4 @@ class ChatMessage(Base):
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(nullable=False)

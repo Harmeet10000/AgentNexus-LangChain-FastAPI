@@ -9,7 +9,7 @@ Do not add new columns here.
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, String, Text, func
+from sqlalchemy import JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database.base import Base
@@ -29,8 +29,6 @@ class DocumentVector(Base):
     doc_metadata: Mapped[dict[str, Any] | None] = mapped_column(
         JSON, name="metadata", nullable=True
     )
-    # ponytail: server_default so DB clock is truth; Python lambdas drift.
-    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now(), onupdate=func.now()
-    )
+    # Legacy — keep Python-side handling to match 0014 (no server_default there).
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(nullable=False)

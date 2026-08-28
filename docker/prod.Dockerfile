@@ -12,6 +12,9 @@ WORKDIR /app
 # --- Builder Stage ---
 FROM base AS builder
 
+# hnswlib (via headroom-ai) needs a C++ compiler to build from source.
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 COPY pyproject.toml uv.lock ./
