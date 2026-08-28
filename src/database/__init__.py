@@ -1,17 +1,9 @@
-"""Database package with Base and all schemas."""
+"""Database package — kernel only. Feature tables live in app/features/*/model.py."""
 
 from .base import Base, PublicIdMixin, TimestampMixin
-from .schemas import (
-    ChatMessage,
-    ChatSession,
-    DocumentVector,
-)
 
 __all__ = [
     "Base",
-    "ChatMessage",
-    "ChatSession",
-    "DocumentVector",
     "PublicIdMixin",
     "TimestampMixin",
 ]

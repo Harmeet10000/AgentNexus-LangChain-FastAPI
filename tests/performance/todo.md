@@ -227,6 +227,7 @@ It will be compatible before version 2.0.0.
 223. need to make standardise alembic file naming scheme  DONE
 228. fix the failing websocket tests  DONE
 229. need to have a proper versioning of docker images ties to the git commit and see how the industry standard does this  DONE
+225. think where to add models in databse/schemas or somewhere else? what can i do to follow industry convention. improve the env.py seeder and other files for that make it include in ruff and ty   DONE
 
 161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
 type Composable = Callable[[Any], Any]
@@ -343,7 +344,6 @@ need to standardise what happens in except block
     global _otel_celery_meters  # noqa: PLW0603 — module-level lazy init
 226. remove redis client protocol and use from cache/ and remove any datamodels
 227. agentState should be typedDict and not a baseModel
-225. think where to add models in databse/schemas or somewhere else? what can i do to follow industry convention. improve the env.py seeder and other files for that make it include in ruff and ty 
 228. disable memory in claude code, opencode and remove the unnecesary skills from computer
 230. need to have a standard for marking the task done in openspec spec gated with a DONE sections that is detailed and summary of how it is done
 ```

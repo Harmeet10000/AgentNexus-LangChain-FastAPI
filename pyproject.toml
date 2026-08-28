@@ -194,6 +194,7 @@ type-check = "ty:check"
 migrate = "alembic:upgrade"
 test = "pytest:main"
 replay-outbox = "scripts.replay_outbox:main"
+seed = "database.seeders.run_seeders:main"
 
 
 [project.optional-dependencies]
@@ -449,6 +450,13 @@ section-order = [
     "BLE001",  # blind-except: asserting on error paths
     "PLR0914", # too-many-locals: long scenario tests
 ]
+"src/alembic/env.py" = [
+    "F401", # _MODEL_MODULES side-effect registry
+    "PLC0415", # importlib loop at module level
+    "S104", # dummy URL host
+    "ARG001", # Alembic include_object/include_name callbacks have fixed signatures
+    "ARG002", # same
+]
 "src/alembic/versions/*.py" = [
     "ANN",
     "N999", # Allow invalid module names
@@ -579,6 +587,8 @@ section-order = [
     "ASYNC240", # Blocking path methods in async — uses os.path intentionally
     "PLC0415",  # Local import re to avoid name collision
 ]
+"src/database/schemas/chat_messages.py" = ["F401"] # shim re-export
+"src/database/schemas/__init__.py" = ["F401"] # shim re-export
 "**/_*.py" = ["ANN201"] # Private modules
 "src/app/features/auth/router.py" = ["S105"]
 "src/app/features/auth/security.py" = ["S105", "S106"]
@@ -752,6 +762,12 @@ missing-override-decorator = "ignore"     # Same test doubles
 invalid-assignment = "ignore"             # Monkeypatching module/class attributes
 invalid-type-form = "ignore"              # cast("any", ...) escape hatches for redis fakes
 
+[[tool.ty.overrides]]
+include = ["src/alembic/**"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"  # alembic.context/op are runtime-provided, not stubbed
+
 [tool.ty.src]
 # Remove `build` from the excluded directories.
 # Exclude common directories (explicit for clarity)
@@ -776,7 +792,7 @@ exclude = [
     "build",
     "dist",
     "node_modules",
-    "src/alembic",
+    "src/alembic/versions",  # generated revisions — not hand-written
     "src/app/examples",
     "src/app/shared/rag",  # ponytail: vendored LangChain internals, not our code
     "venv",

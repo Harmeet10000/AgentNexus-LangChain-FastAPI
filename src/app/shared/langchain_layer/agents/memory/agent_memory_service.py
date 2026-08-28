@@ -104,7 +104,9 @@ class AgentMemoryService:
         self._procedures_probe = procedures_probe
         # Sessions written since the last consolidation — improve() needs them to
         # bridge conversation cache into the permanent graph.
-        self._pending_sessions: set[str] = pending_sessions if pending_sessions is not None else set()
+        self._pending_sessions: set[str] = (
+            pending_sessions if pending_sessions is not None else set()
+        )
 
     async def _graph_procedures_available(self) -> bool:
         if self._procedures_probe is not None:
@@ -229,4 +231,7 @@ class AgentMemoryService:
                 session_ids=list(self._pending_sessions),
             )
             consolidated += 1
-        return {"conversations_consolidated": consolidated, "sessions_bridged": len(self._pending_sessions)}
+        return {
+            "conversations_consolidated": consolidated,
+            "sessions_bridged": len(self._pending_sessions),
+        }
