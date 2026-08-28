@@ -11,7 +11,6 @@ from fakeredis.aioredis import FakeRedis
 # the import machinery reports "'<root>' is not a package". Regenerate with:
 #   rg -o 'from (mcp_core|tasks|app\.shared\.langgraph_layer)(\.[\w.]+)? import' src/
 sys.modules["app.connections.mcp"] = MagicMock()
-sys.modules["app.connections.celery"] = MagicMock()
 sys.modules["mcp_core"] = MagicMock()
 sys.modules["mcp_core.client.auth"] = MagicMock()
 sys.modules["mcp_core.client.manager"] = MagicMock()
