@@ -55,7 +55,7 @@ def create_app() -> FastAPI:
 
     app: FastAPI = FastAPI(
         title="Langchain FastAPI Server",
-        version="1.0.0",
+        version=settings.APP_VERSION,
         lifespan=lifespan,
         docs_url="/api-docs",
         redoc_url="/api-redoc",
@@ -127,7 +127,9 @@ def create_app() -> FastAPI:
         return {
             "message": "Root Route🚀",
             "status": "healthy",
-            "version": "1.0.0",
+            "version": settings.APP_VERSION,
+            "git_sha": settings.GIT_SHA,
+            "build_date": settings.BUILD_DATE,
         }
 
     @app.get(path="/health", tags=["Monitoring"])
@@ -152,7 +154,13 @@ def create_app() -> FastAPI:
         else:
             overall: Literal[HealthStatus.HEALTHY] = HealthStatus.HEALTHY
 
-        body = HealthResponse(status=overall, dependencies=deps)
+        body = HealthResponse(
+            status=overall,
+            version=settings.APP_VERSION,
+            git_sha=settings.GIT_SHA,
+            build_date=settings.BUILD_DATE,
+            dependencies=deps,
+        )
         code: Literal[503, 200] = (
             status.HTTP_503_SERVICE_UNAVAILABLE
             if overall == HealthStatus.UNHEALTHY

@@ -58,10 +58,15 @@ services:
       - ai-service-1
 
   ai-service-1:
+    image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: docker/dev.Dockerfile
       target: dev
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        APP_VERSION: ${APP_VERSION:-1.0.0}
     container_name: ai-service-1
     ports:
       - "5000:5000"
@@ -70,6 +75,9 @@ services:
       - ./data:/app/data
     environment:
       ENVIRONMENT: development
+      GIT_SHA: ${GIT_SHA:-unknown}
+      BUILD_DATE: ${BUILD_DATE:-unknown}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
       POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your_secure_password}@timescale:5432/${POSTGRES_DB:-langchain_db}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672//
     env_file:
@@ -114,10 +122,15 @@ services:
   # execute it. `environment` wins over `env_file` in compose, which is what makes
   # the override effective.
   celery-worker:
+    image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: docker/dev.Dockerfile
       target: dev
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        APP_VERSION: ${APP_VERSION:-1.0.0}
     container_name: celery-worker
     command: uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q default --concurrency=8
     volumes:
@@ -125,6 +138,9 @@ services:
       - ./data:/app/data
     environment:
       ENVIRONMENT: development
+      GIT_SHA: ${GIT_SHA:-unknown}
+      BUILD_DATE: ${BUILD_DATE:-unknown}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
       POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your_secure_password}@timescale:5432/${POSTGRES_DB:-langchain_db}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672//
     env_file:
@@ -143,10 +159,15 @@ services:
   # whatever the largest document costs. Scale this service's replicas rather than
   # its concurrency.
   celery-worker-ingestion:
+    image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: docker/dev.Dockerfile
       target: dev
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        APP_VERSION: ${APP_VERSION:-1.0.0}
     container_name: celery-worker-ingestion
     command: uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q ingestion --concurrency=2
     volumes:
@@ -154,6 +175,9 @@ services:
       - ./data:/app/data
     environment:
       ENVIRONMENT: development
+      GIT_SHA: ${GIT_SHA:-unknown}
+      BUILD_DATE: ${BUILD_DATE:-unknown}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
       POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your_secure_password}@timescale:5432/${POSTGRES_DB:-langchain_db}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672//
     env_file:
@@ -172,16 +196,24 @@ services:
   # publish every scheduled task twice, and the billing and credit tasks it emits
   # are not all idempotent.
   celery-beat:
+    image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: docker/dev.Dockerfile
       target: dev
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        APP_VERSION: ${APP_VERSION:-1.0.0}
     container_name: celery-beat
     command: uv run celery -A app.connections.celery:celery_app beat --loglevel=info
     volumes:
       - ./src:/app/src:ro
     environment:
       ENVIRONMENT: development
+      GIT_SHA: ${GIT_SHA:-unknown}
+      BUILD_DATE: ${BUILD_DATE:-unknown}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
       POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your_secure_password}@timescale:5432/${POSTGRES_DB:-langchain_db}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672//
     env_file:

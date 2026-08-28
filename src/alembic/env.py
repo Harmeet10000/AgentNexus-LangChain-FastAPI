@@ -1,72 +1,49 @@
 import asyncio
+import importlib
 from logging.config import fileConfig
 
 from sqlalchemy.engine import Connection
 
-import app.features.audit.model
-import app.features.credits.models.consumption
-import app.features.credits.models.credit
-import app.features.documents.model
-import app.features.invoices.invoice_batch
-import app.features.invoices.invoice_void
-import app.features.invoices.model
-import app.features.invoices.receipt
-import app.features.invoices.report
-import app.features.payments.currency
-import app.features.payments.model
-import app.features.plans.model
-import app.features.subscriptions.model
-import app.features.subscriptions.trial_extension
-import app.features.webhooks.email_template
-import app.features.webhooks.model
-import app.shared.outbox.model
 from alembic import context
 from app.connections import init_db
 from app.utils import logger
 from database import Base
 
-# Every module above is imported for one side effect: executing its body declares its
-# SQLAlchemy models, which registers their tables on ``Base.metadata`` — the registry
-# Alembic compares the database against. A table missing from that registry is a table a
-# future comparison proposes to DROP, so the import list is the drop-safety contract and
-# nothing in this file calls into it.
-#
-# The modules are therefore named a second time below rather than carrying a suppression.
-# ``F401`` is in this project's ruff ``fixable`` set, so a bare side-effect import here is
-# not merely flagged: ``ruff check --fix`` deletes it, silently unregistering the tables it
-# was protecting. Referencing them removes the diagnostic instead of hiding it.
-#
-# Import order is load-bearing and alphabetical order happens to satisfy it:
-# ``app.features.payments.model`` must precede ``app.features.subscriptions.model``,
-# because the subscriptions package reaches payments and back through
-# ``subscriptions.dependencies``. Entering that cycle from subscriptions raises
-# ``ImportError``; entering it from payments does not.
-#
-# The two credit modules are registered for the same drop-safety reason as the rest, even
-# though they are named nowhere in this change's task text. ``0005`` creates ``user_credits``
-# and ``credit_consumptions``, and joining the heads put ``0005`` inside the single-head
-# chain — so leaving them unregistered would have a future comparison propose dropping two
-# relations the chain creates, which is precisely the defect this import list exists to
-# prevent.
-_MODEL_MODULES = (
-    app.features.audit.model,
-    app.features.credits.models.consumption,
-    app.features.credits.models.credit,
-    app.features.documents.model,
-    app.features.invoices.invoice_batch,
-    app.features.invoices.invoice_void,
-    app.features.invoices.model,
-    app.features.invoices.receipt,
-    app.features.invoices.report,
-    app.features.payments.currency,
-    app.features.payments.model,
-    app.features.plans.model,
-    app.features.subscriptions.model,
-    app.features.subscriptions.trial_extension,
-    app.features.webhooks.email_template,
-    app.features.webhooks.model,
-    app.shared.outbox.model,
+# ---------------------------------------------------------------------------
+# Drop-safety contract: every module below declares SQLAlchemy models that
+# register tables on Base.metadata. A missing import = a future autogenerate
+# proposing DROP for that table.
+# ---------------------------------------------------------------------------
+# ponytail: data-driven import so the list is one source of truth, order is
+# still load-bearing (payments before subscriptions due to cycle via
+# subscriptions.dependencies). Adding a new model = one string here.
+_MODEL_MODULE_NAMES: tuple[str, ...] = (
+    "app.features.audit.model",
+    "app.features.chat.model",
+    "app.features.credits.models.consumption",
+    "app.features.credits.models.credit",
+    "app.features.documents.model",
+    "app.features.invoices.invoice_batch",
+    "app.features.invoices.invoice_void",
+    "app.features.invoices.model",
+    "app.features.invoices.receipt",
+    "app.features.invoices.report",
+    "app.features.payments.currency",
+    "app.features.payments.model",
+    "app.features.plans.model",
+    "app.features.subscriptions.model",
+    "app.features.subscriptions.trial_extension",
+    "app.features.webhooks.email_template",
+    "app.features.webhooks.model",
+    "app.shared.outbox.model",
+    # legacy shim — keeps chat_messages/document_vectors on Base.metadata
+    # until 0014-repaired tables are confirmed on all envs; remove after drop.
+    "database.schemas.document_vectors",
 )
+
+# Side-effect imports — each executes its module body and registers tables.
+# Ty sees these as used via _MODEL_MODULES, so F401 fix does not delete them.
+_MODEL_MODULES = tuple(importlib.import_module(name) for name in _MODEL_MODULE_NAMES)
 
 # Alembic Config object
 config = context.config
@@ -77,34 +54,35 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-# The agent-memory library creates its own tables inside a dedicated schema. They are
-# the library's business, not this migration chain's: autogenerate must never propose
-# creating or dropping them, because their lifecycle belongs to whoever owns the schema.
-# The filter is wired into BOTH configure calls below — protecting only the online
-# branch would leave `--autogenerate` against a connection free to emit memory-schema
-# DDL into a revision file nobody reviews that closely.
+# Cognee owns its own schema — never let autogenerate touch it.
 MEMORY_SCHEMA_NAME = "cognee_memory"
 
 
-def exclude_non_app_schema(obj: object, name: str, type_: str) -> bool:  # noqa: ARG001 — alembic callback signature
-    """``include_object`` predicate: keep app tables, drop everything foreign.
+def _is_memory_schema(schema: str | None) -> bool:
+    return schema is not None and schema != "public" and schema == MEMORY_SCHEMA_NAME
 
-    An object living in the memory schema (or any other non-default schema) is
-    excluded; an ordinary table in ``Base.metadata`` passes through.
-    """
+
+def include_object(
+    obj: object, name: str, type_: str, reflected: bool, compare_to: object | None
+) -> bool:
+    """Alembic include_object — exclude cognee_memory and non-public schemas."""
     schema = getattr(obj, "schema", None)
+    if _is_memory_schema(schema):
+        return False
+    # reflected=True means object came from DB inspection; compare_to=None means new
+    # object in metadata not yet in DB — both should respect same filter.
     return not (schema is not None and schema != "public")
 
 
-def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
+def include_name(name: str | None, type_: str, parent_names: dict[str, str | None]) -> bool:
+    """Alembic include_name — filter schema names themselves."""
+    return not (type_ == "schema" and name == MEMORY_SCHEMA_NAME)
 
-    This is used for generating migration scripts without connecting to the database.
-    """
-    # For offline mode, we need a dummy URL or skip URL-based configuration
+
+def run_migrations_offline() -> None:
+    """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
     if not url:
-        # Fallback: construct a dummy URL
         url = "postgresql+asyncpg://localhost/dummy"
 
     context.configure(
@@ -114,7 +92,8 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         compare_server_default=True,
-        include_object=exclude_non_app_schema,
+        include_object=include_object,
+        include_name=include_name,
     )
 
     with context.begin_transaction():
@@ -122,18 +101,15 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    """Run migrations with the provided database connection.
-
-    Args:
-        connection: Active database connection from the engine
-    """
+    """Run migrations with the provided database connection."""
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
         compare_server_default=True,
-        render_as_batch=True,  # For compatibility with certain dialects
-        include_object=exclude_non_app_schema,
+        render_as_batch=True,
+        include_object=include_object,
+        include_name=include_name,
     )
 
     with context.begin_transaction():
@@ -161,10 +137,7 @@ async def run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
-
-    This connects to the database and applies pending migrations.
-    """
+    """Run migrations in 'online' mode."""
     try:
         asyncio.run(run_async_migrations())
     except Exception as e:
