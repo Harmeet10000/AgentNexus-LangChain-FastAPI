@@ -1,7 +1,6 @@
 """Example Celery tasks."""
 
-from app.connections.celery import ResilientTask, celery_app
-from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, ResilientTask, celery_app
 from app.connections.celery_task_names import EXAMPLE_ADD, EXAMPLE_PROCESS_DOCUMENT
 from app.utils import logger
 

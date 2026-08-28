@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.connections.celery_reliability import (
+from app.connections.celery import (
     CircuitBreakerState,
     is_circuit_breaker_open,
     record_circuit_breaker_failure,

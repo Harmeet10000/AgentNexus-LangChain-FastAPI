@@ -8,8 +8,7 @@ what is wrong. So the name is bound and a payload model is declared, and the bod
 raises — an explicit not-implemented failure instead of an unknown-task one.
 """
 
-from app.connections.celery import celery_app
-from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, celery_app
 from app.connections.celery_task_names import PAGEINDEX_INGEST
 
 

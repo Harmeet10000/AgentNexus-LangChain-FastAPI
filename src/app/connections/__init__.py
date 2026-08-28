@@ -1,11 +1,13 @@
 """Database connection dependencies."""
 
-from .celery import ResilientTask, celery_app, create_celery_app
-from .celery_reliability import (
+from .celery import (
     CircuitBreakerOpenError,
+    ResilientTask,
     acquire_idempotency_lock,
     build_circuit_breaker_key,
     build_idempotency_key,
+    celery_app,
+    create_celery_app,
     get_circuit_breaker_state,
     get_idempotency_status,
     is_circuit_breaker_open,

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.connections.celery_reliability import (
+from app.connections.celery import (
     CircuitBreakerOpenError,
     IdempotencyLockError,
     RateLimiter,

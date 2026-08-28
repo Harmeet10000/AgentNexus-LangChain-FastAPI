@@ -9,7 +9,7 @@ from celery.exceptions import CeleryError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.connections.celery_registry import CeleryTaskRegistry
+from app.connections.celery import CeleryTaskRegistry
 from app.utils import logger
 
 _MAX_RETRIES: Final[int] = 5

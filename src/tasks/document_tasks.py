@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.connections.celery import ResilientTask, celery_app
-from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, ResilientTask, celery_app
 from app.connections.celery_task_names import DOCUMENTS_INGEST
 from app.features.documents.service import run_document_ingestion_task
 from app.utils import logger

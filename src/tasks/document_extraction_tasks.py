@@ -3,8 +3,7 @@ from typing import Any
 
 import langextract
 
-from app.connections.celery import celery_app
-from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry
+from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, celery_app
 from app.connections.celery_task_names import LEGAL_BATCH_EXTRACTION
 from app.shared.rag.langextract.langextract_batch_processor import (
     LangExtractBatchContext,
