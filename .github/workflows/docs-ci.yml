@@ -5,13 +5,13 @@ on:
     branches: [main]
     paths:
       - "docs-site/**"
-      - "docs-site/mint.json"
+      - "docs-site/docs.json"
       - ".markdownlint.jsonc"
   pull_request:
     branches: [main]
     paths:
       - "docs-site/**"
-      - "docs-site/mint.json"
+      - "docs-site/docs.json"
       - ".markdownlint.jsonc"
   workflow_dispatch:
 

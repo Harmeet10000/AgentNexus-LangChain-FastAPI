@@ -2,7 +2,7 @@
 """Verify Mintlify docs-site: nav↔files, frontmatter, stubs, internal links.
 
 Checks:
-  (a) every mint.json nav entry resolves to an existing .mdx file
+  (a) every docs.json nav entry resolves to an existing .mdx file
   (b) every .mdx (except 404.mdx) is nav-listed
   (c) every file has front-matter title+description
   (d) no stub placeholder text ("TODO", "lorem", "stub") remains
@@ -21,13 +21,7 @@ from pathlib import Path
 import yaml  # pyyaml — already in repo
 
 DOCS_ROOT = Path(__file__).resolve().parents[1]
-# Mintlify 4.x uses docs.json, 3.x used mint.json — support both, but require
-# identity when both exist so legacy 3.x builds don't silently diverge.
-DOCS_JSON = DOCS_ROOT / "docs.json"
-LEGACY_MINT_JSON = DOCS_ROOT / "mint.json"
-if DOCS_JSON.exists() and LEGACY_MINT_JSON.exists() and DOCS_JSON.read_bytes() != LEGACY_MINT_JSON.read_bytes():
-    raise SystemExit("FAIL: docs.json and mint.json must be identical")
-MINT_JSON = DOCS_JSON if DOCS_JSON.exists() else LEGACY_MINT_JSON
+MINT_JSON = DOCS_ROOT / "docs.json"
 
 # ponytail: substring scan is intentional — catches "STUB:", "TODO:" in any case.
 STUB_RE = re.compile(r"\b(TODO|lorem|stub)\b", re.IGNORECASE)
