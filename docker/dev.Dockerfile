@@ -24,12 +24,24 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # --- Development Stage ---
 FROM base AS dev
 
+# ponytail: same version args as prod so `docker inspect` + `/` answer the same question in dev.
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=unknown
+ARG APP_VERSION=1.0.0
+
+LABEL org.opencontainers.image.revision=$GIT_SHA \
+      org.opencontainers.image.version=$APP_VERSION \
+      org.opencontainers.image.created=$BUILD_DATE
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 COPY --from=builder /app/.venv /app/.venv
 
 ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONPATH="/app/src"
+    PYTHONPATH="/app/src" \
+    GIT_SHA=$GIT_SHA \
+    BUILD_DATE=$BUILD_DATE \
+    APP_VERSION=$APP_VERSION
 
 COPY pyproject.toml uv.lock ./
 COPY src ./src

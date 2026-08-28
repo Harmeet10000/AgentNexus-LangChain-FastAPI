@@ -1,0 +1,140 @@
+# Production compose — pull-only, no build.
+# Every image is pinned to an immutable sha-* or semver tag produced by CI.
+# Usage:
+#   IMAGE_TAG=sha-9a924a2  docker compose -f docker-compose.prod.yml up -d
+#   IMAGE_TAG=v1.2.3       docker compose -f docker-compose.prod.yml up -d
+#   # rollback:
+#   IMAGE_TAG=sha-<previous> docker compose -f docker-compose.prod.yml up -d
+# Never use `latest` in production.
+services:
+  ai-service-1:
+    image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:?IMAGE_TAG must be set to sha-<commit> or vX.Y.Z}
+    container_name: ai-service-1
+    ports:
+      - "5000:5000"
+    environment:
+      ENVIRONMENT: production
+      # baked at build time but also readable as env for Settings
+      GIT_SHA: ${GIT_SHA:-unknown}
+      BUILD_DATE: ${BUILD_DATE:-unknown}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+    env_file:
+      - .env.production
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    depends_on:
+      timescale:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  celery-worker:
+    image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:?IMAGE_TAG must be set}
+    container_name: celery-worker
+    command: celery -A app.connections.celery:celery_app worker --loglevel=info -Q default --concurrency=8
+    environment:
+      ENVIRONMENT: production
+      GIT_SHA: ${GIT_SHA:-unknown}
+      BUILD_DATE: ${BUILD_DATE:-unknown}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+    env_file:
+      - .env.production
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    depends_on:
+      timescale:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  celery-worker-ingestion:
+    image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:?IMAGE_TAG must be set}
+    container_name: celery-worker-ingestion
+    command: celery -A app.connections.celery:celery_app worker --loglevel=info -Q ingestion --concurrency=2
+    environment:
+      ENVIRONMENT: production
+      GIT_SHA: ${GIT_SHA:-unknown}
+      BUILD_DATE: ${BUILD_DATE:-unknown}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+    env_file:
+      - .env.production
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    depends_on:
+      timescale:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  celery-beat:
+    image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:?IMAGE_TAG must be set}
+    container_name: celery-beat
+    command: celery -A app.connections.celery:celery_app beat --loglevel=info
+    environment:
+      ENVIRONMENT: production
+      GIT_SHA: ${GIT_SHA:-unknown}
+      BUILD_DATE: ${BUILD_DATE:-unknown}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+    env_file:
+      - .env.production
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - langchain-network
+    restart: unless-stopped
+
+  timescale:
+    image: timescale/timescaledb-ha:pg18
+    container_name: timescale_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_secure_password}
+      POSTGRES_DB: ${POSTGRES_DB:-langchain_db}
+    volumes:
+      - timescale-data:/home/postgres/pgdata/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - langchain-network
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    depends_on:
+      - ai-service-1
+
+networks:
+  langchain-network:
+    driver: bridge
+
+volumes:
+  timescale-data:
+  rabbitmq-data:
+  caddy-data:
+  caddy-config:
