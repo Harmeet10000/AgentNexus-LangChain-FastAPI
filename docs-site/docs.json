@@ -13,7 +13,8 @@
     "dark": "/images/logo-dark.svg"
   },
   "favicon": "/images/favicon.svg",
-  "navigation": [
+  "navigation": {
+    "groups": [
       {
         "group": "Get Started",
         "pages": [
@@ -77,7 +78,8 @@
       { "group": "Deployment", "pages": ["deployment/index"] },
       { "group": "Development", "pages": ["development/index"] },
       { "group": "Resources", "pages": ["resources/security", "resources/faq"] }
-    ],
+    ]
+  },
   "topbarLinks": [
     { "name": "API Reference", "url": "/api-reference" }
   ],
@@ -95,9 +97,7 @@
       "description": "Production documentation for the AgentNexus LangChain-FastAPI legal AI platform."
     }
   },
-  "integrations": {
-    "options": {}
-  },
+  "integrations": {},
   "redirects": [
     { "source": "/security", "destination": "/resources/security" }
   ]
