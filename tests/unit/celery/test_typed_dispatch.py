@@ -140,7 +140,7 @@ def test_the_helper_imports_the_declaring_module_before_deciding(
     probe_name = "tests.lazy_import_probe"
     probe_module = "c9_lazy_import_probe"
     (tmp_path / f"{probe_module}.py").write_text(
-        "from app.connections.celery_registry import CeleryTaskPayload, CeleryTaskRegistry\n"
+        "from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry\n"
         "\n"
         "\n"
         "class ProbePayload(CeleryTaskPayload):\n"

@@ -1,16 +1,15 @@
 """Celery connection and production reliability configuration — single source.
 
-Combined from the previous split to remove drift and import cycles:
+Previously split across 4 files — now consolidated:
 - `celery_task_names.py` remains the single definition site for task-name constants
   (imported here, so one copy serves the app, registry, and tests)
-- `celery_reliability.py` → functional helpers (`Redis` from `redis.asyncio`, plain
-  dicts, `RateLimitResult` as `BaseModel`) — now inlined
+- `celery_reliability.py` → functional helpers (`Redis` from `app.utils.cache`,
+  plain dicts, `RateLimitResult` as `BaseModel`) — now inlined and deleted
 - `celery.py` → `ResilientTask`, `create_celery_app`, exchanges, routes, signals
-- `celery_registry.py` → typed dispatch `CeleryTaskRegistry` + `TypedCeleryTask` — now inlined
+- `celery_registry.py` → typed dispatch `CeleryTaskRegistry` + `TypedCeleryTask` — now inlined and deleted
 
-`celery_reliability.py` and `celery_registry.py` remain as thin shims
-(`from app.connections.celery import ...`) for one release so existing imports
-keep working. New code must import from `app.connections.celery` directly.
+All imports must use `from app.connections.celery import ...` or
+`from app.connections.celery_task_names import ...` for constants.
 """
 
 from __future__ import annotations

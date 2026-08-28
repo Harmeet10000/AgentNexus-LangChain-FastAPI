@@ -314,7 +314,7 @@ def get_task_status(task_id: str) -> dict[str, object]:
 - `self.release_idempotency_processing_lock(...)`
 - `self.run_with_circuit_breaker(...)`
 
-The functional Redis helpers live in `src/app/shared/services/celery_reliability.py`.
+The functional Redis helpers live in `src/app/connections/celery.py`.
 
 If you need lower-level control outside a Celery task, you can call those functional helpers directly and pass the worker Redis client.
 
@@ -375,11 +375,11 @@ Recommended workflow:
 
 ## ReliabilitySystem
 
-`ReliabilitySystem` is a unified base class that wraps circuit breaker and idempotency checks. It delegates to the functional helpers in `celery_reliability.py`.
+`ReliabilitySystem` is a unified base class that wraps circuit breaker and idempotency checks. It delegates to the functional helpers in `celery.py` (now single source).
 
 ```python
 from app.connections.celery import ResilientTask
-from app.connections.celery_reliability import ReliabilitySystem
+from app.connections.celery import ReliabilitySystem
 
 @celery_app.task(name="tasks.sync_to_crm", bind=True, base=ResilientTask)
 def sync_to_crm(self, customer_id: str) -> dict[str, str]:
@@ -415,7 +415,7 @@ if status == "completed":
 
 ```python
 import asyncio
-from app.connections.celery_reliability import idempotency_manager
+from app.connections.celery import idempotency_manager
 
 async def process_payment(payment_id: str, redis_client) -> dict[str, str]:
     async with idempotency_manager(
@@ -439,7 +439,7 @@ On non-retryable exception: record marked as `failed_permanent`.
 
 ```python
 import asyncio
-from app.connections.celery_reliability import RateLimiter
+from app.connections.celery import RateLimiter
 
 async def rate_limited_task(redis_client) -> dict[str, str]:
     limiter = RateLimiter(
@@ -484,7 +484,7 @@ result = await limiter.check_and_increment(
 ```python
 import asyncio
 from app.connections.celery import ResilientTask
-from app.connections.celery_reliability import (
+from app.connections.celery import (
     RateLimiter,
     ReliabilitySystem,
     idempotency_manager,
