@@ -463,6 +463,16 @@ section-order = [
     "E501", # Allow long lines
     "F401", # Allow unused imports
 ]
+"src/database/__init__.py" = [
+    "ANN",
+    "F401",
+    "F822", # __all__ names provided by lazy __getattr__
+    "RUF067",
+    "PLC0415", # lazy __getattr__ breaks import cycle
+    "N999", # CamelCase alias
+    "RUF022", # __all__ with lazy getattr
+    "RUF023", # likewise
+]
 "**/__init__.py" = [
     "ANN",  # No type annotations required in __init__.py
     "F401", # Allow unused imports (re-exports)

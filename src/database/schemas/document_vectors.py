@@ -6,7 +6,7 @@ Kept only so Base.metadata still declares `document_vectors` and
 Do not add new columns here.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import JSON, String, Text
@@ -29,6 +29,12 @@ class DocumentVector(Base):
     doc_metadata: Mapped[dict[str, Any] | None] = mapped_column(
         JSON, name="metadata", nullable=True
     )
-    # Legacy — keep Python-side handling to match 0014 (no server_default there).
-    created_at: Mapped[datetime] = mapped_column(nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(nullable=False)
+    # Legacy — Python-side defaults match 0014 (no server_default there).
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )

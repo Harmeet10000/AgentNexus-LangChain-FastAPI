@@ -4,7 +4,7 @@ Canonical location for chat persistence. `database/schemas/chat_messages.py` rem
 as a shim re-exporting these for one release (import path deprecation).
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import JSON, Enum, Integer, String, Text
@@ -26,10 +26,16 @@ class ChatSession(Base):
     user_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    # ponytail: legacy columns keep Python-side defaults to match existing DB
-    # (no server_default in 0014). New tables should use server_default=func.now().
-    created_at: Mapped[datetime] = mapped_column(nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(nullable=False)
+    # Legacy: Python-side defaults match 0014 DB (no server_default there).
+    # New tables should use server_default=func.now() (see database/base.py).
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
 
 
 class ChatMessage(Base):
@@ -48,4 +54,6 @@ class ChatMessage(Base):
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        nullable=False, default=lambda: datetime.now(UTC)
+    )
