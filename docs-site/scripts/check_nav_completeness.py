@@ -15,13 +15,14 @@ import sys
 from pathlib import Path
 
 DOCS_ROOT = Path(__file__).resolve().parents[1]
-MINT_JSON = DOCS_ROOT / "mint.json"
+# Mintlify 4.x uses docs.json, 3.x used mint.json — support both
+MINT_JSON = DOCS_ROOT / "docs.json" if (DOCS_ROOT / "docs.json").exists() else DOCS_ROOT / "mint.json"
 
 
 def load_nav_entries() -> list[str]:
     data = json.loads(MINT_JSON.read_text(encoding="utf-8"))
-    nav = data.get("navigation", {})
-    groups = nav.get("groups", []) if isinstance(nav, dict) else []
+    nav = data.get("navigation", [])
+    groups = nav.get("groups", []) if isinstance(nav, dict) else nav if isinstance(nav, list) else []
     entries: list[str] = []
     for g in groups:
         if not isinstance(g, dict):
