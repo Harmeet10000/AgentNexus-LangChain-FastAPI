@@ -1,6 +1,6 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "prism",
+  "theme": "mint",
   "name": "AgentNexus FastAPI",
   "description": "Production LangChain + FastAPI platform for legal AI agents.",
   "colors": {
