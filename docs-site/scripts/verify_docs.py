@@ -21,8 +21,13 @@ from pathlib import Path
 import yaml  # pyyaml — already in repo
 
 DOCS_ROOT = Path(__file__).resolve().parents[1]
-# Mintlify 4.x uses docs.json, 3.x used mint.json — support both
-MINT_JSON = DOCS_ROOT / "docs.json" if (DOCS_ROOT / "docs.json").exists() else DOCS_ROOT / "mint.json"
+# Mintlify 4.x uses docs.json, 3.x used mint.json — support both, but require
+# identity when both exist so legacy 3.x builds don't silently diverge.
+DOCS_JSON = DOCS_ROOT / "docs.json"
+LEGACY_MINT_JSON = DOCS_ROOT / "mint.json"
+if DOCS_JSON.exists() and LEGACY_MINT_JSON.exists() and DOCS_JSON.read_bytes() != LEGACY_MINT_JSON.read_bytes():
+    raise SystemExit("FAIL: docs.json and mint.json must be identical")
+MINT_JSON = DOCS_JSON if DOCS_JSON.exists() else LEGACY_MINT_JSON
 
 # ponytail: substring scan is intentional — catches "STUB:", "TODO:" in any case.
 STUB_RE = re.compile(r"\b(TODO|lorem|stub)\b", re.IGNORECASE)
