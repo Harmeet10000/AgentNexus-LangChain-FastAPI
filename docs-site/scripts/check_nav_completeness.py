@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check nav completeness for docs-site (task 6.2).
 
-Parses docs-site/mint.json navigation, verifies:
+Parses docs-site/docs.json navigation, verifies:
   (a) every page path maps to an existing .mdx file
   (b) every .mdx (except 404.mdx) is referenced in nav
 
@@ -15,13 +15,7 @@ import sys
 from pathlib import Path
 
 DOCS_ROOT = Path(__file__).resolve().parents[1]
-# Mintlify 4.x uses docs.json, 3.x used mint.json — support both, but require
-# identity when both exist so legacy 3.x builds don't silently diverge.
-DOCS_JSON = DOCS_ROOT / "docs.json"
-LEGACY_MINT_JSON = DOCS_ROOT / "mint.json"
-if DOCS_JSON.exists() and LEGACY_MINT_JSON.exists() and DOCS_JSON.read_bytes() != LEGACY_MINT_JSON.read_bytes():
-    raise SystemExit("FAIL: docs.json and mint.json must be identical")
-MINT_JSON = DOCS_JSON if DOCS_JSON.exists() else LEGACY_MINT_JSON
+MINT_JSON = DOCS_ROOT / "docs.json"
 
 
 def load_nav_entries() -> list[str]:
