@@ -46,6 +46,7 @@ import pytest
 _LIFTED_TREES = (
     "app.connections.celery",
     "app.connections.celery_registry",
+    "app.connections.celery_reliability",
     "tasks",
 )
 
