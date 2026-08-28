@@ -1,5 +1,7 @@
 """Cache utilities using Redis."""
 
+from redis.asyncio import Redis
+
 from app.utils.cache.redis_func import (
     add_to_bloom_filter,
     check_bloom_filter,
@@ -39,6 +41,7 @@ from app.utils.cache.redis_func import (
 from app.utils.cache.redis_guard_adapter import RedisGuardAdapter
 
 __all__ = [
+    "Redis",
     "RedisGuardAdapter",
     "add_to_bloom_filter",
     "check_bloom_filter",

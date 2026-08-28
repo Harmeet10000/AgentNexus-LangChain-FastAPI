@@ -1,10 +1,33 @@
-"""Celery connection and production reliability configuration."""
+"""Celery connection and production reliability configuration — single source.
 
+Combined from the previous split to remove drift and import cycles:
+- `celery_task_names.py` remains the single definition site for task-name constants
+  (imported here, so one copy serves the app, registry, and tests)
+- `celery_reliability.py` → functional helpers (`Redis` from `redis.asyncio`, plain
+  dicts, `RateLimitResult` as `BaseModel`) — now inlined
+- `celery.py` → `ResilientTask`, `create_celery_app`, exchanges, routes, signals
+- `celery_registry.py` → typed dispatch `CeleryTaskRegistry` + `TypedCeleryTask` — now inlined
+
+`celery_reliability.py` and `celery_registry.py` remain as thin shims
+(`from app.connections.celery import ...`) for one release so existing imports
+keep working. New code must import from `app.connections.celery` directly.
+"""
+
+from __future__ import annotations
+
+import asyncio
 import time
-from typing import Any, ClassVar, cast, override
+from collections.abc import Awaitable
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from functools import cache
+from importlib import import_module
+from inspect import isawaitable
+from typing import TYPE_CHECKING, Literal, TypedDict, cast, override
 
 import opentelemetry.trace as otel_trace
 from celery import Celery, Task
+from celery.exceptions import CeleryError
 from celery.schedules import crontab
 from celery.signals import (
     after_task_publish,
@@ -15,20 +38,23 @@ from celery.signals import (
 )
 from kombu import Exchange, Queue
 from opentelemetry import metrics
-from redis.asyncio import Redis
+from pydantic import BaseModel, ValidationError
 
 from app.config import get_settings
 from app.connections.redis import create_redis_client
 from app.utils import logger
+from app.utils.cache import Redis
+from app.utils.json_serializer import from_json, to_json_str
 
-from .celery_reliability import (
-    RedisClientProtocol,
-    acquire_idempotency_lock,
-    mark_idempotency_completed,
-    mark_idempotency_failed_permanently,
-    release_idempotency_processing_lock,
-    run_with_circuit_breaker,
-)
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable, Coroutine
+    from typing import Any, ClassVar
+
+    from app.config.settings import Settings
+
+# ---------------------------------------------------------------------------
+# Task-name constants — imported from single definition site
+# ---------------------------------------------------------------------------
 from .celery_task_names import (
     BILLING_DUNNING,
     BILLING_INVOICE_GENERATION,
@@ -39,6 +65,637 @@ from .celery_task_names import (
     INGESTION_TASK_NAMES,
     TASK_DECLARING_MODULES,
 )
+
+# ---------------------------------------------------------------------------
+# Reliability helpers — functional, plain dicts, Redis from redis.asyncio
+# ---------------------------------------------------------------------------
+
+type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
+type RedisOperationResult = object | Awaitable[object]
+
+type IdempotencyStatus = Literal["processing", "completed", "failed_permanent"]
+type JsonMetadata = dict[str, JsonValue]
+
+PROCESSING_STATUS: IdempotencyStatus = "processing"
+COMPLETED_STATUS: IdempotencyStatus = "completed"
+FAILED_PERMANENT_STATUS: IdempotencyStatus = "failed_permanent"
+
+IDEMPOTENCY_NAMESPACE = "celery:idempotency"
+CIRCUIT_BREAKER_NAMESPACE = "celery:circuit"
+
+
+class CircuitBreakerSnapshot(TypedDict):
+    state: str
+    failures: int
+    opened_at: float | None
+
+
+class CircuitBreakerOpenError(RuntimeError):
+    """Raised when the circuit breaker is open."""
+
+
+def run_redis_call[T](value: T | Awaitable[T]) -> T:
+    """Resolve either a direct Redis result or an awaitable returned by async Redis."""
+    if isawaitable(value):
+        return asyncio.run(cast("Coroutine[object, object, T]", value))
+    return value
+
+
+def build_idempotency_key(
+    idempotency_key: str,
+    *,
+    namespace: str = IDEMPOTENCY_NAMESPACE,
+) -> str:
+    return f"{namespace}:{idempotency_key}"
+
+
+def serialize_idempotency_record(
+    status: IdempotencyStatus,
+    *,
+    task_id: str | None = None,
+    updated_at: str | None = None,
+    metadata: JsonMetadata | None = None,
+) -> str:
+    payload: dict[str, object] = {
+        "status": status,
+        "task_id": task_id,
+        "updated_at": updated_at if updated_at is not None else datetime.now(tz=UTC).isoformat(),
+        "metadata": metadata or {},
+    }
+    return to_json_str(payload)
+
+
+def acquire_idempotency_lock(
+    redis_client: Redis,
+    idempotency_key: str,
+    *,
+    task_id: str | None = None,
+    ttl_seconds: int = 86400,
+    metadata: JsonMetadata | None = None,
+    namespace: str = IDEMPOTENCY_NAMESPACE,
+) -> bool:
+    """Acquire a processing lock for a business operation."""
+    return bool(
+        run_redis_call(
+            redis_client.set(
+                name=build_idempotency_key(idempotency_key, namespace=namespace),
+                value=serialize_idempotency_record(
+                    PROCESSING_STATUS,
+                    task_id=task_id,
+                    metadata=metadata,
+                ),
+                ex=ttl_seconds,
+                nx=True,
+            )
+        )
+    )
+
+
+def mark_idempotency_completed(
+    redis_client: Redis,
+    idempotency_key: str,
+    *,
+    task_id: str | None = None,
+    ttl_seconds: int = 86400,
+    metadata: JsonMetadata | None = None,
+    namespace: str = IDEMPOTENCY_NAMESPACE,
+) -> None:
+    run_redis_call(
+        redis_client.set(
+            name=build_idempotency_key(idempotency_key, namespace=namespace),
+            value=serialize_idempotency_record(
+                COMPLETED_STATUS,
+                task_id=task_id,
+                metadata=metadata,
+            ),
+            ex=ttl_seconds,
+        )
+    )
+
+
+def mark_idempotency_failed_permanently(
+    redis_client: Redis,
+    idempotency_key: str,
+    *,
+    task_id: str | None = None,
+    ttl_seconds: int = 86400,
+    metadata: JsonMetadata | None = None,
+    namespace: str = IDEMPOTENCY_NAMESPACE,
+) -> None:
+    run_redis_call(
+        redis_client.set(
+            name=build_idempotency_key(idempotency_key, namespace=namespace),
+            value=serialize_idempotency_record(
+                FAILED_PERMANENT_STATUS,
+                task_id=task_id,
+                metadata=metadata,
+            ),
+            ex=ttl_seconds,
+        )
+    )
+
+
+def release_idempotency_processing_lock(
+    redis_client: Redis,
+    idempotency_key: str,
+    *,
+    namespace: str = IDEMPOTENCY_NAMESPACE,
+) -> None:
+    """Release the processing lock so a later retry can acquire it again."""
+    run_redis_call(redis_client.delete(build_idempotency_key(idempotency_key, namespace=namespace)))
+
+
+def get_idempotency_status(
+    redis_client: Redis,
+    idempotency_key: str,
+    *,
+    namespace: str = IDEMPOTENCY_NAMESPACE,
+) -> IdempotencyStatus | None:
+    payload: str | None = cast(
+        "str | None",
+        run_redis_call(
+            redis_client.get(build_idempotency_key(idempotency_key, namespace=namespace))
+        ),
+    )
+    if not payload:
+        return None
+    data = cast("dict[str, object]", from_json(payload))
+    status = data.get("status")
+    if status in {PROCESSING_STATUS, COMPLETED_STATUS, FAILED_PERMANENT_STATUS}:
+        return cast("IdempotencyStatus", status)
+    return None
+
+
+def build_circuit_breaker_key(
+    name: str,
+    *,
+    namespace: str = CIRCUIT_BREAKER_NAMESPACE,
+) -> str:
+    return f"{namespace}:{name}"
+
+
+def _default_circuit_snapshot() -> CircuitBreakerSnapshot:
+    return {"state": "closed", "failures": 0, "opened_at": None}
+
+
+def get_circuit_breaker_state(
+    redis_client: Redis,
+    name: str,
+    *,
+    namespace: str = CIRCUIT_BREAKER_NAMESPACE,
+) -> CircuitBreakerSnapshot:
+    payload = cast(
+        "str | None",
+        run_redis_call(redis_client.get(build_circuit_breaker_key(name, namespace=namespace))),
+    )
+    if not payload:
+        return _default_circuit_snapshot()
+    data = cast("dict[str, object]", from_json(payload))
+    failures_raw = data.get("failures", 0)
+    return {
+        "state": str(data.get("state", "closed")),
+        "failures": failures_raw if isinstance(failures_raw, int) else 0,
+        "opened_at": cast("float | None", data.get("opened_at")),
+    }
+
+
+def set_circuit_breaker_state(
+    redis_client: Redis,
+    name: str,
+    state: CircuitBreakerSnapshot,
+    *,
+    recovery_timeout_seconds: int,
+    namespace: str = CIRCUIT_BREAKER_NAMESPACE,
+) -> None:
+    run_redis_call(
+        redis_client.set(
+            name=build_circuit_breaker_key(name, namespace=namespace),
+            value=to_json_str(state),
+            ex=recovery_timeout_seconds * 2,
+        )
+    )
+
+
+def is_circuit_breaker_open(
+    redis_client: Redis,
+    name: str,
+    *,
+    recovery_timeout_seconds: int,
+    namespace: str = CIRCUIT_BREAKER_NAMESPACE,
+) -> bool:
+    state = get_circuit_breaker_state(redis_client, name, namespace=namespace)
+    if state["state"] != "open" or state["opened_at"] is None:
+        return False
+    elapsed = time.time() - state["opened_at"]
+    if elapsed < recovery_timeout_seconds:
+        return True
+    set_circuit_breaker_state(
+        redis_client,
+        name,
+        {"state": "half_open", "failures": state["failures"], "opened_at": state["opened_at"]},
+        recovery_timeout_seconds=recovery_timeout_seconds,
+        namespace=namespace,
+    )
+    return False
+
+
+def record_circuit_breaker_success(
+    redis_client: Redis,
+    name: str,
+    *,
+    namespace: str = CIRCUIT_BREAKER_NAMESPACE,
+) -> None:
+    run_redis_call(redis_client.delete(build_circuit_breaker_key(name, namespace=namespace)))
+
+
+def record_circuit_breaker_failure(
+    redis_client: Redis,
+    name: str,
+    *,
+    failure_threshold: int,
+    recovery_timeout_seconds: int,
+    namespace: str = CIRCUIT_BREAKER_NAMESPACE,
+) -> None:
+    state = get_circuit_breaker_state(redis_client, name, namespace=namespace)
+    failures = state["failures"] + 1
+    if failures >= failure_threshold:
+        set_circuit_breaker_state(
+            redis_client,
+            name,
+            {"state": "open", "failures": failures, "opened_at": time.time()},
+            recovery_timeout_seconds=recovery_timeout_seconds,
+            namespace=namespace,
+        )
+        return
+    set_circuit_breaker_state(
+        redis_client,
+        name,
+        {"state": "closed", "failures": failures, "opened_at": None},
+        recovery_timeout_seconds=recovery_timeout_seconds,
+        namespace=namespace,
+    )
+
+
+def run_with_circuit_breaker[T](
+    redis_client: Redis,
+    name: str,
+    operation: Callable[[], T],
+    *,
+    failure_threshold: int,
+    recovery_timeout_seconds: int,
+    namespace: str = CIRCUIT_BREAKER_NAMESPACE,
+) -> T:
+    """Execute an operation unless the circuit breaker is open."""
+    if is_circuit_breaker_open(
+        redis_client,
+        name,
+        recovery_timeout_seconds=recovery_timeout_seconds,
+        namespace=namespace,
+    ):
+        msg = f"Circuit breaker open for '{name}'"
+        raise CircuitBreakerOpenError(msg)
+    try:
+        result = operation()
+    except Exception:
+        record_circuit_breaker_failure(
+            redis_client,
+            name,
+            failure_threshold=failure_threshold,
+            recovery_timeout_seconds=recovery_timeout_seconds,
+            namespace=namespace,
+        )
+        raise
+    record_circuit_breaker_success(redis_client, name, namespace=namespace)
+    return result
+
+
+class ReliabilitySystem:
+    """Unified reliability base for Celery tasks."""
+
+    def __init__(
+        self,
+        redis_client: Redis,
+        *,
+        circuit_breaker_name: str,
+        failure_threshold: int | None = None,
+        recovery_timeout_seconds: int | None = None,
+        idempotency_ttl_seconds: int | None = None,
+        settings: Settings | None = None,
+    ) -> None:
+        self._redis = redis_client
+        self._circuit_breaker_name = circuit_breaker_name
+        if settings is None:
+            from app.config.settings import get_settings  # noqa: PLC0415
+
+            settings = get_settings()
+        self._failure_threshold = (
+            failure_threshold
+            if failure_threshold is not None
+            else settings.CELERY_CIRCUIT_BREAKER_FAILURE_THRESHOLD
+        )
+        self._recovery_timeout = (
+            recovery_timeout_seconds
+            if recovery_timeout_seconds is not None
+            else settings.CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT
+        )
+        self._default_idempotency_ttl = (
+            idempotency_ttl_seconds
+            if idempotency_ttl_seconds is not None
+            else settings.CELERY_IDEMPOTENCY_TTL_SECONDS
+        )
+        self._validate_config()
+
+    def _validate_config(self) -> None:
+        if self._failure_threshold < 1:
+            msg = f"failure_threshold must be >= 1, got {self._failure_threshold}"
+            raise ValueError(msg)
+        if self._recovery_timeout < 1:
+            msg = f"recovery_timeout_seconds must be >= 1, got {self._recovery_timeout}"
+            raise ValueError(msg)
+        if self._default_idempotency_ttl < 1:
+            msg = f"idempotency_ttl_seconds must be >= 1, got {self._default_idempotency_ttl}"
+            raise ValueError(msg)
+
+    def check_circuit_breaker(self) -> None:
+        if is_circuit_breaker_open(
+            self._redis,
+            self._circuit_breaker_name,
+            recovery_timeout_seconds=self._recovery_timeout,
+        ):
+            msg = f"Circuit breaker '{self._circuit_breaker_name}' is open"
+            raise CircuitBreakerOpenError(msg)
+
+    def record_success(self) -> None:
+        record_circuit_breaker_success(self._redis, self._circuit_breaker_name)
+
+    def record_failure(self) -> None:
+        record_circuit_breaker_failure(
+            self._redis,
+            self._circuit_breaker_name,
+            failure_threshold=self._failure_threshold,
+            recovery_timeout_seconds=self._recovery_timeout,
+        )
+
+    def get_idempotency_status(self, idempotency_key: str) -> IdempotencyStatus | None:
+        return get_idempotency_status(self._redis, idempotency_key)
+
+    @property
+    def default_idempotency_ttl(self) -> int:
+        return self._default_idempotency_ttl
+
+
+class IdempotencyLockError(RuntimeError):
+    """Raised when idempotency lock cannot be acquired."""
+
+
+@asynccontextmanager
+async def idempotency_manager(
+    redis_client: Redis,
+    idempotency_key: str,
+    *,
+    task_id: str | None = None,
+    ttl_seconds: int = 86400,
+    metadata: JsonMetadata | None = None,
+    retryable_exceptions: tuple[type[Exception], ...] = (),
+) -> AsyncIterator[None]:
+    """Context manager for idempotency lock lifecycle."""
+    from loguru import logger  # noqa: PLC0415
+
+    acquired = acquire_idempotency_lock(
+        redis_client,
+        idempotency_key,
+        task_id=task_id,
+        ttl_seconds=ttl_seconds,
+        metadata=metadata,
+    )
+    if not acquired:
+        logger.warning(
+            "Idempotency lock already held",
+            idempotency_key=idempotency_key,
+            task_id=task_id,
+        )
+        msg = f"Operation '{idempotency_key}' is already processing"
+        raise IdempotencyLockError(msg)
+    logger.info(
+        "Idempotency lock acquired",
+        idempotency_key=idempotency_key,
+        task_id=task_id,
+        ttl_seconds=ttl_seconds,
+    )
+    try:
+        yield
+        mark_idempotency_completed(
+            redis_client,
+            idempotency_key,
+            task_id=task_id,
+            ttl_seconds=ttl_seconds,
+            metadata=metadata,
+        )
+        logger.info(
+            "Operation completed successfully",
+            idempotency_key=idempotency_key,
+            task_id=task_id,
+        )
+    except Exception as exc:
+        is_retryable = isinstance(exc, retryable_exceptions) if retryable_exceptions else False
+        if is_retryable:
+            release_idempotency_processing_lock(redis_client, idempotency_key)
+            logger.warning(
+                "Retryable failure, released processing lock",
+                idempotency_key=idempotency_key,
+                task_id=task_id,
+                exception_type=type(exc).__name__,
+            )
+        else:
+            mark_idempotency_failed_permanently(
+                redis_client,
+                idempotency_key,
+                task_id=task_id,
+                ttl_seconds=ttl_seconds,
+                metadata=metadata,
+            )
+            logger.error(
+                "Permanent failure, marked as failed",
+                idempotency_key=idempotency_key,
+                task_id=task_id,
+                exception_type=type(exc).__name__,
+            )
+        raise
+
+
+class RateLimitResult(BaseModel):
+    """Result of rate limit check."""
+
+    model_config = {"frozen": True}
+
+    allowed: bool
+    remaining: int
+    reset_at: float
+    scope: str
+
+
+class RateLimiter:
+    """Redis-based rate limiter with config embedded in keys."""
+
+    def __init__(
+        self,
+        redis_client: Redis,
+        *,
+        scope: str,
+        rate: int,
+        period_seconds: int,
+        burst: int | None = None,
+        settings: Settings | None = None,
+    ) -> None:
+        self._redis = redis_client
+        self._scope = scope
+        self._rate = rate
+        self._period = period_seconds
+        self._burst = burst if burst is not None else rate
+        if settings is None:
+            from app.config.settings import get_settings  # noqa: PLC0415
+
+            settings = get_settings()
+        self._trusted_proxies = settings.FASTAPI_GUARD_TRUSTED_PROXIES
+        self._proxy_depth = settings.FASTAPI_GUARD_TRUSTED_PROXY_DEPTH
+        self._validate_config()
+
+    def _validate_config(self) -> None:
+        if self._rate < 1:
+            msg = f"rate must be >= 1, got {self._rate}"
+            raise ValueError(msg)
+        if self._period < 1:
+            msg = f"period_seconds must be >= 1, got {self._period}"
+            raise ValueError(msg)
+        if self._burst < self._rate:
+            msg = f"burst must be >= rate, got burst={self._burst}, rate={self._rate}"
+            raise ValueError(msg)
+
+    def _build_key(self) -> str:
+        return (
+            f"celery:ratelimit:{self._scope}"
+            f":rate={self._rate}"
+            f":period={self._period}"
+            f":burst={self._burst}"
+        )
+
+    @staticmethod
+    def _parse_key(key: str) -> dict[str, int | str]:
+        parts = key.split(":")
+        config_start = next(
+            (i for i, p in enumerate(parts[2:], start=2) if "=" in p),
+            len(parts),
+        )
+        scope = ":".join(parts[2:config_start])
+        config_parts: dict[str, int] = {}
+        for part in parts[config_start:]:
+            if "=" in part:
+                key_part, value = part.split("=", 1)
+                config_parts[key_part] = int(value)
+        return {
+            "scope": scope,
+            "rate": config_parts.get("rate", 0),
+            "period": config_parts.get("period", 0),
+            "burst": config_parts.get("burst", 0),
+        }
+
+    def extract_client_ip(self, forwarded_for: str | None, direct_ip: str) -> str:
+        if not self._trusted_proxies or not forwarded_for:
+            return direct_ip
+        ip_chain = [ip.strip() for ip in forwarded_for.split(",")]
+        if len(ip_chain) >= self._proxy_depth:
+            return ip_chain[-(self._proxy_depth)]
+        return ip_chain[0] if ip_chain else direct_ip
+
+    async def check_and_increment(
+        self,
+        *,
+        forwarded_for: str | None = None,
+        direct_ip: str | None = None,
+    ) -> RateLimitResult:
+        from loguru import logger  # noqa: PLC0415
+
+        now = time.time()
+        key = self._build_key()
+        final_scope = self._scope
+        if direct_ip:
+            client_ip = self.extract_client_ip(forwarded_for, direct_ip)
+            final_scope = f"{self._scope}:ip={client_ip}"
+            key = f"{key}:ip={client_ip}"
+        window_start = now - self._period
+        await cast("Awaitable[object]", self._redis.zremrangebyscore(key, "-inf", window_start))
+        current_count = cast("int", await cast("Awaitable[object]", self._redis.zcard(key)))
+        allowed = current_count < self._burst
+        if allowed:
+            await cast("Awaitable[object]", self._redis.zadd(key, {str(now): now}))
+            await cast("Awaitable[object]", self._redis.expire(key, self._period * 2))
+            remaining = self._burst - current_count - 1
+        else:
+            remaining = 0
+        reset_at = now + self._period
+        logger.debug(
+            "Rate limit check",
+            scope=final_scope,
+            allowed=allowed,
+            current=current_count,
+            limit=self._burst,
+            remaining=remaining,
+        )
+        return RateLimitResult(
+            allowed=allowed,
+            remaining=remaining,
+            reset_at=reset_at,
+            scope=final_scope,
+        )
+
+
+# Back-compat shims for removed datamodels — keep importable for one release
+def __getattr__(name: str) -> type:
+    if name == "CircuitBreakerState":
+        from dataclasses import dataclass as _dc  # noqa: PLC0415
+
+        @_dc(frozen=True)
+        class _CBS:  # type: ignore[no-redef]
+            state: str = "closed"
+            failures: int = 0
+            opened_at: float | None = None
+
+            def model_dump_json(self) -> str:
+                return to_json_str(
+                    {"state": self.state, "failures": self.failures, "opened_at": self.opened_at}
+                )
+
+            @classmethod
+            def model_validate_json(cls, payload: str) -> _CBS:
+                d = cast("dict[str, object]", from_json(payload))
+                failures_raw = d.get("failures", 0)
+                return cls(
+                    state=str(d.get("state", "closed")),
+                    failures=failures_raw if isinstance(failures_raw, int) else 0,
+                    opened_at=cast("float | None", d.get("opened_at")),
+                )
+
+        return _CBS  # type: ignore[return-value]
+    if name == "IdempotencyRecord":
+        from pydantic import BaseModel as _BM  # noqa: PLC0415, N814
+
+        class _IR(_BM, frozen=True):  # type: ignore[no-redef]
+            status: IdempotencyStatus
+            task_id: str | None = None
+            updated_at: str
+            metadata: JsonMetadata
+
+        return _IR  # type: ignore[return-value]
+    if name == "RedisClientProtocol":
+        # ponytail: shim — old code did `from celery_reliability import RedisClientProtocol`; now use `Redis`
+        return cast("type", Redis)
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
+
+# ---------------------------------------------------------------------------
+# Celery app — exchanges, routes, ResilientTask, factory, signals
+# ---------------------------------------------------------------------------
 
 settings = get_settings()
 
@@ -55,32 +712,7 @@ TASK_DLX_EXCHANGE = Exchange(
 
 
 def _task_routes() -> dict[str, dict[str, str]]:
-    """Give every dispatchable name an explicit destination — no glob, no fallthrough.
-
-    What this replaced was a single ``tasks.*`` glob, and the glob was close to
-    decorative: only 5 of the 16 declared names begin with ``tasks.``, so the
-    other 11 matched no route at all and arrived on the default queue through
-    ``task_default_queue`` instead. Two mechanisms delivering to one queue read as
-    one mechanism until the day a name needs a different queue, and then the
-    question "which of these decides?" has to be answered from Celery's internals
-    rather than from this file.
-
-    Now the table is built from the single task-name definition site, so a name
-    added there cannot be dispatched to an unrouted destination, and the answer to
-    "where does this task go" is visible without knowing anything about matching
-    order. Measured while making the change, and recorded because the tempting
-    smaller edit — three exact entries left sitting beside the glob that also
-    matches them — depends on it: ``MapRoute`` splits the mapping in its
-    constructor, exact keys into one dict and globs into another, and consults the
-    exact dict first, so exact names do win regardless of the order they are
-    written in. That is a fact about a library version, not about this
-    configuration, so the configuration no longer relies on it.
-
-    Each name gets its own copy of the route mapping. ``Router.expand_destination``
-    **pops** ``queue`` out of the dict it is handed; today ``MapRoute`` hands it a
-    fresh copy so shared dicts would survive, but one shared dict emptied by the
-    first lookup is a failure that would present as "routing works once".
-    """
+    """Give every dispatchable name an explicit destination — no glob, no fallthrough."""
     default_route = {
         "queue": settings.CELERY_DEFAULT_QUEUE,
         "routing_key": settings.CELERY_DEFAULT_ROUTING_KEY,
@@ -112,10 +744,10 @@ class ResilientTask(Task):
     _redis_client: ClassVar[Redis | None] = None
 
     @classmethod
-    def get_redis_client(cls) -> RedisClientProtocol:
+    def get_redis_client(cls) -> Redis:
         if cls._redis_client is None:
             cls._redis_client = create_redis_client(settings.REDIS_URL)
-        return cast("RedisClientProtocol", cls._redis_client)
+        return cls._redis_client
 
     def acquire_idempotency_lock(
         self,
@@ -234,30 +866,7 @@ class ResilientTask(Task):
 
 
 def create_celery_app() -> Celery:
-    """Create and configure Celery application.
-
-    Every module declaring a task is named in ``include`` — the list below is the
-    authoritative one an operator reads, and a unit test asserts it agrees with
-    the task-name definition module rather than either being derived from the
-    other. Four modules were missing before, among them the unified document
-    ingestion task, and they were registered only because the task package's
-    initialiser happens to import them: importing any listed sibling imports that
-    initialiser first, which imported the rest. Registration therefore rested on
-    an import side effect in a file with no reason to know it was load-bearing,
-    and tidying that file would have silently stopped ingestion from being
-    consumed while dispatch carried on succeeding.
-
-    ``include`` is lazy — Celery imports these when the application is finalised
-    (worker start), not when it is constructed — so listing a module here costs a
-    dispatching process nothing. The consequence is that a process which only
-    dispatches holds no payload registrations at all; the typed dispatch helper
-    handles that itself rather than forcing the whole list to be imported.
-
-    The typed reference implementation of the two email tasks is deliberately
-    absent: it declares the same two task names as the live email module, so
-    listing both would make the winner depend on import order and silently
-    replace a live implementation with a demonstration of one.
-    """
+    """Create and configure Celery application."""
     app = Celery(
         main="langchain_fastapi",
         broker=settings.RABBITMQ_URL,
@@ -273,7 +882,6 @@ def create_celery_app() -> Celery:
             "tasks.pageindex_tasks",
         ],
     )
-
     app.Task = ResilientTask
     app.conf.update(
         task_serializer="json",
@@ -308,20 +916,6 @@ def create_celery_app() -> Celery:
         task_soft_time_limit=settings.CELERY_TASK_SOFT_TIME_LIMIT,
         task_time_limit=settings.CELERY_TASK_TIME_LIMIT,
         result_expires=settings.CELERY_TASK_RESULT_EXPIRES,
-        # Three queues, and a worker must name the one it wants with `-Q`. Without
-        # `-Q` Celery consumes **every** queue declared here — measured, not
-        # assumed — which means a bare worker also drains the dead-letter queue and
-        # re-runs the very messages that were parked for a human to look at. The
-        # deployed services and the documented commands all carry `-Q` for that
-        # reason; it is not there to save a connection.
-        #
-        # The ingestion queue dead-letters to the same exchange and routing key as
-        # the default one, so ingestion failures park in the existing dead-letter
-        # queue rather than a fourth queue nobody watches. A separate ingestion
-        # dead-letter queue was the alternative and was rejected: a dead-letter
-        # queue with no consumer and no dashboard is indistinguishable from a
-        # message that vanished, and the task name inside each parked message is
-        # already enough to tell ingestion failures from billing ones.
         task_queues=(
             Queue(
                 name=settings.CELERY_DEFAULT_QUEUE,
@@ -386,10 +980,6 @@ def create_celery_app() -> Celery:
                     day_of_week=settings.CREDIT_RECONCILIATION_CRON_DAY_OF_WEEK,
                 ),
             },
-            # Agent-memory consolidation (band F). Named distinctly from the
-            # billing reconciliation entries — they share only the word
-            # "reconciliation", which this key avoids entirely. Inert until a
-            # worker and beat service exist (NG14).
             "agent-memory-consolidation-nightly": {
                 "task": "tasks.agent_memory_consolidation",
                 "schedule": crontab(hour=3, minute=30),
@@ -397,27 +987,22 @@ def create_celery_app() -> Celery:
             },
         },
     )
-
     return app
 
 
 celery_app = create_celery_app()
 
-# OTel meters are created lazily on first task event; importing this module
-# must not spin up exporters or the app.shared.otel package.
-_otel_celery_meters: tuple[Any, Any, Any] | None = None
 
-
+@cache
 def _celery_meters() -> tuple[Any, Any, Any]:
-    global _otel_celery_meters  # noqa: PLW0603 — module-level lazy init
-    if _otel_celery_meters is None:
-        meter = metrics.get_meter("celery")
-        _otel_celery_meters = (
-            meter.create_counter("celery.task.completed_total", unit="1"),
-            meter.create_histogram("celery.task.duration_seconds", unit="s"),
-            meter.create_counter("celery.task.retries_total", unit="1"),
-        )
-    return _otel_celery_meters
+    """Create the Celery meters on first use and reuse them for this process."""
+    # Keep this lazy: importing the module must not initialize OTel exporters.
+    meter = metrics.get_meter("celery")
+    return (
+        meter.create_counter("celery.task.completed_total", unit="1"),
+        meter.create_histogram("celery.task.duration_seconds", unit="s"),
+        meter.create_counter("celery.task.retries_total", unit="1"),
+    )
 
 
 @after_task_publish.connect
@@ -503,3 +1088,134 @@ def log_task_failure(
     if trace_id:
         extra["trace_id"] = trace_id
     logger.bind(**extra).error(f"Celery task failed signal: {exception!s}")
+
+
+# ---------------------------------------------------------------------------
+# Typed registry — maps task names → Pydantic payload models for dispatch-time validation
+# ---------------------------------------------------------------------------
+
+
+class CeleryTaskPayload(BaseModel):
+    """Base for all typed Celery task payloads."""
+
+    model_config = {"extra": "forbid", "frozen": True}
+
+
+class NoKwargsPayload(CeleryTaskPayload):
+    """Payload for a task that takes no keyword arguments."""
+
+
+class TaskDispatchError(CeleryError):
+    """Base for the refusals the typed registry raises before a send."""
+
+
+class UnregisteredTaskError(TaskDispatchError):
+    """A dispatch named a task that has no registered payload model."""
+
+    def __init__(self, task_name: str, *, known_names: frozenset[str]) -> None:
+        self.task_name = task_name
+        self.known_names = known_names
+        message = (
+            f"Celery task {task_name!r} has no registered payload model, so the dispatch was "
+            f"refused rather than sent to a name no consumer may answer to. Register a "
+            f"CeleryTaskPayload subclass for it in the module that declares it. "
+            f"Registered names: {sorted(known_names)}"
+        )
+        super().__init__(message)
+
+
+class TaskPayloadValidationError(TaskDispatchError):
+    """A dispatched payload did not match the model its task declares."""
+
+    def __init__(self, task_name: str, validation_error: ValidationError) -> None:
+        self.task_name = task_name
+        self.validation_error = validation_error
+        message = (
+            f"Payload for Celery task {task_name!r} does not match its registered model, so the "
+            f"dispatch was refused rather than enqueued for a consumer that cannot accept it: "
+            f"{validation_error}"
+        )
+        super().__init__(message)
+
+
+class CeleryTaskRegistry:
+    """Maps task names → Pydantic payload models for validation."""
+
+    _registry: ClassVar[dict[str, type[CeleryTaskPayload]]] = {}
+
+    @classmethod
+    def register(cls, task_name: str, payload_model: type[CeleryTaskPayload]) -> None:
+        cls._registry[task_name] = payload_model
+
+    @classmethod
+    def get(cls, task_name: str) -> type[CeleryTaskPayload] | None:
+        return cls._registry.get(task_name)
+
+    @classmethod
+    def registered_names(cls) -> frozenset[str]:
+        return frozenset(cls._registry)
+
+    @classmethod
+    def ensure_declared_module_imported(cls, task_name: str) -> None:
+        if task_name in cls._registry:
+            return
+        module = TASK_DECLARING_MODULES.get(task_name)
+        if module is None:
+            return
+        import_module(module)
+
+    @classmethod
+    def typed_send(
+        cls, task_name: str, kwargs: dict[str, object], **send_task_opts: object
+    ) -> object:
+        cls.ensure_declared_module_imported(task_name)
+        cls.validate(task_name, kwargs)
+        return celery_app.send_task(task_name, kwargs=kwargs, **send_task_opts)
+
+    @classmethod
+    def validate(cls, task_name: str, kwargs: dict[str, Any]) -> CeleryTaskPayload:
+        model = cls._registry.get(task_name)
+        if model is None:
+            logger.bind(task=task_name, registered=sorted(cls._registry)).error(
+                "Task name is not registered"
+            )
+            raise UnregisteredTaskError(task_name, known_names=cls.registered_names())
+        try:
+            return model.model_validate(kwargs)
+        except ValidationError as exc:
+            logger.bind(task=task_name, errors=exc.errors()).error("Task payload validation failed")
+            raise TaskPayloadValidationError(task_name, exc) from exc
+
+
+class TypedCeleryTask(Task):
+    """Base Celery task that validates kwargs against a registered Pydantic model."""
+
+    abstract = True
+    _validated_payload: CeleryTaskPayload | None = None
+
+    @property
+    def validated_payload(self) -> CeleryTaskPayload:
+        if self._validated_payload is None:
+            msg = "validated_payload accessed before task execution"
+            raise RuntimeError(msg)
+        return self._validated_payload
+
+    @override
+    def before_start(self, task_id: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+        super().before_start(task_id, args, kwargs)
+        task_name = self.name or ""
+        self._validated_payload = CeleryTaskRegistry.validate(task_name, kwargs)
+
+    @override
+    def on_success(
+        self,
+        retval: Any,
+        task_id: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> None:
+        super().on_success(retval, task_id, args, kwargs)
+        if self._validated_payload is not None:
+            logger.bind(
+                task=self.name, task_id=task_id, payload_type=type(self._validated_payload).__name__
+            ).info("Typed task completed")

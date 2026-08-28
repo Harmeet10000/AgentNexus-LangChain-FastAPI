@@ -1,22 +1,7 @@
 import asyncio
 import json
-import sys
 import time
 from unittest.mock import MagicMock
-
-# Break circular import chains that fire when any app.connections or app.utils is imported
-for _mod in (
-    "app.connections.celery",
-    "app.connections.crawl4ai",
-    "app.connections.httpx_client",
-    "app.connections.mongodb",
-    "app.connections.neo4j",
-    "app.connections.postgres",
-    "app.connections.redis",
-    "app.connections.tavily",
-):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
 
 import pytest
 
