@@ -1,6 +1,13 @@
-"""Database schemas package."""
+"""Database schemas package — deprecated shim.
 
-from .chat_messages import ChatMessage, ChatSession
+Canonical locations:
+- ChatMessage / ChatSession → app.features.chat.model
+- DocumentVector → this module (legacy, superseded by UnifiedDocument)
+Kept for one release so `from database.schemas import ...` keeps working.
+"""
+
+from app.features.chat.model import ChatMessage, ChatSession
+
 from .document_vectors import DocumentVector
 
 __all__: list[str] = [

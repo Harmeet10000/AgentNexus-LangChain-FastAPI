@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     # --- Application Settings ---
     APP_NAME: str = Field(default="LangChain FastAPI Production")
     APP_VERSION: str = Field(default="1.0.0")
+    # ponytail: baked at `docker build --build-arg GIT_SHA=...` (prod.Dockerfile), fallback = unknown locally.
+    GIT_SHA: str = Field(default="unknown")
+    BUILD_DATE: str = Field(default="unknown")
     ENVIRONMENT: str = Field(default="development")
     API_PREFIX: str = Field(default="/api/v1")
     CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])

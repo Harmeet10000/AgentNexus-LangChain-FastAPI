@@ -96,6 +96,8 @@ class HealthResponse(BaseModel):
 
     status: HealthStatus
     version: str = Field(default="1.0.0")
+    git_sha: str = Field(default="unknown", serialization_alias="gitSha")
+    build_date: str = Field(default="unknown", serialization_alias="buildDate")
     dependencies: list[DependencyHealth] = Field(default_factory=list)
 
 

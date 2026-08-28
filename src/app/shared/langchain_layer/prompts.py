@@ -356,9 +356,7 @@ class AssembledPrompt:
             return ""
         ranked = list(self.evidence)
         ordered = [ranked[0], *ranked[2:], ranked[1]] if len(ranked) > 2 else list(ranked)
-        return "\n\n".join(
-            f"[{self.evidence.index(item) + 1}] {item}" for item in ordered
-        )
+        return "\n\n".join(f"[{self.evidence.index(item) + 1}] {item}" for item in ordered)
 
     def render(self) -> str:
         parts = [self.preamble]
