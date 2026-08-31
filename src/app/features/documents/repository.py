@@ -82,7 +82,7 @@ class DocumentRepository:
             await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR, retryable=False,
                     message="Database error while fetching document by user hash",
                     details={"user_id": user_id, "content_hash": content_hash, "error": str(exc)},
                     source="document_repository",
@@ -116,7 +116,7 @@ class DocumentRepository:
             await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR, retryable=False,
                     message="Database error while fetching document by ID",
                     details={
                         "user_id": user_id,
@@ -173,7 +173,7 @@ class DocumentRepository:
             await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR, retryable=False,
                     message="Database error while creating document",
                     details={"user_id": user_id, "content_hash": content_hash, "error": str(exc)},
                     source="document_repository",
@@ -306,7 +306,7 @@ class DocumentRepository:
             await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR, retryable=False,
                     message="Database error while upserting chunks",
                     details={"error": str(object=exc)},
                     source="document_repository",
@@ -359,7 +359,7 @@ class DocumentRepository:
             await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR, retryable=False,
                     message="Database error while fetching document status",
                     details={
                         "user_id": user_id,
@@ -409,7 +409,7 @@ class DocumentRepository:
             await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR, retryable=False,
                     message="Database error while performing BM25 search",
                     details={"error": str(exc)},
                     source="document_repository",
@@ -463,7 +463,7 @@ class DocumentRepository:
             await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR, retryable=False,
                     message="Database error while performing vector search",
                     details={"error": str(exc)},
                     source="document_repository",
@@ -511,7 +511,7 @@ class DocumentRepository:
             await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR, retryable=False,
                     message="Database error while performing trigram search",
                     details={"error": str(object=exc)},
                     source="document_repository",
