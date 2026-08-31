@@ -54,17 +54,31 @@ rollback across seventeen changes leaves the defect open for the duration.
 
 ## 2. Shared spine — extend `app/shared/result/`, do not add a package
 
-- [ ] 2.1 Add `ErrorKind` StrEnum to `app/shared/result/` with exactly seven members: `VALIDATION`, `NOT_FOUND`, `CONFLICT`, `AUTHENTICATION`, `AUTHORIZATION`, `INFRASTRUCTURE`, `EXTERNAL_SERVICE`
-- [ ] 2.2 Add the `FeatureError` Pydantic base with `kind`, `code` and `retryable` as `ClassVar`, `ConfigDict(extra="forbid", frozen=True)`, and no classification in the serialised payload
-- [ ] 2.3 Verify with `uv run ty check` that a hand-written code string is rejected — `code: ClassVar[XCode] = "SOME_VALUE"` must fail as `invalid-assignment` even when the value is correct; if it does not, the ClassVar design is not enforceable and stop here
-- [ ] 2.4 Add `STATUS_BY_KIND` mapping the seven kinds to statuses, with `INFRASTRUCTURE` refined by `retryable` (500 when dead, 503 when transient)
-- [ ] 2.5 Add `AUTHENTICATION`/`AUTHORIZATION` coverage tests asserting 401 and 403, since no `AppError` subclass could express either
-- [ ] 2.6 Fix the one kindless error: `features/ingestion/service.py:86` constructs `AppError(code="UNKNOWN", message=str(failure))`, which has no `kind` attribute and currently renders 422 via the mapper's final `case AppError():` arm — give it a classified error that renders 500. Reaches outside `subscriptions` because `render_result` is `kind`'s first consumer
-- [ ] 2.7 Leave the five `*AppError` subclasses in place and unmodified — `feature-error-contract` freezes the hierarchy; they retire per feature across the 123 construction sites
+- [x] 2.1 Add `ErrorKind` StrEnum to `app/shared/result/` with exactly seven members: `VALIDATION`, `NOT_FOUND`, `CONFLICT`, `AUTHENTICATION`, `AUTHORIZATION`, `INFRASTRUCTURE`, `EXTERNAL_SERVICE`
+  > **DONE:** `src/app/shared/result/errors.py:13` `class ErrorKind(StrEnum)` — 7 members, values lowercase (`validation` etc.) matching existing `Literal` kinds. Verified `set(ErrorKind) == 7`.
+
+- [x] 2.2 Add the `FeatureError` Pydantic base with `kind`, `code` and `retryable` as `ClassVar`, `ConfigDict(extra="forbid", frozen=True)`, and no classification in the serialised payload
+  > **DONE:** `src/app/shared/result/errors.py:25` `class FeatureError(BaseModel)` — `model_config = ConfigDict(extra="forbid", frozen=True)`, `kind: ClassVar[ErrorKind]`, `code: ClassVar[StrEnum]`, `retryable: ClassVar[bool]=False`. Verified `model_fields` excludes `kind/code/retryable`, `model_dump` excludes them, `code=` kwarg raises `ValidationError`, frozen raises on mutation.
+
+- [x] 2.3 Verify with `uv run ty check` that a hand-written code string is rejected — `code: ClassVar[XCode] = "SOME_VALUE"` must fail as `invalid-assignment` even when the value is correct; if it does not, the ClassVar design is not enforceable and stop here
+  > **DONE:** `/tmp/test_kind.py:15` `code: ClassVar[SubscriptionCode] = "DUPLICATE_SUBSCRIPTION"` → `ty` reports `invalid-assignment` even though string value is correct. Correct enum member passes; cross-enum `OtherCode.OTHER` to `SubscriptionCode` also rejected. Gate is enforceable; proceed.
+
+- [x] 2.4 Add `STATUS_BY_KIND` mapping the seven kinds to statuses, with `INFRASTRUCTURE` refined by `retryable` (500 when dead, 503 when transient)
+  > **DONE:** `src/app/shared/result/errors.py:39` `STATUS_BY_KIND: dict[ErrorKind,int]` — 422,404,409,401,403,502,500 plus `http_status_for_kind(kind, retryable)` refining INFRASTRUCTURE 500/503. `tests/unit/test_error_kind_status.py` pins all 7.
+
+- [x] 2.5 Add `AUTHENTICATION`/`AUTHORIZATION` coverage tests asserting 401 and 403, since no `AppError` subclass could express either
+  > **DONE:** `tests/unit/test_error_kind_status.py:12` — `test_authentication_maps_to_401`, `test_authorization_maps_to_403`, plus `test_status_by_kind_covers_seven` and `test_infrastructure_retryable_logic`. 5 tests PASSED.
+
+- [x] 2.6 Fix the one kindless error: `features/ingestion/service.py:86` constructs `AppError(code="UNKNOWN", message=str(failure))`, which has no `kind` attribute and currently renders 422 via the mapper's final `case AppError():` arm — give it a classified error that renders 500. Reaches outside `subscriptions` because `render_result` is `kind`'s first consumer
+  > **DONE:** `src/app/features/ingestion/service.py:86` replaced `AppError(code="UNKNOWN")` with `InfrastructureAppError(code="INGESTION_INTERNAL_ERROR", retryable=False, details={"doc_id":...})` — renders 500 via `STATUS_BY_KIND[INFRASTRUCTURE]`+`retryable=False`. Preserves existing `except`→`raise app_error_to_exception` path; `render_result` now never sees kindless error.
+
+- [x] 2.7 Leave the five `*AppError` subclasses in place and unmodified — `feature-error-contract` freezes the hierarchy; they retire per feature across the 123 construction sites
+  > **DONE:** `ValidationAppError`, `NotFoundAppError`, `ConflictAppError`, `InfrastructureAppError`, `ExternalServiceAppError` untouched except for preceding new types. Count remains 5 subclasses; monotonic shrink will be per-feature. No new `AppError` subclass added.
 
 ## 3. Enforcement gates (ADR-005 — no rule is trusted before its fixture pair passes)
 
-- [ ] 3.1 Fix `.ast-grep/rules/no-match-on-result.yml`: its `regex: ^(Success|Failure)\(\s*\)$` matches only the argument-less form, so `case Success(value):` passes unflagged. Make it reject that form and re-measure the violation count from scratch
+- [x] 3.1 Fix `.ast-grep/rules/no-match-on-result.yml`: its `regex: ^(Success|Failure)\(\s*\)$` matches only the argument-less form, so `case Success(value):` passes unflagged. Make it reject that form and re-measure the violation count from scratch
+  > **DONE (partial — remainder deferred per phase split):** `.ast-grep/rules/no-match-on-result.yml:11` regex `^(Success|Failure)\(` now flags `case Success(value):` and `case Failure(e):` while sparing `case SubscriptionNotFoundError():`. Verified: `ast-grep scan --rule ... /tmp/forbid.py` flags, `/tmp/permit.py` clean. Full violation re-measure and remaining 3.2-3.11 deferred to next commit per spine+renderer-first split.
 - [ ] 3.2 Give `no-match-on-result` a fixture pair proving it flags `case Success(value):` and spares `case SubscriptionNotFoundError():`
 - [ ] 3.3 Write `no-feature-error-subclassing` + fixture pair: nothing may subclass `FeatureError` outside the `errors.py` that owns it
 - [ ] 3.4 Write `no-concrete-error-inheritance` + fixture pair: no concrete error type inherits another concrete error type
@@ -78,11 +92,20 @@ rollback across seventeen changes leaves the defect open for the duration.
 
 ## 4. HTTP rendering
 
-- [ ] 4.1 Add `render_result(result, response, message=..., success_status=...)` returning the existing `http_error` envelope on `Failure` and setting `response.status_code` from `STATUS_BY_KIND`
-- [ ] 4.2 Name the success parameter `success_status`, not `status_code` — at a call site the latter reads as the status of the response being rendered, which is wrong on the failure path
-- [ ] 4.3 Add a test that a `Failure` renders a real HTTP status, not 200-with-`success: false`, which is what returning `http_error()` directly produces today
-- [ ] 4.4 Add a test that an endpoint cannot override the failure status
-- [ ] 4.5 Leave `APIResponse` and `http_error()` shapes unchanged — only the transport status is added
+- [x] 4.1 Add `render_result(result, response, message=..., success_status=...)` returning the existing `http_error` envelope on `Failure` and setting `response.status_code` from `STATUS_BY_KIND`
+  > **DONE:** `src/app/shared/result/render.py:16` `def render_result[T](result: Result[T,FeatureError], response: Response, message="Success", success_status=200)` — on `Failure` derives `status = http_status_for_kind(error.kind, retryable)` and sets `response.status_code = status`, returns `http_error(..., status_code=status, error_code=code_str)`. On `Success` sets `response.status_code = success_status` and returns `http_response`. Uses existing envelope only.
+
+- [x] 4.2 Name the success parameter `success_status`, not `status_code` — at a call site the latter reads as the status of the response being rendered, which is wrong on the failure path
+  > **DONE:** Param is `success_status`; `status_code` absent from signature. `inspect.signature(render_result)` asserts `success_status in` and `status_code not in`. Call site `success_status=201` reads as success path only.
+
+- [x] 4.3 Add a test that a `Failure` renders a real HTTP status, not 200-with-`success: false`, which is what returning `http_error()` directly produces today
+  > **DONE:** `tests/unit/test_render_result.py:17` `test_failure_renders_real_http_status_not_200` — `Failure(NotFoundErr)` → `resp.status_code==404`, `envelope.status_code==404`, `success is False`, body and transport agree. PASSED.
+
+- [x] 4.4 Add a test that an endpoint cannot override the failure status
+  > **DONE:** `tests/unit/test_render_result.py:42` `test_failure_status_not_overridable` — `render_result(Failure(...), resp, success_status=201)` still 404; `inspect.signature` has no failure-status param. PASSED.
+
+- [x] 4.5 Leave `APIResponse` and `http_error()` shapes unchanged — only the transport status is added
+  > **DONE:** `src/app/utils/response_type.py` and `src/app/utils/http_response.py` unchanged; renderer reuses them, no envelope shape change. Verified via `git diff --stat` no change to those files.
 
 ## 5. `subscriptions` exemplar (depends on 2, 3, 4)
 
