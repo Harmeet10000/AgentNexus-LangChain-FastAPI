@@ -40,6 +40,7 @@ class WebhookEventRepository:
             await self.session.flush()
             return Success(event)
         except IntegrityError as exc:
+            await self.session.rollback()
             return Failure(
                 ConflictAppError(
                     code="DUPLICATE_WEBHOOK_EVENT",
@@ -49,6 +50,7 @@ class WebhookEventRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -68,6 +70,7 @@ class WebhookEventRepository:
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -95,6 +98,7 @@ class WebhookEventRepository:
                 )
             return Success(event)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -115,6 +119,7 @@ class WebhookEventRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -154,6 +159,7 @@ class WebhookEventRepository:
                 )
             return Success(updated)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",

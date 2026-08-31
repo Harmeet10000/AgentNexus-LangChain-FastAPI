@@ -31,6 +31,7 @@ class ConsumptionRepository:
             await self.session.flush()
             return Success(consumption)
         except IntegrityError as exc:
+            await self.session.rollback()
             return Failure(
                 ConflictAppError(
                     code="CONSUMPTION_CONFLICT",
@@ -40,6 +41,7 @@ class ConsumptionRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -75,6 +77,7 @@ class ConsumptionRepository:
             result = await self.session.execute(statement)
             return Success((list(result.scalars().all()), int(total)))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -93,6 +96,7 @@ class ConsumptionRepository:
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -113,6 +117,7 @@ class ConsumptionRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -131,6 +136,7 @@ class ConsumptionRepository:
             result = await self.session.execute(statement)
             return Success(int(result.scalar_one()))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",

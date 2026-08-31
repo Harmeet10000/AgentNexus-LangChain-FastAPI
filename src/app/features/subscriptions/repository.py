@@ -1,4 +1,11 @@
-"""Subscription persistence operations with optimistic locking."""
+"""Subscription persistence operations with optimistic locking.
+
+Rollback contract (ADR D8): classify → rollback → log → return — rollback
+precedes any log so a logging failure cannot leave the session poisoned.
+For batch callers, this rollback discards all uncommitted updates in the same
+session. Each batch item must therefore use an independent session and
+transaction; a savepoint on this session cannot contain `session.rollback()`.
+"""
 
 from __future__ import annotations
 
@@ -71,6 +78,7 @@ class SubscriptionRepository:
             await self.session.flush()
             return Success(subscription)
         except IntegrityError as exc:
+            await self.session.rollback()
             return Failure(
                 ConflictAppError(
                     code="DUPLICATE_SUBSCRIPTION",
@@ -84,6 +92,7 @@ class SubscriptionRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -112,6 +121,7 @@ class SubscriptionRepository:
                 )
             return Success(subscription)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",
@@ -142,6 +152,7 @@ class SubscriptionRepository:
                 )
             return Success(inner_value=subscription)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",
@@ -180,6 +191,7 @@ class SubscriptionRepository:
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -219,6 +231,7 @@ class SubscriptionRepository:
             result = await self.session.execute(statement)
             return Success((list(result.scalars().all()), int(total)))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -267,6 +280,7 @@ class SubscriptionRepository:
                 )
             return Success(updated)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
