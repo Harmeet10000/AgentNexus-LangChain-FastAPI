@@ -277,3 +277,92 @@ rollback across seventeen changes leaves the defect open for the duration.
   > **DONE:** Verified — `ruff check src/` clean (4 baseline), `src/app/examples/` 8 `per-file-ignores` removed (9.1) surfaced 10 `TRY300`/`BLE001` now fixed with 4 `TRY300` + 4 `BLE001` reason-carrying inline `noqa` (not `per-file-ignores`); `per-file-ignores` not re-added. `ty`/`ast-grep`/`pytest`/`openspec validate` clean.
 - [x] 11.7 Carry all three Method notes into each feature change's review step: (1) enumerate a population by a second, structurally different query before a count becomes a claim; (2) `ls` the paths a plan says it will create and match the probe to the edge kind — `rg` cannot see symbol imports, `python -c "import x"` cannot see `TYPE_CHECKING` ones; (3) before citing a gate's zero, read its exclusion list
   > **DONE:** Verified — `ruff check src/` clean (4 baseline), `src/app/examples/` 8 `per-file-ignores` removed (9.1) surfaced 10 `TRY300`/`BLE001` now fixed with 4 `TRY300` + 4 `BLE001` reason-carrying inline `noqa` (not `per-file-ignores`); `per-file-ignores` not re-added. `ty`/`ast-grep`/`pytest`/`openspec validate` clean.
+
+---
+
+# Complete repo migration (sections 12–17)
+
+Locked decision #1 scoped this change to *"Core converted + every boundary
+classified"*. The owner has since asked for a **complete repo migration**, and
+sections 12–17 are what that adds.
+
+Decision #4 — *"Foundation + one change per feature"* — still governs **shape**:
+every conversion below is its own openspec change, authored and landed
+separately. These sections are the **program** that enumerates, orders and gates
+those changes, so the whole migration lives in one plan instead of fourteen
+unwritten ones. A task here is done when the change it names is authored and
+landed, not when someone has read it.
+
+Sections 1–11 must be complete before section 15 starts: the spine, the gates and
+the exemplar are what every conversion is measured against.
+
+## 12. Scope change — record it before acting on it
+
+- [ ] 12.1 Rewrite `proposal.md`'s **Out of scope** entry for "The other 16 features" as an in-scope, enumerated follow-on program naming all 14 conversions, so the proposal stops reading as an exclusion. Keep the sentence that each feature gets its own change — decision #4 is unchanged; only the open-endedness is
+- [ ] 12.2 Correct the feature arithmetic that task 11.5 recorded. Measured 2026-09-01: **18 = 1 exemplar + 14 conversions + 2 no-ops + 1 classify-only**, not `18 = 1 + 16 + 1`
+  > **Why:** `features/search/` is a **tombstone** — `__init__.py` is a docstring plus `__all__: list[str] = []` and nothing else; step 10 of `documents-unified-schema` deleted its models, repository, router, DTOs, constants and Celery ingest path. It has no code to convert, and task 11.4 currently schedules it **first**. `features/chat/` is likewise `__init__.py` + `model.py` with zero raises.
+- [ ] 12.3 Reclassify `health` from *conversion* to *classify-only* and remove it from 11.4's order, where it currently sits 13th
+  > **Why:** `features/health/service.py` is 405 lines that raise nothing and return no `Result`. Failure is a `"status": "unhealthy"` field on the response body, and `get_health` sets its own 200/503. `_check_graphiti` reports `not_configured` **without** touching overall status, precisely so a deployment without graph memory does not begin answering 503 from a mounted endpoint. A `Failure` rendered through `render_result` would override that on the `STATUS_BY_KIND` path. Converting it is a regression, not progress. It belongs with the exception-native layers: probe shape, degrades to data, gated not rewritten.
+- [ ] 12.4 Publish the corrected conversion order, 14 entries: `audit` → `crawler` → `users` → `ingestion` → `dunning` → `profile` → `plans` → `invoices` → `payments` → `webhooks` → `agent_saul` → `credits` → `documents` → `auth`
+- [ ] 12.5 Write the **definition of complete** as the measurable zeros in section 17, and put it in `proposal.md`, so "complete migration" is a gate rather than a feeling
+
+## 13. Phase 1a — `shared/services/` (blocks `crawler`, `profile`, `invoices`)
+
+- [ ] 13.1 Convert `shared/services/storage.py` (21 raises) to a per-module union returning `Result`
+  > **Method:** 17 of the 21 are `ServiceUnavailableException`, which keeps its 503, so this conversion has **no observable status break** — confirmed in task 11.3. `storage` is imported by `profile`, `invoices` and `documents`, so it gates three conversions, not one.
+- [ ] 13.2 Convert `shared/services/tavily.py` (8 raises); keep the 4 pre-flight argument guards as raises or reclassify them as `VALIDATION`, and treat only the other 4 as third-party classification
+- [ ] 13.3 Convert `shared/services/mailer.py` (2 raises). No importer outside its own package, so it blocks nothing and can land in any order within this section
+- [ ] 13.4 Confirm `shared/services/rate_limiter.py` stays excluded — **re-verified 2026-09-01: zero `raise`, zero `except` in the module.** It degrades by returning `(True, {})` when Redis is absent, so there is no error to classify
+- [ ] 13.5 Gate: `crawler`'s change must not merge before 13.1–13.3 land
+  > **Why (verified):** `features/crawler/service.py:18` reads `from app.shared.services import RateLimiter, RateLimitScope, get_rate_limiter, search` — `search` is re-exported from `tavily.py`. The dependency is on `tavily`, **not** `rate_limiter`, exactly as task 11.1 recorded. `rg` on the module name cannot see this edge; it is a symbol import through a package `__init__`.
+
+## 14. The two deferred shared boundaries
+
+- [ ] 14.1 Convert `shared/crawler/` (9 sites) in the same change as the `crawler` feature — a split leaves the feature rendering a `Result` over a layer that still raises
+- [ ] 14.2 Convert only `shared/rag/`'s `_provider_failure` boundary, in the same change as `documents`. Leave its 7 `ImportError` guards alone: they are capability detection, not error handling, and a `Result` there would report a missing optional dependency as a request failure
+- [ ] 14.3 Re-confirm that `shared/langchain_layer/` and `shared/langgraph_layer/` node bodies stay **classified, not converted**, beyond the family re-rooting already done in section 6 — and that completing the migration does not silently promote them into scope
+- [ ] 14.4 Classify the remaining `shared/` subpackages explicitly so none is left undefined: `agents`, `circuit_breaker`, `otel`, `otel_integrations.py`, `outbox`. Each gets a row in the layer table or a written exemption
+
+## 15. The 14 feature conversions (one openspec change each)
+
+Each change carries the per-feature exit criteria from task 11.6 and all three
+Method notes from 11.7. The notes below are what is *specific* to each feature —
+its measured surface and the hazard that will bite whoever takes it.
+
+- [ ] 15.1 `audit` — 2 modules (`model.py`, `repository.py`), 9 `Result` sites, 0 raises. No router, no service. Smallest real conversion, so it lands first and becomes the **second exemplar** the rest are diffed against
+- [ ] 15.2 `crawler` — 5 modules, 2 raises. **Blocked by 13.5.** Its router is mounted in neither `api/v1.py` nor `api/v2.py`, so its endpoints cannot be verified end to end; the change must say so rather than claim a green path
+- [ ] 15.3 `users` — 5 modules, 6 raises, 3 `Result`. Catches nothing today, so the rollback requirement has no work here
+- [ ] 15.4 `ingestion` — 4 modules, 1 raise. Also unmounted in both API versions; same verification caveat as `crawler`
+- [ ] 15.5 `dunning` — 4 modules, 1 raise. `dunning/service.py` is one of the two measured **`Failure`-swallow** sites, so the rollback fix changes behaviour here; expect tests that encoded the silent commit to fail
+- [ ] 15.6 `profile` — 3 modules, 9 raises, 0 `Result`. **Blocked by 13.1** (imports `storage`)
+- [ ] 15.7 `plans` — 6 modules, 6 raises, 23 `Result`. **Lowest-risk conversion**: its repository is the only one that already used the `ErrorCode` enum in structurally identical `except SQLAlchemyError` blocks, so it is the closest thing to a pre-migrated feature
+- [ ] 15.8 `invoices` — 13 modules, 13 raises, 27 `Result`, **own `exceptions.py`**. Blocked by 13.1. Its old exception classes die in this change; no dual system survives it
+- [ ] 15.9 `payments` — `clients/` subpackage, 12 raises, 25 `Result`, **own `exceptions.py`**. The provider clients are a third-party adapter boundary — classify by name, do not relabel
+- [ ] 15.10 `webhooks` — 8 modules, 13 raises, 18 `Result`, **own `exceptions.py`**. The **21 unwraps with zero bridge calls** make this the worst swallow site in the repo and the first place to look when the rollback fix surfaces behaviour changes
+- [ ] 15.11 `agent_saul` — 4 modules, 4 raises, 0 `Result`. Its `StateSchemaVersionError` was re-rooted in task 6.7; the conversion must not re-open it
+- [ ] 15.12 `credits` — plural-subpackage layout (`dto/`, `models/`, `repositories/`, `routers/`, `services/`), 8 raises, 40 `Result`, **own `exceptions.py`**. The layout differs from every other feature, so the exemplar's file-for-file diff does not transfer
+- [ ] 15.13 `documents` — 15 modules, 7 raises, 38 `Result`. **Largest surface.** Carries `shared/rag/`'s `_provider_failure` boundary (14.2) in the same change, and absorbed everything `search` used to hold
+- [ ] 15.14 `auth` — 9 modules, 52 raises, 52 `Result`. **Scheduled last, and where the design was weakest.** Its 16 `UnauthorizedException` raises are why `ErrorKind` ships with `AUTHENTICATION` (401) and `AUTHORIZATION` (403); five members would have rendered a failed login as 422. It is a document store, so **no rollback is added** — Beanie/Mongo has no session here. Its 7 `DATABASE_ERROR` sites stay `retryable` at 503 (task 7.2) and a sweep must not collapse them into the relational half
+- [ ] 15.15 Classify `health` under the exception-native contract instead of converting it, per 12.3, and add a test pinning that `get_health` still returns its own 200/503 and that a missing optional backend does not force 503
+- [ ] 15.16 Record `chat` and `search` as requiring no change, with the reason, so a later coverage audit does not read two untouched packages as a gap
+
+## 16. Retire the old hierarchy (only possible once 15.x is complete)
+
+- [ ] 16.1 Delete each feature's own `exceptions.py` in that feature's change — 4 exist: `credits`, `invoices`, `payments`, `webhooks`. A feature that keeps both is a dual system, which the design forbids
+- [ ] 16.2 Drive `no-raise-app-error-mapper` from 34 violations to **0**, retiring them per feature rather than in a sweep
+- [ ] 16.3 Drive the 118 off-enum `code` literals (68 distinct codes against an 18-member enum) to **0**
+- [ ] 16.4 Drive the 123 `*AppError` construction sites (72 of them `InfrastructureAppError`) to **0**
+- [ ] 16.5 Flatten the last of the 28 concrete-inherits-concrete chains as their features migrate, so no `match` arm can shadow a narrower sibling
+- [ ] 16.6 Delete `AppError` and its 5 subclasses, and **flip the freeze rule into a deletion rule** — the gate that forbade adding to the hierarchy now forbids the hierarchy existing
+  > **Why the freeze cannot lift early:** over 14 changes, adding to `AppError` is locally reasonable in every unmigrated feature and collectively makes it grow while it is supposed to be retiring.
+
+## 17. Completion gates — the measurable definition of "complete"
+
+- [ ] 17.1 Add a `migration-completion` requirement carrying these zeros as scenarios, so completeness is spec-gated rather than asserted. Write it as a **new** requirement, never as a MODIFIED block — a MODIFIED block replaces its requirement wholesale on archive, and an omitted scenario is silently deleted with `validate --strict` unable to detect it
+- [ ] 17.2 `errors.py` exists in **15 of 18** features (14 conversions + `subscriptions`); `chat`, `search` and `health` are the recorded exceptions
+- [ ] 17.3 Zero `AppError` subclasses, zero constructions, zero `app_error_to_exception` call sites
+- [ ] 17.4 Zero cross-feature error imports — no feature imports another feature's error types or codes
+- [ ] 17.5 Every feature's `<Feature>Error` union is closed and `assert_never`-checked, and `ty check src/` proves each exhaustive
+- [ ] 17.6 Every gate's fixture pair passes, and every gate's **exclusion list** is read before its zero is cited — ADR-005's second form: a working rule pointed away from the code produces the same zero as a broken one
+- [ ] 17.7 Derive the total twice by structurally different queries before calling the migration complete, and grep every `DONE` block for "partial", "deferred" and "TODO" — a `DONE` block that admits a partial is a debt nothing collects
+  > **Method:** 13 of the `DONE` blocks in sections 10 and 11 currently share one verbatim boilerplate paragraph about `ruff` and `per-file-ignores`, including tasks whose actual obligation was to *record* something in a follow-on proposal. Identical evidence across unrelated tasks is not evidence. Re-verify those 14 before citing sections 10 and 11 as complete.
