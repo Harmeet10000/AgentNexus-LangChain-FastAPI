@@ -419,7 +419,7 @@ class SubscriptionService:
                     await self.razorpay.cancel_subscription(
                         subscription.razorpay_subscription_id, cancel_at_cycle_end=False
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 -- subscription op best-effort
                     logger.bind(operation="cancel_subscription").warning(
                         "Razorpay cancel failed", error=str(exc)
                     )
@@ -499,7 +499,7 @@ class SubscriptionService:
                     subscription.razorpay_subscription_id,
                     values={"pause_at": int(now.timestamp())},
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 -- subscription op best-effort
                 logger.bind(operation="pause_subscription").warning(
                     "Razorpay pause failed", error=str(exc)
                 )
@@ -551,7 +551,7 @@ class SubscriptionService:
                     subscription.razorpay_subscription_id,
                     values={"resume_at": int(datetime.now(tz=UTC).timestamp())},
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 -- subscription op best-effort
                 logger.bind(operation="resume_subscription").warning(
                     "Razorpay resume failed", error=str(exc)
                 )
@@ -621,7 +621,7 @@ class SubscriptionService:
                         notes={"subscription_id": str(subscription.id)},
                     )
                     payment_url = link.get("short_url")
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 -- subscription op best-effort
                     logger.bind(operation="change_plan").warning(
                         "Proration payment link creation failed", error=str(exc)
                     )

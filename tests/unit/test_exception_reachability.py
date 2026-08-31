@@ -21,14 +21,13 @@ def _collect_excepts(path: pathlib.Path) -> set[str]:
     tree = ast.parse(text)
     excs = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ExceptHandler):
-            if node.type is not None:
-                if isinstance(node.type, ast.Name):
-                    excs.add(node.type.id)
-                elif isinstance(node.type, ast.Tuple):
-                    for elt in node.type.elts:
-                        if isinstance(elt, ast.Name):
-                            excs.add(elt.id)
+        if isinstance(node, ast.ExceptHandler) and node.type is not None:
+            if isinstance(node.type, ast.Name):
+                excs.add(node.type.id)
+            elif isinstance(node.type, ast.Tuple):
+                for elt in node.type.elts:
+                    if isinstance(elt, ast.Name):
+                        excs.add(elt.id)
     return excs
 
 
