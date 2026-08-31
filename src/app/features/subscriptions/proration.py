@@ -7,9 +7,9 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from typing import TYPE_CHECKING
 
 from app.features.invoices.tax import split_tax_inclusive
+from app.utils import ValidationException
 
 from .dto import ProrationCalculation, ProrationDirection
-from .exceptions import ProrationCalculationException
 from .model import SubscriptionStatus
 
 if TYPE_CHECKING:
@@ -28,14 +28,14 @@ def calculate_proration_fraction(
     total_microseconds = int((period_end - period_start).total_seconds() * 1_000_000)
     if total_microseconds <= 0:
         msg = "Billing period is empty or inverted"
-        raise ProrationCalculationException(
+        raise ValidationException(
             msg,
             data={"period_start": period_start.isoformat(), "period_end": period_end.isoformat()},
         )
     remaining_microseconds = int((period_end - effective_date).total_seconds() * 1_000_000)
     if remaining_microseconds < 0:
         msg = "Effective date is after the current billing period end"
-        raise ProrationCalculationException(
+        raise ValidationException(
             msg,
             data={
                 "effective_date": effective_date.isoformat(),
@@ -59,19 +59,19 @@ def calculate_plan_change_proration(
     """Compute the prorated charge/credit for a mid-cycle plan change."""
     if current_plan.interval != new_plan.interval:
         msg = "Cannot change between different billing intervals"
-        raise ProrationCalculationException(
+        raise ValidationException(
             msg,
             data={"current_interval": current_plan.interval, "new_interval": new_plan.interval},
         )
     if subscription.status != SubscriptionStatus.ACTIVE:
         msg = "Proration is only valid for active subscriptions"
-        raise ProrationCalculationException(
+        raise ValidationException(
             msg,
             data={"subscription_id": str(subscription.id), "status": subscription.status},
         )
     if subscription.current_period_start is None or subscription.current_period_end is None:
         msg = "Subscription has no active billing period"
-        raise ProrationCalculationException(
+        raise ValidationException(
             msg,
             data={"subscription_id": str(subscription.id)},
         )

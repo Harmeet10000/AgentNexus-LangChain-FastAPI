@@ -9,14 +9,13 @@ from returns.result import Failure, Success
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.shared.result import (
-    ConflictAppError,
-    InfrastructureAppError,
-    NotFoundAppError,
-    ValidationAppError,
+from .errors import (
+    SubscriptionDuplicateError,
+    SubscriptionInfrastructureError,
+    SubscriptionInvalidTransitionError,
+    SubscriptionNotFoundError,
+    SubscriptionVersionConflictError,
 )
-from app.utils.codes import ErrorCode
-
 from .model import Subscription, SubscriptionStatus
 
 if TYPE_CHECKING:
@@ -25,7 +24,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from app.shared.result import AppResult
+    from .errors import SubscriptionResult
 
 
 # Requirement 4.1-4.6: allowed state transitions.
@@ -64,7 +63,7 @@ class SubscriptionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session: AsyncSession = session
 
-    async def create(self, subscription: Subscription) -> AppResult[Subscription]:
+    async def create(self, subscription: Subscription) -> SubscriptionResult[Subscription]:
         try:
             self.session.add(subscription)
             await self.session.flush()
@@ -72,8 +71,7 @@ class SubscriptionRepository:
         except IntegrityError as exc:
             await self.session.rollback()
             return Failure(
-                ConflictAppError(
-                    code="DUPLICATE_SUBSCRIPTION",
+                SubscriptionDuplicateError(
                     message="An active subscription already exists for this user and plan",
                     details={
                         "user_id": subscription.user_id,
@@ -81,21 +79,24 @@ class SubscriptionRepository:
                         "error": str(exc),
                     },
                     source="subscription_repository",
+                    user_id=subscription.user_id,
+                    plan_id=str(subscription.plan_id),
                 )
             )
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                SubscriptionInfrastructureError(
                     message="Database error while creating subscription",
                     details={"error": str(exc)},
                     source="subscription_repository",
+                    operation="create",
                 )
             )
 
-    async def find_by_id(self, subscription_id: str | UUID) -> AppResult[Subscription | None]:
+    async def find_by_id(
+        self, subscription_id: str | UUID
+    ) -> SubscriptionResult[Subscription | None]:
         try:
             statement: Select[tuple[Subscription]] = select(Subscription).where(
                 Subscription.id == subscription_id,
@@ -105,29 +106,28 @@ class SubscriptionRepository:
             subscription: Subscription | None = result.scalar_one_or_none()
             if subscription is None:
                 return Failure(
-                    inner_value=NotFoundAppError(
-                        code="SUBSCRIPTION_NOT_FOUND",
+                    SubscriptionNotFoundError(
                         message="Subscription not found",
                         details={"subscription_id": str(subscription_id)},
                         source="subscription_repository",
+                        subscription_id=str(subscription_id),
                     )
                 )
             return Success(subscription)
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                SubscriptionInfrastructureError(
                     message="Database error while fetching subscription",
                     details={"subscription_id": str(subscription_id), "error": str(exc)},
                     source="subscription_repository",
+                    operation="find_by_id",
                 )
             )
 
     async def find_by_razorpay_id(
         self, razorpay_subscription_id: str
-    ) -> AppResult[Subscription | None]:
+    ) -> SubscriptionResult[Subscription | None]:
         try:
             statement: Select[tuple[Subscription]] = select(Subscription).where(
                 Subscription.razorpay_subscription_id == razorpay_subscription_id,
@@ -137,32 +137,31 @@ class SubscriptionRepository:
             subscription: Subscription | None = result.scalar_one_or_none()
             if subscription is None:
                 return Failure(
-                    inner_value=NotFoundAppError(
-                        code="SUBSCRIPTION_NOT_FOUND",
+                    SubscriptionNotFoundError(
                         message="Subscription not found for Razorpay ID",
                         details={"razorpay_subscription_id": razorpay_subscription_id},
                         source="subscription_repository",
+                        subscription_id=razorpay_subscription_id,
                     )
                 )
-            return Success(inner_value=subscription)
+            return Success(subscription)
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                SubscriptionInfrastructureError(
                     message="Database error while fetching subscription by Razorpay ID",
                     details={
                         "razorpay_subscription_id": razorpay_subscription_id,
                         "error": str(exc),
                     },
                     source="subscription_repository",
+                    operation="find_by_razorpay_id",
                 )
             )
 
     async def find_by_user_and_plan(
         self, user_id: str, plan_id: str | UUID
-    ) -> AppResult[Subscription | None]:
+    ) -> SubscriptionResult[Subscription | None]:
         try:
             statement: Select[tuple[Subscription]] = (
                 select(Subscription)
@@ -188,12 +187,11 @@ class SubscriptionRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                SubscriptionInfrastructureError(
                     message="Database error while finding subscription by user and plan",
                     details={"user_id": user_id, "plan_id": str(plan_id), "error": str(exc)},
                     source="subscription_repository",
+                    operation="find_by_user_and_plan",
                 )
             )
 
@@ -205,7 +203,7 @@ class SubscriptionRepository:
         plan_id: str | UUID | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> AppResult[tuple[list[Subscription], int]]:
+    ) -> SubscriptionResult[tuple[list[Subscription], int]]:
         """Return (items, total_count) for the requested slice."""
         try:
             conditions = [Subscription.user_id == user_id, Subscription.deleted_at.is_(None)]
@@ -229,12 +227,11 @@ class SubscriptionRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                SubscriptionInfrastructureError(
                     message="Database error while listing subscriptions",
                     details={"user_id": user_id, "error": str(exc)},
                     source="subscription_repository",
+                    operation="list_by_user",
                 )
             )
 
@@ -244,7 +241,7 @@ class SubscriptionRepository:
         expected_version: int,
         *,
         values: dict[str, object],
-    ) -> AppResult[Subscription]:
+    ) -> SubscriptionResult[Subscription]:
         """Optimistic-lock update (Requirement 29).
 
         Runs ``UPDATE ... WHERE id = :id AND version = :expected`` and
@@ -265,26 +262,26 @@ class SubscriptionRepository:
             updated = result.scalar_one_or_none()
             if updated is None:
                 return Failure(
-                    ConflictAppError(
-                        code="VERSION_CONFLICT",
+                    SubscriptionVersionConflictError(
                         message="Subscription was modified concurrently; refetch and retry",
                         details={
                             "subscription_id": str(subscription.id),
                             "expected_version": expected_version,
                         },
                         source="subscription_repository",
+                        subscription_id=str(subscription.id),
+                        expected_version=expected_version,
                     )
                 )
             return Success(updated)
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                SubscriptionInfrastructureError(
                     message="Database error while updating subscription",
                     details={"subscription_id": str(subscription.id), "error": str(exc)},
                     source="subscription_repository",
+                    operation="update_with_lock",
                 )
             )
 
@@ -295,12 +292,11 @@ class SubscriptionRepository:
         *,
         expected_version: int,
         extra_values: dict[str, object] | None = None,
-    ) -> AppResult[Subscription]:
+    ) -> SubscriptionResult[Subscription]:
         """Update status with state-machine validation and optimistic locking."""
         if not validate_transition(subscription.status, new_status):
             return Failure(
-                ValidationAppError(
-                    code="INVALID_STATE_TRANSITION",
+                SubscriptionInvalidTransitionError(
                     message=f"Invalid subscription state transition: {subscription.status} -> {new_status}",
                     details={
                         "subscription_id": str(subscription.id),
@@ -308,6 +304,9 @@ class SubscriptionRepository:
                         "target": new_status.value,
                     },
                     source="subscription_repository",
+                    subscription_id=str(subscription.id),
+                    current=subscription.status,
+                    target=new_status.value,
                 )
             )
         values: dict[str, object] = {"status": new_status.value}
@@ -317,7 +316,7 @@ class SubscriptionRepository:
 
     async def increment_retry_count(
         self, subscription: Subscription, *, expected_version: int
-    ) -> AppResult[Subscription]:
+    ) -> SubscriptionResult[Subscription]:
         return await self.update_with_lock(
             subscription,
             expected_version,
@@ -326,7 +325,7 @@ class SubscriptionRepository:
 
     async def reset_retry_count(
         self, subscription: Subscription, *, expected_version: int
-    ) -> AppResult[Subscription]:
+    ) -> SubscriptionResult[Subscription]:
         return await self.update_with_lock(
             subscription, expected_version, values={"retry_count": 0}
         )

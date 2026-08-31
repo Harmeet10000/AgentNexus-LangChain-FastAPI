@@ -10,7 +10,6 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.features.audit.model import AuditAction, AuditLog
 from app.features.payments.clients.razorpay_client import RazorpayClient
-from app.features.subscriptions.exceptions import InvalidStateTransitionException
 from app.shared.result import app_error_to_exception, log_expected_failure
 from app.utils import DatabaseException, NotFoundException, ValidationException, logger
 
@@ -173,7 +172,8 @@ class PlanService:
             msg = "Plan"
             raise NotFoundException(msg, plan_id)
         if not plan.is_active:
-            raise InvalidStateTransitionException(current="inactive", target="update")
+            msg = "Cannot update inactive plan"
+            raise ValidationException(msg)
 
         values: dict[str, object] = {}
         if dto.name is not None:

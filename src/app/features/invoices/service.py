@@ -9,8 +9,8 @@ from returns.result import Failure
 
 from app.config import get_settings
 from app.features.audit.model import AuditAction, AuditLog
-from app.shared.result import app_error_to_exception, log_expected_failure
-from app.utils import NotFoundException, ValidationException
+from app.shared.result import AppError, app_error_to_exception, log_expected_failure
+from app.utils import NotFoundException, ValidationException, logger
 
 from .dto import InvoiceLineItemDTO, InvoiceResponse
 from .invoice_void import InvoiceVoid
@@ -41,7 +41,6 @@ if TYPE_CHECKING:
     from app.features.plans.repository import PlanRepository
     from app.features.subscriptions.model import Subscription
     from app.features.subscriptions.repository import SubscriptionRepository
-    from app.shared.result import AppError
     from app.shared.services.storage import StorageService
 
     from .dto import VoidInvoiceDTO
@@ -88,9 +87,14 @@ def _invoice_to_response(invoice: Invoice) -> InvoiceResponse:
     )
 
 
-def _repo_failure(error: AppError, operation: str) -> None:
-    log_expected_failure(error, operation=operation)
-    raise app_error_to_exception(error)
+def _repo_failure(error: object, operation: str) -> None:
+    # Handles both AppError (pre-migration) and SubscriptionError (migrated subscriptions)
+    if isinstance(error, AppError):
+        log_expected_failure(error, operation=operation)
+        raise app_error_to_exception(error)
+    # SubscriptionError is FeatureError — log and raise generic
+    logger.bind(operation=operation, error=str(error)).warning("repository failure")
+    raise ValidationException(str(getattr(error, "message", str(error))))
 
 
 class InvoiceService:
