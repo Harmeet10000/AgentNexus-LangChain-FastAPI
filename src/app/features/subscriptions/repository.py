@@ -1,4 +1,11 @@
-"""Subscription persistence operations with optimistic locking."""
+"""Subscription persistence operations with optimistic locking.
+
+Rollback contract (ADR D8): classify → rollback → log → return — rollback
+precedes any log so a logging failure cannot leave the session poisoned.
+For batch callers, this rollback discards all uncommitted updates in the same
+session. Each batch item must therefore use an independent session and
+transaction; a savepoint on this session cannot contain `session.rollback()`.
+"""
 
 from __future__ import annotations
 
