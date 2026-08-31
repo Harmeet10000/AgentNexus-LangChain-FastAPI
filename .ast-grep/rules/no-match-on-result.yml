@@ -8,4 +8,4 @@ note: |
   them, so `.unwrap()` stays untyped. isinstance narrows correctly.
 rule:
   kind: case_pattern
-  regex: ^(Success|Failure)\(\s*\)$
+  regex: ^(Success|Failure)\(
