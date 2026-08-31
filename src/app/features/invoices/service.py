@@ -196,7 +196,7 @@ class InvoiceService:
             if not isinstance(update_result, Failure):
                 created.pdf_url = pdf_url
 
-        await self.audit.create(
+        audit_result = await self.audit.create(
             AuditLog(
                 entity_type="invoice",
                 entity_id=str(created.id),
@@ -209,6 +209,12 @@ class InvoiceService:
                 },
             )
         )
+        if isinstance(audit_result, Failure):
+            # ponytail: audit shares the same session/transaction as the invoice.
+            # If audit flush fails, repository rollback has already undone the invoice
+            # (sourcery broader_impact, ADR D8). Swallowing would commit a clean tx
+            # with no invoice persisted, so we must surface the failure.
+            _repo_failure(audit_result.failure(), "generate_for_payment_audit")
         return created
 
     async def generate_receipt_for_payment(
@@ -285,7 +291,7 @@ class InvoiceService:
             raise ValidationException(msg)
         return _invoice_to_response(invoice)
 
-    async def void_invoice(  # noqa: PLR0912
+    async def void_invoice(  # noqa: PLR0912, PLR0915
         self, invoice_id: str | UUID, dto: VoidInvoiceDTO, *, user_id: str
     ) -> InvoiceResponse:
         """Void an issued/paid invoice and optionally reissue (Requirement 41)."""
@@ -327,7 +333,7 @@ class InvoiceService:
             _repo_failure(void_result.failure(), "void_invoice")
         voided: Invoice = void_result.unwrap()
 
-        await self.audit.create(
+        audit_void = await self.audit.create(
             AuditLog(
                 entity_type="invoice",
                 entity_id=str(voided.id),
@@ -336,6 +342,8 @@ class InvoiceService:
                 changes={"reason": dto.reason, "description": dto.description},
             )
         )
+        if isinstance(audit_void, Failure):
+            _repo_failure(audit_void.failure(), "void_invoice_audit")
 
         if dto.reissue:
             sub_result = await self.subscriptions.find_by_id(voided.subscription_id)
@@ -363,7 +371,7 @@ class InvoiceService:
                 raise ValidationException(msg)
 
             reissued = await self.generate_for_payment(payment, subscription, plan)
-            await self.audit.create(
+            audit_reissue = await self.audit.create(
                 AuditLog(
                     entity_type="invoice",
                     entity_id=str(reissued.id),
@@ -372,6 +380,8 @@ class InvoiceService:
                     changes={"original_invoice_id": str(voided.id)},
                 )
             )
+            if isinstance(audit_reissue, Failure):
+                _repo_failure(audit_reissue.failure(), "void_invoice_reissue_audit")
             return _invoice_to_response(reissued)
         return _invoice_to_response(voided)
 
