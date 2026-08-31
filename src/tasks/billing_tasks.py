@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from returns.result import Failure
 from sqlalchemy import select
@@ -18,7 +19,7 @@ from app.connections.celery_task_names import (
     BILLING_RECONCILIATION,
     BILLING_RENEWAL,
 )
-from app.connections.postgres import init_db
+from app.connections.postgres import independent_session, init_db
 from app.features.audit.model import AuditAction, AuditLog
 from app.features.audit.repository import AuditLogRepository
 from app.features.dunning.service import DunningService
@@ -36,7 +37,15 @@ from app.features.subscriptions.model import Subscription, SubscriptionStatus
 from app.features.subscriptions.repository import SubscriptionRepository
 from app.utils import logger
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 settings = get_settings()
+
+type SessionFactory = async_sessionmaker[AsyncSession]
+type BillingOperation = Callable[[AsyncSession, SessionFactory], Awaitable[dict[str, int]]]
 
 
 def _subscription_repo(session) -> SubscriptionRepository:
@@ -70,12 +79,12 @@ def _invoice_service(session) -> InvoiceService:
     )
 
 
-async def _run(operation) -> dict[str, int]:
+async def _run(operation: BillingOperation) -> dict[str, int]:
     engine, session_local = await init_db()
     try:
         async with session_local() as session:
             try:
-                result = await operation(session)
+                result = await operation(session, session_local)
                 await session.commit()
             except Exception:
                 await session.rollback()
@@ -90,9 +99,10 @@ def _current_utc() -> datetime:
     return datetime.now(tz=UTC)
 
 
-async def _renewal_job(session) -> dict[str, int]:
+async def _renewal_job(
+    session: AsyncSession, session_factory: SessionFactory
+) -> dict[str, int]:
     """Reconcile-only renewal pass: no Razorpay charges are initiated here."""
-    subscriptions = _subscription_repo(session)
     audit = _audit_repo(session)
     now = _current_utc()
     statement = (
@@ -124,13 +134,8 @@ async def _renewal_job(session) -> dict[str, int]:
                 values["current_period_end"] = datetime.fromtimestamp(int(current_end), tz=UTC)
             if not values:
                 continue
-            # ponytail: per-item savepoint so a later rollback discards only this
-            # iteration, not prior successful updates in the shared billing-job
-            # session (Greptile P1). ADR D8: rollback lives in repository; batch callers
-            # must use savepoints — this is the minimal fix; per-item commit is the
-            # upgrade if savepoint overhead matters.
-            async with session.begin_nested():
-                update = await subscriptions.update_with_lock(
+            async with independent_session(session_factory) as item_session:
+                update = await _subscription_repo(item_session).update_with_lock(
                     subscription, subscription.version, values=values
                 )
                 if isinstance(update, Failure):
@@ -154,7 +159,9 @@ async def _renewal_job(session) -> dict[str, int]:
     return {"checked": len(subscription_rows), "renewed": renewed}
 
 
-async def _dunning_job(session) -> dict[str, int]:
+async def _dunning_job(
+    session: AsyncSession, session_factory: SessionFactory
+) -> dict[str, int]:
     service = DunningService(
         session,
         SubscriptionRepository(session),
@@ -165,17 +172,23 @@ async def _dunning_job(session) -> dict[str, int]:
     retried = 0
     halted = 0
     for subscription in due:
-        # ponytail: savepoint per subscription — D8 batch semantics
-        async with session.begin_nested():
-            updated = await service.execute_retry(subscription)
+        async with independent_session(session_factory) as item_session:
+            item_service = DunningService(
+                item_session,
+                SubscriptionRepository(item_session),
+                PlanRepository(item_session),
+                AuditLogRepository(item_session),
+            )
+            updated = await item_service.execute_retry(subscription)
             if updated.status == SubscriptionStatus.HALTED.value:
                 halted += 1
             retried += 1
     return {"due": len(due), "retried": retried, "halted": halted}
 
 
-async def _invoice_backfill(session) -> dict[str, int]:
-    service = _invoice_service(session)
+async def _invoice_backfill(
+    session: AsyncSession, session_factory: SessionFactory
+) -> dict[str, int]:
     subscriptions = _subscription_repo(session)
     plans = _plan_repo(session)
     existing = select(Invoice.payment_id).where(Invoice.payment_id.is_not(None))
@@ -205,9 +218,10 @@ async def _invoice_backfill(session) -> dict[str, int]:
         if plan is None:
             continue
         try:
-            # ponytail: savepoint per payment — audit rollback must not discard prior invoices
-            async with session.begin_nested():
-                await service.generate_for_payment(payment, subscription, plan)
+            async with independent_session(session_factory) as item_session:
+                await _invoice_service(item_session).generate_for_payment(
+                    payment, subscription, plan
+                )
                 generated += 1
         except Exception as exc:  # noqa: BLE001
             logger.bind(operation="billing.invoice_backfill", payment_id=str(payment.id)).warning(
@@ -216,8 +230,9 @@ async def _invoice_backfill(session) -> dict[str, int]:
     return {"checked": len(payments), "generated": generated}
 
 
-async def _receipt_backfill(session) -> dict[str, int]:
-    service = _invoice_service(session)
+async def _receipt_backfill(
+    session: AsyncSession, session_factory: SessionFactory
+) -> dict[str, int]:
     subscriptions = _subscription_repo(session)
     plans = _plan_repo(session)
     existing = select(PaymentReceipt.payment_id)
@@ -247,8 +262,10 @@ async def _receipt_backfill(session) -> dict[str, int]:
         if plan is None:
             continue
         try:
-            async with session.begin_nested():
-                await service.generate_receipt_for_payment(payment, subscription, plan)
+            async with independent_session(session_factory) as item_session:
+                await _invoice_service(item_session).generate_receipt_for_payment(
+                    payment, subscription, plan
+                )
                 generated += 1
         except Exception as exc:  # noqa: BLE001
             logger.bind(operation="billing.receipt_backfill", payment_id=str(payment.id)).warning(
@@ -257,8 +274,9 @@ async def _receipt_backfill(session) -> dict[str, int]:
     return {"checked": len(payments), "generated": generated}
 
 
-async def _pause_resume_job(session) -> dict[str, int]:
-    subscriptions = _subscription_repo(session)
+async def _pause_resume_job(
+    session: AsyncSession, session_factory: SessionFactory
+) -> dict[str, int]:
     now = _current_utc()
     statement = (
         select(Subscription)
@@ -275,9 +293,8 @@ async def _pause_resume_job(session) -> dict[str, int]:
 
     resumed = 0
     for subscription in subscription_rows:
-        # ponytail: savepoint per item — same rationale as _renewal_job (Greptile P1 / D8)
-        async with session.begin_nested():
-            update = await subscriptions.update_status(
+        async with independent_session(session_factory) as item_session:
+            update = await _subscription_repo(item_session).update_status(
                 subscription,
                 SubscriptionStatus.ACTIVE,
                 expected_version=subscription.version,
@@ -292,7 +309,9 @@ async def _pause_resume_job(session) -> dict[str, int]:
     return {"checked": len(subscription_rows), "resumed": resumed}
 
 
-async def _reconciliation_job(session) -> dict[str, int]:
+async def _reconciliation_job(
+    session: AsyncSession, session_factory: SessionFactory
+) -> dict[str, int]:
     """Daily Razorpay reconciliation: fetch captured payments and align local records."""
     service = PaymentService(PaymentRepository(session), AuditLogRepository(session))
     subscriptions = _subscription_repo(session)
@@ -336,9 +355,11 @@ async def _reconciliation_job(session) -> dict[str, int]:
         if subscription is None:
             missing += 1
             continue
-        # ponytail: savepoint per payment creation — D8 batch semantics
-        async with session.begin_nested():
-            await service.record_payment(
+        async with independent_session(session_factory) as item_session:
+            item_service = PaymentService(
+                PaymentRepository(item_session), AuditLogRepository(item_session)
+            )
+            await item_service.record_payment(
                 PaymentRecordDTO(
                     razorpay_payment_id=rz_id,
                     subscription_id=str(subscription.id),
