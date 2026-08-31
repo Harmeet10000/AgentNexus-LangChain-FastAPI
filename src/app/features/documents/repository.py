@@ -79,6 +79,7 @@ class DocumentRepository:
                 )
             return Success(doc)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",
@@ -112,6 +113,7 @@ class DocumentRepository:
                 )
             return Success(inner_value=doc)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",
@@ -158,6 +160,7 @@ class DocumentRepository:
             await self.session.flush()
             return Success(inner_value=document)
         except IntegrityError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=ConflictAppError(
                     code="DOCUMENT_CONFLICT",
@@ -167,6 +170,7 @@ class DocumentRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",
@@ -289,6 +293,7 @@ class DocumentRepository:
             await self.session.execute(build_chunk_upsert_statement(rows))
             return Success(inner_value=None)
         except IntegrityError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=ConflictAppError(
                     code="CHUNK_CONFLICT",
@@ -298,6 +303,7 @@ class DocumentRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",
@@ -350,6 +356,7 @@ class DocumentRepository:
                 )
             return Success(inner_value=dict(row))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",
@@ -399,6 +406,7 @@ class DocumentRepository:
             )
             return Success(inner_value=[dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",
@@ -452,6 +460,7 @@ class DocumentRepository:
             )
             return Success(inner_value=[dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",
@@ -499,6 +508,7 @@ class DocumentRepository:
             )
             return Success(inner_value=[dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
                     code="DB_ERROR",

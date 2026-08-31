@@ -41,6 +41,7 @@ class PlanRepository:
             await self.session.flush()
             return Success(plan)
         except IntegrityError as exc:
+            await self.session.rollback()
             return Failure(
                 ConflictAppError(
                     code=ErrorCode.CONFLICT,
@@ -50,6 +51,7 @@ class PlanRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
@@ -75,6 +77,7 @@ class PlanRepository:
                 )
             return Success(plan)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
@@ -93,6 +96,7 @@ class PlanRepository:
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
@@ -110,6 +114,7 @@ class PlanRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
@@ -141,6 +146,7 @@ class PlanRepository:
                 )
             return Success(plan)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
@@ -171,6 +177,7 @@ class PlanRepository:
                 )
             return Success(updated)
         except IntegrityError as exc:
+            await self.session.rollback()
             return Failure(
                 ConflictAppError(
                     code=ErrorCode.CONFLICT,
@@ -180,6 +187,7 @@ class PlanRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
