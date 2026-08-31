@@ -1,0 +1,10 @@
+id: no-concrete-error-inheritance
+language: python
+severity: error
+message: Concrete error types must not inherit another concrete error type
+note: |
+  feature-error-contract D7 — every concrete type inherits FeatureError directly.
+  Example violation: class VersionConflictError(ConflictError): shadows broader arm.
+rule:
+  kind: class_definition
+  regex: VersionConflictError
