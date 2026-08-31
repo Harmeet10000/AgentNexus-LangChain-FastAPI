@@ -3,23 +3,40 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
-from returns.result import Failure
+from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.features.audit.model import AuditAction, AuditLog
 from app.features.payments.clients.razorpay_client import RazorpayClient
 from app.features.payments.dto import RefundRequestDTO
 from app.features.payments.model import PaymentStatus
-from app.shared.result import app_error_to_exception, log_expected_failure
-from app.utils import NotFoundException, ValidationException, logger
+from app.shared.result.errors import (
+    ConflictAppError,
+    ErrorKind,
+    ExternalServiceAppError,
+    InfrastructureAppError,
+    NotFoundAppError,
+    ValidationAppError,
+    http_status_for_kind,
+)
+from app.utils import logger
 
 from .dto import (
     SubscriptionListResponse,
     SubscriptionResponse,
 )
-from .exceptions import InvalidStateTransitionException
+from .errors import (
+    SubscriptionDuplicateError,
+    SubscriptionInfrastructureError,
+    SubscriptionInvalidTransitionError,
+    SubscriptionNotFoundError,
+    SubscriptionPlanNotFoundError,
+    SubscriptionTransientInfrastructureError,
+    SubscriptionValidationError,
+    SubscriptionVersionConflictError,
+)
 from .model import Subscription, SubscriptionStatus
 from .proration import calculate_plan_change_proration
 from .trial_extension import TrialExtension
@@ -35,7 +52,6 @@ if TYPE_CHECKING:
     from app.features.plans.model import Plan
     from app.features.plans.repository import PlanRepository
     from app.features.subscriptions.repository import SubscriptionRepository
-    from app.shared.result import AppError
 
     from .dto import (
         PlanChangeDTO,
@@ -44,6 +60,7 @@ if TYPE_CHECKING:
         SubscriptionCreateDTO,
         SubscriptionPauseDTO,
     )
+    from .errors import SubscriptionError, SubscriptionResult
 
 
 def _subscription_to_response(
@@ -81,9 +98,31 @@ def _subscription_to_response(
     )
 
 
-def _repo_failure(error: AppError, operation: str) -> None:
-    log_expected_failure(error, operation=operation)
-    raise app_error_to_exception(error)
+def subscription_error_to_http_status(error: SubscriptionError) -> int:
+    """Exhaustive dispatch over SubscriptionError — task 5.4.
+
+    Adding a member to SubscriptionError without an arm fails ty with
+    type-assertion-failure naming the missing type via assert_never.
+    """
+    match error:
+        case SubscriptionNotFoundError():
+            return http_status_for_kind(ErrorKind.NOT_FOUND)
+        case SubscriptionDuplicateError():
+            return http_status_for_kind(ErrorKind.CONFLICT)
+        case SubscriptionVersionConflictError():
+            return http_status_for_kind(ErrorKind.CONFLICT)
+        case SubscriptionInvalidTransitionError():
+            return http_status_for_kind(ErrorKind.VALIDATION)
+        case SubscriptionPlanNotFoundError():
+            return http_status_for_kind(ErrorKind.NOT_FOUND)
+        case SubscriptionInfrastructureError():
+            return http_status_for_kind(ErrorKind.INFRASTRUCTURE, retryable=error.retryable)
+        case SubscriptionTransientInfrastructureError():
+            return http_status_for_kind(ErrorKind.INFRASTRUCTURE, retryable=error.retryable)
+        case SubscriptionValidationError():
+            return http_status_for_kind(ErrorKind.VALIDATION)
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 class SubscriptionService:
@@ -109,34 +148,105 @@ class SubscriptionService:
 
     async def _get_owned_subscription(
         self, user_id: str, subscription_id: str | UUID
-    ) -> Subscription:
+    ) -> SubscriptionResult[Subscription]:
         result = await self.subscriptions.find_by_id(subscription_id)
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "get_owned_subscription")
+            return result
         subscription = result.unwrap()
         if subscription is None:
-            msg = "Subscription"
-            raise NotFoundException(msg, str(subscription_id))
+            return Failure(
+                SubscriptionNotFoundError(
+                    message="Subscription not found",
+                    details={"subscription_id": str(subscription_id)},
+                    source="subscription_service",
+                    subscription_id=str(subscription_id),
+                )
+            )
         if subscription.user_id != user_id:
-            msg = "Subscription does not belong to this user"
-            raise ValidationException(msg)
-        return subscription
+            return Failure(
+                SubscriptionValidationError(
+                    message="Subscription does not belong to this user",
+                    details={"subscription_id": str(subscription_id), "user_id": user_id},
+                    source="subscription_service",
+                )
+            )
+        return Success(subscription)
 
-    async def _load_plan(self, plan_id: str | UUID) -> Plan:
+    async def _load_plan(self, plan_id: str | UUID) -> SubscriptionResult[Plan]:
         result = await self.plans.find_by_id(plan_id)
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "load_plan")
+            err = result.failure()
+            # Preserve plan infrastructure/validation semantics — do not collapse to not-found
+            if isinstance(err, InfrastructureAppError):
+                error_type = (
+                    SubscriptionTransientInfrastructureError
+                    if err.retryable
+                    else SubscriptionInfrastructureError
+                )
+                return Failure(
+                    error_type(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                        operation="load_plan",
+                    )
+                )
+            if isinstance(err, NotFoundAppError):
+                return Failure(
+                    SubscriptionPlanNotFoundError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                        plan_id=str(plan_id),
+                    )
+                )
+            if isinstance(err, ValidationAppError):
+                return Failure(
+                    SubscriptionValidationError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                    )
+                )
+            if isinstance(err, ConflictAppError):
+                return Failure(
+                    SubscriptionValidationError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                    )
+                )
+            if isinstance(err, ExternalServiceAppError):
+                return Failure(
+                    SubscriptionTransientInfrastructureError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                        operation="load_plan",
+                    )
+                )
+            return Failure(
+                SubscriptionTransientInfrastructureError(
+                    message=getattr(err, "message", "Plan not found"),
+                    details={"plan_id": str(plan_id), "error": str(err)},
+                    source="subscription_service",
+                    operation="load_plan",
+                )
+            )
         plan = result.unwrap()
         if plan is None:
-            msg = "Plan"
-            raise NotFoundException(msg, str(plan_id))
-        return plan
+            return Failure(
+                SubscriptionPlanNotFoundError(
+                    message="Plan not found",
+                    details={"plan_id": str(plan_id)},
+                    source="subscription_service",
+                    plan_id=str(plan_id),
+                )
+            )
+        return Success(plan)
 
     async def _refund_on_cancel(self, subscription: Subscription, plan: Plan, user_id: str) -> int:
-        """Apply the plan's refund policy on immediate cancellation (Requirement 41).
-
-        Returns the refund amount in paisa actually issued, else 0.
-        """
+        """Apply the plan's refund policy on immediate cancellation (Requirement 41)."""
         if not self._razorpay_enabled() or plan.refund_policy == "NONE":
             return 0
         result = await self.payments.find_by_subscription(subscription.id, limit=1)
@@ -174,18 +284,31 @@ class SubscriptionService:
 
     async def create_subscription(
         self, user_id: str, dto: SubscriptionCreateDTO
-    ) -> SubscriptionResponse:
-        plan = await self._load_plan(dto.plan_id)
+    ) -> SubscriptionResult[SubscriptionResponse]:
+        plan_result = await self._load_plan(dto.plan_id)
+        if isinstance(plan_result, Failure):
+            return plan_result
+        plan = plan_result.unwrap()
         if not plan.is_active:
-            msg = "Plan is not active"
-            raise ValidationException(msg)
+            return Failure(
+                SubscriptionValidationError(
+                    message="Plan is not active",
+                    details={"plan_id": str(plan.id)},
+                    source="subscription_service",
+                )
+            )
 
         existing = await self.subscriptions.find_by_user_and_plan(user_id, plan.id)
         if isinstance(existing, Failure):
-            _repo_failure(existing.failure(), "create_subscription")
+            return existing
         if existing.unwrap() is not None:
-            msg = "An active subscription already exists for this plan"
-            raise ValidationException(msg)
+            return Failure(
+                SubscriptionValidationError(
+                    message="An active subscription already exists for this plan",
+                    details={"user_id": user_id, "plan_id": str(plan.id)},
+                    source="subscription_service",
+                )
+            )
 
         trial_days = (
             dto.trial_period_days if dto.trial_period_days is not None else plan.trial_period_days
@@ -200,7 +323,7 @@ class SubscriptionService:
         )
         result = await self.subscriptions.create(subscription)
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "create_subscription")
+            return result
         created = result.unwrap()
 
         payment_url: str | None = None
@@ -227,7 +350,7 @@ class SubscriptionService:
                     },
                 )
                 if isinstance(update, Failure):
-                    _repo_failure(update.failure(), "create_subscription")
+                    return update
                 created = update.unwrap()
             except Exception as exc:  # noqa: BLE001 — Razorpay is optional in dev
                 logger.bind(operation="create_subscription").warning(
@@ -243,7 +366,7 @@ class SubscriptionService:
                 changes={"plan_id": str(plan.id), "trial_end": str(created.trial_end)},
             )
         )
-        return _subscription_to_response(created, plan=plan, payment_url=payment_url)
+        return Success(_subscription_to_response(created, plan=plan, payment_url=payment_url))
 
     async def list_subscriptions(
         self,
@@ -253,69 +376,103 @@ class SubscriptionService:
         plan_id: str | UUID | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> SubscriptionListResponse:
+    ) -> SubscriptionResult[SubscriptionListResponse]:
         result = await self.subscriptions.list_by_user(
             user_id, status=status, plan_id=plan_id, limit=limit, offset=offset
         )
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "list_subscriptions")
+            return result
         items, total = result.unwrap()
         plan_cache: dict[str, Plan] = {}
         responses: list[SubscriptionResponse] = []
         for subscription in items:
             plan = plan_cache.get(str(subscription.plan_id))
             if plan is None:
-                try:
-                    plan = await self._load_plan(subscription.plan_id)
-                except ValidationException:
+                plan_result = await self._load_plan(subscription.plan_id)
+                if isinstance(plan_result, Failure):
+                    # If plan not found, skip caching but still return subscription without plan
                     plan = None
-                if plan is not None:
-                    plan_cache[str(subscription.plan_id)] = plan
+                else:
+                    plan = plan_result.unwrap()
+                    if plan is not None:
+                        plan_cache[str(subscription.plan_id)] = plan
             responses.append(_subscription_to_response(subscription, plan=plan))
-        return SubscriptionListResponse(items=responses, total=total, limit=limit, offset=offset)
+        return Success(SubscriptionListResponse(items=responses, total=total, limit=limit, offset=offset))
 
-    async def get_subscription(self, user_id: str, subscription_id: str) -> SubscriptionResponse:
+    async def get_subscription(self, user_id: str, subscription_id: str) -> SubscriptionResult[SubscriptionResponse]:
         result = await self.subscriptions.find_by_id(subscription_id)
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "get_subscription")
+            return result
         subscription = result.unwrap()
         if subscription is None:
-            msg = "Subscription"
-            raise NotFoundException(msg, subscription_id)
+            return Failure(
+                SubscriptionNotFoundError(
+                    message="Subscription not found",
+                    details={"subscription_id": subscription_id},
+                    source="subscription_service",
+                    subscription_id=subscription_id,
+                )
+            )
         if subscription.user_id != user_id:
-            msg = "Subscription does not belong to this user"
-            raise ValidationException(msg)
-        plan = await self._load_plan(subscription.plan_id)
-        return _subscription_to_response(subscription, plan=plan)
+            return Failure(
+                SubscriptionValidationError(
+                    message="Subscription does not belong to this user",
+                    details={"subscription_id": subscription_id, "user_id": user_id},
+                    source="subscription_service",
+                )
+            )
+        plan_result = await self._load_plan(subscription.plan_id)
+        if isinstance(plan_result, Failure):
+            return plan_result
+        plan = plan_result.unwrap()
+        return Success(_subscription_to_response(subscription, plan=plan))
 
     async def cancel_subscription(
         self, user_id: str, subscription_id: str, dto: SubscriptionCancelDTO
-    ) -> SubscriptionResponse:
-        subscription = await self._get_owned_subscription(user_id, subscription_id)
+    ) -> SubscriptionResult[SubscriptionResponse]:
+        owned = await self._get_owned_subscription(user_id, subscription_id)
+        if isinstance(owned, Failure):
+            return owned
+        subscription = owned.unwrap()
         if subscription.status not in {
             SubscriptionStatus.ACTIVE.value,
             SubscriptionStatus.PAUSED.value,
             SubscriptionStatus.PAST_DUE.value,
             SubscriptionStatus.HALTED.value,
         }:
-            raise InvalidStateTransitionException(
-                current=subscription.status, target=SubscriptionStatus.CANCELLED.value
+            return Failure(
+                SubscriptionInvalidTransitionError(
+                    message=f"Invalid state transition: {subscription.status} -> {SubscriptionStatus.CANCELLED.value}",
+                    details={"current": subscription.status, "target": SubscriptionStatus.CANCELLED.value},
+                    source="subscription_service",
+                    subscription_id=str(subscription.id),
+                    current=subscription.status,
+                    target=SubscriptionStatus.CANCELLED.value,
+                )
             )
 
         if dto.cancel_at_period_end:
             if subscription.cancel_at_period_end:
-                msg = "Subscription is already scheduled to cancel"
-                raise ValidationException(msg)
+                return Failure(
+                    SubscriptionValidationError(
+                        message="Subscription is already scheduled to cancel",
+                        details={"subscription_id": str(subscription.id)},
+                        source="subscription_service",
+                    )
+                )
             update = await self.subscriptions.update_with_lock(
                 subscription,
                 subscription.version,
                 values={"cancel_at_period_end": True},
             )
             if isinstance(update, Failure):
-                _repo_failure(update.failure(), "cancel_subscription")
+                return update
             subscription = update.unwrap()
         else:
-            plan = await self._load_plan(subscription.plan_id)
+            plan_result = await self._load_plan(subscription.plan_id)
+            if isinstance(plan_result, Failure):
+                return plan_result
+            plan = plan_result.unwrap()
             if self._razorpay_enabled() and subscription.razorpay_subscription_id:
                 try:
                     await self.razorpay.cancel_subscription(
@@ -337,7 +494,7 @@ class SubscriptionService:
                 },
             )
             if isinstance(update, Failure):
-                _repo_failure(update.failure(), "cancel_subscription")
+                return update
             subscription = update.unwrap()
             if refund_paisa > 0:
                 await self.audit.create(
@@ -362,16 +519,30 @@ class SubscriptionService:
                 changes={"cancel_at_period_end": dto.cancel_at_period_end, "reason": dto.reason},
             )
         )
-        plan = await self._load_plan(subscription.plan_id)
-        return _subscription_to_response(subscription, plan=plan)
+        plan_result = await self._load_plan(subscription.plan_id)
+        if isinstance(plan_result, Failure):
+            # Return with subscription but without plan details if plan load fails
+            return Success(_subscription_to_response(subscription, plan=None))
+        plan = plan_result.unwrap()
+        return Success(_subscription_to_response(subscription, plan=plan))
 
     async def pause_subscription(
         self, user_id: str, subscription_id: str, dto: SubscriptionPauseDTO
-    ) -> SubscriptionResponse:
-        subscription = await self._get_owned_subscription(user_id, subscription_id)
+    ) -> SubscriptionResult[SubscriptionResponse]:
+        owned = await self._get_owned_subscription(user_id, subscription_id)
+        if isinstance(owned, Failure):
+            return owned
+        subscription = owned.unwrap()
         if subscription.status != SubscriptionStatus.ACTIVE.value:
-            raise InvalidStateTransitionException(
-                current=subscription.status, target=SubscriptionStatus.PAUSED.value
+            return Failure(
+                SubscriptionInvalidTransitionError(
+                    message=f"Invalid state transition: {subscription.status} -> {SubscriptionStatus.PAUSED.value}",
+                    details={"current": subscription.status, "target": SubscriptionStatus.PAUSED.value},
+                    source="subscription_service",
+                    subscription_id=str(subscription.id),
+                    current=subscription.status,
+                    target=SubscriptionStatus.PAUSED.value,
+                )
             )
 
         now = datetime.now(tz=UTC)
@@ -398,7 +569,7 @@ class SubscriptionService:
             extra_values=values,
         )
         if isinstance(update, Failure):
-            _repo_failure(update.failure(), "pause_subscription")
+            return update
         subscription = update.unwrap()
 
         await self.audit.create(
@@ -410,14 +581,27 @@ class SubscriptionService:
                 changes=values,
             )
         )
-        plan = await self._load_plan(subscription.plan_id)
-        return _subscription_to_response(subscription, plan=plan)
+        plan_result = await self._load_plan(subscription.plan_id)
+        if isinstance(plan_result, Failure):
+            return Success(_subscription_to_response(subscription, plan=None))
+        plan = plan_result.unwrap()
+        return Success(_subscription_to_response(subscription, plan=plan))
 
-    async def resume_subscription(self, user_id: str, subscription_id: str) -> SubscriptionResponse:
-        subscription = await self._get_owned_subscription(user_id, subscription_id)
+    async def resume_subscription(self, user_id: str, subscription_id: str) -> SubscriptionResult[SubscriptionResponse]:
+        owned = await self._get_owned_subscription(user_id, subscription_id)
+        if isinstance(owned, Failure):
+            return owned
+        subscription = owned.unwrap()
         if subscription.status != SubscriptionStatus.PAUSED.value:
-            raise InvalidStateTransitionException(
-                current=subscription.status, target=SubscriptionStatus.ACTIVE.value
+            return Failure(
+                SubscriptionInvalidTransitionError(
+                    message=f"Invalid state transition: {subscription.status} -> {SubscriptionStatus.ACTIVE.value}",
+                    details={"current": subscription.status, "target": SubscriptionStatus.ACTIVE.value},
+                    source="subscription_service",
+                    subscription_id=str(subscription.id),
+                    current=subscription.status,
+                    target=SubscriptionStatus.ACTIVE.value,
+                )
             )
 
         if self._razorpay_enabled() and subscription.razorpay_subscription_id:
@@ -437,7 +621,7 @@ class SubscriptionService:
             extra_values={"pause_start": None, "pause_end": None},
         )
         if isinstance(update, Failure):
-            _repo_failure(update.failure(), "resume_subscription")
+            return update
         subscription = update.unwrap()
 
         await self.audit.create(
@@ -449,21 +633,38 @@ class SubscriptionService:
                 changes={"status": SubscriptionStatus.ACTIVE.value},
             )
         )
-        plan = await self._load_plan(subscription.plan_id)
-        return _subscription_to_response(subscription, plan=plan)
+        plan_result = await self._load_plan(subscription.plan_id)
+        if isinstance(plan_result, Failure):
+            return Success(_subscription_to_response(subscription, plan=None))
+        plan = plan_result.unwrap()
+        return Success(_subscription_to_response(subscription, plan=plan))
 
     async def change_plan(
         self,
         user_id: str,
         subscription_id: str,
         dto: PlanChangeDTO,
-    ) -> SubscriptionResponse:
-        subscription = await self._get_owned_subscription(user_id, subscription_id)
-        current_plan = await self._load_plan(subscription.plan_id)
-        new_plan = await self._load_plan(dto.new_plan_id)
+    ) -> SubscriptionResult[SubscriptionResponse]:
+        owned = await self._get_owned_subscription(user_id, subscription_id)
+        if isinstance(owned, Failure):
+            return owned
+        subscription = owned.unwrap()
+        current_plan_result = await self._load_plan(subscription.plan_id)
+        if isinstance(current_plan_result, Failure):
+            return current_plan_result
+        current_plan = current_plan_result.unwrap()
+        new_plan_result = await self._load_plan(dto.new_plan_id)
+        if isinstance(new_plan_result, Failure):
+            return new_plan_result
+        new_plan = new_plan_result.unwrap()
         if not new_plan.is_active:
-            msg = "New plan is not active"
-            raise ValidationException(msg)
+            return Failure(
+                SubscriptionValidationError(
+                    message="New plan is not active",
+                    details={"new_plan_id": str(new_plan.id)},
+                    source="subscription_service",
+                )
+            )
 
         proration: ProrationCalculation = calculate_plan_change_proration(
             subscription, current_plan, new_plan, effective_date=dto.effective_date
@@ -484,8 +685,13 @@ class SubscriptionService:
                         "Proration payment link creation failed", error=str(exc)
                     )
             else:
-                msg = "Razorpay is required to charge the prorated upgrade amount"
-                raise ValidationException(msg)
+                return Failure(
+                    SubscriptionValidationError(
+                        message="Razorpay is required to charge the prorated upgrade amount",
+                        details={"proration_amount": proration.proration_amount},
+                        source="subscription_service",
+                    )
+                )
 
         update = await self.subscriptions.update_with_lock(
             subscription,
@@ -493,7 +699,7 @@ class SubscriptionService:
             values={"plan_id": new_plan.id},
         )
         if isinstance(update, Failure):
-            _repo_failure(update.failure(), "change_plan")
+            return update
         subscription = update.unwrap()
 
         await self.audit.create(
@@ -510,23 +716,40 @@ class SubscriptionService:
                 },
             )
         )
-        return _subscription_to_response(subscription, plan=new_plan, payment_url=payment_url)
+        return Success(_subscription_to_response(subscription, plan=new_plan, payment_url=payment_url))
 
     async def get_change_preview(
         self, user_id: str, subscription_id: str, new_plan_id: str
-    ) -> ProrationCalculation:
-        subscription = await self._get_owned_subscription(user_id, subscription_id)
-        current_plan = await self._load_plan(subscription.plan_id)
-        new_plan = await self._load_plan(new_plan_id)
-        return calculate_plan_change_proration(subscription, current_plan, new_plan)
+    ) -> SubscriptionResult[ProrationCalculation]:
+        owned = await self._get_owned_subscription(user_id, subscription_id)
+        if isinstance(owned, Failure):
+            return owned
+        subscription = owned.unwrap()
+        current_plan_result = await self._load_plan(subscription.plan_id)
+        if isinstance(current_plan_result, Failure):
+            return current_plan_result
+        current_plan = current_plan_result.unwrap()
+        new_plan_result = await self._load_plan(new_plan_id)
+        if isinstance(new_plan_result, Failure):
+            return new_plan_result
+        new_plan = new_plan_result.unwrap()
+        return Success(calculate_plan_change_proration(subscription, current_plan, new_plan))
 
     async def request_trial_extension(
         self, user_id: str, subscription_id: str, *, days: int, reason: str | None = None
-    ) -> dict[str, object]:
-        subscription: Subscription = await self._get_owned_subscription(user_id, subscription_id)
+    ) -> SubscriptionResult[dict[str, object]]:
+        owned = await self._get_owned_subscription(user_id, subscription_id)
+        if isinstance(owned, Failure):
+            return owned
+        subscription = owned.unwrap()
         if subscription.trial_end is None:
-            msg = "Subscription is not in trial"
-            raise ValidationException(msg)
+            return Failure(
+                SubscriptionValidationError(
+                    message="Subscription is not in trial",
+                    details={"subscription_id": str(subscription.id)},
+                    source="subscription_service",
+                )
+            )
         now: datetime = datetime.now(tz=UTC)
         extension = TrialExtension(
             subscription_id=subscription.id,
@@ -538,8 +761,19 @@ class SubscriptionService:
             rejection_reason=reason,
             original_trial_end=subscription.trial_end,
         )
-        self.session.add(extension)
-        await self.session.flush()
+        try:
+            self.session.add(extension)
+            await self.session.flush()
+        except Exception as exc:  # noqa: BLE001 — trial extension flush may fail
+            await self.session.rollback()
+            return Failure(
+                SubscriptionTransientInfrastructureError(
+                    message="Database error while creating trial extension",
+                    details={"subscription_id": str(subscription.id), "error": str(exc)},
+                    source="subscription_service",
+                    operation="request_trial_extension",
+                )
+            )
         await self.audit.create(
             AuditLog(
                 entity_type="subscription",
@@ -549,7 +783,7 @@ class SubscriptionService:
                 changes={"requested_days": days, "reason": reason},
             )
         )
-        return {"status": "pending", "requested_days": days}
+        return Success({"status": "pending", "requested_days": days})
 
     @staticmethod
     def _razorpay_enabled() -> bool:
