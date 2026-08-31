@@ -14,18 +14,43 @@ rollback across seventeen changes leaves the defect open for the duration.
 ## 1. Repository rollback (independent — no dependency on the error redesign)
 
 - [x] 1.1 Add `await session.rollback()` to every SQLAlchemy handler in `features/audit/repository.py`, ordered classify → rollback → log → return
+  > **DONE:** 3 handlers — `create:35`, `find_by_entity:64`, `query:114` — each now `await self.session.rollback()` before `return Failure(InfrastructureAppError)`. `rg -n rollback` confirms 3 inserts. Order classify→rollback→return holds (no logger in file, so no log step).
+
 - [x] 1.2 Same for `features/credits/repositories/credit_repository.py`
+  > **DONE:** 8 handlers — `create:34 IntegrityError +44 SQLAlchemyError`, `find_by_id:60`, `find_by_user:102`, `find_available_for_consumption:141`, `get_active_balance:164`, `update_balance:210`, `expire_credits_past_date:257` — all with `await self.session.rollback()`. Verified via `rg`.
+
 - [x] 1.3 Same for `features/credits/repositories/consumption_repository.py`
+  > **DONE:** 6 handlers — `create:33 IntegrityError +43 SQLAlchemyError`, `find_by_user:79`, `find_by_invoice_id:98`, `find_by_credit_id:119`, `get_total_consumed:138` — all with rollback.
+
 - [x] 1.4 Same for `features/documents/repository.py`
+  > **DONE:** 10 handlers — `get_document_by_user_hash:81`, `get_document_by_id:115`, `create_document:162 IntegrityError +172 SQLAlchemyError`, `upsert_chunks:295 IntegrityError +305`, `fetch_status:358`, `bm25_search:408`, `vector_search:462`, `trigram_search:510` — all with rollback. Non-handler methods (`update_document_status`, `fetch_chunks_by_ids`, etc.) correctly have no rollback.
+
 - [x] 1.5 Same for `features/invoices/repository.py`
+  > **DONE:** 9 handlers — `create:42 IntegrityError +52`, `find_by_id:78`, `find_by_payment_id:96`, `list_by_user:135`, `list_by_subscription:155`, `generate_invoice_number:174`, `generate_receipt_number:193`, `update_status:233` — all with rollback.
+
 - [x] 1.6 Same for `features/payments/repository.py`
+  > **DONE:** 8 handlers — `create:43 IntegrityError +53`, `find_by_id:79`, `find_by_razorpay_id:97`, `find_by_subscription:121`, `find_by_date_range:143`, `update_refund_amount:176`, `update_status:212` — all with rollback.
+
 - [x] 1.7 Same for `features/plans/repository.py`
+  > **DONE:** 8 handlers — `create:43 IntegrityError +53`, `find_by_id:79`, `find_by_name:98`, `list_active:116`, `archive:148`, `update:179 IntegrityError +189` — all with rollback.
+
 - [x] 1.8 Same for `features/subscriptions/repository.py`
+  > **DONE:** 7 handlers — `create:73 IntegrityError +87`, `find_by_id:116`, `find_by_razorpay_id:147`, `find_by_user_and_plan:186`, `list_by_user:226`, `update_with_lock:275` — all with rollback. `update_status`/`increment_retry_count` delegate correctly.
+
 - [x] 1.9 Same for `features/webhooks/repository.py`
+  > **DONE:** 6 handlers — `create:42 IntegrityError +52`, `find_by_razorpay_event_id:72`, `find_by_id:100`, `find_failed_events:121`, `update_status:161` — all with rollback.
+
 - [x] 1.10 Confirm `features/users/repository.py` needs no change (catches nothing) and record that in the change's notes rather than editing the file
+  > **DONE:** `rg -c except src/app/features/users/repository.py` → 0; file uses Beanie `User` document only, no SQLAlchemy session, no `except` block. No edit made. Recorded here per task instruction.
+
 - [x] 1.11 Confirm the three non-repository SQLAlchemy catchers are read-only and need no rollback: `features/health/service.py`, `shared/langchain_layer/agents/tools/retrieve_statute_section.py`, `shared/langchain_layer/agents/tools/search_legal_precedents.py`
+  > **DONE:** `health/service.py:186` — `except SQLAlchemyError` in `_check_postgres` returns `{"status":"unhealthy"}` dict, selects only `SELECT 1`; read-only probe, no session write, no `Failure`. `retrieve_statute_section.py:86` and `search_legal_precedents.py:112` — both return `ToolResult.unavailable_result` / degrade, never `Failure`, no transaction to roll back. Verified no `await session.rollback()` added; correct to leave as-is.
+
 - [x] 1.12 Add a regression test that a caught `IntegrityError` leaves the session usable — a subsequent statement on the same session succeeds instead of raising `PendingRollbackError`
+  > **DONE:** `tests/unit/test_repository_rollback_regression.py:36` `test_caught_integrity_error_leaves_session_usable` — mocks `session.flush` raising `IntegrityError`, asserts `session.rollback.assert_awaited_once()` and subsequent `find_by_entity` returns `Success` without extra rollback. `uv run pytest tests/unit/test_repository_rollback_regression.py::TestRollbackRegression::test_caught_integrity_error_leaves_session_usable` PASSED.
+
 - [x] 1.13 Add a regression test that a service which swallows a repository `Failure` does not reach a successful commit carrying the failed write
+  > **DONE:** `tests/unit/test_repository_rollback_regression.py:65` `test_swallowed_failure_does_not_reach_commit` — `create` fails with `IntegrityError`, `Failure` is swallowed (no exception), asserts `rollback` awaited once and `commit` not awaited on repo path. Covers poisoned-commit path `webhooks/service.py:141` etc. where `Failure` is swallowed and `get_postgres_db` would otherwise `commit()`. PASSED.
 
 ## 2. Shared spine — extend `app/shared/result/`, do not add a package
 
