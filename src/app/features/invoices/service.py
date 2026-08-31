@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from returns.result import Failure
@@ -10,7 +11,16 @@ from returns.result import Failure
 from app.config import get_settings
 from app.features.audit.model import AuditAction, AuditLog
 from app.shared.result import AppError, app_error_to_exception, log_expected_failure
-from app.utils import NotFoundException, ValidationException, logger
+from app.shared.result.errors import ErrorKind, FeatureError
+from app.utils import (
+    ConflictException,
+    ExternalServiceException,
+    InfrastructureException,
+    NotFoundException,
+    ValidationException,
+    logger,
+)
+from app.utils.codes import ErrorCode
 
 from .dto import InvoiceLineItemDTO, InvoiceResponse
 from .invoice_void import InvoiceVoid
@@ -88,11 +98,51 @@ def _invoice_to_response(invoice: Invoice) -> InvoiceResponse:
 
 
 def _repo_failure(error: object, operation: str) -> None:
-    # Handles both AppError (pre-migration) and SubscriptionError (migrated subscriptions)
+    # Handles both AppError (pre-migration) and SubscriptionError (FeatureError)
     if isinstance(error, AppError):
         log_expected_failure(error, operation=operation)
         raise app_error_to_exception(error)
-    # SubscriptionError is FeatureError — log and raise generic
+    if isinstance(error, FeatureError):
+        # Preserve typed error classification — do not collapse to 422
+        kind: ErrorKind = getattr(error, "kind", ErrorKind.VALIDATION)  # type: ignore[attr-defined]
+        retryable: bool = bool(getattr(error, "retryable", False))
+        code_val = getattr(error, "code", ErrorCode.VALIDATION_ERROR)
+        code_str = code_val.value if isinstance(code_val, StrEnum) else str(code_val)
+        details = getattr(error, "details", None)
+        message = getattr(error, "message", str(error))
+        logger.bind(
+            operation=operation, error_code=code_str, kind=str(kind), details=details
+        ).warning(message)
+        if kind == ErrorKind.NOT_FOUND:
+            identifier: str | None = None
+            if isinstance(details, dict):
+                identifier = details.get("subscription_id") or details.get("plan_id")  # type: ignore[union-attr]
+            raise NotFoundException(
+                resource=message,
+                identifier=str(identifier) if identifier else "",
+                error_code=code_str,
+            )
+        if kind == ErrorKind.VALIDATION:
+            raise ValidationException(
+                detail=message, error_code=code_str, data=details if isinstance(details, dict) else None
+            )
+        if kind == ErrorKind.CONFLICT:
+            raise ConflictException(
+                detail=message, error_code=code_str, data=details if isinstance(details, dict) else None
+            )
+        if kind == ErrorKind.INFRASTRUCTURE:
+            raise InfrastructureException(
+                detail=message, error_code=code_str, retryable=retryable, data=details if isinstance(details, dict) else None
+            )
+        if kind == ErrorKind.EXTERNAL_SERVICE:
+            raise ExternalServiceException(
+                service=getattr(error, "source", "external") or "external",
+                detail=message,
+                error_code=code_str,
+            )
+        raise ValidationException(
+            detail=message, error_code=code_str, data=details if isinstance(details, dict) else None
+        )
     logger.bind(operation=operation, error=str(error)).warning("repository failure")
     raise ValidationException(str(getattr(error, "message", str(error))))
 
@@ -200,7 +250,7 @@ class InvoiceService:
             if not isinstance(update_result, Failure):
                 created.pdf_url = pdf_url
 
-        await self.audit.create(
+        audit_result = await self.audit.create(
             AuditLog(
                 entity_type="invoice",
                 entity_id=str(created.id),
@@ -213,6 +263,12 @@ class InvoiceService:
                 },
             )
         )
+        if isinstance(audit_result, Failure):
+            # ponytail: audit shares the same session/transaction as the invoice.
+            # If audit flush fails, repository rollback has already undone the invoice
+            # (sourcery broader_impact, ADR D8). Swallowing would commit a clean tx
+            # with no invoice persisted, so we must surface the failure.
+            _repo_failure(audit_result.failure(), "generate_for_payment_audit")
         return created
 
     async def generate_receipt_for_payment(
@@ -289,7 +345,7 @@ class InvoiceService:
             raise ValidationException(msg)
         return _invoice_to_response(invoice)
 
-    async def void_invoice(  # noqa: PLR0912
+    async def void_invoice(  # noqa: PLR0912, PLR0915
         self, invoice_id: str | UUID, dto: VoidInvoiceDTO, *, user_id: str
     ) -> InvoiceResponse:
         """Void an issued/paid invoice and optionally reissue (Requirement 41)."""
@@ -331,7 +387,7 @@ class InvoiceService:
             _repo_failure(void_result.failure(), "void_invoice")
         voided: Invoice = void_result.unwrap()
 
-        await self.audit.create(
+        audit_void = await self.audit.create(
             AuditLog(
                 entity_type="invoice",
                 entity_id=str(voided.id),
@@ -340,6 +396,8 @@ class InvoiceService:
                 changes={"reason": dto.reason, "description": dto.description},
             )
         )
+        if isinstance(audit_void, Failure):
+            _repo_failure(audit_void.failure(), "void_invoice_audit")
 
         if dto.reissue:
             sub_result = await self.subscriptions.find_by_id(voided.subscription_id)
@@ -367,7 +425,7 @@ class InvoiceService:
                 raise ValidationException(msg)
 
             reissued = await self.generate_for_payment(payment, subscription, plan)
-            await self.audit.create(
+            audit_reissue = await self.audit.create(
                 AuditLog(
                     entity_type="invoice",
                     entity_id=str(reissued.id),
@@ -376,6 +434,8 @@ class InvoiceService:
                     changes={"original_invoice_id": str(voided.id)},
                 )
             )
+            if isinstance(audit_reissue, Failure):
+                _repo_failure(audit_reissue.failure(), "void_invoice_reissue_audit")
             return _invoice_to_response(reissued)
         return _invoice_to_response(voided)
 

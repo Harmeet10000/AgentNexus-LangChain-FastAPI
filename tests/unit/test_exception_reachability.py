@@ -5,7 +5,7 @@ import pathlib
 
 
 def _collect_raises(path: pathlib.Path) -> set[str]:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     tree = ast.parse(text)
     raises = set()
     for node in ast.walk(tree):
@@ -17,7 +17,7 @@ def _collect_raises(path: pathlib.Path) -> set[str]:
 
 
 def _collect_excepts(path: pathlib.Path) -> set[str]:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     tree = ast.parse(text)
     excs = set()
     for node in ast.walk(tree):
@@ -31,10 +31,16 @@ def _collect_excepts(path: pathlib.Path) -> set[str]:
     return excs
 
 
+def _is_reachable(raised: str, excepts: set[str], ancestor_map: dict[str, set[str]]) -> bool:
+    if raised in excepts:
+        return True
+    for ancestor in ancestor_map.get(raised, set()):
+        if ancestor in excepts:
+            return True
+    return False
+
+
 def test_reachability_over_ancestors():
-    # 6.1: TaskDispatchError is base with 0 raises, its subclasses are raised
-    # If we measured exact names, TaskDispatchError would be reported as unreachable (0 raises, 1 catch via CeleryError)
-    # But ancestors measurement should not flag it
     raises = set()
     excepts = set()
     for p in pathlib.Path("src").rglob("*.py"):
@@ -42,34 +48,49 @@ def test_reachability_over_ancestors():
             continue
         raises |= _collect_raises(p)
         excepts |= _collect_excepts(p)
-    # Abstract base with 0 raises should not be reported as unreachable
-    # TaskDispatchError is example — check that we don't flag bases with 0 raises
-    # Our simple check: if a class has no raises, it's not considered unreachable
-    assert "TaskDispatchError" not in raises or "TaskDispatchError" in excepts or True  # base not raised, not flagged
-    # The real check: UnregisteredTaskError and TaskPayloadValidationError are raised, and are reachable via CeleryError ancestor
-    # So they should not be flagged as unreachable even though no except names them exactly
-    # This is the correct re-rooting outcome (celery_registry)
-    assert True  # placeholder for correct measurement
+    assert "UnregisteredTaskError" in raises, "UnregisteredTaskError should be raised"
+    assert "TaskPayloadValidationError" in raises, "TaskPayloadValidationError should be raised"
+    assert "CeleryError" in excepts, "CeleryError should be caught (covers TaskDispatchError family)"
+    assert "TaskDispatchError" not in raises, "TaskDispatchError base should not be raised directly"
+    from app.connections.celery import TaskDispatchError, TaskPayloadValidationError, UnregisteredTaskError
+    ancestor_map: dict[str, set[str]] = {}
+    for cls in (UnregisteredTaskError, TaskPayloadValidationError, TaskDispatchError):
+        ancestor_map[cls.__name__] = {c.__name__ for c in cls.__mro__[1:]}
+    assert "UnregisteredTaskError" not in excepts
+    assert "TaskPayloadValidationError" not in excepts
+    assert _is_reachable("UnregisteredTaskError", excepts, ancestor_map), "UnregisteredTaskError reachable via CeleryError"
+    assert _is_reachable("TaskPayloadValidationError", excepts, ancestor_map), "TaskPayloadValidationError reachable via CeleryError"
+    unreachable = {r for r in raises if r in ancestor_map and not _is_reachable(r, excepts, ancestor_map)}
+    assert "UnregisteredTaskError" not in unreachable
+    assert "TaskPayloadValidationError" not in unreachable
 
 
 def test_abstract_base_not_reported_as_unreachable():
-    # 6.9: deliberately-unraised abstract base is not reported
-    # Create a base with no raises, ensure our logic doesn't flag it
-    assert True
+    raises = set()
+    excepts = set()
+    for p in pathlib.Path("src").rglob("*.py"):
+        if p.stat().st_size == 0:
+            continue
+        raises |= _collect_raises(p)
+        excepts |= _collect_excepts(p)
+    assert "TaskDispatchError" not in raises
+    from app.connections.celery import TaskDispatchError, TaskPayloadValidationError, UnregisteredTaskError
+    ancestor_map: dict[str, set[str]] = {}
+    for cls in (UnregisteredTaskError, TaskPayloadValidationError, TaskDispatchError):
+        ancestor_map[cls.__name__] = {c.__name__ for c in cls.__mro__[1:]}
+    def is_reachable(name: str) -> bool:
+        return _is_reachable(name, excepts, ancestor_map)
+    unreachable = {r for r in raises if not is_reachable(r)}
+    assert "TaskDispatchError" not in unreachable, "abstract base with 0 raises must not be flagged"
+    assert is_reachable("TaskDispatchError"), "TaskDispatchError reachable via CeleryError ancestor"
 
 
 def test_catch_order_narrowest_first():
-    # 6.8: every catch site over nine chains narrowest-first
-    # Check lifespan and global_exception_handler ordering
-    text = pathlib.Path("src/app/middleware/global_exception_handler.py").read_text()
-    # Should be APIException before RequestValidationError before StarletteHTTPException before catch-all
+    text = pathlib.Path("src/app/middleware/global_exception_handler.py").read_text(encoding="utf-8")
     api_idx = text.find("isinstance(exc, APIException)")
     req_idx = text.find("isinstance(exc, RequestValidationError)")
     star_idx = text.find("isinstance(exc, StarletteHTTPException)")
     catch_all_idx = text.find("status.HTTP_500_INTERNAL_SERVER_ERROR")
     assert api_idx < req_idx < star_idx < catch_all_idx
-
-    # Check lifespan ordering: narrower before broader (e.g., CogneeDimensionMismatchError before Exception)
-    text2 = pathlib.Path("src/app/lifecycle/lifespan.py").read_text()
-    # CogneeDimensionMismatchError is hard-fail before generic Exception for Cognee
+    text2 = pathlib.Path("src/app/lifecycle/lifespan.py").read_text(encoding="utf-8")
     assert text2.find("CogneeDimensionMismatchError") < text2.find("except Exception as exc:  # noqa: BLE001 — optional dependency")

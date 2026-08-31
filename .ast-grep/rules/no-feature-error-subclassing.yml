@@ -6,7 +6,9 @@ note: |
   feature-error-contract — concrete error types inherit FeatureError directly
   and must be declared in src/app/features/<name>/errors.py. Subclassing
   FeatureError elsewhere makes the union open and breaks exhaustiveness.
-  This rule flags BadFeatureError as example; real check is path-based.
 rule:
   kind: class_definition
-  regex: BadFeatureError
+  regex: '\(FeatureError'
+ignores:
+  - src/app/features/*/errors.py
+  - .ast-grep/fixtures/no-feature-error-subclassing/permit.py

@@ -27,17 +27,17 @@ def test_db_error_split():
     ]
     auth = ["src/app/features/auth/repository.py"]
     # Count ErrorCode.DATABASE_ERROR with retryable=False (relational dead)
-    rel_dead = _count(r"DATABASE_ERROR.*retryable=False", relational)  # type: ignore[arg-type]
-    # Alternative: count all DATABASE_ERROR in relational (49)
+    rel_dead = _count(r"(?s)DATABASE_ERROR.*?retryable=False", relational)  # type: ignore[arg-type]
+    # Alternative: count all DATABASE_ERROR in relational (49 + 6 for plans already converted)
     rel_total = _count(r"DATABASE_ERROR", relational)
     auth_total = _count(r"DATABASE_ERROR", auth)
-    # 49 total relational (8 repos); 7 auth
-    assert rel_total == 49, f"relational {rel_total} != 49"
+    # 49 original + 6 plans already had enum = 55 total relational; 7 auth
+    assert rel_total == 55, f"relational {rel_total} != 55 (49+6 plans)"
     assert auth_total == 7, f"auth {auth_total} != 7"
     # All relational should be retryable=False
-    assert rel_dead == 49, f"relational dead {rel_dead} != 49"
+    assert rel_dead == 55, f"relational dead {rel_dead} != 55"
     # Auth should have 0 retryable=False (all retryable)
-    auth_dead = _count(r"DATABASE_ERROR.*retryable=False", auth)
+    auth_dead = _count(r"(?s)DATABASE_ERROR.*?retryable=False", auth)
     assert auth_dead == 0, f"auth dead {auth_dead} != 0"
 
 

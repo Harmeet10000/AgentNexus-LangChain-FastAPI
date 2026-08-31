@@ -12,7 +12,15 @@ from app.features.audit.model import AuditAction, AuditLog
 from app.features.payments.clients.razorpay_client import RazorpayClient
 from app.features.payments.dto import RefundRequestDTO
 from app.features.payments.model import PaymentStatus
-from app.shared.result.errors import ErrorKind, http_status_for_kind
+from app.shared.result.errors import (
+    ConflictAppError,
+    ErrorKind,
+    ExternalServiceAppError,
+    InfrastructureAppError,
+    NotFoundAppError,
+    ValidationAppError,
+    http_status_for_kind,
+)
 from app.utils import logger
 
 from .dto import (
@@ -25,6 +33,7 @@ from .errors import (
     SubscriptionInvalidTransitionError,
     SubscriptionNotFoundError,
     SubscriptionPlanNotFoundError,
+    SubscriptionTransientInfrastructureError,
     SubscriptionValidationError,
     SubscriptionVersionConflictError,
 )
@@ -108,6 +117,8 @@ def subscription_error_to_http_status(error: SubscriptionError) -> int:
             return http_status_for_kind(ErrorKind.NOT_FOUND)
         case SubscriptionInfrastructureError():
             return http_status_for_kind(ErrorKind.INFRASTRUCTURE, retryable=error.retryable)
+        case SubscriptionTransientInfrastructureError():
+            return http_status_for_kind(ErrorKind.INFRASTRUCTURE, retryable=error.retryable)
         case SubscriptionValidationError():
             return http_status_for_kind(ErrorKind.VALIDATION)
         case _ as unreachable:
@@ -164,14 +175,62 @@ class SubscriptionService:
     async def _load_plan(self, plan_id: str | UUID) -> SubscriptionResult[Plan]:
         result = await self.plans.find_by_id(plan_id)
         if isinstance(result, Failure):
-            # Translate plan repo failure (AppResult) into subscription error
             err = result.failure()
+            # Preserve plan infrastructure/validation semantics — do not collapse to not-found
+            if isinstance(err, InfrastructureAppError):
+                error_type = (
+                    SubscriptionTransientInfrastructureError
+                    if err.retryable
+                    else SubscriptionInfrastructureError
+                )
+                return Failure(
+                    error_type(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                        operation="load_plan",
+                    )
+                )
+            if isinstance(err, NotFoundAppError):
+                return Failure(
+                    SubscriptionPlanNotFoundError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                        plan_id=str(plan_id),
+                    )
+                )
+            if isinstance(err, ValidationAppError):
+                return Failure(
+                    SubscriptionValidationError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                    )
+                )
+            if isinstance(err, ConflictAppError):
+                return Failure(
+                    SubscriptionValidationError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                    )
+                )
+            if isinstance(err, ExternalServiceAppError):
+                return Failure(
+                    SubscriptionTransientInfrastructureError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                        operation="load_plan",
+                    )
+                )
             return Failure(
-                SubscriptionPlanNotFoundError(
+                SubscriptionTransientInfrastructureError(
                     message=getattr(err, "message", "Plan not found"),
                     details={"plan_id": str(plan_id), "error": str(err)},
                     source="subscription_service",
-                    plan_id=str(plan_id),
+                    operation="load_plan",
                 )
             )
         plan = result.unwrap()
@@ -708,7 +767,7 @@ class SubscriptionService:
         except Exception as exc:  # noqa: BLE001 — trial extension flush may fail
             await self.session.rollback()
             return Failure(
-                SubscriptionInfrastructureError(
+                SubscriptionTransientInfrastructureError(
                     message="Database error while creating trial extension",
                     details={"subscription_id": str(subscription.id), "error": str(exc)},
                     source="subscription_service",

@@ -1,3 +1,6 @@
-# permit: same-feature import is allowed — this file is audit feature, so audit errors import is ok
-# we model as no cross import here to keep scan clean
+# permit: same-feature relative import — allowed (subscriptions/service.py)
+from .errors import SubscriptionNotFoundError
+from .errors import SubscriptionCode
+
+# permit: shared result import — allowed
 from app.shared.result import FeatureError
