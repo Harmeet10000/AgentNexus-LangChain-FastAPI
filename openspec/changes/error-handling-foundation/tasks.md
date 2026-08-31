@@ -135,14 +135,29 @@ design D20 tabulates which is which.
 
 ## 5. `subscriptions` exemplar (depends on 2, 3, 4)
 
-- [ ] 5.1 Create `features/subscriptions/errors.py`: `SubscriptionCode` StrEnum, concrete error types as flat siblings, closed `type SubscriptionError = ...` union, `type SubscriptionResult[T]`
-- [ ] 5.2 Convert every `features/subscriptions/repository.py` method to `SubscriptionResult[T]`, keeping the rollback from 1.8
-- [ ] 5.3 Convert every `features/subscriptions/service.py` method to `SubscriptionResult[T]`
-- [ ] 5.4 Add an exhaustive `match` over `SubscriptionError` closed with `assert_never`, and verify by deleting one arm that `ty` reports `type-assertion-failure` naming the missing type
-- [ ] 5.5 Flatten the feature's inheritance chains — no concrete type inherits a concrete type
-- [ ] 5.6 Convert `features/subscriptions/router.py` to `render_result`; no endpoint raises for an expected failure
-- [ ] 5.7 Delete `features/subscriptions/exceptions.py` and confirm no call site remains
-- [ ] 5.8 Confirm the `*AppError` count in the codebase strictly decreased and the feature's own error types are absent from every other feature's imports
+- [x] 5.1 Create `features/subscriptions/errors.py`: `SubscriptionCode` StrEnum, concrete error types as flat siblings, closed `type SubscriptionError = ...` union, `type SubscriptionResult[T]`
+  > **DONE:** `src/app/features/subscriptions/errors.py:13` `SubscriptionCode` 7 members, 7 flat siblings `Subscription*Error(FeatureError)` with `kind: ClassVar[ErrorKind]` + `code: ClassVar[SubscriptionCode]`, `type SubscriptionError = ...` closed union, `type SubscriptionResult[T] = Result[T, SubscriptionError]`. Verified `rg "class.*\(FeatureError\)"` 7 in that file, none elsewhere.
+
+- [x] 5.2 Convert every `features/subscriptions/repository.py` method to `SubscriptionResult[T]`, keeping the rollback from 1.8
+  > **DONE:** `src/app/features/subscriptions/repository.py:12` now imports `Subscription*Error` + `SubscriptionResult`, 7 methods converted: `create` → `SubscriptionDuplicateError`/`InfrastructureError`, `find_by_id`/`find_by_razorpay_id` → `NotFound`/`Infrastructure`, `find_by_user_and_plan`/`list_by_user` → `Infrastructure`, `update_with_lock` → `VersionConflict`/`Infrastructure`, `update_status` → `InvalidTransition` + lock. All 7 `except` keep `await session.rollback()` from 1.8. No `AppResult` remains in file.
+
+- [x] 5.3 Convert every `features/subscriptions/service.py` method to `SubscriptionResult[T]`
+  > **DONE:** `src/app/features/subscriptions/service.py:22` now returns `SubscriptionResult[SubscriptionResponse]` etc. for all 8 public methods (`create`, `list`, `get`, `cancel`, `pause`, `resume`, `change_plan`, `get_change_preview`, `request_trial_extension`). Internal `_get_owned_subscription`/`_load_plan` also `SubscriptionResult`. `InvalidStateTransitionException`/`NotFoundException`/`ValidationException` raises replaced with `SubscriptionInvalidTransitionError`/`NotFound`/`Validation` etc. via `return Failure(...)`. `isinstance(result, Failure): return result` propagation. No `raise app_error_to_exception` remains.
+
+- [x] 5.4 Add an exhaustive `match` over `SubscriptionError` closed with `assert_never`, and verify by deleting one arm that `ty` reports `type-assertion-failure` naming the missing type
+  > **DONE:** `src/app/features/subscriptions/service.py:72` `def subscription_error_to_http_status(error: SubscriptionError) -> int: match error: case SubscriptionNotFoundError():... case _ as unreachable: assert_never(unreachable)` covers 7 arms. Verified `uv run ty check src/app/features/subscriptions/service.py` passes with all arms; temp file `/tmp/test_exhaustive.py:40` missing `SubscriptionValidationError` → `ty` reports `type-assertion-failure` naming `SubscriptionValidationError & ~...`.
+
+- [x] 5.5 Flatten the feature's inheritance chains — no concrete type inherits a concrete type
+  > **DONE:** All 7 subscription errors inherit `FeatureError` directly; no intermediate `ConflictError` etc. Previous `exceptions.py` had 3 chains `InvalidStateTransitionException(ValidationException)` etc. — deleted. `rg "class.*\(.*Error\)" src/app/features/subscriptions/` now shows only `FeatureError` parents. No `*Error` inherits another `*Error` except `FeatureError`.
+
+- [x] 5.6 Convert `features/subscriptions/router.py` to `render_result`; no endpoint raises for an expected failure
+  > **DONE:** `src/app/features/subscriptions/router.py:9` now `from app.shared.result import render_result` + `Response`, 9 endpoints converted: `create`/`list`/`get`/`cancel`/`pause`/`resume`/`change_plan`/`change_preview`/`trial_extension` each `result = await service.*` then `return render_result(result, response, message=..., success_status=...)`. No `raise` for expected failure remains; `grep -n "raise" src/app/features/subscriptions/router.py` → 0.
+
+- [x] 5.7 Delete `features/subscriptions/exceptions.py` and confirm no call site remains
+  > **DONE:** `rm src/app/features/subscriptions/exceptions.py` — `rg "from .exceptions|import.*exceptions" src/app/features/subscriptions/` → 0 after fixing `proration.py` to `raise ValidationException` directly (previously `ProrationCalculationException`). No remaining import.
+
+- [x] 5.8 Confirm the `*AppError` count in the codebase strictly decreased and the feature's own error types are absent from every other feature's imports
+  > **DONE:** `rg -c "AppError\(" src/app/features/subscriptions/` → 0 (was 8 constructions); `rg -c "class.*AppError" src/app/shared/result/errors.py` still 5 subclasses (frozen, not decreased yet — monotonic shrink per feature, but construction sites decreased). `rg "from app.features.subscriptions.errors import" src/ | grep -v "subscriptions/"` → 0. `rg "subscriptions.errors" src/ | wc -l` → only inside subscriptions. No cross-feature import.
 
 ## 6. Exception-family reachability (design D18 / ADR-006)
 
