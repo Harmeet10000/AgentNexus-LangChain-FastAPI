@@ -64,24 +64,29 @@ file marks. **Never commit to `main`.**
 
 ### What has already landed
 
-Four commits on `feature/error-handling-foundation`, none merged to `main` yet:
+Six commits on `feature/error-handling-foundation`, none merged to `main` yet:
 
 | Commit | Covers |
 |---|---|
 | `d5854a0` `fix(repositories): roll back before returning Failure…` | section 1 — 9 repositories |
 | `0ca39ea`, `789b331` `chore(openspec): …` | ticks + `DONE:` blocks for 1.1–1.13 |
 | `58422c1` `feat(result): shared spine + renderer` | sections 2 and 4, **plus task 3.1** |
+| `853fe25` `chore(openspec): add planning artifacts…` | the six artifacts + a no-match fixture |
+| `7074738` `refactor(db): replace DB_ERROR literals…` | **tasks 7.1 and 7.2 in code — still unticked** |
 
-Sections 2, 4 and task 3.1 arrived in one commit, so the original PR 1 / 2 / 3 split no
-longer maps onto the history — do not try to retrofit it. Open **one PR for the branch
-as it stands** (sections 1, 2, 4, task 3.1 — 26 tasks) and split only what remains:
+Two warnings from that history. `7074738` changed nine repositories and no checkbox, so
+`tasks.md` understates progress: verify 7.1/7.2 against the code before redoing them, and
+tick them with a `DONE:` block once you have. And sections 2, 4 and task 3.1 arrived in
+one commit, so the original PR 1 / 2 / 3 split no longer maps onto the history — do not
+try to retrofit it. Open **one PR for the branch as it stands** and split only what
+remains:
 
 | # | Branch | Sections | Tasks | Depends on |
 |---|---|---|---|---|
-| A | `feature/error-handling-foundation` (exists) | 1, 2, 4, 3.1 | 26 | nothing — merge first |
+| A | `feature/error-handling-foundation` (exists) | 1, 2, 4, 3.1, 7.1–7.2 | 28 | nothing — merge first |
 | B | `feat/enforcement-gates` | 3.2–3.11 | 10 | A |
 | C | `feat/subscriptions-exemplar` | 5 | 8 | B |
-| D | `refactor/error-classification-and-docs` | 6, 7, 8 | 23 | A (C not required) |
+| D | `refactor/error-classification-and-docs` | 6, 7.3–7.7, 8 | 21 | A (C not required) |
 | E | `chore/scope-exemptions-and-examples` | 9 | 16 | D — task 9.3 must ship in the same commit as 7.5 |
 
 Section 10 (verification) runs on **every** PR. Section 11 (handoff notes) goes in E.
@@ -96,13 +101,18 @@ E is small and mostly configuration, but do not fold it into D — task 9.1 remo
 
 **Two things about PR A specifically.** Task 3.1's regex fix to
 `.ast-grep/rules/no-match-on-result.yml` is *correct* — verified both ways, see §6 — but
-it shipped **no fixture pair**, and ADR-005 requires one with every rule this change
-touches. A corrected rule is the exact case that ADR was written for. Add the fixture
-before opening A; do not revert the rule, it works.
+check that its fixture pair is actually committed; ADR-005 requires one with every rule
+this change touches, and a corrected rule is the exact case that ADR was written for.
+That is task 3.2. Do not revert the rule, it works.
 
-And every planning artifact except `tasks.md` is still **untracked** (`proposal.md`,
-`design.md`, `adrs.md`, `review.md`, `specs/`, this file). Commit them in A, or a
-reviewer — and the next agent — gets 97 ticked checkboxes with no plan behind them.
+And **re-check `tasks.md`'s section list before you trust it.** `853fe25` committed the
+planning artifacts, which fixed the original problem — the branch now carries its
+proposal, ADRs and spec deltas rather than bare checkboxes. But the `tasks.md` in that
+commit was the **79-task, 10-section** version: section 9, the renumbering, and tasks
+10.7 and 11.5 had been lost from it while the specs kept all 45 requirements. Restored
+since. `grep -n '^## ' tasks.md` must show `## 9. The five later-added directories`,
+`## 10. Verification`, `## 11. Handoff`, and 97 total checkboxes. If it shows
+`## 9. Verification`, you are on the narrowed copy and section 9's 16 tasks are missing.
 
 Branch prefixes match the repo's history — `fix/`, `feat/`, `refactor/`, `chore/`.
 Commit messages are conventional-commit scoped, e.g.
