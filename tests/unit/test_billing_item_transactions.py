@@ -39,6 +39,7 @@ def test_later_item_rollback_does_not_discard_prior_commit() -> None:
 
     _run(run_batch())
 
+    assert session_factory.call_count == 2
     first.commit.assert_awaited_once()
     first.rollback.assert_not_awaited()
     second.rollback.assert_awaited_once()
