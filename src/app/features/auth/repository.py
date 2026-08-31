@@ -120,7 +120,7 @@ class UserRepository:
         except PyMongoError as exc:
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
                     message="Database error while finding user by email",
                     details={"email": email, "error": str(exc)},
                     source="auth_repository",
@@ -146,7 +146,7 @@ class UserRepository:
         except PyMongoError as exc:
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
                     message="Database error while finding user by verification token hash",
                     details={"token_hash": token_hash, "error": str(exc)},
                     source="auth_repository",
@@ -172,7 +172,7 @@ class UserRepository:
         except PyMongoError as exc:
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
                     message="Database error while finding user by reset token hash",
                     details={"token_hash": token_hash, "error": str(exc)},
                     source="auth_repository",
@@ -196,7 +196,7 @@ class UserRepository:
         except PyMongoError as exc:
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
                     message="Database error while creating user",
                     details={"email": user.email, "error": str(exc)},
                     source="auth_repository",
@@ -212,7 +212,7 @@ class UserRepository:
         except PyMongoError as exc:
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
                     message="Database error while saving user",
                     details={"user_id": str(user.id), "error": str(exc)},
                     source="auth_repository",
@@ -227,7 +227,7 @@ class UserRepository:
         except PyMongoError as exc:
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
                     message="Database error while checking email existence",
                     details={"email": email, "error": str(exc)},
                     source="auth_repository",
@@ -262,7 +262,7 @@ class UserRepository:
         except PyMongoError as exc:
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
                     message="Database error during OAuth user find-or-create",
                     details={"email": email, "error": str(exc)},
                     source="auth_repository",
