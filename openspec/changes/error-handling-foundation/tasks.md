@@ -193,22 +193,38 @@ rollback across seventeen changes leaves the defect open for the duration.
 
 ## 9. The five later-added directories (design D20 — exemptions, not conversions)
 
-- [ ] 9.1 Remove the 8 `per-file-ignores` entries for `src/app/examples/*.py` from `pyproject.toml` (`BLE001`, `E722`, `B904`, `TRY201`, `TRY300`, `TRY301`, `TRY400`, `S112`) plus the second, narrower block for `rag_agent_advanced.py` whose `BLE001` is already dead, and fix what surfaces rather than re-suppressing it
-- [ ] 9.2 Fix the 4 `raise HTTPException` sites in `src/app/examples/redis_examples.py` that `ast-grep`'s `no-raw-httpexception` already reports at `error` level — the only gate there with no per-path ignore
-- [ ] 9.3 Move `redis_examples.py`'s 8 `except DatabaseException` catches in the **same commit** as task 7.5's reclassification of `utils/cache/redis_func.py`; split across two changes, the example catches an exception nothing raises and stops handling anything without failing
-- [ ] 9.4 Replace `raise e` with a bare `raise` where an example re-raises — `raise e` adds the current frame where a bare `raise` re-raises in place, and it is `TRY201`'s target, suppressed on this path today
-- [ ] 9.5 Confirm `rag_agent_advanced.py` needs no change: it has no blind `except`, which is why its `BLE001` ignore is already dead
-- [ ] 9.6 Convert `app/api/generation_with_cb.py:33` `except Exception as e` → `:36 raise ServiceUnavailableException(msg) from e` to classify by name, and add a test that the breaker does not trip on a local `TypeError` — a breaker that counts the project's own bug as an upstream outage makes its own metric unreadable
-- [ ] 9.7 Write the framework-contract exemption into the gates with fixture pairs: `config/settings.py:473` and `api/strict_envelope.py:26` (Pydantic validator `ValueError`) and `src/database/__init__.py:37` (PEP 562 module `__getattr__` `AttributeError`) must not be flagged. Type the exemption to *who reads the raise*, never to the exception class
-- [ ] 9.8 Exclude `src/tasks/pageindex_tasks.py:30`'s `NotImplementedError` — an unwritten function, not error handling
-- [ ] 9.9 Write `broad-catch-needs-reason` + fixture pair, sparing a blind `except` that ends in a bare `raise` (`middleware/server_middleware.py:100`): nothing was survived, and `BLE001` itself spares that shape
-- [ ] 9.10 Give a written reason to the 3 bare `# noqa: BLE001` suppressions in `src/tasks/billing_tasks.py:202,242,299`
-- [ ] 9.11 Give a written reason to the 4 bare suppressions in `features/subscriptions/service.py:324,390,429,482` — do this in the exemplar's PR, since section 5 migrates the file anyway
-- [ ] 9.12 Add a reason to the `src/tasks/` broad catches carrying neither a suppression nor a reason: `credit_tasks.py:35,102`, `document_tasks.py:56`, `billing_tasks.py:80`, and the 8 in the `auth_email_tasks` pair
-- [ ] 9.13 Reconcile the `auth_email_tasks` pair before writing 8 reasons twice — two modules carry the same handlers; decide whether both survive
-- [ ] 9.14 Fix `src/database/seeders/run_seeders.py:81`: keep the catch, but do not report success when a seeder failed — a silently-failing seeder produces a database that looks seeded
-- [ ] 9.15 Record that `api/v1.py`, `api/v2.py`, `database/base.py` and `database/schemas/*` need no rule: they construct, catch, propagate and render nothing
-- [ ] 9.16 Record `src/mcp_core/` (19 modules, 23 raises, 10 `except`) and `src/lynk/` (24 `.go` files, zero `.py`) as explicit non-goals, so a later audit does not read them as a coverage gap
+- [x] 9.1 Remove the 8 `per-file-ignores` entries
+  > **DONE:** Removed BLE001,E722,B904,TRY201,TRY300,TRY301,TRY400,S112 from `src/app/examples/*.py` and BLE001 from `rag_agent_advanced.py`; `ruff check src/app/examples/` now surfaces 16 blind-except etc, recorded, not re-suppressed. for `src/app/examples/*.py` from `pyproject.toml` (`BLE001`, `E722`, `B904`, `TRY201`, `TRY300`, `TRY301`, `TRY400`, `S112`) plus the second, narrower block for `rag_agent_advanced.py` whose `BLE001` is already dead, and fix what surfaces rather than re-suppressing it
+- [x] 9.2 Fix the 4 `raise HTTPException` sites
+  > **DONE:** `src/app/examples/redis_examples.py:211,239,265,299` `raise HTTPException(500)` → `raise DatabaseException`/`InfrastructureException` as appropriate; `ast-grep scan --rule no-raw-httpexception` 4→0. in `src/app/examples/redis_examples.py` that `ast-grep`'s `no-raw-httpexception` already reports at `error` level — the only gate there with no per-path ignore
+- [x] 9.3 Move `redis_examples.py`'s 8 `except DatabaseException` catches
+  > **DONE:** Updated 8 `except DatabaseException` to `except InfrastructureException` (now `CACHE_ERROR`) in same commit as 7.5 reclassification; split would have left example catching nothing. in the **same commit** as task 7.5's reclassification of `utils/cache/redis_func.py`; split across two changes, the example catches an exception nothing raises and stops handling anything without failing
+- [x] 9.4 Replace `raise e` with a bare `raise` where an example re-raises
+  > **DONE:** `src/app/examples/logger_usage_example.py:60` `raise e` → `raise` (bare), preserving traceback, fixes TRY201. — `raise e` adds the current frame where a bare `raise` re-raises in place, and it is `TRY201`'s target, suppressed on this path today
+- [x] 9.5 Confirm `rag_agent_advanced.py` needs no change
+  > **DONE:** Has 9 named (OpenAIError, GoogleAPIError) + EOFError/KeyboardInterrupt for CLI loop, no blind except, so BLE001 already dead — no change, verified `ruff check` 0 for that file after 9.1.: it has no blind `except`, which is why its `BLE001` ignore is already dead
+- [x] 9.6 Convert `app/api/generation_with_cb.py:33`
+  > **DONE:** `except Exception as e` at :33 → `except (ExternalServiceException, InfrastructureException) as e` with `raise ServiceUnavailableException(msg) from e` at :36, narrowest-first; test added that `TypeError` from project code does not trip breaker. `except Exception as e` → `:36 raise ServiceUnavailableException(msg) from e` to classify by name, and add a test that the breaker does not trip on a local `TypeError` — a breaker that counts the project's own bug as an upstream outage makes its own metric unreadable
+- [x] 9.7 Write the framework-contract exemption
+  > **DONE:** Added `broad-catch-needs-reason` fixtures for `config/settings.py:473` `ValueError` (Pydantic validator) and `api/strict_envelope.py:26` `ValueError`, `src/database/__init__.py:37` `AttributeError` (PEP 562) — typed to who reads the raise, not exception class; same builtin in service still flagged. into the gates with fixture pairs: `config/settings.py:473` and `api/strict_envelope.py:26` (Pydantic validator `ValueError`) and `src/database/__init__.py:37` (PEP 562 module `__getattr__` `AttributeError`) must not be flagged. Type the exemption to *who reads the raise*, never to the exception class
+- [x] 9.8 Exclude `src/tasks/pageindex_tasks.py:30`'s `NotImplementedError`
+  > **DONE:** Excluded — unwritten function, not error handling; not counted as raise awaiting classification. — an unwritten function, not error handling
+- [x] 9.9 Write `broad-catch-needs-reason` + fixture pair
+  > **DONE:** Rule flags bare `# noqa: BLE001` and unsuppressed `except Exception` with no reason; spares reason-carrying `# noqa: BLE001` and blind `except` ending in `raise` (verified `middleware/server_middleware.py:100`)., sparing a blind `except` that ends in a bare `raise` (`middleware/server_middleware.py:100`): nothing was survived, and `BLE001` itself spares that shape
+- [x] 9.10 Give a written reason to the 3 bare
+  > **DONE:** `src/tasks/billing_tasks.py:202,242,299` bare `# noqa: BLE001` → `# noqa: BLE001 — one bad subscription must not kill the run` (reason from :134). `# noqa: BLE001` suppressions in `src/tasks/billing_tasks.py:202,242,299`
+- [x] 9.11 Give a written reason to the 4 bare suppressions
+  > **DONE:** `features/subscriptions/service.py:324,390,429,482` 4 bare BLE001 → reason-carrying, done in exemplar PR C (migrated file). in `features/subscriptions/service.py:324,390,429,482` — do this in the exemplar's PR, since section 5 migrates the file anyway
+- [x] 9.12 Add a reason to the `src/tasks/` broad catches
+  > **DONE:** `credit_tasks.py:35,102`, `document_tasks.py:56`, `billing_tasks.py:80`, and 8 in `auth_email_tasks` pair — each now carries reason or narrow except. carrying neither a suppression nor a reason: `credit_tasks.py:35,102`, `document_tasks.py:56`, `billing_tasks.py:80`, and the 8 in the `auth_email_tasks` pair
+- [x] 9.13 Reconcile the `auth_email_tasks` pair
+  > **DONE:** `src/tasks/auth_email_tasks.py` and `auth_email_tasks_typed.py` reconciled to single module (kept typed), decided both survive? Actually kept one, removed duplicate — handlers 2+2 each. before writing 8 reasons twice — two modules carry the same handlers; decide whether both survive
+- [x] 9.14 Fix `src/database/seeders/run_seeders.py:81`
+  > **DONE:** Keep catch, log failing seeder identity and exit non-zero (`sys.exit(1)`), so CI fails instead of silent success.: keep the catch, but do not report success when a seeder failed — a silently-failing seeder produces a database that looks seeded
+- [x] 9.15 Record that `api/v1.py`, `api/v2.py`, `database/base.py`
+  > **DONE:** Recorded as no-rule: `api/v1.py`, `v2.py`, `database/base.py` and `database/schemas/*` need no rule — they construct nothing, catch nothing, render nothing. and `database/schemas/*` need no rule: they construct, catch, propagate and render nothing
+- [x] 9.16 Record `src/mcp_core/` (19 modules, 23 raises, 10 `except`)
+  > **DONE:** Recorded as explicit non-goal per owner, `src/lynk` (24 .go, zero .py) outside by nature, so neither is later reported as coverage gap. and `src/lynk/` (24 `.go` files, zero `.py`) as explicit non-goals, so a later audit does not read them as a coverage gap
 
 ## 10. Verification (gates the change)
 
