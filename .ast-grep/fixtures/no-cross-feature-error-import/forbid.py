@@ -1,0 +1,1 @@
+from app.features.subscriptions.errors import SubscriptionNotFoundError

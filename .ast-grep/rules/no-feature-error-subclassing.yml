@@ -1,0 +1,11 @@
+id: no-feature-error-subclassing
+language: python
+severity: error
+message: FeatureError subclasses must live in the owning errors.py
+note: |
+  feature-error-contract — concrete error types inherit FeatureError directly
+  and must be declared in src/app/features/<name>/errors.py. Subclassing
+  FeatureError elsewhere makes the union open and breaks exhaustiveness.
+rule:
+  kind: class_definition
+  regex: \(FeatureError\)
