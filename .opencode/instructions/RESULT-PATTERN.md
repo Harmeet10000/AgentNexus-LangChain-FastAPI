@@ -1,14 +1,18 @@
 # Result / returns Pattern Rules
 
+## Per-Feature Closed Union (ADR-001)
+
+Each feature defines `errors.py` with `FeatureError` flat siblings, `Code` StrEnum, and `type FeatureErrorUnion = A | B | ...` closed with `assert_never` at every consumer. `kind`/`code`/`retryable` are `ClassVar`, never constructor args, and `ErrorKind` (7 members) is the only cross-feature vocabulary. No concrete inherits another concrete — a broader arm before a narrower one shadows silently.
+
 ## Pattern Matching Taxonomy
 
 This codebase uses **3 pattern matching approaches**. This document catalogs each, declares the project standard, and marks which patterns are retired.
 
 ---
 
-### Pattern 1: `isinstance` + `http_error()` — **STANDARD**
+### Pattern 1: `isinstance` + `http_error()` / `render_result()` — **STANDARD**
 
-The single canonical pattern for unwrapping `AppResult[T]` in service-layer code. Expected failures are logged and answered with `http_error()` — the typed error is NOT raised.
+The single canonical pattern for unwrapping `SubscriptionResult[T]` (per-feature `Result[T, SubscriptionError]`) in service-layer code. Expected failures are logged and answered with `http_error()` at service boundaries or `render_result(result, response, ...)` at routers — the typed error is NOT raised. `match`/`case` on `Success`/`Failure` is forbidden (ADR-002).
 
 ```python
 result = await self._user_repo.find_by_email(dto.email)

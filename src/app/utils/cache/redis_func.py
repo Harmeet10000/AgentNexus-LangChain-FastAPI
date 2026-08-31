@@ -20,7 +20,7 @@ from typing import Any, cast
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from app.utils.exceptions import DatabaseException
+from app.utils.exceptions import InfrastructureException
 from app.utils.json_serializer import from_json, to_json_str
 from app.utils.logger import logger
 
@@ -33,10 +33,12 @@ type RedisCommandArgs = list[str]
 # ────────────────────────────────────────────────────────────
 
 
-def _build_database_exception(detail: str, exc: Exception) -> DatabaseException:
+def _build_cache_exception(detail: str, exc: Exception) -> InfrastructureException:
     """Create a normalized database exception with the original error attached."""
 
-    return DatabaseException(detail=detail, original_exc=exc)
+    return InfrastructureException(
+        detail=detail, error_code="CACHE_ERROR", retryable=False, original_exc=exc
+    )
 
 
 def _redis_error_contains(exc: RedisError, message: str) -> bool:
@@ -90,14 +92,14 @@ def serialize_data(value: Any) -> str:
         JSON string
 
     Raises:
-        DatabaseException: If serialization fails
+        InfrastructureException: If serialization fails
     """
     try:
         if isinstance(value, str):
             return value
         return to_json_str(value)
     except Exception as exc:
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to serialize data: {exc!s}",
             exc=exc,
         ) from exc
@@ -113,12 +115,12 @@ def deserialize_data(value: str | bytes) -> Any:
         Deserialized Python object
 
     Raises:
-        DatabaseException: If deserialization fails
+        InfrastructureException: If deserialization fails
     """
     try:
         return from_json(value) if isinstance(value, str) else value
     except Exception as exc:
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to deserialize data: {exc!s}",
             exc=exc,
         ) from exc
@@ -149,14 +151,14 @@ async def set_cache(
         True if cache was set successfully
 
     Raises:
-        DatabaseException: If cache operation fails
+        InfrastructureException: If cache operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
     try:
         string_value = serialize_data(value)
         await _redis_any(redis).set(cache_key, string_value, ex=expire_seconds)
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
@@ -164,7 +166,7 @@ async def set_cache(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to set cache for {object_type}",
             exc=exc,
         ) from exc
@@ -191,13 +193,13 @@ async def get_cache(
         Cached value or None if not found
 
     Raises:
-        DatabaseException: If cache operation fails
+        InfrastructureException: If cache operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
     try:
         result = await _redis_any(redis).get(cache_key)
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
@@ -205,7 +207,7 @@ async def get_cache(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to retrieve cache for {object_type}",
             exc=exc,
         ) from exc
@@ -235,7 +237,7 @@ async def delete_cache(
         True if at least one key was deleted
 
     Raises:
-        DatabaseException: If cache operation fails
+        InfrastructureException: If cache operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
@@ -247,7 +249,7 @@ async def delete_cache(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to delete cache for {object_type}",
             exc=exc,
         ) from exc
@@ -280,7 +282,7 @@ async def execute_pipeline(
         List of results from each operation
 
     Raises:
-        DatabaseException: If pipeline execution fails
+        InfrastructureException: If pipeline execution fails
     """
     try:
         pipeline = _redis_any(redis).pipeline()
@@ -296,7 +298,7 @@ async def execute_pipeline(
             f"Pipeline execution failed with {len(operations)} operations",
             error=str(exc),
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail="Failed to execute Redis pipeline",
             exc=exc,
         ) from exc
@@ -330,7 +332,7 @@ async def set_hash(
         True if hash was set
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
@@ -342,7 +344,7 @@ async def set_hash(
 
         if expire_seconds:
             await redis.expire(cache_key, expire_seconds)
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
@@ -350,7 +352,7 @@ async def set_hash(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to set hash for {object_type}",
             exc=exc,
         ) from exc
@@ -380,13 +382,13 @@ async def get_hash(
         Dictionary with deserialized values, or None if not found
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
     try:
         result = await _redis_any(redis).hgetall(cache_key)
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
@@ -394,7 +396,7 @@ async def get_hash(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to retrieve hash for {object_type}",
             exc=exc,
         ) from exc
@@ -429,14 +431,14 @@ async def update_hash(
         True if hash was updated
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
     try:
         serialized_data = {k: serialize_data(v) for k, v in data.items()}
         await _redis_any(redis).hset(cache_key, mapping=serialized_data)
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
@@ -444,7 +446,7 @@ async def update_hash(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to update hash for {object_type}",
             exc=exc,
         ) from exc
@@ -475,7 +477,7 @@ async def delete_hash_field(
         True if field was deleted
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
@@ -487,7 +489,7 @@ async def delete_hash_field(
             field=field,
             error=str(exc),
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to delete hash field for {object_type}",
             exc=exc,
         ) from exc
@@ -516,7 +518,7 @@ async def delete_hash(
         True if hash was deleted
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
@@ -528,7 +530,7 @@ async def delete_hash(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to delete hash for {object_type}",
             exc=exc,
         ) from exc
@@ -565,7 +567,7 @@ async def push_to_list(
         New length of the list
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
     values = value if isinstance(value, list) else [value]
@@ -579,7 +581,7 @@ async def push_to_list(
         )
         if expire_seconds:
             await redis.expire(cache_key, expire_seconds)
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
@@ -587,7 +589,7 @@ async def push_to_list(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to push to list for {object_type}",
             exc=exc,
         ) from exc
@@ -625,13 +627,13 @@ async def get_list_items(
         List of items (deserialized if parse_json=True)
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
     try:
         items = await _redis_any(redis).lrange(cache_key, start, end)
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
@@ -639,7 +641,7 @@ async def get_list_items(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to retrieve list items for {object_type}",
             exc=exc,
         ) from exc
@@ -681,7 +683,7 @@ async def get_list_length(
         List length
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
@@ -693,7 +695,7 @@ async def get_list_length(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to get list length for {object_type}",
             exc=exc,
         ) from exc
@@ -724,14 +726,14 @@ async def remove_from_list(
         Number of items removed
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
     try:
         string_value = serialize_data(value)
         result = await _redis_any(redis).lrem(cache_key, count, string_value)
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
@@ -739,7 +741,7 @@ async def remove_from_list(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to remove from list for {object_type}",
             exc=exc,
         ) from exc
@@ -772,14 +774,14 @@ async def update_list_item(
         True if update was successful
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
     try:
         string_value = serialize_data(new_value)
         await _redis_any(redis).lset(cache_key, index, string_value)
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
@@ -787,7 +789,7 @@ async def update_list_item(
             index=index,
             error=str(exc),
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to update list item for {object_type}",
             exc=exc,
         ) from exc
@@ -820,7 +822,7 @@ async def trim_list(
         True if trim was successful
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
@@ -832,7 +834,7 @@ async def trim_list(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to trim list for {object_type}",
             exc=exc,
         ) from exc
@@ -861,7 +863,7 @@ async def delete_list(
         True if list was deleted
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     cache_key = get_cache_key(object_type, key)
 
@@ -873,7 +875,7 @@ async def delete_list(
             error=str(exc),
             object_type=object_type,
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to delete list for {object_type}",
             exc=exc,
         ) from exc
@@ -1103,7 +1105,7 @@ async def create_search_index(
         {"created": bool, "indexName": str}
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     index_exists = False
 
@@ -1118,14 +1120,14 @@ async def create_search_index(
                 options=normalized_options,
             )
             await redis.execute_command(*args)
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
             f"Failed to create search index: {index_name}",
             error=str(exc),
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to create search index {index_name}",
             exc=exc,
         ) from exc
@@ -1171,13 +1173,13 @@ async def search_index(
         {"totalResults": int, "documents": list[dict]}
 
     Raises:
-        DatabaseException: If search fails
+        InfrastructureException: If search fails
     """
     try:
         normalized_options = options or {}
         args = _build_search_index_query_args(index_name, query, normalized_options)
         result = await redis.execute_command(*args)
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
@@ -1185,7 +1187,7 @@ async def search_index(
             query=query,
             error=str(exc),
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to search index {index_name}",
             exc=exc,
         ) from exc
@@ -1214,7 +1216,7 @@ async def delete_search_index(
         {"deleted": True, "indexName": str}
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     try:
         await redis.execute_command("FT.DROPINDEX", index_name)
@@ -1223,7 +1225,7 @@ async def delete_search_index(
             f"Failed to delete search index: {index_name}",
             error=str(exc),
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to delete search index {index_name}",
             exc=exc,
         ) from exc
@@ -1255,7 +1257,7 @@ async def create_bloom_filter(
         {"created": bool, "filterName": str}
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     filter_exists = False
 
@@ -1268,14 +1270,14 @@ async def create_bloom_filter(
                 str(error_rate),
                 str(capacity),
             )
-    except DatabaseException:
+    except InfrastructureException:
         raise
     except Exception as exc:
         logger.error(
             f"Failed to create bloom filter: {filter_name}",
             error=str(exc),
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to create bloom filter {filter_name}",
             exc=exc,
         ) from exc
@@ -1308,14 +1310,14 @@ async def add_to_bloom_filter(
         True/False for single value, list of bools for multiple values
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     if isinstance(value, list):
         try:
             result = await redis.execute_command("BF.MADD", filter_name, *value)
         except Exception as exc:
             logger.error(f"Failed to add to bloom filter: {filter_name}", error=str(exc))
-            raise _build_database_exception(
+            raise _build_cache_exception(
                 detail=f"Failed to add to bloom filter {filter_name}",
                 exc=exc,
             ) from exc
@@ -1329,7 +1331,7 @@ async def add_to_bloom_filter(
         result = await redis.execute_command("BF.ADD", filter_name, value)
     except Exception as exc:
         logger.error(f"Failed to add to bloom filter: {filter_name}", error=str(exc))
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to add to bloom filter {filter_name}",
             exc=exc,
         ) from exc
@@ -1355,14 +1357,14 @@ async def check_bloom_filter(
         True/False for single value, list of bools for multiple values
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     if isinstance(value, list):
         try:
             result = await redis.execute_command("BF.MEXISTS", filter_name, *value)
         except Exception as exc:
             logger.error(f"Failed to check bloom filter: {filter_name}", error=str(exc))
-            raise _build_database_exception(
+            raise _build_cache_exception(
                 detail=f"Failed to check bloom filter {filter_name}",
                 exc=exc,
             ) from exc
@@ -1376,7 +1378,7 @@ async def check_bloom_filter(
         result = await redis.execute_command("BF.EXISTS", filter_name, value)
     except Exception as exc:
         logger.error(f"Failed to check bloom filter: {filter_name}", error=str(exc))
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to check bloom filter {filter_name}",
             exc=exc,
         ) from exc
@@ -1400,7 +1402,7 @@ async def get_bloom_filter_info(
         Dictionary with filter metadata
 
     Raises:
-        DatabaseException: If operation fails
+        InfrastructureException: If operation fails
     """
     try:
         result = await redis.execute_command("BF.INFO", filter_name)
@@ -1414,7 +1416,7 @@ async def get_bloom_filter_info(
             f"Failed to get bloom filter info: {filter_name}",
             error=str(exc),
         )
-        raise _build_database_exception(
+        raise _build_cache_exception(
             detail=f"Failed to get bloom filter info for {filter_name}",
             exc=exc,
         ) from exc

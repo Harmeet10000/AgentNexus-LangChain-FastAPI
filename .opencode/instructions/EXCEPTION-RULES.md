@@ -1,10 +1,25 @@
 # Exception Rules
 
-## Hierarchy
+## Per-Feature Typed Errors (ADR-001, D7)
 
-```text
-starlette.exceptions.HTTPException  (re-exported as fastapi.HTTPException)
-  └── APIException                          ← base for all handled API errors
+Each feature owns its `errors.py` with a closed union:
+
+```python
+# src/app/features/subscriptions/errors.py
+class SubscriptionCode(StrEnum): ...  # feature's own codes, never bare str
+class SubscriptionNotFoundError(FeatureError):  # flat sibling, inherits FeatureError directly
+    kind: ClassVar[ErrorKind] = ErrorKind.NOT_FOUND
+    code: ClassVar[SubscriptionCode] = SubscriptionCode.SUBSCRIPTION_NOT_FOUND
+type SubscriptionError = SubscriptionNotFoundError | SubscriptionDuplicateError | ...
+type SubscriptionResult[T] = Result[T, SubscriptionError]
+```
+
+- `ErrorKind` (7 members) is the only cross-feature vocabulary; `kind` is `ClassVar[ErrorKind]` and never appears in `model_dump`.
+- `code` is `ClassVar[FeatureCode StrEnum]` — hand-written `"STRING"` is rejected by `ty` (`invalid-assignment`).
+- Concrete types are **flat siblings** — no concrete inherits another concrete. A broader arm before a narrower one shadows silently; `ty` still reports exhaustive via `assert_never`, so the ordering footgun is invisible.
+- Where two features exchange a failure, the caller translates into its own union — no cross-feature error imports.
+
+## Hierarchy (APIException family — transport, not Result)
         ├── ValidationException             → 422
         ├── NotFoundException               → 404  (resource, identifier?)
         ├── UnauthorizedException           → 401  (auto-adds WWW-Authenticate)
@@ -102,9 +117,28 @@ Do NOT use `add_note` when:
 - The context is already in structured log fields (`logger.bind(...)`)
 - You're about to raise a DIFFERENT exception type — use `raise ... from e` instead
 
-## Result bridge pattern
+### `try`/`except` as third-party adapter only
 
-Repositories return `AppResult[T]` (`Result[T, AppError]` from `returns`). Service boundaries unwrap. Expected failures are NOT raised — log them, then answer with `http_error()`:
+`try`/`except` in this codebase is an **adapter at the boundary of code you do not own** — `sqlalchemy`, `pymongo`, `redis`, `httpx`, `neo4j` etc. — where you catch the library's exception, classify it (`ErrorKind` + `code`), roll back if needed, and return a typed `Failure`. Application code never raises to communicate an expected failure to itself; it returns `Result`. Raising is for transport (router/dependency/middleware/Celery) or for truly unexpected faults that must reach the global handler.
+
+## Result bridge pattern (per-feature `Result`)
+
+Repositories return `SubscriptionResult[T]` (`Result[T, SubscriptionError]` — closed union per feature; `AppResult` is legacy and frozen). Service boundaries unwrap with `isinstance(result, Failure)` and **never** `match` on `Success`/`Failure` (ADR-002). Expected failures are answered, not raised — `render_result(result, response, ...)` derives the transport status from `error.kind` via `STATUS_BY_KIND` and emits the `http_error` envelope. `http_error()` remains the only formatter; `raise app_error_to_exception` is retired.
+
+```python
+# inside service or repository helper returning Result — translate
+result = await repo.find_by_email(email)
+if isinstance(result, Failure):
+    error = result.failure()
+    log_expected_failure(error, operation="find_by_email")
+    return http_error(  # or render_result at router
+        message=error.message,
+        status_code=...,  # derive from error.kind (422 / 404 / 409 / 502 / 500-503)
+        error_code=error.code,
+        data=error.details,
+    )
+user = result.unwrap()
+```
 
 ```python
 result = await repo.find_by_email(email)
