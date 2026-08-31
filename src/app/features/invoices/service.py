@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from returns.result import Failure
@@ -10,7 +11,16 @@ from returns.result import Failure
 from app.config import get_settings
 from app.features.audit.model import AuditAction, AuditLog
 from app.shared.result import AppError, app_error_to_exception, log_expected_failure
-from app.utils import NotFoundException, ValidationException, logger
+from app.shared.result.errors import ErrorKind, FeatureError
+from app.utils import (
+    ConflictException,
+    ExternalServiceException,
+    InfrastructureException,
+    NotFoundException,
+    ValidationException,
+    logger,
+)
+from app.utils.codes import ErrorCode
 
 from .dto import InvoiceLineItemDTO, InvoiceResponse
 from .invoice_void import InvoiceVoid
@@ -88,11 +98,51 @@ def _invoice_to_response(invoice: Invoice) -> InvoiceResponse:
 
 
 def _repo_failure(error: object, operation: str) -> None:
-    # Handles both AppError (pre-migration) and SubscriptionError (migrated subscriptions)
+    # Handles both AppError (pre-migration) and SubscriptionError (FeatureError)
     if isinstance(error, AppError):
         log_expected_failure(error, operation=operation)
         raise app_error_to_exception(error)
-    # SubscriptionError is FeatureError — log and raise generic
+    if isinstance(error, FeatureError):
+        # Preserve typed error classification — do not collapse to 422
+        kind: ErrorKind = getattr(error, "kind", ErrorKind.VALIDATION)  # type: ignore[attr-defined]
+        retryable: bool = bool(getattr(error, "retryable", False))
+        code_val = getattr(error, "code", ErrorCode.VALIDATION_ERROR)
+        code_str = code_val.value if isinstance(code_val, StrEnum) else str(code_val)
+        details = getattr(error, "details", None)
+        message = getattr(error, "message", str(error))
+        logger.bind(
+            operation=operation, error_code=code_str, kind=str(kind), details=details
+        ).warning(message)
+        if kind == ErrorKind.NOT_FOUND:
+            identifier: str | None = None
+            if isinstance(details, dict):
+                identifier = details.get("subscription_id") or details.get("plan_id")  # type: ignore[union-attr]
+            raise NotFoundException(
+                resource=message,
+                identifier=str(identifier) if identifier else "",
+                error_code=code_str,
+            )
+        if kind == ErrorKind.VALIDATION:
+            raise ValidationException(
+                detail=message, error_code=code_str, data=details if isinstance(details, dict) else None
+            )
+        if kind == ErrorKind.CONFLICT:
+            raise ConflictException(
+                detail=message, error_code=code_str, data=details if isinstance(details, dict) else None
+            )
+        if kind == ErrorKind.INFRASTRUCTURE:
+            raise InfrastructureException(
+                detail=message, error_code=code_str, retryable=retryable, data=details if isinstance(details, dict) else None
+            )
+        if kind == ErrorKind.EXTERNAL_SERVICE:
+            raise ExternalServiceException(
+                service=getattr(error, "source", "external") or "external",
+                detail=message,
+                error_code=code_str,
+            )
+        raise ValidationException(
+            detail=message, error_code=code_str, data=details if isinstance(details, dict) else None
+        )
     logger.bind(operation=operation, error=str(error)).warning("repository failure")
     raise ValidationException(str(getattr(error, "message", str(error))))
 
