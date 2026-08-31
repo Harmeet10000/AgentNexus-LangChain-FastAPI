@@ -1,4 +1,12 @@
-"""Subscription persistence operations with optimistic locking."""
+"""Subscription persistence operations with optimistic locking.
+
+Rollback contract (ADR D8): classify → rollback → log → return — rollback
+precedes any log so a logging failure cannot leave the session poisoned.
+For batch callers (Greptile P1), this rollback is per-statement and discards
+prior uncommitted updates in the same session; batch jobs must use
+`session.begin_nested()` savepoints or per-item commits (see billing_tasks).
+ponytail: global rollback; per-item savepoint is the upgrade if batch throughput matters.
+"""
 
 from __future__ import annotations
 

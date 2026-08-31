@@ -124,13 +124,19 @@ async def _renewal_job(session) -> dict[str, int]:
                 values["current_period_end"] = datetime.fromtimestamp(int(current_end), tz=UTC)
             if not values:
                 continue
-            update = await subscriptions.update_with_lock(
-                subscription, subscription.version, values=values
-            )
-            if isinstance(update, Failure):
-                logger.bind(operation="billing.renewal").warning(update.failure().message)
-                continue
-            renewed += 1
+            # ponytail: per-item savepoint so a later rollback discards only this
+            # iteration, not prior successful updates in the shared billing-job
+            # session (Greptile P1). ADR D8: rollback lives in repository; batch callers
+            # must use savepoints — this is the minimal fix; per-item commit is the
+            # upgrade if savepoint overhead matters.
+            async with session.begin_nested():
+                update = await subscriptions.update_with_lock(
+                    subscription, subscription.version, values=values
+                )
+                if isinstance(update, Failure):
+                    logger.bind(operation="billing.renewal").warning(update.failure().message)
+                    continue
+                renewed += 1
         except Exception as exc:  # noqa: BLE001 — one bad subscription must not kill the run
             logger.bind(
                 operation="billing.renewal",
@@ -159,10 +165,12 @@ async def _dunning_job(session) -> dict[str, int]:
     retried = 0
     halted = 0
     for subscription in due:
-        updated = await service.execute_retry(subscription)
-        if updated.status == SubscriptionStatus.HALTED.value:
-            halted += 1
-        retried += 1
+        # ponytail: savepoint per subscription — D8 batch semantics
+        async with session.begin_nested():
+            updated = await service.execute_retry(subscription)
+            if updated.status == SubscriptionStatus.HALTED.value:
+                halted += 1
+            retried += 1
     return {"due": len(due), "retried": retried, "halted": halted}
 
 
@@ -197,8 +205,10 @@ async def _invoice_backfill(session) -> dict[str, int]:
         if plan is None:
             continue
         try:
-            await service.generate_for_payment(payment, subscription, plan)
-            generated += 1
+            # ponytail: savepoint per payment — audit rollback must not discard prior invoices
+            async with session.begin_nested():
+                await service.generate_for_payment(payment, subscription, plan)
+                generated += 1
         except Exception as exc:  # noqa: BLE001
             logger.bind(operation="billing.invoice_backfill", payment_id=str(payment.id)).warning(
                 "invoice generation failed", error=str(exc)
@@ -237,8 +247,9 @@ async def _receipt_backfill(session) -> dict[str, int]:
         if plan is None:
             continue
         try:
-            await service.generate_receipt_for_payment(payment, subscription, plan)
-            generated += 1
+            async with session.begin_nested():
+                await service.generate_receipt_for_payment(payment, subscription, plan)
+                generated += 1
         except Exception as exc:  # noqa: BLE001
             logger.bind(operation="billing.receipt_backfill", payment_id=str(payment.id)).warning(
                 "receipt generation failed", error=str(exc)
@@ -264,18 +275,20 @@ async def _pause_resume_job(session) -> dict[str, int]:
 
     resumed = 0
     for subscription in subscription_rows:
-        update = await subscriptions.update_status(
-            subscription,
-            SubscriptionStatus.ACTIVE,
-            expected_version=subscription.version,
-            extra_values={"pause_start": None, "pause_end": None},
-        )
-        if isinstance(update, Failure):
-            logger.bind(
-                operation="billing.pause_resume", subscription_id=str(subscription.id)
-            ).warning(update.failure().message)
-            continue
-        resumed += 1
+        # ponytail: savepoint per item — same rationale as _renewal_job (Greptile P1 / D8)
+        async with session.begin_nested():
+            update = await subscriptions.update_status(
+                subscription,
+                SubscriptionStatus.ACTIVE,
+                expected_version=subscription.version,
+                extra_values={"pause_start": None, "pause_end": None},
+            )
+            if isinstance(update, Failure):
+                logger.bind(
+                    operation="billing.pause_resume", subscription_id=str(subscription.id)
+                ).warning(update.failure().message)
+                continue
+            resumed += 1
     return {"checked": len(subscription_rows), "resumed": resumed}
 
 
@@ -323,18 +336,20 @@ async def _reconciliation_job(session) -> dict[str, int]:
         if subscription is None:
             missing += 1
             continue
-        await service.record_payment(
-            PaymentRecordDTO(
-                razorpay_payment_id=rz_id,
-                subscription_id=str(subscription.id),
-                amount=int(payment.get("amount") or 0),
-                currency=str(payment.get("currency") or "INR"),
-                method=payment.get("method"),
-                captured_at=datetime.fromtimestamp(int(payment.get("created_at") or 0), tz=UTC),
-            ),
-            subscription=subscription,
-        )
-        reconciled += 1
+        # ponytail: savepoint per payment creation — D8 batch semantics
+        async with session.begin_nested():
+            await service.record_payment(
+                PaymentRecordDTO(
+                    razorpay_payment_id=rz_id,
+                    subscription_id=str(subscription.id),
+                    amount=int(payment.get("amount") or 0),
+                    currency=str(payment.get("currency") or "INR"),
+                    method=payment.get("method"),
+                    captured_at=datetime.fromtimestamp(int(payment.get("created_at") or 0), tz=UTC),
+                ),
+                subscription=subscription,
+            )
+            reconciled += 1
 
     await _audit_repo(session).create(
         AuditLog(
