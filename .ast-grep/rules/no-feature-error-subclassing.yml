@@ -8,4 +8,7 @@ note: |
   FeatureError elsewhere makes the union open and breaks exhaustiveness.
 rule:
   kind: class_definition
-  regex: \(FeatureError\)
+  regex: '\(FeatureError'
+ignores:
+  - src/app/features/*/errors.py
+  - .ast-grep/fixtures/no-feature-error-subclassing/permit.py
