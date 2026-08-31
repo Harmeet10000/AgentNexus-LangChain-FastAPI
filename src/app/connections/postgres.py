@@ -1,6 +1,7 @@
 """Neon Postgres database configuration with SQLAlchemy."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Final, Literal
 from urllib.parse import (
     SplitResult,
@@ -236,6 +237,20 @@ async def _verify_postgres_connection(engine: AsyncEngine) -> None:
             database=fields.database,
             version=version,
         )
+
+
+@asynccontextmanager
+async def independent_session(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncSession]:
+    """Give one unit of work an independent transaction."""
+    async with session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 async def get_postgres_db(connection: HTTPConnection) -> AsyncGenerator[AsyncSession, None]:
