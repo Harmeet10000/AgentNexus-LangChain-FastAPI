@@ -83,7 +83,14 @@ class IngestionService:
             elif isinstance(failure, dict):
                 error = AppError.model_validate(failure)
             else:
-                error = AppError(code="UNKNOWN", message=str(failure))
+                # ponytail: kindless AppError rendered 422; infrastructure 500 is correct
+                error = InfrastructureAppError(
+                    code="INGESTION_INTERNAL_ERROR",
+                    message=str(failure),
+                    details={"doc_id": resolved_doc_id, "failure": str(failure)},
+                    source="ingestion_service",
+                    retryable=False,
+                )
             log_expected_failure(error, operation="ingest_document")
             raise app_error_to_exception(error)
 
