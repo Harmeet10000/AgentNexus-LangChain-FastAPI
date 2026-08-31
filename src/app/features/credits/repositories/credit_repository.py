@@ -10,16 +10,15 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.features.credits.models.credit import CreditStatus, UserCredit
-from app.utils.codes import ErrorCode
 from app.shared.result import ConflictAppError, InfrastructureAppError, NotFoundAppError
+from app.utils.codes import ErrorCode
 
 if TYPE_CHECKING:
     from uuid import UUID
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.utils.codes import ErrorCode
-from app.shared.result import AppResult
+    from app.shared.result import AppResult
 
 
 class CreditRepository:
@@ -47,7 +46,8 @@ class CreditRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while creating credit",
                     details={"error": str(exc)},
                     source="credit_repository",
@@ -63,7 +63,8 @@ class CreditRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching credit",
                     details={"credit_id": str(credit_id), "error": str(exc)},
                     source="credit_repository",
@@ -105,7 +106,8 @@ class CreditRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while listing credits",
                     details={"user_id": user_id, "error": str(exc)},
                     source="credit_repository",
@@ -144,7 +146,8 @@ class CreditRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while finding available credits",
                     details={"user_id": user_id, "error": str(exc)},
                     source="credit_repository",
@@ -167,7 +170,8 @@ class CreditRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while calculating credit balance",
                     details={"user_id": user_id, "error": str(exc)},
                     source="credit_repository",
@@ -213,7 +217,8 @@ class CreditRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while updating credit balance",
                     details={"credit_id": str(credit.id), "error": str(exc)},
                     source="credit_repository",
@@ -260,7 +265,8 @@ class CreditRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while expiring credits",
                     details={"error": str(exc)},
                     source="credit_repository",

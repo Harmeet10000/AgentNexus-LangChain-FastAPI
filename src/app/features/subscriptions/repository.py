@@ -9,13 +9,13 @@ from returns.result import Failure, Success
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.utils.codes import ErrorCode
 from app.shared.result import (
     ConflictAppError,
     InfrastructureAppError,
     NotFoundAppError,
     ValidationAppError,
 )
+from app.utils.codes import ErrorCode
 
 from .model import Subscription, SubscriptionStatus
 
@@ -25,10 +25,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from app.utils.codes import ErrorCode
-from app.shared.result import (
-        AppResult,
-    )
+    from app.shared.result import AppResult
 
 
 # Requirement 4.1-4.6: allowed state transitions.
@@ -90,7 +87,8 @@ class SubscriptionRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while creating subscription",
                     details={"error": str(exc)},
                     source="subscription_repository",
@@ -119,7 +117,8 @@ class SubscriptionRepository:
             await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching subscription",
                     details={"subscription_id": str(subscription_id), "error": str(exc)},
                     source="subscription_repository",
@@ -150,7 +149,8 @@ class SubscriptionRepository:
             await self.session.rollback()
             return Failure(
                 inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching subscription by Razorpay ID",
                     details={
                         "razorpay_subscription_id": razorpay_subscription_id,
@@ -189,7 +189,8 @@ class SubscriptionRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while finding subscription by user and plan",
                     details={"user_id": user_id, "plan_id": str(plan_id), "error": str(exc)},
                     source="subscription_repository",
@@ -229,7 +230,8 @@ class SubscriptionRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while listing subscriptions",
                     details={"user_id": user_id, "error": str(exc)},
                     source="subscription_repository",
@@ -278,7 +280,8 @@ class SubscriptionRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while updating subscription",
                     details={"subscription_id": str(subscription.id), "error": str(exc)},
                     source="subscription_repository",

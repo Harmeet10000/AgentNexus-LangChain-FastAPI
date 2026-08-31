@@ -55,6 +55,7 @@ class PlanRepository:
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while creating plan",
                     details={"error": str(exc)},
                     source="plan_repository",
@@ -81,6 +82,7 @@ class PlanRepository:
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching plan",
                     details={"plan_id": str(plan_id), "error": str(exc)},
                     source="plan_repository",
@@ -100,6 +102,7 @@ class PlanRepository:
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while finding plan by name",
                     details={"name": name, "error": str(exc)},
                     source="plan_repository",
@@ -118,6 +121,7 @@ class PlanRepository:
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while listing plans",
                     details={"error": str(exc)},
                     source="plan_repository",
@@ -150,6 +154,7 @@ class PlanRepository:
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while archiving plan",
                     details={"plan_id": str(plan_id), "error": str(exc)},
                     source="plan_repository",
@@ -191,6 +196,7 @@ class PlanRepository:
             return Failure(
                 InfrastructureAppError(
                     code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while updating plan",
                     details={"plan_id": str(plan.id), "error": str(exc)},
                     source="plan_repository",

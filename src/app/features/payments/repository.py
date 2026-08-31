@@ -9,12 +9,12 @@ from returns.result import Failure, Success
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.utils.codes import ErrorCode
 from app.shared.result import (
     ConflictAppError,
     InfrastructureAppError,
     NotFoundAppError,
 )
+from app.utils.codes import ErrorCode
 
 from .model import Payment
 
@@ -25,10 +25,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from app.utils.codes import ErrorCode
-from app.shared.result import (
-        AppResult,
-    )
+    from app.shared.result import AppResult
 
 
 class PaymentRepository:
@@ -56,7 +53,8 @@ class PaymentRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while creating payment",
                     details={"error": str(exc)},
                     source="payment_repository",
@@ -82,7 +80,8 @@ class PaymentRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching payment",
                     details={"payment_id": str(payment_id), "error": str(exc)},
                     source="payment_repository",
@@ -100,7 +99,8 @@ class PaymentRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching payment by Razorpay ID",
                     details={"razorpay_payment_id": razorpay_payment_id, "error": str(exc)},
                     source="payment_repository",
@@ -124,7 +124,8 @@ class PaymentRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while listing payments for subscription",
                     details={"subscription_id": str(subscription_id), "error": str(exc)},
                     source="payment_repository",
@@ -146,7 +147,8 @@ class PaymentRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching payments by date range",
                     details={"error": str(exc)},
                     source="payment_repository",
@@ -179,7 +181,8 @@ class PaymentRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while updating payment refund amount",
                     details={"payment_id": str(payment.id), "error": str(exc)},
                     source="payment_repository",
@@ -215,7 +218,8 @@ class PaymentRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while updating payment status",
                     details={"payment_id": str(payment.id), "error": str(exc)},
                     source="payment_repository",
