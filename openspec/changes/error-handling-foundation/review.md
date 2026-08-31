@@ -631,12 +631,31 @@ violates a dependency. The table was simply written before the history existed. 
 records what landed and splits only the remainder (A–E), which preserves the reviewable-
 unit goal without asking anyone to rewrite four commits.
 
-**28. Every planning artifact except `tasks.md` is untracked.** `proposal.md`,
-`design.md`, `adrs.md`, `review.md`, `specs/` and `HANDOFF.md` are all `??` in
-`git status`. `tasks.md` is tracked only because `0ca39ea` committed the section 1 ticks.
-So the branch currently carries 97 ticked-and-unticked checkboxes, four implementation
-commits, and no proposal, no ADRs and no spec deltas — a reviewer sees the answers with
-none of the reasoning, and `openspec archive` at the end would have nothing to fold.
+**28. The planning artifacts were untracked, were committed mid-session, and the commit
+captured a `tasks.md` that had lost section 9.** When this pass began, `proposal.md`,
+`design.md`, `adrs.md`, `review.md`, `specs/` and `HANDOFF.md` were all `??` in
+`git status` — only `tasks.md` was tracked, because `0ca39ea` had committed the section 1
+ticks. `853fe25 chore(openspec): add planning artifacts and no-match fixture for PR A`
+then committed the whole set, which resolves the original finding: the branch now carries
+its proposal, ADRs and spec deltas, and `openspec archive` has something to fold.
+
+What it did *not* resolve is worse, and is the reason this finding stays open. The
+`tasks.md` that `853fe25` committed is the **79-task, 10-section** version — the
+pre-fold-in state. Section 9 (the five later-added directories, 16 tasks), the
+renumbering of Verification to 10 and Handoff to 11, and tasks 10.7 and 11.5 were all
+absent from it. The specs kept every one of their 45 requirements and 180 scenarios, so
+the change still *specifies* the five directories while its task file no longer schedules
+any work against them. That is the exact failure mode the openspec archive hazard
+describes, arriving through a different door: a delta that validates while the plan
+behind it has been silently narrowed. Restored and re-committed; verify with
+`grep -n '^## ' tasks.md` that section 9 reads "The five later-added directories" and
+that the total is 97.
+
+The mechanism matters for anyone working this branch. Two workers were editing the change
+concurrently — one implementing, one planning — and `git status` is the only thing that
+distinguished "my edit is safe" from "my edit is the uncommitted side of a file someone
+else is about to commit from a stale tree." An untracked artifact survived; the tracked
+one was rewound.
 
 **29. Task 3.1's deferred re-measure is now done, and the answer is a real zero.** 3.1's
 own `DONE` block said "DONE (partial…) — full violation re-measure deferred". Completed
