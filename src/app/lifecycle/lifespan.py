@@ -148,7 +148,20 @@ async def _init_outbox_relay(app: FastAPI, celery_app: Celery | None) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR0914, PLR0915
-    """Manage application startup and shutdown with parallel execution."""
+    """Manage application startup and shutdown with parallel execution.
+
+    Exception families survived (14 named handlers, single catch-all is `except Exception` for Cognee):
+    Redis (ConnectionError, TimeoutError, OSError, redis.exceptions.RedisError),
+    MongoDB (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError),
+    Neo4j (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError, ServiceUnavailable, ConfigurationError),
+    Celery (ServiceUnavailableException, OperationalError, OSError),
+    TaskGroup ExceptionGroup, PostgreSQL startup (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError),
+    CogneeDimensionMismatchError (hard-fail), Graphiti (ConnectionError, TimeoutError, OSError, ServiceUnavailable),
+    Crawl4AI (ConnectionError, TimeoutError, OSError, PlaywrightError),
+    Object storage (ConnectionError, TimeoutError, OSError), Celery TimeoutError,
+    Celery ServiceUnavailableException, Outbox (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError).
+    Single `except Exception` for Cognee optional dep remains.
+    """
     settings = get_settings()
     logger.info("Application starting", app_name=app.title, version=app.version)
 
