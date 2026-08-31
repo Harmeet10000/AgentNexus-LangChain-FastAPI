@@ -199,7 +199,7 @@ async def _invoice_backfill(session) -> dict[str, int]:
         try:
             await service.generate_for_payment(payment, subscription, plan)
             generated += 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 -- one bad subscription must not kill the run
             logger.bind(operation="billing.invoice_backfill", payment_id=str(payment.id)).warning(
                 "invoice generation failed", error=str(exc)
             )
@@ -239,7 +239,7 @@ async def _receipt_backfill(session) -> dict[str, int]:
         try:
             await service.generate_receipt_for_payment(payment, subscription, plan)
             generated += 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 -- one bad subscription must not kill the run
             logger.bind(operation="billing.receipt_backfill", payment_id=str(payment.id)).warning(
                 "receipt generation failed", error=str(exc)
             )
@@ -296,7 +296,7 @@ async def _reconciliation_job(session) -> dict[str, int]:
                 "count": 100,
             }
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 -- one bad subscription must not kill the run
         logger.bind(operation="billing.reconciliation").error(
             "Razorpay payment fetch failed", error=str(exc)
         )

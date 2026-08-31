@@ -44,17 +44,17 @@ async def process_payment(user_id: int, amount: float) -> dict:
 
         # Passing an entire object/dict as extra data
         logger.bind(payment_data=result).info("Payment flow completed successfully")
-        return result
+        return result  # noqa: TRY300 -- example
 
     except ValueError as ve:
         # We already logged the error in the repo, so we just return or re-raise safely
         logger.warning(f"Payment rejected due to validation: {ve}")
         return {"status": "failed", "reason": str(ve)}
 
-    except Exception as e:
+    except Exception:
         # 5. EXCEPTION: Automatically captures the full stack trace and attaches it to the log
         # Passing extra context helps debug exactly what caused the crash
         logger.bind(user_id=user_id, amount=amount).exception(
             "Catastrophic failure in payment service"
         )
-        raise e
+        raise

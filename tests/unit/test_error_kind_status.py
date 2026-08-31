@@ -1,6 +1,6 @@
 """2.5 AUTH 401/403 coverage — no AppError could express these."""
 
-from app.shared.result.errors import ErrorKind, http_status_for_kind, STATUS_BY_KIND
+from app.shared.result.errors import STATUS_BY_KIND, ErrorKind, http_status_for_kind
 
 
 def test_status_by_kind_covers_seven():

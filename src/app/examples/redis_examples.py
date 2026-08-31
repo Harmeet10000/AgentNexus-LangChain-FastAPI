@@ -6,7 +6,7 @@ in real FastAPI endpoints with proper error handling and dependency injection.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, EmailStr
 from redis.asyncio import Redis
 
@@ -19,7 +19,7 @@ from app.utils.cache import (
     push_to_list,
     set_cache,
 )
-from app.utils.exceptions import DatabaseException
+from app.utils.exceptions import InfrastructureException
 from app.utils.logger import logger
 
 # ────────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ async def get_cached_user(user_id: str, redis: Redis) -> UserProfile:
 
         logger.info(f"Cache MISS: user:{user_id}")
 
-    except DatabaseException as e:
+    except InfrastructureException as e:
         logger.warning(f"Cache read failed for user {user_id}: {e.detail}")
         # Continue to DB lookup
 
@@ -105,7 +105,7 @@ async def get_cached_user(user_id: str, redis: Redis) -> UserProfile:
     try:
         await set_cache(redis, "user", user_id, user.model_dump(), expire_seconds=3600)
         logger.info(f"Cached user: user:{user_id}")
-    except DatabaseException as e:
+    except InfrastructureException as e:
         logger.error(f"Failed to cache user {user_id}: {e.detail}")
         # Don't fail the request, just continue without cache
 
@@ -133,7 +133,7 @@ async def update_cached_user(user_id: str, updates: UserUpdate, redis: Redis) ->
         # await update_hash(redis, "user", user_id, update_data)
 
         logger.info(f"Updated cache for user: {user_id}")
-    except DatabaseException as e:
+    except InfrastructureException as e:
         logger.error(f"Failed to update cache for user {user_id}: {e.detail}")
 
     return user
@@ -145,7 +145,7 @@ async def invalidate_user_cache(user_id: str, redis: Redis) -> None:
         deleted = await delete_cache(redis, "user", user_id)
         if deleted:
             logger.info(f"Invalidated cache: user:{user_id}")
-    except DatabaseException as e:
+    except InfrastructureException as e:
         logger.error(f"Failed to invalidate cache for user {user_id}: {e.detail}")
 
 
@@ -161,7 +161,7 @@ async def add_activity(user_id: str, activity: ActivityLog, redis: Redis) -> Non
             expire_seconds=2592000,  # 30 days
         )
         logger.info(f"Activity logged for user: {user_id}")
-    except DatabaseException as e:
+    except InfrastructureException as e:
         logger.error(f"Failed to log activity for user {user_id}: {e.detail}")
 
 
@@ -176,7 +176,7 @@ async def get_user_activity(user_id: str, redis: Redis, limit: int = 20) -> list
             end=limit - 1,
         )
         return [ActivityLog(**item) for item in raw_activities]
-    except DatabaseException as e:
+    except InfrastructureException as e:
         logger.error(f"Failed to get activities for user {user_id}: {e.detail}")
         return []
 
@@ -205,10 +205,10 @@ async def get_user_endpoint(
     """
     try:
         user = await get_cached_user(user_id, redis)
-        return user
+        return user  # noqa: TRY300 -- example
     except Exception as e:
         logger.error(f"Failed to get user {user_id}: {e!s}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve user")
+        raise InfrastructureException(detail="Failed to retrieve user", error_code="CACHE_ERROR", retryable=False) from e
 
 
 @router.patch("/{user_id}")
@@ -233,10 +233,10 @@ async def update_user_endpoint(
     """
     try:
         user = await update_cached_user(user_id, updates, redis)
-        return user
+        return user  # noqa: TRY300 -- example
     except Exception as e:
         logger.error(f"Failed to update user {user_id}: {e!s}")
-        raise HTTPException(status_code=500, detail="Failed to update user")
+        raise InfrastructureException(detail="Failed to update user", error_code="CACHE_ERROR", retryable=False) from e
 
 
 @router.delete("/{user_id}")
@@ -259,10 +259,10 @@ async def delete_user_endpoint(user_id: str, redis: Annotated[Redis, Depends(get
         await invalidate_user_cache(user_id, redis)
         await delete_list(redis, "activity", user_id)
 
-        return {"status": "deleted", "user_id": user_id}
-    except DatabaseException as e:
+        return {"status": "deleted", "user_id": user_id}  # noqa: TRY300 -- example
+    except InfrastructureException as e:
         logger.error(f"Failed to delete user {user_id}: {e.detail}")
-        raise HTTPException(status_code=500, detail="Failed to delete user")
+        raise InfrastructureException(detail="Failed to delete user", error_code="CACHE_ERROR", retryable=False) from e
 
 
 @router.post("/{user_id}/activity")
@@ -289,14 +289,14 @@ async def log_activity_endpoint(
     """
     try:
         await add_activity(user_id, activity, redis)
-        return {
+        return {  # noqa: TRY300 -- example
             "status": "logged",
             "user_id": user_id,
             "action": activity.action,
         }
-    except DatabaseException as e:
+    except InfrastructureException as e:
         logger.error(f"Failed to log activity: {e.detail}")
-        raise HTTPException(status_code=500, detail="Failed to log activity")
+        raise InfrastructureException(detail="Failed to log activity", error_code="CACHE_ERROR", retryable=False) from e
 
 
 @router.get("/{user_id}/activity")
@@ -320,7 +320,7 @@ async def get_activity_endpoint(
             "total": len(activities),
             "activities": activities,
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- example  # noqa: BLE001 -- example
         logger.error(f"Failed to get activities for user {user_id}: {e!s}")
         return {"user_id": user_id, "total": 0, "activities": []}
 
@@ -350,7 +350,7 @@ async def get_multiple_users(
         try:
             user = await get_cached_user(user_id, redis)
             users[user_id] = user.model_dump()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- example  # noqa: BLE001 -- example
             logger.error(f"Failed to get user {user_id}: {e!s}")
             failed.append(user_id)
 
@@ -383,7 +383,7 @@ async def warm_user_cache(user_ids: list[str], redis: Redis) -> None:
                 user.model_dump(),
                 expire_seconds=3600,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- example
             logger.error(f"Failed to warm cache for user {user_id}: {e!s}")
 
 
@@ -414,7 +414,7 @@ async def cache_with_fallback(
     """
     try:
         return await get_cached_user(user_id, redis)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- example  # noqa: BLE001 -- example
         logger.error(
             f"Complete failure retrieving user {user_id}: {e!s}",
             user_id=user_id,
