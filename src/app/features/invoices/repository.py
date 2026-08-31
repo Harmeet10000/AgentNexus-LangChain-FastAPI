@@ -14,6 +14,7 @@ from app.shared.result import (
     InfrastructureAppError,
     NotFoundAppError,
 )
+from app.utils.codes import ErrorCode
 
 from .model import Invoice
 
@@ -23,9 +24,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from app.shared.result import (
-        AppResult,
-    )
+    from app.shared.result import AppResult
 
 
 class InvoiceRepository:
@@ -53,7 +52,8 @@ class InvoiceRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while creating invoice",
                     details={"error": str(exc)},
                     source="invoice_repository",
@@ -79,7 +79,8 @@ class InvoiceRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching invoice",
                     details={"invoice_id": str(invoice_id), "error": str(exc)},
                     source="invoice_repository",
@@ -97,7 +98,8 @@ class InvoiceRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching invoice by payment",
                     details={"payment_id": str(payment_id), "error": str(exc)},
                     source="invoice_repository",
@@ -136,7 +138,8 @@ class InvoiceRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while listing invoices",
                     details={"user_id": user_id, "error": str(exc)},
                     source="invoice_repository",
@@ -156,7 +159,8 @@ class InvoiceRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while listing invoices for subscription",
                     details={"subscription_id": str(subscription_id), "error": str(exc)},
                     source="invoice_repository",
@@ -175,7 +179,8 @@ class InvoiceRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while generating invoice number",
                     details={"error": str(exc)},
                     source="invoice_repository",
@@ -194,7 +199,8 @@ class InvoiceRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while generating receipt number",
                     details={"error": str(exc)},
                     source="invoice_repository",
@@ -234,7 +240,8 @@ class InvoiceRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code="DB_ERROR",
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while updating invoice status",
                     details={"invoice_id": str(invoice.id), "error": str(exc)},
                     source="invoice_repository",

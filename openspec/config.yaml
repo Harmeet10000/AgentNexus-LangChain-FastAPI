@@ -17,12 +17,7 @@ context: |
     live in lifespan and are read from connection.app.state.
   - Async-first: all I/O through async clients (asyncpg, motor, redis.asyncio);
     bounded fan-out via asyncio.gather; no blocking calls in async functions.
-  - Errors: typed hierarchy in src/app/utils/exceptions.py (ValidationException,
-    NotFoundException, ConflictException, UnauthorizedException,
-    ExternalServiceException). Service code unwraps repository AppResult with
-    isinstance(result, Failure) then log_expected_failure(...) and
-    http_error(...); never raise the typed error, never match/case on
-    Success/Failure, never chain log_expected_failure(...) or ...
+  - Errors: per-feature typed union in src/app/features/<name>/errors.py (FeatureError flat siblings, Code StrEnum, ErrorKind 7, closed union with assert_never). Shared spine in src/app/shared/result/: ErrorKind, FeatureError, STATUS_BY_KIND, render_result. Service unwraps SubscriptionResult with isinstance(result, Failure) then log_expected_failure + http_error/render_result; never match/case on Success/Failure (ADR-002), kind/code/retryable are ClassVar.
   - Secrets: Pydantic SecretStr; always call .get_secret_value(), never str()
     or repr on a SecretStr.
   - Response envelope: APIResponse from src/app/shared/response_type.py;
@@ -31,8 +26,7 @@ context: |
   - Typing: ruff + ty gate the merge; PEP 695 generics on Python 3.12; no
     blanket type ignores; always use uv run for tooling.
 
-  Tooling: uv sync, then uv run ruff format src/, uv run ruff check src/,
-  uv run ty check src/ before finishing code work.
+  Tooling: uv sync --extra dev, then uv run ruff format src/ tests/ and uv run ruff check src/ tests/, uv run ty check src/ tests/ (CI checks src/ tests/, not src/ alone).
 
 # Per-artifact rules
 rules:
@@ -55,9 +49,9 @@ rules:
 operations:
   apply:
     guidance:
-      - Run uv sync then uv run ruff format src/ and uv run ruff check src/.
-      - Run uv run ty check src/ and fix type errors before finishing.
-      - Run ast-grep scan and fix any rule violations in changed files.
+      - Run uv sync --extra dev then uv run ruff format src/ tests/ and uv run ruff check src/ tests/.
+      - Run uv run ty check src/ tests/ and fix type errors before finishing.
+      - Run ast-grep scan src/ and fix any rule violations; verify each rule's fixture pair (ADR-005).
       - Check tasks off in tasks.md as they are completed.
   archive:
     guidance:
