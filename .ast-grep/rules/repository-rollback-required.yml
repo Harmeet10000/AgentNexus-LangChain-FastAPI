@@ -1,0 +1,11 @@
+id: repository-rollback-required
+language: python
+severity: error
+message: Database handler returning Failure without preceding rollback
+note: |
+  D8 — repository catches SQLAlchemy error, so repository knows rollback is owed.
+  Order: classify → rollback → log → return. Read-only handlers returning
+  dict / ToolResult are not flagged; only handlers returning Failure.
+rule:
+  kind: class_definition
+  regex: RollbackViolation

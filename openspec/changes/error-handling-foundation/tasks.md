@@ -4,12 +4,18 @@
 
 Section 1 is independent of the rest and closes live poisoned-commit paths — it can
 land alone. Sections 2–4 build the spine. Section 5 is the exemplar and must come
-after them. Sections 6–8 can run in parallel with 5. Section 9 gates the change.
+after them. Sections 6–9 can run in parallel with 5, with two ties: task 9.3 must ship
+in the same commit as 7.5, and task 9.11 is subscriptions' own work from 5. Section 10
+gates the change.
 
 Two tasks reach outside `features/subscriptions/` on purpose and are marked where
 they appear: 2.6 fixes a kindless error in `ingestion` because the renderer is its
 first consumer, and 1.x touches nine features' repositories because staging the
 rollback across seventeen changes leaves the defect open for the duration.
+
+Section 9 covers the five directories added to scope after the third review pass. Its
+work is mostly *removing* an exemption or *writing one down*, not converting code —
+design D20 tabulates which is which.
 
 ## 1. Repository rollback (independent — no dependency on the error redesign)
 
@@ -78,17 +84,37 @@ rollback across seventeen changes leaves the defect open for the duration.
 ## 3. Enforcement gates (ADR-005 — no rule is trusted before its fixture pair passes)
 
 - [x] 3.1 Fix `.ast-grep/rules/no-match-on-result.yml`: its `regex: ^(Success|Failure)\(\s*\)$` matches only the argument-less form, so `case Success(value):` passes unflagged. Make it reject that form and re-measure the violation count from scratch
-  > **DONE (partial — remainder deferred per phase split):** `.ast-grep/rules/no-match-on-result.yml:11` regex `^(Success|Failure)\(` now flags `case Success(value):` and `case Failure(e):` while sparing `case SubscriptionNotFoundError():`. Verified: `ast-grep scan --rule ... /tmp/forbid.py` flags, `/tmp/permit.py` clean. Full violation re-measure and remaining 3.2-3.11 deferred to next commit per spine+renderer-first split.
-- [ ] 3.2 Give `no-match-on-result` a fixture pair proving it flags `case Success(value):` and spares `case SubscriptionNotFoundError():`
-- [ ] 3.3 Write `no-feature-error-subclassing` + fixture pair: nothing may subclass `FeatureError` outside the `errors.py` that owns it
-- [ ] 3.4 Write `no-concrete-error-inheritance` + fixture pair: no concrete error type inherits another concrete error type
-- [ ] 3.5 Write `no-cross-feature-error-import` + fixture pair: a feature may not import another feature's error types or code enum
-- [ ] 3.6 Write `repository-rollback-required` + fixture pair: a database handler returning `Failure` without a preceding rollback is a violation; a read-only handler is not
-- [ ] 3.7 Write `no-new-apperror-subclass` + fixture pair, enforcing the frozen hierarchy and its monotonic shrink
-- [ ] 3.8 Write `router-renders-result` + fixture pair, and verify it spares all three exempt shapes: the dispatcher's `isinstance` chain, an `except ImportError` capability flag, and a pre-service policy guard
-- [ ] 3.9 Verify `router-renders-result` reports zero violations for `features/crawler/router.py`'s three `raise TooManyRequestsException` sites — they follow a boolean `check_rate_limit`, produce no `Result` and catch nothing
-- [ ] 3.10 Verify the dispatcher exemption holds: `middleware/global_exception_handler.py` contains zero `except` blocks and must not be flagged by any new rule
-- [ ] 3.11 Register every new rule in `sgconfig.yml` and confirm `ast-grep scan src/` runs them
+  > **DONE:** `.ast-grep/rules/no-match-on-result.yml:11` regex `^(Success|Failure)\(` now flags `case Success(value):` and `case Failure(e):` while sparing `case SubscriptionNotFoundError():`. Verified: `ast-grep scan --rule ... /tmp/forbid.py` flags, `/tmp/permit.py` clean.
+  > **Re-measure completed 2026-08-31 (was deferred):** corrected rule reports **0 violations in `src/`, 0 in `tests/`**. Reconciled with a structurally different query — `rg 'case\s+(Success|Failure)\s*\('` over the same trees also returns 0 — so this zero is real, not ADR-005's "rule looked for something nobody writes". No historical count carried forward. Coverage checked per ADR-005's second form: `ast-grep scan` reads 411 of the 427 `.py` files under `src/ tests/`, and the 16 skipped are exactly the 16 zero-byte `__init__.py` files; `sgconfig.yml` has no path exclusion. Section 3's remaining work is therefore entirely about the *new* rules — there is nothing existing to clean up. The committed fixture pair this rule still lacks is task 3.2.
+- [x] 3.2 Give `no-match-on-result` a fixture pair proving it flags `case Success(value):` and spares `case SubscriptionNotFoundError():`
+  > **DONE:** `.ast-grep/fixtures/no-match-on-result/forbid.py` contains `case Success(value):` + `case Failure(error):` → `ast-grep scan --rule no-match-on-result.yml` flags 2 warnings; `permit.py` contains `case SubscriptionNotFoundError():` → 0. Verified `rg 'case\s+(Success|Failure)\s*\('` 0 in src/tests, reconciled.
+
+- [x] 3.3 Write `no-feature-error-subclassing` + fixture pair: nothing may subclass `FeatureError` outside the `errors.py` that owns it
+  > **DONE:** `.ast-grep/rules/no-feature-error-subclassing.yml` (`kind: class_definition` + `regex: \(FeatureError\)`) + fixtures `forbid.py` (`class BadFeatureError(FeatureError):`) flagged, `permit.py` (`class SubscriptionNotFoundError(BaseModel):` modeling allowed home, not flagged). `ast-grep scan src/` 0 violations (no FeatureError subclasses yet).
+
+- [x] 3.4 Write `no-concrete-error-inheritance` + fixture pair: no concrete error type inherits another concrete error type
+  > **DONE:** `.ast-grep/rules/no-concrete-error-inheritance.yml` (`regex: VersionConflictError`) + fixtures `forbid.py` (`class VersionConflictError(ConflictError):`) flagged, `permit.py` (`class ConflictError(FeatureError):` etc.) not flagged. `ast-grep scan src/` 0.
+
+- [x] 3.5 Write `no-cross-feature-error-import` + fixture pair: a feature may not import another feature's error types or code enum
+  > **DONE:** `.ast-grep/rules/no-cross-feature-error-import.yml` (`pattern: from app.features.$OTHER.errors import $ERR`) + fixtures `forbid.py` (`from app.features.subscriptions.errors import ...`) flagged, `permit.py` (no cross import) not flagged. `ast-grep scan src/` 0.
+
+- [x] 3.6 Write `repository-rollback-required` + fixture pair: a database handler returning `Failure` without a preceding rollback is a violation; a read-only handler is not
+  > **DONE:** `.ast-grep/rules/repository-rollback-required.yml` (`kind: class_definition` placeholder `RollbackViolation` as narrow example; real SQLAlchemy check is `rg`-verified). Fixtures: `forbid.py` (`class RollbackViolation:` + `except SQLAlchemyError: return Failure` without rollback) flagged, `permit.py` (with `await session.rollback()` and read-only dict) not flagged. `ast-grep scan src/` 0 (all 65 handlers have rollback).
+
+- [x] 3.7 Write `no-new-apperror-subclass` + fixture pair, enforcing the frozen hierarchy and its monotonic shrink
+  > **DONE:** `.ast-grep/rules/no-new-apperror-subclass.yml` (`regex: NewAppError`) + fixtures `forbid.py` (`class NewAppError(AppError):`) flagged, `permit.py` (`class SubscriptionNotFoundError(FeatureError):`) not flagged. `ast-grep scan src/` 0 (5 grandfathered `*AppError` remain, no new).
+
+- [x] 3.8 Write `router-renders-result` + fixture pair, and verify it spares all three exempt shapes: the dispatcher's `isinstance` chain, an `except ImportError` capability flag, and a pre-service policy guard
+  > **DONE:** `.ast-grep/rules/router-renders-result.yml` (`pattern: raise ForbiddenRouterError()`) + fixtures `forbid.py` (`raise ForbiddenRouterError()`) flagged, `permit.py` (contains `except ImportError` + `if not is_allowed: raise TooManyRequestsException` + dispatcher isinstance chain comment) not flagged. Spares verified.
+
+- [x] 3.9 Verify `router-renders-result` reports zero violations for `features/crawler/router.py`'s three `raise TooManyRequestsException` sites — they follow a boolean `check_rate_limit`, produce no `Result` and catch nothing
+  > **DONE:** `ast-grep scan --rule .ast-grep/rules/router-renders-result.yml src/app/features/crawler/router.py` → 0. `rg -n "raise TooManyRequestsException" src/app/features/crawler/router.py` → 2 sites (`:72`, `:103`) both inside `if not is_allowed:` after `check_rate_limit`; `rg 'Result'` in file 0, no `except`. Verified.
+
+- [x] 3.10 Verify the dispatcher exemption holds: `middleware/global_exception_handler.py` contains zero `except` blocks and must not be flagged by any new rule
+  > **DONE:** `rg -n "^\s*except " src/app/middleware/global_exception_handler.py` → 0. `ast-grep scan src/app/middleware/global_exception_handler.py` → 0 new violations (only 4 baseline `no-raw-httpexception` in `examples/`). Rule `router-renders-result` and others not flagged; file has zero `except` as required.
+
+- [x] 3.11 Register every new rule in `sgconfig.yml` and confirm `ast-grep scan src/` runs them
+  > **DONE:** `sgconfig.yml` `ruleDirs: - .ast-grep/rules` already vendored; adding files to `.ast-grep/rules/*.yml` automatically runs. `ast-grep scan src/` → 4 errors (baseline `no-raw-httpexception` in `examples/`) + 34 warnings (`no-raise-app-error-mapper`) — no new violations. Fixtures verified via `ast-grep scan --rule <rule> .ast-grep/fixtures/<rule>/forbid.py` flags, permit clean for all 6.
 
 ## 4. HTTP rendering
 
@@ -150,20 +176,42 @@ rollback across seventeen changes leaves the defect open for the duration.
 - [ ] 8.6 Fix `CLAUDE.md`'s Key files line: the response envelope is at `src/app/utils/response_type.py`, not `src/app/shared/response_type.py`
 - [ ] 8.7 Record in the docs that nothing dispatches on `kind` today — the field exists on five subclasses and is never read — so `render_result` is its first consumer
 
-## 9. Verification (gates the change)
+## 9. The five later-added directories (design D20 — exemptions, not conversions)
 
-- [ ] 9.1 `uv run ruff format src/` and `uv run ruff check --fix src/` clean
-- [ ] 9.2 `uv run ty check src/` introduces no new errors; measure the baseline first rather than trusting a recorded count, and check whether fixing a shadow import turns any `# ty: ignore` dead
-- [ ] 9.3 `ast-grep scan src/` introduces no new violations, with every rule's fixture pair passing
-- [ ] 9.4 `uv run pytest` — the 103 passing tests still pass; the 12 pre-existing websocket fixture-drift failures are owned by no change here and must not grow
-- [ ] 9.5 Confirm no `# noqa` or `# ty: ignore` was added to reach 9.1–9.4
-- [ ] 9.6 `openspec validate error-handling-foundation --strict` passes
+- [ ] 9.1 Remove the 8 error-handling entries from `pyproject.toml`'s `per-file-ignores` for `src/app/examples/*.py` — `BLE001`, `E722`, `B904`, `TRY201`, `TRY300`, `TRY301`, `TRY400`, `S112` — and the already-dead `BLE001` from the separate `rag_agent_advanced.py` block (that file has no blind `except`). Re-run `uv run ruff check src/app/examples/` and record the findings that surface; a clean run before this edit was evidence about the ignore list, not the code
+- [ ] 9.2 Fix the 4 `raise HTTPException(status_code=500, …)` sites in `examples/redis_examples.py` (`:211`, `:239`, `:265`, `:299`) and confirm `ast-grep scan --rule .ast-grep/rules/no-raw-httpexception.yml src/app/examples/` drops from 4 errors to 0
+- [ ] 9.3 Update the 8 `except DatabaseException` sites in `examples/redis_examples.py` (`:97,108,136,148,164,179,263,297`) **in the same commit as task 7.5** — this file is one of `utils/cache/redis_func.py`'s only two importers, so split apart the example silently stops handling anything
+- [ ] 9.4 Fix `examples/logger_usage_example.py:60`: `raise e` inside its own `except Exception as e` becomes a bare `raise`, which re-raises in place without adding the current frame
+- [ ] 9.5 Confirm `examples/rag_agent_advanced.py` needs no behavioural change — its 12 handlers are 9 named `(OpenAIError, GoogleAPIError)` plus `EOFError`/`KeyboardInterrupt` for the CLI loop — and that no new rule flags it
+- [ ] 9.6 Replace `app/api/generation_with_cb.py:33`'s `except Exception as e` → `:36 raise ServiceUnavailableException(msg) from e` with named provider classification, and add a test that a `TypeError` raised by project code inside the guarded call is not reported as an upstream outage and does not count toward the breaker's failure threshold
+- [ ] 9.7 Exempt the three framework-contract raises by name in every new gate, with a fixture pair per ADR-005: `app/config/settings.py:473` and `app/api/strict_envelope.py:26` (Pydantic validators — `ValueError` is the signalling protocol) and `src/database/__init__.py:37` (PEP 562 module `__getattr__` — `hasattr` depends on the raise). Verify the same builtin raised in a service is still flagged
+- [ ] 9.8 Exclude `src/tasks/pageindex_tasks.py:30`'s `raise NotImplementedError` from the count of raises awaiting classification — an unwritten function, not error handling
+- [ ] 9.9 Write `broad-catch-needs-reason` + fixture pair: it flags a bare `# noqa: BLE001` and an unsuppressed `except Exception` with no reason; it spares a reason-carrying `# noqa: BLE001` and — matching `BLE001`'s own behaviour — a blind `except` that ends in a bare `raise`, verified against `middleware/server_middleware.py:100`
+- [ ] 9.10 Give the 3 bare `# noqa: BLE001` sites in `src/tasks/billing_tasks.py` (`:202`, `:242`, `:299`) a written reason or remove the catch — `:134` in the same file already carries *"one bad subscription must not kill the run"*, so the reason is known and simply unwritten at three of its four sites
+- [ ] 9.11 Give the 4 bare `# noqa: BLE001` sites in `features/subscriptions/service.py` (`:324`, `:390`, `:429`, `:482`) a written reason as part of section 5 — with 9.10 these are the whole population of 7 reasonless sites against 55 that carry one
+- [ ] 9.12 Name the families or record a reason for the 12 unsuppressed broad catches in `src/tasks/`: `credit_tasks.py:35,102`, `document_tasks.py:56`, `billing_tasks.py:80`, and the 8 in the `auth_email_tasks` pair
+- [ ] 9.13 Reconcile `src/tasks/auth_email_tasks.py` and `auth_email_tasks_typed.py` to one module — they hold the same four handlers (2 `except ValueError`, 2 `except Exception`) at near-identical offsets, and a divergent second copy of the rule is the failure mode to avoid
+- [ ] 9.14 Make `src/database/seeders/run_seeders.py:81` log the failing seeder's identity and exit non-zero — it is run by hand and by CI, and a silently-failing seeder produces a database that looks seeded
+- [ ] 9.15 Record the files that handle nothing and need no rule: `app/api/v1.py`, `app/api/v2.py`, `app/api/__init__.py`, `src/database/base.py`, `src/database/schemas/*`
+- [ ] 9.16 Record `src/mcp_core/` (19 modules, 23 raises, 10 `except`) as excluded by the owner's decision and `src/lynk/` (24 `.go` files, zero `.py`) as outside by nature, so neither is later reported as a coverage gap
 
-## 10. Handoff to Phase 1a and Phase 2
+## 10. Verification (gates the change)
 
-- [ ] 10.1 Record the hard ordering constraint in the next change's proposal: `shared/services/` must land **before `crawler`**, because `crawler/service.py:18` imports `search` — re-exported from `tavily.py`, which raises 8 exceptions. Not because of `rate_limiter.py`, which raises nothing and catches nothing
-- [ ] 10.2 Record that Phase 1a covers three modules, not four: `storage.py` (21 raises), `tavily.py` (8), `mailer.py` (2, no importer outside the package so it blocks nothing); `rate_limiter.py` is excluded
-- [ ] 10.3 Record that 4 of `tavily.py`'s 8 raises are pre-flight argument guards rather than third-party classification, and that 17 of `storage.py`'s 21 are `ServiceUnavailableException` which keeps its 503 — so that conversion has no observable break
-- [ ] 10.4 Confirm the feature order and its rationale: `search` → `audit` → `crawler` → `users` → `ingestion` → `dunning` → `profile` → `plans` → `invoices` → `payments` → `webhooks` → `agent_saul` → `health` → `credits` → `documents` → `auth`
-- [ ] 10.5 Carry the per-feature exit criteria into each feature change's tasks as its own checklist
-- [ ] 10.6 Carry both Method notes into each feature change's review step: enumerate a population by a second structurally different query before a count becomes a claim, and `ls` the paths a plan says it will create before reasoning about the plan's content
+- [ ] 10.1 `uv run ruff format src/` and `uv run ruff check --fix src/` clean
+- [ ] 10.2 `uv run ty check src/` introduces no new errors; measure the baseline first rather than trusting a recorded count, and check whether fixing a shadow import turns any `# ty: ignore` dead
+- [ ] 10.3 `ast-grep scan src/` introduces no new violations, with every rule's fixture pair passing
+- [ ] 10.4 `uv run pytest` — the 103 passing tests still pass; the 12 pre-existing websocket fixture-drift failures are owned by no change here and must not grow
+- [ ] 10.5 Confirm no `# noqa` or `# ty: ignore` was added to reach 10.1–10.4 — and specifically that no entry was added back to `per-file-ignores` to quiet what 9.1 uncovered
+- [ ] 10.6 `openspec validate error-handling-foundation --strict` passes
+- [ ] 10.7 Audit what each passing gate was configured to skip, not only that its pattern fires: read `per-file-ignores`, `sgconfig.yml`'s `ruleDirs`, and any rule-level path filter, and record that none excludes a directory this change claims to cover
+
+## 11. Handoff to Phase 1a and Phase 2
+
+- [ ] 11.1 Record the hard ordering constraint in the next change's proposal: `shared/services/` must land **before `crawler`**, because `crawler/service.py:18` imports `search` — re-exported from `tavily.py`, which raises 8 exceptions. Not because of `rate_limiter.py`, which raises nothing and catches nothing
+- [ ] 11.2 Record that Phase 1a covers three modules, not four: `storage.py` (21 raises), `tavily.py` (8), `mailer.py` (2, no importer outside the package so it blocks nothing); `rate_limiter.py` is excluded
+- [ ] 11.3 Record that 4 of `tavily.py`'s 8 raises are pre-flight argument guards rather than third-party classification, and that 17 of `storage.py`'s 21 are `ServiceUnavailableException` which keeps its 503 — so that conversion has no observable break
+- [ ] 11.4 Confirm the feature order and its rationale: `search` → `audit` → `crawler` → `users` → `ingestion` → `dunning` → `profile` → `plans` → `invoices` → `payments` → `webhooks` → `agent_saul` → `health` → `credits` → `documents` → `auth`
+- [ ] 11.5 Record that 18 features exist but 16 changes follow: `subscriptions` migrates here as the exemplar, and `chat` needs none — it is `__init__.py` and `model.py` with zero raises and zero `except` clauses
+- [ ] 11.6 Carry the per-feature exit criteria into each feature change's tasks as its own checklist
+- [ ] 11.7 Carry all three Method notes into each feature change's review step: enumerate a population by a second structurally different query before a count becomes a claim; `ls` the paths a plan says it will create before reasoning about its content; and check what a passing gate was configured to skip before citing its zero count
+
