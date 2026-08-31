@@ -492,9 +492,6 @@ section-order = [
     "ASYNC240",
     "ASYNC250",
     "B007",
-    "B904",
-    "BLE001",
-    "E722",
     "FAST002",
     "PLW2901",
     "RET503",
@@ -503,12 +500,7 @@ section-order = [
     "S105",
     "S106",
     "S108",
-    "S112",
     "SIM102",
-    "TRY201",
-    "TRY300",
-    "TRY301",
-    "TRY400",
     "T100",    # Allow debugger calls in examples
 ]
 # Relocated from src/app/shared/rag by todo-210 band E. Deliberately NOT
@@ -535,7 +527,6 @@ section-order = [
     "ARG001",
     "ASYNC250",
     "B007",
-    "BLE001",
     "F821",
     "PLC0415",
 ]
