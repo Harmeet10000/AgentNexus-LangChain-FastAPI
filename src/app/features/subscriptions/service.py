@@ -33,6 +33,7 @@ from .errors import (
     SubscriptionInvalidTransitionError,
     SubscriptionNotFoundError,
     SubscriptionPlanNotFoundError,
+    SubscriptionTransientInfrastructureError,
     SubscriptionValidationError,
     SubscriptionVersionConflictError,
 )
@@ -116,6 +117,8 @@ def subscription_error_to_http_status(error: SubscriptionError) -> int:
             return http_status_for_kind(ErrorKind.NOT_FOUND)
         case SubscriptionInfrastructureError():
             return http_status_for_kind(ErrorKind.INFRASTRUCTURE, retryable=error.retryable)
+        case SubscriptionTransientInfrastructureError():
+            return http_status_for_kind(ErrorKind.INFRASTRUCTURE, retryable=error.retryable)
         case SubscriptionValidationError():
             return http_status_for_kind(ErrorKind.VALIDATION)
         case _ as unreachable:
@@ -175,8 +178,13 @@ class SubscriptionService:
             err = result.failure()
             # Preserve plan infrastructure/validation semantics — do not collapse to not-found
             if isinstance(err, InfrastructureAppError):
+                error_type = (
+                    SubscriptionTransientInfrastructureError
+                    if err.retryable
+                    else SubscriptionInfrastructureError
+                )
                 return Failure(
-                    SubscriptionInfrastructureError(
+                    error_type(
                         message=err.message,
                         details=err.details or {"plan_id": str(plan_id)},
                         source="subscription_service",
@@ -210,7 +218,7 @@ class SubscriptionService:
                 )
             if isinstance(err, ExternalServiceAppError):
                 return Failure(
-                    SubscriptionInfrastructureError(
+                    SubscriptionTransientInfrastructureError(
                         message=err.message,
                         details=err.details or {"plan_id": str(plan_id)},
                         source="subscription_service",
@@ -218,7 +226,7 @@ class SubscriptionService:
                     )
                 )
             return Failure(
-                SubscriptionInfrastructureError(
+                SubscriptionTransientInfrastructureError(
                     message=getattr(err, "message", "Plan not found"),
                     details={"plan_id": str(plan_id), "error": str(err)},
                     source="subscription_service",
@@ -759,7 +767,7 @@ class SubscriptionService:
         except Exception as exc:  # noqa: BLE001 — trial extension flush may fail
             await self.session.rollback()
             return Failure(
-                SubscriptionInfrastructureError(
+                SubscriptionTransientInfrastructureError(
                     message="Database error while creating trial extension",
                     details={"subscription_id": str(subscription.id), "error": str(exc)},
                     source="subscription_service",

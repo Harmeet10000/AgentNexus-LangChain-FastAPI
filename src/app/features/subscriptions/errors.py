@@ -75,6 +75,14 @@ class SubscriptionInfrastructureError(FeatureError):
     operation: str | None = None
 
 
+class SubscriptionTransientInfrastructureError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.INFRASTRUCTURE
+    code: ClassVar[SubscriptionCode] = SubscriptionCode.DATABASE_ERROR
+    retryable: ClassVar[bool] = True
+
+    operation: str | None = None
+
+
 class SubscriptionValidationError(FeatureError):
     kind: ClassVar[ErrorKind] = ErrorKind.VALIDATION
     code: ClassVar[SubscriptionCode] = SubscriptionCode.VALIDATION_ERROR
@@ -88,6 +96,7 @@ type SubscriptionError = (
     | SubscriptionInvalidTransitionError
     | SubscriptionPlanNotFoundError
     | SubscriptionInfrastructureError
+    | SubscriptionTransientInfrastructureError
     | SubscriptionValidationError
 )
 
