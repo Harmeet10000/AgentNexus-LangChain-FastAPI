@@ -40,6 +40,7 @@ class InvoiceRepository:
             await self.session.flush()
             return Success(invoice)
         except IntegrityError as exc:
+            await self.session.rollback()
             return Failure(
                 ConflictAppError(
                     code="INVOICE_CONFLICT",
@@ -49,6 +50,7 @@ class InvoiceRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -74,6 +76,7 @@ class InvoiceRepository:
                 )
             return Success(invoice)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -91,6 +94,7 @@ class InvoiceRepository:
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -129,6 +133,7 @@ class InvoiceRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -148,6 +153,7 @@ class InvoiceRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -166,6 +172,7 @@ class InvoiceRepository:
             sequence = int(result.scalar_one())
             return Success(f"{prefix}-{year}-{sequence:04d}")
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -184,6 +191,7 @@ class InvoiceRepository:
             sequence = int(result.scalar_one())
             return Success(f"{prefix}-{year}-{sequence:04d}")
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -223,6 +231,7 @@ class InvoiceRepository:
                 )
             return Success(updated)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",

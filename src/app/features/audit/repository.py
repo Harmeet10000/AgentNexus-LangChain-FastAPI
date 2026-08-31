@@ -33,6 +33,7 @@ class AuditLogRepository:
             await self.session.flush()
             return Success(entry)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -61,6 +62,7 @@ class AuditLogRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -110,6 +112,7 @@ class AuditLogRepository:
             result = await self.session.execute(statement)
             return Success((list(result.scalars().all()), int(total)))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
