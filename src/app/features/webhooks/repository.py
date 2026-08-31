@@ -9,12 +9,12 @@ from returns.result import Failure, Success
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.utils.codes import ErrorCode
 from app.shared.result import (
     ConflictAppError,
     InfrastructureAppError,
     NotFoundAppError,
 )
+from app.utils.codes import ErrorCode
 
 from .model import WebhookEvent
 
@@ -24,10 +24,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from app.utils.codes import ErrorCode
-from app.shared.result import (
-        AppResult,
-    )
+    from app.shared.result import AppResult
 
 
 class WebhookEventRepository:
@@ -55,7 +52,8 @@ class WebhookEventRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while creating webhook event",
                     details={"error": str(exc)},
                     source="webhook_event_repository",
@@ -75,7 +73,8 @@ class WebhookEventRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while checking webhook event",
                     details={"razorpay_event_id": razorpay_event_id, "error": str(exc)},
                     source="webhook_event_repository",
@@ -103,7 +102,8 @@ class WebhookEventRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching webhook event",
                     details={"event_id": str(event_id), "error": str(exc)},
                     source="webhook_event_repository",
@@ -124,7 +124,8 @@ class WebhookEventRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while listing failed webhook events",
                     details={"error": str(exc)},
                     source="webhook_event_repository",
@@ -164,7 +165,8 @@ class WebhookEventRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while updating webhook event status",
                     details={"event_id": str(event.id), "error": str(exc)},
                     source="webhook_event_repository",

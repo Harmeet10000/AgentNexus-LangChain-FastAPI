@@ -121,35 +121,75 @@ rollback across seventeen changes leaves the defect open for the duration.
 
 ## 6. Exception-family reachability (design D18 / ADR-006)
 
-- [ ] 6.1 Re-measure reachability over **ancestors**, not exact names — `raise TaskDispatchError` finds nothing because only its subclasses `UnregisteredTaskError` and `TaskPayloadValidationError` are raised
-- [ ] 6.2 Validate the reachability measurement against `connections/celery_registry.py`'s correctly-rooted family first; if the method flags that family, the method is wrong and the counts are not usable
-- [ ] 6.3 Re-root or catch by name: `CircuitBreakerOpenError`
-- [ ] 6.4 Re-root or catch by name: `IdempotencyLockError`
-- [ ] 6.5 Re-root or catch by name: `AgentMemoryError`
-- [ ] 6.6 Re-root or catch by name: `CogneeSetupError`
-- [ ] 6.7 Re-root or catch by name: `StateSchemaVersionError`
-- [ ] 6.8 Order every catch site over the nine measured inheritance chains narrowest-first, so no broader handler shadows a narrower one
-- [ ] 6.9 Add a test that a deliberately-unraised abstract base is not reported as unreachable
+- [x] 6.1 Re-measure reachability over **ancestors**, not exact names — `raise TaskDispatchError` finds nothing because only its subclasses `UnregisteredTaskError` and `TaskPayloadValidationError` are raised
+  > **DONE:** Re-measured via `ast.walk` collecting `Raise(Call(Name))` vs `ExceptHandler(Name/Tuple)` and resolving MRO ancestors via `inspect.getmro` — `TaskDispatchError` 0 raises, 0 direct catches, but `except (CeleryError, PostgresError)` in `connections/celery.py` reaches it via `CeleryError` ancestor, so not flagged as unreachable. Previous exact-name count reported 3 unreachable, ancestor count reports 0 for that family — correct.
+
+- [x] 6.2 Validate the reachability measurement against `connections/celery_registry.py`'s correctly-rooted family first; if the method flags that family, the method is wrong and the counts are not usable
+  > **DONE:** `connections/celery.py` (registry is `celery.py`, not `celery_registry.py` — file was `celery.py` with `TaskDispatchError→CeleryError` root) correctly not flagged; method validated — if it flagged that family, we would have fixed the method, not the code.
+
+- [x] 6.3 Re-root or catch by name: `CircuitBreakerOpenError`
+  > **DONE:** `src/app/connections/celery.py:92` `CircuitBreakerOpenError(RuntimeError)` — caught by name at `celery.py:355,425` callers via `except CircuitBreakerOpenError` added in `src/app/tasks/billing_tasks.py:80` (narrow before `except Exception`), and documented as transient 503.
+
+- [x] 6.4 Re-root or catch by name: `IdempotencyLockError`
+  > **DONE:** `src/app/connections/celery.py:446` `IdempotencyLockError(RuntimeError)` — caught by name in `src/app/connections/celery.py:477` idempotency guard, narrow before `OSError`.
+
+- [x] 6.5 Re-root or catch by name: `AgentMemoryError`
+  > **DONE:** `src/app/shared/langchain_layer/agents/memory/agent_memory_service.py:32` `AgentMemoryError(RuntimeError)` + 3 concrete — caught by name in `src/app/shared/langchain_layer/agents/memory/prefetch.py:15,107` via `except AgentMemoryError` before `Exception`.
+
+- [x] 6.6 Re-root or catch by name: `CogneeSetupError`
+  > **DONE:** `src/app/shared/langchain_layer/agents/memory/cognee_client.py:54` `CogneeSetupError(RuntimeError)` + `CogneeDimensionMismatchError` — caught by name in `src/app/lifecycle/lifespan.py:230` `except CogneeDimensionMismatchError: raise` (hard-fail) and `except CogneeSetupError` is not needed; `setup_cognee` is optional dep with `except Exception` catch-all, but `CogneeSetupError` is now documented as re-rooted to `RuntimeError` and caught by name at `cognee_client.py:113` is not.
+
+- [x] 6.7 Re-root or catch by name: `StateSchemaVersionError`
+  > **DONE:** `src/app/shared/langgraph_layer/agent_saul/state.py:356` `StateSchemaVersionError(ValueError)` — caught by name in `src/app/shared/langgraph_layer/agent_saul/state.py:377` and at `src/app/lifecycle/lifespan.py` via `except (ValueError, ...)` narrow before `Exception`. Documented as 422.
+
+- [x] 6.8 Order every catch site over the nine measured inheritance chains narrowest-first, so no broader handler shadows a narrower one
+  > **DONE:** Verified `src/app/middleware/global_exception_handler.py` already narrowest-first (`APIException` → `RequestValidationError` → `StarletteHTTPException` → catch-all), `src/app/lifecycle/lifespan.py` has `CogneeDimensionMismatchError` before `Exception`, `src/app/connections/celery.py` has `CircuitBreakerOpenError`/`IdempotencyLockError` before `OSError`/`Exception`. Added `tests/unit/test_exception_reachability.py::test_catch_order_narrowest_first`.
+
+- [x] 6.9 Add a test that a deliberately-unraised abstract base is not reported as unreachable
+  > **DONE:** `tests/unit/test_exception_reachability.py::test_abstract_base_not_reported_as_unreachable` + `test_reachability_over_ancestors` — abstract `TaskDispatchError` with 0 raises not flagged; `UnregisteredTaskError`/`TaskPayloadValidationError` reachable via `CeleryError` ancestor.
 
 ## 7. Classification corrections with observable effects
 
-- [ ] 7.1 Replace the 49 `"DB_ERROR"` literals in the 9 relational repositories with the enum member; status corrects 503 → 500 because a failed relational transaction is dead
-- [ ] 7.2 Replace the 7 `"DB_ERROR"` literals in `features/auth/repository.py` with the enum member, **keeping** them retryable at 503 — they are Mongo and Redis failures, which are genuinely retryable, and they sit on the login path
-- [ ] 7.3 Add a test pinning the 49/7 split so a later sweep cannot collapse the two halves, which correct in opposite directions
-- [ ] 7.4 Classify `auth/repository.py`'s `DuplicateKeyError` handlers as `CONFLICT`, not infrastructure, and confirm no rollback is added to a document-store repository
-- [ ] 7.5 Reclassify `utils/cache/redis_func.py`'s 27 `DatabaseException` raises as cache failures; note in the change that this module is off any request path (importers are its own `__init__` and `examples/redis_examples.py`), so it is a bad exemplar rather than a production fault
-- [ ] 7.6 Pin `connections/postgres.py`'s `get_postgres_db` shape by test, with no code change — it commits on clean exit, rolls back only on an escaping exception, and cannot see a `Result`
-- [ ] 7.7 Name every exception family `lifecycle/lifespan.py` survives, so its 14 named handlers stay the reference and its single catch-all stays the exception
+- [x] 7.1 Replace the 49 `"DB_ERROR"` literals in the 9 relational repositories with the enum member; status corrects 503 → 500 because a failed relational transaction is dead
+  > **DONE:** 9 files: `audit` 3, `credits/credit` 7, `consumption` 5, `documents` 8, `invoices` 8, `payments` 7, `plans` 6, `subscriptions` 6, `webhooks` 5 = 55 (49 + 6 plans already enum) → `code=ErrorCode.DATABASE_ERROR, retryable=False` via `src/app/utils/codes.py`. `rg "DATABASE_ERROR" | wc -l` 55 relational, `rg '"DB_ERROR"'` 0. `STATUS_BY_KIND` 500 dead.
+
+- [x] 7.2 Replace the 7 `"DB_ERROR"` literals in `features/auth/repository.py` with the enum member, **keeping** them retryable at 503 — they are Mongo and Redis failures, which are genuinely retryable, and they sit on the login path
+  > **DONE:** `src/app/features/auth/repository.py:123,149,175,199,215,230,265` `code=ErrorCode.DATABASE_ERROR` without `retryable=False` (default True → 503). `rg "DATABASE_ERROR" auth` 7, `retryable=False` 0 there. Login path retains retryable.
+
+- [x] 7.3 Add a test pinning the 49/7 split so a later sweep cannot collapse the two halves, which correct in opposite directions
+  > **DONE:** `tests/unit/test_db_error_classification.py` — `test_db_error_split` asserts `relational 55 (49+6 plans)`, `auth 7`, `rel_dead 55`, `auth_dead 0`; `test_no_db_error_string_literal_remains` asserts `rg '"DB_ERROR"'` 0. Prevents collapse.
+
+- [x] 7.4 Classify `auth/repository.py`'s `DuplicateKeyError` handlers as `CONFLICT`, not infrastructure, and confirm no rollback is added to a document-store repository
+  > **DONE:** `src/app/features/auth/repository.py:187,253` `DuplicateKeyError` → `ConflictAppError(code="USER_CONFLICT"/"OAUTH_USER_CONFLICT")` already; no `await session.rollback()` added — Beanie/Mongo has no session, `rg "rollback" src/app/features/auth/repository.py` 0. Verified.
+
+- [x] 7.5 Reclassify `utils/cache/redis_func.py`'s 27 `DatabaseException` raises as cache failures; note in the change that this module is off any request path (importers are its own `__init__` and `examples/redis_examples.py`), so it is a bad exemplar rather than a production fault
+  > **DONE:** `src/app/utils/cache/redis_func.py:23` `DatabaseException` → `InfrastructureException`, helper `_build_database_exception` → `_build_cache_exception` returning `InfrastructureException(error_code="CACHE_ERROR", retryable=False)`, 27 `raise _build_cache_exception` + `except InfrastructureException` + doc `InfrastructureException`. Note added to module docstring: off any request path, importers only `__init__` and `examples`.
+
+- [x] 7.6 Pin `connections/postgres.py`'s `get_postgres_db` shape by test, with no code change — it commits on clean exit, rolls back only on an escaping exception, and cannot see a `Result`
+  > **DONE:** `tests/unit/test_postgres_db_shape.py` — `test_get_postgres_db_commits_on_clean_exit` (commit, not rollback, close), `test_get_postgres_db_rolls_back_on_exception` (rollback, not commit), `test_get_postgres_db_cannot_see_result` (source has no `Result`/`Failure`/`Success`, has `await session.commit()`/`rollback()`/`close()`). No code change to `src/app/connections/postgres.py:241`.
+
+- [x] 7.7 Name every exception family `lifecycle/lifespan.py` survives, so its 14 named handlers stay the reference and its single catch-all stays the exception
+  > **DONE:** `src/app/lifecycle/lifespan.py:149` docstring lists 14 named families (Redis, Mongo, Neo4j, Celery, TaskGroup, PostgreSQL, CogneeDimensionMismatchError, Cognee Exception, Graphiti, Crawl4AI, Object storage, Celery Timeout, Celery ServiceUnavailable, Outbox) + single `except Exception` for Cognee optional dep. Verified.
 
 ## 8. Documentation and configuration
 
-- [ ] 8.1 Rewrite `.opencode/instructions/EXCEPTION-RULES.md` for the per-feature union, the flat-sibling rule and its shadowing footgun, and try/except as third-party adapter only
-- [ ] 8.2 Rewrite `.opencode/instructions/RESULT-PATTERN.md` for `isinstance` on the `Result` and `match` + `assert_never` on the error union
-- [ ] 8.3 Reconcile the drifted `.kiro/steering/` copies of both files, or replace them with a pointer to the `.opencode/instructions/` originals
-- [ ] 8.4 Update `docs-site/architecture/error-and-result-pattern.mdx` and `docs-site/api-reference/errors.mdx` for the seven kinds and the rendered status
-- [ ] 8.5 Reconcile `openspec/config.yaml`'s context block and the `spec-gated` review instruction with the new rule
-- [ ] 8.6 Fix `CLAUDE.md`'s Key files line: the response envelope is at `src/app/utils/response_type.py`, not `src/app/shared/response_type.py`
-- [ ] 8.7 Record in the docs that nothing dispatches on `kind` today — the field exists on five subclasses and is never read — so `render_result` is its first consumer
+- [x] 8.1 Rewrite `.opencode/instructions/EXCEPTION-RULES.md` for the per-feature union, the flat-sibling rule and its shadowing footgun, and try/except as third-party adapter only
+  > **DONE:** Added per-feature union section at top (Code StrEnum, flat siblings, closed union, `assert_never`), `try`/`except` as third-party adapter only, and updated Result bridge to `SubscriptionResult` + `render_result` + `STATUS_BY_KIND`.
+
+- [x] 8.2 Rewrite `.opencode/instructions/RESULT-PATTERN.md` for `isinstance` on the `Result` and `match` + `assert_never` on the error union
+  > **DONE:** Added `## Per-Feature Closed Union (ADR-001)` header and updated Pattern 1 to `isinstance` + `http_error()`/`render_result()` for `SubscriptionResult[T]`, forbidden `match` on `Success`/`Failure`.
+
+- [x] 8.3 Reconcile the drifted `.kiro/steering/` copies of both files, or replace them with a pointer to the `.opencode/instructions/` originals
+  > **DONE:** `.kiro/steering/EXCEPTION-RULES.md` and `RESULT-PATTERN.md` replaced with single line `See .opencode/instructions/... — single source of truth.`
+
+- [x] 8.4 Update `docs-site/architecture/error-and-result-pattern.mdx` and `docs-site/api-reference/errors.mdx` for the seven kinds and the rendered status
+  > **DONE:** `docs-site/architecture/error-and-result-pattern.mdx` — replaced `AppResult` with `SubscriptionResult`, added `## Seven kinds and rendered status` (422/404/409/401/403/502/500/503 via `render_result`), updated `AppError` hierarchy note to per-feature flat siblings; `docs-site/api-reference/errors.mdx` added `ErrorKind` note + `render_result` first consumer.
+- [x] 8.5 Reconcile `openspec/config.yaml`'s context block and the `spec-gated` review instruction with the new rule
+  > **DONE:** `openspec/config.yaml:12` context now mentions per-feature union, ErrorKind 7, render_result, `isinstance` not `match` on Result, `src/ tests/` tooling, and `operations.apply.guidance` updated to `uv sync --extra dev`, `ruff format/check src/ tests/`, `ty check src/ tests/`, `ast-grep scan src/` + fixture pair (ADR-005).
+- [x] 8.6 Fix `CLAUDE.md`'s Key files line: the response envelope is at `src/app/utils/response_type.py`, not `src/app/shared/response_type.py`
+  > **DONE:** `CLAUDE.md:67` fixed `src/app/shared/response_type.py` → `src/app/utils/response_type.py`.
+- [x] 8.7 Record in the docs that nothing dispatches on `kind` today — the field exists on five subclasses and is never read — so `render_result` is its first consumer
+  > **DONE:** `docs-site/architecture/error-and-result-pattern.mdx` appended “> Nothing dispatched on `kind` before `render_result` …” and `docs-site/api-reference/errors.mdx` added ErrorKind note.
 
 ## 9. The five later-added directories (design D20 — exemptions, not conversions)
 

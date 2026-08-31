@@ -64,7 +64,7 @@ All under `.opencode/instructions/`.
 
 - Exceptions: `src/app/utils/exceptions.py` · handler: `src/app/middleware/global_exception_handler.py`
 - Result→exception bridge: `src/app/shared/result/mappers.py`
-- Response envelope: `src/app/shared/response_type.py`
+- Response envelope: `src/app/utils/response_type.py`
 - Cache: `src/app/utils/cache/redis_func.py` · Lifespan: `src/app/lifecycle/lifespan.py`
 - Examples belong in `src/app/examples/`
 

@@ -9,16 +9,15 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.features.credits.models.consumption import CreditConsumption
-from app.utils.codes import ErrorCode
 from app.shared.result import ConflictAppError, InfrastructureAppError
+from app.utils.codes import ErrorCode
 
 if TYPE_CHECKING:
     from uuid import UUID
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.utils.codes import ErrorCode
-from app.shared.result import AppResult
+    from app.shared.result import AppResult
 
 
 class ConsumptionRepository:
@@ -46,7 +45,8 @@ class ConsumptionRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while creating credit consumption",
                     details={"error": str(exc)},
                     source="consumption_repository",
@@ -82,7 +82,8 @@ class ConsumptionRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while listing credit consumptions",
                     details={"user_id": user_id, "error": str(exc)},
                     source="consumption_repository",
@@ -101,7 +102,8 @@ class ConsumptionRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching consumption by invoice",
                     details={"invoice_id": str(invoice_id), "error": str(exc)},
                     source="consumption_repository",
@@ -122,7 +124,8 @@ class ConsumptionRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while fetching consumptions by credit",
                     details={"credit_id": str(credit_id), "error": str(exc)},
                     source="consumption_repository",
@@ -141,7 +144,8 @@ class ConsumptionRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while calculating total consumed",
                     details={"credit_id": str(credit_id), "error": str(exc)},
                     source="consumption_repository",

@@ -8,8 +8,8 @@ from returns.result import Failure, Success
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.utils.codes import ErrorCode
 from app.shared.result import InfrastructureAppError
+from app.utils.codes import ErrorCode
 
 from .model import AuditLog
 
@@ -19,8 +19,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from app.utils.codes import ErrorCode
-from app.shared.result import AppResult
+    from app.shared.result import AppResult
 
 
 class AuditLogRepository:
@@ -38,7 +37,8 @@ class AuditLogRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while creating audit log entry",
                     details={"entity_type": entry.entity_type, "error": str(exc)},
                     source="audit_repository",
@@ -67,7 +67,8 @@ class AuditLogRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while querying audit logs",
                     details={"entity_type": entity_type, "entity_id": entity_id, "error": str(exc)},
                     source="audit_repository",
@@ -117,7 +118,8 @@ class AuditLogRepository:
             await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR, retryable=False,
+                    code=ErrorCode.DATABASE_ERROR,
+                    retryable=False,
                     message="Database error while querying audit logs",
                     details={"error": str(exc)},
                     source="audit_repository",
