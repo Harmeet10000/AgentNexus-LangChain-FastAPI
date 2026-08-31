@@ -7,4 +7,4 @@ note: |
   Example violation: class VersionConflictError(ConflictError): shadows broader arm.
 rule:
   kind: class_definition
-  regex: VersionConflictError
+  regex: ^class VersionConflictError\(ConflictError\)
