@@ -12,7 +12,15 @@ from app.features.audit.model import AuditAction, AuditLog
 from app.features.payments.clients.razorpay_client import RazorpayClient
 from app.features.payments.dto import RefundRequestDTO
 from app.features.payments.model import PaymentStatus
-from app.shared.result.errors import ErrorKind, http_status_for_kind
+from app.shared.result.errors import (
+    ConflictAppError,
+    ErrorKind,
+    ExternalServiceAppError,
+    InfrastructureAppError,
+    NotFoundAppError,
+    ValidationAppError,
+    http_status_for_kind,
+)
 from app.utils import logger
 
 from .dto import (
@@ -164,14 +172,57 @@ class SubscriptionService:
     async def _load_plan(self, plan_id: str | UUID) -> SubscriptionResult[Plan]:
         result = await self.plans.find_by_id(plan_id)
         if isinstance(result, Failure):
-            # Translate plan repo failure (AppResult) into subscription error
             err = result.failure()
+            # Preserve plan infrastructure/validation semantics — do not collapse to not-found
+            if isinstance(err, InfrastructureAppError):
+                return Failure(
+                    SubscriptionInfrastructureError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                        operation="load_plan",
+                    )
+                )
+            if isinstance(err, NotFoundAppError):
+                return Failure(
+                    SubscriptionPlanNotFoundError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                        plan_id=str(plan_id),
+                    )
+                )
+            if isinstance(err, ValidationAppError):
+                return Failure(
+                    SubscriptionValidationError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                    )
+                )
+            if isinstance(err, ConflictAppError):
+                return Failure(
+                    SubscriptionValidationError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                    )
+                )
+            if isinstance(err, ExternalServiceAppError):
+                return Failure(
+                    SubscriptionInfrastructureError(
+                        message=err.message,
+                        details=err.details or {"plan_id": str(plan_id)},
+                        source="subscription_service",
+                        operation="load_plan",
+                    )
+                )
             return Failure(
-                SubscriptionPlanNotFoundError(
+                SubscriptionInfrastructureError(
                     message=getattr(err, "message", "Plan not found"),
                     details={"plan_id": str(plan_id), "error": str(err)},
                     source="subscription_service",
-                    plan_id=str(plan_id),
+                    operation="load_plan",
                 )
             )
         plan = result.unwrap()

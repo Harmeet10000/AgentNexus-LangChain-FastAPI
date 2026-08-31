@@ -6,5 +6,16 @@ note: |
   feature-error-contract D7 — every concrete type inherits FeatureError directly.
   Example violation: class VersionConflictError(ConflictError): shadows broader arm.
 rule:
-  kind: class_definition
-  regex: ^class VersionConflictError\(ConflictError\)
+  all:
+    - kind: class_definition
+      regex: '^class \w+\([^)]*Error'
+    - not:
+        regex: '\(FeatureError'
+    - not:
+        regex: '\(AppError'
+    - not:
+        regex: '\(BaseModel'
+files:
+  - src/app/features/**/errors.py
+  - src/app/shared/result/errors.py
+  - .ast-grep/fixtures/no-concrete-error-inheritance/**
