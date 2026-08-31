@@ -1,0 +1,33 @@
+id: router-renders-result
+language: python
+severity: warning
+message: Router should render Result via render_result, not raise for expected failures
+note: |
+  http-result-rendering — endpoints open Result and hand Failure to render_result.
+  Three shapes are exempt and must not be flagged:
+  1) dispatcher's isinstance chain (global_exception_handler.py — zero except blocks)
+  2) except ImportError capability flag
+  3) pre-service policy guard: boolean check_rate_limit → raise TooManyRequestsException (crawler/router.py)
+  Example violation: raise NotFoundException in router without render_result.
+rule:
+  any:
+    - pattern: raise NotFoundException($$$ARGS)
+    - pattern: raise ValidationException($$$ARGS)
+    - pattern: raise ConflictException($$$ARGS)
+    - pattern: raise UnauthorizedException($$$ARGS)
+    - pattern: raise ForbiddenException($$$ARGS)
+    - pattern: raise ServiceUnavailableException($$$ARGS)
+    - pattern: raise DatabaseException($$$ARGS)
+    - pattern: raise ExternalServiceException($$$ARGS)
+    - pattern: raise NotFoundAppError($$$ARGS)
+    - pattern: raise ValidationAppError($$$ARGS)
+    - pattern: raise ConflictAppError($$$ARGS)
+    - pattern: raise InfrastructureAppError($$$ARGS)
+    - pattern: raise ExternalServiceAppError($$$ARGS)
+files:
+  - src/app/features/**/router.py
+  - src/app/**/router.py
+  - .ast-grep/fixtures/router-renders-result/**
+ignores:
+  - src/app/middleware/global_exception_handler.py
+  - src/app/features/crawler/router.py

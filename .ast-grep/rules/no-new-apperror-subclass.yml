@@ -1,0 +1,14 @@
+id: no-new-apperror-subclass
+language: python
+severity: error
+message: AppError hierarchy is frozen — add FeatureError subclass in the feature's errors.py instead
+note: |
+  feature-error-contract — from this change until last feature migrates,
+  no new subclass of AppError may be added. Existing 5 subclasses are grandfathered;
+  this rule flags NewAppError as example of violation.
+rule:
+  all:
+    - kind: class_definition
+      regex: '\(AppError'
+    - not:
+        regex: 'ValidationAppError|NotFoundAppError|ConflictAppError|InfrastructureAppError|ExternalServiceAppError'
