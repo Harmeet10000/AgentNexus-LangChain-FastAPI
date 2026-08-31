@@ -5,5 +5,6 @@ message: Feature must not import another feature's error types or code enum
 note: |
   feature-error-contract — each feature owns its errors.py. Where two
   features exchange a failure, the caller translates into its own union.
+  Same-feature imports must use relative `from .errors import` and are not flagged.
 rule:
   pattern: from app.features.$OTHER.errors import $ERR

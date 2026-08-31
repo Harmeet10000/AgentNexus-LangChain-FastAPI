@@ -1,4 +1,8 @@
-# permit is in errors.py — no violation (we model as not containing FeatureError subclass here to keep scan clean)
-from pydantic import BaseModel
-class SubscriptionNotFoundError(BaseModel):
+# permit: src/app/features/subscriptions/errors.py — allowed (ignored via ignores)
+from app.shared.result import FeatureError
+
+class SubscriptionNotFoundError(FeatureError):
+    pass
+
+class SubscriptionDuplicateError(FeatureError):
     pass
