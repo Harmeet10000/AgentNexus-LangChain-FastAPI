@@ -79,6 +79,7 @@ rollback across seventeen changes leaves the defect open for the duration.
 
 - [x] 3.1 Fix `.ast-grep/rules/no-match-on-result.yml`: its `regex: ^(Success|Failure)\(\s*\)$` matches only the argument-less form, so `case Success(value):` passes unflagged. Make it reject that form and re-measure the violation count from scratch
   > **DONE (partial — remainder deferred per phase split):** `.ast-grep/rules/no-match-on-result.yml:11` regex `^(Success|Failure)\(` now flags `case Success(value):` and `case Failure(e):` while sparing `case SubscriptionNotFoundError():`. Verified: `ast-grep scan --rule ... /tmp/forbid.py` flags, `/tmp/permit.py` clean. Full violation re-measure and remaining 3.2-3.11 deferred to next commit per spine+renderer-first split.
+  > **Re-measure completed 2026-08-31 (the deferred half of 3.1):** the corrected rule reports **0 violations in `src/`, 0 in `tests/`**. Reconciled with a structurally different query — `rg 'case\s+(Success|Failure)\s*\('` over the same trees also returns 0 — so this zero is real, not ADR-005's "the rule looked for something nobody writes". No historical count carried forward. Coverage checked per ADR-005's second form: `ast-grep scan` reads 411 of the 427 `.py` files under `src/ tests/`, and the 16 it skips are exactly the 16 zero-byte `__init__.py` files; `sgconfig.yml` declares no path exclusion. Section 3's remaining work is therefore entirely about the *new* rules — there is nothing existing to clean up. The committed fixture pair this rule still lacks is task 3.2.
 - [ ] 3.2 Give `no-match-on-result` a fixture pair proving it flags `case Success(value):` and spares `case SubscriptionNotFoundError():`
 - [ ] 3.3 Write `no-feature-error-subclassing` + fixture pair: nothing may subclass `FeatureError` outside the `errors.py` that owns it
 - [ ] 3.4 Write `no-concrete-error-inheritance` + fixture pair: no concrete error type inherits another concrete error type
@@ -150,20 +151,41 @@ rollback across seventeen changes leaves the defect open for the duration.
 - [ ] 8.6 Fix `CLAUDE.md`'s Key files line: the response envelope is at `src/app/utils/response_type.py`, not `src/app/shared/response_type.py`
 - [ ] 8.7 Record in the docs that nothing dispatches on `kind` today — the field exists on five subclasses and is never read — so `render_result` is its first consumer
 
-## 9. Verification (gates the change)
+## 9. The five later-added directories (design D20 — exemptions, not conversions)
 
-- [ ] 9.1 `uv run ruff format src/` and `uv run ruff check --fix src/` clean
-- [ ] 9.2 `uv run ty check src/` introduces no new errors; measure the baseline first rather than trusting a recorded count, and check whether fixing a shadow import turns any `# ty: ignore` dead
-- [ ] 9.3 `ast-grep scan src/` introduces no new violations, with every rule's fixture pair passing
-- [ ] 9.4 `uv run pytest` — the 103 passing tests still pass; the 12 pre-existing websocket fixture-drift failures are owned by no change here and must not grow
-- [ ] 9.5 Confirm no `# noqa` or `# ty: ignore` was added to reach 9.1–9.4
-- [ ] 9.6 `openspec validate error-handling-foundation --strict` passes
+- [ ] 9.1 Remove the 8 `per-file-ignores` entries for `src/app/examples/*.py` from `pyproject.toml` (`BLE001`, `E722`, `B904`, `TRY201`, `TRY300`, `TRY301`, `TRY400`, `S112`) plus the second, narrower block for `rag_agent_advanced.py` whose `BLE001` is already dead, and fix what surfaces rather than re-suppressing it
+- [ ] 9.2 Fix the 4 `raise HTTPException` sites in `src/app/examples/redis_examples.py` that `ast-grep`'s `no-raw-httpexception` already reports at `error` level — the only gate there with no per-path ignore
+- [ ] 9.3 Move `redis_examples.py`'s 8 `except DatabaseException` catches in the **same commit** as task 7.5's reclassification of `utils/cache/redis_func.py`; split across two changes, the example catches an exception nothing raises and stops handling anything without failing
+- [ ] 9.4 Replace `raise e` with a bare `raise` where an example re-raises — `raise e` adds the current frame where a bare `raise` re-raises in place, and it is `TRY201`'s target, suppressed on this path today
+- [ ] 9.5 Confirm `rag_agent_advanced.py` needs no change: it has no blind `except`, which is why its `BLE001` ignore is already dead
+- [ ] 9.6 Convert `app/api/generation_with_cb.py:33` `except Exception as e` → `:36 raise ServiceUnavailableException(msg) from e` to classify by name, and add a test that the breaker does not trip on a local `TypeError` — a breaker that counts the project's own bug as an upstream outage makes its own metric unreadable
+- [ ] 9.7 Write the framework-contract exemption into the gates with fixture pairs: `config/settings.py:473` and `api/strict_envelope.py:26` (Pydantic validator `ValueError`) and `src/database/__init__.py:37` (PEP 562 module `__getattr__` `AttributeError`) must not be flagged. Type the exemption to *who reads the raise*, never to the exception class
+- [ ] 9.8 Exclude `src/tasks/pageindex_tasks.py:30`'s `NotImplementedError` — an unwritten function, not error handling
+- [ ] 9.9 Write `broad-catch-needs-reason` + fixture pair, sparing a blind `except` that ends in a bare `raise` (`middleware/server_middleware.py:100`): nothing was survived, and `BLE001` itself spares that shape
+- [ ] 9.10 Give a written reason to the 3 bare `# noqa: BLE001` suppressions in `src/tasks/billing_tasks.py:202,242,299`
+- [ ] 9.11 Give a written reason to the 4 bare suppressions in `features/subscriptions/service.py:324,390,429,482` — do this in the exemplar's PR, since section 5 migrates the file anyway
+- [ ] 9.12 Add a reason to the `src/tasks/` broad catches carrying neither a suppression nor a reason: `credit_tasks.py:35,102`, `document_tasks.py:56`, `billing_tasks.py:80`, and the 8 in the `auth_email_tasks` pair
+- [ ] 9.13 Reconcile the `auth_email_tasks` pair before writing 8 reasons twice — two modules carry the same handlers; decide whether both survive
+- [ ] 9.14 Fix `src/database/seeders/run_seeders.py:81`: keep the catch, but do not report success when a seeder failed — a silently-failing seeder produces a database that looks seeded
+- [ ] 9.15 Record that `api/v1.py`, `api/v2.py`, `database/base.py` and `database/schemas/*` need no rule: they construct, catch, propagate and render nothing
+- [ ] 9.16 Record `src/mcp_core/` (19 modules, 23 raises, 10 `except`) and `src/lynk/` (24 `.go` files, zero `.py`) as explicit non-goals, so a later audit does not read them as a coverage gap
 
-## 10. Handoff to Phase 1a and Phase 2
+## 10. Verification (gates the change)
 
-- [ ] 10.1 Record the hard ordering constraint in the next change's proposal: `shared/services/` must land **before `crawler`**, because `crawler/service.py:18` imports `search` — re-exported from `tavily.py`, which raises 8 exceptions. Not because of `rate_limiter.py`, which raises nothing and catches nothing
-- [ ] 10.2 Record that Phase 1a covers three modules, not four: `storage.py` (21 raises), `tavily.py` (8), `mailer.py` (2, no importer outside the package so it blocks nothing); `rate_limiter.py` is excluded
-- [ ] 10.3 Record that 4 of `tavily.py`'s 8 raises are pre-flight argument guards rather than third-party classification, and that 17 of `storage.py`'s 21 are `ServiceUnavailableException` which keeps its 503 — so that conversion has no observable break
-- [ ] 10.4 Confirm the feature order and its rationale: `search` → `audit` → `crawler` → `users` → `ingestion` → `dunning` → `profile` → `plans` → `invoices` → `payments` → `webhooks` → `agent_saul` → `health` → `credits` → `documents` → `auth`
-- [ ] 10.5 Carry the per-feature exit criteria into each feature change's tasks as its own checklist
-- [ ] 10.6 Carry both Method notes into each feature change's review step: enumerate a population by a second structurally different query before a count becomes a claim, and `ls` the paths a plan says it will create before reasoning about the plan's content
+- [ ] 10.1 `uv run ruff format src/` and `uv run ruff check --fix src/` clean
+- [ ] 10.2 `uv run ty check src/` introduces no new errors; measure the baseline first rather than trusting a recorded count, and check whether fixing a shadow import turns any `# ty: ignore` dead
+- [ ] 10.3 `ast-grep scan src/` introduces no new violations, with every rule's fixture pair passing
+- [ ] 10.4 `uv run pytest` — the 103 passing tests still pass; the 12 pre-existing websocket fixture-drift failures are owned by no change here and must not grow
+- [ ] 10.5 Confirm no `# noqa` or `# ty: ignore` was added to reach 10.1–10.4, and that no `per-file-ignores` entry was re-added for the same purpose
+- [ ] 10.6 `openspec validate error-handling-foundation --strict` passes
+- [ ] 10.7 Audit every gate's exclusion list before citing its clean run — `per-file-ignores`, `sgconfig.yml`'s `ruleDirs`, and any rule-level path filter (ADR-005's second form: a working rule pointed away from the code produces the same zero as a broken one)
+
+## 11. Handoff to Phase 1a and Phase 2
+
+- [ ] 11.1 Record the hard ordering constraint in the next change's proposal: `shared/services/` must land **before `crawler`**, because `crawler/service.py:18` imports `search` — re-exported from `tavily.py`, which raises 8 exceptions. Not because of `rate_limiter.py`, which raises nothing and catches nothing
+- [ ] 11.2 Record that Phase 1a covers three modules, not four: `storage.py` (21 raises), `tavily.py` (8), `mailer.py` (2, no importer outside the package so it blocks nothing); `rate_limiter.py` is excluded
+- [ ] 11.3 Record that 4 of `tavily.py`'s 8 raises are pre-flight argument guards rather than third-party classification, and that 17 of `storage.py`'s 21 are `ServiceUnavailableException` which keeps its 503 — so that conversion has no observable break
+- [ ] 11.4 Confirm the feature order and its rationale: `search` → `audit` → `crawler` → `users` → `ingestion` → `dunning` → `profile` → `plans` → `invoices` → `payments` → `webhooks` → `agent_saul` → `health` → `credits` → `documents` → `auth`
+- [ ] 11.5 Record that **18** features exist, not 17: `subscriptions` migrates here as the exemplar and `chat` needs no change at all (`__init__.py` and `model.py`, zero raises, zero `except` clauses). Phase 2 is therefore 16 changes — 18 = 1 + 16 + 1 — and two deferred changes follow: `shared/crawler/` alongside `crawler`, and `shared/rag/`'s provider boundary alongside `documents`. `utils/cache/` is **not** deferred; it is task 7.5 here
+- [ ] 11.6 Carry the per-feature exit criteria into each feature change's tasks as its own checklist
+- [ ] 11.7 Carry all three Method notes into each feature change's review step: (1) enumerate a population by a second, structurally different query before a count becomes a claim; (2) `ls` the paths a plan says it will create and match the probe to the edge kind — `rg` cannot see symbol imports, `python -c "import x"` cannot see `TYPE_CHECKING` ones; (3) before citing a gate's zero, read its exclusion list
