@@ -320,7 +320,7 @@ async def get_activity_endpoint(
             "total": len(activities),
             "activities": activities,
         }
-    except Exception as e:  # noqa: BLE001 -- example  # noqa: BLE001 -- example
+    except Exception as e:  # noqa: BLE001 -- example
         logger.error(f"Failed to get activities for user {user_id}: {e!s}")
         return {"user_id": user_id, "total": 0, "activities": []}
 
@@ -350,7 +350,7 @@ async def get_multiple_users(
         try:
             user = await get_cached_user(user_id, redis)
             users[user_id] = user.model_dump()
-        except Exception as e:  # noqa: BLE001 -- example  # noqa: BLE001 -- example
+        except Exception as e:  # noqa: BLE001 -- example
             logger.error(f"Failed to get user {user_id}: {e!s}")
             failed.append(user_id)
 
@@ -414,7 +414,7 @@ async def cache_with_fallback(
     """
     try:
         return await get_cached_user(user_id, redis)
-    except Exception as e:  # noqa: BLE001 -- example  # noqa: BLE001 -- example
+    except Exception as e:  # noqa: BLE001 -- example
         logger.error(
             f"Complete failure retrieving user {user_id}: {e!s}",
             user_id=user_id,
