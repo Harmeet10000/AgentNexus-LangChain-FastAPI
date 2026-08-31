@@ -306,6 +306,9 @@ the exemplar are what every conversion is measured against.
 - [ ] 12.4 Publish the corrected conversion order, 14 entries: `audit` → `crawler` → `users` → `ingestion` → `dunning` → `profile` → `plans` → `invoices` → `payments` → `webhooks` → `agent_saul` → `credits` → `documents` → `auth`
 - [ ] 12.5 Write the **definition of complete** as the measurable zeros in section 17, and put it in `proposal.md`, so "complete migration" is a gate rather than a feeling
 
+- [ ] 12.6 Adopt the **union rule** for `tasks.md` merges and record it in `HANDOFF.md` §7: this file exists in five divergent branch copies whose tick counts differ against the same task list (measured 2026-09-01: 26 / 36 / 44 / 49 / 97 done). At every merge conflict on `tasks.md`, take the **union** of `- [x]` lines and the **superset** of sections — never one side wholesale.
+  > **Why:** taking one side wholesale is how Section 9's sixteen tasks were lost once already. The five PR branches forked from one commit (`58422c1`) and each committed its own copy, so no branch holds the union: PR E is missing tasks 3.2–3.11 (PR B's gates) and 5.1–5.8 (PR C's exemplar) even though it has the highest count. A tick is a claim about the repository, not about a branch.
+
 ## 13. Phase 1a — `shared/services/` (blocks `crawler`, `profile`, `invoices`)
 
 - [ ] 13.1 Convert `shared/services/storage.py` (21 raises) to a per-module union returning `Result`
