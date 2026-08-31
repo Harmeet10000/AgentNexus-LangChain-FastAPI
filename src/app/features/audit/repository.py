@@ -1,4 +1,11 @@
-"""Immutable audit log persistence."""
+"""Immutable audit log persistence.
+
+Rollback contract: classify → rollback → log → return (D8). Audit shares the
+request/session transaction with its primary write; if audit flush fails,
+rollback undoes that primary write (sourcery broader_impact). Callers must
+not swallow audit Failures — propagate or the success response will describe
+work that was rolled back. See InvoiceService.generate_for_payment handling.
+"""
 
 from __future__ import annotations
 
@@ -33,6 +40,7 @@ class AuditLogRepository:
             await self.session.flush()
             return Success(entry)
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -61,6 +69,7 @@ class AuditLogRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
@@ -110,6 +119,7 @@ class AuditLogRepository:
             result = await self.session.execute(statement)
             return Success((list(result.scalars().all()), int(total)))
         except SQLAlchemyError as exc:
+            await self.session.rollback()
             return Failure(
                 InfrastructureAppError(
                     code="DB_ERROR",
