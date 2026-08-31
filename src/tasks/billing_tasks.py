@@ -223,7 +223,7 @@ async def _invoice_backfill(
                     payment, subscription, plan
                 )
                 generated += 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 -- one bad payment must not kill the run
             logger.bind(operation="billing.invoice_backfill", payment_id=str(payment.id)).warning(
                 "invoice generation failed", error=str(exc)
             )
@@ -267,7 +267,7 @@ async def _receipt_backfill(
                     payment, subscription, plan
                 )
                 generated += 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 -- one bad payment must not kill the run
             logger.bind(operation="billing.receipt_backfill", payment_id=str(payment.id)).warning(
                 "receipt generation failed", error=str(exc)
             )
@@ -328,7 +328,7 @@ async def _reconciliation_job(
                 "count": 100,
             }
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 -- upstream failure degrades this scheduled run
         logger.bind(operation="billing.reconciliation").error(
             "Razorpay payment fetch failed", error=str(exc)
         )
