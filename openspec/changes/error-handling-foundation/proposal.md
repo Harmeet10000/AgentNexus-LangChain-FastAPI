@@ -161,14 +161,32 @@ Also in scope, by role rather than by directory — the ten non-feature trees:
 | `src/database/` | `seeders/run_seeders.py:81`'s loop catch must name the failing seeder and report a failing exit status; `__init__.py:37`'s PEP 562 `AttributeError` is exempted as a framework contract; `base.py` and `schemas/` handle nothing |
 | `src/tasks/` | the reason-carrying `# noqa: BLE001` form becomes the written rule, since **55 of the repo's 62 such sites already use it**; the 3 bare suppressions in `billing_tasks.py` and the 12 unsuppressed broad catches must name their families or their reason; `pageindex_tasks.py:30`'s `NotImplementedError` stub is excluded; the near-identical `auth_email_tasks.py` / `auth_email_tasks_typed.py` pair is reconciled to one |
 
-**Out of scope — deliberately:**
+**In-scope follow-on migration program:**
 
-- The other 16 features. Each gets its own change, ordered by the roadmap in
-  `design.md`. Their old exception classes die in the same change that replaces
-  their last call site; no feature carries a dual system. (18 features exist;
-  `subscriptions` migrates here as the exemplar, and `chat` is two files —
-  `__init__.py` and `model.py` — with zero raises and zero `except` clauses, so it
-  needs no change at all.)
+- Fourteen feature conversions, each delivered as its own OpenSpec change in this
+  order: `audit` → `crawler` → `users` → `ingestion` → `dunning` → `profile` →
+  `plans` → `invoices` → `payments` → `webhooks` → `agent_saul` → `credits` →
+  `documents` → `auth`. Their old exception classes die in the same change that
+  replaces their last call site; no feature carries a dual system.
+- The complete feature arithmetic is **18 = 1 exemplar + 14 conversions + 2
+  no-ops + 1 classify-only**. `subscriptions` is the exemplar. `chat` and `search`
+  are no-ops: `chat` has no error-handling surface, while `search` is a tombstone
+  whose implementation moved into `documents`. `health` is classify-only because
+  its probes degrade to response data and own their 200/503 transport status;
+  converting them to `Result` would change that contract.
+- `shared/services/{storage,tavily,mailer}.py` converts before the feature program.
+  `shared/crawler/` converts with `crawler`, and the `shared/rag/` provider boundary
+  converts with `documents`, preserving the per-change ownership seams.
+
+**Definition of complete:** the program is complete only when the section 17 gates
+are measured and all hold: 15 of 18 features own `errors.py`; there are zero
+`AppError` subclasses, constructions, and `app_error_to_exception` call sites; zero
+cross-feature error imports; every feature union is closed and exhaustively checked
+by `ty`; every enforcement fixture pair passes with its exclusions audited; and the
+final totals are independently derived twice with no completed task admitting
+"partial", "deferred", or "TODO" work.
+
+**Out of scope — deliberately:**
 - `src/mcp_core/` — 19 modules, 23 raises, 10 `except` clauses. Excluded by the
   owner's decision, not by oversight. `result-layer-boundaries` records the
   exclusion so a later reviewer does not report it as a coverage gap; the layer
@@ -240,8 +258,10 @@ Also in scope, by role rather than by directory — the ten non-feature trees:
   handlers for the rollback fix. The 123 existing `*AppError` construction sites
   (72 of them `InfrastructureAppError`) are the migration surface for the
   vocabulary change; they are retired per feature, not here.
-- **Code, downstream changes:** 63 files across the 18 features become
-  Result-typed; 152 files fall under a named rule.
+- **Code, downstream changes:** the three `shared/services/` classifiers and 14
+  feature conversions become Result-typed; `subscriptions` is already the exemplar,
+  `chat` and `search` are recorded no-ops, and `health` remains exception-native and
+  classify-only. 152 files fall under a named rule.
 - **Infrastructure surface, newly in scope:** 148 files across the five original
   directories (`connections/` 12, `lifecycle/` 3, `middleware/` 6, `shared/` 111,
   `utils/` 16), carrying 115 raise sites and 228 `except` clauses. The dense spots are

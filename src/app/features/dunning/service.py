@@ -6,14 +6,17 @@ from datetime import UTC, datetime, timedelta
 from secrets import randbelow
 from typing import TYPE_CHECKING, cast
 
-from returns.result import Failure
+from returns.result import Failure, Success
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.features.audit.model import AuditLog
 from app.features.payments.clients.razorpay_client import RazorpayClient
 from app.features.subscriptions.model import Subscription, SubscriptionStatus
 from app.utils import logger
+
+from .errors import DunningExternalServiceError, DunningInfrastructureError
 
 if TYPE_CHECKING:
     from typing import Any
@@ -24,6 +27,8 @@ if TYPE_CHECKING:
     from app.features.plans.repository import PlanRepository
     from app.features.subscriptions.model import Subscription as SubscriptionModel
     from app.features.subscriptions.repository import SubscriptionRepository
+
+    from .errors import DunningResult
 
 
 class DunningService:
@@ -82,7 +87,7 @@ class DunningService:
         last_at = self._last_attempt_at(subscription) or subscription.updated_at or now
         return last_at + self._jittered_delay(delay_days) <= now
 
-    async def find_due_for_retry(self, *, limit: int = 200) -> list[Subscription]:
+    async def find_due_for_retry(self, *, limit: int = 200) -> DunningResult[list[Subscription]]:
         try:
             statement = (
                 select(Subscription)
@@ -94,24 +99,46 @@ class DunningService:
             )
             result = await self.session.execute(statement)
             candidates = list(result.scalars().all())
-        except Exception as exc:  # noqa: BLE001 — orchestration boundary
+        except SQLAlchemyError as exc:
             logger.bind(operation="dunning").error("find_due_for_retry failed", error=str(exc))
-            return []
+            return Failure(
+                DunningInfrastructureError(
+                    message="Failed to query subscriptions due for retry",
+                    details={"error": str(exc)},
+                    source="dunning_service",
+                    operation="find_due_for_retry",
+                )
+            )
 
         now = datetime.now(tz=UTC)
-        return [sub for sub in candidates if self.is_due_for_retry(sub, now=now)]
+        return Success([sub for sub in candidates if self.is_due_for_retry(sub, now=now)])
 
-    async def _attempt_charge(self, subscription: Subscription) -> dict[str, Any]:
+    async def _attempt_charge(self, subscription: Subscription) -> DunningResult[dict[str, Any]]:
         """Issue a Razorpay payment link for the retry (R9.5/R40)."""
         if not get_settings().RAZORPAY_KEY_ID:
-            return {"status": "skipped", "reason": "razorpay not configured"}
+            return Success({"status": "skipped", "reason": "razorpay not configured"})
         try:
             plan_result = await self.plans.find_by_id(subscription.plan_id)
             if isinstance(plan_result, Failure):
-                return {"status": "charge_failed", "reason": "plan lookup failed"}
+                error = plan_result.failure()
+                return Failure(
+                    DunningInfrastructureError(
+                        message=error.message,
+                        details=error.details,
+                        source="dunning_service",
+                        operation="find_plan",
+                    )
+                )
             plan = plan_result.unwrap()
             if plan is None:
-                return {"status": "charge_failed", "reason": "plan not found"}
+                return Failure(
+                    DunningInfrastructureError(
+                        message="Plan not found for dunning retry",
+                        details={"plan_id": str(subscription.plan_id)},
+                        source="dunning_service",
+                        operation="find_plan",
+                    )
+                )
             link = await self.razorpay.create_payment_link(
                 amount=plan.amount,
                 currency=plan.currency,
@@ -119,14 +146,21 @@ class DunningService:
                 customer_id=subscription.razorpay_customer_id,
                 notes={"subscription_id": str(subscription.id), "dunning": "retry"},
             )
-            return {"status": "charge_attempted", "payment_link_id": link.get("id")}
+            return Success({"status": "charge_attempted", "payment_link_id": link.get("id")})
         except Exception as exc:  # noqa: BLE001  -- recorded, not re-raised
             logger.bind(operation="dunning", subscription_id=str(subscription.id)).warning(
                 f"Charge attempt failed: {exc}"
             )
-            return {"status": "charge_failed", "reason": str(exc)[:500]}
+            return Failure(
+                DunningExternalServiceError(
+                    message="Dunning charge attempt failed",
+                    details={"subscription_id": str(subscription.id), "error": str(exc)[:500]},
+                    source="dunning_service",
+                    operation="attempt_charge",
+                )
+            )
 
-    async def execute_retry(self, subscription: Subscription) -> Subscription:
+    async def execute_retry(self, subscription: Subscription) -> DunningResult[Subscription]:
         """Attempt a charge, record the attempt, and maybe halt (R9.5/R40)."""
         now = datetime.now(tz=UTC)
         raw_attempts = subscription.metadata_.get("dunning_attempts", [])
@@ -135,7 +169,10 @@ class DunningService:
             if isinstance(raw_attempts, list)
             else []
         )
-        charge: dict[str, Any] = await self._attempt_charge(subscription)
+        charge_result = await self._attempt_charge(subscription)
+        if isinstance(charge_result, Failure):
+            return charge_result
+        charge = charge_result.unwrap()
 
         next_retry_at = self._next_retry_at(subscription, now=now)
         attempts.append(
@@ -169,10 +206,15 @@ class DunningService:
                 },
             )
         if isinstance(update, Failure):
-            logger.bind(operation="dunning", subscription_id=str(subscription.id)).error(
-                update.failure().message
+            error = update.failure()
+            return Failure(
+                DunningInfrastructureError(
+                    message=error.message,
+                    details=error.details,
+                    source="dunning_service",
+                    operation="update_subscription",
+                )
             )
-            raise RuntimeError(update.failure().message)  # noqa: TRY004
 
         updated = update.unwrap()
         logger.bind(
@@ -182,7 +224,7 @@ class DunningService:
             retry_count=updated.retry_count,
             next_retry_at=next_retry_at.isoformat(),
         ).info("Dunning retry executed")
-        await self.audit.create(
+        audit_result = await self.audit.create(
             AuditLog(
                 entity_type="subscription",
                 entity_id=str(updated.id),
@@ -196,7 +238,17 @@ class DunningService:
                 },
             )
         )
-        return updated
+        if isinstance(audit_result, Failure):
+            error = audit_result.failure()
+            return Failure(
+                DunningInfrastructureError(
+                    message=error.message,
+                    details=error.details,
+                    source="dunning_service",
+                    operation="create_audit_log",
+                )
+            )
+        return Success(updated)
 
     @staticmethod
     def _parse_dt(value: object) -> datetime | None:

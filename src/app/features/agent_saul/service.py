@@ -30,8 +30,10 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from pydantic import ValidationError
 from redis.asyncio import Redis
+from returns.result import Success
 
 from app.features.agent_saul.dto import (
+    CreateSessionResponse,
     WSDoneFrame,
     WSErrorFrame,
     WSHITLInterruptFrame,
@@ -58,6 +60,8 @@ from app.shared.langgraph_layer.agent_saul.state import (
     WorkflowStatus,
 )
 from app.utils import logger
+
+from .errors import AgentSaulResult
 
 # Status emitted when a node starts — keeps WS client progress bar accurate.
 _NODE_STATUS_MAP: dict[str, WorkflowStatus] = {
@@ -107,6 +111,13 @@ class AgentSaulService:
     # ------------------------------------------------------------------
     # Public entry point
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def create_session(
+        *, websocket_url: str, thread_id: str
+    ) -> AgentSaulResult[CreateSessionResponse]:
+        """Create the HTTP pre-flight response before entering the WS boundary."""
+        return Success(CreateSessionResponse(thread_id=thread_id, ws_url=websocket_url))
 
     async def run_session(
         self,

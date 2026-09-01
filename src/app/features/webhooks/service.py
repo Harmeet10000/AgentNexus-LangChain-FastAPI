@@ -7,19 +7,24 @@ import hmac
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
-from returns.result import Failure
+from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.features.audit.model import AuditAction, AuditLog
 from app.features.payments.dto import PaymentRecordDTO
 from app.features.subscriptions.model import SubscriptionStatus
-from app.features.webhooks.exceptions import WebhookVerificationException
 from app.features.webhooks.model import (
     WebhookEvent,
     WebhookEventStatus,
     WebhookEventType,
 )
 from app.utils import logger
+
+from .errors import (
+    WebhookCollaboratorError,
+    WebhookValidationError,
+    WebhookVerificationError,
+)
 
 if TYPE_CHECKING:
     from typing import Any
@@ -31,6 +36,9 @@ if TYPE_CHECKING:
     from app.features.subscriptions.model import Subscription
     from app.features.subscriptions.repository import SubscriptionRepository
     from app.features.webhooks.repository import WebhookEventRepository
+    from app.shared.result.errors import FeatureError
+
+    from .errors import WebhookResult
 
 _IGNORED_EVENTS = frozenset(
     {
@@ -40,6 +48,10 @@ _IGNORED_EVENTS = frozenset(
 )
 
 _TERMINAL_PAYMENT_STATES = frozenset({SubscriptionStatus.CANCELLED.value})
+
+
+def _collaborator_error(error: FeatureError) -> WebhookCollaboratorError:
+    return WebhookCollaboratorError(message=error.message, details=error.details)
 
 
 class WebhookService:
@@ -62,36 +74,36 @@ class WebhookService:
         self.invoice_service = invoice_service
 
     @staticmethod
-    def verify_signature(*, raw_body: str, signature: str) -> None:
+    def verify_signature(*, raw_body: str, signature: str) -> WebhookResult[None]:
         secret = get_settings().RAZORPAY_WEBHOOK_SECRET.get_secret_value()
         if not secret:
-            msg = "Razorpay webhook secret is not configured"
-            raise WebhookVerificationException(msg)
+            return Failure(
+                WebhookVerificationError(message="Razorpay webhook secret is not configured")
+            )
         expected = hmac.new(secret.encode(), raw_body.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, signature):
-            msg = "Signature mismatch"
-            raise WebhookVerificationException(msg)
+            return Failure(WebhookVerificationError(message="Signature mismatch"))
+        return Success(None)
 
     async def process(  # noqa: PLR0912
         self, *, event_id: str, event_type: str, payload: dict[str, object]
-    ) -> bool:
+    ) -> WebhookResult[bool]:
         """Idempotently process a verified webhook event. Returns True if handled."""
         existing = await self.webhooks.find_by_razorpay_event_id(event_id)
         if isinstance(existing, Failure):
-            raise WebhookVerificationException(existing.failure().message)
+            return existing
         previous = existing.unwrap()
         if previous is not None:
             if previous.status in {
                 WebhookEventStatus.PROCESSED.value,
                 WebhookEventStatus.SKIPPED.value,
             }:
-                return True
+                return Success(True)
             if previous.status == WebhookEventStatus.FAILED.value:
                 # A previous attempt failed; allow re-processing of the delivery.
                 pass
             else:
-                msg = "Webhook event already in flight"
-                raise WebhookVerificationException(msg)
+                return Failure(WebhookValidationError(message="Webhook event already in flight"))
 
         if event_type in _IGNORED_EVENTS:
             if previous is None:
@@ -101,8 +113,10 @@ class WebhookService:
                     status=WebhookEventStatus.SKIPPED.value,
                     payload=payload,
                 )
-                await self.webhooks.create(event)
-            return False
+                created = await self.webhooks.create(event)
+                if isinstance(created, Failure):
+                    return created
+            return Success(False)
 
         if previous is None:
             event = WebhookEvent(
@@ -113,7 +127,7 @@ class WebhookService:
             )
             created = await self.webhooks.create(event)
             if isinstance(created, Failure):
-                raise WebhookVerificationException(created.failure().message)
+                return created
             event = created.unwrap()
         else:
             event = previous
@@ -122,31 +136,30 @@ class WebhookService:
             event, status=WebhookEventStatus.PROCESSING.value
         )
         if isinstance(processing, Failure):
-            raise WebhookVerificationException(processing.failure().message)
+            return processing
         event = processing.unwrap()
 
-        try:
-            result = await self._dispatch(event_type, payload)
-        except Exception as exc:  # noqa: BLE001  -- recorded, not re-raised
+        dispatched = await self._dispatch(event_type, payload)
+
+        if isinstance(dispatched, Failure):
+            error = dispatched.failure()
             update = await self.webhooks.update_status(
                 event,
                 status=WebhookEventStatus.FAILED.value,
                 extra_values={
                     "failed_at": datetime.now(tz=UTC),
-                    "error_message": str(exc)[:1000],
+                    "error_message": error.message[:1000],
                     "retry_count": event.retry_count + 1,
                 },
             )
             if isinstance(update, Failure):
-                logger.bind(operation="webhook").error(update.failure().message)
-            logger.bind(operation="webhook", event_type=event_type, event_id=event_id).error(
-                f"Webhook processing failed: {exc}"
-            )
-            return False
+                return update
+            return dispatched
+        dispatch_status = dispatched.unwrap()
 
         status = (
             WebhookEventStatus.SKIPPED.value
-            if result == "skipped"
+            if dispatch_status == "skipped"
             else WebhookEventStatus.PROCESSED.value
         )
         update = await self.webhooks.update_status(
@@ -155,50 +168,38 @@ class WebhookService:
             extra_values={"processed_at": datetime.now(tz=UTC)},
         )
         if isinstance(update, Failure):
-            logger.bind(operation="webhook").error(update.failure().message)
-        return True
+            return update
+        return Success(True)
 
-    async def replay(self, event_id: str) -> WebhookEvent:
+    async def replay(self, event_id: str) -> WebhookResult[WebhookEvent]:
         """Re-process a FAILED webhook event (Requirement 22/31)."""
         result = await self.webhooks.find_by_id(event_id)
         if isinstance(result, Failure):
-            raise WebhookVerificationException(result.failure().message)
+            return result
         event = result.unwrap()
         if event is None:
-            msg = "Webhook event not found"
-            raise WebhookVerificationException(msg)
+            return Failure(WebhookValidationError(message="Webhook event not found"))
         if event.status != WebhookEventStatus.FAILED.value:
-            msg = f"Cannot replay event in status '{event.status}'"
-            raise WebhookVerificationException(msg)
+            return Failure(
+                WebhookValidationError(message=f"Cannot replay event in status '{event.status}'")
+            )
         if event.event_type in _IGNORED_EVENTS:
-            msg = "Event type is intentionally ignored"
-            raise WebhookVerificationException(msg)
+            return Failure(WebhookValidationError(message="Event type is intentionally ignored"))
 
         processing = await self.webhooks.update_status(
             event, status=WebhookEventStatus.PROCESSING.value
         )
         if isinstance(processing, Failure):
-            raise WebhookVerificationException(processing.failure().message)
+            return processing
         event = processing.unwrap()
 
-        try:
-            result = await self._dispatch(event.event_type, event.payload, replay=True)
-        except Exception as exc:
-            update = await self.webhooks.update_status(
-                event,
-                status=WebhookEventStatus.FAILED.value,
-                extra_values={
-                    "failed_at": datetime.now(tz=UTC),
-                    "error_message": str(exc)[:1000],
-                    "retry_count": event.retry_count + 1,
-                },
-            )
-            if isinstance(update, Failure):
-                logger.bind(operation="webhook").error(update.failure().message)
-            raise
+        dispatched = await self._dispatch(event.event_type, event.payload, replay=True)
+        if isinstance(dispatched, Failure):
+            return dispatched
+        dispatch_status = dispatched.unwrap()
         status = (
             WebhookEventStatus.SKIPPED.value
-            if result == "skipped"
+            if dispatch_status == "skipped"
             else WebhookEventStatus.PROCESSED.value
         )
         updated = await self.webhooks.update_status(
@@ -207,12 +208,12 @@ class WebhookService:
             extra_values={"processed_at": datetime.now(tz=UTC)},
         )
         if isinstance(updated, Failure):
-            raise WebhookVerificationException(updated.failure().message)
-        return updated.unwrap()
+            return updated
+        return Success(updated.unwrap())
 
     async def _dispatch(  # noqa: PLR0912
         self, event_type: str, payload: dict[str, object], *, replay: bool = False
-    ) -> str:
+    ) -> WebhookResult[str]:
         match event_type:
             case WebhookEventType.SUBSCRIPTION_AUTHENTICATED.value:
                 return await self._handle_subscription_authenticated(payload, replay=replay)
@@ -242,7 +243,7 @@ class WebhookService:
                 logger.bind(operation="webhook", event_type=event_type).warning(
                     "Unhandled webhook event type"
                 )
-                return "skipped"
+                return Success("skipped")
 
     @staticmethod
     def _entity(payload: dict[str, object], key: str) -> dict[str, Any]:
@@ -273,43 +274,46 @@ class WebhookService:
 
     async def _handle_subscription_authenticated(
         self, payload: dict[str, object], *, replay: bool
-    ) -> str:
+    ) -> WebhookResult[str]:
         entity = self._entity(payload, "subscription")
         subscription = await self._find_subscription_by_entity(entity)
         if subscription is None:
-            return "skipped"
+            return Success("skipped")
         if replay:
             skip = self._skipped(
                 subscription.status,
                 {SubscriptionStatus.AUTHENTICATED.value, SubscriptionStatus.ACTIVE.value},
             )
             if skip is not None:
-                return skip
+                return Success(skip)
         update = await self.subscriptions.update_status(
             subscription,
             SubscriptionStatus.AUTHENTICATED,
             expected_version=subscription.version,
         )
         if isinstance(update, Failure):
-            logger.bind(operation="webhook").warning(update.failure().message)
-        else:
-            await self._audit(update.unwrap(), AuditAction.SUBSCRIPTION_AUTHENTICATED.value)
-        return "processed"
+            return Failure(_collaborator_error(update.failure()))
+        audit_result = await self._audit(
+            update.unwrap(), AuditAction.SUBSCRIPTION_AUTHENTICATED.value
+        )
+        if isinstance(audit_result, Failure):
+            return audit_result
+        return Success("processed")
 
     async def _handle_subscription_activated(
         self, payload: dict[str, object], *, replay: bool
-    ) -> str:
+    ) -> WebhookResult[str]:
         entity = self._entity(payload, "subscription")
         subscription = await self._find_subscription_by_entity(entity)
         if subscription is None:
-            return "skipped"
+            return Success("skipped")
         if replay:
             skip = self._skipped(
                 subscription.status,
                 {SubscriptionStatus.ACTIVE.value, SubscriptionStatus.CANCELLED.value},
             )
             if skip is not None:
-                return skip
+                return Success(skip)
         update = await self.subscriptions.update_status(
             subscription,
             SubscriptionStatus.ACTIVE,
@@ -320,16 +324,17 @@ class WebhookService:
             },
         )
         if isinstance(update, Failure):
-            logger.bind(operation="webhook").warning(update.failure().message)
-        else:
-            await self._audit(update.unwrap(), AuditAction.SUBSCRIPTION_ACTIVATED.value)
-        return "processed"
+            return Failure(_collaborator_error(update.failure()))
+        audit_result = await self._audit(update.unwrap(), AuditAction.SUBSCRIPTION_ACTIVATED.value)
+        if isinstance(audit_result, Failure):
+            return audit_result
+        return Success("processed")
 
-    async def _handle_subscription_charged(self, payload: dict[str, object]) -> str:
+    async def _handle_subscription_charged(self, payload: dict[str, object]) -> WebhookResult[str]:
         entity = self._entity(payload, "subscription")
         subscription = await self._find_subscription_by_entity(entity)
         if subscription is None:
-            return "skipped"
+            return Success("skipped")
         update = await self.subscriptions.update_status(
             subscription,
             SubscriptionStatus.ACTIVE,
@@ -340,46 +345,50 @@ class WebhookService:
             },
         )
         if isinstance(update, Failure):
-            logger.bind(operation="webhook").warning(update.failure().message)
-        else:
-            await self._audit(update.unwrap(), AuditAction.SUBSCRIPTION_ACTIVATED.value)
-        return "processed"
+            return Failure(_collaborator_error(update.failure()))
+        audit_result = await self._audit(update.unwrap(), AuditAction.SUBSCRIPTION_ACTIVATED.value)
+        if isinstance(audit_result, Failure):
+            return audit_result
+        return Success("processed")
 
-    async def _handle_subscription_pending(self, payload: dict[str, object]) -> str:
+    async def _handle_subscription_pending(self, payload: dict[str, object]) -> WebhookResult[str]:
         entity = self._entity(payload, "subscription")
         subscription = await self._find_subscription_by_entity(entity)
         if subscription is None:
-            return "skipped"
+            return Success("skipped")
         update = await self.subscriptions.update_status(
             subscription,
             SubscriptionStatus.PAST_DUE,
             expected_version=subscription.version,
         )
         if isinstance(update, Failure):
-            logger.bind(operation="webhook").warning(update.failure().message)
-        return "processed"
+            return Failure(_collaborator_error(update.failure()))
+        return Success("processed")
 
-    async def _handle_subscription_halted(self, payload: dict[str, object]) -> str:
+    async def _handle_subscription_halted(self, payload: dict[str, object]) -> WebhookResult[str]:
         entity = self._entity(payload, "subscription")
         subscription = await self._find_subscription_by_entity(entity)
         if subscription is None:
-            return "skipped"
+            return Success("skipped")
         update = await self.subscriptions.update_status(
             subscription,
             SubscriptionStatus.HALTED,
             expected_version=subscription.version,
         )
         if isinstance(update, Failure):
-            logger.bind(operation="webhook").warning(update.failure().message)
-        else:
-            await self._audit(update.unwrap(), AuditAction.SUBSCRIPTION_HALTED.value)
-        return "processed"
+            return Failure(_collaborator_error(update.failure()))
+        audit_result = await self._audit(update.unwrap(), AuditAction.SUBSCRIPTION_HALTED.value)
+        if isinstance(audit_result, Failure):
+            return audit_result
+        return Success("processed")
 
-    async def _handle_subscription_cancelled(self, payload: dict[str, object]) -> str:
+    async def _handle_subscription_cancelled(
+        self, payload: dict[str, object]
+    ) -> WebhookResult[str]:
         entity = self._entity(payload, "subscription")
         subscription = await self._find_subscription_by_entity(entity)
         if subscription is None:
-            return "skipped"
+            return Success("skipped")
         update = await self.subscriptions.update_status(
             subscription,
             SubscriptionStatus.CANCELLED,
@@ -390,16 +399,17 @@ class WebhookService:
             },
         )
         if isinstance(update, Failure):
-            logger.bind(operation="webhook").warning(update.failure().message)
-        else:
-            await self._audit(update.unwrap(), AuditAction.SUBSCRIPTION_CANCELLED.value)
-        return "processed"
+            return Failure(_collaborator_error(update.failure()))
+        audit_result = await self._audit(update.unwrap(), AuditAction.SUBSCRIPTION_CANCELLED.value)
+        if isinstance(audit_result, Failure):
+            return audit_result
+        return Success("processed")
 
-    async def _handle_subscription_paused(self, payload: dict[str, object]) -> str:
+    async def _handle_subscription_paused(self, payload: dict[str, object]) -> WebhookResult[str]:
         entity = self._entity(payload, "subscription")
         subscription = await self._find_subscription_by_entity(entity)
         if subscription is None:
-            return "skipped"
+            return Success("skipped")
         update = await self.subscriptions.update_status(
             subscription,
             SubscriptionStatus.PAUSED,
@@ -407,14 +417,14 @@ class WebhookService:
             extra_values={"pause_start": datetime.now(tz=UTC)},
         )
         if isinstance(update, Failure):
-            logger.bind(operation="webhook").warning(update.failure().message)
-        return "processed"
+            return Failure(_collaborator_error(update.failure()))
+        return Success("processed")
 
-    async def _handle_subscription_resumed(self, payload: dict[str, object]) -> str:
+    async def _handle_subscription_resumed(self, payload: dict[str, object]) -> WebhookResult[str]:
         entity = self._entity(payload, "subscription")
         subscription = await self._find_subscription_by_entity(entity)
         if subscription is None:
-            return "skipped"
+            return Success("skipped")
         update = await self.subscriptions.update_status(
             subscription,
             SubscriptionStatus.ACTIVE,
@@ -422,10 +432,12 @@ class WebhookService:
             extra_values={"pause_start": None, "pause_end": None},
         )
         if isinstance(update, Failure):
-            logger.bind(operation="webhook").warning(update.failure().message)
-        return "processed"
+            return Failure(_collaborator_error(update.failure()))
+        return Success("processed")
 
-    async def _handle_payment_captured(self, payload: dict[str, object], *, replay: bool) -> str:
+    async def _handle_payment_captured(
+        self, payload: dict[str, object], *, replay: bool
+    ) -> WebhookResult[str]:
         entity = self._entity(payload, "payment")
         rz_payment_id = entity.get("id")
         subscription = await self._find_subscription_by_entity(entity)
@@ -434,11 +446,11 @@ class WebhookService:
                 "payment.captured without resolvable subscription",
                 payment_id=rz_payment_id,
             )
-            return "skipped"
+            return Success("skipped")
         if replay and subscription.status in _TERMINAL_PAYMENT_STATES:
-            return "skipped"
+            return Success("skipped")
 
-        payment = await self.payment_service.record_payment(
+        payment_result = await self.payment_service.record_payment(
             PaymentRecordDTO(
                 razorpay_payment_id=rz_payment_id,
                 subscription_id=str(subscription.id),
@@ -450,17 +462,26 @@ class WebhookService:
             ),
             subscription=subscription,
         )
+        if isinstance(payment_result, Failure):
+            return Failure(_collaborator_error(payment_result.failure()))
+        payment = payment_result.unwrap()
         plan_result = await self.plans.find_by_id(subscription.plan_id)
         if isinstance(plan_result, Failure):
-            logger.bind(operation="webhook").warning(plan_result.failure().message)
-            return "processed"
+            return Failure(_collaborator_error(plan_result.failure()))
         plan = plan_result.unwrap()
         if plan is None:
-            logger.bind(operation="webhook").warning("Plan not found for subscription")
-            return "processed"
+            return Failure(WebhookValidationError(message="Plan not found for subscription"))
 
-        await self.invoice_service.generate_for_payment(payment, subscription, plan)
-        await self.invoice_service.generate_receipt_for_payment(payment, subscription, plan)
+        invoice_result = await self.invoice_service.generate_for_payment(
+            payment, subscription, plan
+        )
+        if isinstance(invoice_result, Failure):
+            return Failure(_collaborator_error(invoice_result.failure()))
+        receipt_result = await self.invoice_service.generate_receipt_for_payment(
+            payment, subscription, plan
+        )
+        if isinstance(receipt_result, Failure):
+            return Failure(_collaborator_error(receipt_result.failure()))
 
         update = await self.subscriptions.update_status(
             subscription,
@@ -469,68 +490,80 @@ class WebhookService:
             extra_values={"retry_count": 0},
         )
         if isinstance(update, Failure):
-            logger.bind(operation="webhook").warning(update.failure().message)
+            return Failure(_collaborator_error(update.failure()))
 
-        await self._audit(payment, AuditAction.PAYMENT_CAPTURED.value)
-        return "processed"
+        audit_result = await self._audit(payment, AuditAction.PAYMENT_CAPTURED.value)
+        if isinstance(audit_result, Failure):
+            return audit_result
+        return Success("processed")
 
-    async def _handle_payment_failed(self, payload: dict[str, object]) -> str:
+    async def _handle_payment_failed(self, payload: dict[str, object]) -> WebhookResult[str]:
         entity = self._entity(payload, "payment")
         subscription = await self._find_subscription_by_entity(entity)
         if subscription is None:
-            return "skipped"
+            return Success("skipped")
         rz_payment_id = entity.get("id")
-        await self.payment_service.record_failed_payment(
+        payment_result = await self.payment_service.record_failed_payment(
             razorpay_payment_id=str(rz_payment_id or ""),
             subscription_id=str(subscription.id),
             error_code=str(entity.get("error_code") or ""),
             error_description=str(entity.get("error_description") or ""),
         )
+        if isinstance(payment_result, Failure):
+            return Failure(_collaborator_error(payment_result.failure()))
         update = await self.subscriptions.update_status(
             subscription,
             SubscriptionStatus.PAST_DUE,
             expected_version=subscription.version,
         )
         if isinstance(update, Failure):
-            logger.bind(operation="webhook").warning(update.failure().message)
-        else:
-            await self._audit(update.unwrap(), AuditAction.PAYMENT_FAILED.value)
-        return "processed"
+            return Failure(_collaborator_error(update.failure()))
+        audit_result = await self._audit(update.unwrap(), AuditAction.PAYMENT_FAILED.value)
+        if isinstance(audit_result, Failure):
+            return audit_result
+        return Success("processed")
 
-    async def _handle_refund_processed(self, payload: dict[str, object]) -> str:
+    async def _handle_refund_processed(self, payload: dict[str, object]) -> WebhookResult[str]:
         entity = self._entity(payload, "refund")
         rz_payment_id = entity.get("payment_id")
         amount = entity.get("amount")
         if not isinstance(rz_payment_id, str) or not isinstance(amount, (int, float)):
-            return "skipped"
-        await self.payment_service.handle_refund_processed(
+            return Success("skipped")
+        result = await self.payment_service.handle_refund_processed(
             razorpay_payment_id=rz_payment_id, refund_paisa=int(amount)
         )
-        return "processed"
+        if isinstance(result, Failure):
+            return Failure(_collaborator_error(result.failure()))
+        return Success("processed")
 
-    async def _handle_dispute_created(self, payload: dict[str, object]) -> str:
+    async def _handle_dispute_created(self, payload: dict[str, object]) -> WebhookResult[str]:
         entity = self._entity(payload, "dispute")
         rz_payment_id = entity.get("payment_id")
         dispute_id = entity.get("id")
         reason = entity.get("reason")
         if not isinstance(rz_payment_id, str) or not isinstance(dispute_id, str):
-            return "skipped"
-        await self.payment_service.handle_chargeback(
+            return Success("skipped")
+        result = await self.payment_service.handle_chargeback(
             razorpay_payment_id=rz_payment_id,
             dispute_id=dispute_id,
             reason=str(reason or ""),
         )
-        return "processed"
+        if isinstance(result, Failure):
+            return Failure(_collaborator_error(result.failure()))
+        return Success("processed")
 
-    async def _audit(self, entity: object, action: str) -> None:
+    async def _audit(self, entity: object, action: str) -> WebhookResult[None]:
         entity_type = type(entity).__name__.lower()
-        await self.audit.create(
+        result = await self.audit.create(
             AuditLog(
                 entity_type=entity_type,
                 entity_id=str(getattr(entity, "id", "")),
                 action=action,
             )
         )
+        if isinstance(result, Failure):
+            return Failure(_collaborator_error(result.failure()))
+        return Success(None)
 
     @staticmethod
     def _parse_datetime(value: object) -> datetime | None:

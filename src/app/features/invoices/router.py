@@ -2,10 +2,11 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query
+from fastapi import APIRouter, Path, Query, Response
 
 from app.features.auth import CurrentVerifiedUser
-from app.utils import APIResponse, http_response
+from app.shared.result import render_result
+from app.utils import APIResponse
 
 from .dependencies import InvoiceServiceDep
 from .dto import InvoiceResponse, VoidInvoiceDTO
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/invoices", tags=["billing-invoices"])
 async def list_invoices(  # noqa: PLR0917
     service: InvoiceServiceDep,
     user: CurrentVerifiedUser,
+    response: Response,
     subscription_id: Annotated[str | None, Query(alias="subscriptionId")] = None,
     status_filter: Annotated[str | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -29,7 +31,7 @@ async def list_invoices(  # noqa: PLR0917
         limit=limit,
         offset=offset,
     )
-    return http_response(message="Invoices", data=result)
+    return render_result(result, response, message="Invoices")
 
 
 @router.get("/{invoice_id}")
@@ -37,9 +39,10 @@ async def get_invoice(
     invoice_id: Annotated[str, Path(min_length=1)],
     service: InvoiceServiceDep,
     user: CurrentVerifiedUser,
+    response: Response,
 ) -> APIResponse[InvoiceResponse]:
     result = await service.get_invoice(invoice_id, user_id=str(user.id))
-    return http_response(message="Invoice", data=result)
+    return render_result(result, response, message="Invoice")
 
 
 @router.post("/{invoice_id}/void")
@@ -48,6 +51,7 @@ async def void_invoice(
     payload: VoidInvoiceDTO,
     service: InvoiceServiceDep,
     user: CurrentVerifiedUser,
+    response: Response,
 ) -> APIResponse[InvoiceResponse]:
-    voided = await service.void_invoice(invoice_id, payload, user_id=str(user.id))
-    return http_response(message="Invoice voided", data=voided)
+    result = await service.void_invoice(invoice_id, payload, user_id=str(user.id))
+    return render_result(result, response, message="Invoice voided")

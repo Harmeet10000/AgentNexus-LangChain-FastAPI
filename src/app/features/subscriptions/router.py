@@ -31,7 +31,9 @@ async def create_subscription(
     response: Response,
 ) -> APIResponse[SubscriptionResponse]:
     result = await service.create_subscription(str(user.id), payload)
-    return render_result(result, response, message="Subscription created", success_status=status.HTTP_201_CREATED)
+    return render_result(
+        result, response, message="Subscription created", success_status=status.HTTP_201_CREATED
+    )
 
 
 @router.get("")
@@ -47,7 +49,9 @@ async def list_subscriptions(  # noqa: PLR0917
     result = await service.list_subscriptions(
         str(user.id), status=status_filter, plan_id=plan_id, limit=limit, offset=offset
     )
-    return render_result(result, response, message="Subscriptions", success_status=status.HTTP_200_OK)
+    return render_result(
+        result, response, message="Subscriptions", success_status=status.HTTP_200_OK
+    )
 
 
 @router.get("/{subscription_id}")
@@ -58,7 +62,9 @@ async def get_subscription(
     response: Response,
 ) -> APIResponse[SubscriptionResponse]:
     result = await service.get_subscription(str(user.id), subscription_id)
-    return render_result(result, response, message="Subscription", success_status=status.HTTP_200_OK)
+    return render_result(
+        result, response, message="Subscription", success_status=status.HTTP_200_OK
+    )
 
 
 @router.post("/{subscription_id}/cancel")
@@ -70,7 +76,9 @@ async def cancel_subscription(
     response: Response,
 ) -> APIResponse[SubscriptionResponse]:
     result = await service.cancel_subscription(str(user.id), subscription_id, payload)
-    return render_result(result, response, message="Subscription cancelled", success_status=status.HTTP_200_OK)
+    return render_result(
+        result, response, message="Subscription cancelled", success_status=status.HTTP_200_OK
+    )
 
 
 @router.post("/{subscription_id}/pause")
@@ -82,7 +90,9 @@ async def pause_subscription(
     response: Response,
 ) -> APIResponse[SubscriptionResponse]:
     result = await service.pause_subscription(str(user.id), subscription_id, payload)
-    return render_result(result, response, message="Subscription paused", success_status=status.HTTP_200_OK)
+    return render_result(
+        result, response, message="Subscription paused", success_status=status.HTTP_200_OK
+    )
 
 
 @router.post("/{subscription_id}/resume")
@@ -93,7 +103,9 @@ async def resume_subscription(
     response: Response,
 ) -> APIResponse[SubscriptionResponse]:
     result = await service.resume_subscription(str(user.id), subscription_id)
-    return render_result(result, response, message="Subscription resumed", success_status=status.HTTP_200_OK)
+    return render_result(
+        result, response, message="Subscription resumed", success_status=status.HTTP_200_OK
+    )
 
 
 @router.post("/{subscription_id}/change-plan")
@@ -105,7 +117,9 @@ async def change_plan(
     response: Response,
 ) -> APIResponse[SubscriptionResponse]:
     result = await service.change_plan(str(user.id), subscription_id, payload)
-    return render_result(result, response, message="Plan changed", success_status=status.HTTP_200_OK)
+    return render_result(
+        result, response, message="Plan changed", success_status=status.HTTP_200_OK
+    )
 
 
 @router.get("/{subscription_id}/change-preview")
@@ -117,7 +131,9 @@ async def change_preview(
     response: Response,
 ) -> APIResponse[ProrationCalculation]:
     result = await service.get_change_preview(str(user.id), subscription_id, new_plan_id)
-    return render_result(result, response, message="Proration preview", success_status=status.HTTP_200_OK)
+    return render_result(
+        result, response, message="Proration preview", success_status=status.HTTP_200_OK
+    )
 
 
 @router.post("/{subscription_id}/trial-extension")
@@ -132,4 +148,6 @@ async def request_trial_extension(  # noqa: PLR0917
     result = await service.request_trial_extension(
         str(user.id), subscription_id, days=days, reason=reason
     )
-    return render_result(result, response, message="Trial extension requested", success_status=status.HTTP_200_OK)
+    return render_result(
+        result, response, message="Trial extension requested", success_status=status.HTTP_200_OK
+    )

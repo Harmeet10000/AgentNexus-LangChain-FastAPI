@@ -22,6 +22,7 @@ from langchain_core.runnables import (
 )
 from langchain_core.tools import InjectedToolArg, tool
 from playwright.async_api import Error as PlaywrightError
+from returns.result import Failure
 
 from app.shared.crawler import sanitize_url, validate_url
 from app.shared.langchain_layer import _build_chat_model
@@ -129,25 +130,32 @@ async def tavily_search_async(
         max_results=max_results,
         topic=topic,
     )
-    try:
-        responses: list[SearchResponse] = await asyncio.gather(
-            *(
-                search(
-                    query=query,
-                    max_results=max_results,
-                    topic=topic,
-                    include_answer=False,
-                    include_raw_content=include_raw_content,
-                    http_client=http_client,
-                )
-                for query in search_queries
+    results = await asyncio.gather(
+        *(
+            search(
+                query=query,
+                max_results=max_results,
+                topic=topic,
+                include_answer=False,
+                include_raw_content=include_raw_content,
+                http_client=http_client,
             )
+            for query in search_queries
         )
-    except ExternalServiceException:
-        search_log.exception("tavily_search_async_failed")
-        raise
+    )
+    responses: list[SearchResponse] = []
+    for result in results:
+        if isinstance(result, Failure):
+            error = result.failure()
+            search_log.bind(error_code=error.code.value).error(
+                "tavily_search_async_failed", error=error.message
+            )
+            raise ExternalServiceException(
+                service="Tavily", detail=error.message, error_code=error.code.value
+            )
+        responses.append(result.unwrap())
     search_log.info("tavily_search_async_complete")
-    return list(responses)
+    return responses
 
 
 def _get_httpx_client_from_config(config: RunnableConfig | None) -> httpx.AsyncClient | None:

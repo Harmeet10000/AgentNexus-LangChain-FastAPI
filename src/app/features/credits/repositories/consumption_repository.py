@@ -9,15 +9,15 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.features.credits.models.consumption import CreditConsumption
-from app.shared.result import ConflictAppError, InfrastructureAppError
-from app.utils.codes import ErrorCode
+
+from ..errors import CreditConsumptionConflictError, CreditInfrastructureError
 
 if TYPE_CHECKING:
     from uuid import UUID
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.shared.result import AppResult
+    from ..errors import CreditResult
 
 
 class ConsumptionRepository:
@@ -26,7 +26,7 @@ class ConsumptionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create(self, consumption: CreditConsumption) -> AppResult[CreditConsumption]:
+    async def create(self, consumption: CreditConsumption) -> CreditResult[CreditConsumption]:
         try:
             self.session.add(consumption)
             await self.session.flush()
@@ -34,8 +34,7 @@ class ConsumptionRepository:
         except IntegrityError as exc:
             await self.session.rollback()
             return Failure(
-                ConflictAppError(
-                    code="CONSUMPTION_CONFLICT",
+                CreditConsumptionConflictError(
                     message="Credit consumption creation failed due to a constraint violation",
                     details={"credit_id": str(consumption.credit_id), "error": str(exc)},
                     source="consumption_repository",
@@ -44,9 +43,7 @@ class ConsumptionRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while creating credit consumption",
                     details={"error": str(exc)},
                     source="consumption_repository",
@@ -59,7 +56,7 @@ class ConsumptionRepository:
         *,
         limit: int = 50,
         offset: int = 0,
-    ) -> AppResult[tuple[list[CreditConsumption], int]]:
+    ) -> CreditResult[tuple[list[CreditConsumption], int]]:
         try:
             conditions = [CreditConsumption.user_id == user_id]
 
@@ -81,9 +78,7 @@ class ConsumptionRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while listing credit consumptions",
                     details={"user_id": user_id, "error": str(exc)},
                     source="consumption_repository",
@@ -93,7 +88,7 @@ class ConsumptionRepository:
     async def find_by_invoice_id(
         self,
         invoice_id: UUID,
-    ) -> AppResult[CreditConsumption | None]:
+    ) -> CreditResult[CreditConsumption | None]:
         try:
             statement = select(CreditConsumption).where(CreditConsumption.invoice_id == invoice_id)
             result = await self.session.execute(statement)
@@ -101,16 +96,14 @@ class ConsumptionRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while fetching consumption by invoice",
                     details={"invoice_id": str(invoice_id), "error": str(exc)},
                     source="consumption_repository",
                 )
             )
 
-    async def find_by_credit_id(self, credit_id: UUID) -> AppResult[list[CreditConsumption]]:
+    async def find_by_credit_id(self, credit_id: UUID) -> CreditResult[list[CreditConsumption]]:
         """Find all consumption records for a credit."""
         try:
             statement = (
@@ -123,16 +116,14 @@ class ConsumptionRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while fetching consumptions by credit",
                     details={"credit_id": str(credit_id), "error": str(exc)},
                     source="consumption_repository",
                 )
             )
 
-    async def get_total_consumed(self, credit_id: UUID) -> AppResult[int]:
+    async def get_total_consumed(self, credit_id: UUID) -> CreditResult[int]:
         """Get total consumed amount for a credit (in paisa)."""
         try:
             statement = select(func.coalesce(func.sum(CreditConsumption.consumed_amount), 0)).where(
@@ -143,9 +134,7 @@ class ConsumptionRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while calculating total consumed",
                     details={"credit_id": str(credit_id), "error": str(exc)},
                     source="consumption_repository",

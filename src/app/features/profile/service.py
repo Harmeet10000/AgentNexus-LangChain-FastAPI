@@ -1,3 +1,5 @@
+from returns.result import Failure, Success
+
 from app.features.auth import (
     RefreshTokenRepository,
     User,
@@ -6,14 +8,16 @@ from app.features.auth import (
     verify_password,
 )
 from app.shared.services.storage import StorageService
-from app.utils import (
-    ConflictException,
-    ServiceUnavailableException,
-    UnauthorizedException,
-    logger,
-)
+from app.utils import logger
 
 from .dto import AvatarResponse, UpdateProfileRequest
+from .errors import (
+    ProfileAuthenticationError,
+    ProfileConflictError,
+    ProfileInfrastructureError,
+    ProfileResult,
+    ProfileStorageError,
+)
 
 
 class ProfileService:
@@ -31,12 +35,23 @@ class ProfileService:
         self,
         user: User,
         dto: UpdateProfileRequest,
-    ) -> User:
+    ) -> ProfileResult[User]:
         if dto.full_name is not None:
             user.full_name = dto.full_name
-        updated = await self._user_repo.save(user)
+        result = await self._user_repo.save(user)
+        if isinstance(result, Failure):
+            error = result.failure()
+            return Failure(
+                ProfileInfrastructureError(
+                    message=error.message,
+                    details=error.details,
+                    source="profile_service",
+                    operation="update_profile",
+                )
+            )
+        updated = result.unwrap()
         logger.bind(user_id=str(user.id)).info("Profile updated")
-        return updated
+        return Success(updated)
 
     async def change_password(
         self,
@@ -46,49 +61,89 @@ class ProfileService:
         current_session_id: str | None,
         *,
         revoke_other_sessions: bool,
-    ) -> None:
+    ) -> ProfileResult[None]:
         if user.hashed_password is None:
-            msg = (
-                "Password cannot be changed on an OAuth-only account. "
-                "Link a password via account settings."
+            return Failure(
+                ProfileConflictError(
+                    message=(
+                        "Password cannot be changed on an OAuth-only account. "
+                        "Link a password via account settings."
+                    ),
+                    source="profile_service",
+                    operation="change_password",
+                )
             )
-            raise ConflictException(msg)
         if not verify_password(user.hashed_password, current_password):
-            msg = "Current password is incorrect"
-            raise UnauthorizedException(msg)
+            return Failure(
+                ProfileAuthenticationError(
+                    message="Current password is incorrect",
+                    source="profile_service",
+                )
+            )
         if current_password == new_password:
-            msg = "New password must differ from current password"
-            raise ConflictException(msg)
+            return Failure(
+                ProfileConflictError(
+                    message="New password must differ from current password",
+                    source="profile_service",
+                    operation="change_password",
+                )
+            )
 
         user.hashed_password = hash_password(new_password)
-        await self._user_repo.save(user)
+        saved = await self._user_repo.save(user)
+        if isinstance(saved, Failure):
+            error = saved.failure()
+            return Failure(
+                ProfileInfrastructureError(
+                    message=error.message,
+                    details=error.details,
+                    source="profile_service",
+                    operation="change_password",
+                )
+            )
 
         if revoke_other_sessions:
-            await self._token_repo.revoke_all_user_sessions(
+            revoked = await self._token_repo.revoke_all_user_sessions(
                 user_id=str(user.id),
                 except_session_id=current_session_id,
                 reason="password_change",
             )
+            if isinstance(revoked, Failure):
+                error = revoked.failure()
+                return Failure(
+                    ProfileInfrastructureError(
+                        message=error.message,
+                        details=error.details,
+                        source="profile_service",
+                        operation="revoke_sessions",
+                    )
+                )
         logger.bind(user_id=str(user.id)).info("Password changed")
+        return Success(None)
 
     async def upload_avatar(
         self,
         user: User,
         file_data: bytes,
         content_type: str,
-    ) -> AvatarResponse:
+    ) -> ProfileResult[AvatarResponse]:
         # Startup publishes object_store as None when S3 access cannot be verified,
         # so answer 503 here instead of raising AttributeError on a None client.
         storage = self._storage
         if storage is None:
-            raise ServiceUnavailableException(detail="Object storage is not configured")
+            return Failure(ProfileStorageError(message="Object storage is not configured"))
 
-        # StorageService validates type and size — raises ValidationException if invalid
-        public_url = await storage.upload_avatar(  # ty: ignore[unresolved-attribute]
-            user_id=str(user.id),
+        key = f"avatars/{user.id}"
+        stored = await storage.put_object(
+            key=key,
             data=file_data,
             content_type=content_type,
+            metadata={"user_id": str(user.id)},
         )
+        if isinstance(stored, Failure):
+            error = stored.failure()
+            return Failure(ProfileStorageError(message=error.message, details=error.details))
+        public_url = f"{storage.public_url}/{key}" if storage.public_url else stored.unwrap()
 
         # Optionally delete old avatar — best-effort, non-blocking
         old_avatar: str | None = getattr(user, "avatar_url", None)
@@ -102,4 +157,4 @@ class ProfileService:
             await storage.delete_object(key=old_key)
 
         logger.bind(user_id=str(user.id)).info("Avatar uploaded")
-        return AvatarResponse(avatar_url=public_url)
+        return Success(AvatarResponse(avatar_url=public_url))

@@ -4,8 +4,10 @@ import asyncio
 from typing import override
 
 from langchain_core.tools import BaseTool
+from returns.result import Failure
 
 from app.shared.services import get_tavily_client
+from app.utils import ExternalServiceException
 
 
 class WebSearchInput(BaseTool):
@@ -45,11 +47,17 @@ class WebSearchTool(BaseTool):
 
         tavily = await get_tavily_client()
 
-        response = await tavily.search(
+        result = await tavily.search(
             query=query,
             max_results=max_results,
             include_answer=True,
         )
+        if isinstance(result, Failure):
+            error = result.failure()
+            raise ExternalServiceException(
+                service="Tavily", detail=error.message, error_code=error.code.value
+            )
+        response = result.unwrap()
 
         parts = []
 

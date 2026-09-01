@@ -150,6 +150,11 @@ nothing. The classification SHALL be:
 | SSE streaming | exceptions | post-flush failures have no envelope; must be logged |
 | Scripts and CLI | exceptions | operator-facing, no envelope required |
 | Alembic env and migration bodies | exceptions | out of the domain contract |
+| Shared agent package (`shared/agents/`) | none | no such package exists; agent implementations live under the classified LangChain/LangGraph rows |
+| Circuit breaker (`shared/circuit_breaker/`) | exceptions | Redis adapter; names `RedisError`, degrades its cache reads, and raises only at the caller-owned breaker boundary |
+| OpenTelemetry (`shared/otel/`) | exceptions | optional instrumentation and shutdown degradation; broad catches carry reasons and never relabel failures |
+| `shared/otel_integrations.py` | none | declarations only; constructs, catches, propagates, and renders no errors |
+| Outbox (`shared/outbox/`) | exceptions | scan/listen loops degrade with documented reasons; publish handling is explicitly partial over `CeleryError` and `PostgresError` |
 
 An exception-native layer SHALL NOT be converted to Result merely for uniformity.
 It SHALL be converted only where the project owns the control flow.

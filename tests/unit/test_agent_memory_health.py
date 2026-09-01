@@ -103,6 +103,30 @@ async def test_features_surface_reports_present_procedures() -> None:
     assert report["graphProceduresAvailable"] is True
 
 
+async def test_health_keeps_its_own_200_status_when_optional_backends_are_absent() -> None:
+    result = await _service(cognee_config=None).get_health()
+
+    assert result.status_code == 200
+    assert result.data is not None
+    assert result.data.status == "healthy"
+    assert result.data.checks.graphiti["state"] == "not_configured"
+
+
+async def test_health_keeps_its_own_503_status_for_required_probe_failure() -> None:
+    service = _service(cognee_config=None)
+
+    async def unhealthy() -> dict[str, str]:
+        return {"status": "unhealthy", "state": "disconnected"}
+
+    service._check_mongodb = unhealthy
+    service.mongo_client = object()
+    result = await service.get_health()
+
+    assert result.status_code == 503
+    assert result.data is not None
+    assert result.data.status == "unhealthy"
+
+
 async def test_both_surfaces_agree_for_the_same_state() -> None:
     """Degraded on one surface must be degraded on the other."""
     config = SimpleNamespace(embedding_dimension=768)

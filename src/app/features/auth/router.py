@@ -2,17 +2,20 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import RedirectResponse, Response
+from returns.result import Failure
 
 from app.config import get_settings
 from app.connections.mongodb import get_mongodb
 from app.connections.redis import get_redis
-from app.utils import APIResponse, UnauthorizedException, ValidationException, http_response
+from app.shared.result import render_result
+from app.utils import APIResponse, http_response
 from app.utils.rate_limit.dependencies import get_rate_limiter
 
 from .dependencies import (
     AuthServiceDep,
     CurrentClaims,
     CurrentVerifiedUser,
+    raise_auth_error,
 )
 from .dto import (
     ForgotPasswordRequest,
@@ -28,6 +31,7 @@ from .dto import (
     UserResponse,
     VerifyEmailRequest,
 )
+from .errors import AuthAuthenticationError, AuthValidationError
 from .repository import RefreshTokenRepository, UserRepository
 from .security import OAUTH_STATE_COOKIE
 from .service import AuthService
@@ -103,12 +107,14 @@ limit_resend_verification = get_rate_limiter(burst=2, rate=2, period=300)
 async def register(
     body: RegisterRequest,
     service: AuthServiceDep,
+    response: Response,
 ) -> APIResponse[UserResponse]:
-    result: UserResponse = await service.register(body)
-    return http_response(
-        "Registration successful. Check your email to verify your account.",
-        data=result,
-        status_code=201,
+    result = await service.register(body)
+    return render_result(
+        result,
+        response,
+        message="Registration successful. Check your email to verify your account.",
+        success_status=201,
     )
 
 
@@ -122,7 +128,10 @@ async def login(
     ip: str | None = request.client.host if request.client else None
     user_agent: str | None = request.headers.get("user-agent")
 
-    tokens: TokenResponse = await service.login(body, ip=ip, user_agent=user_agent)
+    result = await service.login(body, ip=ip, user_agent=user_agent)
+    if isinstance(result, Failure):
+        return render_result(result, response, message="Login successful")
+    tokens = result.unwrap()
     response.set_cookie(
         _ACCESS_TOKEN_COOKIE,
         tokens.access_token,
@@ -131,7 +140,7 @@ async def login(
         samesite="lax",
         max_age=tokens.expires_in,
     )
-    return http_response("Login successful", data=tokens)
+    return render_result(result, response, message="Login successful")
 
 
 @router.post("/logout", response_model=APIResponse[None])
@@ -140,9 +149,10 @@ async def logout(
     response: Response,
     service: AuthServiceDep,
 ) -> APIResponse[None]:
-    await service.logout(body.refresh_token)
-    response.delete_cookie(_ACCESS_TOKEN_COOKIE)
-    return http_response("Logged out successfully")
+    result = await service.logout(body.refresh_token)
+    if not isinstance(result, Failure):
+        response.delete_cookie(_ACCESS_TOKEN_COOKIE)
+    return render_result(result, response, message="Logged out successfully")
 
 
 @router.post("/refresh")
@@ -151,7 +161,10 @@ async def refresh_token(
     response: Response,
     service: AuthServiceDep,
 ) -> APIResponse[TokenResponse]:
-    tokens = await service.refresh(body.refresh_token)
+    result = await service.refresh(body.refresh_token)
+    if isinstance(result, Failure):
+        return render_result(result, response, message="Token refreshed")
+    tokens = result.unwrap()
     response.set_cookie(
         _ACCESS_TOKEN_COOKIE,
         tokens.access_token,
@@ -160,7 +173,7 @@ async def refresh_token(
         samesite="lax",
         max_age=tokens.expires_in,
     )
-    return http_response("Token refreshed", data=tokens)
+    return render_result(result, response, message="Token refreshed")
 
 
 # ── Email verification ─────────────────────────────────────────────────────────
@@ -170,9 +183,10 @@ async def refresh_token(
 async def verify_email(
     body: VerifyEmailRequest,
     service: AuthServiceDep,
+    response: Response,
 ) -> APIResponse[None]:
-    await service.verify_email(body.token)
-    return http_response("Email verified successfully")
+    result = await service.verify_email(body.token)
+    return render_result(result, response, message="Email verified successfully")
 
 
 @router.post(
@@ -183,9 +197,12 @@ async def verify_email(
 async def resend_verification(
     body: ResendVerificationRequest,
     service: AuthServiceDep,
+    response: Response,
 ) -> APIResponse[None]:
-    await service.resend_verification(body.email)
-    return http_response("If that email is registered, a verification link has been sent")
+    result = await service.resend_verification(body.email)
+    return render_result(
+        result, response, message="If that email is registered, a verification link has been sent"
+    )
 
 
 # ── Password reset ─────────────────────────────────────────────────────────────
@@ -199,18 +216,24 @@ async def resend_verification(
 async def forgot_password(
     body: ForgotPasswordRequest,
     service: AuthServiceDep,
+    response: Response,
 ) -> APIResponse[None]:
-    await service.forgot_password(body.email)
-    return http_response("If that email is registered, a reset link has been sent")
+    result = await service.forgot_password(body.email)
+    return render_result(
+        result, response, message="If that email is registered, a reset link has been sent"
+    )
 
 
 @router.post("/reset-password", response_model=APIResponse[None])
 async def reset_password(
     body: ResetPasswordRequest,
     service: AuthServiceDep,
+    response: Response,
 ) -> APIResponse[None]:
-    await service.reset_password(body.token, body.new_password)
-    return http_response("Password reset successfully. All sessions have been revoked.")
+    result = await service.reset_password(body.token, body.new_password)
+    return render_result(
+        result, response, message="Password reset successfully. All sessions have been revoked."
+    )
 
 
 # ── OAuth2 ─────────────────────────────────────────────────────────────────────
@@ -222,7 +245,10 @@ async def oauth_authorize(
     response: Response,
     service: AuthServiceDep,
 ) -> APIResponse[OAuthAuthorizeResponse]:
-    url, signed_state = await service.oauth_get_authorization_url(provider)
+    result = await service.oauth_get_authorization_url(provider)
+    if isinstance(result, Failure):
+        raise_auth_error(result.failure())
+    url, signed_state = result.unwrap()
     # samesite="lax" is intentional — "strict" blocks cookies on cross-site redirects,
     # which is exactly the OAuth callback redirect from the provider.
     response.set_cookie(
@@ -239,14 +265,16 @@ async def oauth_authorize(
     )
 
 
-@router.get("/oauth/{provider}/callback")
+@router.get("/oauth/{provider}/callback", response_model=None)
 async def oauth_callback(
     provider: Annotated[str, Path()],
     request: Request,
+    response: Response,
+    *,
     code: Annotated[str | None, Query()] = None,
     state: Annotated[str | None, Query()] = None,
     error: Annotated[str | None, Query()] = None,
-) -> Response:
+) -> Response | APIResponse[TokenResponse | None]:
     settings = get_settings()
     frontend_url = settings.FRONTEND_URL.rstrip("/")
 
@@ -254,13 +282,25 @@ async def oauth_callback(
         return RedirectResponse(url=f"{frontend_url}/auth/error?reason={error}")
 
     if not code or not state:
-        msg = "Missing code or state in OAuth callback"
-        raise ValidationException(msg)
+        return render_result(
+            Failure(
+                AuthValidationError(
+                    message="Missing code or state in OAuth callback", source="auth_router"
+                )
+            ),
+            response,
+            message="OAuth callback failed",
+        )
 
     signed_state: str | None = request.cookies.get(OAUTH_STATE_COOKIE)
     if not signed_state:
-        msg = "Missing OAuth state cookie"
-        raise UnauthorizedException(msg)
+        return render_result(
+            Failure(
+                AuthAuthenticationError(message="Missing OAuth state cookie", source="auth_router")
+            ),
+            response,
+            message="OAuth callback failed",
+        )
 
     # Resolve service manually — can't use AuthServiceDep with mixed Response return types
 
@@ -271,7 +311,7 @@ async def oauth_callback(
     ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
 
-    tokens = await service.oauth_callback(
+    result = await service.oauth_callback(
         provider=provider,
         code=code,
         state=state,
@@ -279,6 +319,9 @@ async def oauth_callback(
         ip=ip,
         user_agent=user_agent,
     )
+    if isinstance(result, Failure):
+        return render_result(result, response, message="OAuth callback failed")
+    tokens = result.unwrap()
 
     # Refresh token travels in the URL fragment — never hits the server, stays in browser memory
     redirect = RedirectResponse(
@@ -318,12 +361,13 @@ async def get_me(user: CurrentVerifiedUser) -> APIResponse[UserResponse]:
 async def list_sessions(
     claims: CurrentClaims,
     service: AuthServiceDep,
+    response: Response,
 ) -> APIResponse[list[SessionResponse]]:
-    sessions = await service.list_sessions(
+    result = await service.list_sessions(
         user_id=claims.sub,
         current_session_id=claims.sid,
     )
-    return http_response("Active sessions", data=sessions)
+    return render_result(result, response, message="Active sessions")
 
 
 @router.delete("/sessions/{session_id}")
@@ -332,24 +376,30 @@ async def revoke_session(
     claims: CurrentClaims,
     service: AuthServiceDep,
     request: Request,
+    response: Response,
 ) -> APIResponse[list[str]]:
     # Task 3.4: revoke and close any live WebSocket connections for the session
-    closed_connection_ids = await service.revoke_session_and_close_connections(
+    result = await service.revoke_session_and_close_connections(
         session_id=session_id,
         user_id=claims.sub,
         ws_security_service=request.app.state.websocket_security,
     )
-    return http_response("Session revoked", data=closed_connection_ids)
+    return render_result(result, response, message="Session revoked")
 
 
 @router.delete("/sessions", response_model=APIResponse[None])
 async def revoke_all_sessions(
     claims: CurrentClaims,
     service: AuthServiceDep,
+    response: Response,
     keep_current: Annotated[bool, Query()] = True,
 ) -> APIResponse[None]:
-    await service.revoke_all_sessions(
+    result = await service.revoke_all_sessions(
         user_id=claims.sub,
         except_session_id=claims.sid if keep_current else None,
     )
-    return http_response("All other sessions revoked" if keep_current else "All sessions revoked")
+    return render_result(
+        result,
+        response,
+        message="All other sessions revoked" if keep_current else "All sessions revoked",
+    )

@@ -1,11 +1,12 @@
 # Handoff — implementing `error-handling-foundation`
 
-You are implementing an OpenSpec change whose planning is **complete and frozen**.
-All six artifacts exist and validate. Your job is `tasks.md`, not re-planning. If you
-believe an artifact is wrong, say so and stop — do not silently deviate.
+You are implementing an OpenSpec change whose planning artifacts define a complete
+repository migration program. All six artifacts exist and validate. Work from
+`tasks.md`; when a task explicitly corrects an artifact, update that artifact and
+record the completed correction rather than preserving stale text.
 
-**State as of 2026-08-31: 26 of 97 tasks done.** Sections 1 (13/13), 2 (7/7) and 4
-(5/5) are complete, plus task 3.1. Verify that yourself with
+**State as of 2026-09-01: sections 1–11 have landed on `main`; 97 of 141 tasks were
+complete before section 12 began.** Verify the live count yourself with
 `grep -c '^- \[x\]' tasks.md` before trusting this line — it is a snapshot, and the
 count changes as you work. Every completed task carries a `> **DONE:**` block naming
 the sites it touched; keep that convention.
@@ -308,7 +309,14 @@ Seven errors in this change's own drafting came from skipping these. They are ch
    reconciling second query. And a `DONE` block that says "partial" is a debt nothing
    collects: `--strict` cannot see it and `openspec status` counts the task complete, so
    grep the `DONE` blocks for "partial", "deferred" and "TODO" before opening the PR that
-   contains them.
+    contains them.
+
+5. **Resolve `tasks.md` conflicts by union, never by choosing one side.** Keep the
+   superset of sections and the union of every `- [x]` task line. A checkbox is a
+   claim about repository state, not branch ownership. This rule is required because
+   five historical branch copies held different completed subsets and no single copy
+   held the union; choosing one side previously deleted section 9 while all specs
+   continued to validate.
 
 ## 8. Archiving — last step, after the last merge
 
@@ -371,13 +379,12 @@ Phase 1a — `shared/services/`, **before** the `crawler` feature change, becaus
 (21 raises), `tavily` (8), `mailer` (2, no external importer). `rate_limiter.py` is
 excluded — it raises nothing.
 
-Then 16 feature changes in the order in `design.md`'s Phase 2, then **two** deferred
-changes: `shared/crawler/` alongside the `crawler` feature, and `shared/rag/`'s provider
-boundary alongside `documents`. `utils/cache/` is **not** deferred — it is task 7.5 in
-this change, with `examples/redis_examples.py` in the same commit as task 9.3. An
-earlier draft of `design.md` listed the pair as deferred while its own risk register and
-`tasks.md` both scheduled it here; that line is corrected.
+Then 14 feature changes in the corrected order in `design.md`'s Phase 2.
+`shared/crawler/` lands with `crawler`, and `shared/rag/`'s provider boundary lands
+with `documents`. `utils/cache/` is already complete under task 7.5.
 
-18 features exist, not 17. `subscriptions` migrates in this change as the exemplar, and
-`chat` needs no change at all — `__init__.py` and `model.py`, zero raises, zero
-`except` clauses. That is the whole 18 = 1 + 16 + 1 arithmetic.
+18 features exist: `subscriptions` is the exemplar; `audit`, `crawler`, `users`,
+`ingestion`, `dunning`, `profile`, `plans`, `invoices`, `payments`, `webhooks`,
+`agent_saul`, `credits`, `documents`, and `auth` are the 14 conversions; `chat` and
+`search` are no-ops; `health` is classify-only. That is the complete
+**18 = 1 + 14 + 2 + 1** arithmetic.
