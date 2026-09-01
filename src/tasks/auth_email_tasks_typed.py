@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from functools import partial
 
+from returns.result import Failure
+
 from app.config import get_settings
 from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, ResilientTask, celery_app
 from app.connections.celery_task_names import (
@@ -21,31 +23,41 @@ from app.connections.celery_task_names import (
     SEND_VERIFICATION_EMAIL,
 )
 from app.shared.services.mailer import config_from_settings, send_template
-from app.utils import logger
+from app.utils import ExternalServiceException, logger
 
 settings = get_settings()
 
 
 def _send_verification_email(email: str, token: str) -> dict[str, str]:
     url = f"{settings.FRONTEND_URL}/verify-email?token={token}"
-    send_template(
+    result = send_template(
         config_from_settings(settings),
         to=email,
         template_id=settings.RESEND_VERIFICATION_TEMPLATE_ID,
         variables={"verification_url": url, "email": email},
     )
+    if isinstance(result, Failure):
+        error = result.failure()
+        raise ExternalServiceException(
+            service="resend", detail=error.message, error_code=error.code.value
+        )
     logger.bind(email=email, url=url).info("Verification email dispatched")
     return {"status": "sent", "email": email}
 
 
 def _send_password_reset_email(email: str, token: str) -> dict[str, str]:
     url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
-    send_template(
+    result = send_template(
         config_from_settings(settings),
         to=email,
         template_id=settings.RESEND_PASSWORD_RESET_TEMPLATE_ID,
         variables={"reset_url": url, "email": email},
     )
+    if isinstance(result, Failure):
+        error = result.failure()
+        raise ExternalServiceException(
+            service="resend", detail=error.message, error_code=error.code.value
+        )
     logger.bind(email=email, url=url).info("Password reset email dispatched")
     return {"status": "sent", "email": email}
 

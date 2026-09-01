@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from typing import Annotated
+from typing import Annotated, assert_never
 
 from fastapi import Depends, Request, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -8,8 +8,24 @@ from starlette.requests import HTTPConnection
 
 from app.connections.mongodb import get_mongodb
 from app.connections.redis import get_redis
-from app.utils import ForbiddenException, UnauthorizedException
+from app.utils import (
+    ConflictException,
+    ForbiddenException,
+    InfrastructureException,
+    NotFoundException,
+    UnauthorizedException,
+    ValidationException,
+)
 
+from .errors import (
+    AuthAuthenticationError,
+    AuthAuthorizationError,
+    AuthConflictError,
+    AuthError,
+    AuthInfrastructureError,
+    AuthNotFoundError,
+    AuthValidationError,
+)
 from .model import Permission, User, UserRole
 from .repository import RefreshTokenRepository, UserRepository
 from .security import TokenClaims, decode_token
@@ -17,6 +33,34 @@ from .service import AuthService
 
 _http_bearer = HTTPBearer(auto_error=False)
 _ACCESS_TOKEN_TYPE = "access"  # noqa: S105 — token type constant, not a password
+
+
+def raise_auth_error(error: AuthError) -> None:
+    """Translate an auth failure at an exception-native request boundary."""
+    match error:
+        case AuthValidationError():
+            raise ValidationException(
+                detail=error.message, error_code=error.code, data=error.details
+            )
+        case AuthNotFoundError():
+            raise NotFoundException(
+                resource="Auth resource", identifier=None, error_code=error.code
+            )
+        case AuthConflictError():
+            raise ConflictException(detail=error.message, error_code=error.code, data=error.details)
+        case AuthAuthenticationError():
+            raise UnauthorizedException(detail=error.message, error_code=error.code)
+        case AuthAuthorizationError():
+            raise ForbiddenException(detail=error.message, error_code=error.code)
+        case AuthInfrastructureError():
+            raise InfrastructureException(
+                detail=error.message,
+                error_code=error.code,
+                retryable=error.retryable,
+                data=error.details,
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 # ── Repository and service wiring ─────────────────────────────────────────────
@@ -113,8 +157,11 @@ async def get_current_user(
     """Full user hydration from MongoDB. Use when the handler needs live user state."""
     result = await user_repo.find_by_id(claims.sub)
     if isinstance(result, Failure):
-        msg = "User not found"
-        raise UnauthorizedException(msg)
+        error = result.failure()
+        if isinstance(error, AuthNotFoundError | AuthValidationError):
+            msg = "User not found"
+            raise UnauthorizedException(msg)
+        raise_auth_error(error)
     user = result.unwrap()
     if user is None:
         msg = "User not found"

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from returns.result import Result
 
-from app.shared.result.errors import ErrorKind, FeatureError
+from app.shared.result.errors import ErrorKind, FeatureError, http_status_for_kind
 
 if TYPE_CHECKING:
     from typing import ClassVar
@@ -101,3 +101,17 @@ type SubscriptionError = (
 )
 
 type SubscriptionResult[T] = Result[T, SubscriptionError]
+
+
+def subscription_error_to_http_status(error: SubscriptionError) -> int:
+    match error:
+        case SubscriptionNotFoundError() | SubscriptionPlanNotFoundError():
+            return http_status_for_kind(error.kind)
+        case SubscriptionDuplicateError() | SubscriptionVersionConflictError():
+            return http_status_for_kind(error.kind)
+        case SubscriptionInvalidTransitionError() | SubscriptionValidationError():
+            return http_status_for_kind(error.kind)
+        case SubscriptionInfrastructureError() | SubscriptionTransientInfrastructureError():
+            return http_status_for_kind(error.kind, retryable=error.retryable)
+        case _ as unreachable:
+            assert_never(unreachable)

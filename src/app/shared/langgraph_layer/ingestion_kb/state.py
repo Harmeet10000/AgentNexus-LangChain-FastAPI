@@ -12,13 +12,13 @@ from enum import StrEnum
 # is annotated `Annotated[list[ContextualizedChunk], operator.add]`. With the import confined
 # to a type-checking block the name is absent at runtime, the model is never fully defined, and
 # every `IngestionState(...)` raises `PydanticUserError`. The same reasoning already guards
-# `AppError` on the next line; this import was the one that got away.
+# The state failure import below is runtime-load-bearing for Pydantic.
 from typing import Annotated, Any  # noqa: TC003 - Pydantic resolves these fields at runtime.
 
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.shared.result import AppError  # noqa: TC001 - Pydantic resolves this field at runtime.
+from .errors import IngestionGraphError  # noqa: TC001 - Pydantic resolves this field at runtime.
 
 
 class ClauseType(StrEnum):
@@ -195,7 +195,7 @@ class IngestionState(BaseModel):
     stored_relationship_ids: list[str] = Field(default_factory=list)
     graphiti_episode_ids: list[str] = Field(default_factory=list)
     ingestion_complete: bool = False
-    failure: AppError | None = None
+    failure: IngestionGraphError | None = None
 
 
 StructuredRunnable = Runnable[list[Any], Any]

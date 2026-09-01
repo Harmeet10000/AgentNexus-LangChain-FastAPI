@@ -8,7 +8,9 @@ from fastapi import Response
 from returns.result import Failure
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.features.invoices.service import _repo_failure
+from app.features.invoices.errors import InvoiceCollaboratorError
+from app.features.invoices.service import _translate_collaborator_error
+from app.features.plans.errors import PlanInfrastructureError
 from app.features.subscriptions.errors import (
     SubscriptionInfrastructureError,
     SubscriptionTransientInfrastructureError,
@@ -18,8 +20,7 @@ from app.features.subscriptions.service import (
     SubscriptionService,
     subscription_error_to_http_status,
 )
-from app.shared.result import InfrastructureAppError, render_result
-from app.utils import InfrastructureException
+from app.shared.result import render_result
 
 
 def _permanent_error() -> SubscriptionInfrastructureError:
@@ -78,17 +79,15 @@ def test_subscription_match_and_renderer_preserve_retryability(
 )
 async def test_plan_translation_selects_infrastructure_sibling(
     retryable: bool,
-    expected_type: type[
-        SubscriptionInfrastructureError | SubscriptionTransientInfrastructureError
-    ],
+    expected_type: type[SubscriptionInfrastructureError | SubscriptionTransientInfrastructureError],
 ) -> None:
     plans = SimpleNamespace(
         find_by_id=AsyncMock(
             return_value=Failure(
-                InfrastructureAppError(
+                PlanInfrastructureError(
                     message="plan database failure",
-                    retryable=retryable,
                     source="plan_repository",
+                    operation="find_by_id",
                 )
             )
         )
@@ -99,8 +98,8 @@ async def test_plan_translation_selects_infrastructure_sibling(
     result = await service._load_plan("plan-id")
 
     assert isinstance(result, Failure)
-    assert isinstance(result.failure(), expected_type)
-    assert result.failure().retryable is retryable
+    assert isinstance(result.failure(), SubscriptionInfrastructureError)
+    assert result.failure().retryable is False
 
 
 @pytest.mark.asyncio
@@ -119,18 +118,11 @@ async def test_repository_database_failure_is_transient() -> None:
     session.rollback.assert_awaited_once()
 
 
-@pytest.mark.parametrize(
-    ("error", "expected_status"),
-    [
-        (_permanent_error(), 500),
-        (_transient_error(), 503),
-    ],
-)
-def test_invoice_translation_preserves_retryability(
+@pytest.mark.parametrize("error", [_permanent_error(), _transient_error()])
+def test_invoice_translates_collaborator_failure_to_its_own_union(
     error: SubscriptionInfrastructureError | SubscriptionTransientInfrastructureError,
-    expected_status: int,
 ) -> None:
-    with pytest.raises(InfrastructureException) as exc_info:
-        _repo_failure(error, "void_invoice")
+    translated = _translate_collaborator_error(error)
 
-    assert exc_info.value.status_code == expected_status
+    assert isinstance(translated, InvoiceCollaboratorError)
+    assert translated.message == error.message

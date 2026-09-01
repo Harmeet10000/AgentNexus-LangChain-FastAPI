@@ -6,3 +6,7 @@ class SubscriptionNotFoundError(FeatureError):
 
 class SubscriptionDuplicateError(FeatureError):
     pass
+
+# permit: src/app/shared/rag/errors.py — shared classifier owns its union (ADR-006)
+class RagProviderError(FeatureError):
+    pass

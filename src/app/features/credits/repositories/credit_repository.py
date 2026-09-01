@@ -10,15 +10,19 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.features.credits.models.credit import CreditStatus, UserCredit
-from app.shared.result import ConflictAppError, InfrastructureAppError, NotFoundAppError
-from app.utils.codes import ErrorCode
+
+from ..errors import (
+    CreditConflictError,
+    CreditInfrastructureError,
+    CreditNotFoundError,
+)
 
 if TYPE_CHECKING:
     from uuid import UUID
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.shared.result import AppResult
+    from ..errors import CreditResult
 
 
 class CreditRepository:
@@ -27,7 +31,7 @@ class CreditRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create(self, credit: UserCredit) -> AppResult[UserCredit]:
+    async def create(self, credit: UserCredit) -> CreditResult[UserCredit]:
         try:
             self.session.add(credit)
             await self.session.flush()
@@ -35,8 +39,7 @@ class CreditRepository:
         except IntegrityError as exc:
             await self.session.rollback()
             return Failure(
-                ConflictAppError(
-                    code="CREDIT_CONFLICT",
+                CreditConflictError(
                     message="Credit creation failed due to a constraint violation",
                     details={"user_id": credit.user_id, "error": str(exc)},
                     source="credit_repository",
@@ -45,16 +48,14 @@ class CreditRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while creating credit",
                     details={"error": str(exc)},
                     source="credit_repository",
                 )
             )
 
-    async def find_by_id(self, credit_id: UUID) -> AppResult[UserCredit | None]:
+    async def find_by_id(self, credit_id: UUID) -> CreditResult[UserCredit | None]:
         try:
             statement = select(UserCredit).where(UserCredit.id == credit_id)
             result = await self.session.execute(statement)
@@ -62,9 +63,7 @@ class CreditRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while fetching credit",
                     details={"credit_id": str(credit_id), "error": str(exc)},
                     source="credit_repository",
@@ -78,7 +77,7 @@ class CreditRepository:
         status: CreditStatus | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> AppResult[tuple[list[UserCredit], int]]:
+    ) -> CreditResult[tuple[list[UserCredit], int]]:
         try:
             conditions = [
                 UserCredit.user_id == user_id,
@@ -105,9 +104,7 @@ class CreditRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while listing credits",
                     details={"user_id": user_id, "error": str(exc)},
                     source="credit_repository",
@@ -119,7 +116,7 @@ class CreditRepository:
         user_id: str,
         *,
         limit: int = 100,
-    ) -> AppResult[list[UserCredit]]:
+    ) -> CreditResult[list[UserCredit]]:
         """Find ACTIVE, non-expired credits ordered by soonest valid_until, then oldest created_at.
 
         Credits with no expiry (valid_until IS NULL) are consumed last.
@@ -145,16 +142,14 @@ class CreditRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while finding available credits",
                     details={"user_id": user_id, "error": str(exc)},
                     source="credit_repository",
                 )
             )
 
-    async def get_active_balance(self, user_id: str) -> AppResult[int]:
+    async def get_active_balance(self, user_id: str) -> CreditResult[int]:
         """Sum remaining_balance across ACTIVE, non-expired credits (paisa)."""
         try:
             now = datetime.now(tz=UTC)
@@ -169,9 +164,7 @@ class CreditRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while calculating credit balance",
                     details={"user_id": user_id, "error": str(exc)},
                     source="credit_repository",
@@ -185,7 +178,7 @@ class CreditRepository:
         new_remaining_balance: int,
         new_status: CreditStatus | None = None,
         consumed_at: datetime | None = None,
-    ) -> AppResult[UserCredit]:
+    ) -> CreditResult[UserCredit]:
         try:
             values: dict[str, object] = {
                 "remaining_balance": new_remaining_balance,
@@ -205,8 +198,7 @@ class CreditRepository:
             updated = result.scalar_one_or_none()
             if updated is None:
                 return Failure(
-                    NotFoundAppError(
-                        code="CREDIT_NOT_FOUND",
+                    CreditNotFoundError(
                         message="Credit not found during balance update",
                         details={"credit_id": str(credit.id)},
                         source="credit_repository",
@@ -216,16 +208,14 @@ class CreditRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while updating credit balance",
                     details={"credit_id": str(credit.id), "error": str(exc)},
                     source="credit_repository",
                 )
             )
 
-    async def expire_credits_past_date(self, cutoff: datetime) -> AppResult[list[UserCredit]]:
+    async def expire_credits_past_date(self, cutoff: datetime) -> CreditResult[list[UserCredit]]:
         """Find ACTIVE credits past their valid_until and mark them EXPIRED."""
         try:
             statement = (
@@ -264,9 +254,7 @@ class CreditRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                CreditInfrastructureError(
                     message="Database error while expiring credits",
                     details={"error": str(exc)},
                     source="credit_repository",

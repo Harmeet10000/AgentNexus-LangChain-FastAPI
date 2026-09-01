@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
+from returns.result import Failure
+
+from app.utils import InfrastructureException
 
 if TYPE_CHECKING:
     from typing import Any
@@ -17,9 +20,10 @@ if TYPE_CHECKING:
 
     from app.shared.services.storage import StorageService
 
+    from .errors import DocumentResult
     from .repository import DocumentRepository
 
-type IngestDocumentFn = Callable[..., Awaitable[dict[str, object]]]
+type IngestDocumentFn = Callable[..., Awaitable[DocumentResult[dict[str, object]]]]
 
 
 class DocumentIngestionState(BaseModel):
@@ -48,14 +52,18 @@ def build_document_ingestion_graph(
 
     graph = StateGraph(DocumentIngestionState)
     graph.add_node(
-        node="ingest_document",
-        action=_make_ingest_document_node(
-            object_store=object_store,
-            repo=repo,
-            graphiti=graphiti,
-            ingest_document_fn=ingest_document_fn,
-            llm=llm,
+        "ingest_document",
+        cast(
+            "Any",
+            _make_ingest_document_node(
+                object_store=object_store,
+                repo=repo,
+                graphiti=graphiti,
+                ingest_document_fn=ingest_document_fn,
+                llm=llm,
+            ),
         ),
+        input_schema=DocumentIngestionState,
     )
     graph.set_entry_point("ingest_document")
     graph.add_edge("ingest_document", END)
@@ -69,9 +77,9 @@ def _make_ingest_document_node(
     graphiti: Graphiti | None,
     ingest_document_fn: IngestDocumentFn,
     llm: BaseChatModel,
-) -> IngestDocumentFn:
+) -> Callable[[DocumentIngestionState], Awaitable[dict[str, object]]]:
     async def ingest_document_node(state: DocumentIngestionState) -> dict[str, object]:
-        return await ingest_document_fn(
+        result = await ingest_document_fn(
             document_id=state.document_id,
             user_id=state.user_id,
             filename=state.filename,
@@ -82,5 +90,14 @@ def _make_ingest_document_node(
             graphiti=graphiti,
             llm=llm,
         )
+        if isinstance(result, Failure):
+            error = result.failure()
+            raise InfrastructureException(
+                detail=error.message,
+                error_code=error.code,
+                retryable=error.retryable,
+                data=error.details,
+            )
+        return result.unwrap()
 
     return ingest_document_node

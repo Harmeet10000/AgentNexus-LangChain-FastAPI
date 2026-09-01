@@ -23,7 +23,7 @@ class ErrorCode(StrEnum):
     INFRASTRUCTURE_ERROR = "INFRASTRUCTURE_ERROR"
     INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
 
-    # Repository-level codes (used in AppError payloads from repositories)
+    # Legacy repository-level codes retained for transport exception compatibility.
     DOCUMENT_NOT_FOUND = "DOCUMENT_NOT_FOUND"
     STATUS_NOT_FOUND = "STATUS_NOT_FOUND"
     SEARCH_DOCUMENT_NOT_FOUND = "SEARCH_DOCUMENT_NOT_FOUND"

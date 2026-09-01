@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from redis.asyncio import Redis
+from returns.result import Failure, Success
 
 from app.connections.crawl4ai import get_crawler
 from app.shared.crawler import (
@@ -16,6 +17,7 @@ from app.shared.crawler import (
 )
 from app.shared.crawler import SchemaType as ProcessorSchemaType
 from app.shared.services import RateLimiter, RateLimitScope, get_rate_limiter, search
+from app.shared.services.errors import TavilyValidationError
 from app.utils import logger
 
 from .constants import CrawlMode
@@ -27,6 +29,7 @@ from .dto import (
     SearchResponse,
     SearchResultItem,
 )
+from .errors import CrawlerResult, CrawlerSearchError, CrawlerValidationError
 
 
 class CrawlerService:
@@ -83,7 +86,7 @@ class CrawlerService:
         """Increment rate limit counter."""
         await self.rate_limiter.increment_rate_limit(identifier, scope)
 
-    async def crawl(self, request: CrawlRequest) -> CrawlResponse:
+    async def crawl(self, request: CrawlRequest) -> CrawlerResult[CrawlResponse]:
         """
         Crawl a URL or URLs based on request.
 
@@ -98,18 +101,22 @@ class CrawlerService:
         logger.info("Starting crawl for: {}", request.url)
 
         if request.max_depth > 1:
-            crawl_results = await self.crawler.crawl_recursive(
+            crawl_result = await self.crawler.crawl_recursive(
                 urls=[request.url],
                 max_depth=request.max_depth,
                 max_pages=request.max_pages,
             )
         else:
-            result = await self.crawler.crawl(
+            crawl_result = await self.crawler.crawl(
                 url=request.url,
                 use_proxy=request.use_proxy,
                 bypass_cache=request.bypass_cache,
             )
-            crawl_results = [result]
+        if isinstance(crawl_result, Failure):
+            error = crawl_result.failure()
+            return Failure(CrawlerSearchError(message=error.message, details=error.details))
+        resolved = crawl_result.unwrap()
+        crawl_results = resolved if isinstance(resolved, list) else [resolved]
 
         results: list[CrawlResultItem] = []
         total_word_count = 0
@@ -131,15 +138,17 @@ class CrawlerService:
 
         processing_time_ms = int((time.time() - start_time) * 1000)
 
-        return CrawlResponse(
-            success=failed_pages == 0,
-            query_url=request.url,
-            results=results,
-            total_pages=len(results),
-            successful_pages=successful_pages,
-            failed_pages=failed_pages,
-            total_word_count=total_word_count,
-            processing_time_ms=processing_time_ms,
+        return Success(
+            CrawlResponse(
+                success=failed_pages == 0,
+                query_url=request.url,
+                results=results,
+                total_pages=len(results),
+                successful_pages=successful_pages,
+                failed_pages=failed_pages,
+                total_word_count=total_word_count,
+                processing_time_ms=processing_time_ms,
+            )
         )
 
     async def _process_crawl_result(
@@ -202,7 +211,7 @@ class CrawlerService:
         )
 
     @staticmethod
-    async def search(request: SearchRequest) -> SearchResponse:
+    async def search(request: SearchRequest) -> CrawlerResult[SearchResponse]:
         """
         Search the web using Tavily.
 
@@ -214,11 +223,20 @@ class CrawlerService:
         """
         logger.info("Searching for: {}", request.query)
 
-        tavily_response = await search(
+        tavily_result = await search(
             query=request.query,
             max_results=request.max_results,
             include_answer=request.include_answer,
         )
+        if isinstance(tavily_result, Failure):
+            error = tavily_result.failure()
+            crawler_error = (
+                CrawlerValidationError(message=error.message, details=error.details)
+                if isinstance(error, TavilyValidationError)
+                else CrawlerSearchError(message=error.message, details=error.details)
+            )
+            return Failure(crawler_error)
+        tavily_response = tavily_result.unwrap()
 
         results = [
             SearchResultItem(
@@ -231,12 +249,14 @@ class CrawlerService:
             for result in tavily_response.results
         ]
 
-        return SearchResponse(
-            success=True,
-            query=request.query,
-            answer=tavily_response.answer,
-            results=results,
-            total_results=tavily_response.total_results,
+        return Success(
+            SearchResponse(
+                success=True,
+                query=request.query,
+                answer=tavily_response.answer,
+                results=results,
+                total_results=tavily_response.total_results,
+            )
         )
 
     async def close(self) -> None:

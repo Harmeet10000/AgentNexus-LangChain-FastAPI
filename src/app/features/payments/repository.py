@@ -9,13 +9,7 @@ from returns.result import Failure, Success
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.shared.result import (
-    ConflictAppError,
-    InfrastructureAppError,
-    NotFoundAppError,
-)
-from app.utils.codes import ErrorCode
-
+from .errors import PaymentConflictError, PaymentInfrastructureError, PaymentNotFoundError
 from .model import Payment
 
 if TYPE_CHECKING:
@@ -25,7 +19,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from app.shared.result import AppResult
+    from .errors import PaymentResult
 
 
 class PaymentRepository:
@@ -34,7 +28,7 @@ class PaymentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create(self, payment: Payment) -> AppResult[Payment]:
+    async def create(self, payment: Payment) -> PaymentResult[Payment]:
         try:
             self.session.add(payment)
             await self.session.flush()
@@ -42,8 +36,7 @@ class PaymentRepository:
         except IntegrityError as exc:
             await self.session.rollback()
             return Failure(
-                ConflictAppError(
-                    code="DUPLICATE_PAYMENT",
+                PaymentConflictError(
                     message="Payment already recorded for this Razorpay payment ID",
                     details={"razorpay_payment_id": payment.razorpay_payment_id, "error": str(exc)},
                     source="payment_repository",
@@ -52,24 +45,21 @@ class PaymentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                PaymentInfrastructureError(
                     message="Database error while creating payment",
                     details={"error": str(exc)},
                     source="payment_repository",
                 )
             )
 
-    async def find_by_id(self, payment_id: str | UUID) -> AppResult[Payment | None]:
+    async def find_by_id(self, payment_id: str | UUID) -> PaymentResult[Payment | None]:
         try:
             statement: Select[tuple[Payment]] = select(Payment).where(Payment.id == payment_id)
             result = await self.session.execute(statement)
             payment = result.scalar_one_or_none()
             if payment is None:
                 return Failure(
-                    NotFoundAppError(
-                        code="PAYMENT_NOT_FOUND",
+                    PaymentNotFoundError(
                         message="Payment not found",
                         details={"payment_id": str(payment_id)},
                         source="payment_repository",
@@ -79,16 +69,14 @@ class PaymentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                PaymentInfrastructureError(
                     message="Database error while fetching payment",
                     details={"payment_id": str(payment_id), "error": str(exc)},
                     source="payment_repository",
                 )
             )
 
-    async def find_by_razorpay_id(self, razorpay_payment_id: str) -> AppResult[Payment | None]:
+    async def find_by_razorpay_id(self, razorpay_payment_id: str) -> PaymentResult[Payment | None]:
         try:
             statement: Select[tuple[Payment]] = select(Payment).where(
                 Payment.razorpay_payment_id == razorpay_payment_id
@@ -98,9 +86,7 @@ class PaymentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                PaymentInfrastructureError(
                     message="Database error while fetching payment by Razorpay ID",
                     details={"razorpay_payment_id": razorpay_payment_id, "error": str(exc)},
                     source="payment_repository",
@@ -109,7 +95,7 @@ class PaymentRepository:
 
     async def find_by_subscription(
         self, subscription_id: str | UUID, *, limit: int = 50, offset: int = 0
-    ) -> AppResult[list[Payment]]:
+    ) -> PaymentResult[list[Payment]]:
         try:
             statement: Select[tuple[Payment]] = (
                 select(Payment)
@@ -123,9 +109,7 @@ class PaymentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                PaymentInfrastructureError(
                     message="Database error while listing payments for subscription",
                     details={"subscription_id": str(subscription_id), "error": str(exc)},
                     source="payment_repository",
@@ -134,7 +118,7 @@ class PaymentRepository:
 
     async def find_by_date_range(
         self, *, date_from: datetime, date_to: datetime
-    ) -> AppResult[list[Payment]]:
+    ) -> PaymentResult[list[Payment]]:
         try:
             statement: Select[tuple[Payment]] = (
                 select(Payment)
@@ -146,9 +130,7 @@ class PaymentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                PaymentInfrastructureError(
                     message="Database error while fetching payments by date range",
                     details={"error": str(exc)},
                     source="payment_repository",
@@ -157,7 +139,7 @@ class PaymentRepository:
 
     async def update_refund_amount(
         self, payment: Payment, *, refund_amount: Decimal
-    ) -> AppResult[Payment]:
+    ) -> PaymentResult[Payment]:
         try:
             statement = (
                 update(Payment)
@@ -169,8 +151,7 @@ class PaymentRepository:
             updated = result.scalar_one_or_none()
             if updated is None:
                 return Failure(
-                    NotFoundAppError(
-                        code="PAYMENT_NOT_FOUND",
+                    PaymentNotFoundError(
                         message="Payment not found",
                         details={"payment_id": str(payment.id)},
                         source="payment_repository",
@@ -180,9 +161,7 @@ class PaymentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                PaymentInfrastructureError(
                     message="Database error while updating payment refund amount",
                     details={"payment_id": str(payment.id), "error": str(exc)},
                     source="payment_repository",
@@ -191,7 +170,7 @@ class PaymentRepository:
 
     async def update_status(
         self, payment: Payment, *, status: str, extra_values: dict[str, object] | None = None
-    ) -> AppResult[Payment]:
+    ) -> PaymentResult[Payment]:
         try:
             values: dict[str, object] = {"status": status}
             if extra_values:
@@ -206,8 +185,7 @@ class PaymentRepository:
             updated = result.scalar_one_or_none()
             if updated is None:
                 return Failure(
-                    NotFoundAppError(
-                        code="PAYMENT_NOT_FOUND",
+                    PaymentNotFoundError(
                         message="Payment not found",
                         details={"payment_id": str(payment.id)},
                         source="payment_repository",
@@ -217,9 +195,7 @@ class PaymentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                PaymentInfrastructureError(
                     message="Database error while updating payment status",
                     details={"payment_id": str(payment.id), "error": str(exc)},
                     source="payment_repository",

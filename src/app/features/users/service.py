@@ -1,18 +1,21 @@
 import math
 
-from returns.result import Failure
+from returns.result import Failure, Success
 
 from app.features.auth import RefreshTokenRepository, User, UserRole, create_impersonation_token
-from app.shared.result import (
-    app_error_to_exception,
-    log_expected_failure,
-)
-from app.utils import ConflictException, ForbiddenException, NotFoundException, logger
+from app.utils import logger
 
 from .dto import (
     ImpersonateResponse,
     PaginatedData,
     UserAdminResponse,
+)
+from .errors import (
+    UsersAuthorizationError,
+    UsersConflictError,
+    UsersInfrastructureError,
+    UsersNotFoundError,
+    UsersResult,
 )
 from .repository import UserAdminRepository
 
@@ -40,17 +43,21 @@ class UserAdminService:
         self._user_repo = user_repo
         self._token_repo = token_repo
 
-    async def _get_user_or_raise(self, user_id: str) -> User:
+    async def _get_user(self, user_id: str) -> UsersResult[User]:
         result = await self._user_repo.find_by_id(user_id)
         if isinstance(result, Failure):
-            error = result.failure()
-            log_expected_failure(error, operation="user_admin_lookup")
-            raise app_error_to_exception(error)
+            return result
         user = result.unwrap()
         if user is None:
-            msg = "User not found"
-            raise NotFoundException(msg)
-        return user
+            return Failure(
+                UsersNotFoundError(
+                    message="User not found",
+                    details={"user_id": user_id},
+                    source="users_service",
+                    user_id=user_id,
+                )
+            )
+        return Success(user)
 
     async def list_users(
         self,
@@ -59,44 +66,61 @@ class UserAdminService:
         role: UserRole | None = None,
         is_active: bool | None = None,
         search: str | None = None,
-    ) -> PaginatedData[UserAdminResponse]:
+    ) -> UsersResult[PaginatedData[UserAdminResponse]]:
         per_page = min(per_page, 100)  # hard cap — prevent unbounded queries
-        items, total = await self._user_repo.list_users(
+        result = await self._user_repo.list_users(
             page=page,
             per_page=per_page,
             role=role,
             is_active=is_active,
             search=search,
         )
-        return PaginatedData(
-            items=[_to_admin_response(u) for u in items],
-            total=total,
-            page=page,
-            per_page=per_page,
-            pages=math.ceil(total / per_page) if total else 0,
+        if isinstance(result, Failure):
+            return result
+        items, total = result.unwrap()
+        return Success(
+            PaginatedData(
+                items=[_to_admin_response(u) for u in items],
+                total=total,
+                page=page,
+                per_page=per_page,
+                pages=math.ceil(total / per_page) if total else 0,
+            )
         )
 
-    async def get_user(self, user_id: str) -> UserAdminResponse:
-        user = await self._get_user_or_raise(user_id)
-        return _to_admin_response(user)
+    async def get_user(self, user_id: str) -> UsersResult[UserAdminResponse]:
+        result = await self._get_user(user_id)
+        if isinstance(result, Failure):
+            return result
+        return Success(_to_admin_response(result.unwrap()))
 
     async def update_role(
         self,
         user_id: str,
         new_role: UserRole,
         requesting_admin_id: str,
-    ) -> UserAdminResponse:
+    ) -> UsersResult[UserAdminResponse]:
         if user_id == requesting_admin_id:
-            msg = "Admins cannot update their own role"
-            raise ConflictException(msg)
-        user = await self._get_user_or_raise(user_id)
-        user = await self._user_repo.update_role(user, new_role)
+            return Failure(
+                UsersConflictError(
+                    message="Admins cannot update their own role",
+                    source="users_service",
+                    operation="update_role",
+                )
+            )
+        lookup = await self._get_user(user_id)
+        if isinstance(lookup, Failure):
+            return lookup
+        updated = await self._user_repo.update_role(lookup.unwrap(), new_role)
+        if isinstance(updated, Failure):
+            return updated
+        user = updated.unwrap()
         logger.bind(
             target_user_id=user_id,
             new_role=new_role,
             admin_id=requesting_admin_id,
         ).info("User role updated")
-        return _to_admin_response(user)
+        return Success(_to_admin_response(user))
 
     async def set_active(
         self,
@@ -104,54 +128,108 @@ class UserAdminService:
         *,
         is_active: bool,
         requesting_admin_id: str,
-    ) -> UserAdminResponse:
+    ) -> UsersResult[UserAdminResponse]:
         if user_id == requesting_admin_id:
-            msg = "Admins cannot deactivate themselves"
-            raise ConflictException(msg)
-        user = await self._get_user_or_raise(user_id)
-        user = await self._user_repo.set_active(user, is_active=is_active)
+            return Failure(
+                UsersConflictError(
+                    message="Admins cannot deactivate themselves",
+                    source="users_service",
+                    operation="set_active",
+                )
+            )
+        lookup = await self._get_user(user_id)
+        if isinstance(lookup, Failure):
+            return lookup
+        updated = await self._user_repo.set_active(lookup.unwrap(), is_active=is_active)
+        if isinstance(updated, Failure):
+            return updated
+        user = updated.unwrap()
         if not is_active:
             # Force all sessions offline when account is deactivated
-            await self._token_repo.revoke_all_user_sessions(
+            revoked = await self._token_repo.revoke_all_user_sessions(
                 user_id=user_id,
                 reason="account_deactivated",
             )
+            if isinstance(revoked, Failure):
+                error = revoked.failure()
+                return Failure(
+                    UsersInfrastructureError(
+                        message=error.message,
+                        details=error.details,
+                        source="users_service",
+                        operation="revoke_sessions",
+                    )
+                )
         logger.bind(
             target_user_id=user_id,
             is_active=is_active,
             admin_id=requesting_admin_id,
         ).info("User active status updated")
-        return _to_admin_response(user)
+        return Success(_to_admin_response(user))
 
     async def hard_delete(
         self,
         user_id: str,
         requesting_admin_id: str,
-    ) -> None:
+    ) -> UsersResult[None]:
         if user_id == requesting_admin_id:
-            msg = "Admins cannot delete themselves"
-            raise ConflictException(msg)
-        user = await self._get_user_or_raise(user_id)
+            return Failure(
+                UsersConflictError(
+                    message="Admins cannot delete themselves",
+                    source="users_service",
+                    operation="hard_delete",
+                )
+            )
+        lookup = await self._get_user(user_id)
+        if isinstance(lookup, Failure):
+            return lookup
+        user = lookup.unwrap()
         # Revoke sessions before deletion so Redis doesn't hold orphaned keys
-        await self._token_repo.revoke_all_user_sessions(
+        revoked = await self._token_repo.revoke_all_user_sessions(
             user_id=user_id,
             reason="account_deleted",
         )
-        await self._user_repo.hard_delete(user)
+        if isinstance(revoked, Failure):
+            error = revoked.failure()
+            return Failure(
+                UsersInfrastructureError(
+                    message=error.message,
+                    details=error.details,
+                    source="users_service",
+                    operation="revoke_sessions",
+                )
+            )
+        deleted = await self._user_repo.hard_delete(user)
+        if isinstance(deleted, Failure):
+            return deleted
         logger.bind(target_user_id=user_id, admin_id=requesting_admin_id).info("User hard deleted")
+        return Success(None)
 
     async def impersonate(
         self,
         target_user_id: str,
         admin_user_id: str,
-    ) -> ImpersonateResponse:
+    ) -> UsersResult[ImpersonateResponse]:
         if target_user_id == admin_user_id:
-            msg = "Cannot impersonate yourself"
-            raise ForbiddenException(msg)
-        user = await self._get_user_or_raise(target_user_id)
+            return Failure(
+                UsersAuthorizationError(
+                    message="Cannot impersonate yourself",
+                    source="users_service",
+                    operation="impersonate",
+                )
+            )
+        lookup = await self._get_user(target_user_id)
+        if isinstance(lookup, Failure):
+            return lookup
+        user = lookup.unwrap()
         if not user.is_active:
-            msg = "Cannot impersonate a disabled account"
-            raise ForbiddenException(msg)
+            return Failure(
+                UsersAuthorizationError(
+                    message="Cannot impersonate a disabled account",
+                    source="users_service",
+                    operation="impersonate",
+                )
+            )
 
         access_token, expires_in = create_impersonation_token(
             target_user_id=str(user.id),
@@ -163,9 +241,11 @@ class UserAdminService:
             target_user_id=target_user_id,
             admin_id=admin_user_id,
         ).warning("Admin impersonation session created")  # warning level — always audit this
-        return ImpersonateResponse(
-            access_token=access_token,
-            token_type="bearer",  # noqa: S106
-            expires_in=expires_in,
-            impersonating_user_id=admin_user_id,
+        return Success(
+            ImpersonateResponse(
+                access_token=access_token,
+                token_type="bearer",  # noqa: S106
+                expires_in=expires_in,
+                impersonating_user_id=admin_user_id,
+            )
         )

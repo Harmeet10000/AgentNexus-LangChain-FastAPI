@@ -9,13 +9,7 @@ from returns.result import Failure, Success
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.shared.result import (
-    ConflictAppError,
-    InfrastructureAppError,
-    NotFoundAppError,
-)
-from app.utils.codes import ErrorCode
-
+from .errors import WebhookConflictError, WebhookInfrastructureError, WebhookNotFoundError
 from .model import WebhookEvent
 
 if TYPE_CHECKING:
@@ -24,7 +18,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from app.shared.result import AppResult
+    from .errors import WebhookResult
 
 
 class WebhookEventRepository:
@@ -33,7 +27,7 @@ class WebhookEventRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session: AsyncSession = session
 
-    async def create(self, event: WebhookEvent) -> AppResult[WebhookEvent]:
+    async def create(self, event: WebhookEvent) -> WebhookResult[WebhookEvent]:
         try:
             self.session.add(event)
             await self.session.flush()
@@ -41,8 +35,7 @@ class WebhookEventRepository:
         except IntegrityError as exc:
             await self.session.rollback()
             return Failure(
-                ConflictAppError(
-                    code="DUPLICATE_WEBHOOK_EVENT",
+                WebhookConflictError(
                     message="Webhook event already processed",
                     details={"razorpay_event_id": event.razorpay_event_id, "error": str(exc)},
                     source="webhook_event_repository",
@@ -51,9 +44,7 @@ class WebhookEventRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                WebhookInfrastructureError(
                     message="Database error while creating webhook event",
                     details={"error": str(exc)},
                     source="webhook_event_repository",
@@ -62,7 +53,7 @@ class WebhookEventRepository:
 
     async def find_by_razorpay_event_id(
         self, razorpay_event_id: str
-    ) -> AppResult[WebhookEvent | None]:
+    ) -> WebhookResult[WebhookEvent | None]:
         try:
             statement: Select[tuple[WebhookEvent]] = select(WebhookEvent).where(
                 WebhookEvent.razorpay_event_id == razorpay_event_id
@@ -72,16 +63,14 @@ class WebhookEventRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                WebhookInfrastructureError(
                     message="Database error while checking webhook event",
                     details={"razorpay_event_id": razorpay_event_id, "error": str(exc)},
                     source="webhook_event_repository",
                 )
             )
 
-    async def find_by_id(self, event_id: str | UUID) -> AppResult[WebhookEvent | None]:
+    async def find_by_id(self, event_id: str | UUID) -> WebhookResult[WebhookEvent | None]:
         try:
             statement: Select[tuple[WebhookEvent]] = select(WebhookEvent).where(
                 WebhookEvent.id == event_id
@@ -90,8 +79,7 @@ class WebhookEventRepository:
             event = result.scalar_one_or_none()
             if event is None:
                 return Failure(
-                    NotFoundAppError(
-                        code="WEBHOOK_EVENT_NOT_FOUND",
+                    WebhookNotFoundError(
                         message="Webhook event not found",
                         details={"event_id": str(event_id)},
                         source="webhook_event_repository",
@@ -101,16 +89,14 @@ class WebhookEventRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                WebhookInfrastructureError(
                     message="Database error while fetching webhook event",
                     details={"event_id": str(event_id), "error": str(exc)},
                     source="webhook_event_repository",
                 )
             )
 
-    async def find_failed_events(self, *, limit: int = 100) -> AppResult[list[WebhookEvent]]:
+    async def find_failed_events(self, *, limit: int = 100) -> WebhookResult[list[WebhookEvent]]:
         try:
             statement: Select[tuple[WebhookEvent]] = (
                 select(WebhookEvent)
@@ -123,9 +109,7 @@ class WebhookEventRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                WebhookInfrastructureError(
                     message="Database error while listing failed webhook events",
                     details={"error": str(exc)},
                     source="webhook_event_repository",
@@ -138,7 +122,7 @@ class WebhookEventRepository:
         *,
         status: str,
         extra_values: dict[str, object] | None = None,
-    ) -> AppResult[WebhookEvent]:
+    ) -> WebhookResult[WebhookEvent]:
         try:
             values: dict[str, object] = {"status": status}
             if extra_values:
@@ -153,8 +137,7 @@ class WebhookEventRepository:
             updated = result.scalar_one_or_none()
             if updated is None:
                 return Failure(
-                    NotFoundAppError(
-                        code="WEBHOOK_EVENT_NOT_FOUND",
+                    WebhookNotFoundError(
                         message="Webhook event not found",
                         details={"event_id": str(event.id)},
                         source="webhook_event_repository",
@@ -164,9 +147,7 @@ class WebhookEventRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                WebhookInfrastructureError(
                     message="Database error while updating webhook event status",
                     details={"event_id": str(event.id), "error": str(exc)},
                     source="webhook_event_repository",

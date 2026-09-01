@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING, cast
 from graphiti_core.errors import GraphitiError
 from langchain_core.exceptions import LangChainException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from returns.result import Failure
 
 from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
 from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text
 from app.shared.langgraph_layer.kb_retry import retry_immediate
-from app.utils import logger
+from app.shared.result import log_expected_failure
+from app.utils import InfrastructureException, logger
 
 from .reranker import CrossEncoderReranker
 from .state import ContextGrade, GeneratedAnswer, QueryPlan, RetrievedChunk
@@ -192,7 +194,7 @@ def make_hybrid_retrieval_node(
         # back only by the caller never passing another user's chunk ids. The unified query
         # scopes on the parent document's owner, which is why the state field is required here
         # rather than optional.
-        rows = await retry_immediate(
+        rows_result = await retry_immediate(
             lambda: repo.legal_rrf_search(
                 user_id=state["user_id"],
                 query_text=plan.rewritten_query,
@@ -217,6 +219,16 @@ def make_hybrid_retrieval_node(
             ),
             label="postgres_legal_rrf_search",
         )
+        if isinstance(rows_result, Failure):
+            error = rows_result.failure()
+            log_expected_failure(error, operation="postgres_legal_rrf_search")
+            raise InfrastructureException(
+                detail=error.message,
+                error_code=error.code,
+                retryable=error.retryable,
+                data=error.details,
+            )
+        rows = rows_result.unwrap()
         return {"retrieved_chunks": [_row_to_chunk(row) for row in rows]}
 
     return hybrid_retrieval_node

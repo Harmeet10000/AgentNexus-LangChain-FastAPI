@@ -9,7 +9,8 @@ from pydantic import BaseModel
 from returns.result import Failure, Success
 
 from app.shared.langchain_layer.models import _build_chat_model
-from app.shared.result import AppResult, ValidationAppError
+
+from .errors import CrawlerProcessingResult, CrawlerProcessingValidationError
 
 
 class SchemaType(StrEnum):
@@ -267,14 +268,13 @@ def get_schema_for_type(schema_type: SchemaType) -> dict[str, Any] | None:
 def _resolve_extraction_schema(
     schema_type: SchemaType | None,
     custom_schema: dict[str, Any] | None,
-) -> AppResult[tuple[dict[str, Any], str]]:
+) -> CrawlerProcessingResult[tuple[dict[str, Any], str]]:
     if schema_type is not None and schema_type != SchemaType.CUSTOM:
         schema = PREDEFINED_SCHEMAS.get(schema_type)
         if schema is not None:
             return Success((schema, schema_type.value))
         return Failure(
-            ValidationAppError(
-                code="UNKNOWN_EXTRACTION_SCHEMA",
+            CrawlerProcessingValidationError(
                 message=f"Unknown schema type: {schema_type}",
                 details={"schema_type": schema_type.value},
                 source="crawler_processor",
@@ -285,8 +285,7 @@ def _resolve_extraction_schema(
         return Success((custom_schema, "custom"))
 
     return Failure(
-        ValidationAppError(
-            code="MISSING_EXTRACTION_SCHEMA",
+        CrawlerProcessingValidationError(
             message="No schema provided. Use schema_type or custom_schema.",
             source="crawler_processor",
         )
@@ -300,13 +299,12 @@ def _response_text(response: object) -> str:
     return str(content)
 
 
-def _parse_extraction_json(response_text: str) -> AppResult[dict[str, Any]]:
+def _parse_extraction_json(response_text: str) -> CrawlerProcessingResult[dict[str, Any]]:
     try:
         parsed = json.loads(response_text.strip())
     except json.JSONDecodeError as exc:
         return Failure(
-            ValidationAppError(
-                code="INVALID_EXTRACTION_JSON",
+            CrawlerProcessingValidationError(
                 message=f"Failed to parse JSON: {exc!s}",
                 source="crawler_processor",
             )
@@ -314,8 +312,7 @@ def _parse_extraction_json(response_text: str) -> AppResult[dict[str, Any]]:
 
     if not isinstance(parsed, dict):
         return Failure(
-            ValidationAppError(
-                code="INVALID_EXTRACTION_SHAPE",
+            CrawlerProcessingValidationError(
                 message="Structured extraction response must be a JSON object.",
                 source="crawler_processor",
             )

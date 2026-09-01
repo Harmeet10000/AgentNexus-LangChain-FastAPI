@@ -13,6 +13,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from neo4j import AsyncDriver
 from neo4j.exceptions import ConfigurationError, ServiceUnavailable
 from playwright.async_api import Error as PlaywrightError
+from returns.result import Failure
 
 from app.config import get_settings
 from app.connections import (
@@ -119,7 +120,16 @@ def setup_celery() -> Celery | None:
 async def _init_object_storage(app: FastAPI, settings: Any) -> None:
     if settings.S3_BUCKET_NAME:
         app.state.object_store = StorageService.from_settings(settings=settings)
-        await app.state.object_store.verify_access()
+        result = await app.state.object_store.verify_access()
+        if isinstance(result, Failure):
+            error = result.failure()
+            logger.warning(
+                "Object storage access verification failed",
+                error=error.message,
+                details=error.details,
+            )
+            app.state.object_store = None
+            return
         logger.info("Object storage initialized: bucket={}", settings.S3_BUCKET_NAME)
     else:
         app.state.object_store = None

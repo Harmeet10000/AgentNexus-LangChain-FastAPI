@@ -3,26 +3,24 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from returns.result import Failure
+from returns.result import Failure, Success
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.features.audit.model import AuditAction, AuditLog
-from app.shared.result import AppError, app_error_to_exception, log_expected_failure
-from app.shared.result.errors import ErrorKind, FeatureError
-from app.utils import (
-    ConflictException,
-    ExternalServiceException,
-    InfrastructureException,
-    NotFoundException,
-    ValidationException,
-    logger,
-)
-from app.utils.codes import ErrorCode
+from app.shared.result.errors import ErrorKind
 
 from .dto import InvoiceLineItemDTO, InvoiceResponse
+from .errors import (
+    InvoiceCollaboratorError,
+    InvoiceConflictError,
+    InvoiceInfrastructureError,
+    InvoiceNotFoundError,
+    InvoiceStorageError,
+    InvoiceValidationError,
+)
 from .invoice_void import InvoiceVoid
 from .model import (
     Invoice,
@@ -51,9 +49,11 @@ if TYPE_CHECKING:
     from app.features.plans.repository import PlanRepository
     from app.features.subscriptions.model import Subscription
     from app.features.subscriptions.repository import SubscriptionRepository
+    from app.shared.result.errors import FeatureError
     from app.shared.services.storage import StorageService
 
     from .dto import VoidInvoiceDTO
+    from .errors import InvoiceError, InvoiceResult
 
 _DEFAULT_SAC_CODE = "998314"
 
@@ -97,54 +97,16 @@ def _invoice_to_response(invoice: Invoice) -> InvoiceResponse:
     )
 
 
-def _repo_failure(error: object, operation: str) -> None:
-    # Handles both AppError (pre-migration) and SubscriptionError (FeatureError)
-    if isinstance(error, AppError):
-        log_expected_failure(error, operation=operation)
-        raise app_error_to_exception(error)
-    if isinstance(error, FeatureError):
-        # Preserve typed error classification — do not collapse to 422
-        kind: ErrorKind = getattr(error, "kind", ErrorKind.VALIDATION)  # type: ignore[attr-defined]
-        retryable: bool = bool(getattr(error, "retryable", False))
-        code_val = getattr(error, "code", ErrorCode.VALIDATION_ERROR)
-        code_str = code_val.value if isinstance(code_val, StrEnum) else str(code_val)
-        details = getattr(error, "details", None)
-        message = getattr(error, "message", str(error))
-        logger.bind(
-            operation=operation, error_code=code_str, kind=str(kind), details=details
-        ).warning(message)
-        if kind == ErrorKind.NOT_FOUND:
-            identifier: str | None = None
-            if isinstance(details, dict):
-                identifier = details.get("subscription_id") or details.get("plan_id")  # type: ignore[union-attr]
-            raise NotFoundException(
-                resource=message,
-                identifier=str(identifier) if identifier else "",
-                error_code=code_str,
-            )
-        if kind == ErrorKind.VALIDATION:
-            raise ValidationException(
-                detail=message, error_code=code_str, data=details if isinstance(details, dict) else None
-            )
-        if kind == ErrorKind.CONFLICT:
-            raise ConflictException(
-                detail=message, error_code=code_str, data=details if isinstance(details, dict) else None
-            )
-        if kind == ErrorKind.INFRASTRUCTURE:
-            raise InfrastructureException(
-                detail=message, error_code=code_str, retryable=retryable, data=details if isinstance(details, dict) else None
-            )
-        if kind == ErrorKind.EXTERNAL_SERVICE:
-            raise ExternalServiceException(
-                service=getattr(error, "source", "external") or "external",
-                detail=message,
-                error_code=code_str,
-            )
-        raise ValidationException(
-            detail=message, error_code=code_str, data=details if isinstance(details, dict) else None
-        )
-    logger.bind(operation=operation, error=str(error)).warning("repository failure")
-    raise ValidationException(str(getattr(error, "message", str(error))))
+def _translate_collaborator_error(error: FeatureError) -> InvoiceError:
+    if error.kind == ErrorKind.NOT_FOUND:
+        translated = InvoiceNotFoundError(message=error.message, details=error.details)
+    elif error.kind == ErrorKind.CONFLICT:
+        translated = InvoiceConflictError(message=error.message, details=error.details)
+    elif error.kind == ErrorKind.VALIDATION:
+        translated = InvoiceValidationError(message=error.message, details=error.details)
+    else:
+        translated = InvoiceCollaboratorError(message=error.message, details=error.details)
+    return translated
 
 
 class InvoiceService:
@@ -175,7 +137,7 @@ class InvoiceService:
         plan: Plan,
         *,
         buyer_gstin: str | None = None,
-    ) -> Invoice:
+    ) -> InvoiceResult[Invoice]:
         """Create a GST invoice for a captured payment.
 
         GST-inclusive split (Property 1, Requirements 12/38): all amounts are
@@ -196,7 +158,7 @@ class InvoiceService:
             prefix=settings.BILLING_INVOICE_PREFIX, year=datetime.now(tz=UTC).year
         )
         if isinstance(number_result, Failure):
-            raise ValidationException(number_result.failure().message)
+            return number_result
         invoice_number = number_result.unwrap()
 
         now = datetime.now(tz=UTC)
@@ -239,16 +201,20 @@ class InvoiceService:
         )
         create_result = await self.invoices.create(invoice)
         if isinstance(create_result, Failure):
-            raise ValidationException(create_result.failure().message)
+            return create_result
         created = create_result.unwrap()
 
-        pdf_url = await self._store_pdf(render_invoice_pdf(created), created.invoice_number)
+        pdf_result = await self._store_pdf(render_invoice_pdf(created), created.invoice_number)
+        if isinstance(pdf_result, Failure):
+            return pdf_result
+        pdf_url = pdf_result.unwrap()
         if pdf_url:
             update_result = await self.invoices.update_status(
                 created, status=created.status, extra_values={"pdf_url": pdf_url}
             )
-            if not isinstance(update_result, Failure):
-                created.pdf_url = pdf_url
+            if isinstance(update_result, Failure):
+                return update_result
+            created.pdf_url = pdf_url
 
         audit_result = await self.audit.create(
             AuditLog(
@@ -268,22 +234,22 @@ class InvoiceService:
             # If audit flush fails, repository rollback has already undone the invoice
             # (sourcery broader_impact, ADR D8). Swallowing would commit a clean tx
             # with no invoice persisted, so we must surface the failure.
-            _repo_failure(audit_result.failure(), "generate_for_payment_audit")
-        return created
+            return Failure(_translate_collaborator_error(audit_result.failure()))
+        return Success(created)
 
     async def generate_receipt_for_payment(
         self,
         payment: Payment,
         subscription: Subscription,
         plan: Plan,
-    ) -> PaymentReceipt:
+    ) -> InvoiceResult[PaymentReceipt]:
         """Create a non-taxable payment receipt (Requirement 36)."""
         settings = get_settings()
         number_result = await self.invoices.generate_receipt_number(
             prefix=settings.BILLING_RECEIPT_PREFIX, year=datetime.now(tz=UTC).year
         )
         if isinstance(number_result, Failure):
-            raise ValidationException(number_result.failure().message)
+            return number_result
 
         receipt = PaymentReceipt(
             receipt_number=number_result.unwrap(),
@@ -299,16 +265,28 @@ class InvoiceService:
             billing_period_end=subscription.current_period_end,
             plan_name=plan.name,
         )
-        self.session.add(receipt)
-        await self.session.flush()
+        try:
+            self.session.add(receipt)
+            await self.session.flush()
+        except SQLAlchemyError as exc:
+            await self.session.rollback()
+            return Failure(
+                InvoiceInfrastructureError(
+                    message="Database error while creating payment receipt",
+                    details={"error": str(exc)},
+                )
+            )
 
-        pdf_url = await self._store_pdf(
+        pdf_result = await self._store_pdf(
             render_receipt_pdf(receipt), receipt.receipt_number, folder="billing/receipts"
         )
+        if isinstance(pdf_result, Failure):
+            return pdf_result
+        pdf_url = pdf_result.unwrap()
         if pdf_url:
             receipt.pdf_url = pdf_url
             await self.session.flush()
-        return receipt
+        return Success(receipt)
 
     async def list_invoices(
         self,
@@ -318,7 +296,7 @@ class InvoiceService:
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[InvoiceResponse]:
+    ) -> InvoiceResult[list[InvoiceResponse]]:
         result = await self.invoices.list_by_user(
             user_id,
             subscription_id=subscription_id,
@@ -327,44 +305,40 @@ class InvoiceService:
             offset=offset,
         )
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "list_invoices")
-        return [_invoice_to_response(i) for i in result.unwrap()]
+            return result
+        return Success([_invoice_to_response(i) for i in result.unwrap()])
 
     async def get_invoice(
         self, invoice_id: str | UUID, *, user_id: str | None = None
-    ) -> InvoiceResponse:
+    ) -> InvoiceResult[InvoiceResponse]:
         result = await self.invoices.find_by_id(invoice_id)
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "get_invoice")
+            return result
         invoice = result.unwrap()
         if invoice is None:
-            msg = "Invoice"
-            raise NotFoundException(msg, str(invoice_id))
+            return Failure(InvoiceNotFoundError(message="Invoice not found"))
         if user_id is not None and invoice.user_id != user_id:
-            msg = "Invoice does not belong to this user"
-            raise ValidationException(msg)
-        return _invoice_to_response(invoice)
+            return Failure(InvoiceValidationError(message="Invoice does not belong to this user"))
+        return Success(_invoice_to_response(invoice))
 
-    async def void_invoice(  # noqa: PLR0912, PLR0915
+    async def void_invoice(  # noqa: PLR0912
         self, invoice_id: str | UUID, dto: VoidInvoiceDTO, *, user_id: str
-    ) -> InvoiceResponse:
+    ) -> InvoiceResult[InvoiceResponse]:
         """Void an issued/paid invoice and optionally reissue (Requirement 41)."""
         result = await self.invoices.find_by_id(invoice_id)
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "void_invoice")
+            return result
         invoice = result.unwrap()
         if invoice is None:
-            msg = "Invoice"
-            raise NotFoundException(msg, str(invoice_id))
+            return Failure(InvoiceNotFoundError(message="Invoice not found"))
         if invoice.user_id != user_id:
-            msg = "Invoice does not belong to this user"
-            raise ValidationException(msg)
+            return Failure(InvoiceValidationError(message="Invoice does not belong to this user"))
         if invoice.status == InvoiceStatus.VOID.value:
-            msg = "Invoice is already void"
-            raise ValidationException(msg)
+            return Failure(InvoiceValidationError(message="Invoice is already void"))
         if invoice.status not in {InvoiceStatus.ISSUED.value, InvoiceStatus.PAID.value}:
-            msg = f"Cannot void invoice in status '{invoice.status}'"
-            raise ValidationException(msg)
+            return Failure(
+                InvoiceValidationError(message=f"Cannot void invoice in status '{invoice.status}'")
+            )
 
         now = datetime.now(tz=UTC)
         self.session.add(
@@ -384,7 +358,7 @@ class InvoiceService:
         )
         void_result = await self.invoices.update_status(invoice, status=InvoiceStatus.VOID.value)
         if isinstance(void_result, Failure):
-            _repo_failure(void_result.failure(), "void_invoice")
+            return void_result
         voided: Invoice = void_result.unwrap()
 
         audit_void = await self.audit.create(
@@ -397,34 +371,36 @@ class InvoiceService:
             )
         )
         if isinstance(audit_void, Failure):
-            _repo_failure(audit_void.failure(), "void_invoice_audit")
+            return Failure(_translate_collaborator_error(audit_void.failure()))
 
         if dto.reissue:
             sub_result = await self.subscriptions.find_by_id(voided.subscription_id)
             if isinstance(sub_result, Failure):
-                _repo_failure(sub_result.failure(), "void_invoice")
+                return Failure(_translate_collaborator_error(sub_result.failure()))
             subscription = sub_result.unwrap()
             if subscription is None:
-                msg = "Subscription"
-                raise NotFoundException(msg, str(voided.subscription_id))
+                return Failure(InvoiceNotFoundError(message="Subscription not found"))
             plan_result = await self.plans.find_by_id(subscription.plan_id)
             if isinstance(plan_result, Failure):
-                _repo_failure(plan_result.failure(), "void_invoice")
+                return Failure(_translate_collaborator_error(plan_result.failure()))
             plan = plan_result.unwrap()
             if plan is None:
-                msg = "Plan"
-                raise NotFoundException(msg, str(subscription.plan_id))
+                return Failure(InvoiceNotFoundError(message="Plan not found"))
             payment = None
             if voided.payment_id is not None:
                 payment_result = await self.payments.find_by_id(voided.payment_id)
                 if isinstance(payment_result, Failure):
-                    _repo_failure(payment_result.failure(), "void_invoice")
+                    return Failure(_translate_collaborator_error(payment_result.failure()))
                 payment = payment_result.unwrap()
             if payment is None:
-                msg = "Cannot reissue without an associated payment"
-                raise ValidationException(msg)
+                return Failure(
+                    InvoiceValidationError(message="Cannot reissue without an associated payment")
+                )
 
-            reissued = await self.generate_for_payment(payment, subscription, plan)
+            reissued_result = await self.generate_for_payment(payment, subscription, plan)
+            if isinstance(reissued_result, Failure):
+                return reissued_result
+            reissued = reissued_result.unwrap()
             audit_reissue = await self.audit.create(
                 AuditLog(
                     entity_type="invoice",
@@ -435,18 +411,27 @@ class InvoiceService:
                 )
             )
             if isinstance(audit_reissue, Failure):
-                _repo_failure(audit_reissue.failure(), "void_invoice_reissue_audit")
-            return _invoice_to_response(reissued)
-        return _invoice_to_response(voided)
+                return Failure(_translate_collaborator_error(audit_reissue.failure()))
+            return Success(_invoice_to_response(reissued))
+        return Success(_invoice_to_response(voided))
 
     async def _store_pdf(
         self, pdf_bytes: bytes, name: str, *, folder: str = "billing/invoices"
-    ) -> str | None:
+    ) -> InvoiceResult[str | None]:
         if self.storage is None:
-            return None
+            return Success(None)
         key = f"{folder}/{name}.pdf"
-        await self.storage.put_object(
+        storage_result = await self.storage.put_object(
             key=key, data=pdf_bytes, content_type="application/pdf", metadata={}
         )
+        if isinstance(storage_result, Failure):
+            error = storage_result.failure()
+            return Failure(
+                InvoiceStorageError(
+                    message=error.message,
+                    details=error.details,
+                    source="storage",
+                )
+            )
         public_base = get_settings().S3_PUBLIC_URL.rstrip("/")
-        return f"{public_base}/{key}" if public_base else None
+        return Success(f"{public_base}/{key}" if public_base else None)

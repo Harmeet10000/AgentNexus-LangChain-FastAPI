@@ -3,13 +3,24 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 import httpx
 from pydantic import BaseModel, ConfigDict
+from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.connections.tavily import get_shared_tavily_http_client
-from app.utils import ExternalServiceException, ValidationException, logger
+from app.utils import logger
+
+from .errors import (
+    TavilyExternalError,
+    TavilyInvalidResponseError,
+    TavilyValidationError,
+)
+
+if TYPE_CHECKING:
+    from .errors import TavilyResult
 
 
 class SearchResult(BaseModel):
@@ -42,7 +53,7 @@ class SearchResponse(BaseModel):
     total_results: int
 
 
-def _validate_search_inputs(query: str, max_results: int, topic: str) -> None:
+def _validate_search_inputs(query: str, max_results: int, topic: str) -> TavilyResult[None]:
     """Validate search inputs.
 
     Args:
@@ -55,13 +66,16 @@ def _validate_search_inputs(query: str, max_results: int, topic: str) -> None:
     """
     settings = get_settings()
     if not settings.TAVILY_API_KEY.get_secret_value():
-        raise ValidationException(detail="Tavily API key not configured")
+        return Failure(TavilyValidationError(message="Tavily API key not configured"))
     if not query.strip():
-        raise ValidationException(detail="Search query is required")
+        return Failure(TavilyValidationError(message="Search query is required"))
     if max_results < 1:
-        raise ValidationException(detail="max_results must be greater than 0")
+        return Failure(TavilyValidationError(message="max_results must be greater than 0"))
     if topic not in {"general", "news", "finance"}:
-        raise ValidationException(detail="topic must be one of: general, news, finance")
+        return Failure(
+            TavilyValidationError(message="topic must be one of: general, news, finance")
+        )
+    return Success(None)
 
 
 def _read_string(data: Mapping[str, object], key: str) -> str:
@@ -105,7 +119,7 @@ async def search(
     include_raw_content: bool = False,
     include_images: bool = False,
     http_client: httpx.AsyncClient | None = None,
-) -> SearchResponse:
+) -> TavilyResult[SearchResponse]:
     """Search the web using Tavily.
 
     Args:
@@ -125,7 +139,9 @@ async def search(
         ExternalServiceException: If Tavily API request fails
     """
     settings = get_settings()
-    _validate_search_inputs(query=query, max_results=max_results, topic=topic)
+    validation = _validate_search_inputs(query=query, max_results=max_results, topic=topic)
+    if isinstance(validation, Failure):
+        return validation
 
     payload = {
         "api_key": settings.TAVILY_API_KEY.get_secret_value(),
@@ -156,31 +172,27 @@ async def search(
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         log.bind(status_code=exc.response.status_code).warning("Tavily returned an error response")
-        raise ExternalServiceException(
-            service="Tavily",
-            detail=f"HTTP {exc.response.status_code}",
-            status_code=exc.response.status_code,
-        ) from exc
-    except httpx.TimeoutException as exc:
+        return Failure(
+            TavilyExternalError(
+                message=f"Tavily returned HTTP {exc.response.status_code}",
+                details={"status_code": exc.response.status_code},
+            )
+        )
+    except httpx.TimeoutException:
         log.warning("Tavily request timed out")
-        raise ExternalServiceException(
-            service="Tavily",
-            detail="request timed out",
-        ) from exc
+        return Failure(TavilyExternalError(message="Tavily request timed out"))
     except httpx.HTTPError as exc:
         log.bind(error=str(exc)).warning("Tavily request failed")
-        raise ExternalServiceException(
-            service="Tavily",
-            detail="network error",
-        ) from exc
+        return Failure(TavilyExternalError(message="Tavily network request failed"))
 
-    data = response.json()
+    try:
+        data = response.json()
+    except ValueError:
+        log.warning("Tavily returned a non-JSON response payload")
+        return Failure(TavilyInvalidResponseError(message="Tavily returned invalid payload"))
     if not isinstance(data, Mapping):
         log.warning("Tavily returned an invalid response payload")
-        raise ExternalServiceException(
-            service="Tavily",
-            detail="invalid response payload",
-        )
+        return Failure(TavilyInvalidResponseError(message="Tavily returned invalid payload"))
 
     results = [
         _build_search_result(result)
@@ -189,11 +201,13 @@ async def search(
     ]
 
     log.bind(returned_results=len(results)).info("Tavily search completed")
-    return SearchResponse(
-        query=query,
-        results=results,
-        answer=_read_optional_string(data, "answer"),
-        total_results=len(results),
+    return Success(
+        SearchResponse(
+            query=query,
+            results=results,
+            answer=_read_optional_string(data, "answer"),
+            total_results=len(results),
+        )
     )
 
 
@@ -201,7 +215,7 @@ class _TavilyClient:
     @staticmethod
     async def search(
         query: str, max_results: int = 10, include_answer: bool = True
-    ) -> SearchResponse:
+    ) -> TavilyResult[SearchResponse]:
         return await search(query=query, max_results=max_results, include_answer=include_answer)
 
 
@@ -219,7 +233,7 @@ async def get_context(
     query: str,
     max_results: int = 5,
     http_client: httpx.AsyncClient | None = None,
-) -> str:
+) -> TavilyResult[str]:
     """Build a plain-text context block from Tavily results.
 
     Args:
@@ -230,13 +244,16 @@ async def get_context(
     Returns:
         Plain-text context combining search answer and top results
     """
-    response: SearchResponse = await search(
+    result = await search(
         query=query,
         max_results=max_results,
         include_answer=True,
         http_client=http_client,
     )
 
+    if isinstance(result, Failure):
+        return result
+    response = result.unwrap()
     context_parts: list[str] = []
     if response.answer:
         context_parts.append(f"Answer: {response.answer}")
@@ -246,4 +263,4 @@ async def get_context(
         for result in response.results[:max_results]
     )
 
-    return "\n\n".join(context_parts)
+    return Success("\n\n".join(context_parts))
