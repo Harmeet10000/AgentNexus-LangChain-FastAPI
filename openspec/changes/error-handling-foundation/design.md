@@ -598,11 +598,13 @@ they close under section 5 whether or not the degradation rule exists.
 
 ## Migration Plan
 
-**17 changes total: this foundation, then 16 features.** 18 features exist. The
-arithmetic differs from the 18 changes estimated when scope was agreed for two
-reasons: `subscriptions` migrates inside this change as the exemplar rather than
-getting its own, and `chat` needs no change at all — it is `__init__.py` and
-`model.py`, with zero raises and zero `except` clauses.
+**One foundation, one shared-services prerequisite, and 14 feature conversions.**
+The complete feature arithmetic is **18 = 1 exemplar + 14 conversions + 2 no-ops +
+1 classify-only**. `subscriptions` migrates inside this change as the exemplar.
+`chat` has no error-handling surface, and `search` is a tombstone after its code moved
+into `documents`, so both are no-ops. `health` is classify-only: its probes degrade
+failures into response data and deliberately own their 200/503 status, which a
+`render_result` conversion would override.
 
 **Phase 1 — this change.** Shared spine (`app/shared/result/` extended in place, the
 renderer, `mappers.py`, the global handler); rollback added to all 9 relational
@@ -675,18 +677,24 @@ Rollback for all 9 relational repositories lands here rather than per feature, b
 is a correctness fix with no dependency on the error redesign, and leaving it
 staged across 17 changes leaves poisoned-commit paths open for the duration.
 
-**Phase 2 — 16 features, in ascending difficulty:**
+**Phase 2 — 14 feature conversions, in ascending difficulty:**
 
-`search` → `audit` → `crawler` → `users` → `ingestion` → `dunning` → `profile` →
-`plans` → `invoices` → `payments` → `webhooks` → `agent_saul` → `health` →
-`credits` → `documents` → `auth`
+`audit` → `crawler` → `users` → `ingestion` → `dunning` → `profile` → `plans` →
+`invoices` → `payments` → `webhooks` → `agent_saul` → `credits` → `documents` →
+`auth`
 
 Difficulty here means error-site count, unwrap-site count, and how many
-exception-native boundaries the feature touches. `search` is first because it is
-small enough that a mistake in the exemplar surfaces cheaply. `auth` is last
-because it is the security boundary and its dependencies are the one place
-raising is structurally required. `plans` is early relative to its size because
+exception-native boundaries the feature touches. `audit` is first because it is the
+smallest real conversion and becomes the second exemplar after `subscriptions`.
+`auth` is last because it is the security boundary and its dependencies are the one
+place raising is structurally required. `plans` is early relative to its size because
 it is the only repository already using the enum, so it is the least changed.
+
+`health` is verified separately under the exception-native contract: its response
+body records degraded probes and `get_health` chooses 200 or 503. A missing optional
+Graphiti backend must remain `not_configured` without forcing overall 503. `chat` and
+`search` are recorded as no-op packages so neither appears later as an unexplained
+coverage gap.
 
 **Per-feature exit criteria** — all must hold before the change is archived:
 

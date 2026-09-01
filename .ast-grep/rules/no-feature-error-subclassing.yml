@@ -1,14 +1,15 @@
 id: no-feature-error-subclassing
 language: python
 severity: error
-message: FeatureError subclasses must live in the owning errors.py
+message: FeatureError subclasses must live in the owning feature or shared-classifier errors.py
 note: |
   feature-error-contract — concrete error types inherit FeatureError directly
-  and must be declared in src/app/features/<name>/errors.py. Subclassing
-  FeatureError elsewhere makes the union open and breaks exhaustiveness.
+  and must be declared in the owning errors.py. Shared modules that classify
+  third-party failures own unions on the same terms as features (ADR-006).
 rule:
   kind: class_definition
   regex: '\(FeatureError'
 ignores:
   - src/app/features/*/errors.py
+  - src/app/shared/**/errors.py
   - .ast-grep/fixtures/no-feature-error-subclassing/permit.py
