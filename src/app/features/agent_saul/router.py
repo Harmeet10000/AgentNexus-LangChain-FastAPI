@@ -13,11 +13,12 @@ validation of the first inbound frame, and structured error emission.
 from contextlib import suppress
 from uuid import uuid4
 
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, Response, WebSocket, WebSocketDisconnect
 
 from app.config import get_settings
 from app.features.auth import CurrentClaims, WebSocketSecurityViolation
-from app.utils import APIResponse, ErrorCode, ValidationException, http_response, logger
+from app.shared.result import render_result
+from app.utils import APIResponse, ErrorCode, ValidationException, logger
 
 from .dependencies import (
     AgentSaulDepsAnnotated,
@@ -77,6 +78,7 @@ async def create_session(
     _deps: AgentSaulDepsAnnotated,
     claims: CurrentClaims,
     request: Request,
+    response: Response,
 ) -> APIResponse[CreateSessionResponse]:
     thread_id = str(uuid4())
     ws_path = f"{get_settings().API_PREFIX}/agent-saul/ws/{thread_id}"
@@ -85,9 +87,11 @@ async def create_session(
     log = logger.bind(user_id=claims.sub, thread_id=thread_id, doc_id=body.doc_id)
     log.info("saul_session_created")
 
-    return http_response(
+    result = AgentSaulService.create_session(websocket_url=ws_url, thread_id=thread_id)
+    return render_result(
+        result,
+        response,
         message="Session created",
-        data=CreateSessionResponse(thread_id=thread_id, ws_url=ws_url),
     )
 
 

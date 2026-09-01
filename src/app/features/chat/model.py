@@ -28,9 +28,7 @@ class ChatSession(Base):
     extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     # Legacy: Python-side defaults match 0014 DB (no server_default there).
     # New tables should use server_default=func.now() (see database/base.py).
-    created_at: Mapped[datetime] = mapped_column(
-        nullable=False, default=lambda: datetime.now(UTC)
-    )
+    created_at: Mapped[datetime] = mapped_column(nullable=False, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         nullable=False,
         default=lambda: datetime.now(UTC),
@@ -54,6 +52,4 @@ class ChatMessage(Base):
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        nullable=False, default=lambda: datetime.now(UTC)
-    )
+    created_at: Mapped[datetime] = mapped_column(nullable=False, default=lambda: datetime.now(UTC))

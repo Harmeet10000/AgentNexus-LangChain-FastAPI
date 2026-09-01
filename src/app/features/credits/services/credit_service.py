@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from returns.result import Failure
+from returns.result import Failure, Success
 
 from app.features.audit.model import AuditLog
 from app.features.credits.dto.consumption_dto import ConsumedCredit, CreditConsumptionResult
@@ -19,13 +19,13 @@ from app.features.credits.dto.credit_dto import (
     CreditHistoryResponse,
     CreditRecord,
 )
-from app.features.credits.exceptions import (
-    CreditAmountMustBePositiveException,
-    CreditMetadataMissingException,
+from app.features.credits.errors import (
+    CreditAmountError,
+    CreditCollaboratorError,
+    CreditMetadataError,
 )
 from app.features.credits.models.consumption import CreditConsumption
 from app.features.credits.models.credit import CreditStatus, CreditType, UserCredit
-from app.shared.result import app_error_to_exception, log_expected_failure
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -36,10 +36,7 @@ if TYPE_CHECKING:
     from app.features.credits.repositories.consumption_repository import ConsumptionRepository
     from app.features.credits.repositories.credit_repository import CreditRepository
 
-
-def _repo_error(error, operation: str) -> None:
-    log_expected_failure(error, operation=operation)
-    raise app_error_to_exception(error)
+    from ..errors import CreditResult
 
 
 def _grant_response(credit: UserCredit) -> CreditGrantResponse:
@@ -75,13 +72,19 @@ class CreditService:
         self,
         user_id: str,
         dto: CreditGrantDTO,
-    ) -> CreditGrantResponse:
+    ) -> CreditResult[CreditGrantResponse]:
         """Grant credit to a user (Requirement 49)."""
         if dto.credit_amount < 1:
-            raise CreditAmountMustBePositiveException(dto.credit_amount)
+            return Failure(
+                CreditAmountError(
+                    message=f"Credit amount must be positive, got {dto.credit_amount}"
+                )
+            )
 
         if dto.credit_type == CreditType.ADMIN_GRANT.value and "admin_user_id" not in dto.metadata_:
-            raise CreditMetadataMissingException
+            return Failure(
+                CreditMetadataError(message="ADMIN_GRANT requires admin_user_id in metadata")
+            )
 
         now: datetime = datetime.now(tz=UTC)
         credit = UserCredit(
@@ -98,10 +101,10 @@ class CreditService:
 
         result = await self.credit_repo.create(credit)
         if isinstance(result, Failure):
-            _repo_error(result.failure(), "grant_credit")
+            return result
         created = result.unwrap()
 
-        await self.audit.create(
+        audit_result = await self.audit.create(
             AuditLog(
                 entity_type="user_credit",
                 entity_id=str(created.id),
@@ -114,17 +117,22 @@ class CreditService:
             )
         )
 
-        return _grant_response(created)
+        if isinstance(audit_result, Failure):
+            error = audit_result.failure()
+            return Failure(CreditCollaboratorError(message=error.message, details=error.details))
+        return Success(_grant_response(created))
 
-    async def get_credit_balance(self, user_id: str) -> CreditBalanceResponse:
+    async def get_credit_balance(self, user_id: str) -> CreditResult[CreditBalanceResponse]:
         """Get user's total available credit balance (Requirement 52.1)."""
         result = await self.credit_repo.get_active_balance(user_id)
         if isinstance(result, Failure):
-            _repo_error(result.failure(), "get_credit_balance")
+            return result
         balance_paisa = result.unwrap()
-        return CreditBalanceResponse(
-            total_balance=balance_paisa,
-            total_balance_rupees=balance_paisa / 100,
+        return Success(
+            CreditBalanceResponse(
+                total_balance=balance_paisa,
+                total_balance_rupees=balance_paisa / 100,
+            )
         )
 
     async def get_credit_history(
@@ -133,48 +141,50 @@ class CreditService:
         *,
         limit: int = 50,
         offset: int = 0,
-    ) -> CreditHistoryResponse:
+    ) -> CreditResult[CreditHistoryResponse]:
         """Get user's credit and consumption history (Requirement 52.2)."""
         credits_result = await self.credit_repo.find_by_user(user_id, limit=limit, offset=offset)
         if isinstance(credits_result, Failure):
-            _repo_error(credits_result.failure(), "get_credit_history")
+            return credits_result
         credit_rows, credit_total = credits_result.unwrap()
 
         consumptions_result = await self.consumptions.find_by_user(
             user_id, limit=limit, offset=offset
         )
         if isinstance(consumptions_result, Failure):
-            _repo_error(consumptions_result.failure(), "get_credit_history")
+            return consumptions_result
         consumption_rows, consumption_total = consumptions_result.unwrap()
 
-        return CreditHistoryResponse(
-            credits=[
-                CreditRecord(
-                    credit_id=str(c.id),
-                    credit_type=c.credit_type,
-                    credit_amount=c.credit_amount,
-                    remaining_balance=c.remaining_balance,
-                    valid_from=c.valid_from,
-                    valid_until=c.valid_until,
-                    status=c.status,
-                    created_at=c.created_at,
-                )
-                for c in credit_rows
-            ],
-            consumptions=[
-                ConsumptionRecord(
-                    consumption_id=str(co.id),
-                    credit_id=str(co.credit_id),
-                    consumed_amount=co.consumed_amount,
-                    invoice_id=str(co.invoice_id) if co.invoice_id else None,
-                    razorpay_payment_id=co.razorpay_payment_id,
-                    created_at=co.created_at,
-                )
-                for co in consumption_rows
-            ],
-            total=credit_total + consumption_total,
-            limit=limit,
-            offset=offset,
+        return Success(
+            CreditHistoryResponse(
+                credits=[
+                    CreditRecord(
+                        credit_id=str(c.id),
+                        credit_type=c.credit_type,
+                        credit_amount=c.credit_amount,
+                        remaining_balance=c.remaining_balance,
+                        valid_from=c.valid_from,
+                        valid_until=c.valid_until,
+                        status=c.status,
+                        created_at=c.created_at,
+                    )
+                    for c in credit_rows
+                ],
+                consumptions=[
+                    ConsumptionRecord(
+                        consumption_id=str(co.id),
+                        credit_id=str(co.credit_id),
+                        consumed_amount=co.consumed_amount,
+                        invoice_id=str(co.invoice_id) if co.invoice_id else None,
+                        razorpay_payment_id=co.razorpay_payment_id,
+                        created_at=co.created_at,
+                    )
+                    for co in consumption_rows
+                ],
+                total=credit_total + consumption_total,
+                limit=limit,
+                offset=offset,
+            )
         )
 
     async def consume_credits(
@@ -183,7 +193,7 @@ class CreditService:
         invoice_id,
         invoice_gross_total: Decimal,
         session: AsyncSession,  # noqa: ARG002 — owned by caller, required by design
-    ) -> CreditConsumptionResult:
+    ) -> CreditResult[CreditConsumptionResult]:
         """Apply available credits to an invoice (Requirement 50).
 
         CRITICAL: This method accepts a session it does NOT own and MUST NOT commit.
@@ -191,7 +201,7 @@ class CreditService:
         """
         available_result = await self.credit_repo.find_available_for_consumption(user_id)
         if isinstance(available_result, Failure):
-            _repo_error(available_result.failure(), "consume_credits")
+            return available_result
         available_credits = available_result.unwrap()
 
         total_due_paisa = int(invoice_gross_total * 100)
@@ -214,7 +224,7 @@ class CreditService:
                 consumed_at=datetime.now(tz=UTC) if is_fully_consumed else None,
             )
             if isinstance(update_result, Failure):
-                _repo_error(update_result.failure(), "consume_credits")
+                return update_result
 
             consumption = CreditConsumption(
                 id=uuid4(),
@@ -226,7 +236,7 @@ class CreditService:
             )
             consumption_result = await self.consumptions.create(consumption)
             if isinstance(consumption_result, Failure):
-                _repo_error(consumption_result.failure(), "consume_credits")
+                return consumption_result
 
             consumed_credits.append(
                 ConsumedCredit(
@@ -241,7 +251,7 @@ class CreditService:
 
         cash_due_paisa = max(remaining_due, 0)
 
-        await self.audit.create(
+        audit_result = await self.audit.create(
             AuditLog(
                 entity_type="user_credit",
                 entity_id=user_id,
@@ -255,25 +265,30 @@ class CreditService:
             )
         )
 
-        return CreditConsumptionResult(
-            credit_applied=total_credit_applied_paisa,
-            credit_applied_rupees=total_credit_applied_paisa / 100,
-            cash_due=cash_due_paisa,
-            cash_due_rupees=cash_due_paisa / 100,
-            credits_consumed=consumed_credits,
-            invoice_paid_in_full=remaining_due <= 0,
+        if isinstance(audit_result, Failure):
+            error = audit_result.failure()
+            return Failure(CreditCollaboratorError(message=error.message, details=error.details))
+        return Success(
+            CreditConsumptionResult(
+                credit_applied=total_credit_applied_paisa,
+                credit_applied_rupees=total_credit_applied_paisa / 100,
+                cash_due=cash_due_paisa,
+                cash_due_rupees=cash_due_paisa / 100,
+                credits_consumed=consumed_credits,
+                invoice_paid_in_full=remaining_due <= 0,
+            )
         )
 
-    async def expire_credits(self) -> int:
+    async def expire_credits(self) -> CreditResult[int]:
         """Background job to expire past-due credits (Requirement 51). Returns count expired."""
         now = datetime.now(tz=UTC)
         result = await self.credit_repo.expire_credits_past_date(now)
         if isinstance(result, Failure):
-            _repo_error(result.failure(), "expire_credits")
+            return result
         expired = result.unwrap()
 
         for credit in expired:
-            await self.audit.create(
+            audit_result = await self.audit.create(
                 AuditLog(
                     entity_type="user_credit",
                     entity_id=str(credit.id),
@@ -285,8 +300,13 @@ class CreditService:
                     },
                 )
             )
+            if isinstance(audit_result, Failure):
+                error = audit_result.failure()
+                return Failure(
+                    CreditCollaboratorError(message=error.message, details=error.details)
+                )
 
-        return len(expired)
+        return Success(len(expired))
 
     async def grant_credit_on_downgrade(
         self,
@@ -295,7 +315,7 @@ class CreditService:
         proration_amount_paisa: int,
         *,
         billing_cycle_end: datetime,
-    ) -> CreditGrantResponse:
+    ) -> CreditResult[CreditGrantResponse]:
         """Grant credit from plan downgrade proration (Requirement 54)."""
         new_year = billing_cycle_end.year + 1
         new_month = billing_cycle_end.month

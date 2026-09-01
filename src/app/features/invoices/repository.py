@@ -9,13 +9,7 @@ from returns.result import Failure, Success
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.shared.result import (
-    ConflictAppError,
-    InfrastructureAppError,
-    NotFoundAppError,
-)
-from app.utils.codes import ErrorCode
-
+from .errors import InvoiceConflictError, InvoiceInfrastructureError, InvoiceNotFoundError
 from .model import Invoice
 
 if TYPE_CHECKING:
@@ -24,7 +18,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from app.shared.result import AppResult
+    from .errors import InvoiceResult
 
 
 class InvoiceRepository:
@@ -33,7 +27,7 @@ class InvoiceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create(self, invoice: Invoice) -> AppResult[Invoice]:
+    async def create(self, invoice: Invoice) -> InvoiceResult[Invoice]:
         try:
             self.session.add(invoice)
             await self.session.flush()
@@ -41,8 +35,7 @@ class InvoiceRepository:
         except IntegrityError as exc:
             await self.session.rollback()
             return Failure(
-                ConflictAppError(
-                    code="INVOICE_CONFLICT",
+                InvoiceConflictError(
                     message="Invoice creation failed due to a constraint violation",
                     details={"invoice_number": invoice.invoice_number, "error": str(exc)},
                     source="invoice_repository",
@@ -51,24 +44,21 @@ class InvoiceRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                InvoiceInfrastructureError(
                     message="Database error while creating invoice",
                     details={"error": str(exc)},
                     source="invoice_repository",
                 )
             )
 
-    async def find_by_id(self, invoice_id: str | UUID) -> AppResult[Invoice | None]:
+    async def find_by_id(self, invoice_id: str | UUID) -> InvoiceResult[Invoice | None]:
         try:
             statement: Select[tuple[Invoice]] = select(Invoice).where(Invoice.id == invoice_id)
             result = await self.session.execute(statement)
             invoice = result.scalar_one_or_none()
             if invoice is None:
                 return Failure(
-                    NotFoundAppError(
-                        code="INVOICE_NOT_FOUND",
+                    InvoiceNotFoundError(
                         message="Invoice not found",
                         details={"invoice_id": str(invoice_id)},
                         source="invoice_repository",
@@ -78,16 +68,14 @@ class InvoiceRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                InvoiceInfrastructureError(
                     message="Database error while fetching invoice",
                     details={"invoice_id": str(invoice_id), "error": str(exc)},
                     source="invoice_repository",
                 )
             )
 
-    async def find_by_payment_id(self, payment_id: str | UUID) -> AppResult[Invoice | None]:
+    async def find_by_payment_id(self, payment_id: str | UUID) -> InvoiceResult[Invoice | None]:
         try:
             statement: Select[tuple[Invoice]] = select(Invoice).where(
                 Invoice.payment_id == payment_id
@@ -97,9 +85,7 @@ class InvoiceRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                InvoiceInfrastructureError(
                     message="Database error while fetching invoice by payment",
                     details={"payment_id": str(payment_id), "error": str(exc)},
                     source="invoice_repository",
@@ -114,7 +100,7 @@ class InvoiceRepository:
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> AppResult[list[Invoice]]:
+    ) -> InvoiceResult[list[Invoice]]:
         """List issued/paid invoices for a user (Requirement 13)."""
         try:
             conditions = [
@@ -137,16 +123,16 @@ class InvoiceRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                InvoiceInfrastructureError(
                     message="Database error while listing invoices",
                     details={"user_id": user_id, "error": str(exc)},
                     source="invoice_repository",
                 )
             )
 
-    async def list_by_subscription(self, subscription_id: str | UUID) -> AppResult[list[Invoice]]:
+    async def list_by_subscription(
+        self, subscription_id: str | UUID
+    ) -> InvoiceResult[list[Invoice]]:
         try:
             statement: Select[tuple[Invoice]] = (
                 select(Invoice)
@@ -158,16 +144,14 @@ class InvoiceRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                InvoiceInfrastructureError(
                     message="Database error while listing invoices for subscription",
                     details={"subscription_id": str(subscription_id), "error": str(exc)},
                     source="invoice_repository",
                 )
             )
 
-    async def generate_invoice_number(self, *, prefix: str, year: int) -> AppResult[str]:
+    async def generate_invoice_number(self, *, prefix: str, year: int) -> InvoiceResult[str]:
         """Sequential invoice number via a PostgreSQL sequence (Requirement 12.1)."""
         try:
             result = await self.session.execute(
@@ -178,16 +162,14 @@ class InvoiceRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                InvoiceInfrastructureError(
                     message="Database error while generating invoice number",
                     details={"error": str(exc)},
                     source="invoice_repository",
                 )
             )
 
-    async def generate_receipt_number(self, *, prefix: str, year: int) -> AppResult[str]:
+    async def generate_receipt_number(self, *, prefix: str, year: int) -> InvoiceResult[str]:
         """Sequential receipt number via a PostgreSQL sequence (Requirement 36.3)."""
         try:
             result = await self.session.execute(
@@ -198,9 +180,7 @@ class InvoiceRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                InvoiceInfrastructureError(
                     message="Database error while generating receipt number",
                     details={"error": str(exc)},
                     source="invoice_repository",
@@ -213,7 +193,7 @@ class InvoiceRepository:
         *,
         status: str,
         extra_values: dict[str, object] | None = None,
-    ) -> AppResult[Invoice]:
+    ) -> InvoiceResult[Invoice]:
         try:
             values: dict[str, object] = {"status": status}
             if extra_values:
@@ -228,8 +208,7 @@ class InvoiceRepository:
             updated = result.scalar_one_or_none()
             if updated is None:
                 return Failure(
-                    NotFoundAppError(
-                        code="INVOICE_NOT_FOUND",
+                    InvoiceNotFoundError(
                         message="Invoice not found",
                         details={"invoice_id": str(invoice.id)},
                         source="invoice_repository",
@@ -239,9 +218,7 @@ class InvoiceRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                InvoiceInfrastructureError(
                     message="Database error while updating invoice status",
                     details={"invoice_id": str(invoice.id), "error": str(exc)},
                     source="invoice_repository",

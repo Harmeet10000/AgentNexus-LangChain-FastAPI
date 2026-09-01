@@ -1,9 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Response, status
 
 from app.features.auth import Permission, TokenClaims, UserRole, require_permission, require_role
-from app.utils import APIResponse, http_response
+from app.shared.result import render_result
+from app.utils import APIResponse
 
 from .dependencies import UserAdminServiceDep
 from .dto import (
@@ -26,6 +27,7 @@ _require_users_read = Depends(require_permission(Permission.USERS_READ))
 )
 async def list_users(
     service: UserAdminServiceDep,
+    response: Response,
     *,
     page: Annotated[int, Query(ge=1)] = 1,
     per_page: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -33,14 +35,14 @@ async def list_users(
     is_active: Annotated[bool | None, Query()] = None,
     search: Annotated[str | None, Query(max_length=100)] = None,
 ) -> APIResponse[PaginatedData[UserAdminResponse]]:
-    result: PaginatedData[UserAdminResponse] = await service.list_users(
+    result = await service.list_users(
         page=page,
         per_page=per_page,
         role=role,
         is_active=is_active,
         search=search,
     )
-    return http_response("Users retrieved", data=result)
+    return render_result(result, response, message="Users retrieved")
 
 
 @router.get(
@@ -50,9 +52,10 @@ async def list_users(
 async def get_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
+    response: Response,
 ) -> APIResponse[UserAdminResponse]:
-    result: UserAdminResponse = await service.get_user(user_id)
-    return http_response("User retrieved", data=result)
+    result = await service.get_user(user_id)
+    return render_result(result, response, message="User retrieved")
 
 
 @router.patch(
@@ -64,13 +67,14 @@ async def update_user_role(
     body: UpdateUserRoleRequest,
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
+    response: Response,
 ) -> APIResponse[UserAdminResponse]:
-    result: UserAdminResponse = await service.update_role(
+    result = await service.update_role(
         user_id=user_id,
         new_role=body.role,
         requesting_admin_id=claims.sub,
     )
-    return http_response("User role updated", data=result)
+    return render_result(result, response, message="User role updated")
 
 
 @router.patch(
@@ -81,13 +85,14 @@ async def activate_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
+    response: Response,
 ) -> APIResponse[UserAdminResponse]:
-    result: UserAdminResponse = await service.set_active(
+    result = await service.set_active(
         user_id=user_id,
         is_active=True,
         requesting_admin_id=claims.sub,
     )
-    return http_response("User activated", data=result)
+    return render_result(result, response, message="User activated")
 
 
 @router.patch(
@@ -98,13 +103,14 @@ async def deactivate_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
+    response: Response,
 ) -> APIResponse[UserAdminResponse]:
-    result: UserAdminResponse = await service.set_active(
+    result = await service.set_active(
         user_id=user_id,
         is_active=False,
         requesting_admin_id=claims.sub,
     )
-    return http_response("User deactivated", data=result)
+    return render_result(result, response, message="User deactivated")
 
 
 @router.delete(
@@ -116,12 +122,15 @@ async def delete_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_DELETE))],
+    response: Response,
 ) -> APIResponse[None]:
-    await service.hard_delete(
+    result = await service.hard_delete(
         user_id=user_id,
         requesting_admin_id=claims.sub,
     )
-    return http_response("User permanently deleted")
+    return render_result(
+        result, response, message="User permanently deleted", success_status=status.HTTP_200_OK
+    )
 
 
 @router.post(
@@ -132,9 +141,10 @@ async def impersonate_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
     claims: Annotated[TokenClaims, Depends(require_role(UserRole.ADMIN))],
+    response: Response,
 ) -> APIResponse[ImpersonateResponse]:
-    result: ImpersonateResponse = await service.impersonate(
+    result = await service.impersonate(
         target_user_id=user_id,
         admin_user_id=claims.sub,
     )
-    return http_response("Impersonation token issued", data=result)
+    return render_result(result, response, message="Impersonation token issued")

@@ -4,16 +4,22 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from returns.result import Failure
+from returns.result import Failure, Success
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.features.audit.model import AuditAction, AuditLog
 from app.features.payments.clients.razorpay_client import RazorpayClient
-from app.shared.result import app_error_to_exception, log_expected_failure
-from app.utils import DatabaseException, NotFoundException, ValidationException, logger
+from app.utils import logger
 
 from .dto import PlanResponse
+from .errors import (
+    PlanConflictError,
+    PlanInfrastructureError,
+    PlanNotFoundError,
+    PlanValidationError,
+)
 from .model import Plan
 
 if TYPE_CHECKING:
@@ -21,9 +27,9 @@ if TYPE_CHECKING:
 
     from app.features.audit.repository import AuditLogRepository
     from app.features.plans.repository import PlanRepository
-    from app.shared.result import AppError
 
     from .dto import PlanCreateDTO, PlanUpdateDTO
+    from .errors import PlanResult
 
 
 def _plan_to_response(plan: Plan) -> PlanResponse:
@@ -48,11 +54,6 @@ def _plan_to_response(plan: Plan) -> PlanResponse:
     )
 
 
-def _repo_failure(error: AppError, operation: str) -> None:
-    log_expected_failure(error, operation=operation)
-    raise app_error_to_exception(error)
-
-
 class PlanService:
     """CRUD for billing plans, mirrored to Razorpay when configured."""
 
@@ -70,43 +71,58 @@ class PlanService:
 
     async def list_plans(
         self, *, include_inactive: bool = False, limit: int = 50, offset: int = 0
-    ) -> list[PlanResponse]:
+    ) -> PlanResult[list[PlanResponse]]:
         if include_inactive:
             try:
                 statement = (
                     select(Plan).order_by(Plan.created_at.desc()).limit(limit).offset(offset)
                 )
                 result = await self.session.execute(statement)
-                return [_plan_to_response(p) for p in result.scalars().all()]
-            except Exception as exc:
+                return Success([_plan_to_response(p) for p in result.scalars().all()])
+            except SQLAlchemyError as exc:
                 logger.bind(operation="list_plans").warning("list_plans failed", error=str(exc))
-                raise DatabaseException(
-                    detail="Database error while listing plans",
-                    original_exc=exc,
-                ) from exc
+                return Failure(
+                    PlanInfrastructureError(
+                        message="Database error while listing plans",
+                        details={"error": str(exc)},
+                        source="plan_service",
+                        operation="list_plans",
+                    )
+                )
 
         result = await self.plans.list_active()
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "list_plans")
-        return [_plan_to_response(p) for p in result.unwrap()]
+            return result
+        return Success([_plan_to_response(p) for p in result.unwrap()])
 
-    async def get_plan(self, plan_id: str) -> PlanResponse:
+    async def get_plan(self, plan_id: str) -> PlanResult[PlanResponse]:
         result = await self.plans.find_by_id(plan_id)
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "get_plan")
+            return result
         plan = result.unwrap()
         if plan is None:
-            msg = "Plan"
-            raise NotFoundException(msg, plan_id)
-        return _plan_to_response(plan)
+            return Failure(
+                PlanNotFoundError(
+                    message="Plan not found",
+                    details={"plan_id": plan_id},
+                    source="plan_service",
+                    plan_id=plan_id,
+                )
+            )
+        return Success(_plan_to_response(plan))
 
-    async def create_plan(self, dto: PlanCreateDTO, *, user_id: str) -> PlanResponse:
+    async def create_plan(self, dto: PlanCreateDTO, *, user_id: str) -> PlanResult[PlanResponse]:
         existing = await self.plans.find_by_name(dto.name)
         if isinstance(existing, Failure):
-            _repo_failure(existing.failure(), "create_plan")
+            return existing
         if existing.unwrap() is not None:
-            msg = f"A plan named '{dto.name}' already exists"
-            raise ValidationException(msg)
+            return Failure(
+                PlanConflictError(
+                    message=f"A plan named '{dto.name}' already exists",
+                    details={"name": dto.name},
+                    source="plan_service",
+                )
+            )
 
         plan = Plan(
             name=dto.name,
@@ -123,7 +139,7 @@ class PlanService:
         )
         result = await self.plans.create(plan)
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "create_plan")
+            return result
         created = result.unwrap()
 
         if self._sync_razorpay_enabled():
@@ -135,16 +151,18 @@ class PlanService:
                     currency=created.currency,
                     period=created.interval_count,
                 )
-                await self.plans.update(
+                update_result = await self.plans.update(
                     created, values={"razorpay_plan_id": razorpay_plan.get("id")}
                 )
+                if isinstance(update_result, Failure):
+                    return update_result
                 created.razorpay_plan_id = razorpay_plan.get("id")
             except Exception as exc:  # noqa: BLE001 — Razorpay is optional in dev
                 logger.bind(operation="create_plan").warning(
                     "Razorpay plan sync skipped", error=str(exc)
                 )
 
-        await self.audit.create(
+        audit_result = await self.audit.create(
             AuditLog(
                 entity_type="plan",
                 entity_id=str(created.id),
@@ -153,11 +171,21 @@ class PlanService:
                 changes={"name": created.name, "amount": created.amount},
             )
         )
-        return _plan_to_response(created)
+        if isinstance(audit_result, Failure):
+            error = audit_result.failure()
+            return Failure(
+                PlanInfrastructureError(
+                    message=error.message,
+                    details=error.details,
+                    source="plan_service",
+                    operation="create_audit_log",
+                )
+            )
+        return Success(_plan_to_response(created))
 
     async def update_plan(  # noqa: PLR0912
         self, plan_id: str, dto: PlanUpdateDTO, *, user_id: str
-    ) -> PlanResponse:
+    ) -> PlanResult[PlanResponse]:
         """Create a new plan version; keep the current one for existing subscribers.
 
         Requirement 24: updates never mutate the original record. A new Plan
@@ -166,14 +194,25 @@ class PlanService:
         """
         result = await self.plans.find_by_id(plan_id)
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "update_plan")
+            return result
         plan = result.unwrap()
         if plan is None:
-            msg = "Plan"
-            raise NotFoundException(msg, plan_id)
+            return Failure(
+                PlanNotFoundError(
+                    message="Plan not found",
+                    details={"plan_id": plan_id},
+                    source="plan_service",
+                    plan_id=plan_id,
+                )
+            )
         if not plan.is_active:
-            msg = "Cannot update inactive plan"
-            raise ValidationException(msg)
+            return Failure(
+                PlanValidationError(
+                    message="Cannot update inactive plan",
+                    details={"plan_id": plan_id},
+                    source="plan_service",
+                )
+            )
 
         values: dict[str, object] = {}
         if dto.name is not None:
@@ -199,11 +238,11 @@ class PlanService:
         if dto.metadata is not None:
             values["metadata_"] = dto.metadata
         if not values:
-            return _plan_to_response(plan)
+            return Success(_plan_to_response(plan))
 
         archive_result = await self.plans.archive(plan_id)
         if isinstance(archive_result, Failure):
-            _repo_failure(archive_result.failure(), "update_plan")
+            return archive_result
 
         new_version = Plan(
             parent_plan_id=plan.id,
@@ -232,10 +271,10 @@ class PlanService:
             restore = await self.plans.update(plan, values={"is_active": True})
             if isinstance(restore, Failure):
                 logger.bind(operation="update_plan").error(restore.failure().message)
-            _repo_failure(created_result.failure(), "update_plan")
+            return created_result
         created = created_result.unwrap()
 
-        await self.audit.create(
+        audit_result = await self.audit.create(
             AuditLog(
                 entity_type="plan",
                 entity_id=str(created.id),
@@ -244,17 +283,33 @@ class PlanService:
                 changes={**values, "parent_plan_id": str(plan.id)},
             )
         )
-        return _plan_to_response(created)
+        if isinstance(audit_result, Failure):
+            error = audit_result.failure()
+            return Failure(
+                PlanInfrastructureError(
+                    message=error.message,
+                    details=error.details,
+                    source="plan_service",
+                    operation="create_audit_log",
+                )
+            )
+        return Success(_plan_to_response(created))
 
-    async def archive_plan(self, plan_id: str, *, user_id: str) -> PlanResponse:
+    async def archive_plan(self, plan_id: str, *, user_id: str) -> PlanResult[PlanResponse]:
         result = await self.plans.archive(plan_id)
         if isinstance(result, Failure):
-            _repo_failure(result.failure(), "archive_plan")
+            return result
         plan = result.unwrap()
         if plan is None:
-            msg = "Plan"
-            raise NotFoundException(msg, plan_id)
-        await self.audit.create(
+            return Failure(
+                PlanNotFoundError(
+                    message="Plan not found",
+                    details={"plan_id": plan_id},
+                    source="plan_service",
+                    plan_id=plan_id,
+                )
+            )
+        audit_result = await self.audit.create(
             AuditLog(
                 entity_type="plan",
                 entity_id=str(plan.id),
@@ -263,7 +318,17 @@ class PlanService:
                 changes={"is_active": False},
             )
         )
-        return _plan_to_response(plan)
+        if isinstance(audit_result, Failure):
+            error = audit_result.failure()
+            return Failure(
+                PlanInfrastructureError(
+                    message=error.message,
+                    details=error.details,
+                    source="plan_service",
+                    operation="create_audit_log",
+                )
+            )
+        return Success(_plan_to_response(plan))
 
     @staticmethod
     def _sync_razorpay_enabled() -> bool:

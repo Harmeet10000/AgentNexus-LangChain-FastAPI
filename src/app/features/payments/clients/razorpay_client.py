@@ -21,12 +21,15 @@ from tenacity import (
 )
 
 from app.config import get_settings
-from app.features.payments.exceptions import RazorpayRetryableError
 from app.utils import ExternalServiceException, logger
 
 type _JsonObject = dict[str, Any]
 
 _RAZORPAY_TIMEOUT_CODES = (503, 504, 429)
+
+
+class RazorpayRetryableError(ExternalServiceException):
+    """Transient provider failure after the retry policy is exhausted."""
 
 
 class RazorpayPermanentError(ExternalServiceException):

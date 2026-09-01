@@ -7,9 +7,10 @@ Passes uploaded bytes to IngestionGraph; the graph performs Docling parsing.
 Dependencies read from app.state — same pattern as agent_saul.
 """
 
-from fastapi import APIRouter, UploadFile
+from fastapi import APIRouter, Response, UploadFile, status
 
-from app.utils import APIResponse, http_response, logger
+from app.shared.result import render_result
+from app.utils import APIResponse, logger
 
 from .dependencies import IngestionGraphDep, UserIdDep
 from .dto import DocumentUploadResponse
@@ -39,6 +40,8 @@ async def upload_document(
     file: UploadFile,
     graph: IngestionGraphDep,
     user_id: UserIdDep,
+    response: Response,
+    *,
     document_type: str = "unknown",
     jurisdiction: str = "India",
 ) -> IngestionUploadResponse:
@@ -54,7 +57,7 @@ async def upload_document(
     log.info("upload_received", size_bytes=len(raw_bytes))
 
     service = IngestionService(ingestion_graph=graph)
-    response: DocumentUploadResponse = await service.ingest_document(
+    result = await service.ingest_document(
         raw_bytes=raw_bytes,
         user_id=user_id,
         filename=file.filename or "uploaded-document",
@@ -63,9 +66,9 @@ async def upload_document(
         jurisdiction=jurisdiction,
     )
 
-    log.info("upload_processed", doc_id=response.doc_id, status=response.status)
-    return http_response(
+    return render_result(
+        result,
+        response,
         message="Document Ingested Successfully",
-        data=response,
-        status_code=201,
+        success_status=status.HTTP_201_CREATED,
     )

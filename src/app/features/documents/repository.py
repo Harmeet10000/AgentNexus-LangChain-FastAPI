@@ -12,14 +12,20 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.shared.result import ConflictAppError, InfrastructureAppError, NotFoundAppError
-from app.utils import ErrorCode
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 
 from .constants import (
     DISKANN_QUERY_RESCORE,
     DISKANN_QUERY_SEARCH_LIST_SIZE,
     TRIGRAM_SIMILARITY_THRESHOLD,
+)
+from .errors import (
+    DocumentChunkConflictError,
+    DocumentConflictError,
+    DocumentDatabaseError,
+    DocumentEmbeddingWidthError,
+    DocumentNotFoundError,
+    DocumentStatusNotFoundError,
 )
 from .model import CHUNK_EMBEDDING_DIM, UnifiedChunk, UnifiedDocument
 
@@ -34,8 +40,7 @@ if TYPE_CHECKING:
     from sqlalchemy.sql.elements import TextClause
     from sqlalchemy.sql.selectable import Select
 
-    from app.shared.result import AppResult
-
+    from .errors import DocumentResult
 
 _FILTER_SQL = """
   AND (:document_ids = '{}' OR c.document_id = ANY(CAST(:document_ids AS uuid[])))
@@ -60,7 +65,7 @@ class DocumentRepository:
         *,
         user_id: str,
         content_hash: str,
-    ) -> AppResult[UnifiedDocument | None]:
+    ) -> DocumentResult[UnifiedDocument | None]:
         try:
             statement: Select[tuple[UnifiedDocument]] = select(UnifiedDocument).where(
                 UnifiedDocument.user_id == user_id,
@@ -70,8 +75,7 @@ class DocumentRepository:
             doc: UnifiedDocument | None = result.scalar_one_or_none()
             if doc is None:
                 return Failure(
-                    inner_value=NotFoundAppError(
-                        code=ErrorCode.DOCUMENT_NOT_FOUND,
+                    inner_value=DocumentNotFoundError(
                         message="Document not found for the given user and content hash",
                         details={"user_id": user_id, "content_hash": content_hash},
                         source="document_repository",
@@ -81,9 +85,7 @@ class DocumentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                inner_value=DocumentDatabaseError(
                     message="Database error while fetching document by user hash",
                     details={"user_id": user_id, "content_hash": content_hash, "error": str(exc)},
                     source="document_repository",
@@ -95,7 +97,7 @@ class DocumentRepository:
         *,
         user_id: str,
         document_id: str,
-    ) -> AppResult[UnifiedDocument | None]:
+    ) -> DocumentResult[UnifiedDocument | None]:
         try:
             statement: Select[tuple[UnifiedDocument]] = select(UnifiedDocument).where(
                 UnifiedDocument.user_id == user_id,
@@ -105,8 +107,7 @@ class DocumentRepository:
             doc: UnifiedDocument | None = result.scalar_one_or_none()
             if doc is None:
                 return Failure(
-                    inner_value=NotFoundAppError(
-                        code=ErrorCode.DOCUMENT_NOT_FOUND,
+                    inner_value=DocumentNotFoundError(
                         message="Document not found for the given user and document ID",
                         details={"user_id": user_id, "document_id": document_id},
                         source="document_repository",
@@ -116,9 +117,7 @@ class DocumentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                inner_value=DocumentDatabaseError(
                     message="Database error while fetching document by ID",
                     details={
                         "user_id": user_id,
@@ -143,7 +142,7 @@ class DocumentRepository:
         contract_type: str | None,
         parties: list[object],
         metadata_: dict[str, object],
-    ) -> AppResult[UnifiedDocument]:
+    ) -> DocumentResult[UnifiedDocument]:
         try:
             document = UnifiedDocument(
                 user_id=user_id,
@@ -164,8 +163,7 @@ class DocumentRepository:
         except IntegrityError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=ConflictAppError(
-                    code="DOCUMENT_CONFLICT",
+                inner_value=DocumentConflictError(
                     message="Document creation failed due to a constraint violation",
                     details={"user_id": user_id, "content_hash": content_hash, "error": str(exc)},
                     source="document_repository",
@@ -174,9 +172,7 @@ class DocumentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                inner_value=DocumentDatabaseError(
                     message="Database error while creating document",
                     details={"user_id": user_id, "content_hash": content_hash, "error": str(exc)},
                     source="document_repository",
@@ -194,9 +190,10 @@ class DocumentRepository:
         contract_type: str | None = None,
         parties: list[object] | None = None,
         metadata_: dict[str, object] | None = None,
-    ) -> None:
-        statement: TextClause = text(
-            text="""
+    ) -> DocumentResult[None]:
+        try:
+            statement: TextClause = text(
+                text="""
             UPDATE documents
             SET
                 status = :status,
@@ -209,28 +206,38 @@ class DocumentRepository:
                 updated_at = :updated_at
             WHERE id = :document_id::uuid
             """
-        )
-        await self.session.execute(
-            statement,
-            params={
-                "document_id": document_id,
-                "status": status,
-                "title": title,
-                "document_kind": document_kind,
-                "jurisdiction": jurisdiction,
-                "contract_type": contract_type,
-                "parties": json.dumps(obj=parties) if parties is not None else None,
-                "metadata_": json.dumps(obj=metadata_) if metadata_ is not None else None,
-                "updated_at": datetime.now(tz=UTC),
-            },
-        )
+            )
+            await self.session.execute(
+                statement,
+                params={
+                    "document_id": document_id,
+                    "status": status,
+                    "title": title,
+                    "document_kind": document_kind,
+                    "jurisdiction": jurisdiction,
+                    "contract_type": contract_type,
+                    "parties": json.dumps(obj=parties) if parties is not None else None,
+                    "metadata_": json.dumps(obj=metadata_) if metadata_ is not None else None,
+                    "updated_at": datetime.now(tz=UTC),
+                },
+            )
+            return Success(None)
+        except SQLAlchemyError as exc:
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while updating document status",
+                    details={"document_id": document_id, "error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
     @staticmethod
-    def _reject_width_mismatch(rows: list[dict[str, Any]]) -> InfrastructureAppError | None:
+    def _reject_width_mismatch(rows: list[dict[str, Any]]) -> DocumentEmbeddingWidthError | None:
         """Refuse a chunk batch whose vectors are not the width this relation stores.
 
         Returns the error rather than raising it because the caller returns
-        ``AppResult`` — the raising half of the same guard lives in
+         ``DocumentResult`` — the raising half of the same guard lives in
         ``utils/embedding.assert_stored_width_matches_configured`` for the offline
         batch paths that have no ``Result`` to put a failure into.
 
@@ -254,15 +261,13 @@ class DocumentRepository:
         mismatch = stored_width_mismatch(stored_dim)
         if mismatch is not None:
             stored, expected = mismatch
-            return InfrastructureAppError(
-                code="EMBEDDING_WIDTH_MISMATCH",
+            return DocumentEmbeddingWidthError(
                 message=width_mismatch_detail(stored, expected, relation="chunks.embedding"),
                 details={"stored_dim": stored, "configured_dim": expected},
                 # `retryable` defaults to True on this error, which would be wrong
                 # here in a way that costs real money: a Celery task retrying a
                 # width disagreement spins until its ceiling against a condition
                 # that only a re-embedding run can change.
-                retryable=False,
                 source="document_repository",
             )
 
@@ -272,21 +277,19 @@ class DocumentRepository:
                 continue
             actual = len(embedding)
             if actual != stored_dim:
-                return InfrastructureAppError(
-                    code="EMBEDDING_WIDTH_MISMATCH",
+                return DocumentEmbeddingWidthError(
                     message=(
                         f"chunk at index {index} carries a {actual}-dimensional vector but "
                         f"chunks.embedding stores {stored_dim}; the batch is refused rather "
                         f"than partially written. Re-embed with the configured model."
                     ),
                     details={"row_index": index, "row_dim": actual, "stored_dim": stored_dim},
-                    retryable=False,
                     source="document_repository",
                 )
 
         return None
 
-    async def upsert_chunks(self, rows: list[dict[str, Any]]) -> AppResult[None]:
+    async def upsert_chunks(self, rows: list[dict[str, Any]]) -> DocumentResult[None]:
         if not rows:
             return Success(inner_value=None)
         width_error = self._reject_width_mismatch(rows)
@@ -298,8 +301,7 @@ class DocumentRepository:
         except IntegrityError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=ConflictAppError(
-                    code="CHUNK_CONFLICT",
+                inner_value=DocumentChunkConflictError(
                     message="Chunk upsert failed due to a constraint violation",
                     details={"error": str(object=exc)},
                     source="document_repository",
@@ -308,24 +310,33 @@ class DocumentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                inner_value=DocumentDatabaseError(
                     message="Database error while upserting chunks",
                     details={"error": str(object=exc)},
                     source="document_repository",
                 )
             )
 
-    async def analyze_chunks(self) -> None:
-        await self.session.execute(statement=text(text="ANALYZE chunks"))
+    async def analyze_chunks(self) -> DocumentResult[None]:
+        try:
+            await self.session.execute(statement=text(text="ANALYZE chunks"))
+            return Success(None)
+        except SQLAlchemyError as exc:
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while analyzing chunks",
+                    details={"error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
     async def fetch_status(
         self,
         *,
         user_id: str,
         document_id: str,
-    ) -> AppResult[dict[str, Any] | None]:
+    ) -> DocumentResult[dict[str, Any] | None]:
         try:
             statement: TextClause = text(
                 text="""
@@ -351,8 +362,7 @@ class DocumentRepository:
             row: RowMapping | None = result.mappings().one_or_none()
             if row is None:
                 return Failure(
-                    inner_value=NotFoundAppError(
-                        code=ErrorCode.STATUS_NOT_FOUND,
+                    inner_value=DocumentStatusNotFoundError(
                         message="Status not found for the given document",
                         details={"user_id": user_id, "document_id": document_id},
                         source="document_repository",
@@ -362,9 +372,7 @@ class DocumentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                inner_value=DocumentDatabaseError(
                     message="Database error while fetching document status",
                     details={
                         "user_id": user_id,
@@ -382,7 +390,7 @@ class DocumentRepository:
         query: str,
         candidate_limit: int,
         filter_params: dict[str, Any],
-    ) -> AppResult[list[dict[str, Any]]]:
+    ) -> DocumentResult[list[dict[str, Any]]]:
         try:
             statement: TextClause = text(
                 text="""
@@ -413,9 +421,7 @@ class DocumentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                inner_value=DocumentDatabaseError(
                     message="Database error while performing BM25 search",
                     details={"error": str(exc)},
                     source="document_repository",
@@ -429,7 +435,7 @@ class DocumentRepository:
         embedding: list[float],
         candidate_limit: int,
         filter_params: dict[str, Any],
-    ) -> AppResult[list[dict[str, Any]]]:
+    ) -> DocumentResult[list[dict[str, Any]]]:
         try:
             statement: TextClause = text(
                 text="""
@@ -468,9 +474,7 @@ class DocumentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                inner_value=DocumentDatabaseError(
                     message="Database error while performing vector search",
                     details={"error": str(exc)},
                     source="document_repository",
@@ -484,7 +488,7 @@ class DocumentRepository:
         query: str,
         candidate_limit: int,
         filter_params: dict[str, Any],
-    ) -> AppResult[list[dict[str, Any]]]:
+    ) -> DocumentResult[list[dict[str, Any]]]:
         try:
             statement: TextClause = text(
                 text="""
@@ -517,20 +521,21 @@ class DocumentRepository:
         except SQLAlchemyError as exc:
             await self.session.rollback()
             return Failure(
-                inner_value=InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                inner_value=DocumentDatabaseError(
                     message="Database error while performing trigram search",
                     details={"error": str(object=exc)},
                     source="document_repository",
                 )
             )
 
-    async def fetch_chunks_by_ids(self, chunk_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
+    async def fetch_chunks_by_ids(
+        self, chunk_ids: Sequence[str]
+    ) -> DocumentResult[dict[str, dict[str, Any]]]:
         if not chunk_ids:
-            return {}
-        statement: TextClause = text(
-            text="""
+            return Success({})
+        try:
+            statement: TextClause = text(
+                text="""
             SELECT
                 c.id::text AS chunk_id,
                 c.document_id::text AS document_id,
@@ -546,9 +551,20 @@ class DocumentRepository:
             JOIN documents AS d ON d.id = c.document_id
             WHERE c.id = ANY(CAST(:chunk_ids AS uuid[]))
             """
-        )
-        result = await self.session.execute(statement, params={"chunk_ids": list(chunk_ids)})
-        return {str(object=row["chunk_id"]): dict(row) for row in result.mappings().all()}
+            )
+            result = await self.session.execute(statement, params={"chunk_ids": list(chunk_ids)})
+            return Success(
+                {str(object=row["chunk_id"]): dict(row) for row in result.mappings().all()}
+            )
+        except SQLAlchemyError as exc:
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while fetching chunks",
+                    details={"error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
     async def legal_rrf_search(
         self,
@@ -567,9 +583,10 @@ class DocumentRepository:
         require_graphiti_verified: bool,
         bm25_threshold: float | None = None,
         exact_phrase: str | None = None,
-    ) -> list[dict[str, Any]]:
-        statement: TextClause = text(
-            text="""
+    ) -> DocumentResult[list[dict[str, Any]]]:
+        try:
+            statement: TextClause = text(
+                text="""
             WITH candidate_chunks AS (
                 SELECT
                     c.id,
@@ -651,27 +668,36 @@ class DocumentRepository:
             ORDER BY f.rrf_score DESC
             LIMIT :limit
             """
-        )
-        result = await self.session.execute(
-            statement,
-            params={
-                "user_id": user_id,
-                "query_text": query_text,
-                "query_embedding": _vector_literal(query_embedding),
-                "limit": limit,
-                "vector_weight": vector_weight,
-                "keyword_weight": keyword_weight,
-                "jurisdiction": jurisdiction,
-                "contract_type": contract_type,
-                "document_ids": list(document_ids) if document_ids else None,
-                "chunk_ids": list(chunk_ids) if chunk_ids else None,
-                "clause_type": clause_type,
-                "require_graphiti_verified": require_graphiti_verified,
-                "bm25_threshold": bm25_threshold,
-                "exact_phrase_like": f"%{exact_phrase}%" if exact_phrase else None,
-            },
-        )
-        return [dict(row) for row in result.mappings().all()]
+            )
+            result = await self.session.execute(
+                statement,
+                params={
+                    "user_id": user_id,
+                    "query_text": query_text,
+                    "query_embedding": _vector_literal(query_embedding),
+                    "limit": limit,
+                    "vector_weight": vector_weight,
+                    "keyword_weight": keyword_weight,
+                    "jurisdiction": jurisdiction,
+                    "contract_type": contract_type,
+                    "document_ids": list(document_ids) if document_ids else None,
+                    "chunk_ids": list(chunk_ids) if chunk_ids else None,
+                    "clause_type": clause_type,
+                    "require_graphiti_verified": require_graphiti_verified,
+                    "bm25_threshold": bm25_threshold,
+                    "exact_phrase_like": f"%{exact_phrase}%" if exact_phrase else None,
+                },
+            )
+            return Success([dict(row) for row in result.mappings().all()])
+        except SQLAlchemyError as exc:
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while performing legal search",
+                    details={"error": str(exc)},
+                    source="document_repository",
+                )
+            )
 
 
 def build_chunk_upsert_statement(rows: list[dict[str, Any]]) -> Insert:

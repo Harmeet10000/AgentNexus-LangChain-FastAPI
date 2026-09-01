@@ -39,8 +39,13 @@ async def _seed_plans(session: AsyncSession) -> int:
     inserted = 0
     for plan in default_plans:
         # Plan's unique key is partial: uq_plans_active_name WHERE is_active
-        stmt = pg_insert(Plan).values(**plan).on_conflict_do_nothing(
-            index_elements=["name"], index_where=Plan.__table__.c.is_active  # type: ignore[attr-defined]
+        stmt = (
+            pg_insert(Plan)
+            .values(**plan)
+            .on_conflict_do_nothing(
+                index_elements=["name"],
+                index_where=Plan.__table__.c.is_active,  # type: ignore[attr-defined]
+            )
         )
         result = await session.execute(stmt)
         inserted += result.rowcount or 0

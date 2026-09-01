@@ -12,19 +12,22 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from langgraph.graph.state import CompiledStateGraph
+from returns.result import Failure, Success
 
-from app.shared.result import (
-    AppError,
-    InfrastructureAppError,
-    app_error_to_exception,
-    log_expected_failure,
-)
+from app.shared.result import FeatureError
 from app.utils import logger
 
 from .dto import DocumentUploadResponse
+from .errors import (
+    IngestionGraphError,
+    IngestionInternalError,
+    IngestionPipelineError,
+)
 
 if TYPE_CHECKING:
     from typing import Any
+
+    from .errors import IngestionResult
 
 
 class IngestionService:
@@ -41,7 +44,7 @@ class IngestionService:
         document_type: str = "unknown",
         jurisdiction: str = "India",
         doc_id: str | None = None,
-    ) -> DocumentUploadResponse:
+    ) -> IngestionResult[DocumentUploadResponse]:
         resolved_doc_id = doc_id or str(uuid4())
         thread_id = str(uuid4())  # ingestion gets its own thread_id
 
@@ -67,32 +70,39 @@ class IngestionService:
             result = await self._graph.ainvoke(initial_state)
         except Exception as exc:
             log.exception("ingestion_graph_failed", error=str(exc))
-            raise app_error_to_exception(
-                InfrastructureAppError(
-                    code="INGESTION_GRAPH_FAILED",
+            return Failure(
+                IngestionGraphError(
                     message="Document ingestion failed",
-                    details={"doc_id": resolved_doc_id},
+                    details={"doc_id": resolved_doc_id, "error": str(exc)},
                     source="ingestion_service",
+                    doc_id=resolved_doc_id,
                 )
-            ) from exc
+            )
 
         failure = result.get("failure")
         if failure is not None:
-            if isinstance(failure, AppError):
-                error = failure
+            if isinstance(failure, FeatureError):
+                error = IngestionPipelineError(
+                    message=failure.message,
+                    details=failure.details or {"doc_id": resolved_doc_id},
+                    source="ingestion_service",
+                    doc_id=resolved_doc_id,
+                )
             elif isinstance(failure, dict):
-                error = AppError.model_validate(failure)
+                error = IngestionPipelineError(
+                    message=str(failure.get("message", "Document ingestion failed")),
+                    details={"doc_id": resolved_doc_id, "failure": failure},
+                    source="ingestion_service",
+                    doc_id=resolved_doc_id,
+                )
             else:
-                # ponytail: kindless AppError rendered 422; infrastructure 500 is correct
-                error = InfrastructureAppError(
-                    code="INGESTION_INTERNAL_ERROR",
+                error = IngestionInternalError(
                     message=str(failure),
                     details={"doc_id": resolved_doc_id, "failure": str(failure)},
                     source="ingestion_service",
-                    retryable=False,
+                    doc_id=resolved_doc_id,
                 )
-            log_expected_failure(error, operation="ingest_document")
-            raise app_error_to_exception(error)
+            return Failure(error)
 
         log.info(
             "ingestion_completed",
@@ -100,11 +110,13 @@ class IngestionService:
             clauses=len(result.get("stored_clause_ids", [])),
         )
 
-        return DocumentUploadResponse(
-            doc_id=resolved_doc_id,
-            status="completed",
-            entity_count=len(result.get("stored_entity_ids", [])),
-            clause_count=len(result.get("stored_clause_ids", [])),
-            relationship_count=len(result.get("stored_relationship_ids", [])),
-            dropped_entity_count=result.get("dropped_entity_count", 0),
+        return Success(
+            DocumentUploadResponse(
+                doc_id=resolved_doc_id,
+                status="completed",
+                entity_count=len(result.get("stored_entity_ids", [])),
+                clause_count=len(result.get("stored_clause_ids", [])),
+                relationship_count=len(result.get("stored_relationship_ids", [])),
+                dropped_entity_count=result.get("dropped_entity_count", 0),
+            )
         )

@@ -10,15 +10,13 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
-from app.shared.result import (
-    AppResult,
-    ConflictAppError,
-    InfrastructureAppError,
-    NotFoundAppError,
-    ValidationAppError,
+from .errors import (
+    AuthConflictError,
+    AuthInfrastructureError,
+    AuthNotFoundError,
+    AuthResult,
+    AuthValidationError,
 )
-from app.utils import ErrorCode
-
 from .model import OAuthAccount, User
 from .token_audit_log import TokenAuditLog
 
@@ -51,7 +49,7 @@ async def _do_find_or_create_oauth_user(
     provider_user_id: str,
     provider_email: str | None,
     full_name: str | None,
-) -> AppResult[tuple[User, bool]]:
+) -> AuthResult[tuple[User, bool]]:
     user = await User.find_one(User.email == email.lower())
     if user is not None:
         already_linked = any(
@@ -91,11 +89,10 @@ class UserRepository:
         self._db: AsyncIOMotorDatabase[Any] = db  # retained for raw Motor queries when needed
 
     @staticmethod
-    async def find_by_id(user_id: str) -> AppResult[User | None]:
+    async def find_by_id(user_id: str) -> AuthResult[User | None]:
         if not PydanticObjectId.is_valid(user_id):
             return Failure(
-                ValidationAppError(
-                    code="INVALID_USER_ID",
+                AuthValidationError(
                     message="Invalid user identifier",
                     details={"user_id": user_id},
                     source="auth_repository",
@@ -104,13 +101,12 @@ class UserRepository:
         return Success(await User.get(PydanticObjectId(user_id)))
 
     @staticmethod
-    async def find_by_email(email: str) -> AppResult[User | None]:
+    async def find_by_email(email: str) -> AuthResult[User | None]:
         try:
             user = await User.find_one(User.email == email.lower())
             if user is None:
                 return Failure(
-                    NotFoundAppError(
-                        code=ErrorCode.USER_NOT_FOUND,
+                    AuthNotFoundError(
                         message="User not found with the given email",
                         details={"email": email},
                         source="auth_repository",
@@ -119,8 +115,7 @@ class UserRepository:
             return Success(user)
         except PyMongoError as exc:
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
+                AuthInfrastructureError(
                     message="Database error while finding user by email",
                     details={"email": email, "error": str(exc)},
                     source="auth_repository",
@@ -130,13 +125,12 @@ class UserRepository:
     @staticmethod
     async def find_by_verification_token_hash(
         token_hash: str,
-    ) -> AppResult[User | None]:
+    ) -> AuthResult[User | None]:
         try:
             user = await User.find_one(User.verification_token_hash == token_hash)
             if user is None:
                 return Failure(
-                    NotFoundAppError(
-                        code=ErrorCode.USER_NOT_FOUND,
+                    AuthNotFoundError(
                         message="User not found with the given verification token hash",
                         details={"token_hash": token_hash},
                         source="auth_repository",
@@ -145,8 +139,7 @@ class UserRepository:
             return Success(user)
         except PyMongoError as exc:
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
+                AuthInfrastructureError(
                     message="Database error while finding user by verification token hash",
                     details={"token_hash": token_hash, "error": str(exc)},
                     source="auth_repository",
@@ -156,13 +149,12 @@ class UserRepository:
     @staticmethod
     async def find_by_reset_token_hash(
         token_hash: str,
-    ) -> AppResult[User | None]:
+    ) -> AuthResult[User | None]:
         try:
             user = await User.find_one(User.reset_token_hash == token_hash)
             if user is None:
                 return Failure(
-                    NotFoundAppError(
-                        code=ErrorCode.USER_NOT_FOUND,
+                    AuthNotFoundError(
                         message="User not found with the given reset token hash",
                         details={"token_hash": token_hash},
                         source="auth_repository",
@@ -171,8 +163,7 @@ class UserRepository:
             return Success(user)
         except PyMongoError as exc:
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
+                AuthInfrastructureError(
                     message="Database error while finding user by reset token hash",
                     details={"token_hash": token_hash, "error": str(exc)},
                     source="auth_repository",
@@ -180,14 +171,13 @@ class UserRepository:
             )
 
     @staticmethod
-    async def create(user: User) -> AppResult[User]:
+    async def create(user: User) -> AuthResult[User]:
         try:
             created = await user.insert()
             return Success(created)
         except DuplicateKeyError as exc:
             return Failure(
-                ConflictAppError(
-                    code="USER_CONFLICT",
+                AuthConflictError(
                     message="User with this email already exists",
                     details={"email": user.email, "error": str(exc)},
                     source="auth_repository",
@@ -195,8 +185,7 @@ class UserRepository:
             )
         except PyMongoError as exc:
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
+                AuthInfrastructureError(
                     message="Database error while creating user",
                     details={"email": user.email, "error": str(exc)},
                     source="auth_repository",
@@ -204,15 +193,14 @@ class UserRepository:
             )
 
     @staticmethod
-    async def save(user: User) -> AppResult[User]:
+    async def save(user: User) -> AuthResult[User]:
         try:
             user.updated_at = datetime.now(tz=UTC)
             await user.save()
             return Success(user)
         except PyMongoError as exc:
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
+                AuthInfrastructureError(
                     message="Database error while saving user",
                     details={"user_id": str(user.id), "error": str(exc)},
                     source="auth_repository",
@@ -220,14 +208,13 @@ class UserRepository:
             )
 
     @staticmethod
-    async def email_exists(email: str) -> AppResult[bool]:
+    async def email_exists(email: str) -> AuthResult[bool]:
         try:
             count = await User.find(User.email == email.lower()).count()
             return Success(count > 0)
         except PyMongoError as exc:
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
+                AuthInfrastructureError(
                     message="Database error while checking email existence",
                     details={"email": email, "error": str(exc)},
                     source="auth_repository",
@@ -241,7 +228,7 @@ class UserRepository:
         provider_user_id: str,
         provider_email: str | None,
         full_name: str | None,
-    ) -> AppResult[tuple[User, bool]]:
+    ) -> AuthResult[tuple[User, bool]]:
         try:
             return await _do_find_or_create_oauth_user(
                 email,
@@ -252,8 +239,7 @@ class UserRepository:
             )
         except DuplicateKeyError as exc:
             return Failure(
-                ConflictAppError(
-                    code="OAUTH_USER_CONFLICT",
+                AuthConflictError(
                     message="OAuth user creation failed due to a duplicate",
                     details={"email": email, "error": str(exc)},
                     source="auth_repository",
@@ -261,8 +247,7 @@ class UserRepository:
             )
         except PyMongoError as exc:
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
+                AuthInfrastructureError(
                     message="Database error during OAuth user find-or-create",
                     details={"email": email, "error": str(exc)},
                     source="auth_repository",
@@ -281,7 +266,7 @@ class RefreshTokenRepository:
         session: SessionData,
         session_key: str,
         user_key: str,
-    ) -> AppResult[None]:
+    ) -> AuthResult[None]:
         async with self._redis.pipeline(transaction=True) as pipe:
             pipe.setex(session_key, session.ttl, session.model_dump_json())
             pipe.sadd(user_key, session.session_id)
@@ -299,7 +284,7 @@ class RefreshTokenRepository:
         ).insert()
         return Success(None)
 
-    async def _do_get_user_sessions(self, user_id: str) -> AppResult[list[SessionData]]:
+    async def _do_get_user_sessions(self, user_id: str) -> AuthResult[list[SessionData]]:
         raw_ids: set[str] = await cast(
             "Awaitable[set[str]]",
             self._redis.smembers(_USER_SESSIONS_KEY.format(user_id)),
@@ -330,7 +315,7 @@ class RefreshTokenRepository:
         user_id: str,
         except_session_id: str | None,
         reason: str,
-    ) -> AppResult[None]:
+    ) -> AuthResult[None]:
         raw_ids: set[str] = await cast(
             "Awaitable[set[str]]",
             self._redis.smembers(_USER_SESSIONS_KEY.format(user_id)),
@@ -358,22 +343,21 @@ class RefreshTokenRepository:
         )
         return Success(None)
 
-    async def store_session(self, session: SessionData) -> AppResult[None]:
+    async def store_session(self, session: SessionData) -> AuthResult[None]:
         session_key = _SESSION_KEY.format(session.session_id)
         user_key = _USER_SESSIONS_KEY.format(session.user_id)
         try:
             return await self._do_store_session(session, session_key, user_key)
         except (RedisError, PyMongoError) as exc:
             return Failure(
-                InfrastructureAppError(
-                    code="SESSION_STORE_FAILED",
+                AuthInfrastructureError(
                     message="Failed to store session",
                     details={"session_id": session.session_id, "error": str(exc)},
                     source="auth_repository",
                 )
             )
 
-    async def get_session(self, session_id: str) -> AppResult[SessionData | None]:
+    async def get_session(self, session_id: str) -> AuthResult[SessionData | None]:
         try:
             raw = await self._redis.get(_SESSION_KEY.format(session_id))
             if raw is None:
@@ -381,8 +365,7 @@ class RefreshTokenRepository:
             return Success(SessionData.model_validate_json(raw))
         except RedisError as exc:
             return Failure(
-                InfrastructureAppError(
-                    code="SESSION_GET_FAILED",
+                AuthInfrastructureError(
                     message="Failed to retrieve session",
                     details={"session_id": session_id, "error": str(exc)},
                     source="auth_repository",
@@ -394,7 +377,7 @@ class RefreshTokenRepository:
         session_id: str,
         user_id: str,
         reason: str = "logout",
-    ) -> AppResult[None]:
+    ) -> AuthResult[None]:
         try:
             async with self._redis.pipeline(transaction=True) as pipe:
                 pipe.delete(_SESSION_KEY.format(session_id))
@@ -413,21 +396,19 @@ class RefreshTokenRepository:
             return Success(None)
         except (RedisError, PyMongoError) as exc:
             return Failure(
-                InfrastructureAppError(
-                    code="SESSION_REVOKE_FAILED",
+                AuthInfrastructureError(
                     message="Failed to revoke session",
                     details={"session_id": session_id, "error": str(exc)},
                     source="auth_repository",
                 )
             )
 
-    async def get_user_sessions(self, user_id: str) -> AppResult[list[SessionData]]:
+    async def get_user_sessions(self, user_id: str) -> AuthResult[list[SessionData]]:
         try:
             return await self._do_get_user_sessions(user_id)
         except RedisError as exc:
             return Failure(
-                InfrastructureAppError(
-                    code="SESSION_LIST_FAILED",
+                AuthInfrastructureError(
                     message="Failed to list user sessions",
                     details={"user_id": user_id, "error": str(exc)},
                     source="auth_repository",
@@ -439,13 +420,12 @@ class RefreshTokenRepository:
         user_id: str,
         except_session_id: str | None = None,
         reason: str = "revoke_all",
-    ) -> AppResult[None]:
+    ) -> AuthResult[None]:
         try:
             return await self._do_revoke_all_user_sessions(user_id, except_session_id, reason)
         except (RedisError, PyMongoError) as exc:
             return Failure(
-                InfrastructureAppError(
-                    code="SESSION_REVOKE_ALL_FAILED",
+                AuthInfrastructureError(
                     message="Failed to revoke all user sessions",
                     details={"user_id": user_id, "error": str(exc)},
                     source="auth_repository",
