@@ -34,7 +34,7 @@ from app.shared.rag.graphiti.schemas import (
     GRAPHITI_EDGE_TYPES,
     GRAPHITI_ENTITY_TYPES,
 )
-from app.shared.result import ValidationAppError, log_expected_failure
+from app.shared.result import log_expected_failure
 from app.utils import logger
 
 from .prompts import (
@@ -64,27 +64,24 @@ if TYPE_CHECKING:
     from sqlalchemy.sql.elements import TextClause
     from ty_extensions import Unknown
 
-    from app.shared.result import AppError
+    from .errors import IngestionGraphError
+    from .state import IngestionState, StructuredRunnable
 
-    from .state import (
-        IngestionState,
-        StructuredRunnable,
-    )
+from .errors import IngestionGraphValidationError
 
 
-def _state_failure(error: AppError) -> dict[str, object]:
+def _state_failure(error: IngestionGraphError) -> dict[str, object]:
     """Construct a state dict from a failure error (node boundary)."""
     return {"failure": error, "ingestion_complete": False}
 
 
-def _ingestion_failure(error: AppError) -> Failure[AppError]:
+def _ingestion_failure(error: IngestionGraphError) -> Failure[IngestionGraphError]:
     return Failure(error)
 
 
-def _validation_failure(code: str, message: str, *, doc_id: str = "") -> Failure[AppError]:
+def _validation_failure(message: str, *, doc_id: str = "") -> Failure[IngestionGraphError]:
     return _ingestion_failure(
-        ValidationAppError(
-            code=code,
+        IngestionGraphValidationError(
             message=message,
             details={"doc_id": doc_id} if doc_id else None,
             source="ingestion_graph",
@@ -96,7 +93,6 @@ def make_parse_document_node() -> Callable[[IngestionState], Awaitable[dict[str,
     async def parse_document_node(state: IngestionState) -> dict[str, object]:
         if not state.raw_bytes:
             result = _validation_failure(
-                "EMPTY_DOCUMENT",
                 "Uploaded document is empty",
                 doc_id=state.doc_id,
             )
@@ -118,8 +114,7 @@ def make_extract_schema_node(
     async def extract_schema_node(state: IngestionState) -> dict[str, object]:
         parsed: ParsedDocument | None = state.parsed_document
         if parsed is None:
-            result: Failure[AppError] = _validation_failure(
-                "MISSING_PARSED_DOCUMENT",
+            result: Failure[IngestionGraphError] = _validation_failure(
                 "Parsed document is required before schema extraction",
                 doc_id=state.doc_id,
             )
@@ -159,8 +154,7 @@ def make_segment_document_node(
         parsed: ParsedDocument | None = state.parsed_document
         metadata: ContractMetadata | None = state.contract_metadata
         if parsed is None or metadata is None:
-            result: Failure[AppError] = _validation_failure(
-                "MISSING_DOCUMENT_OR_METADATA",
+            result: Failure[IngestionGraphError] = _validation_failure(
                 "Parsed document and metadata are required before segmentation",
                 doc_id=state.doc_id,
             )
@@ -296,8 +290,7 @@ def make_classify_extract_node(
     async def classify_extract_node(state: IngestionState) -> dict[str, object]:
         metadata: ContractMetadata | None = state.contract_metadata
         if metadata is None:
-            result: Failure[AppError] = _validation_failure(
-                "MISSING_CONTRACT_METADATA",
+            result: Failure[IngestionGraphError] = _validation_failure(
                 "Contract metadata is required before entity extraction",
                 doc_id=state.doc_id,
             )
@@ -344,8 +337,7 @@ def make_embed_store_node(
         parsed: ParsedDocument | None = state.parsed_document
         metadata: ContractMetadata | None = state.contract_metadata
         if parsed is None or metadata is None:
-            result: Failure[AppError] = _validation_failure(
-                "MISSING_PARSED_DOCUMENT_OR_METADATA",
+            result: Failure[IngestionGraphError] = _validation_failure(
                 "Parsed document and metadata are required before storage",
                 doc_id=state.doc_id,
             )

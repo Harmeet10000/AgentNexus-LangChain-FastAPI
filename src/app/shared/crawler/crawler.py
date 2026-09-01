@@ -22,11 +22,13 @@ from playwright.async_api import Error as PlaywrightError
 from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
+from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.utils import logger
 
 from .config import CrawlerConfig, get_crawler_config
+from .errors import CrawlerProcessingResult, CrawlerProviderError
 from .validator import is_valid_url, sanitize_url
 
 if TYPE_CHECKING:
@@ -194,21 +196,22 @@ class WebCrawler:
         url: str,
         use_proxy: bool = False,
         bypass_cache: bool = False,
-    ) -> CrawlResult:
+    ) -> CrawlerProcessingResult[CrawlResult]:
         """Crawl a single URL."""
         url = sanitize_url(url)
 
         if not is_valid_url(url):
-            return CrawlResult(
-                url=url,
-                success=False,
-                error_message="Invalid or disallowed URL",
+            return Failure(
+                CrawlerProviderError(
+                    message="Invalid or disallowed URL",
+                    url=url,
+                )
             )
 
         if not bypass_cache:
             cached_result = await self._get_from_cache(url)
             if cached_result:
-                return cached_result
+                return Success(cached_result)
 
         start_time = time.time()
 
@@ -240,20 +243,29 @@ class WebCrawler:
                 if crawl_result.success:
                     await self._save_to_cache(url, crawl_result)
 
-                return crawl_result
+                if not crawl_result.success:
+                    return Failure(
+                        CrawlerProviderError(
+                            message=crawl_result.error_message or "Crawler provider failed",
+                            url=url,
+                        )
+                    )
+                return Success(crawl_result)
 
         except TimeoutError:
-            return CrawlResult(
-                url=url,
-                success=False,
-                error_message="Crawl timeout",
+            return Failure(
+                CrawlerProviderError(
+                    message="Crawl timeout",
+                    url=url,
+                )
             )
         except (httpx.HTTPError, PlaywrightError) as e:
             e.add_note(f"url={url}")
-            return CrawlResult(
-                url=url,
-                success=False,
-                error_message=str(e),
+            return Failure(
+                CrawlerProviderError(
+                    message=str(e),
+                    url=url,
+                )
             )
 
     async def crawl_recursive(
@@ -261,7 +273,7 @@ class WebCrawler:
         urls: list[str],
         max_depth: int = 1,
         max_pages: int = 10,
-    ) -> list[CrawlResult]:
+    ) -> CrawlerProcessingResult[list[CrawlResult]]:
         """Recursively crawl internal links using native BFS deep crawl strategy."""
         start_time: int | float = time.time()
 
@@ -293,11 +305,28 @@ class WebCrawler:
 
         dispatcher = self._build_dispatcher()
 
-        async with AsyncWebCrawler(config=browser_config) as crawler:
-            crawl_results = await crawler.arun_many(
-                urls=urls,
-                config=run_config,
-                dispatcher=dispatcher,
+        try:
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                crawl_results = await crawler.arun_many(
+                    urls=urls,
+                    config=run_config,
+                    dispatcher=dispatcher,
+                )
+        except (TimeoutError, httpx.HTTPError, PlaywrightError) as exc:
+            return Failure(
+                CrawlerProviderError(
+                    message=str(exc),
+                    url=urls[0] if urls else "",
+                )
             )
 
-        return [self._to_crawl_result(result, start_time) for result in crawl_results]
+        results = [self._to_crawl_result(result, start_time) for result in crawl_results]
+        failed = next((result for result in results if not result.success), None)
+        if failed is not None:
+            return Failure(
+                CrawlerProviderError(
+                    message=failed.error_message or "Crawler provider failed",
+                    url=failed.url,
+                )
+            )
+        return Success(results)

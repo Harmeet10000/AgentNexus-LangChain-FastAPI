@@ -1,63 +1,21 @@
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, Request, Response, UploadFile
+from returns.result import Failure
 
-from app.features.auth import (
-    CurrentVerifiedUser,
-    TokenClaims,
-    UserResponse,
-    get_refresh_token_repository,
-    get_user_repository,
-)
-from app.utils import (
-    APIResponse,
-    ServiceUnavailableException,
-    ValidationException,
-    http_response,
-)
+from app.features.auth import CurrentVerifiedUser, TokenClaims, UserResponse
+from app.shared.result import render_result
+from app.utils import APIResponse, http_response
 
+from .dependencies import get_profile_service
 from .dto import (
     AvatarResponse,
     ChangePasswordRequest,
     UpdateProfileRequest,
 )
-from .service import ProfileService
-
-if TYPE_CHECKING:
-    from app.shared.services.storage import StorageService
+from .errors import ProfileValidationError
 
 router = APIRouter(prefix="/profile", tags=["profile"])
-
-
-async def _get_profile_service(request: Request) -> ProfileService:
-    """Resolve ProfileService against the client names startup actually publishes.
-
-    Startup publishes ``object_store``, ``db`` and ``redis`` on ``app.state`` — never
-    ``storage`` or ``mongodb`` — and it sets each of them to ``None`` when that
-    connection fails instead of aborting boot. Every read is therefore resolved
-    defensively: a missing or absent client answers ``503`` from here, rather than
-    becoming a ``None`` that fails deeper in the request, far from its cause.
-
-    The object store is *not* required here. Only avatar upload uses it, so it is
-    passed through as optional and its absence is answered at the point of use —
-    a password change must not fail because object storage is down.
-    """
-    state = request.app.state
-
-    db = getattr(state, "db", None)
-    if db is None:
-        msg = "User database is unavailable"
-        raise ServiceUnavailableException(msg)
-
-    redis = getattr(state, "redis", None)
-    if redis is None:
-        msg = "Session store is unavailable"
-        raise ServiceUnavailableException(msg)
-
-    storage: StorageService | None = getattr(state, "object_store", None)
-    user_repo = await get_user_repository(db)
-    token_repo = await get_refresh_token_repository(redis)
-    return ProfileService(user_repo, token_repo, storage)
 
 
 @router.get("/")
@@ -79,19 +37,25 @@ async def update_profile(
     body: UpdateProfileRequest,
     user: CurrentVerifiedUser,
     request: Request,
+    response: Response,
 ) -> APIResponse[UserResponse]:
-    service = await _get_profile_service(request)
-    updated = await service.update_profile(user, body)
-    result = UserResponse(
-        id=str(updated.id),
-        email=updated.email,
-        full_name=updated.full_name,
-        role=updated.role.value,
-        is_verified=updated.is_verified,
-        is_active=updated.is_active,
-        created_at=updated.created_at,
+    service = await get_profile_service(request)
+    result = await service.update_profile(user, body)
+    return render_result(
+        result.map(
+            lambda updated: UserResponse(
+                id=str(updated.id),
+                email=updated.email,
+                full_name=updated.full_name,
+                role=updated.role.value,
+                is_verified=updated.is_verified,
+                is_active=updated.is_active,
+                created_at=updated.created_at,
+            )
+        ),
+        response,
+        message="Profile updated",
     )
-    return http_response("Profile updated", data=result)
 
 
 @router.post("/change-password", response_model=APIResponse[None])
@@ -99,6 +63,7 @@ async def change_password(
     body: ChangePasswordRequest,
     user: CurrentVerifiedUser,
     request: Request,
+    response: Response,
     # Resolve claims to get session_id for session preservation
     claims: Annotated[
         TokenClaims,
@@ -109,8 +74,8 @@ async def change_password(
         ),
     ],
 ) -> APIResponse[None]:
-    service = await _get_profile_service(request)
-    await service.change_password(
+    service = await get_profile_service(request)
+    result = await service.change_password(
         user=user,
         current_password=body.current_password,
         new_password=body.new_password,
@@ -122,24 +87,29 @@ async def change_password(
         if body.revoke_other_sessions
         else "Password changed."
     )
-    return http_response(msg)
+    return render_result(result, response, message=msg)
 
 
 @router.post("/avatar")
 async def upload_avatar(
     user: CurrentVerifiedUser,
     request: Request,
+    response: Response,
     file: Annotated[UploadFile, File()],
 ) -> APIResponse[AvatarResponse]:
     if not file.content_type:
-        msg = "Content-Type header is required for file upload"
-        raise ValidationException(msg)
+        return render_result(
+            Failure(
+                ProfileValidationError(message="Content-Type header is required for file upload")
+            ),
+            response,
+        )
 
     contents = await file.read()
-    service = await _get_profile_service(request)
+    service = await get_profile_service(request)
     result = await service.upload_avatar(
         user=user,
         file_data=contents,
         content_type=file.content_type,
     )
-    return http_response("Avatar uploaded", data=result)
+    return render_result(result, response, message="Avatar uploaded")

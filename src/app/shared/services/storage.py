@@ -10,8 +10,11 @@ import asyncer
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from returns.result import Failure, Success
 
-from app.utils import ServiceUnavailableException, ValidationException, logger
+from app.utils import logger
+
+from .errors import StorageUnavailableError, StorageValidationError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -21,6 +24,8 @@ if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
 
     from app.config import Settings
+
+    from .errors import StorageResult
 
 
 class S3ObjectLocation(BaseModel):
@@ -266,7 +271,7 @@ class StorageService(BaseModel):
         data: bytes,
         content_type: str,
         metadata: dict[str, str],
-    ) -> str:
+    ) -> StorageResult[str]:
         try:
             uri = await asyncer.asyncify(self._wrapper.put_object)(
                 key=key,
@@ -276,103 +281,138 @@ class StorageService(BaseModel):
             )
         except (BotoCoreError, ClientError) as exc:
             logger.bind(bucket=self.bucket, key=key).error("s3_put_failed", error=str(exc))
-            raise ServiceUnavailableException(
-                detail="Object storage upload failed",
-                data={"bucket": self.bucket, "key": key},
-            ) from exc
-        return uri
+            return Failure(
+                StorageUnavailableError(
+                    message="Object storage upload failed",
+                    details={"bucket": self.bucket, "key": key},
+                    operation="put_object",
+                )
+            )
+        return Success(uri)
 
-    async def get_object(self, *, key: str) -> bytes:
+    async def get_object(self, *, key: str) -> StorageResult[bytes]:
         try:
-            return await asyncer.asyncify(self._wrapper.get_object)(key=key)
+            value = await asyncer.asyncify(self._wrapper.get_object)(key=key)
         except (BotoCoreError, ClientError) as exc:
             logger.bind(bucket=self.bucket, key=key).error("s3_get_failed", error=str(exc))
-            raise ServiceUnavailableException(
-                detail="Object storage download failed",
-                data={"bucket": self.bucket, "key": key},
-            ) from exc
+            return Failure(
+                StorageUnavailableError(
+                    message="Object storage download failed",
+                    details={"bucket": self.bucket, "key": key},
+                    operation="get_object",
+                )
+            )
+        return Success(value)
 
-    async def delete_object(self, *, key: str) -> None:
+    async def delete_object(self, *, key: str) -> StorageResult[None]:
         try:
             await asyncer.asyncify(self._wrapper.delete_object)(key=key)
         except ClientError as exc:
             error_code = exc.response.get("Error", {}).get("Code", "")
             if error_code in {"404", "NotFound", "NoSuchKey"}:
-                return
+                return Success(None)
             logger.bind(bucket=self.bucket, key=key).error("s3_delete_failed", error=str(exc))
-            raise ServiceUnavailableException(
-                detail="Object storage delete failed",
-                data={"bucket": self.bucket, "key": key},
-            ) from exc
+            return Failure(
+                StorageUnavailableError(
+                    message="Object storage delete failed",
+                    details={"bucket": self.bucket, "key": key},
+                    operation="delete_object",
+                )
+            )
         except BotoCoreError as exc:
             logger.bind(bucket=self.bucket, key=key).error("s3_delete_failed", error=str(exc))
-            raise ServiceUnavailableException(
-                detail="Object storage delete failed",
-                data={"bucket": self.bucket, "key": key},
-            ) from exc
+            return Failure(
+                StorageUnavailableError(
+                    message="Object storage delete failed",
+                    details={"bucket": self.bucket, "key": key},
+                    operation="delete_object",
+                )
+            )
+        return Success(None)
 
-    async def get_by_uri(self, *, uri: str) -> bytes:
-        return await self.get_object(key=key_from_s3_uri(uri))
+    async def get_by_uri(self, *, uri: str) -> StorageResult[bytes]:
+        key_result = key_from_s3_uri(uri)
+        if isinstance(key_result, Failure):
+            return key_result
+        return await self.get_object(key=key_result.unwrap())
 
-    async def delete_by_uri(self, *, uri: str) -> None:
-        await self.delete_object(key=key_from_s3_uri(uri))
+    async def delete_by_uri(self, *, uri: str) -> StorageResult[None]:
+        key_result = key_from_s3_uri(uri)
+        if isinstance(key_result, Failure):
+            return key_result
+        return await self.delete_object(key=key_result.unwrap())
 
-    async def verify_access(self) -> None:
+    async def verify_access(self) -> StorageResult[None]:
         try:
             await asyncer.asyncify(self._wrapper.head_bucket)()
         except (BotoCoreError, ClientError) as exc:
             logger.bind(bucket=self.bucket).error("s3_verify_access_failed", error=str(exc))
-            raise ServiceUnavailableException(
-                detail="Object storage bucket access failed",
-                data={"bucket": self.bucket},
-            ) from exc
+            return Failure(
+                StorageUnavailableError(
+                    message="Object storage bucket access failed",
+                    details={"bucket": self.bucket},
+                    operation="verify_access",
+                )
+            )
+        return Success(None)
 
-    async def object_exists(self, *, key: str) -> bool:
+    async def object_exists(self, *, key: str) -> StorageResult[bool]:
         try:
             await asyncer.asyncify(self._wrapper.head_object)(key=key)
         except ClientError as exc:
             error_code = exc.response.get("Error", {}).get("Code")
             if error_code in {"404", "NotFound", "NoSuchKey"}:
-                return False
+                return Success(False)
             logger.bind(bucket=self.bucket, key=key).error("s3_head_failed", error=str(exc))
-            raise ServiceUnavailableException(
-                detail="Object existence check failed",
-                data={"bucket": self.bucket, "key": key},
-            ) from exc
+            return Failure(
+                StorageUnavailableError(
+                    message="Object existence check failed",
+                    details={"bucket": self.bucket, "key": key},
+                    operation="object_exists",
+                )
+            )
         except BotoCoreError as exc:
             logger.bind(bucket=self.bucket, key=key).error("s3_head_failed", error=str(exc))
-            raise ServiceUnavailableException(
-                detail="Object existence check failed",
-                data={"bucket": self.bucket, "key": key},
-            ) from exc
-        return True
+            return Failure(
+                StorageUnavailableError(
+                    message="Object existence check failed",
+                    details={"bucket": self.bucket, "key": key},
+                    operation="object_exists",
+                )
+            )
+        return Success(True)
 
     async def list_objects(
         self,
         *,
         prefix: str = "",
         max_keys: int = 1000,
-    ) -> S3ListObjectsResponse:
+    ) -> StorageResult[S3ListObjectsResponse]:
         try:
             response = await asyncer.asyncify(self._wrapper.list_objects)(
                 prefix=prefix, max_keys=max_keys
             )
         except (BotoCoreError, ClientError) as exc:
             logger.bind(bucket=self.bucket, prefix=prefix).error("s3_list_failed", error=str(exc))
-            raise ServiceUnavailableException(
-                detail="Object listing failed",
-                data={"bucket": self.bucket, "prefix": prefix},
-            ) from exc
+            return Failure(
+                StorageUnavailableError(
+                    message="Object listing failed",
+                    details={"bucket": self.bucket, "prefix": prefix},
+                    operation="list_objects",
+                )
+            )
         contents = response.get("Contents") or []
         common_prefixes = response.get("CommonPrefixes") or []
-        return S3ListObjectsResponse(
-            keys=[obj["Key"] for obj in contents if "Key" in obj],
-            prefixes=[p["Prefix"] for p in common_prefixes if "Prefix" in p],
-            is_truncated=response.get("IsTruncated", False),
-            key_count=response.get("KeyCount", 0),
+        return Success(
+            S3ListObjectsResponse(
+                keys=[obj["Key"] for obj in contents if "Key" in obj],
+                prefixes=[p["Prefix"] for p in common_prefixes if "Prefix" in p],
+                is_truncated=response.get("IsTruncated", False),
+                key_count=response.get("KeyCount", 0),
+            )
         )
 
-    async def copy_object(self, *, source_key: str, destination_key: str) -> None:
+    async def copy_object(self, *, source_key: str, destination_key: str) -> StorageResult[None]:
         try:
             await asyncer.asyncify(self._wrapper.copy_object)(
                 source_key=source_key,
@@ -384,14 +424,18 @@ class StorageService(BaseModel):
                 source_key=source_key,
                 destination_key=destination_key,
             ).error("s3_copy_failed", error=str(exc))
-            raise ServiceUnavailableException(
-                detail="Object copy failed",
-                data={
-                    "bucket": self.bucket,
-                    "source_key": source_key,
-                    "destination_key": destination_key,
-                },
-            ) from exc
+            return Failure(
+                StorageUnavailableError(
+                    message="Object copy failed",
+                    details={
+                        "bucket": self.bucket,
+                        "source_key": source_key,
+                        "destination_key": destination_key,
+                    },
+                    operation="copy_object",
+                )
+            )
+        return Success(None)
 
     async def create_multipart_upload(
         self,
@@ -399,9 +443,9 @@ class StorageService(BaseModel):
         key: str,
         content_type: str,
         metadata: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
+    ) -> StorageResult[dict[str, Any]]:
         try:
-            return await asyncer.asyncify(self._wrapper.create_multipart_upload)(
+            response = await asyncer.asyncify(self._wrapper.create_multipart_upload)(
                 key=key,
                 content_type=content_type,
                 metadata=metadata or {},
@@ -410,10 +454,14 @@ class StorageService(BaseModel):
             logger.bind(bucket=self.bucket, key=key).error(
                 "s3_multipart_create_failed", error=str(exc)
             )
-            raise ServiceUnavailableException(
-                detail="Multipart upload initialization failed",
-                data={"bucket": self.bucket, "key": key},
-            ) from exc
+            return Failure(
+                StorageUnavailableError(
+                    message="Multipart upload initialization failed",
+                    details={"bucket": self.bucket, "key": key},
+                    operation="create_multipart_upload",
+                )
+            )
+        return Success(response)
 
     async def upload_part(
         self,
@@ -422,7 +470,7 @@ class StorageService(BaseModel):
         upload_id: str,
         part_number: int,
         body: bytes,
-    ) -> S3UploadPartResponse:
+    ) -> StorageResult[S3UploadPartResponse]:
         try:
             response = await asyncer.asyncify(self._wrapper.upload_part)(
                 key=key,
@@ -437,16 +485,19 @@ class StorageService(BaseModel):
                 upload_id=upload_id,
                 part_number=part_number,
             ).error("s3_upload_part_failed", error=str(exc))
-            raise ServiceUnavailableException(
-                detail="Multipart part upload failed",
-                data={
-                    "bucket": self.bucket,
-                    "key": key,
-                    "upload_id": upload_id,
-                    "part_number": part_number,
-                },
-            ) from exc
-        return S3UploadPartResponse(e_tag=str(response.get("ETag", "")))
+            return Failure(
+                StorageUnavailableError(
+                    message="Multipart part upload failed",
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "upload_id": upload_id,
+                        "part_number": part_number,
+                    },
+                    operation="upload_part",
+                )
+            )
+        return Success(S3UploadPartResponse(e_tag=str(response.get("ETag", ""))))
 
     async def complete_multipart_upload(
         self,
@@ -454,7 +505,7 @@ class StorageService(BaseModel):
         key: str,
         upload_id: str,
         parts: list[dict[str, Any]],
-    ) -> S3CompleteMultipartUploadResponse:
+    ) -> StorageResult[S3CompleteMultipartUploadResponse]:
         try:
             response = await asyncer.asyncify(self._wrapper.complete_multipart_upload)(
                 key=key,
@@ -466,18 +517,23 @@ class StorageService(BaseModel):
                 "s3_multipart_complete_failed",
                 error=str(exc),
             )
-            raise ServiceUnavailableException(
-                detail="Multipart upload completion failed",
-                data={"bucket": self.bucket, "key": key, "upload_id": upload_id},
-            ) from exc
-        return S3CompleteMultipartUploadResponse(
-            location=str(response.get("Location", "")),
-            bucket=str(response.get("Bucket", "")),
-            key=str(response.get("Key", "")),
-            e_tag=str(response.get("ETag", "")),
+            return Failure(
+                StorageUnavailableError(
+                    message="Multipart upload completion failed",
+                    details={"bucket": self.bucket, "key": key, "upload_id": upload_id},
+                    operation="complete_multipart_upload",
+                )
+            )
+        return Success(
+            S3CompleteMultipartUploadResponse(
+                location=str(response.get("Location", "")),
+                bucket=str(response.get("Bucket", "")),
+                key=str(response.get("Key", "")),
+                e_tag=str(response.get("ETag", "")),
+            )
         )
 
-    async def abort_multipart_upload(self, *, key: str, upload_id: str) -> None:
+    async def abort_multipart_upload(self, *, key: str, upload_id: str) -> StorageResult[None]:
         try:
             await asyncer.asyncify(self._wrapper.abort_multipart_upload)(
                 key=key, upload_id=upload_id
@@ -485,31 +541,38 @@ class StorageService(BaseModel):
         except ClientError as exc:
             error_code = exc.response.get("Error", {}).get("Code", "")
             if error_code in {"404", "NoSuchUpload"}:
-                return
+                return Success(None)
             logger.bind(bucket=self.bucket, key=key, upload_id=upload_id).error(
                 "s3_multipart_abort_failed",
                 error=str(exc),
             )
-            raise ServiceUnavailableException(
-                detail="Multipart upload abort failed",
-                data={"bucket": self.bucket, "key": key, "upload_id": upload_id},
-            ) from exc
+            return Failure(
+                StorageUnavailableError(
+                    message="Multipart upload abort failed",
+                    details={"bucket": self.bucket, "key": key, "upload_id": upload_id},
+                    operation="abort_multipart_upload",
+                )
+            )
         except BotoCoreError as exc:
             logger.bind(bucket=self.bucket, key=key, upload_id=upload_id).error(
                 "s3_multipart_abort_failed",
                 error=str(exc),
             )
-            raise ServiceUnavailableException(
-                detail="Multipart upload abort failed",
-                data={"bucket": self.bucket, "key": key, "upload_id": upload_id},
-            ) from exc
+            return Failure(
+                StorageUnavailableError(
+                    message="Multipart upload abort failed",
+                    details={"bucket": self.bucket, "key": key, "upload_id": upload_id},
+                    operation="abort_multipart_upload",
+                )
+            )
+        return Success(None)
 
     async def list_multipart_upload_parts(
         self,
         *,
         key: str,
         upload_id: str,
-    ) -> S3ListPartsResponse:
+    ) -> StorageResult[S3ListPartsResponse]:
         try:
             response = await asyncer.asyncify(self._wrapper.list_parts)(
                 key=key, upload_id=upload_id
@@ -519,32 +582,49 @@ class StorageService(BaseModel):
                 "s3_multipart_list_parts_failed",
                 error=str(exc),
             )
-            raise ServiceUnavailableException(
-                detail="Multipart upload part listing failed",
-                data={"bucket": self.bucket, "key": key, "upload_id": upload_id},
-            ) from exc
-        parts_data = response.get("Parts") or []
-        return S3ListPartsResponse(
-            parts=[
-                S3PartInfo(
-                    part_number=p["PartNumber"],
-                    e_tag=p["ETag"],
-                    size=p["Size"],
-                    last_modified=p["LastModified"],
+            return Failure(
+                StorageUnavailableError(
+                    message="Multipart upload part listing failed",
+                    details={"bucket": self.bucket, "key": key, "upload_id": upload_id},
+                    operation="list_multipart_upload_parts",
                 )
-                for p in parts_data
-            ],
+            )
+        parts_data = response.get("Parts") or []
+        return Success(
+            S3ListPartsResponse(
+                parts=[
+                    S3PartInfo(
+                        part_number=p["PartNumber"],
+                        e_tag=p["ETag"],
+                        size=p["Size"],
+                        last_modified=p["LastModified"],
+                    )
+                    for p in parts_data
+                ],
+            )
         )
 
-    async def get_signed_get_url(self, *, key: str, expires_in: int = 900) -> str:
+    async def get_signed_get_url(self, *, key: str, expires_in: int = 900) -> StorageResult[str]:
         params = {"Bucket": self.bucket, "Key": key}
-        url = await asyncer.asyncify(self._wrapper.generate_presigned_url)(
-            "get_object",
-            params=params,
-            expires_in=expires_in,
-        )
+        try:
+            url = await asyncer.asyncify(self._wrapper.generate_presigned_url)(
+                "get_object",
+                params=params,
+                expires_in=expires_in,
+            )
+        except (BotoCoreError, ClientError) as exc:
+            logger.bind(bucket=self.bucket, key=key).error(
+                "s3_signed_get_url_failed", error=str(exc)
+            )
+            return Failure(
+                StorageUnavailableError(
+                    message="Signed download URL generation failed",
+                    details={"bucket": self.bucket, "key": key},
+                    operation="get_signed_get_url",
+                )
+            )
         logger.bind(bucket=self.bucket, key=key).debug("s3_signed_get_url_generated")
-        return url
+        return Success(url)
 
     async def get_signed_put_url(
         self,
@@ -552,15 +632,27 @@ class StorageService(BaseModel):
         key: str,
         content_type: str,
         expires_in: int = 900,
-    ) -> str:
+    ) -> StorageResult[str]:
         params = {"Bucket": self.bucket, "Key": key, "ContentType": content_type}
-        url = await asyncer.asyncify(self._wrapper.generate_presigned_url)(
-            "put_object",
-            params=params,
-            expires_in=expires_in,
-        )
+        try:
+            url = await asyncer.asyncify(self._wrapper.generate_presigned_url)(
+                "put_object",
+                params=params,
+                expires_in=expires_in,
+            )
+        except (BotoCoreError, ClientError) as exc:
+            logger.bind(bucket=self.bucket, key=key).error(
+                "s3_signed_put_url_failed", error=str(exc)
+            )
+            return Failure(
+                StorageUnavailableError(
+                    message="Signed upload URL generation failed",
+                    details={"bucket": self.bucket, "key": key},
+                    operation="get_signed_put_url",
+                )
+            )
         logger.bind(bucket=self.bucket, key=key).debug("s3_signed_put_url_generated")
-        return url
+        return Success(url)
 
     async def generate_presigned_upload_urls(
         self,
@@ -568,7 +660,7 @@ class StorageService(BaseModel):
         files: Sequence[UploadRequest] = (),
         destination: str = "uploads",
         expires_in: int = 900,
-    ) -> list[PresignedUploadURL]:
+    ) -> StorageResult[list[PresignedUploadURL]]:
         results: list[PresignedUploadURL] = []
         for file in files:
             key = build_s3_key(
@@ -578,13 +670,15 @@ class StorageService(BaseModel):
                 content_hash=file.content_hash,
                 filename=file.filename,
             )
-            signed_url = await self.get_signed_put_url(
+            signed_url_result = await self.get_signed_put_url(
                 key=key,
                 content_type=file.content_type,
                 expires_in=expires_in,
             )
-            results.append(PresignedUploadURL(signed_url=signed_url, key=key))
-        return results
+            if isinstance(signed_url_result, Failure):
+                return signed_url_result
+            results.append(PresignedUploadURL(signed_url=signed_url_result.unwrap(), key=key))
+        return Success(results)
 
     async def create_multipart_upload_plan(
         self,
@@ -596,10 +690,9 @@ class StorageService(BaseModel):
         part_size: int = 5 * 1024 * 1024,
         expires_in: int = 3600,
         metadata: dict[str, str] | None = None,
-    ) -> MultipartUploadPlan:
+    ) -> StorageResult[MultipartUploadPlan]:
         if file_size <= 0:
-            message = "file_size must be greater than zero"
-            raise ValidationException(message)
+            return Failure(StorageValidationError(message="file_size must be greater than zero"))
 
         key = build_s3_key(
             prefix=destination,
@@ -613,24 +706,35 @@ class StorageService(BaseModel):
             content_type=content_type,
             metadata=metadata or {},
         )
-        upload_id = str(init_response.get("UploadId") or "")
+        if isinstance(init_response, Failure):
+            return init_response
+        upload_id = str(init_response.unwrap().get("UploadId") or "")
         if not upload_id:
-            message = "S3 did not return an upload id"
-            raise ServiceUnavailableException(
-                detail=message, data={"bucket": self.bucket, "key": key}
+            return Failure(
+                StorageUnavailableError(
+                    message="S3 did not return an upload id",
+                    details={"bucket": self.bucket, "key": key},
+                    operation="create_multipart_upload_plan",
+                )
             )
 
         num_parts = max(1, (file_size + part_size - 1) // part_size)
         parts: list[MultipartPartURL] = []
         for part_number in range(1, num_parts + 1):
-            url = await self.get_signed_multipart_part_url(
+            url_result = await self.get_signed_multipart_part_url(
                 key=key,
                 upload_id=upload_id,
                 part_number=part_number,
                 expires_in=expires_in,
             )
-            parts.append(MultipartPartURL(part_number=part_number, presigned_url=url))
-        return MultipartUploadPlan(upload_id=upload_id, key=key, parts=parts, part_size=part_size)
+            if isinstance(url_result, Failure):
+                return url_result
+            parts.append(
+                MultipartPartURL(part_number=part_number, presigned_url=url_result.unwrap())
+            )
+        return Success(
+            MultipartUploadPlan(upload_id=upload_id, key=key, parts=parts, part_size=part_size)
+        )
 
     async def get_signed_multipart_part_url(
         self,
@@ -639,22 +743,42 @@ class StorageService(BaseModel):
         upload_id: str,
         part_number: int,
         expires_in: int = 3600,
-    ) -> str:
+    ) -> StorageResult[str]:
         params = {
             "Bucket": self.bucket,
             "Key": key,
             "UploadId": upload_id,
             "PartNumber": part_number,
         }
-        url = await asyncer.asyncify(self._wrapper.generate_presigned_url)(
-            "upload_part",
-            params=params,
-            expires_in=expires_in,
-        )
+        try:
+            url = await asyncer.asyncify(self._wrapper.generate_presigned_url)(
+                "upload_part",
+                params=params,
+                expires_in=expires_in,
+            )
+        except (BotoCoreError, ClientError) as exc:
+            logger.bind(
+                bucket=self.bucket,
+                key=key,
+                upload_id=upload_id,
+                part_number=part_number,
+            ).error("s3_signed_multipart_part_url_failed", error=str(exc))
+            return Failure(
+                StorageUnavailableError(
+                    message="Signed multipart URL generation failed",
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "upload_id": upload_id,
+                        "part_number": part_number,
+                    },
+                    operation="get_signed_multipart_part_url",
+                )
+            )
         logger.bind(
             bucket=self.bucket, key=key, upload_id=upload_id, part_number=part_number
         ).debug("s3_signed_multipart_part_url_generated")
-        return url
+        return Success(url)
 
 
 class UploadRequest(BaseModel):
@@ -678,29 +802,25 @@ def build_s3_uri(*, bucket: str, key: str) -> str:
     return f"s3://{bucket}/{key}"
 
 
-def key_from_s3_uri(uri: str) -> str:
+def key_from_s3_uri(uri: str) -> StorageResult[str]:
     prefix = "s3://"
     if not uri.startswith(prefix):
-        message = f"Unsupported object URI: {uri}"
-        raise ValidationException(message)
+        return Failure(StorageValidationError(message=f"Unsupported object URI: {uri}"))
     parts = uri[len(prefix) :].split("/", maxsplit=1)
     if len(parts) != 2:
-        message = f"Invalid object URI: {uri}"
-        raise ValidationException(message)
-    return parts[1]
+        return Failure(StorageValidationError(message=f"Invalid object URI: {uri}"))
+    return Success(parts[1])
 
 
-def uri_to_location(uri: str) -> S3ObjectLocation:
+def uri_to_location(uri: str) -> StorageResult[S3ObjectLocation]:
     prefix = "s3://"
     if not uri.startswith(prefix):
-        message = f"Unsupported object URI: {uri}"
-        raise ValidationException(message)
+        return Failure(StorageValidationError(message=f"Unsupported object URI: {uri}"))
     remainder = uri[len(prefix) :]
     parts = remainder.split("/", maxsplit=1)
     if len(parts) != 2:
-        message = f"Invalid object URI: {uri}"
-        raise ValidationException(message)
-    return S3ObjectLocation(bucket=parts[0], key=parts[1])
+        return Failure(StorageValidationError(message=f"Invalid object URI: {uri}"))
+    return Success(S3ObjectLocation(bucket=parts[0], key=parts[1]))
 
 
 def _normalized_extension(filename: str) -> str:
@@ -709,49 +829,51 @@ def _normalized_extension(filename: str) -> str:
 
 async def put_object(
     storage: StorageService, *, key: str, data: bytes, content_type: str, metadata: dict[str, str]
-) -> str:
+) -> StorageResult[str]:
     return await storage.put_object(
         key=key, data=data, content_type=content_type, metadata=metadata
     )
 
 
-async def get_object(storage: StorageService, *, key: str) -> bytes:
+async def get_object(storage: StorageService, *, key: str) -> StorageResult[bytes]:
     return await storage.get_object(key=key)
 
 
-async def delete_object(storage: StorageService, *, key: str) -> None:
-    await storage.delete_object(key=key)
+async def delete_object(storage: StorageService, *, key: str) -> StorageResult[None]:
+    return await storage.delete_object(key=key)
 
 
-async def get_by_uri(storage: StorageService, *, uri: str) -> bytes:
+async def get_by_uri(storage: StorageService, *, uri: str) -> StorageResult[bytes]:
     return await storage.get_by_uri(uri=uri)
 
 
-async def delete_by_uri(storage: StorageService, *, uri: str) -> None:
-    await storage.delete_by_uri(uri=uri)
+async def delete_by_uri(storage: StorageService, *, uri: str) -> StorageResult[None]:
+    return await storage.delete_by_uri(uri=uri)
 
 
-async def verify_access(storage: StorageService) -> None:
-    await storage.verify_access()
+async def verify_access(storage: StorageService) -> StorageResult[None]:
+    return await storage.verify_access()
 
 
-async def object_exists(storage: StorageService, *, key: str) -> bool:
+async def object_exists(storage: StorageService, *, key: str) -> StorageResult[bool]:
     return await storage.object_exists(key=key)
 
 
 async def list_objects(
     storage: StorageService, *, prefix: str = "", max_keys: int = 1000
-) -> S3ListObjectsResponse:
+) -> StorageResult[S3ListObjectsResponse]:
     return await storage.list_objects(prefix=prefix, max_keys=max_keys)
 
 
-async def copy_object(storage: StorageService, *, source_key: str, destination_key: str) -> None:
-    await storage.copy_object(source_key=source_key, destination_key=destination_key)
+async def copy_object(
+    storage: StorageService, *, source_key: str, destination_key: str
+) -> StorageResult[None]:
+    return await storage.copy_object(source_key=source_key, destination_key=destination_key)
 
 
 async def create_multipart_upload(
     storage: StorageService, *, key: str, content_type: str, metadata: dict[str, str] | None = None
-) -> dict[str, Any]:
+) -> StorageResult[dict[str, Any]]:
     return await storage.create_multipart_upload(
         key=key, content_type=content_type, metadata=metadata
     )
@@ -759,7 +881,7 @@ async def create_multipart_upload(
 
 async def upload_part(
     storage: StorageService, *, key: str, upload_id: str, part_number: int, body: bytes
-) -> S3UploadPartResponse:
+) -> StorageResult[S3UploadPartResponse]:
     return await storage.upload_part(
         key=key, upload_id=upload_id, part_number=part_number, body=body
     )
@@ -767,27 +889,31 @@ async def upload_part(
 
 async def complete_multipart_upload(
     storage: StorageService, *, key: str, upload_id: str, parts: list[dict[str, Any]]
-) -> S3CompleteMultipartUploadResponse:
+) -> StorageResult[S3CompleteMultipartUploadResponse]:
     return await storage.complete_multipart_upload(key=key, upload_id=upload_id, parts=parts)
 
 
-async def abort_multipart_upload(storage: StorageService, *, key: str, upload_id: str) -> None:
-    await storage.abort_multipart_upload(key=key, upload_id=upload_id)
+async def abort_multipart_upload(
+    storage: StorageService, *, key: str, upload_id: str
+) -> StorageResult[None]:
+    return await storage.abort_multipart_upload(key=key, upload_id=upload_id)
 
 
 async def list_multipart_upload_parts(
     storage: StorageService, *, key: str, upload_id: str
-) -> S3ListPartsResponse:
+) -> StorageResult[S3ListPartsResponse]:
     return await storage.list_multipart_upload_parts(key=key, upload_id=upload_id)
 
 
-async def get_signed_get_url(storage: StorageService, *, key: str, expires_in: int = 900) -> str:
+async def get_signed_get_url(
+    storage: StorageService, *, key: str, expires_in: int = 900
+) -> StorageResult[str]:
     return await storage.get_signed_get_url(key=key, expires_in=expires_in)
 
 
 async def get_signed_put_url(
     storage: StorageService, *, key: str, content_type: str, expires_in: int = 900
-) -> str:
+) -> StorageResult[str]:
     return await storage.get_signed_put_url(
         key=key, content_type=content_type, expires_in=expires_in
     )

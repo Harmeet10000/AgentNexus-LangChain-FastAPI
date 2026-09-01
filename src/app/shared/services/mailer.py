@@ -12,12 +12,17 @@ from typing import TYPE_CHECKING
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
+from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.utils import ExternalServiceException, logger
+from app.utils import logger
+
+from .errors import MailerDeliveryError, MailerUnavailableError
 
 if TYPE_CHECKING:
     from httpx._models import Response
+
+    from .errors import MailerResult
 
 settings = get_settings()
 
@@ -43,11 +48,8 @@ def send_template(
     to: str,
     template_id: str,
     variables: dict[str, str],
-) -> None:
-    """Send a Resend hosted template email.
-
-    Raises ExternalServiceException on API or network failure.
-    """
+) -> MailerResult[None]:
+    """Send a Resend hosted template email with typed delivery failures."""
     try:
         with httpx.Client(timeout=10) as client:
             resp: Response = client.post(
@@ -70,17 +72,17 @@ def send_template(
             status_code=exc.response.status_code,
             error=str(exc),
         )
-        raise ExternalServiceException(
-            service="resend",
-            detail="Email dispatch failed",
-        ) from exc
+        return Failure(
+            MailerDeliveryError(
+                message="Email dispatch failed",
+                details={"status_code": exc.response.status_code},
+            )
+        )
     except httpx.RequestError as exc:
         logger.bind(to=to, template_id=template_id).error(
             "email_send_request_failed",
             error=str(exc),
         )
-        raise ExternalServiceException(
-            service="resend",
-            detail="Email service unreachable",
-        ) from exc
+        return Failure(MailerUnavailableError(message="Email service unreachable"))
     logger.bind(to=to, template_id=template_id).debug("Email dispatched via Resend")
+    return Success(None)
