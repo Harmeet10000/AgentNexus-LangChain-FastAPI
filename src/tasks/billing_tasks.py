@@ -99,9 +99,7 @@ def _current_utc() -> datetime:
     return datetime.now(tz=UTC)
 
 
-async def _renewal_job(
-    session: AsyncSession, session_factory: SessionFactory
-) -> dict[str, int]:
+async def _renewal_job(session: AsyncSession, session_factory: SessionFactory) -> dict[str, int]:
     """Reconcile-only renewal pass: no Razorpay charges are initiated here."""
     audit = _audit_repo(session)
     now = _current_utc()
@@ -159,16 +157,18 @@ async def _renewal_job(
     return {"checked": len(subscription_rows), "renewed": renewed}
 
 
-async def _dunning_job(
-    session: AsyncSession, session_factory: SessionFactory
-) -> dict[str, int]:
+async def _dunning_job(session: AsyncSession, session_factory: SessionFactory) -> dict[str, int]:
     service = DunningService(
         session,
         SubscriptionRepository(session),
         PlanRepository(session),
         AuditLogRepository(session),
     )
-    due = await service.find_due_for_retry(limit=200)
+    due_result = await service.find_due_for_retry(limit=200)
+    if isinstance(due_result, Failure):
+        logger.bind(operation="billing.dunning").error(due_result.failure().message)
+        return {"due": 0, "retried": 0, "halted": 0}
+    due = due_result.unwrap()
     retried = 0
     halted = 0
     for subscription in due:
@@ -179,7 +179,14 @@ async def _dunning_job(
                 PlanRepository(item_session),
                 AuditLogRepository(item_session),
             )
-            updated = await item_service.execute_retry(subscription)
+            updated_result = await item_service.execute_retry(subscription)
+            if isinstance(updated_result, Failure):
+                logger.bind(
+                    operation="billing.dunning",
+                    subscription_id=str(subscription.id),
+                ).warning(updated_result.failure().message)
+                continue
+            updated = updated_result.unwrap()
             if updated.status == SubscriptionStatus.HALTED.value:
                 halted += 1
             retried += 1

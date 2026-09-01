@@ -15,9 +15,9 @@ from returns.result import Failure, Success
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.shared.result import InfrastructureAppError
-from app.utils.codes import ErrorCode
+from app.utils import logger
 
+from .errors import AuditInfrastructureError
 from .model import AuditLog
 
 if TYPE_CHECKING:
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from app.shared.result import AppResult
+    from .errors import AuditResult
 
 
 class AuditLogRepository:
@@ -35,20 +35,22 @@ class AuditLogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create(self, entry: AuditLog) -> AppResult[AuditLog]:
+    async def create(self, entry: AuditLog) -> AuditResult[AuditLog]:
         try:
             self.session.add(entry)
             await self.session.flush()
             return Success(entry)
         except SQLAlchemyError as exc:
             await self.session.rollback()
+            logger.bind(operation="create", entity_type=entry.entity_type).error(
+                "audit_repository_failed", error=str(exc)
+            )
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                AuditInfrastructureError(
                     message="Database error while creating audit log entry",
                     details={"entity_type": entry.entity_type, "error": str(exc)},
                     source="audit_repository",
+                    operation="create",
                 )
             )
 
@@ -59,7 +61,7 @@ class AuditLogRepository:
         *,
         limit: int = 100,
         offset: int = 0,
-    ) -> AppResult[list[AuditLog]]:
+    ) -> AuditResult[list[AuditLog]]:
         try:
             statement: Select[tuple[AuditLog]] = (
                 select(AuditLog)
@@ -72,13 +74,17 @@ class AuditLogRepository:
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
             await self.session.rollback()
+            logger.bind(
+                operation="find_by_entity",
+                entity_type=entity_type,
+                entity_id=entity_id,
+            ).error("audit_repository_failed", error=str(exc))
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                AuditInfrastructureError(
                     message="Database error while querying audit logs",
                     details={"entity_type": entity_type, "entity_id": entity_id, "error": str(exc)},
                     source="audit_repository",
+                    operation="find_by_entity",
                 )
             )
 
@@ -92,7 +98,7 @@ class AuditLogRepository:
         date_to: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> AppResult[tuple[list[AuditLog], int]]:
+    ) -> AuditResult[tuple[list[AuditLog], int]]:
         try:
             conditions = []
             if entity_type is not None:
@@ -123,12 +129,12 @@ class AuditLogRepository:
             return Success((list(result.scalars().all()), int(total)))
         except SQLAlchemyError as exc:
             await self.session.rollback()
+            logger.bind(operation="query").error("audit_repository_failed", error=str(exc))
             return Failure(
-                InfrastructureAppError(
-                    code=ErrorCode.DATABASE_ERROR,
-                    retryable=False,
+                AuditInfrastructureError(
                     message="Database error while querying audit logs",
                     details={"error": str(exc)},
                     source="audit_repository",
+                    operation="query",
                 )
             )

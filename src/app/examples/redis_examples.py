@@ -208,7 +208,9 @@ async def get_user_endpoint(
         return user  # noqa: TRY300 -- example
     except Exception as e:
         logger.error(f"Failed to get user {user_id}: {e!s}")
-        raise InfrastructureException(detail="Failed to retrieve user", error_code="CACHE_ERROR", retryable=False) from e
+        raise InfrastructureException(
+            detail="Failed to retrieve user", error_code="CACHE_ERROR", retryable=False
+        ) from e
 
 
 @router.patch("/{user_id}")
@@ -236,7 +238,9 @@ async def update_user_endpoint(
         return user  # noqa: TRY300 -- example
     except Exception as e:
         logger.error(f"Failed to update user {user_id}: {e!s}")
-        raise InfrastructureException(detail="Failed to update user", error_code="CACHE_ERROR", retryable=False) from e
+        raise InfrastructureException(
+            detail="Failed to update user", error_code="CACHE_ERROR", retryable=False
+        ) from e
 
 
 @router.delete("/{user_id}")
@@ -262,7 +266,9 @@ async def delete_user_endpoint(user_id: str, redis: Annotated[Redis, Depends(get
         return {"status": "deleted", "user_id": user_id}  # noqa: TRY300 -- example
     except InfrastructureException as e:
         logger.error(f"Failed to delete user {user_id}: {e.detail}")
-        raise InfrastructureException(detail="Failed to delete user", error_code="CACHE_ERROR", retryable=False) from e
+        raise InfrastructureException(
+            detail="Failed to delete user", error_code="CACHE_ERROR", retryable=False
+        ) from e
 
 
 @router.post("/{user_id}/activity")
@@ -296,7 +302,9 @@ async def log_activity_endpoint(
         }
     except InfrastructureException as e:
         logger.error(f"Failed to log activity: {e.detail}")
-        raise InfrastructureException(detail="Failed to log activity", error_code="CACHE_ERROR", retryable=False) from e
+        raise InfrastructureException(
+            detail="Failed to log activity", error_code="CACHE_ERROR", retryable=False
+        ) from e
 
 
 @router.get("/{user_id}/activity")

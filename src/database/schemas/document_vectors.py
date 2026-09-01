@@ -30,9 +30,7 @@ class DocumentVector(Base):
         JSON, name="metadata", nullable=True
     )
     # Legacy — Python-side defaults match 0014 (no server_default there).
-    created_at: Mapped[datetime] = mapped_column(
-        nullable=False, default=lambda: datetime.now(UTC)
-    )
+    created_at: Mapped[datetime] = mapped_column(nullable=False, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         nullable=False,
         default=lambda: datetime.now(UTC),

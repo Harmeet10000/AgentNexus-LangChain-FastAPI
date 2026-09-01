@@ -26,15 +26,9 @@ from app.shared.langgraph_layer.retrieval_kb import (
     build_retrieval_graph,
 )
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
-from app.shared.result import app_error_to_exception, log_expected_failure
+from app.shared.result import log_expected_failure
 from app.shared.services.storage import StorageService, build_s3_key, key_from_s3_uri
-from app.utils import (
-    NotFoundException,
-    ServiceUnavailableException,
-    ValidationException,
-    logger,
-    to_sorted_key_bytes,
-)
+from app.utils import logger, to_sorted_key_bytes
 
 from .classification import classify_document, segment_chunks
 from .constants import (
@@ -54,6 +48,11 @@ from .dto import (
     UnifiedRagResponse,
     UnifiedSearchRequest,
     UnifiedSearchResponse,
+)
+from .errors import (
+    DocumentNotFoundError,
+    DocumentStorageError,
+    DocumentValidationError,
 )
 from .fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
 from .graphiti_verifier import write_and_verify_chunk
@@ -78,10 +77,10 @@ if TYPE_CHECKING:
 
     from app.config.settings import Settings
     from app.features.documents.rag import ContextSection
-    from app.shared.result import AppResult
 
     from . import dto as documents_dto
     from .classification import ClassifiedDocument, ParsedDocument, PreparedChunk, QualityWarning
+    from .errors import DocumentResult
     from .legal_metadata import (
         LegalMetadataExtraction,
     )
@@ -122,10 +121,13 @@ class DocumentCommandService:
         filename: str,
         content_type: str,
         raw_bytes: bytes,
-    ) -> DocumentUploadResponse:
+    ) -> DocumentResult[DocumentUploadResponse]:
         if not raw_bytes:
-            message = "Uploaded document is empty"
-            raise ValidationException(message)
+            return Failure(
+                DocumentValidationError(
+                    message="Uploaded document is empty", source="document_service"
+                )
+            )
         content_hash = hashlib.sha256(raw_bytes).hexdigest()
         existing_result = await self.repo.get_document_by_user_hash(
             user_id=user_id, content_hash=content_hash
@@ -133,20 +135,20 @@ class DocumentCommandService:
         if isinstance(existing_result, Success):
             existing = existing_result.unwrap()
             if existing is not None:
-                return DocumentUploadResponse(
-                    doc_id=str(existing.id),
-                    status=existing.status,
-                    duplicate=True,
+                return Success(
+                    DocumentUploadResponse(
+                        doc_id=str(existing.id),
+                        status=existing.status,
+                        duplicate=True,
+                    )
                 )
         elif isinstance(existing_result, Failure):
             failure = existing_result.failure()
             # A miss on the duplicate check is the NORMAL first-upload path,
             # not an error — only real infrastructure failures abort here.
-            from app.shared.result.errors import NotFoundAppError
-
-            if not isinstance(failure, NotFoundAppError):
+            if not isinstance(failure, DocumentNotFoundError):
                 log_expected_failure(error=failure, operation="document_upload")
-                raise app_error_to_exception(failure)
+                return Failure(failure)
 
         document_id = str(object=uuid4())
         object_key = build_s3_key(
@@ -157,13 +159,27 @@ class DocumentCommandService:
             filename=filename,
         )
         if self.object_store is None:
-            raise ServiceUnavailableException(detail="Object storage is not configured")
-        object_uri: str = await self.object_store.put_object(
+            return Failure(
+                DocumentStorageError(
+                    message="Object storage is not configured", source="document_service"
+                )
+            )
+        storage_result = await self.object_store.put_object(
             key=object_key,
             data=raw_bytes,
             content_type=content_type,
             metadata={"user_id": user_id, "document_id": document_id, "content_hash": content_hash},
         )
+        if isinstance(storage_result, Failure):
+            error = storage_result.failure()
+            return Failure(
+                DocumentStorageError(
+                    message=error.message,
+                    details=error.details,
+                    source="object_storage",
+                )
+            )
+        object_uri = storage_result.unwrap()
         create_result = await self.repo.create_document(
             user_id=user_id,
             title=filename,
@@ -177,11 +193,10 @@ class DocumentCommandService:
             parties=[],
             metadata_={"content_type": content_type, "filename": filename},
         )
-        if isinstance(create_result, Success):
-            document = create_result.unwrap()
-        elif isinstance(create_result, Failure):
+        if isinstance(create_result, Failure):
             log_expected_failure(error=create_result.failure(), operation="document_upload")
-            raise app_error_to_exception(error=create_result.failure())
+            return Failure(create_result.failure())
+        document = create_result.unwrap()
 
         from app.shared.outbox import (
             with_outbox,
@@ -202,36 +217,47 @@ class DocumentCommandService:
         )
 
         logger.bind(document_id=str(object=document.id)).info("documents_ingest_queued")
-        return DocumentUploadResponse(
-            doc_id=str(object=document.id),
-            status="queued",
-            task_id=None,
-            object_uri=object_uri,
-            document_kind=document.document_kind,
-            warning_count=0,
+        return Success(
+            DocumentUploadResponse(
+                doc_id=str(object=document.id),
+                status="queued",
+                task_id=None,
+                object_uri=object_uri,
+                document_kind=document.document_kind,
+                warning_count=0,
+            )
         )
 
-    async def get_status(self, *, user_id: str, document_id: str) -> DocumentStatusResponse:
-        status_result: AppResult[dict[str, Any] | None] = await self.repo.fetch_status(
-            user_id=user_id, document_id=document_id
-        )
+    async def get_status(
+        self, *, user_id: str, document_id: str
+    ) -> DocumentResult[DocumentStatusResponse]:
+        status_result = await self.repo.fetch_status(user_id=user_id, document_id=document_id)
         if isinstance(status_result, Success):
             record: dict[str, Any] | None = status_result.unwrap()
             if record is not None:
                 warnings: list[QualityWarningDTO] = _flatten_warnings(record.get("warnings", []))
-                return DocumentStatusResponse(
-                    doc_id=str(object=record["document_id"]),
-                    status=str(object=record["status"]),
-                    object_uri=str(object=record["object_uri"]),
-                    title=str(object=record["title"]),
-                    document_kind=str(object=record["document_kind"]),
-                    chunk_count=int(record["chunk_count"]),
-                    verified_chunk_count=int(record["verified_chunk_count"]),
-                    warning_count=len(warnings),
-                    warnings=warnings,
+                return Success(
+                    DocumentStatusResponse(
+                        doc_id=str(object=record["document_id"]),
+                        status=str(object=record["status"]),
+                        object_uri=str(object=record["object_uri"]),
+                        title=str(object=record["title"]),
+                        document_kind=str(object=record["document_kind"]),
+                        chunk_count=int(record["chunk_count"]),
+                        verified_chunk_count=int(record["verified_chunk_count"]),
+                        warning_count=len(warnings),
+                        warnings=warnings,
+                    )
                 )
-        resource = "Document"
-        raise NotFoundException(resource, document_id)
+        if isinstance(status_result, Failure):
+            return Failure(status_result.failure())
+        return Failure(
+            DocumentNotFoundError(
+                message="Document not found",
+                details={"document_id": document_id},
+                source="document_service",
+            )
+        )
 
 
 class DocumentQueryService:
@@ -260,7 +286,9 @@ class DocumentQueryService:
             self._llm = self._llm_factory()
         return self._llm
 
-    async def search(self, *, user_id: str, payload: UnifiedSearchRequest) -> UnifiedSearchResponse:
+    async def search(
+        self, *, user_id: str, payload: UnifiedSearchRequest
+    ) -> DocumentResult[UnifiedSearchResponse]:
         cache_key = _build_cache_key("documents:search", payload)
         lock_key = f"{cache_key}:lock"
         lock_acquired = False
@@ -268,7 +296,7 @@ class DocumentQueryService:
             cached = await self.redis.get(cache_key)
             if cached is not None:
                 response: UnifiedSearchResponse = UnifiedSearchResponse.model_validate_json(cached)
-                return response.model_copy(update={"cache_hit": True})
+                return Success(response.model_copy(update={"cache_hit": True}))
 
             # ponytail: setnx lock prevents concurrent duplicate compute for same query
             lock_acquired = await self.redis.setnx(lock_key, "1")
@@ -277,8 +305,10 @@ class DocumentQueryService:
                     await asyncio.sleep(0.05)
                     cached = await self.redis.get(cache_key)
                     if cached is not None:
-                        return UnifiedSearchResponse.model_validate_json(cached).model_copy(
-                            update={"cache_hit": True}
+                        return Success(
+                            UnifiedSearchResponse.model_validate_json(cached).model_copy(
+                                update={"cache_hit": True}
+                            )
                         )
             else:
                 await self.redis.expire(lock_key, 15)
@@ -291,7 +321,7 @@ class DocumentQueryService:
         filter_params = build_search_filter_params(
             metadata_filter=payload.metadata_filter.model_dump()
         )
-        fused_result: AppResult[list[RankedChunk]] = await self._fuse_search_branches(
+        fused_result = await self._fuse_search_branches(
             user_id=user_id,
             payload=payload,
             query_embedding=query_embedding,
@@ -302,11 +332,14 @@ class DocumentQueryService:
             log_expected_failure(error, operation="hybrid_search")
             # The setnx lock above is not released on this path. It carries a 15s expiry for
             # exactly this reason, and every other raise in this method already relied on it.
-            raise app_error_to_exception(error)
+            return Failure(error)
         fused_results: list[RankedChunk] = fused_result.unwrap()
-        chunk_lookup = await self.repo.fetch_chunks_by_ids(
+        chunk_lookup_result = await self.repo.fetch_chunks_by_ids(
             [item.chunk_id for item in fused_results]
         )
+        if isinstance(chunk_lookup_result, Failure):
+            return Failure(chunk_lookup_result.failure())
+        chunk_lookup = chunk_lookup_result.unwrap()
         items: list[DocumentSearchResultItem] = _build_search_items(
             fused_results=fused_results, chunk_lookup=chunk_lookup
         )
@@ -319,7 +352,7 @@ class DocumentQueryService:
             )
             if lock_acquired:
                 await self.redis.delete(lock_key)
-        return response
+        return Success(response)
 
     async def _fuse_search_branches(
         self,
@@ -328,7 +361,7 @@ class DocumentQueryService:
         payload: UnifiedSearchRequest,
         query_embedding: list[float],
         filter_params: dict[str, Any],
-    ) -> AppResult[list[RankedChunk]]:
+    ) -> DocumentResult[list[RankedChunk]]:
         """Run the three retrieval modes and fuse them, or fail naming the branch that broke.
 
         The distinction this method exists to draw: **an empty result from a healthy branch is
@@ -367,10 +400,10 @@ class DocumentQueryService:
         for branch, branch_result in zip(_SEARCH_BRANCHES, results, strict=True):
             if isinstance(branch_result, Failure):
                 error = branch_result.failure()
-                # `model_copy` rather than a fresh `InfrastructureAppError`: re-wrapping would
+                # `model_copy` rather than a fresh infrastructure error: re-wrapping would
                 # flatten the taxonomy and turn a 422 from one branch into a 503 for the whole
-                # request. This keeps the branch's own error kind, so `app_error_to_exception`
-                # still maps it to the status the branch earned, and only adds the attribution.
+                # request. This keeps the branch's own error kind, so the renderer still uses
+                # the status the branch earned and this path only adds the attribution.
                 return Failure(
                     error.model_copy(
                         update={
@@ -393,10 +426,13 @@ class DocumentQueryService:
 
     async def rag(
         self, *, user_id: str, payload: documents_dto.UnifiedRagRequest
-    ) -> UnifiedRagResponse:
-        response = await self.search(
+    ) -> DocumentResult[UnifiedRagResponse]:
+        search_result = await self.search(
             user_id=user_id, payload=UnifiedSearchRequest.model_validate(payload.model_dump())
         )
+        if isinstance(search_result, Failure):
+            return Failure(search_result.failure())
+        response = search_result.unwrap()
         chunk_lookup: dict[str, SearchChunkRecord] = {
             item.chunk_id: SearchChunkRecord(
                 document_id=item.document_id,
@@ -414,24 +450,26 @@ class DocumentQueryService:
         context_sections: list[ContextSection] = assemble_rag_context(
             ranked_chunks, chunk_lookup, max_tokens=payload.max_tokens
         )
-        return UnifiedRagResponse(
-            items=response.items,
-            context=[
-                RagContextSectionResponse(
-                    document_id=section.document_id,
-                    title=section.title,
-                    content=section.content,
-                    chunk_indices=section.chunk_indices,
-                    chunk_metadata=section.chunk_metadata,
-                )
-                for section in context_sections
-            ],
-            cache_hit=response.cache_hit,
+        return Success(
+            UnifiedRagResponse(
+                items=response.items,
+                context=[
+                    RagContextSectionResponse(
+                        document_id=section.document_id,
+                        title=section.title,
+                        content=section.content,
+                        chunk_indices=section.chunk_indices,
+                        chunk_metadata=section.chunk_metadata,
+                    )
+                    for section in context_sections
+                ],
+                cache_hit=response.cache_hit,
+            )
         )
 
     async def ask_via_retrieval_graph(
         self, *, user_id: str, payload: documents_dto.UnifiedAskRequest
-    ) -> UnifiedAskResponse:
+    ) -> DocumentResult[UnifiedAskResponse]:
         """Answer through the compiled retrieval graph rather than the inline loop in `ask`.
 
         **Deliberately not exposed by any router**, and that is the whole point of it existing.
@@ -465,18 +503,20 @@ class DocumentQueryService:
             }
         )
         answer = GeneratedAnswer.model_validate(result["generated_answer"])
-        return UnifiedAskResponse(
-            answer=answer.answer,
-            citations=[
-                LegalCitationResponse(
-                    chunk_id=citation.chunk_id,
-                    clause_type=citation.clause_type,
-                    claim=citation.claim,
-                )
-                for citation in answer.citations
-            ],
-            confidence=answer.confidence,
-            cache_hit=bool(result.get("cache_hit")),
+        return Success(
+            UnifiedAskResponse(
+                answer=answer.answer,
+                citations=[
+                    LegalCitationResponse(
+                        chunk_id=citation.chunk_id,
+                        clause_type=citation.clause_type,
+                        claim=citation.claim,
+                    )
+                    for citation in answer.citations
+                ],
+                confidence=answer.confidence,
+                cache_hit=bool(result.get("cache_hit")),
+            )
         )
 
     async def ask(  # noqa: PLR0914
@@ -485,7 +525,7 @@ class DocumentQueryService:
         user_id: str,
         payload: documents_dto.UnifiedAskRequest,
         require_graphiti_verified: bool,
-    ) -> UnifiedAskResponse:
+    ) -> DocumentResult[UnifiedAskResponse]:
         answer_cache_key = _build_answer_cache_key(
             query=payload.query,
             doc_ids_filter=payload.doc_ids_filter,
@@ -498,7 +538,7 @@ class DocumentQueryService:
             cached = await self.redis.get(answer_cache_key)
             if cached is not None:
                 response = UnifiedAskResponse.model_validate_json(cached)
-                return response.model_copy(update={"cache_hit": True})
+                return Success(response.model_copy(update={"cache_hit": True}))
 
         settings: Settings = get_settings()
         _ = settings
@@ -539,7 +579,7 @@ class DocumentQueryService:
                 ),
                 label="documents_query_embedding",
             )
-            rows = await self.repo.legal_rrf_search(
+            rows_result = await self.repo.legal_rrf_search(
                 user_id=user_id,
                 query_text=plan.rewritten_query,
                 query_embedding=embedding,
@@ -555,6 +595,9 @@ class DocumentQueryService:
                 bm25_threshold=plan.bm25_threshold,
                 exact_phrase=plan.exact_phrase,
             )
+            if isinstance(rows_result, Failure):
+                return Failure(rows_result.failure())
+            rows = rows_result.unwrap()
             retrieved_chunks = [_row_to_chunk(row) for row in rows]
             reranked = await CrossEncoderReranker().rerank(
                 plan.rewritten_query, retrieved_chunks, limit=5
@@ -592,7 +635,32 @@ class DocumentQueryService:
                 DEFAULT_SEARCH_CACHE_TTL_SECONDS,
                 response.model_dump_json(),
             )
-        return response
+        return Success(response)
+
+
+async def _load_document_bytes(
+    object_store: StorageService, object_uri: str
+) -> DocumentResult[bytes]:
+    key_result = key_from_s3_uri(object_uri)
+    if isinstance(key_result, Failure):
+        error = key_result.failure()
+        return Failure(
+            DocumentValidationError(
+                message=error.message,
+                details=error.details,
+                source="object_storage",
+            )
+        )
+    object_result = await object_store.get_object(key=key_result.unwrap())
+    if isinstance(object_result, Failure):
+        return Failure(
+            DocumentStorageError(
+                message=object_result.failure().message,
+                details=object_result.failure().details,
+                source="object_storage",
+            )
+        )
+    return Success(object_result.unwrap())
 
 
 async def process_document_ingestion(
@@ -606,8 +674,11 @@ async def process_document_ingestion(
     repo: DocumentRepository,
     graphiti: Graphiti | None,
     llm: BaseChatModel,
-) -> dict[str, object]:
-    raw_bytes = await object_store.get_object(key=key_from_s3_uri(object_uri))
+) -> DocumentResult[dict[str, object]]:
+    raw_result = await _load_document_bytes(object_store, object_uri)
+    if isinstance(raw_result, Failure):
+        return raw_result
+    raw_bytes = raw_result.unwrap()
     parsed: ParsedDocument = await parse_document(
         raw_bytes=raw_bytes, filename=filename, content_type=content_type
     )
@@ -620,7 +691,7 @@ async def process_document_ingestion(
             markdown=parsed.markdown,
             classified=classified,
         )
-    await repo.update_document_status(
+    status_result = await repo.update_document_status(
         document_id=document_id,
         status="parsed",
         title=parsed.title,
@@ -637,6 +708,8 @@ async def process_document_ingestion(
             **(legal_metadata.model_dump(exclude_none=True) if legal_metadata else {}),
         },
     )
+    if isinstance(status_result, Failure):
+        return Failure(status_result.failure())
     chunks, segmentation_warnings = await segment_chunks(parsed=parsed, classified=classified)
     if legal_metadata is not None:
         chunks = enrich_legal_chunks(
@@ -655,41 +728,28 @@ async def process_document_ingestion(
     )
     if isinstance(upsert_result, Failure):
         log_expected_failure(upsert_result.failure(), operation="document_ingestion")
-        raise app_error_to_exception(upsert_result.failure())
+        return Failure(upsert_result.failure())
     if len(chunk_rows) > ANALYZE_THRESHOLD_CHUNKS:
-        await repo.analyze_chunks()
-    await repo.update_document_status(document_id=document_id, status="stored_postgres")
+        analyze_result = await repo.analyze_chunks()
+        if isinstance(analyze_result, Failure):
+            return Failure(analyze_result.failure())
+    status_result = await repo.update_document_status(
+        document_id=document_id, status="stored_postgres"
+    )
+    if isinstance(status_result, Failure):
+        return Failure(status_result.failure())
     if classified.graphiti_required:
-        if graphiti is not None and legal_metadata is not None:
-            for event_name, event_date in contract_event_dates(legal_metadata):
-                try:
-                    await graphiti.add_episode(
-                        name=f"{event_name}:{document_id}:{event_date}",
-                        episode_body=f"{event_name} for {document_id} occurs on {event_date}.",
-                        source_description=(
-                            "{"
-                            f'"doc_id":"{document_id}",'
-                            f'"event_type":"{event_name}",'
-                            f'"event_date":"{event_date}"'
-                            "}"
-                        ),
-                        reference_time=None,  # ty: ignore[invalid-argument-type]
-                        group_id=document_id,
-                    )
-                except (AttributeError, TypeError, ValueError) as exc:
-                    logger.bind(
-                        document_id=document_id,
-                        event_name=event_name,
-                        event_date=event_date,
-                    ).warning("graphiti_event_episode_failed", error=str(exc))
-                    continue
-        verified_count: int = await _verify_legal_chunks(
+        await _write_contract_events(graphiti, legal_metadata, document_id)
+        verify_result = await _verify_legal_chunks(
             repo=repo,
             graphiti=graphiti,
             user_id=user_id,
             document_id=document_id,
             chunk_rows=chunk_rows,
         )
+        if isinstance(verify_result, Failure):
+            return Failure(verify_result.failure())
+        verified_count = verify_result.unwrap()
         final_status: Literal["completed", "completed_with_warnings"] = (
             "completed" if verified_count == len(chunk_rows) else "completed_with_warnings"
         )
@@ -700,14 +760,48 @@ async def process_document_ingestion(
             else "completed_with_warnings"
         )
         verified_count = 0
-    await repo.update_document_status(document_id=document_id, status=final_status)
-    return {
-        "status": final_status,
-        "document_id": document_id,
-        "chunk_count": len(chunk_rows),
-        "verified_chunk_count": verified_count,
-        "document_kind": classified.document_kind,
-    }
+    status_result = await repo.update_document_status(document_id=document_id, status=final_status)
+    if isinstance(status_result, Failure):
+        return Failure(status_result.failure())
+    return Success(
+        {
+            "status": final_status,
+            "document_id": document_id,
+            "chunk_count": len(chunk_rows),
+            "verified_chunk_count": verified_count,
+            "document_kind": classified.document_kind,
+        }
+    )
+
+
+async def _write_contract_events(
+    graphiti: Graphiti | None,
+    legal_metadata: LegalMetadataExtraction | None,
+    document_id: str,
+) -> None:
+    if graphiti is None or legal_metadata is None:
+        return
+    for event_name, event_date in contract_event_dates(legal_metadata):
+        try:
+            await graphiti.add_episode(
+                name=f"{event_name}:{document_id}:{event_date}",
+                episode_body=f"{event_name} for {document_id} occurs on {event_date}.",
+                source_description=(
+                    "{"
+                    f'"doc_id":"{document_id}",'
+                    f'"event_type":"{event_name}",'
+                    f'"event_date":"{event_date}"'
+                    "}"
+                ),
+                reference_time=None,  # ty: ignore[invalid-argument-type]
+                group_id=document_id,
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            logger.bind(
+                document_id=document_id,
+                event_name=event_name,
+                event_date=event_date,
+            ).warning("graphiti_event_episode_failed", error=str(exc))
 
 
 async def run_document_ingestion_task(
@@ -799,7 +893,7 @@ async def _verify_legal_chunks(
     user_id: str,
     document_id: str,
     chunk_rows: list[dict[str, object]],
-) -> int:
+) -> DocumentResult[int]:
     verified_count = 0
     for chunk in chunk_rows:
         result = await write_and_verify_chunk(
@@ -820,8 +914,8 @@ async def _verify_legal_chunks(
     )
     if isinstance(upsert_result, Failure):
         log_expected_failure(upsert_result.failure(), operation="verify_legal_chunks")
-        raise app_error_to_exception(upsert_result.failure())
-    return verified_count
+        return Failure(upsert_result.failure())
+    return Success(verified_count)
 
 
 async def _build_query_plan(
