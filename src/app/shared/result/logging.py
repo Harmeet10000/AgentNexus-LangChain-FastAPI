@@ -2,10 +2,10 @@
 
 from app.utils import execution_path, logger
 
-from .errors import AppError
+from .errors import FeatureError
 
 
-def log_expected_failure(error: AppError, *, operation: str | None = None) -> None:
+def log_expected_failure(error: FeatureError, *, operation: str | None = None) -> None:
     """Log an expected failure once at the ownership boundary."""
     # The `[]` default is load-bearing, for the same reason it is at
     # `middleware/global_exception_handler.py:54`: `execution_path` is set by the HTTP middleware

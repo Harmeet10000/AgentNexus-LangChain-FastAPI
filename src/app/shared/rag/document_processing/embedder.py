@@ -27,10 +27,13 @@ against the configured model.
 import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Never
 
 from google import genai
 from google.genai import errors as genai_errors
+from returns.result import Failure
 
+from app.shared.rag.errors import RagProviderError, RagResult
 from app.utils import logger
 from app.utils.exceptions import ExternalServiceException
 
@@ -68,8 +71,8 @@ def get_embedding_dimension() -> int:
     return get_settings().EMBEDDING_DIMENSION
 
 
-def _provider_failure(detail: str, *, model: str, text_count: int) -> ExternalServiceException:
-    """Build the one typed failure this module raises.
+def _provider_failure(detail: str, *, model: str, text_count: int) -> RagResult[None]:
+    """Classify a provider failure before the exception-native pipeline adapter.
 
     Each note carries a value the traceback alone does not: which model was
     asked, under which task type, and how many texts were in flight. The notes go
@@ -84,11 +87,27 @@ def _provider_failure(detail: str, *, model: str, text_count: int) -> ExternalSe
     anybody could see. (Deliberately described rather than quoted — A2's proof is
     a grep for the literal, and prose that spells it out would defeat the guard.)
     """
-    exc = ExternalServiceException(service=_SERVICE_NAME, detail=detail)
+    return Failure(
+        RagProviderError(
+            message=detail,
+            source="rag_embedder",
+            model=model,
+            text_count=text_count,
+        )
+    )
+
+
+def _raise_provider_failure(detail: str, *, model: str, text_count: int) -> Never:
+    failure = _provider_failure(detail, model=model, text_count=text_count).failure()
+    exc = ExternalServiceException(
+        service=_SERVICE_NAME,
+        detail=failure.message,
+        error_code=failure.code,
+    )
     exc.add_note(f"model={model}")
     exc.add_note(f"task_type={GEMINI_TASK_TYPE}")
     exc.add_note(f"text_count={text_count}")
-    return exc
+    raise exc
 
 
 def _validated_width(embedding: list[float], *, model: str, text_count: int) -> list[float]:
@@ -109,11 +128,11 @@ def _validated_width(embedding: list[float], *, model: str, text_count: int) -> 
     actual = len(embedding)
     if actual != expected:
         msg = f"provider returned a {actual}-dimensional vector; EMBEDDING_DIMENSION is {expected}"
-        raise _provider_failure(msg, model=model, text_count=text_count)
+        _raise_provider_failure(msg, model=model, text_count=text_count)
     return embedding
 
 
-async def generate_embedding(  # noqa: RET503
+async def generate_embedding(
     text: str,
     model: str = _PROVIDER_EMBEDDING_MODEL,
     max_retries: int = 3,
@@ -137,7 +156,7 @@ async def generate_embedding(  # noqa: RET503
     """
     if not text or not text.strip():
         msg = "refusing to embed empty text"
-        raise _provider_failure(msg, model=model, text_count=1)
+        _raise_provider_failure(msg, model=model, text_count=1)
 
     client = genai.Client()
 
@@ -168,9 +187,10 @@ async def generate_embedding(  # noqa: RET503
             await asyncio.sleep(retry_delay)
         else:
             return response.embedding.values
+    _raise_provider_failure("provider exhausted embedding attempts", model=model, text_count=1)
 
 
-async def generate_embeddings_batch(  # noqa: RET503
+async def generate_embeddings_batch(
     texts: list[str],
     model: str = _PROVIDER_EMBEDDING_MODEL,
     max_retries: int = 3,
@@ -203,7 +223,7 @@ async def generate_embeddings_batch(  # noqa: RET503
     blank_count = sum(1 for text in texts if not text or not text.strip())
     if blank_count:
         msg = f"refusing to embed a batch containing {blank_count} blank text(s)"
-        raise _provider_failure(msg, model=model, text_count=len(texts))
+        _raise_provider_failure(msg, model=model, text_count=len(texts))
 
     processed_texts = [
         text[: _MAX_INPUT_TOKENS * 4] if len(text) > _MAX_INPUT_TOKENS * 4 else text
@@ -241,6 +261,9 @@ async def generate_embeddings_batch(  # noqa: RET503
             await asyncio.sleep(retry_delay)
         else:
             return embeddings
+    _raise_provider_failure(
+        "provider exhausted batch embedding attempts", model=model, text_count=len(texts)
+    )
 
 
 async def _process_embeddings_individually(
@@ -274,7 +297,10 @@ async def _process_embeddings_individually(
         except genai_errors.APIError as e:
             logger.error("Failed to embed text: {}", e)
             msg = "provider failed while embedding a batch text individually"
-            raise _provider_failure(msg, model=model, text_count=len(texts)) from e
+            try:
+                _raise_provider_failure(msg, model=model, text_count=len(texts))
+            except ExternalServiceException as exc:
+                raise exc from e
         embeddings.append(_validated_width(embedding, model=model, text_count=len(texts)))
         await asyncio.sleep(0.1)
 

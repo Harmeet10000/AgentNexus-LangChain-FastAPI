@@ -2,11 +2,12 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 
+from app.shared.result import render_result
 from app.shared.services import RateLimitScope
 from app.shared.services.rate_limiter import RateLimiter
-from app.utils import TooManyRequestsException
+from app.utils import APIResponse, TooManyRequestsException
 
 from .constants import CRAWLER_PREFIX, CRAWLER_TAG
 from .dependencies import get_crawler_service, get_rate_limiter
@@ -47,9 +48,10 @@ def get_client_identifier(request: Request) -> str:
 async def crawl_url(
     request_data: CrawlRequest,
     request: Request,
+    response: Response,
     service: Annotated[CrawlerService, Depends(get_crawler_service)],
     rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
-) -> CrawlResponse:
+) -> APIResponse[CrawlResponse]:
     """
     Crawl a URL and optionally extract structured data.
 
@@ -76,19 +78,21 @@ async def crawl_url(
 
     await rate_limiter.increment_rate_limit(client_id, RateLimitScope.CRAWL)
 
-    return await service.crawl(request_data)
+    result = await service.crawl(request_data)
+    return render_result(result, response, message="Crawl completed")
 
 
 @router.get(path="/search")
 async def search_web(
     request: Request,
+    response: Response,
     service: Annotated[CrawlerService, Depends(get_crawler_service)],
     rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     query: str,
     *,
     max_results: int = 10,
     include_answer: bool = True,
-) -> SearchResponse:
+) -> APIResponse[SearchResponse]:
     """
     Search the web using Tavily.
 
@@ -113,7 +117,8 @@ async def search_web(
         include_answer=include_answer,
     )
 
-    return await service.search(search_request)
+    result = await service.search(search_request)
+    return render_result(result, response, message="Search completed")
 
 
 @router.get(path="/rate-limit")
