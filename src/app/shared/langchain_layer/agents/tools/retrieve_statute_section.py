@@ -23,6 +23,7 @@ from langchain_core.tools.base import BaseTool
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.shared.result.diagnostics import add_database_error_note
 from app.utils import logger
 
 from .idempotency import IdempotencyGuard, ToolResult
@@ -84,6 +85,9 @@ def make_retrieve_statute_section_tool(
                 jurisdiction=jurisdiction,
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(
+                exc, table="statute_sections", operation="fetch_statute_section"
+            )
             # Honesty (group 6): an unreachable corpus is NOT a missing section.
             logger.warning("statute_fetch_failed", error=str(exc))
             unavailable = ToolResult.unavailable_result(

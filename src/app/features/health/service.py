@@ -184,6 +184,7 @@ class HealthService:
                 version_result = await session.execute(text("SELECT version()"))
                 version = version_result.scalar() or "unknown"
         except SQLAlchemyError as exc:
+            exc.add_note("table=health_probe, operation=check_postgres, query=SELECT 1")
             logger.bind(error=str(exc)).warning("Postgres health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
         response_time = (time.perf_counter() - start) * 1000
