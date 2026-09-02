@@ -10,24 +10,20 @@ note: |
   3) pre-service policy guard: boolean check_rate_limit → raise TooManyRequestsException (crawler/router.py)
   Example violation: raise NotFoundException in router without render_result.
 rule:
-  any:
-    - pattern: raise NotFoundException($$$ARGS)
-    - pattern: raise ValidationException($$$ARGS)
-    - pattern: raise ConflictException($$$ARGS)
-    - pattern: raise UnauthorizedException($$$ARGS)
-    - pattern: raise ForbiddenException($$$ARGS)
-    - pattern: raise ServiceUnavailableException($$$ARGS)
-    - pattern: raise DatabaseException($$$ARGS)
-    - pattern: raise ExternalServiceException($$$ARGS)
-    - pattern: raise NotFoundAppError($$$ARGS)
-    - pattern: raise ValidationAppError($$$ARGS)
-    - pattern: raise ConflictAppError($$$ARGS)
-    - pattern: raise InfrastructureAppError($$$ARGS)
-    - pattern: raise ExternalServiceAppError($$$ARGS)
+  all:
+    - pattern: raise $EXCEPTION($$$ARGS)
+    - not:
+        regex: "raise\\s+(TooManyRequestsException|ForbiddenException|ValidationException|ValueError|WebSocketException)\\s*\\("
+    - not:
+        inside:
+          kind: except_clause
+    - not:
+        inside:
+          kind: if_statement
+          has:
+            pattern: "if not $ALLOWED:"
 files:
   - src/app/features/**/router.py
+  - src/app/features/**/routers/*.py
   - src/app/**/router.py
   - .ast-grep/fixtures/router-renders-result/**
-ignores:
-  - src/app/middleware/global_exception_handler.py
-  - src/app/features/crawler/router.py

@@ -10,6 +10,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.features.credits.models.credit import CreditStatus, UserCredit
+from app.shared.result.diagnostics import add_database_error_note
 
 from ..errors import (
     CreditConflictError,
@@ -37,6 +38,7 @@ class CreditRepository:
             await self.session.flush()
             return Success(credit)
         except IntegrityError as exc:
+            add_database_error_note(exc, table="user_credits")
             await self.session.rollback()
             return Failure(
                 CreditConflictError(
@@ -46,6 +48,7 @@ class CreditRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="user_credits")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(
@@ -61,6 +64,7 @@ class CreditRepository:
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="user_credits")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(
@@ -102,6 +106,7 @@ class CreditRepository:
             result = await self.session.execute(statement)
             return Success((list(result.scalars().all()), int(total)))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="user_credits")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(
@@ -140,6 +145,7 @@ class CreditRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="user_credits")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(
@@ -162,6 +168,7 @@ class CreditRepository:
             result = await self.session.execute(statement)
             return Success(int(result.scalar_one()))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="user_credits")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(
@@ -206,6 +213,7 @@ class CreditRepository:
                 )
             return Success(updated)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="user_credits")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(
@@ -252,6 +260,7 @@ class CreditRepository:
 
             return Success(credit_rows)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="user_credits")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(

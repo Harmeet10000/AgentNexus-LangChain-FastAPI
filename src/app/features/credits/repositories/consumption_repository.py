@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.features.credits.models.consumption import CreditConsumption
+from app.shared.result.diagnostics import add_database_error_note
 
 from ..errors import CreditConsumptionConflictError, CreditInfrastructureError
 
@@ -32,6 +33,7 @@ class ConsumptionRepository:
             await self.session.flush()
             return Success(consumption)
         except IntegrityError as exc:
+            add_database_error_note(exc, table="credit_consumptions")
             await self.session.rollback()
             return Failure(
                 CreditConsumptionConflictError(
@@ -41,6 +43,7 @@ class ConsumptionRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="credit_consumptions")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(
@@ -76,6 +79,7 @@ class ConsumptionRepository:
             result = await self.session.execute(statement)
             return Success((list(result.scalars().all()), int(total)))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="credit_consumptions")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(
@@ -94,6 +98,7 @@ class ConsumptionRepository:
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="credit_consumptions")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(
@@ -114,6 +119,7 @@ class ConsumptionRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="credit_consumptions")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(
@@ -132,6 +138,7 @@ class ConsumptionRepository:
             result = await self.session.execute(statement)
             return Success(int(result.scalar_one()))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="credit_consumptions")
             await self.session.rollback()
             return Failure(
                 CreditInfrastructureError(

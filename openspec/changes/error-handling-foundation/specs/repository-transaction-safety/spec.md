@@ -10,9 +10,11 @@ backing store has no transaction to roll back.
 ### Requirement: A relational repository SHALL roll back before returning a failure from a caught database exception
 
 When a repository catches an exception raised by the SQLAlchemy driver or ORM after
-any statement has been sent on the request-scoped session, it SHALL roll back that
-session before returning `Failure`. The order SHALL be: classify the exception into
-the feature's error type, roll back, log, return.
+any statement has been sent on the request-scoped session, it SHALL attach bounded
+diagnostic context to the original exception and roll back that session before
+returning `Failure`. The order SHALL be: classify the exception, add a note, roll
+back, log, return. An `IntegrityError` note SHALL include the available constraint
+name, using `unknown` when the driver does not expose one.
 
 Rollback SHALL happen in the repository, not in the service and not in the request
 dependency, because the repository is the only layer that knows a statement was
@@ -21,6 +23,10 @@ issued.
 #### Scenario: A flush failure leaves the session usable
 - **WHEN** a repository catches `IntegrityError` from a flush and returns its conflict error
 - **THEN** it has rolled back the session first, and a subsequent statement on that same session succeeds rather than raising `PendingRollbackError`
+
+#### Scenario: A database failure retains bounded diagnostics
+- **WHEN** a repository catches `SQLAlchemyError` or `IntegrityError`
+- **THEN** it adds a bounded note containing the table and operation, and an `IntegrityError` note also contains the available constraint name
 
 #### Scenario: The rollback precedes the log line
 - **WHEN** a repository catches `SQLAlchemyError` and both rolls back and logs
@@ -72,11 +78,12 @@ enforcement gates, not a matter of reviewer attention.
 Measured scope. There are **11 repository modules** holding 12 repository classes
 (`auth/repository.py` holds two). Of those:
 
-- **9 are relational** and carry 74 SQLAlchemy handlers between them — `audit`,
+- **9 are relational** and carry 69 SQLAlchemy handlers between them — `audit`,
   `credits/consumption_repository`, `credits/credit_repository`, `documents`,
   `invoices`, `payments`, `plans`, `subscriptions`, `webhooks`. These are the modules
-  this requirement covers. None of them rolls back today; `session.rollback` has
-  never appeared under `src/app/features/` in the repository's history.
+  this requirement covers. All 69 handlers now roll back before returning a
+  caught failure; the current contract is enforced by the repository audit test
+  and the repository rollback gate.
 - **`auth/repository.py` is a document-store repository**, not a relational one. It
   catches `PyMongoError`, `DuplicateKeyError` and `RedisError` across 19 handlers and
   issues no statement on the SQLAlchemy session. It is covered by the next

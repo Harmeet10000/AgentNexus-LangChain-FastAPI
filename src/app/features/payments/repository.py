@@ -9,6 +9,8 @@ from returns.result import Failure, Success
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.shared.result.diagnostics import add_database_error_note
+
 from .errors import PaymentConflictError, PaymentInfrastructureError, PaymentNotFoundError
 from .model import Payment
 
@@ -34,6 +36,7 @@ class PaymentRepository:
             await self.session.flush()
             return Success(payment)
         except IntegrityError as exc:
+            add_database_error_note(exc, table="payments")
             await self.session.rollback()
             return Failure(
                 PaymentConflictError(
@@ -43,6 +46,7 @@ class PaymentRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="payments")
             await self.session.rollback()
             return Failure(
                 PaymentInfrastructureError(
@@ -67,6 +71,7 @@ class PaymentRepository:
                 )
             return Success(payment)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="payments")
             await self.session.rollback()
             return Failure(
                 PaymentInfrastructureError(
@@ -84,6 +89,7 @@ class PaymentRepository:
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="payments")
             await self.session.rollback()
             return Failure(
                 PaymentInfrastructureError(
@@ -107,6 +113,7 @@ class PaymentRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="payments")
             await self.session.rollback()
             return Failure(
                 PaymentInfrastructureError(
@@ -128,6 +135,7 @@ class PaymentRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="payments")
             await self.session.rollback()
             return Failure(
                 PaymentInfrastructureError(
@@ -159,6 +167,7 @@ class PaymentRepository:
                 )
             return Success(updated)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="payments")
             await self.session.rollback()
             return Failure(
                 PaymentInfrastructureError(
@@ -193,6 +202,7 @@ class PaymentRepository:
                 )
             return Success(updated)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="payments")
             await self.session.rollback()
             return Failure(
                 PaymentInfrastructureError(

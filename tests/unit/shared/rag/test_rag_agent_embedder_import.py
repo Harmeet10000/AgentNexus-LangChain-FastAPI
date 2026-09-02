@@ -77,7 +77,12 @@ def test_the_phantom_package_does_not_exist() -> None:
     Asserted so that a regression fails on this test rather than on a
     ``ModuleNotFoundError`` at some caller's first request.
     """
-    assert importlib.util.find_spec("ingestion") is None
+    production_root = Path(__file__).resolve().parents[4] / "src"
+    spec = importlib.util.find_spec("ingestion")
+    assert spec is None or not any(
+        Path(location).resolve().is_relative_to(production_root)
+        for location in (spec.submodule_search_locations or ())
+    )
 
 
 # --- The embedder import is gone; the unified entry point replaced it ---

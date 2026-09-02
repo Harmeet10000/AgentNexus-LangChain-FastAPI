@@ -15,6 +15,7 @@ class CreditCode(StrEnum):
     AMOUNT_MUST_BE_POSITIVE = "CREDIT_AMOUNT_MUST_BE_POSITIVE"
     METADATA_MISSING = "CREDIT_METADATA_MISSING"
     INVALID = "CREDIT_INVALID"
+    FORBIDDEN = "CREDIT_FORBIDDEN"
     DATABASE_ERROR = "CREDIT_DATABASE_ERROR"
     COLLABORATOR_ERROR = "CREDIT_COLLABORATOR_ERROR"
 
@@ -49,6 +50,12 @@ class CreditMetadataError(FeatureError):
     retryable: ClassVar[bool] = False
 
 
+class CreditAuthorizationError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.AUTHORIZATION
+    code: ClassVar[CreditCode] = CreditCode.FORBIDDEN
+    retryable: ClassVar[bool] = False
+
+
 class CreditValidationError(FeatureError):
     kind: ClassVar[ErrorKind] = ErrorKind.VALIDATION
     code: ClassVar[CreditCode] = CreditCode.INVALID
@@ -73,6 +80,7 @@ type CreditError = (
     | CreditNotFoundError
     | CreditAmountError
     | CreditMetadataError
+    | CreditAuthorizationError
     | CreditValidationError
     | CreditInfrastructureError
     | CreditCollaboratorError
@@ -87,6 +95,8 @@ def credit_error_to_http_status(error: CreditError) -> int:
         case CreditNotFoundError():
             return http_status_for_kind(error.kind)
         case CreditAmountError() | CreditMetadataError() | CreditValidationError():
+            return http_status_for_kind(error.kind)
+        case CreditAuthorizationError():
             return http_status_for_kind(error.kind)
         case CreditInfrastructureError() | CreditCollaboratorError():
             return http_status_for_kind(error.kind, retryable=error.retryable)

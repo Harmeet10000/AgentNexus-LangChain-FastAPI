@@ -339,7 +339,7 @@ re-reading, which is the only method that has worked on this change.
 15. **`auth/repository.py` is a document store, and two claims rested on it not
     being one.** Every artifact said "11 repositories catch `SQLAlchemyError`" and
     "the 56 `DB_ERROR` sites correct from 503 to 500". Measured: of 11 repository
-    modules holding 12 classes, **9 are relational** with 74 SQLAlchemy handlers,
+    modules holding 12 classes, **9 are relational** with 69 SQLAlchemy handlers,
     `users/repository.py` catches nothing, and `auth/repository.py` is MongoDB and
     Redis — 13 `PyMongoError`/`DuplicateKeyError` handlers, 6 `RedisError`, zero
     SQLAlchemy, zero `session` writes.

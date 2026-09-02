@@ -9,6 +9,8 @@ from returns.result import Failure, Success
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.shared.result.diagnostics import add_database_error_note
+
 from .errors import WebhookConflictError, WebhookInfrastructureError, WebhookNotFoundError
 from .model import WebhookEvent
 
@@ -33,6 +35,7 @@ class WebhookEventRepository:
             await self.session.flush()
             return Success(event)
         except IntegrityError as exc:
+            add_database_error_note(exc, table="webhook_events")
             await self.session.rollback()
             return Failure(
                 WebhookConflictError(
@@ -42,6 +45,7 @@ class WebhookEventRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="webhook_events")
             await self.session.rollback()
             return Failure(
                 WebhookInfrastructureError(
@@ -61,6 +65,7 @@ class WebhookEventRepository:
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="webhook_events")
             await self.session.rollback()
             return Failure(
                 WebhookInfrastructureError(
@@ -87,6 +92,7 @@ class WebhookEventRepository:
                 )
             return Success(event)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="webhook_events")
             await self.session.rollback()
             return Failure(
                 WebhookInfrastructureError(
@@ -107,6 +113,7 @@ class WebhookEventRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="webhook_events")
             await self.session.rollback()
             return Failure(
                 WebhookInfrastructureError(
@@ -145,6 +152,7 @@ class WebhookEventRepository:
                 )
             return Success(updated)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="webhook_events")
             await self.session.rollback()
             return Failure(
                 WebhookInfrastructureError(

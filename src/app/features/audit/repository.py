@@ -15,6 +15,7 @@ from returns.result import Failure, Success
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.shared.result.diagnostics import add_database_error_note
 from app.utils import logger
 
 from .errors import AuditInfrastructureError
@@ -41,6 +42,7 @@ class AuditLogRepository:
             await self.session.flush()
             return Success(entry)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="audit_logs")
             await self.session.rollback()
             logger.bind(operation="create", entity_type=entry.entity_type).error(
                 "audit_repository_failed", error=str(exc)
@@ -73,6 +75,7 @@ class AuditLogRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="audit_logs")
             await self.session.rollback()
             logger.bind(
                 operation="find_by_entity",
@@ -128,6 +131,7 @@ class AuditLogRepository:
             result = await self.session.execute(statement)
             return Success((list(result.scalars().all()), int(total)))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="audit_logs")
             await self.session.rollback()
             logger.bind(operation="query").error("audit_repository_failed", error=str(exc))
             return Failure(

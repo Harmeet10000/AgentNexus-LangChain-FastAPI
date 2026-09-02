@@ -3,11 +3,12 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Response, status
+from returns.result import Failure
 
 from app.features.auth import CurrentClaims, require_role
 from app.features.auth.model import UserRole
 from app.shared.result import render_result
-from app.utils import APIResponse, ForbiddenException, ValidationException
+from app.utils import APIResponse
 
 from ..dependencies import CreditServiceDep
 from ..dto import (
@@ -16,6 +17,7 @@ from ..dto import (
     CreditGrantResponse,
     CreditHistoryResponse,
 )
+from ..errors import CreditAuthorizationError, CreditMetadataError
 
 router = APIRouter(prefix="/credits", tags=["credits"])
 
@@ -34,8 +36,11 @@ async def grant_credit(
     """Grant credit to a user (Requirement 49). Admin only."""
     target_user_id = dto.metadata_.get("target_user_id")
     if not target_user_id:
-        message = "target_user_id is required"
-        raise ValidationException(message)
+        return render_result(
+            Failure(CreditMetadataError(message="target_user_id is required")),
+            response,
+            message="Credit grant failed",
+        )
     result = await service.grant_credit(user_id=target_user_id, dto=dto)
     return render_result(
         result, response, message="Credit granted", success_status=status.HTTP_201_CREATED
@@ -52,7 +57,9 @@ async def get_credit_balance(
     """Get user's total available credit balance (Requirement 52.1)."""
     msg = "Cannot view other users' credit balances"
     if claims.sub != user_id and claims.role != UserRole.ADMIN.value:
-        raise ForbiddenException(msg)
+        return render_result(
+            Failure(CreditAuthorizationError(message=msg)), response, message="Credit access denied"
+        )
     result = await service.get_credit_balance(user_id)
     return render_result(result, response, message="Credit balance")
 
@@ -70,6 +77,8 @@ async def get_credit_history(
     """Get user's credit and consumption history (Requirement 52.2)."""
     msg = "Cannot view other users' credit history"
     if claims.sub != user_id and claims.role != UserRole.ADMIN.value:
-        raise ForbiddenException(msg)
+        return render_result(
+            Failure(CreditAuthorizationError(message=msg)), response, message="Credit access denied"
+        )
     result = await service.get_credit_history(user_id, limit=limit, offset=offset)
     return render_result(result, response, message="Credit history")

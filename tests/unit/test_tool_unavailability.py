@@ -7,12 +7,15 @@ fabricated "no results" answer and never as a rendered string.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 async def _async_none(*_a: Any, **_k: Any) -> None:
@@ -31,7 +34,8 @@ def _idempotency() -> Any:
         """connect() fails like an unreachable database."""
 
         def connect(self):
-            raise SQLAlchemyError("no database")
+            message = "no database"
+            raise SQLAlchemyError(message)
 
     return IdempotencyGuard(redis=redis, db_engine=_FailingEngine())
 
@@ -48,7 +52,8 @@ class _NullDB:
     class engine:  # noqa: N801 — attribute holder only
         @staticmethod
         def connect():
-            raise RuntimeError("no db in unit test")
+            message = "no db in unit test"
+            raise RuntimeError(message)
 
 
 async def _noop(*_a: Any, **_k: Any) -> None:
@@ -62,7 +67,8 @@ async def test_statute_tool_answers_unavailable_when_corpus_raises(monkeypatch: 
     )
 
     async def _raise(**_kw: Any) -> dict[str, Any]:
-        raise SQLAlchemyError("connection refused")
+        message = "connection refused"
+        raise SQLAlchemyError(message)
 
     monkeypatch.setattr(
         "app.shared.langchain_layer.agents.tools.retrieve_statute_section._fetch_statute_section",
@@ -98,7 +104,8 @@ async def test_precedent_search_answers_unavailable_when_corpus_raises(monkeypat
             return []
 
     async def _raise(**_kw: Any) -> list[dict[str, Any]]:
-        raise SQLAlchemyError("schema missing")
+        message = "schema missing"
+        raise SQLAlchemyError(message)
 
     tool = make_search_legal_precedents_tool(
         _Graphiti(),
@@ -134,8 +141,9 @@ async def test_hybrid_tool_reports_the_vector_layer_unavailable() -> None:
             return []
 
     class _EmptySubgraph:
-        nodes: list = []
-        edges: list = []
+        def __init__(self) -> None:
+            self.nodes: list[object] = []
+            self.edges: list[object] = []
 
         def to_context_text(self) -> str:
             return ""
@@ -179,7 +187,8 @@ async def test_a_partial_source_set_sets_basis_unknown_and_keeps_the_survivor(
             return [SimpleNamespace(name="p", content="c", relevance_score=0.9, uuid="u1")]
 
     async def _raise(**_kw: Any) -> list[dict[str, Any]]:
-        raise SQLAlchemyError("schema missing")
+        message = "schema missing"
+        raise SQLAlchemyError(message)
 
     tool = make_search_legal_precedents_tool(_Graphiti(), object(), _idempotency())
     monkeypatch.setattr(
