@@ -56,8 +56,10 @@ from app.features.auth.websocket_security import (
 )
 from app.shared.langgraph_layer.agent_saul.state import (
     GRAPH_NODE_NAMES,
+    STATE_SCHEMA_VERSION,
     HITLInterruptType,
     WorkflowStatus,
+    hydrate_state,
 )
 from app.utils import logger
 
@@ -129,6 +131,15 @@ class AgentSaulService:
         """Main session loop.  Runs until graph completes or WS closes."""
         config = self._build_config(thread_id)
         initial_input = self._build_initial_state(start_msg, thread_id, user_id)
+
+        # Checkpointed values may predate schema_version. Hydrate them before
+        # the first node sees state; the checkpointer itself stays generic.
+        persisted = await self._graph.aget_state(config)
+        initial_input = (
+            hydrate_state(dict(persisted.values))
+            if persisted.values
+            else hydrate_state(initial_input)
+        )
 
         # current_input alternates between:
         #   - dict (LegalAgentState subset) on first run
@@ -409,7 +420,7 @@ class AgentSaulService:
             "user_id": user_id,
             "thread_id": thread_id,
             "correlation_id": self._correlation_id,
-            "schema_version": 1,
+            "schema_version": STATE_SCHEMA_VERSION,
             "doc_id": start_msg.doc_id,
             "document_text": None,
             "messages": [HumanMessage(content=start_msg.user_query)],

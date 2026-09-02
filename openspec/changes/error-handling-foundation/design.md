@@ -49,7 +49,7 @@ governance is.
 | `uv run ruff check src/` | clean | — |
 | `uv run ty check src/` | 2 errors (`…agents.memory.setup_types` unresolved) | no |
 | `ast-grep scan src/` | 4 errors, 34 warnings | yes — the 34 are `no-raise-app-error-mapper`; the 4 are `no-raw-httpexception` in `examples/redis_examples.py` |
-| `uv run pytest` | 400 of 439 collected, 2 collection errors, 12 known websocket fixture failures | no |
+| `uv run pytest` | 485 passed, 6 failures, 39 deselected on the merged baseline; 6 failures are tracked test/environment drift | no |
 
 ## Goals / Non-Goals
 
@@ -233,7 +233,7 @@ knows a rollback is owed. Order: classify → rollback → log → return, so a 
 failure cannot leave the session poisoned.
 
 **The rule is per-store, not per-repository.** Of 11 repository modules, 9 are
-relational and carry 74 SQLAlchemy handlers; `users/repository.py` catches nothing;
+relational and carry 69 SQLAlchemy handlers; `users/repository.py` catches nothing;
 and `auth/repository.py` is a **document-store repository** — `UserRepository` and
 `RefreshTokenRepository` over MongoDB and Redis, with 13 `PyMongoError`/
 `DuplicateKeyError` handlers and 6 `RedisError` handlers, and no statement on the
@@ -608,7 +608,7 @@ failures into response data and deliberately own their 200/503 status, which a
 
 **Phase 1 — this change.** Shared spine (`app/shared/result/` extended in place, the
 renderer, `mappers.py`, the global handler); rollback added to all 9 relational
-repositories' 74 SQLAlchemy handlers; the doc surfaces reconciled; the gates written
+repositories' 69 SQLAlchemy handlers; the doc surfaces reconciled; the gates written
 and verified against fixtures; `subscriptions` migrated end to end.
 
 Also in Phase 1, from the infrastructure scope: the six unrooted families re-rooted

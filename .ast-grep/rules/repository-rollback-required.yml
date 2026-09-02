@@ -1,11 +1,19 @@
 id: repository-rollback-required
 language: python
 severity: error
-message: Database handler returning Failure without preceding rollback
+message: Repository database handler requires rollback contract test
 note: |
-  D8 — repository catches SQLAlchemy error, so repository knows rollback is owed.
-  Order: classify → rollback → log → return. Read-only handlers returning
-  dict / ToolResult are not flagged; only handlers returning Failure.
+  D8 — the authoritative handler-level check is
+  tests/unit/test_repository_exception_notes.py because the installed ast-grep
+  version cannot express ordered nested statements and negative sibling checks.
+  This rule flags SQLAlchemy exception handlers that omit rollback. The paired
+  Python contract test verifies note and rollback ordering for every handler.
 rule:
-  kind: class_definition
-  regex: RollbackViolation
+  kind: except_clause
+  regex: "SQLAlchemyError"
+  has:
+    regex: "Failure"
+  not:
+    regex: rollback
+files:
+  - src/app/features/**/repository.py

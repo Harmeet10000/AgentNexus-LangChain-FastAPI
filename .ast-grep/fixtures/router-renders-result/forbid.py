@@ -4,15 +4,27 @@ from app.utils.exceptions import NotFoundException, ValidationException, Forbidd
 
 router = APIRouter()
 
+
 # violation: router raises expected-failure exception instead of render_result
 @router.get("/x")
 async def get_x(response: Response):
     raise NotFoundException("not found")
 
+
 @router.get("/y")
 async def get_y(response: Response):
     raise ValidationException(detail="bad input")
 
+
 @router.get("/z")
 async def get_z(response: Response):
     raise ForbiddenException(detail="forbidden")
+
+
+class NewlyIntroducedProjectException(Exception):
+    pass
+
+
+@router.get("/new")
+async def get_new(response: Response):
+    raise NewlyIntroducedProjectException("must be rendered")

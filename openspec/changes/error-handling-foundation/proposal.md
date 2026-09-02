@@ -22,7 +22,7 @@ exhaustive. Every downstream weakness follows from that one property:
   invent or mistype one. The drift is not an accident; it is the only thing the
   type is shaped to allow.
 - **Zero repositories roll back.** Of 11 repository modules, **9 are relational** and
-  carry 74 SQLAlchemy handlers between them; every one returns `Failure` and leaves
+  carry 69 SQLAlchemy handlers between them; every one returns `Failure` and leaves
   the session in a failed transaction. (`auth` is a document store; `users` catches
   nothing.) Where a service swallows that `Failure` instead of raising —
   `webhooks/service.py` (21 unwraps, zero bridge calls), `dunning/service.py` — no
@@ -254,7 +254,7 @@ final totals are independently derived twice with no completed task admitting
   `mappers.py`, `logging.py` — extended, not replaced), `utils/exceptions.py`,
   `utils/codes.py`, `utils/http_response.py`,
   `middleware/global_exception_handler.py`,
-  `features/subscriptions/*`, and the 9 relational repositories' 74 SQLAlchemy
+  `features/subscriptions/*`, and the 9 relational repositories' 69 SQLAlchemy
   handlers for the rollback fix. The 123 existing `*AppError` construction sites
   (72 of them `InfrastructureAppError`) are the migration surface for the
   vocabulary change; they are retired per feature, not here.

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from returns.result import Failure
 from sqlalchemy.exc import IntegrityError, PendingRollbackError
 
@@ -51,11 +52,11 @@ def _mock_session_with_rollback(*, raise_on_flush: Exception | None = None):
     # configure flush to optionally fail and poison the tx
     async def _flush(*_a, **_kw):
         if state["needs_rollback"]:
-            raise PendingRollbackError("This Session's transaction has been rolled back")
+            message = "This Session's transaction has been rolled back"
+            raise PendingRollbackError(message)
         if raise_on_flush is not None:
             state["needs_rollback"] = True
             raise raise_on_flush
-        return None
 
     session.flush.side_effect = _flush
 
@@ -64,21 +65,24 @@ def _mock_session_with_rollback(*, raise_on_flush: Exception | None = None):
 
     async def _execute(*a, **kw):
         if state["needs_rollback"]:
-            raise PendingRollbackError("This Session's transaction has been rolled back")
+            message = "This Session's transaction has been rolled back"
+            raise PendingRollbackError(message)
         # delegate to the mock's return_value behavior
         rv = orig_execute.return_value
         # if caller set return_value, return it; else default mock
         if rv is not None and not isinstance(rv, AsyncMock):
             return rv
-        return MagicMock(scalars=lambda: MagicMock(all=lambda: []))
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = []
+        return result
 
     session.execute.side_effect = _execute
 
     # commit also fails if poisoned (mirrors get_postgres_db commit)
     async def _commit(*_a, **_kw):
         if state["needs_rollback"]:
-            raise PendingRollbackError("This Session's transaction has been rolled back")
-        return None
+            message = "This Session's transaction has been rolled back"
+            raise PendingRollbackError(message)
 
     session.commit.side_effect = _commit
 
@@ -115,7 +119,8 @@ class TestRollbackRegression:
 
         async def _execute_ok(*a, **kw):
             if state["needs_rollback"]:
-                raise PendingRollbackError("poisoned")
+                message = "poisoned"
+                raise PendingRollbackError(message)
             return mock_result
 
         session.execute.side_effect = _execute_ok  # type: ignore[assignment]
@@ -132,24 +137,23 @@ class TestRollbackRegression:
         session = AsyncMock()
         session.add = MagicMock()
         session.flush = AsyncMock(side_effect=IntegrityError("stmt", {}, Exception("orig")))
+
         # poisoned flag never cleared
-        state = {"needs_rollback": True}
 
         async def _execute_poisoned(*a, **kw):
-            raise PendingRollbackError("This Session's transaction has been rolled back")
+            message = "This Session's transaction has been rolled back"
+            raise PendingRollbackError(message)
 
         session.execute = AsyncMock(side_effect=_execute_poisoned)
         session.rollback = AsyncMock()
 
         # directly verify poisoned state would cause PendingRollbackError
+
         async def _try_execute():
             return await session.execute(MagicMock())
 
-        try:
+        with pytest.raises(PendingRollbackError):
             _run(_try_execute())
-            assert False, "expected PendingRollbackError"
-        except PendingRollbackError:
-            pass  # correct — mock proves that without rollback the session is unusable
 
     def test_swallowed_failure_does_not_reach_commit(self):
         """1.13: service swallowing Failure must not leave poisoned session committed."""
@@ -175,11 +179,8 @@ class TestRollbackRegression:
         poisoned = _mock_session_with_rollback(raise_on_flush=flush_err)
         # manually poison without clearing
         poisoned._needs_rollback["needs_rollback"] = True  # type: ignore[attr-defined]
-        try:
+        with pytest.raises(PendingRollbackError):
             _run(poisoned.commit())
-            assert False, "expected PendingRollbackError on commit without rollback"
-        except PendingRollbackError:
-            pass
 
         # repo path itself never calls commit
         # (commit is the dependency's job; we just verify rollback cleared the tx)

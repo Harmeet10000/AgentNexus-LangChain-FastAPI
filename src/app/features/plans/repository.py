@@ -9,6 +9,7 @@ from returns.result import Failure, Success
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.shared.result.diagnostics import add_database_error_note
 from app.utils import logger
 
 from .errors import PlanConflictError, PlanInfrastructureError, PlanNotFoundError
@@ -35,6 +36,7 @@ class PlanRepository:
             await self.session.flush()
             return Success(plan)
         except IntegrityError as exc:
+            add_database_error_note(exc, table="plans")
             await self.session.rollback()
             logger.bind(operation="create", plan_name=plan.name).error(
                 "plan_repository_failed", error=str(exc)
@@ -47,6 +49,7 @@ class PlanRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="plans")
             await self.session.rollback()
             logger.bind(operation="create").error("plan_repository_failed", error=str(exc))
             return Failure(
@@ -74,6 +77,7 @@ class PlanRepository:
                 )
             return Success(plan)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="plans")
             await self.session.rollback()
             logger.bind(operation="find_by_id", plan_id=str(plan_id)).error(
                 "plan_repository_failed", error=str(exc)
@@ -96,6 +100,7 @@ class PlanRepository:
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="plans")
             await self.session.rollback()
             logger.bind(operation="find_by_name", plan_name=name).error(
                 "plan_repository_failed", error=str(exc)
@@ -117,6 +122,7 @@ class PlanRepository:
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="plans")
             await self.session.rollback()
             logger.bind(operation="list_active").error("plan_repository_failed", error=str(exc))
             return Failure(
@@ -150,6 +156,7 @@ class PlanRepository:
                 )
             return Success(plan)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="plans")
             await self.session.rollback()
             logger.bind(operation="archive", plan_id=str(plan_id)).error(
                 "plan_repository_failed", error=str(exc)
@@ -184,6 +191,7 @@ class PlanRepository:
                 )
             return Success(updated)
         except IntegrityError as exc:
+            add_database_error_note(exc, table="plans")
             await self.session.rollback()
             logger.bind(operation="update", plan_id=str(plan.id)).error(
                 "plan_repository_failed", error=str(exc)
@@ -196,6 +204,7 @@ class PlanRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="plans")
             await self.session.rollback()
             logger.bind(operation="update", plan_id=str(plan.id)).error(
                 "plan_repository_failed", error=str(exc)

@@ -9,6 +9,8 @@ from returns.result import Failure, Success
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.shared.result.diagnostics import add_database_error_note
+
 from .errors import (
     SubscriptionDuplicateError,
     SubscriptionInvalidTransitionError,
@@ -69,6 +71,7 @@ class SubscriptionRepository:
             await self.session.flush()
             return Success(subscription)
         except IntegrityError as exc:
+            add_database_error_note(exc, table="subscriptions")
             await self.session.rollback()
             return Failure(
                 SubscriptionDuplicateError(
@@ -84,6 +87,7 @@ class SubscriptionRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="subscriptions")
             await self.session.rollback()
             return Failure(
                 SubscriptionTransientInfrastructureError(
@@ -115,6 +119,7 @@ class SubscriptionRepository:
                 )
             return Success(subscription)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="subscriptions")
             await self.session.rollback()
             return Failure(
                 SubscriptionTransientInfrastructureError(
@@ -146,6 +151,7 @@ class SubscriptionRepository:
                 )
             return Success(subscription)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="subscriptions")
             await self.session.rollback()
             return Failure(
                 SubscriptionTransientInfrastructureError(
@@ -185,6 +191,7 @@ class SubscriptionRepository:
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="subscriptions")
             await self.session.rollback()
             return Failure(
                 SubscriptionTransientInfrastructureError(
@@ -225,6 +232,7 @@ class SubscriptionRepository:
             result = await self.session.execute(statement)
             return Success((list(result.scalars().all()), int(total)))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="subscriptions")
             await self.session.rollback()
             return Failure(
                 SubscriptionTransientInfrastructureError(
@@ -275,6 +283,7 @@ class SubscriptionRepository:
                 )
             return Success(updated)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="subscriptions")
             await self.session.rollback()
             return Failure(
                 SubscriptionTransientInfrastructureError(

@@ -17,20 +17,20 @@ class DummyCode(StrEnum):
     INFRA_DEAD = "INFRA_DEAD"
 
 
-class NotFoundErr(FeatureError):
+class NotFoundError(FeatureError):
     kind: ClassVar[ErrorKind] = ErrorKind.NOT_FOUND
     code: ClassVar[DummyCode] = DummyCode.NOT_FOUND
     retryable: ClassVar[bool] = False
     identifier: str | None = None
 
 
-class InfraRetryableErr(FeatureError):
+class InfraRetryableError(FeatureError):
     kind: ClassVar[ErrorKind] = ErrorKind.INFRASTRUCTURE
     code: ClassVar[DummyCode] = DummyCode.INFRA_RETRYABLE
     retryable: ClassVar[bool] = True
 
 
-class InfraDeadErr(FeatureError):
+class InfraDeadError(FeatureError):
     kind: ClassVar[ErrorKind] = ErrorKind.INFRASTRUCTURE
     code: ClassVar[DummyCode] = DummyCode.INFRA_DEAD
     retryable: ClassVar[bool] = False
@@ -39,7 +39,7 @@ class InfraDeadErr(FeatureError):
 def test_failure_renders_real_http_status_not_200():
     # 4.3 — returning http_error directly would be 200 with success false; render must set transport status
     resp = Response()
-    result = Failure(NotFoundErr(message="not found"))
+    result = Failure(NotFoundError(message="not found"))
     envelope = render_result(result, resp)
     assert resp.status_code == 404
     assert envelope.status_code == 404
@@ -52,11 +52,11 @@ def test_failure_renders_real_http_status_not_200():
 
 def test_infrastructure_retryable_vs_dead():
     resp1 = Response()
-    render_result(Failure(InfraRetryableErr(message="transient")), resp1)
+    render_result(Failure(InfraRetryableError(message="transient")), resp1)
     assert resp1.status_code == 503
 
     resp2 = Response()
-    render_result(Failure(InfraDeadErr(message="dead")), resp2)
+    render_result(Failure(InfraDeadError(message="dead")), resp2)
     assert resp2.status_code == 500
 
 
@@ -72,7 +72,7 @@ def test_success_uses_success_status():
 def test_failure_status_not_overridable():
     # 4.4 — renderer offers no param to force failure status; even if caller passes success_status 201, failure still 404
     resp = Response()
-    envelope = render_result(Failure(NotFoundErr(message="not found")), resp, success_status=201)
+    envelope = render_result(Failure(NotFoundError(message="not found")), resp, success_status=201)
     assert resp.status_code == 404
     assert envelope.status_code == 404
     # ensure signature has no status_code param (would be ambiguous)

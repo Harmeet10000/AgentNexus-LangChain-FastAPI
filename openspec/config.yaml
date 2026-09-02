@@ -20,7 +20,7 @@ context: |
   - Errors: per-feature typed union in src/app/features/<name>/errors.py (FeatureError flat siblings, Code StrEnum, ErrorKind 7, closed union with assert_never). Shared spine in src/app/shared/result/: ErrorKind, FeatureError, STATUS_BY_KIND, render_result. Service unwraps SubscriptionResult with isinstance(result, Failure) then log_expected_failure + http_error/render_result; never match/case on Success/Failure (ADR-002), kind/code/retryable are ClassVar.
   - Secrets: Pydantic SecretStr; always call .get_secret_value(), never str()
     or repr on a SecretStr.
-  - Response envelope: APIResponse from src/app/shared/response_type.py;
+  - Response envelope: APIResponse from src/app/utils/response_type.py;
     routers return http_response(...). Uniform error shape success/statusCode/
     error/request.
   - Typing: ruff + ty gate the merge; PEP 695 generics on Python 3.12; no

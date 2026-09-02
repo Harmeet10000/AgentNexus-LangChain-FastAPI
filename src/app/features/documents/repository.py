@@ -12,6 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.shared.result.diagnostics import add_database_error_note
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 
 from .constants import (
@@ -83,6 +84,7 @@ class DocumentRepository:
                 )
             return Success(doc)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="documents")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentDatabaseError(
@@ -115,6 +117,7 @@ class DocumentRepository:
                 )
             return Success(inner_value=doc)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="documents")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentDatabaseError(
@@ -161,6 +164,7 @@ class DocumentRepository:
             await self.session.flush()
             return Success(inner_value=document)
         except IntegrityError as exc:
+            add_database_error_note(exc, table="documents")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentConflictError(
@@ -170,6 +174,7 @@ class DocumentRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="documents")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentDatabaseError(
@@ -223,6 +228,7 @@ class DocumentRepository:
             )
             return Success(None)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="documents")
             await self.session.rollback()
             return Failure(
                 DocumentDatabaseError(
@@ -299,6 +305,7 @@ class DocumentRepository:
             await self.session.execute(build_chunk_upsert_statement(rows))
             return Success(inner_value=None)
         except IntegrityError as exc:
+            add_database_error_note(exc, table="chunks")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentChunkConflictError(
@@ -308,6 +315,7 @@ class DocumentRepository:
                 )
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chunks")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentDatabaseError(
@@ -322,6 +330,7 @@ class DocumentRepository:
             await self.session.execute(statement=text(text="ANALYZE chunks"))
             return Success(None)
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chunks")
             await self.session.rollback()
             return Failure(
                 DocumentDatabaseError(
@@ -370,6 +379,7 @@ class DocumentRepository:
                 )
             return Success(inner_value=dict(row))
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="documents, chunks")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentDatabaseError(
@@ -419,6 +429,7 @@ class DocumentRepository:
             )
             return Success(inner_value=[dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chunks, documents")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentDatabaseError(
@@ -472,6 +483,7 @@ class DocumentRepository:
             )
             return Success(inner_value=[dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chunks, documents")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentDatabaseError(
@@ -519,6 +531,7 @@ class DocumentRepository:
             )
             return Success(inner_value=[dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chunks, documents")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentDatabaseError(
@@ -557,6 +570,7 @@ class DocumentRepository:
                 {str(object=row["chunk_id"]): dict(row) for row in result.mappings().all()}
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chunks, documents")
             await self.session.rollback()
             return Failure(
                 DocumentDatabaseError(
@@ -690,6 +704,7 @@ class DocumentRepository:
             )
             return Success([dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chunks, documents")
             await self.session.rollback()
             return Failure(
                 DocumentDatabaseError(
