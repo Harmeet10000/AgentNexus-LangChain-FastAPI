@@ -13,7 +13,7 @@ rule:
   all:
     - pattern: raise $EXCEPTION($$$ARGS)
     - not:
-        regex: "raise\\s+(TooManyRequestsException|ForbiddenException|ValidationException|ValueError|WebSocketException)\\s*\\("
+        regex: "raise\\s+(TooManyRequestsException|ValueError|WebSocketException)\\s*\\("
     - not:
         inside:
           kind: except_clause
