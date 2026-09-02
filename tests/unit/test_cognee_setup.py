@@ -133,9 +133,13 @@ async def test_placeholder_connection_fields_are_refused(
     import app.shared.langchain_layer.agents.memory.cognee_client as client
 
     target = "_database_fields" if hasattr(client, "_database_fields") else "get_database_fields"
-    setattr(client, target, lambda: SimpleNamespace(  # type: ignore[attr-defined]
-        host="localhost", port=5432, username="u", password=SecretStr("p"), database="db"
-    ))
+    setattr(
+        client,
+        target,
+        lambda: SimpleNamespace(  # type: ignore[attr-defined]
+            host="localhost", port=5432, username="u", password=SecretStr("p"), database="db"
+        ),
+    )
     settings = _settings(POSTGRES_HOST="localhost", POSTGRES_DB_NAME="db")
     with pytest.raises(CogneeSetupError, match="placeholder"):
         await setup_cognee(settings)

@@ -40,8 +40,8 @@ class UserAdminService:
         user_repo: UserAdminRepository,
         token_repo: RefreshTokenRepository,
     ) -> None:
-        self._user_repo = user_repo
-        self._token_repo = token_repo
+        self._user_repo: UserAdminRepository = user_repo
+        self._token_repo: RefreshTokenRepository = token_repo
 
     async def _get_user(self, user_id: str) -> UsersResult[User]:
         result = await self._user_repo.find_by_id(user_id)

@@ -8,7 +8,7 @@ registry, tool-object specs pass through untouched.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -16,6 +16,9 @@ from app.shared.langchain_layer.agents.tools import (
     get_tool_registry,
     register_default_tools,
 )
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 @pytest.fixture(autouse=True)
@@ -26,13 +29,13 @@ def populated_registry() -> Any:
     r = get_tool_registry()
     for name in list(r.names()):
         if name not in {"web_search", "crawl_url"}:
-            del r._tools[name]  # noqa: SLF001 — test cleanup of names this module added
+            del r._tools[name]
 
 
 class _FakeModel:
     """Minimal stand-in: the factory only binds tools to it."""
 
-    def bind_tools(self, _tools: Any, **_kw: Any) -> "_FakeModel":
+    def bind_tools(self, _tools: Any, **_kw: Any) -> _FakeModel:
         return self
 
 
@@ -55,7 +58,7 @@ def test_a_string_tool_name_resolves_through_the_factory(monkeypatch: Any) -> No
     ``create_agent`` boundary, because constructing LangChain's full agent stack
     needs provider packages this environment does not have (the D13 finding).
     """
-    import app.shared.langchain_layer.agents.factory as factory
+    from app.shared.langchain_layer.agents import factory
 
     captured: dict[str, Any] = {}
 

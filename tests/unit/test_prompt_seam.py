@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
+
+if TYPE_CHECKING:
+    from typing import Any
 
 from app.shared.langchain_layer.prompts import (
     PromptSection,
@@ -42,7 +45,9 @@ def test_scrambled_sections_emit_in_kind_order() -> None:
 
 def test_labels_never_influence_ordering() -> None:
     a = assemble_kinded_sections([_section(SectionKind.INSTRUCTION, "b", label="HEADER ONE")])
-    b = assemble_kinded_sections([_section(SectionKind.INSTRUCTION, "b", label="totally different")])
+    b = assemble_kinded_sections(
+        [_section(SectionKind.INSTRUCTION, "b", label="totally different")]
+    )
     assert a.splitlines()[0] != b.splitlines()[0], "labels differ"
     # Same kind → same position in the emitted order.
     two = assemble_kinded_sections(
@@ -52,7 +57,8 @@ def test_labels_never_influence_ordering() -> None:
             _section(SectionKind.EVIDENCE, "e2", label="L-C"),
         ]
     )
-    assert two.index("L-B") < two.index("L-A") and two.index("L-A") < two.index("L-C")
+    assert two.index("L-B") < two.index("L-A")
+    assert two.index("L-A") < two.index("L-C")
 
 
 def test_an_empty_section_is_rejected() -> None:
@@ -68,7 +74,8 @@ def test_preamble_is_byte_identical_across_different_evidence() -> None:
     p1 = build_assembled_prompt(parts, task="t1", evidence=["only evidence"])
     p2 = build_assembled_prompt(parts, task="t2", evidence=["a", "b", "c"])
     assert p1.preamble == p2.preamble
-    assert p1.preamble in p1.render() and p1.preamble in p2.render()
+    assert p1.preamble in p1.render()
+    assert p1.preamble in p2.render()
 
 
 def test_highest_salience_evidence_occupies_the_block_edges() -> None:
@@ -79,7 +86,8 @@ def test_highest_salience_evidence_occupies_the_block_edges() -> None:
     positions = {name: assembled.evidence_block.index(name) for name in ("r1", "r2", "r3", "r5")}
     first_item = assembled.evidence_block.split("[1] ")[1].splitlines()[0]
     last_item = assembled.evidence_block.rstrip().splitlines()[-1].split("] ", 1)[-1]
-    assert first_item == "r1" and last_item == "r2"
+    assert first_item == "r1"
+    assert last_item == "r2"
     assert positions["r1"] < positions["r3"] < positions["r5"]
 
 

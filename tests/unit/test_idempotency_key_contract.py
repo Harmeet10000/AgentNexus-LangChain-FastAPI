@@ -15,7 +15,8 @@ from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
 def test_make_key_is_keyword_only_with_structural_and_content() -> None:
     params = inspect.signature(IdempotencyGuard.make_key).parameters
     assert all(v.kind is v.KEYWORD_ONLY for k, v in params.items() if k != "self")
-    assert "structural" in params and "content" in params
+    assert "structural" in params
+    assert "content" in params
 
 
 def test_differently_worded_queries_produce_different_keys() -> None:
@@ -55,9 +56,7 @@ def test_a_write_replayed_twice_produces_the_same_key() -> None:
 
 
 def test_content_none_differs_from_content_present() -> None:
-    write = IdempotencyGuard.make_key(
-        step_id="s", structural={"d": 1}, user_id="u", content=None
-    )
+    write = IdempotencyGuard.make_key(step_id="s", structural={"d": 1}, user_id="u", content=None)
     read = IdempotencyGuard.make_key(
         step_id="s", structural={"d": 1}, user_id="u", content={"query": "q"}
     )

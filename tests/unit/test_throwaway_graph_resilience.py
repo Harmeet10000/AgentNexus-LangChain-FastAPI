@@ -306,10 +306,8 @@ def test_retry_behaviour_lives_at_the_seam_not_in_node_bodies() -> None:
             isinstance(func, ast.Attribute) and func.attr == "ToolRetryMiddleware"
         )
 
-    constructions = [
-        node.lineno for node in ast.walk(tree) if _is_middleware_construction(node)
-    ]
+    constructions = [node.lineno for node in ast.walk(tree) if _is_middleware_construction(node)]
     assert constructions, "the seam must construct ToolRetryMiddleware"
-    assert all(
-        seam_def.lineno <= line <= seam_def.end_lineno for line in constructions
-    ), "retry construction must exist only inside the seam factory"
+    assert all(seam_def.lineno <= line <= seam_def.end_lineno for line in constructions), (
+        "retry construction must exist only inside the seam factory"
+    )

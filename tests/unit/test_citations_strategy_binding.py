@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
+
+if TYPE_CHECKING:
+    from typing import Any
 
 # --- 8.1 citations non-empty ---
 
@@ -20,10 +23,7 @@ def test_citation_fields_pre_exist_and_are_not_redefined() -> None:
 def test_a_report_with_no_citations_fails_validation() -> None:
     from app.shared.langgraph_layer.agent_saul.state import (
         Citation,
-        ComplianceFinding,
         FinalReport,
-        ReviewOverride,
-        RiskFinding,
     )
 
     kwargs: dict[str, Any] = {
@@ -102,8 +102,8 @@ async def test_a_transfer_tool_returns_a_routing_payload() -> None:
 def test_saul_agents_have_zero_empty_tool_lists() -> None:
     from pathlib import Path
 
-    source = (
-        Path("src/app/shared/langgraph_layer/agent_saul/factory.py").read_text()
+    source = Path("src/app/shared/langgraph_layer/agent_saul/factory.py").read_text(
+        encoding="utf-8"
     )
     assert "tools=[]" not in source, "agents must bind their tools explicitly"
 
@@ -111,6 +111,8 @@ def test_saul_agents_have_zero_empty_tool_lists() -> None:
 def test_saul_factory_installs_the_retry_middleware() -> None:
     from pathlib import Path
 
-    source = Path("src/app/shared/langgraph_layer/agent_saul/factory.py").read_text()
+    source = Path("src/app/shared/langgraph_layer/agent_saul/factory.py").read_text(
+        encoding="utf-8"
+    )
     assert "ToolRetryMiddleware" in source
     assert "handle_tool_errors" not in source
