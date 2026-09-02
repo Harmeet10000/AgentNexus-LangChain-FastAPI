@@ -162,7 +162,7 @@ async def _fetch_statute_section(
         WHERE
             instrument_name = :act_name
             AND section_ref = :section_ref
-        ORDER BY instrument_year DESC
+        ORDER BY instrument_year DESC NULLS LAST
         LIMIT 1
         """
     )
