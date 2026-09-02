@@ -24,10 +24,10 @@ async def get_webhook_service(
     invoice_service: Annotated[InvoiceService, Depends(get_invoice_service)],
 ) -> WebhookService:
     return WebhookService(
-        WebhookEventRepository(session),
-        SubscriptionRepository(session),
-        PlanRepository(session),
-        AuditLogRepository(session),
+        webhooks=WebhookEventRepository(session),
+        subscriptions=SubscriptionRepository(session),
+        plans=PlanRepository(session),
+        audit=AuditLogRepository(session),
         payment_service=payment_service,
         invoice_service=invoice_service,
     )

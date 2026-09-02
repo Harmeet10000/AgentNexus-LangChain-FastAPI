@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 from pydantic import BaseModel, ConfigDict
-from returns.result import Failure, Success
+from returns.result import Failure, Success, Result
 
 from app.config import get_settings
 from app.connections.tavily import get_shared_tavily_http_client
@@ -244,7 +244,7 @@ async def get_context(
     Returns:
         Plain-text context combining search answer and top results
     """
-    result = await search(
+    result: TavilyResult[SearchResponse] = await search(
         query=query,
         max_results=max_results,
         include_answer=True,

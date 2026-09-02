@@ -173,7 +173,7 @@ class PlanRepository:
     async def update(self, plan: Plan, *, values: dict[str, object]) -> PlanResult[Plan]:
         try:
             statement = (
-                update(Plan)
+                update(table=Plan)
                 .where(Plan.id == plan.id)
                 .values(**values, updated_at=datetime.now(tz=UTC))
                 .returning(Plan)

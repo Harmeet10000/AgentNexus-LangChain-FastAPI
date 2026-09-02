@@ -79,8 +79,7 @@ def test_version_constant_has_exactly_one_definition() -> None:
         path
         for path in src_dir.glob("*.py")
         if any(
-            line.startswith("STATE_SCHEMA_VERSION")
-            and "=" in line
+            line.startswith("STATE_SCHEMA_VERSION") and "=" in line
             for line in path.read_text().splitlines()
         )
     ]
@@ -92,5 +91,5 @@ def test_version_constant_has_exactly_one_definition() -> None:
 def test_service_layer_imports_the_constant_instead_of_a_literal() -> None:
     app_root = Path(state_module.__file__).parents[3]
     service_src = (app_root / "features/agent_saul/service.py").read_text()
-    assert 'STATE_SCHEMA_VERSION' in service_src
+    assert "STATE_SCHEMA_VERSION" in service_src
     assert '"schema_version": 1' not in service_src

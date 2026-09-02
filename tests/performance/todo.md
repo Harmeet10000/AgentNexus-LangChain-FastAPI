@@ -228,6 +228,38 @@ It will be compatible before version 2.0.0.
 228. fix the failing websocket tests  DONE
 229. need to have a proper versioning of docker images ties to the git commit and see how the industry standard does this  DONE
 225. think where to add models in databse/schemas or somewhere else? what can i do to follow industry convention. improve the env.py seeder and other files for that make it include in ruff and ty   DONE
+226. remove redis client protocol and use from cache/ and remove any datamodels  DONE
+222. RESULT-PATTERN.md currently documents the envelope style as "project standard" — it now contradicts the code (users/service.py raises). Optional follow-up: update the doc to match. Say the word and I'll include it.
+there are 2-3 error handling that i need to figure out
+try catch with return typed error
+one raises exception from custom exception
+one raises raise app_error_to_exception(error)
+except SQLAlchemyError as exc:
+            return Failure(
+                InfrastructureAppError(
+                    code="DB_ERROR",
+                    message="Database error while updating subscription",
+                    details={"subscription_id": str(subscription.id), "error": str(exc)},
+                    source="subscription_repository",
+                )
+            )
+ if updated is None:
+                return Failure(
+                    ConflictAppError(
+                        code="VERSION_CONFLICT",
+                        message="Subscription was modified concurrently; refetch and retry",
+                        details={
+                            "subscription_id": str(subscription.id),
+                            "expected_version": expected_version,
+                        },
+                        source="subscription_repository",
+                    )
+                )  
+and also need to check where to put log_expected_failure(error, operation=operation) in the final one
+also need to check how exactly error msg should be written. should it be string message, StringEnum or something else. need to chec the best practice.
+need to standardise what happens in except block      DONE
+ 224. fix this def _celery_meters() -> tuple[Any, Any, Any]:
+    global _otel_celery_meters                                 DONE
 
 161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
 type Composable = Callable[[Any], Any]
@@ -304,48 +336,23 @@ todos:-
 
 218. add a small gloassary of the project from the screenshot, we are open at the core, we share about are roadmap, how we think about things, and of course we share all our code and should strive to be in that way. its important to maintian the things they live and iterate over the product. 
 219.  add in the system prompt to add a search, implementation, verifier, reviewer, check if i can give specific system propmts, skills, tools, MCP servers to subagents, defining models for subagents, permissions, need to have taht matt pocock line to have agents give me non verbose answers(see his short)
-always write why Use Block-Level HTML Comments: Since Claude Code strips HTML comments from the context it reads, you can include detailed notes for human maintainers without increasing token usage (3:02-3:12).
+always write why Use Block-Level HTML Comments: Since Claude Code strips HTML comments from the context it reads, you can include detailed notes for human maintainers without increasing token usage (3:02-3:12).  need to have a proper git branch/worktrees workflow along with specs, adr, design
 The "Incident-Why-Outcome" Framework: The host recommends structuring your comments to record three specific pieces of information for every rule (3:14-3:43):
 The Failure/Incident: Describe the specific event or bug that necessitated the rule (e.g., citing a specific incident number or date).
 Why the Rule Helps: Explain how the specific instruction prevents that failure from reoccurring.
 The Outcome: Provide evidence of the rule's success (e.g., "no orphan rows in 11 months").
 Additionally, the host personally recommends adding a commit reference to these comments to help future developers trace the history of the decision (3:45-3:49). The host warns that vague comments like "added to fix an issue" are ineffective and perform no better than having no comments at all 
-221. fix the files tht are scrambled in utils,shared, combine celery, remove redisclientprotocol  and other places
-222. RESULT-PATTERN.md currently documents the envelope style as "project standard" — it now contradicts the code (users/service.py raises). Optional follow-up: update the doc to match. Say the word and I'll include it.
-there are 2-3 error handling that i need to figure out
-try catch with return typed error
-one raises exception from custom exception
-one raises raise app_error_to_exception(error)
-except SQLAlchemyError as exc:
-            return Failure(
-                InfrastructureAppError(
-                    code="DB_ERROR",
-                    message="Database error while updating subscription",
-                    details={"subscription_id": str(subscription.id), "error": str(exc)},
-                    source="subscription_repository",
-                )
-            )
- if updated is None:
-                return Failure(
-                    ConflictAppError(
-                        code="VERSION_CONFLICT",
-                        message="Subscription was modified concurrently; refetch and retry",
-                        details={
-                            "subscription_id": str(subscription.id),
-                            "expected_version": expected_version,
-                        },
-                        source="subscription_repository",
-                    )
-                )
-and also need to check where to put log_expected_failure(error, operation=operation) in the final one
-also need to check how exactly error msg should be written. should it be string message, StringEnum or something else. need to chec the best practice.
-need to standardise what happens in except block
- 224. fix this def _celery_meters() -> tuple[Any, Any, Any]:
-    global _otel_celery_meters  # noqa: PLW0603 — module-level lazy init
-226. remove redis client protocol and use from cache/ and remove any datamodels
+221. fix the files tht are scrambled in utils,shared, combine celery, and other places
+
+
+           
 227. agentState should be typedDict and not a baseModel
 228. disable memory in claude code, opencode and remove the unnecesary skills from computer
 230. need to have a standard for marking the task done in openspec spec gated with a DONE sections that is detailed and summary of how it is done
+231. need to check all the stashed item in git 
+232. check graphify not being installed
+233. check and review logger config and usage to better standardise, proper biniding, file path, execution flow, anf other things
+234. learn about classVars and check if UUIDv7 is available in ORM
 ```
 summarise these chapters in great detail and take video's transcript as reference for summarising
 

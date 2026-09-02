@@ -1,7 +1,8 @@
 """7.6 pin get_postgres_db shape — no code change."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from app.connections.postgres import get_postgres_db
 
@@ -22,7 +23,7 @@ async def test_get_postgres_db_commits_on_clean_exit():
     mock_connection.app.state.db_session_local = mock_session_local
 
     gen = get_postgres_db(mock_connection)
-    session = await gen.__anext__()
+    session = await anext(gen)
     assert session is mock_session
     # clean exit: commit, not rollback
     await gen.aclose()  # triggers finally + commit path

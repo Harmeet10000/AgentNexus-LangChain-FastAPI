@@ -106,11 +106,12 @@ class TestGrantCredit:
         )
 
         result = _run(svc.grant_credit("user-123", dto))
+        response = result.unwrap()
 
-        assert isinstance(result, CreditGrantResponse)
-        assert result.credit_amount == 500
-        assert result.remaining_balance == 500
-        assert result.user_id == "user-123"
+        assert isinstance(response, CreditGrantResponse)
+        assert response.credit_amount == 500
+        assert response.remaining_balance == 500
+        assert response.user_id == "user-123"
 
     def test_grant_credit_admin_grant_missing_metadata(self):
         """ADMIN_GRANT without admin_user_id in metadata raises ValidationException."""
@@ -186,11 +187,12 @@ class TestConsumeCredits:
                 session=AsyncMock(),
             )
         )
+        consumption = result.unwrap()
 
-        assert isinstance(result, CreditConsumptionResult)
-        assert result.credit_applied == 1000
-        assert result.cash_due == 0
-        assert result.invoice_paid_in_full is True
+        assert isinstance(consumption, CreditConsumptionResult)
+        assert consumption.credit_applied == 1000
+        assert consumption.cash_due == 0
+        assert consumption.invoice_paid_in_full is True
 
     def test_consume_partial_coverage(self):
         """Credit covers part of invoice."""
@@ -216,10 +218,11 @@ class TestConsumeCredits:
                 session=AsyncMock(),
             )
         )
+        consumption = result.unwrap()
 
-        assert result.credit_applied == 300
-        assert result.cash_due == 700
-        assert result.invoice_paid_in_full is False
+        assert consumption.credit_applied == 300
+        assert consumption.cash_due == 700
+        assert consumption.invoice_paid_in_full is False
 
     def test_consume_no_credits_available(self):
         """No credits available, all cash due."""
@@ -240,11 +243,12 @@ class TestConsumeCredits:
                 session=AsyncMock(),
             )
         )
+        consumption = result.unwrap()
 
-        assert result.credit_applied == 0
-        assert result.cash_due == 1000
-        assert result.invoice_paid_in_full is False
-        assert result.credits_consumed == []
+        assert consumption.credit_applied == 0
+        assert consumption.cash_due == 1000
+        assert consumption.invoice_paid_in_full is False
+        assert consumption.credits_consumed == []
 
     def test_consume_respects_order_soonest_expiring(self):
         """Credits consumed in soonest-expiring-first order."""
@@ -293,10 +297,11 @@ class TestConsumeCredits:
                 session=AsyncMock(),
             )
         )
+        consumption = result.unwrap()
 
         # 3 credits at 200 each, invoice is 300 paisa → first 2 consumed, third untouched
-        assert result.credit_applied == 300
-        assert result.cash_due == 0
+        assert consumption.credit_applied == 300
+        assert consumption.cash_due == 0
 
         # Verify update_balance was called on the soonest-expiring credit first
         first_call_credit = svc.credit_repo.update_balance.call_args_list[0][0][0]
@@ -348,10 +353,11 @@ class TestCreditBalance:
         svc.credit_repo.get_active_balance = AsyncMock(return_value=Success(5000))
 
         result = _run(svc.get_credit_balance("user-123"))
+        response = result.unwrap()
 
-        assert isinstance(result, CreditBalanceResponse)
-        assert result.total_balance == 5000
-        assert result.total_balance_rupees == pytest.approx(50.0)
+        assert isinstance(response, CreditBalanceResponse)
+        assert response.total_balance == 5000
+        assert response.total_balance_rupees == pytest.approx(50.0)
 
 
 class TestCreditHistory:
@@ -379,10 +385,11 @@ class TestCreditHistory:
         svc.consumptions.find_by_user = AsyncMock(return_value=Success(([consumption], 1)))
 
         result = _run(svc.get_credit_history("user-123", limit=10, offset=0))
+        response = result.unwrap()
 
-        assert isinstance(result, CreditHistoryResponse)
-        assert len(result.credits) == 1
-        assert len(result.consumptions) == 1
-        assert result.total == 2
-        assert result.limit == 10
-        assert result.offset == 0
+        assert isinstance(response, CreditHistoryResponse)
+        assert len(response.credits) == 1
+        assert len(response.consumptions) == 1
+        assert response.total == 2
+        assert response.limit == 10
+        assert response.offset == 0

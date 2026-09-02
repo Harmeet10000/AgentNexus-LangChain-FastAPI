@@ -220,9 +220,11 @@ class TestBugCondition3TOCTOUCapacityOverflow:
             try:
                 await ws_security_service.ensure_connection_capacity(user_id)
                 await ws_security_service.register_connection(ctx)
-                return True
             except WebSocketException:
-                return False  # ponytail: narrow catch; any other exception is a bug and must fail loud
+                # ponytail: narrow catch; any other exception is a bug and must fail loud
+                return False
+            else:
+                return True
 
         results = await asyncio.gather(*[_try_register(ctx) for ctx, _ in connection_tasks])
         rejected = results.count(False)

@@ -105,9 +105,7 @@ def make_mock_user(**kwargs) -> MagicMock:
 
 
 # ponytail: fail fast if marker contradicts directory (e.g. requires_db in tests/unit)
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     for item in items:
         fspath = str(getattr(item, "fspath", ""))
         markers = {m.name for m in item.iter_markers()}
