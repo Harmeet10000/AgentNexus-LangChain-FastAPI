@@ -10,10 +10,11 @@ note: |
   Python contract test verifies note and rollback ordering for every handler.
 rule:
   kind: except_clause
-  regex: "SQLAlchemyError"
+  regex: "SQLAlchemyError|IntegrityError"
   has:
     regex: "Failure"
   not:
     regex: rollback
 files:
   - src/app/features/**/repository.py
+  - .ast-grep/fixtures/repository-rollback-required/**
