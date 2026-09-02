@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.features.audit.model import AuditLog
 from app.features.payments.clients.razorpay_client import RazorpayClient
 from app.features.subscriptions.model import Subscription, SubscriptionStatus
+from app.shared.result.diagnostics import add_database_error_note
 from app.utils import logger
 
 from .errors import DunningExternalServiceError, DunningInfrastructureError
@@ -100,6 +101,7 @@ class DunningService:
             result = await self.session.execute(statement)
             candidates = list(result.scalars().all())
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="subscriptions", operation="find_due_for_retry")
             logger.bind(operation="dunning").error("find_due_for_retry failed", error=str(exc))
             return Failure(
                 DunningInfrastructureError(

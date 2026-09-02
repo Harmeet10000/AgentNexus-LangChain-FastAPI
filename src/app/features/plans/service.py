@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.config import get_settings
 from app.features.audit.model import AuditAction, AuditLog
 from app.features.payments.clients.razorpay_client import RazorpayClient
+from app.shared.result.diagnostics import add_database_error_note
 from app.utils import logger
 
 from .dto import PlanResponse
@@ -80,6 +81,7 @@ class PlanService:
                 result = await self.session.execute(statement)
                 return Success([_plan_to_response(p) for p in result.scalars().all()])
             except SQLAlchemyError as exc:
+                add_database_error_note(exc, table="plans", operation="list_plans")
                 logger.bind(operation="list_plans").warning("list_plans failed", error=str(exc))
                 return Failure(
                     PlanInfrastructureError(

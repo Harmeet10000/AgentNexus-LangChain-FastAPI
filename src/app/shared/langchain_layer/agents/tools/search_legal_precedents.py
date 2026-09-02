@@ -26,6 +26,7 @@ from langchain_core.tools.base import BaseTool
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.shared.result.diagnostics import add_database_error_note
 from app.utils import logger
 
 from .idempotency import IdempotencyGuard, ToolResult
@@ -110,6 +111,7 @@ def make_search_legal_precedents_tool(
                 limit=_STATUTE_SEARCH_LIMIT,
             )
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="statute_sections", operation="search_statutes")
             logger.warning("statute_postgres_search_failed", error=str(exc))
             unavailable_layers.append("statutes")
             statute_results = []

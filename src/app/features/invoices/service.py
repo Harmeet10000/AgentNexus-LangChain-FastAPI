@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.features.audit.model import AuditAction, AuditLog
+from app.shared.result.diagnostics import add_database_error_note
 from app.shared.result.errors import ErrorKind
 
 from .dto import InvoiceLineItemDTO, InvoiceResponse
@@ -269,6 +270,7 @@ class InvoiceService:
             self.session.add(receipt)
             await self.session.flush()
         except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="payment_receipts", operation="generate_for_payment")
             await self.session.rollback()
             return Failure(
                 InvoiceInfrastructureError(
