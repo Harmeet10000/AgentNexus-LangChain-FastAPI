@@ -37,6 +37,7 @@ from app.shared.rag.graphiti.schemas import (
 from app.shared.result import log_expected_failure
 from app.utils import logger
 
+from .canonicalize import canonicalize_entities
 from .prompts import (
     _CLASSIFY_EXTRACT_SYSTEM_PROMPT,
     _CONTEXTUALIZE_CHUNK_SYSTEM_PROMPT,
@@ -49,6 +50,13 @@ from .state import (
     ContextualizedChunk,
     ContractMetadata,
     EntityExtractionResult,
+    # Runtime-load-bearing, not cosmetic (the A6 situation): `from __future__
+    # import annotations` makes every annotation a string, so `TC001` correctly
+    # asks for a type-checking block — but langgraph calls `get_type_hints()`
+    # on the dispatch function when the graph is built, which evaluates that
+    # string. Confined to a type-checking block, the name is absent at runtime
+    # and `build_ingestion_graph` raises `NameError` before compiling anything.
+    IngestionState,  # noqa: TC001
     ParsedDocument,
     StoredChunk,
 )
@@ -65,7 +73,7 @@ if TYPE_CHECKING:
     from ty_extensions import Unknown
 
     from .errors import IngestionGraphError
-    from .state import IngestionState, StructuredRunnable
+    from .state import StructuredRunnable
 
 from .errors import IngestionGraphValidationError
 
@@ -344,6 +352,15 @@ def make_embed_store_node(
             log_expected_failure(result.failure(), operation="embed_store")
             return _state_failure(result.failure())
 
+        # ADR-2 ordering: canonicalisation precedes every graph-bound write, and
+        # a refusal stops the document before a single row or episode exists.
+        # There is no raw-text fallback identity.
+        _canonical, refused = canonicalize_entities(state.extracted_entities)
+        if refused:
+            result = _refused_entities_failure(state.doc_id, refused_names(refused))
+            log_expected_failure(result.failure(), operation="embed_store")
+            return _state_failure(result.failure())
+
         async with AsyncSession(db_engine) as session, session.begin():
             parent_doc_id = await retry_immediate(
                 lambda: _upsert_parent_document(session, state, parsed, metadata),
@@ -381,8 +398,24 @@ def make_graphiti_upsert_node(
     graphiti: Any,
 ) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def graphiti_upsert_node(state: IngestionState) -> dict[str, object]:
+        # A terminal failure upstream means no episode is written for this
+        # document — the refusal scenario requires exactly this.
+        if state.failure is not None:
+            return {"graphiti_episode_ids": [], "ingestion_complete": False}
         if graphiti is None:
             return {"graphiti_episode_ids": [], "ingestion_complete": True}
+
+        # ADR-2: every episode write keys on the canonical identity. The episode
+        # carries the canonical entity ids as its entity references; a refusal
+        # records a terminal failure and writes no episode at all.
+        canonical, refused = canonicalize_entities(state.extracted_entities)
+        if refused:
+            result = _refused_entities_failure(state.doc_id, refused_names(refused))
+            log_expected_failure(result.failure(), operation="graphiti_upsert")
+            return _state_failure(result.failure())
+        canonical_entity_ids = sorted(
+            record.canonical_id for record in canonical.values()
+        )
 
         episode_ids: list[str] = []
         for chunk in state.contextualized_chunks:
@@ -400,6 +433,7 @@ def make_graphiti_upsert_node(
                     "postgres_chunk_id": postgres_chunk_id,
                     "clause_type": chunk.clause_type.value,
                     "edge_type": "REFERENCES_CLAUSE",
+                    "entities": canonical_entity_ids,
                 }
             )
             episode_id: str | None = await _graphiti_add_episode(
@@ -518,25 +552,39 @@ async def _upsert_parent_document(
     parsed: ParsedDocument,
     metadata: ContractMetadata,
 ) -> str:
+    # D15 (`documents`/`chunks` is the sole retrieval schema): the pipeline writes
+    # the `documents` row, never the superseded parent-document relation — that
+    # relation does not exist and no migration will create it. Identity is the pair
+    # (user_id, content_hash), so the conflict target names
+    # `uq_documents_user_content_hash`; there is no `doc_id` column to conflict on.
+    # The writer supplies `id` explicitly (no database default) and `object_uri`
+    # (NOT NULL, the provenance link for re-parsing). The thread scope and the
+    # document summary live in `metadata_` as scalars — `documents` carries no
+    # full-text body column, so `markdown` is deliberately not persisted; the chunk
+    # rows carry the only text this schema keeps. Status is set on insert only: a
+    # re-ingest must not regress a terminal status back to a non-terminal one.
     content_hash: str = hashlib.sha256(parsed.markdown.encode("utf-8")).hexdigest()
     query: TextClause = text(
         """
-        INSERT INTO parent_documents
-            (doc_id, user_id, thread_id, source, title, document_type, jurisdiction,
-             content_hash, markdown, summary, metadata)
+        INSERT INTO documents
+            (id, user_id, title, source_uri, object_uri, content_hash,
+             document_kind, status, jurisdiction, contract_type, parties,
+             metadata_, updated_at)
         VALUES
-            (:doc_id, :user_id, :thread_id, :source, :title, :document_type,
-             :jurisdiction, :content_hash, :markdown, :summary, CAST(:metadata AS JSONB))
-        ON CONFLICT (doc_id)
+            (:id, :user_id, :title, :source_uri, :object_uri, :content_hash,
+             :document_kind, :status, :jurisdiction, :contract_type,
+             CAST(:parties AS JSONB), CAST(:metadata_ AS JSONB), NOW())
+        ON CONFLICT ON CONSTRAINT uq_documents_user_content_hash
         DO UPDATE SET
-            source = EXCLUDED.source,
             title = EXCLUDED.title,
-            document_type = EXCLUDED.document_type,
+            source_uri = EXCLUDED.source_uri,
+            object_uri = EXCLUDED.object_uri,
+            document_kind = EXCLUDED.document_kind,
             jurisdiction = EXCLUDED.jurisdiction,
-            content_hash = EXCLUDED.content_hash,
-            markdown = EXCLUDED.markdown,
-            summary = EXCLUDED.summary,
-            metadata = EXCLUDED.metadata
+            contract_type = EXCLUDED.contract_type,
+            parties = EXCLUDED.parties,
+            metadata_ = EXCLUDED.metadata_,
+            updated_at = NOW()
         RETURNING id::text
         """
     )
@@ -544,65 +592,61 @@ async def _upsert_parent_document(
         await session.execute(
             query,
             {
-                "doc_id": state.doc_id,
+                "id": str(uuid4()),
                 "user_id": state.user_id,
-                "thread_id": state.thread_id,
-                "source": parsed.source,
                 "title": parsed.title,
-                "document_type": state.document_type,
-                "jurisdiction": metadata.jurisdiction or state.jurisdiction,
+                "source_uri": state.source or None,
+                "object_uri": _resolve_object_uri(state, parsed),
                 "content_hash": content_hash,
-                "markdown": parsed.markdown,
-                "summary": metadata.document_summary,
-                "metadata": json.dumps(_contract_metadata_json(metadata, parsed.source)),
+                "document_kind": state.document_type or "generic",
+                "status": "processing",
+                "jurisdiction": metadata.jurisdiction or state.jurisdiction or None,
+                "contract_type": metadata.contract_type or None,
+                "parties": json.dumps(list(metadata.parties)),
+                "metadata_": json.dumps(
+                    _contract_metadata_json(
+                        metadata, parsed.source, thread_id=state.thread_id or None
+                    )
+                ),
             },
         )
     ).fetchone()
     if row is None:
-        msg = "parent document upsert did not return an id"
+        msg = "document upsert did not return an id"
         raise ValueError(msg)
     return str(row[0])
+
+
+def _resolve_object_uri(state: IngestionState, parsed: ParsedDocument) -> str:
+    """Return the non-empty provenance link `documents.object_uri` requires.
+
+    The parsed source is preferred; the dispatch-time source and filename follow.
+    The final fallback names the ingestion identity rather than an empty string —
+    an empty value would claim the text came from nowhere, which is exactly what
+    the NOT NULL contract forbids.
+    """
+    return (
+        parsed.source
+        or state.source
+        or state.filename
+        or f"ingest://{state.doc_id or 'unknown'}"
+    )
 
 
 async def _store_entities(
     session: AsyncSession,
     state: IngestionState,
 ) -> dict[str, str]:
-    entity_id_map: dict[str, str] = {}
-    for entity in state.extracted_entities:
-        row_id = str(uuid4())
-        row = (
-            await session.execute(
-                text(
-                    """
-                    INSERT INTO entities
-                        (id, entity_type, name, normalized_name, doc_id, user_id,
-                         thread_id, metadata, confidence, decay_score)
-                    VALUES
-                        (:id, :entity_type, :name, :normalized_name, :doc_id, :user_id,
-                         :thread_id, CAST(:metadata AS JSONB), :confidence, 1.0)
-                    ON CONFLICT (normalized_name, entity_type)
-                    DO UPDATE SET
-                        confidence = GREATEST(entities.confidence, EXCLUDED.confidence),
-                        last_accessed_at = NOW()
-                    RETURNING id::text
-                    """
-                ),
-                {
-                    "id": row_id,
-                    "entity_type": entity.type.value,
-                    "name": entity.name,
-                    "normalized_name": entity.normalized_name.lower().strip(),
-                    "doc_id": state.doc_id,
-                    "user_id": state.user_id,
-                    "thread_id": state.thread_id,
-                    "metadata": json.dumps({"source": state.source}),
-                    "confidence": entity.confidence,
-                },
-            )
-        ).fetchone()
-        entity_id_map[entity.id] = str(row[0]) if row else row_id
-    return entity_id_map
+    # D15 / Decision 10: entities live in the knowledge-graph store, not in
+    # relational tables — this stage issues no SQL at all. Identities are the
+    # ADR-2 canonical identities; entities the canonicaliser refused were
+    # already stopped upstream, and are skipped here as a double-guard so a
+    # refusal can never fabricate a raw-text endpoint downstream.
+    _ = session
+    canonical, _refused = canonicalize_entities(state.extracted_entities)
+    return {
+        entity_ref: record.canonical_id for entity_ref, record in canonical.items()
+    }
 
 
 async def _store_relationships(
@@ -610,47 +654,48 @@ async def _store_relationships(
     state: IngestionState,
     entity_id_map: dict[str, str],
 ) -> list[str]:
+    # Same fate as `_store_entities`: `relationships` does not exist and the
+    # graph-episode path (`_graphiti_add_episode`) is the sole writer. This stage
+    # validates that both endpoints resolved and mints the deterministic edge key
+    # the episode write carries — no SQL. Unresolvable endpoints are skipped, as
+    # before, because a relationship naming an entity that was refused must not
+    # fabricate an endpoint.
+    _ = session
     stored: list[str] = []
     for relationship in state.extracted_relationships:
         from_id: str | None = entity_id_map.get(relationship.from_entity)
         to_id: str | None = entity_id_map.get(relationship.to_entity)
         if from_id is None or to_id is None:
             continue
-        relationship_id = str(uuid4())
-        row = (
-            await session.execute(
-                text(
-                    """
-                    INSERT INTO relationships
-                        (id, from_entity_id, to_entity_id, relation_type, doc_id,
-                         user_id, clause_id, metadata, valid_from, valid_to,
-                         confidence, source)
-                    VALUES
-                        (:id, :from_id, :to_id, :relation_type, :doc_id, :user_id,
-                         :clause_id, CAST(:metadata AS JSONB), :valid_from, :valid_to,
-                         :confidence, 'graphiti_extraction')
-                    ON CONFLICT DO NOTHING
-                    RETURNING id::text
-                    """
-                ),
-                {
-                    "id": relationship_id,
-                    "from_id": from_id,
-                    "to_id": to_id,
-                    "relation_type": relationship.type.value,
-                    "doc_id": state.doc_id,
-                    "user_id": state.user_id,
-                    "clause_id": relationship.clause_id,
-                    "metadata": json.dumps({"source": state.source}),
-                    "valid_from": relationship.valid_from,
-                    "valid_to": relationship.valid_to,
-                    "confidence": relationship.confidence,
-                },
+        stored.append(
+            _graph_relationship_identity(
+                relationship.type.value, from_id, to_id, relationship.clause_id
             )
-        ).fetchone()
-        if row:
-            stored.append(str(row[0]))
+        )
     return stored
+
+
+def _refused_entities_failure(
+    doc_id: str, names: list[str]
+) -> Failure[IngestionGraphError]:
+    return _validation_failure(
+        f"Entity canonicalisation refused {len(names)} extracted "
+        f"entit{'y' if len(names) == 1 else 'ies'} with no usable identity "
+        f"({', '.join(names)}); no graph write was issued",
+        doc_id=doc_id,
+    )
+
+
+def refused_names(refused: list[Any]) -> list[str]:
+    """Surface forms behind a refusal, truncated for the failure record."""
+    return [entity.name[:80] for entity in refused]
+
+
+def _graph_relationship_identity(
+    relation_type: str, from_id: str, to_id: str, clause_id: str | None
+) -> str:
+    """Deterministic edge key carried into the graph-episode path (no SQL)."""
+    return f"{relation_type}:{from_id}->{to_id}:{clause_id or ''}"
 
 
 async def _store_chunks(
@@ -687,7 +732,9 @@ async def _store_chunks(
         label="gemini_embedding",
     )
 
-    for chunk, text_to_embed, embedding in zip(ordered, embedded_texts, embeddings, strict=True):
+    for chunk, _text_to_embed, embedding in zip(
+        ordered, embedded_texts, embeddings, strict=True
+    ):
         row_id = str(uuid4())
         chunk_id = row_id
         metadata_json = _chunk_metadata_json(
@@ -703,50 +750,59 @@ async def _store_chunks(
             "chunk_faqs": chunk.chunk_faqs,
             "chunk_keywords": chunk.chunk_keywords,
         }
+        # D15: `chunks` is the sole retrieval truth — `clauses` does not exist.
+        # `clause` survives only as a `chunk_kind` value with the clause's own
+        # label in `clause_type`. The upsert key is (document_id, chunk_index),
+        # named via `uq_chunks_document_chunk_index`; `search_text` is generated
+        # by the database and is never supplied. `updated_at` appears in both
+        # the row payload and the conflict set (the D15 trap: the ORM hook does
+        # not fire for a conflict-resolved upsert, so omitting either leaves a
+        # column that looks maintained and is not).
         query: TextClause = text(
             """
-                    INSERT INTO clauses
-                        (id, chunk_id, parent_doc_id, contract_id, doc_id, user_id,
-                         clause_id, chunk_index, text, chunk_text, preamble, embedding,
-                         clause_type, metadata_, custom_metadata, decay_score)
+                    INSERT INTO chunks
+                        (id, document_id, user_id, chunk_index, chunk_kind,
+                         content, preamble, clause_type, page_no, embedding,
+                         metadata_, custom_metadata, quality_warnings, updated_at)
                     VALUES
-                        (:id, :chunk_id, :parent_doc_id, :contract_id, :doc_id, :user_id,
-                         :clause_id, :chunk_index, :text, :chunk_text, :preamble,
-                         CAST(:embedding AS vector), :clause_type, CAST(:metadata AS JSONB),
-                         CAST(:custom_metadata AS JSONB), 1.0)
-                    ON CONFLICT (parent_doc_id, chunk_index)
+                        (:id, :document_id, :user_id, :chunk_index, :chunk_kind,
+                         :content, :preamble, :clause_type, :page_no,
+                         CAST(:embedding AS vector), CAST(:metadata AS JSONB),
+                         CAST(:custom_metadata AS JSONB),
+                         CAST(:quality_warnings AS JSONB), NOW())
+                    ON CONFLICT ON CONSTRAINT uq_chunks_document_chunk_index
                     DO UPDATE SET
-                        chunk_id = EXCLUDED.chunk_id,
-                        text = EXCLUDED.text,
-                        chunk_text = EXCLUDED.chunk_text,
+                        chunk_kind = EXCLUDED.chunk_kind,
+                        content = EXCLUDED.content,
                         preamble = EXCLUDED.preamble,
-                        embedding = EXCLUDED.embedding,
                         clause_type = EXCLUDED.clause_type,
+                        page_no = EXCLUDED.page_no,
+                        embedding = EXCLUDED.embedding,
                         metadata_ = EXCLUDED.metadata_,
-                        custom_metadata = EXCLUDED.custom_metadata
-                    RETURNING chunk_id::text
+                        custom_metadata = EXCLUDED.custom_metadata,
+                        quality_warnings = EXCLUDED.quality_warnings,
+                        updated_at = NOW()
+                    RETURNING id::text
                     """
         )
         params = {
             "id": row_id,
-            "chunk_id": chunk_id,
-            "parent_doc_id": parent_doc_id,
-            "contract_id": metadata.contract_name,
-            "doc_id": state.doc_id,
+            "document_id": parent_doc_id,
             "user_id": state.user_id,
-            "clause_id": chunk.clause_id,
             "chunk_index": chunk.chunk_index,
-            "text": text_to_embed,
-            "chunk_text": _naturalize_tables(chunk.text),
+            "chunk_kind": "clause",
+            "content": _naturalize_tables(chunk.text),
             "preamble": chunk.preamble,
-            "embedding": _vector_literal(embedding),
             "clause_type": chunk.clause_type.value,
+            "page_no": chunk.page_no,
+            "embedding": _vector_literal(embedding),
             "metadata": json.dumps(metadata_json),
             "custom_metadata": json.dumps(custom_metadata),
+            "quality_warnings": json.dumps([]),
         }
         result: Result[Any] = await retry_immediate(
             lambda query=query, params=params: session.execute(query, params),
-            label="postgres_store_clause",
+            label="postgres_store_chunk",
         )
         row = result.fetchone()
         stored_chunk_id = str(row[0]) if row else chunk_id
@@ -821,10 +877,16 @@ def _stored_chunk_id(state: IngestionState, clause_id: str) -> str | None:
     return None
 
 
-def _contract_metadata_json(metadata: ContractMetadata, source: str) -> dict[str, object]:
+def _contract_metadata_json(
+    metadata: ContractMetadata, source: str, *, thread_id: str | None = None
+) -> dict[str, object]:
+    # D15: `documents` has no `summary` or `thread_id` column — both live in
+    # `metadata_` as scalars (`document_summary` arrives via `model_dump`).
     payload = metadata.model_dump()
     payload["source"] = source
     payload["page_no"] = 0
+    if thread_id is not None:
+        payload["thread_id"] = thread_id
     return payload
 
 

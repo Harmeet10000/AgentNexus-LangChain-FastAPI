@@ -168,7 +168,12 @@ class StoredChunk(BaseModel):
 
 
 class IngestionState(BaseModel):
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+    # Decision 2: no arbitrary-types permission — every channel is a plain
+    # scalar, a validated model, or a container of those, which is what keeps
+    # this state convertible to a typed-dict schema later. Adding a channel
+    # holding an arbitrary object must come with the permission *and* the
+    # justification, not just the permission.
+    model_config = ConfigDict(extra="forbid")
 
     doc_id: str = ""
     user_id: str = ""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import asyncer
@@ -14,6 +15,20 @@ if TYPE_CHECKING:
 
 _DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 _FALLBACK_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+
+@lru_cache(maxsize=1)
+def get_shared_reranker() -> CrossEncoderReranker:
+    """Return the process-lifetime shared re-ranker (default model).
+
+    Every retrieval path re-ranks through this accessor rather than
+    constructing per call: the cross-encoder weights load once per process and
+    are reused. `lru_cache` (rather than a module global) is what makes "once"
+    atomic under concurrent first requests. An explicit instance may still be
+    injected (tests, alternate models) — the accessor is the default, not the
+    only construction path.
+    """
+    return CrossEncoderReranker()
 
 
 class CrossEncoderReranker:

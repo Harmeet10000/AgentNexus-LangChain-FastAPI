@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import NamedTuple
 
+import asyncer
+from docling_core.types.doc.document import DoclingDocument
+from docling_core.types.doc.labels import DocItemLabel
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.shared.rag.document_processing import IngestionConfig, chunk_document_simple
-
-if TYPE_CHECKING:
-    from app.shared.rag.document_processing.models import Chunk as SharedChunk
+from app.shared.rag.document_processing import IngestionConfig
+from app.shared.rag.document_processing.chunker import (
+    DEFAULT_TOKENIZER_MODEL_ID,
+    create_hybrid_chunker,
+    get_tokenizer,
+)
 
 
 class QualityWarning(BaseModel):
@@ -88,91 +93,179 @@ async def segment_chunks(
     parsed: ParsedDocument,
     classified: ClassifiedDocument,
 ) -> tuple[list[PreparedChunk], list[QualityWarning]]:
-    if classified.document_kind in {"legal_contract", "legal_policy"}:
-        return _segment_legal_chunks(parsed=parsed, classified=classified)
-
-    shared_chunks = await _chunk_document(
-        parsed=parsed,
-        classified=classified,
-    )
-    chunks = [
-        PreparedChunk(
-            chunk_index=chunk.chunk_index,
-            chunk_kind=chunk.metadata.get("chunk_method", "generic"),
-            content=chunk.content,
-            preamble=chunk.metadata.get("preamble", ""),
-            clause_type=chunk.metadata.get("clause_type"),
-            page_no=int(chunk.metadata.get("page_no", 0) or 0),
-            metadata_=dict(chunk.metadata),
-            custom_metadata={},
-            quality_warnings=[],
-        )
-        for chunk in shared_chunks
-    ]
-    return chunks, []
+    # One structure-aware path for every document kind: the markdown is lifted
+    # into a real document structure (headings + clause-bounded sections) and
+    # the Docling HybridChunker decides chunk boundaries by token budget with
+    # peer merging — never by blank-line pattern matching, and never truncated
+    # to a fixed prefix. Legal documents additionally get clause typing; the
+    # chunking itself is identical.
+    return await _segment_hybrid_chunks(parsed=parsed, classified=classified)
 
 
-async def _chunk_document(
-    *, parsed: ParsedDocument, classified: ClassifiedDocument
-) -> list[SharedChunk]:
-    config = IngestionConfig(
-        chunk_size=1000,
-        chunk_overlap=200,
-        max_chunk_size=2000,
-        min_chunk_size=100,
-        use_semantic_chunking=True,
-        preserve_structure=True,
-        max_tokens=512,
-    )
-    return await chunk_document_simple(
-        content=parsed.markdown,
-        title=parsed.title,
-        source=parsed.title,
-        config=config,
-        metadata={
-            "document_kind": classified.document_kind,
-            "jurisdiction": classified.jurisdiction,
-            "contract_type": classified.contract_type,
-            "parties": classified.parties,
-        },
-    )
+class _StructuredItem(NamedTuple):
+    kind: str  # "heading" or "text"
+    text: str
+    level: int = 1
 
 
-def _segment_legal_chunks(
+class _HybridChunk(NamedTuple):
+    text: str
+    heading_path: tuple[str, ...]
+
+
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
+
+# A paragraph that opens a new clause section. Numbered references (`12.`,
+# `12.3)`, `(a)`) and named references (`Section 12`, `ARTICLE III`) start a
+# section; anything else continues the current one. Deliberately textual rather
+# than semantic: a missed marker merges two clauses into one section (still
+# chunked, still typed), while an over-eager marker only splits a section the
+# chunker's peer merging can rejoin.
+_CLAUSE_START_RE = re.compile(
+    r"(?i)^\s*(?:section|article|clause|schedule|exhibit|appendix|annex|part|paragraph)\b\s*\S+"
+    r"|^\s*\d+(?:\.\d+)*[.)]\s+\S"
+    r"|^\s*\([a-z0-9]+\)\s+\S"
+)
+
+
+def _structure_markdown(markdown: str) -> list[_StructuredItem]:
+    """Lift markdown into heading + section items (cheap string ops, inline).
+
+    Blank lines separate *paragraphs* — the atomic items below — but they never
+    decide chunk boundaries; the chunker does that by token budget. Paragraphs
+    group into one section until a heading or a clause start opens the next, so
+    a multi-paragraph clause that fits the budget stays one atomic item and can
+    never be split mid-clause by a merge.
+    """
+    items: list[_StructuredItem] = []
+    paragraph_lines: list[str] = []
+
+    def _flush_section() -> None:
+        paragraph = "\n".join(paragraph_lines).strip()
+        paragraph_lines.clear()
+        if not paragraph:
+            return
+        if items and items[-1].kind == "text" and not _is_clause_start(paragraph):
+            merged = f"{items[-1].text}\n\n{paragraph}"
+            items[-1] = _StructuredItem(kind="text", text=merged)
+        else:
+            items.append(_StructuredItem(kind="text", text=paragraph))
+
+    for line in markdown.splitlines():
+        heading = _HEADING_RE.match(line)
+        if heading:
+            _flush_section()
+            items.append(
+                _StructuredItem(
+                    kind="heading", text=heading.group(2).strip(), level=len(heading.group(1))
+                )
+            )
+            continue
+        if not line.strip():
+            _flush_section()
+            continue
+        paragraph_lines.append(line.rstrip())
+    _flush_section()
+    return [item for item in items if item.text]
+
+
+def _is_clause_start(paragraph: str) -> bool:
+    first_line = paragraph.splitlines()[0] if paragraph else ""
+    return _CLAUSE_START_RE.match(first_line) is not None
+
+
+def _run_hybrid_chunker_sync(
+    *, title: str, items: list[_StructuredItem], max_tokens: int
+) -> list[_HybridChunk]:
+    """Build the structured document and chunk it (sync; callers offload).
+
+    The tokenizer is the cached process-wide counter, so repeated chunking pays
+    no reload; the chunker merges undersized peer sections within the token
+    bound and carries each chunk's heading path in its metadata.
+    """
+    document = DoclingDocument(name=(title or "document")[:255])
+    for item in items:
+        if item.kind == "heading":
+            document.add_heading(text=item.text, level=min(max(item.level, 1), 6))
+        else:
+            document.add_text(label=DocItemLabel.TEXT, text=item.text)
+    chunker = create_hybrid_chunker(get_tokenizer(), IngestionConfig(max_tokens=max_tokens))
+    chunks: list[_HybridChunk] = []
+    for chunk in chunker.chunk(dl_doc=document):
+        text = chunk.text.strip()
+        if not text:
+            continue
+        # `meta` is typed as the chunker base metadata, which declares no
+        # headings — read structurally rather than suppressing the checker.
+        headings: tuple[str, ...] = tuple(getattr(chunk.meta, "headings", None) or ())
+        chunks.append(_HybridChunk(text=text, heading_path=headings))
+    return chunks
+
+
+async def _segment_hybrid_chunks(
     *,
     parsed: ParsedDocument,
     classified: ClassifiedDocument,
 ) -> tuple[list[PreparedChunk], list[QualityWarning]]:
-    blocks = [block.strip() for block in re.split(r"\n\s*\n", parsed.markdown) if block.strip()]
+    items = _structure_markdown(parsed.markdown)
     warnings: list[QualityWarning] = []
-    if len(blocks) <= 1:
+    if len([item for item in items if item.kind == "text"]) <= 1:
         warnings.append(
             QualityWarning(
                 stage="segment_chunks",
-                code="LEGAL_FALLBACK_SEGMENTATION",
-                message="Clause-aware segmentation fell back to paragraph segmentation.",
+                code="DEGENERATE_PARSE",
+                message=(
+                    "Structure-aware segmentation saw one section or none "
+                    f"in '{parsed.title}'."
+                ),
                 severity="warning",
             )
         )
+    try:
+        hybrid_chunks = await asyncer.asyncify(_run_hybrid_chunker_sync)(
+            title=parsed.title, items=items, max_tokens=512
+        )
+    except Exception as exc:  # noqa: BLE001 — chunking must degrade, not fail ingestion
+        exc.add_note("operation=hybrid_chunk")
+        warnings.append(
+            QualityWarning(
+                stage="segment_chunks",
+                code="HYBRID_CHUNKER_FALLBACK",
+                message=(
+                    "Structure-aware chunking failed "
+                    f"({type(exc).__name__}); emitted atomic sections instead."
+                ),
+                severity="warning",
+            )
+        )
+        hybrid_chunks = [
+            _HybridChunk(text=item.text, heading_path=())
+            for item in items
+            if item.kind == "text"
+        ]
     chunks: list[PreparedChunk] = []
-    for index, block in enumerate(blocks[:200]):
-        clause_type = _infer_clause_type(block)
+    for index, hybrid_chunk in enumerate(hybrid_chunks):
+        clause_type = _infer_clause_type(hybrid_chunk.text)
         preamble = _build_preamble(classified=classified, clause_type=clause_type)
-        chunk_warnings = warnings.copy() if len(blocks) <= 1 else []
+        heading_path = " / ".join(hybrid_chunk.heading_path)
+        if heading_path:
+            preamble = f"{preamble} Section path: {heading_path}."
         chunks.append(
             PreparedChunk(
                 chunk_index=index,
                 chunk_kind=classified.document_kind,
-                content=block,
+                content=hybrid_chunk.text,
                 preamble=preamble,
                 clause_type=clause_type,
                 metadata_={
                     "jurisdiction": classified.jurisdiction,
                     "contract_type": classified.contract_type,
                     "parties": classified.parties,
+                    "heading_path": list(hybrid_chunk.heading_path),
+                    "tokenizer": DEFAULT_TOKENIZER_MODEL_ID,
                 },
-                custom_metadata={"source": "clause_aware" if len(blocks) > 1 else "fallback"},
-                quality_warnings=chunk_warnings,
+                custom_metadata={"source": "hybrid"},
+                quality_warnings=warnings.copy() if warnings else [],
             )
         )
     return chunks, warnings

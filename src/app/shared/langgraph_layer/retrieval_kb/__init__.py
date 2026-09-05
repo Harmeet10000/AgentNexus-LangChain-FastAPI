@@ -2,7 +2,7 @@
 
 from .graph import build_retrieval_graph
 from .nodes import _extract_postgres_chunk_ids
-from .reranker import CrossEncoderReranker
+from .reranker import CrossEncoderReranker, get_shared_reranker
 from .state import (
     Citation,
     ContextGrade,
@@ -22,4 +22,5 @@ __all__ = [
     "RetrievedChunk",
     "_extract_postgres_chunk_ids",
     "build_retrieval_graph",
+    "get_shared_reranker",
 ]
