@@ -14,11 +14,11 @@ from returns.result import Failure
 
 from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
 from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text
-from app.shared.langgraph_layer.kb_retry import retry_immediate
+from app.shared.langgraph_layer.kb_retry import TransientExternalError, retry_immediate
 from app.shared.result import log_expected_failure
 from app.utils import InfrastructureException, logger
 
-from .reranker import CrossEncoderReranker
+from .reranker import get_shared_reranker
 from .state import ContextGrade, GeneratedAnswer, QueryPlan, RetrievedChunk
 
 if TYPE_CHECKING:
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
     from app.features.documents.repository import DocumentRepository
 
+    from .reranker import CrossEncoderReranker
     from .state import RetrievalState
 
 _QUERY_ANALYZER_SYSTEM_PROMPT = render_prompt_sections(
@@ -117,7 +118,12 @@ def make_query_analyzer_node(
                 label="gemini_query_analyzer",
             )
             plan = _normalize_plan(QueryPlan.model_validate(raw_plan))
-        except LangChainException as exc:
+        # Both routes into this branch (the C6 contract): a deterministic
+        # framework failure arrives unwrapped; a transient one arrives retried
+        # and, once the budget is spent, as the boundary's transient type with
+        # the original reachable through its cause. Catching only the first
+        # left this degradation branch dead in production.
+        except (LangChainException, TransientExternalError) as exc:
             exc.add_note(f"query={query[:80]}, operation=query_analyzer")
             logger.bind(error=str(exc)).warning("query_analyzer_failed_using_default")
             plan = QueryPlan(rewritten_query=query, sub_queries=[query])
@@ -154,7 +160,9 @@ def make_graph_retrieval_node(
                 ),
                 label="graphiti_retrieval_search",
             )
-        except GraphitiError as exc:
+        # Same C6 contract as above: a retry-exhausted transient failure
+        # arrives as the boundary's type, not as `GraphitiError`.
+        except (GraphitiError, TransientExternalError) as exc:
             exc.add_note(f"query={plan.rewritten_query[:80]}, operation=graph_retrieval")
             logger.bind(error=str(exc)).warning("graph_retrieval_failed")
             return {"graph_chunk_ids": []}
@@ -237,7 +245,7 @@ def make_hybrid_retrieval_node(
 def make_reranker_node(
     reranker: CrossEncoderReranker | None = None,
 ) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
-    resolved: CrossEncoderReranker = reranker or CrossEncoderReranker()
+    resolved: CrossEncoderReranker = reranker or get_shared_reranker()
 
     async def reranker_node(state: RetrievalState) -> dict[str, object]:
         plan: QueryPlan = state["query_plan"]

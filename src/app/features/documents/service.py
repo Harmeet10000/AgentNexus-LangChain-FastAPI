@@ -12,18 +12,19 @@ from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.connections import init_db
+from app.connections.celery_task_names import DOCUMENTS_INGEST
 from app.shared.langchain_layer import serialize_to_toon
 from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text, embed_texts
 from app.shared.langchain_layer.models import _build_chat_model
 from app.shared.langgraph_layer.kb_retry import retry_immediate
 from app.shared.langgraph_layer.retrieval_kb import (
     ContextGrade,
-    CrossEncoderReranker,
     GeneratedAnswer,
     QueryPlan,
     RetrievedChunk,
     _extract_postgres_chunk_ids,
     build_retrieval_graph,
+    get_shared_reranker,
 )
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.result import log_expected_failure
@@ -206,7 +207,7 @@ class DocumentCommandService:
             session=self.repo.session,
             aggregate_type="user_document",
             aggregate_id=str(object=document.id),
-            event_type="tasks.documents_ingest",
+            event_type=DOCUMENTS_INGEST,
             payload={
                 "document_id": str(object=document.id),
                 "user_id": user_id,
@@ -599,7 +600,7 @@ class DocumentQueryService:
                 return Failure(rows_result.failure())
             rows = rows_result.unwrap()
             retrieved_chunks = [_row_to_chunk(row) for row in rows]
-            reranked = await CrossEncoderReranker().rerank(
+            reranked = await get_shared_reranker().rerank(
                 plan.rewritten_query, retrieved_chunks, limit=5
             )
             grade = await _grade_context(
