@@ -300,7 +300,7 @@ Q2 is closed: the mechanism exists and is wired to the survivor factory. The gap
       count would never reach 0.
 - [x] 9.4 Add the hydration step
       **Executed 2026-08-24 (integrated).** `hydrate_state()` + single `STATE_SCHEMA_VERSION` (one definition site verified `rg -c` →1); `uv run pytest -k hydrat` + `throwaway_graph` pass; full suite 416 passed. `rg build_saul_graph|app.main` in test prints nothing. and collapse the version constant to one definition (D-5).
-      **Proof:** `rg -c "<VERSION_CONST>" src/` prints **1**; a unit test asserts a hydrated state carries the
+      **Proof:** exactly one definition site — `rg -n "^STATE_SCHEMA_VERSION" src/` prints one line; a unit test asserts a hydrated state carries the
       constant: `uv run pytest tests/ -k hydrat 2>&1 | tail -1` passes.
 - [x] 9.5 Prove the six runtime scenarios
       **Executed 2026-08-24.** Throwaway two-node graph + InMemorySaver inside test file; six scenarios via ToolRetryMiddleware hooks; `rg build_saul_graph|app.main` prints nothing. against the **throwaway two-node `StateGraph` + `InMemorySaver` built inside
@@ -337,7 +337,8 @@ Closed by user decision: the file is **moved**, not deleted and not harvested. T
       change 2's `document-retrieval-schema` capability rather than inventing them.
       **Proof (runs today, import-level):** `uv run python -c "import <retarget module>; print('imports clean')"`
       exits 0, and `rg -n "FROM statutes" src/` prints nothing.
-- [x] 11.2 **BLOCKED ON CHANGE 2'S MIGRATION — do not attempt before it lands.** Verify the lookup is index-served.
+- [ ] 11.2 **BLOCKED ON CHANGE 2'S MIGRATION — do not attempt before it lands.** Verify the lookup is index-served.
+      Unchecked 2026-09-05: this task's own text marks its EXPLAIN proof unexecutable until change 2's migration lands.
       **Executed 2026-08-24 on authorized dev DB (.env.development):** seeded statute chunk via ORM, `EXPLAIN` shows `Index Scan using ix_chunks_instrument_section` (cost 0.14..4.16), lookup returns seeded row. `rg FROM statutes` → 0 hits. Index added in revision 0016, applied via `alembic upgrade head`.
       This Proof is unexecutable today because the relation does not exist in the deployed database; running it early
       produces a false failure.

@@ -209,6 +209,16 @@ class RiskFinding(BaseModel, frozen=True):
     citations: list[Citation]
     suggested_revision: str | None = None
 
+    @field_validator("citations")
+    @classmethod
+    def _citations_non_empty(cls, value: list[Citation]) -> list[Citation]:
+        # D-9: an uncited assertion is the failure mode. An empty citation
+        # list must fail validation, not flow downstream with a warning.
+        if not value:
+            msg = "a risk finding must carry at least one citation"
+            raise ValueError(msg)
+        return value
+
 
 class RiskAnalysisOutput(BaseModel, frozen=True):
     findings: list[RiskFinding]
@@ -227,6 +237,16 @@ class ComplianceFinding(BaseModel, frozen=True):
         default=False,
         description="True when retrieved sources < confidence threshold",
     )
+
+    @field_validator("citations")
+    @classmethod
+    def _citations_non_empty(cls, value: list[Citation]) -> list[Citation]:
+        # D-9: an uncited assertion is the failure mode. An empty citation
+        # list must fail validation, not flow downstream with a warning.
+        if not value:
+            msg = "a compliance finding must carry at least one citation"
+            raise ValueError(msg)
+        return value
 
 
 class ComplianceOutput(BaseModel, frozen=True):

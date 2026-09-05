@@ -63,7 +63,11 @@ class ToolRegistry:
         ]
 
     def by_names(self, names: list[str]) -> list[BaseTool]:
-        return [self._tools[n] for n in names if n in self._tools]
+        missing = [name for name in names if name not in self._tools]
+        if missing:
+            msg = f"Tool(s) not found: {', '.join(missing)}"
+            raise KeyError(msg)
+        return [self._tools[name] for name in names]
 
     def names(self) -> list[str]:
         return list(self._tools.keys())
