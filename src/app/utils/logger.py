@@ -110,7 +110,13 @@ def trace_layer(layer_name: str) -> Any:
             tracer = otel_trace.get_tracer(__name__)
 
             # 1. Update Breadcrumbs (Copy to avoid mutating parent state)
-            current_flow = execution_path.get().copy()
+            # .get([]) — not bare .get(): execution_path is set only in
+            # middleware/server_middleware.py, so outside an HTTP request
+            # (Celery tasks, LangGraph nodes, CLI, unit tests) a defaultless
+            # read raises LookupError. Same load-bearing default the global
+            # exception handler already carries; an empty flow degrades to a
+            # single-function breadcrumb.
+            current_flow = execution_path.get([]).copy()
             current_flow.append(func.__name__)
 
             # VERY IMPORTANT: Save the token to reset later

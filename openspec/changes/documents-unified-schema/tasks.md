@@ -805,6 +805,20 @@ This is the third time in this refactor that a step's stated blocker turned out 
 time removing one **shortened** the work rather than adding to it — the same pattern change 0 step 8 hit, where a
 BREAKING notice and an ordering gate both dissolved on inspection. Re-check a gate before honouring it.
 
+**Re-probe 2026-09-04 — the query-route 500s are gone; all three routes answer 401 with auth isolated.** The
+original probe ran under a bare `TestClient` with no lifespan state, so `get_redis` (`app.state.redis`) and
+`get_postgres_db` (`app.state.db_session_local`) raised before the auth dependency was evaluated. Re-running with
+those two infra dependencies overridden by harmless stubs (`get_redis -> None`, `get_postgres_db` yields `None`)
+and the real auth chain intact — working form in `/tmp/c2-reprobe-401.py`, bare `TestClient(app,
+raise_server_exceptions=False)`, no credentials sent — yields **401 on all three**: `POST
+/api/v1/documents/upload`, `GET /api/v1/documents/{id}/status`, and `POST /api/v1/search`. (Lifespan context was
+tried first and is not the working form here: `lifespan` raises `ServiceUnavailableException` on PostgreSQL
+startup with no live database, so it cannot run in this environment at all.) The query route flipping 500 -> 401
+is the lazy-LLM fix doing its job: `DocumentQueryService` now takes an `llm_factory` and constructs at most once
+on first use, so nothing in dependency resolution can raise ahead of the 401 anymore. Step 13's table above is
+left as measured at the time; this note records that the follow-up it called for has shipped and the scenario is
+now proven for the query routes too.
+
 ## 14. Wire the static gate into the default suite and add the real-database gate behind a marker
 
 `--strict-markers` is enabled, so an unregistered marker is a hard error rather than a warning — register

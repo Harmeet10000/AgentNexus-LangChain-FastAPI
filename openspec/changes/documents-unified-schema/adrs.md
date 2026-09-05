@@ -79,7 +79,7 @@ cheap:
 | Field | Type | Contract |
 |---|---|---|
 | `instrument_name` | varchar(255), NULL | The instrument the provision belongs to, in a **normalized** form the ingestion path controls — deliberately *not* the parent document's free-text `title`, because identity that piggybacks on a display string drifts the first time a title is reformatted. |
-| `section_ref` | varchar(64), NULL | The provision reference within that instrument, stored as authored (`12`, `12A`, `12(3)`). Not parsed into parts; a point lookup compares it whole. |
+| `section_ref` | varchar(255), NULL | The provision reference within that instrument, stored as authored (`12`, `12A`, `12(3)`). Not parsed into parts; a point lookup compares it whole. |
 | `instrument_year` | smallint, NULL | The year of the instrument edition this provision is drawn from. It is the discriminator when the same section is held at more than one vintage. |
 
 All three are NULL for the corpus's non-statute majority, and a writer that supplies one SHALL supply
