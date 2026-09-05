@@ -41,17 +41,26 @@ primary. The boundary outlives this change and others will build on it, so it is
 
 `findings-deployment.md` §1–§2, verified by command:
 
-- **There is no worker or beat service in `docker-compose.yml` at all.** Services are exactly `rabbitmq`,
-  `timescale`, `caddy`, `ai-service-1`, and `ai-service-1` declares no `command:`, so it runs the API image CMD.
-  Nothing consumes the queue.
-- **The documented way to start a worker is broken.** `Makefile:52` runs `celery -A celery_config`, and
-  `celery_config` does not exist anywhere in the repository.
+- **At authoring time there was no worker or beat service in `docker-compose.yml` at all** — services were
+  exactly `rabbitmq`, `timescale`, `caddy`, `ai-service-1`, and `ai-service-1` declares no `command:`, so it runs
+  the API image CMD. Nothing consumed the queue. **That premise is now stale:** `docker compose config
+  --services` lists `celery-worker`, `celery-worker-ingestion` and `celery-beat` alongside the original four,
+  each running the fully expanded `app.connections.celery:celery_app` commands the `Makefile`
+  (`CELERY_APP`, `celery`, `celery-ingestion`, `celery-beat` targets) defines once, with a unit test pinning the
+  compose copies to those definitions.
+- **The documented way to start a worker was broken at authoring time** (`celery -A celery_config`, a module
+  that never existed anywhere in the repository). It is now `uv run celery -A app.connections.celery:celery_app
+  worker|beat …` per the `Makefile`.
 
-This change's scheduled consolidation therefore **registers a task and a schedule entry, and states plainly that
-no process exists to execute them.** Provisioning a worker and a beat service is an operational dependency of this
-change, not a step inside it. Proving registration (`celery inspect registered`, `beat_schedule` length) is
-possible today; proving execution is not. Anyone reading the consolidation requirement as "consolidation runs
-nightly in production" is reading it wrong until that service exists.
+This change's scheduled consolidation therefore **registers a task and a schedule entry, and at landing time no
+process existed to execute them.** That second half has since expired: the beat entry
+(`agent-memory-consolidation-nightly`) is published by `celery-beat`, and the task routes to the default queue,
+which `celery-worker` consumes — so the schedule entry is live, not inert. What has *not* changed is the
+execution outcome: wherever the target graph lacks APOC/GDS, the run takes the refusal branch
+(`ConsolidationPreconditionError`, recorded per tenant), and no permanent-graph recall has ever been observed
+(`tasks.md` 10.6, unchecked). Anyone reading the consolidation requirement as "consolidation runs nightly in
+production" is still reading it wrong — now because the graph precondition, not the scheduler, is the missing
+half.
 
 - **The application database is Timescale Cloud**, not the local `timescale` compose service
   (`findings-database.md` §1). `CREATE DATABASE` cannot be assumed, which is why isolation is by **schema**.
@@ -123,7 +132,7 @@ recorded so that a later reader can see the seam rather than discover it.
 | # | What is needed | Owner | State after change 4 lands | Consequence if the owner never lands it |
 |---|---|---|---|---|
 | **C-A** | **A registry binding for deeper memory retrieval.** The behaviour is specified here (`saul-agent-memory`: *Deeper memory retrieval is available only to designated reasoning roles*). What is missing is the tool-name binding and the role assignment: change 3's `agent-tool-registry` must add the memory-retrieval tool to the tool set of exactly the risk-analysis and compliance roles and to no other role — its *"every agent role receives the tools assigned to it"* requirement (`agent-tool-registry/spec.md:74-92`) currently enumerates precedent/statute and knowledge-graph tools only — and change 3's `agent-tool-contract` must carry its refusal path, because the operation must refuse rather than return an empty result set (that contract already has *"Unavailability SHALL never be reported as absence"*, which is exactly the shape needed). | **change 3** (`agent-tools-unification`) — **not yet written into its artifacts**, verified 2026-08-18 | The service operation exists with the role restriction specified. No tool is registered. No reasoning node can invoke it. | The constraint remains specified and unexposed. Nothing regresses; the capability simply is not reachable from a node. This is the *stated* cost of not adding a second tool-registration path here (D6.1). |
-| **C-B** | **A worker and a beat service to execute scheduled consolidation.** There is no worker and no beat service in `docker-compose.yml` at all, and `Makefile:52` starts one from a `celery_config` module that does not exist. | **change 1** — dispositioned there (`dispositions.md` 198.4), deliberately **not** duplicated as a requirement here | The consolidation task is registered and its beat entry is present. **The entry is inert: no process exists to execute it.** | Memory accumulates in conversation-scoped caches and is never consolidated into the permanent graph. Recall keeps working against the conversation cache; the permanent half of the boundary stays theoretical. See NG14. |
+| **C-B** | **A worker and a beat service to execute scheduled consolidation.** At authoring time there was neither in `docker-compose.yml`, and the `Makefile` started one from a `celery_config` module that did not exist. Both have since been provisioned: `celery-worker`, `celery-worker-ingestion` and `celery-beat` exist in compose, run the `app.connections.celery:celery_app` commands the `Makefile` defines, and the consolidation task routes to the default queue the worker consumes. | **change 1** — dispositioned there (`dispositions.md` 198.4), deliberately **not** duplicated as a requirement here | The consolidation task is registered, its beat entry is published and consumed. **Execution reaches the graph precondition, not the scheduler:** without APOC/GDS the run refuses loudly per tenant; nothing has consolidated successfully to date. | Memory accumulates in conversation-scoped caches and is never consolidated into the permanent graph until the graph exposes the required procedures. Recall keeps working against the conversation cache; the permanent half of the boundary stays theoretical. See NG14. |
 
 **C-B also has a hard ordering dependency on change 0**, which is separate from the runtime gap: registration cannot
 even be *proven* until change 0 removes the reconciliation re-exports from `src/tasks/__init__.py:6-9,18-20`, because
@@ -204,13 +213,17 @@ Remaining Non-Goals:
   resolves. If an implementer chooses to satisfy that by parsing `get_database_url()` into discrete parts, the
   accessor becomes a convenience, never a precondition.
 - **NG14 — the process that executes scheduled consolidation.** This change registers a task and a beat entry; it
-  does **not** provision a worker or a beat service, and there is no such service in the deployment to register
-  against (§ Context). **The beat entry this change adds is inert on the day it lands**, and will stay inert until
-  change 1 provisions those services — the runtime gap is dispositioned **in change 1** (`dispositions.md` 198.4),
-  so it is deliberately not duplicated as a requirement here. Stated plainly rather than implied: **after this
-  change, consolidation never runs.** The requirement *Consolidation into the permanent memory graph runs on a
-  schedule* is satisfied by registration and schedule presence, and nothing in it should be read as evidence that a
-  consolidation has ever executed.
+  does **not** provision a worker or a beat service — at landing time there was no such service in the deployment
+  to register against (§ Context), and that provisioning remains owned elsewhere (dispositioned **in change 1**,
+  `dispositions.md` 198.4), so it is deliberately not duplicated as a requirement here.
+  **Reassessment of "inert on landing":** true on the day it landed, expired since. The deployment now runs
+  `celery-worker`, `celery-worker-ingestion` and `celery-beat`; the beat entry is published and consumed off the
+  default queue, and the task constructs its service with a live SHOW PROCEDURES probe. The observed outcome is
+  unchanged for a different reason — every execution takes the refusal branch wherever the graph lacks APOC/GDS,
+  and no permanent-graph recall has ever been observed (`tasks.md` 10.6, unchecked). Stated plainly rather than
+  implied: **no consolidation has ever succeeded.** The requirement *Consolidation into the permanent memory graph
+  runs on a schedule* is satisfied by registration and schedule presence, and nothing in it should be read as
+  evidence that a consolidation has ever executed.
 - **Not owned at all:** item 159 (RAGFlow / OpenRAG evaluation) is deferred per D13 with no owning change, and is
   explicitly not claimed here — D5.1 already commits document retrieval to the existing `pg_textsearch` path.
 
@@ -649,12 +662,7 @@ is descoped, this change ships a subsystem whose misconfiguration is invisible. 
   library's `RelationalConfig` has no place for it except `database_connect_args`, which nothing sets. So it is
   unverified whether this connection to a **managed cloud instance** negotiates TLS at all. Added to the
   precondition audit; not answerable from the repository.
-- **[Scheduled consolidation has nothing to execute it]** → There is no worker or beat service in the deployment,
-  and `Makefile:52` names a nonexistent module (`findings-deployment.md` §1–§2). Mitigated only by honesty: this
-  change registers the task and the schedule entry and proves **registration**, and provisioning the worker/beat
-  services is stated as an operational dependency. Do not read the consolidation requirement as "consolidation runs
-  nightly" until that service exists. **The runtime gap is change 1's** (`dispositions.md` 198.4) and is not
-  duplicated as a requirement here — see NG14 and coordination point C-B.
+- **[Scheduled consolidation has nothing to execute it]** → At authoring time there was no worker or beat service in the deployment, and `Makefile:52` named a nonexistent module (`findings-deployment.md` §1–§2). The scheduler half has since been provisioned (see § Context); what remains is the graph-precondition half — without APOC/GDS every run refuses loudly. Mitigated by honesty: this change registers the task and the schedule entry and proves **registration**, and the remaining gap (a graph exposing the required procedures) is an operational dependency. Do not read the consolidation requirement as "consolidation runs nightly" — no consolidation has ever succeeded. **The runtime provisioning was change 1's** (`dispositions.md` 198.4) and is not duplicated as a requirement here — see NG14 and coordination point C-B.
 - **[The partition name is the sole tenant boundary]** → With access control unavailable (NG6), a bug in partition
   naming is a cross-tenant memory leak with no second line of defence. Mitigated by one validated helper replacing
   three interpolations, plus a test asserting two tenants never collide.
@@ -714,8 +722,10 @@ no dual-run and no cutover. What follows is an ordering, and the order is the de
    shape — a memory failure must not fail a completed legal analysis.
 8. **Scheduled consolidation** — a real task decorator, module registered in the task `include` list, one schedule
    entry. **Depends on change 0** having removed the reconciliation re-exports from `src/tasks/__init__.py:6-9,18-20`;
-   until then every worker dies at import and registration cannot be proven. **Registration is all that lands: the
-   beat entry is inert until change 1 provisions a worker and a beat service** (NG14, coordination point C-B). Name it
+   until then every worker dies at import and registration cannot be proven. **Registration is all this change
+   provisions: at landing time the beat entry was inert until change 1's worker and beat services arrived**
+   (NG14, coordination point C-B) — those services now exist, so the entry is published and consumed, and execution
+   reaches the graph precondition (loud refusal without APOC/GDS, no success ever observed). Name it
    distinctly from the existing billing reconciliation entry, which shares only the word.
 9. **The read seam** — the prefetch node after clarification, relocating the fail-open and the **three-way**
    supplement branch out of the file step 10 deletes, plus the deeper-retrieval service operation with its role

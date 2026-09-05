@@ -13,6 +13,7 @@ import re
 from typing import (
     TYPE_CHECKING,
     Any,  # noqa: TC003 — used in method bodies at runtime
+    Protocol,
 )
 
 import cognee
@@ -21,6 +22,9 @@ from app.utils import logger
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
+    from typing import LiteralString
+
+    from neo4j import Query
 
 #: Tenant and kind identifiers may only contain these characters. The separator
 #: below cannot therefore appear inside either component, which is what makes
@@ -82,6 +86,51 @@ def _origin_of(dumped: dict[str, Any]) -> str | None:
         if key in dumped:
             return str(dumped[key])
     return None
+
+
+class ProceduresQueryDriver(Protocol):
+    """Minimal query surface the consolidation precondition probe needs.
+
+    Declared structurally so this module never imports the driver package at
+    runtime: the probe needs exactly one method, with the driver's own
+    parameter shape so a real driver satisfies the protocol.
+    """
+
+    async def execute_query(self, query_: LiteralString | Query, **kwargs: Any) -> Any: ...
+
+
+def make_neo4j_procedures_probe(
+    driver: ProceduresQueryDriver | None,
+) -> Callable[[], Awaitable[bool]]:
+    """Build the consolidation precondition probe over a Neo4j driver.
+
+    A probe failure answers False — consolidation then refuses loudly with
+    :data:`ConsolidationPreconditionError` — so an unreachable graph or a
+    graph without the required procedures can never read as a success.
+    """
+
+    async def probe() -> bool:
+        if driver is None:
+            return False
+        try:
+            # The same graph-procedure precondition the health surface reports
+            # as ``graphProceduresAvailable``. Inlined as a literal: the driver
+            # types the query as ``LiteralString``, which a variable does not
+            # satisfy.
+            records, _, _ = await driver.execute_query(
+                "SHOW PROCEDURES YIELD name WHERE name STARTS WITH 'apoc.' "
+                "OR name STARTS WITH 'gds.' RETURN count(name) AS n"
+            )
+        except Exception:  # noqa: BLE001 — any probe failure means "precondition absent"
+            return False
+        if not records:
+            return False
+        first = records[0]
+        # neo4j Record supports mapping access; a test double may not.
+        count = first.get("n", 0) if hasattr(first, "get") else getattr(first, "n", 0)
+        return bool(count > 0)
+
+    return probe
 
 
 class AgentMemoryService:

@@ -276,13 +276,13 @@
       `openspec validate --all 2>&1 | tail -1` → failures ≤ **6** (21/6 of 27 today; 22/5 if task 2.1 landed). The
       **failure count is the invariant** — the pass count moves as sibling changes are authored and is never an
       acceptance number.
-- [x] 10.6 Run the one manual round-trip against a **non-production** instance. It is the only check in this change
+- [ ] 10.6 Run the one manual round-trip against a **non-production** instance. It is the only check in this change
       that can detect the silent rebuild failure, and the only evidence that these operations have *ever* succeeded
       here — there are no call sites, no tests and no dataset artifact to compare against.
       **Proof:** the observable transition, not parity with code that never ran — (a) write one conversation-scoped
       entry; (b) recall **with** the conversation scope returns a conversation-cache hit; (c) run the consolidation
-      task once, by hand, since no worker exists (9.4); (d) recall **without** the conversation scope returns a
-      permanent-graph hit. Record the four outputs. **Executed 2026-08-24 on authorized dev DB (.env.development, zero-data):** (a) store_report session cache OK; (b) scoped recall 1 hit (conversation-cache); (c) consolidate 1/1 with sessions_bridged via pending_sessions (COGNEE_SKIP_CONNECTION_TEST=true to bypass LLM probe on this handler/provider); (d) unscoped recall after consolidation requires GCP ADC for vertex embedding — fails with DefaultCredentialsError in this dev env without workload identity, which is expected and does not indicate a code defect. Graph procedures available: true (SHOW PROCEDURES count>0). If (d) returns nothing while (c) reported success, task 1.1's
+      task once, by hand; (d) recall **without** the conversation scope returns a
+      permanent-graph hit. Record the four outputs. **Attempted 2026-08-24 on authorized dev DB (.env.development, zero-data) — INCOMPLETE, box unchecked:** (a) store_report session cache OK; (b) scoped recall 1 hit (conversation-cache); (c) consolidate reported 1/1 with sessions_bridged via pending_sessions (COGNEE_SKIP_CONNECTION_TEST=true to bypass LLM probe on this handler/provider) — a self-reported count only, never confirmed by a permanent-graph hit, so it is NOT evidence that a consolidation executed; (d) unscoped recall after consolidation requires GCP ADC for vertex embedding — fails with DefaultCredentialsError in this dev env without workload identity, which is expected and does not indicate a code defect. Graph procedures available: true (SHOW PROCEDURES count>0). No permanent-graph recall has ever been observed here, so the round-trip is not executed. If (d) returns nothing while (c) reported success, task 1.1's
       graph precondition is absent and consolidation is failing silently.
 
 
@@ -317,6 +317,9 @@ All groups executed against the handover and measured on this tree. Deviations a
 * **10.2 lexical-trap noted**: the Proof pattern `store_relationships` substring-matches the unrelated local
   `_store_relationships` in `ingestion_kb/nodes.py`. Different symbol, different owner — left untouched; a
   structural check (import graph) confirms no caller of the deleted functions remains.
-* **10.6 NOT executed** — needs a reachable non-production graph instance and a manual beat run; neither exists
-  here (see 1.1). This box intentionally stays unchecked; nothing in this change may be read as evidence that a
-  consolidation has ever succeeded.
+* **10.6 NOT executed** — box unchecked. The 2026-08-24 attempt completed steps (a)–(c) only as
+  self-reported outputs; round-trip step (d) failed on GCP ADC (DefaultCredentialsError, no workload
+  identity in this dev env), so no permanent-graph recall has ever been observed here. The (c) 1/1
+  count is an unverified self-report, not evidence that a consolidation has ever succeeded — nothing in
+  this change may be cited as a consolidation having executed. Needs a reachable non-production graph
+  instance with embedding credentials and a manual run; neither exists here (see 1.1).
