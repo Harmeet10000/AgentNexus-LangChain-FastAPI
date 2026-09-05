@@ -194,8 +194,10 @@ query type SHALL be auto-routed by Cognee (default `auto_route=True`) — no exp
 #### Scenario: Search handles failures gracefully
 
 - **WHEN** `cognee.recall()` raises an exception
-- **THEN** an empty list SHALL be returned and the error SHALL be logged
-- **AND** the caller's run SHALL continue
+- **THEN** the service SHALL attach context with `add_note` (operation and partition) and re-raise —
+  it SHALL NOT return an empty list, so a failure can never be mistaken for "nothing in memory"
+- **AND** the caller's run SHALL continue because the read seam fails open one layer up (the prefetch
+  node catches the error, logs it, and continues on current-run context)
 
 #### Scenario: Search returns results as serialisable mappings
 
@@ -212,8 +214,10 @@ query type SHALL be auto-routed by Cognee (default `auto_route=True`) — no exp
 #### Scenario: Recall handles failures gracefully
 
 - **WHEN** `cognee.recall()` raises an exception
-- **THEN** an empty list SHALL be returned and the error SHALL be logged
-- **AND** the caller's run SHALL continue
+- **THEN** the service SHALL attach context with `add_note` (operation and partition) and re-raise —
+  it SHALL NOT return an empty list, so a failure can never be mistaken for "nothing in memory"
+- **AND** the caller's run SHALL continue because the read seam fails open one layer up (the prefetch
+  node catches the error, logs it, and continues on current-run context)
 
 ### Requirement: No type ignore suppressions
 
