@@ -41,6 +41,42 @@ def test_a_report_with_no_citations_fails_validation() -> None:
         FinalReport(**kwargs, citations=[])
 
 
+def test_a_risk_finding_with_no_citations_fails_validation() -> None:
+    from app.shared.langgraph_layer.agent_saul.state import (
+        Citation,
+        RiskFinding,
+        RiskLabel,
+    )
+
+    kwargs: dict[str, Any] = {
+        "risk_id": "r-1",
+        "clause_id": "c-1",
+        "label": RiskLabel.HIGH,
+        "title": "t",
+        "explanation": "e",
+    }
+    RiskFinding(**kwargs, citations=[Citation(claim="c", source="s", confidence=0.5)])
+    with pytest.raises(ValidationError, match="citation"):
+        RiskFinding(**kwargs, citations=[])
+
+
+def test_a_compliance_finding_with_no_citations_fails_validation() -> None:
+    from app.shared.langgraph_layer.agent_saul.state import Citation, ComplianceFinding
+
+    kwargs: dict[str, Any] = {
+        "finding_id": "f-1",
+        "clause_id": "c-1",
+        "statute": "Act s1",
+        "is_compliant": False,
+        "explanation": "e",
+    }
+    ComplianceFinding(
+        **kwargs, citations=[Citation(claim="c", source="s", confidence=0.5)]
+    )
+    with pytest.raises(ValidationError, match="citation"):
+        ComplianceFinding(**kwargs, citations=[])
+
+
 def test_a_grounding_verification_with_no_citations_fails_validation() -> None:
     from app.shared.langgraph_layer.agent_saul.state import (
         Citation,

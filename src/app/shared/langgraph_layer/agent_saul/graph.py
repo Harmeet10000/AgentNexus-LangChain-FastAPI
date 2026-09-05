@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 from langgraph.graph import END, StateGraph
 
 if TYPE_CHECKING:
-    from typing import Any
+    from typing import Any, Final
 
     from langchain_core.language_models import BaseChatModel
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -31,6 +31,22 @@ from .state import (
     LegalAgentOutputState,
     LegalAgentState,
 )
+
+# Step budget (agent-state-handoff): the maximum number of super-steps a single
+# run may take before LangGraph aborts it with GraphRecursionError. Pinned
+# explicitly rather than inherited from the library default so a default
+# change surfaces as a diff here. Invocation sites pass it via
+# `saul_runtime_config`; `compile()` takes no recursion limit, so the budget
+# lives on the invoke config, not on the compiled graph.
+SAUL_STEP_BUDGET: Final[int] = 25
+
+
+def saul_runtime_config(thread_id: str) -> dict[str, Any]:
+    """Invoke config for Agent Saul runs: thread scoping plus the step budget."""
+    return {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": SAUL_STEP_BUDGET,
+    }
 
 
 def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:

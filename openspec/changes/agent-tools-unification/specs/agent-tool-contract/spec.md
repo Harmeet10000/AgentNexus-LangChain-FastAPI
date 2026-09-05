@@ -6,11 +6,16 @@ and downstream verdict in the product depends on.
 
 ## ADDED Requirements
 
-### Requirement: One result envelope for every agent tool
+### Requirement: One result envelope for every result-bearing agent tool
 
-Every agent tool SHALL return results through a single common envelope carrying an outcome flag, a payload, an error
-description, an availability signal, and structured metadata. No agent tool SHALL return a differently-shaped result,
-and no second envelope definition SHALL be reachable from application code.
+Every result-bearing agent tool SHALL return results through a single common envelope carrying an outcome flag, a
+payload, an error description, an availability signal, and structured metadata. No result-bearing agent tool SHALL
+return a differently-shaped result, and no second envelope definition SHALL be reachable from application code.
+
+Recorded exclusions (wording scope, no behaviour change): the `web_search` and `crawl_url` tools return `str`, and
+the `transfer_to_<role>` handoff tools return `TransferPayload` dicts — neither returns the common envelope, and
+wrapping their live returns in envelopes is out of scope for this change. The envelope requirement governs tools
+that report corpus-backed results, not transport-shaped web/handoff returns.
 
 "Envelope definition" SHALL be determined by shape and role, not by class name. Four definitions of this envelope
 exist today under two different names — three named `ToolResult` and one named `ToolOutput` — and the requirement is
@@ -45,8 +50,9 @@ class name differs from the survivor's.
 
 ### Requirement: Tool failures are never reported as free-text output
 
-A tool SHALL report failure through the envelope's error and availability signals. A tool SHALL NOT return a
-human-readable error sentence in the success payload, and SHALL NOT return an error string in place of a result.
+A result-bearing tool SHALL report failure through the envelope's error and availability signals. A result-bearing
+tool SHALL NOT return a human-readable error sentence in the success payload, and SHALL NOT return an error string
+in place of a result. (The recorded web/handoff exclusions above are outside this requirement for the same reason.)
 
 No envelope SHALL provide a method that renders itself to a bare error sentence for consumption by the model, and no
 tool SHALL call such a method on its return path.

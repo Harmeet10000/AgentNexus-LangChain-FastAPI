@@ -35,13 +35,24 @@ def register_default_tools() -> ToolRegistry:
 
     Web tools carry the ``web`` tag; every role gets a ``transfer_to_<role>``
     tool tagged ``handoff`` so the orchestrator is genuinely tool-using and
-    tag-based selection is real, not decorative.
+    tag-based selection is real, not decorative. The five shell/filesystem
+    tools are registered here explicitly (D-1(c)) — importing this module
+    registers nothing; only calling this entry point populates the registry.
     """
     r = get_tool_registry()
     r.register(get_web_search_tool(), tags=["web", "search"])
     r.register(get_crawl_url_tool(), tags=["web", "crawl"])
     for tool in make_handoff_tools():
         r.register(tool, tags=["handoff", tool.name.removeprefix("transfer_to_")])
+    from . import (  # noqa: PLC0415 — D-1(c): entry-point import keeps package import side-effect free
+        shell as _shell,
+    )
+
+    r.register(_shell.shell_tool, tags=["system", "shell"])
+    r.register(_shell.read_file, tags=["filesystem", "read"])
+    r.register(_shell.write_file, tags=["filesystem", "write"])
+    r.register(_shell.list_directory, tags=["filesystem", "list"])
+    r.register(_shell.file_search, tags=["filesystem", "search"])
     return r
 
 

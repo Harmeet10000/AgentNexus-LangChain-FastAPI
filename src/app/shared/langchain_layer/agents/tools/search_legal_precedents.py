@@ -26,6 +26,12 @@ from langchain_core.tools.base import BaseTool
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.features.documents.constants import (
+    HYBRID_CANDIDATE_LIMIT,
+    RRF_K,
+    TRIGRAM_SIMILARITY_THRESHOLD,
+)
+from app.features.documents.fusion import RankedResultRow, reciprocal_rank_fusion
 from app.shared.result.diagnostics import add_database_error_note
 from app.utils import logger
 
@@ -182,16 +188,61 @@ def make_search_legal_precedents_tool(
 async def _search_statutes_postgres(
     db_engine: AsyncEngine,
     query: str,
-    jurisdiction: str,
+    jurisdiction: str,  # noqa: ARG001 — kept in the tool's contract; the statute corpus is jurisdiction-agnostic until change 2 annotates it
     limit: int,
 ) -> list[dict[str, Any]]:
     """Full-text statute search over the unified chunk corpus.
 
-    Task 11.1: the superseded `statutes` relation is created by no migration;
-    retrieval resolves against `chunks.search_text`, which change 0 indexes
-    (trgm GIN) and ranks by trigram similarity.
+    Harvested from the shared retrieval path, not a second ranking
+    implementation (D-11):
+
+    - BM25 branch reuses ``DocumentRepository.bm25_search``'s ranking
+      expression verbatim — ``search_text <@> to_bm25query(:query,
+      'chunks_bm25_idx')`` — including its ``< 0`` match predicate. The index
+      name stays a literal at this use site per the constants-module contract
+      (Decision 10: identifiers are asserted by the schema gate, never
+      interpolated).
+    - Trigram branch reuses ``DocumentRepository.trigram_search``'s
+      ``similarity`` expression and threshold.
+    - The two ranked lists fuse through the shared
+      ``reciprocal_rank_fusion`` (``k=RRF_K``), the same function
+      ``DocumentService`` fuses its branches with.
+
+    Both branches scope to statute chunks (``instrument_name IS NOT NULL``).
+    ``SQLAlchemyError`` propagates to the caller, which maps it onto
+    ``ToolResult.unavailable_result`` / ``basis_unknown`` — this helper never
+    swallows reachability into an empty list.
     """
-    query_sql = text(
+    bm25_sql = text(
+        """
+        SELECT
+            c.id::text AS chunk_id,
+            ROW_NUMBER() OVER (
+                ORDER BY c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')
+            ) AS rank
+        FROM chunks AS c
+        WHERE
+            c.instrument_name IS NOT NULL
+            AND (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')) < 0
+        ORDER BY c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')
+        LIMIT :candidate_limit
+        """
+    )
+    trigram_sql = text(
+        """
+        SELECT
+            c.id::text AS chunk_id,
+            ROW_NUMBER() OVER (ORDER BY similarity(c.search_text, :query) DESC) AS rank
+        FROM chunks AS c
+        WHERE
+            c.instrument_name IS NOT NULL
+            AND c.search_text % :query
+            AND similarity(c.search_text, :query) >= :similarity_threshold
+        ORDER BY similarity(c.search_text, :query) DESC
+        LIMIT :candidate_limit
+        """
+    )
+    detail_sql = text(
         """
         SELECT
             id::text,
@@ -200,38 +251,64 @@ async def _search_statutes_postgres(
             LEFT(content, 500) AS excerpt,
             document_id::text AS document_id,
             instrument_name AS act_name,
-            instrument_year AS year,
-            similarity(search_text, :query) AS rank
+            instrument_year AS year
         FROM chunks
-        WHERE
-            instrument_name IS NOT NULL
-            AND search_text %% :query ::text
-        ORDER BY rank DESC
-        LIMIT :limit
+        WHERE id = ANY(CAST(:chunk_ids AS uuid[]))
         """
     )
     async with db_engine.connect() as conn:
-        rows = (
+        bm25_rows = (
             await conn.execute(
-                query_sql,
+                bm25_sql,
+                {"query": query, "candidate_limit": HYBRID_CANDIDATE_LIMIT},
+            )
+        ).fetchall()
+        trigram_rows = (
+            await conn.execute(
+                trigram_sql,
                 {
                     "query": query,
-                    "jurisdiction": f"%{jurisdiction}%",
-                    "limit": limit,
+                    "candidate_limit": HYBRID_CANDIDATE_LIMIT,
+                    "similarity_threshold": TRIGRAM_SIMILARITY_THRESHOLD,
                 },
             )
         ).fetchall()
+
+        fused = reciprocal_rank_fusion(
+            [
+                RankedResultRow(chunk_id=str(row[0]), score=0.0, rank=int(row[1]))
+                for row in bm25_rows
+            ],
+            [
+                RankedResultRow(chunk_id=str(row[0]), score=0.0, rank=int(row[1]))
+                for row in trigram_rows
+            ],
+            k=RRF_K,
+            limit=limit,
+        )
+        if not fused:
+            return []
+
+        score_by_id = {item.chunk_id: item.score for item in fused}
+        details = (
+            await conn.execute(
+                detail_sql,
+                {"chunk_ids": [item.chunk_id for item in fused]},
+            )
+        ).fetchall()
+        by_id = {str(row[0]): row for row in details}
         return [
             {
-                "id": str(row[0]),
-                "title": row[1],
-                "section_ref": row[2],
-                "excerpt": row[3],
+                "id": str(by_id[item.chunk_id][0]),
+                "title": by_id[item.chunk_id][1],
+                "section_ref": by_id[item.chunk_id][2],
+                "excerpt": by_id[item.chunk_id][3],
                 "jurisdiction": None,
-                "act_name": row[5],
-                "year": row[6],
-                "rank": float(row[7]),
+                "act_name": by_id[item.chunk_id][5],
+                "year": by_id[item.chunk_id][6],
+                "rank": float(score_by_id[item.chunk_id]),
                 "source": "unified_corpus",
             }
-            for row in rows
+            for item in fused
+            if item.chunk_id in by_id
         ]

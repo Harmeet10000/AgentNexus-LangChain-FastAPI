@@ -42,10 +42,12 @@ from .prompts import (
     _RISK_ANALYSIS_SYSTEM_PROMPT,
 )
 from .state import (
+    ComplianceOutput,
     FinalReport,
     GroundingVerificationOutput,
     NormalizedDocument,
     OrchestratorAction,
+    RiskAnalysisOutput,
 )
 
 # ---------------------------------------------------------------------------
@@ -142,6 +144,7 @@ def build_agent_registry(
         tools=risk_tools,
         system_prompt=_RISK_ANALYSIS_SYSTEM_PROMPT,
         middleware=[ToolRetryMiddleware(max_retries=3)],
+        response_format=RiskAnalysisOutput,
     )
 
     compliance_agent = create_agent(
@@ -149,6 +152,7 @@ def build_agent_registry(
         tools=compliance_tools,
         system_prompt=_COMPLIANCE_SYSTEM_PROMPT,
         middleware=[ToolRetryMiddleware(max_retries=3)],
+        response_format=ComplianceOutput,
     )
 
     # --- with_structured_output chains (Flash LLM) -------------------------
