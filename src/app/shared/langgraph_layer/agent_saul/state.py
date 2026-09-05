@@ -240,6 +240,17 @@ class GroundingVerificationOutput(BaseModel, frozen=True):
     verified: bool
     unverified_claims: list[str]
     notes: str
+    citations: list[Citation]
+
+    @field_validator("citations")
+    @classmethod
+    def _citations_non_empty(cls, value: list[Citation]) -> list[Citation]:
+        # D-9: an uncited assertion is the failure mode. An empty citation
+        # list must fail validation, not flow downstream with a warning.
+        if not value:
+            msg = "a grounding verification must carry at least one citation"
+            raise ValueError(msg)
+        return value
 
 
 # ---------------------------------------------------------------------------

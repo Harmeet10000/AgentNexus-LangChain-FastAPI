@@ -112,7 +112,7 @@ _GROUNDING_SYSTEM_PROMPT = render_prompt_sections(
     ),
     (
         "CONSTRAINTS",
-        "Flag unverified claims that should not be presented to the user. Output only GroundingVerificationOutput.",
+        "Flag unverified claims that should not be presented to the user. Every assertion in the output must carry a citation. Output only GroundingVerificationOutput.",
     ),
 )
 
