@@ -41,6 +41,24 @@ def test_a_report_with_no_citations_fails_validation() -> None:
         FinalReport(**kwargs, citations=[])
 
 
+def test_a_grounding_verification_with_no_citations_fails_validation() -> None:
+    from app.shared.langgraph_layer.agent_saul.state import (
+        Citation,
+        GroundingVerificationOutput,
+    )
+
+    kwargs: dict[str, Any] = {
+        "verified": True,
+        "unverified_claims": [],
+        "notes": "n",
+    }
+    GroundingVerificationOutput(
+        **kwargs, citations=[Citation(claim="c", source="s", confidence=0.5)]
+    )
+    with pytest.raises(ValidationError, match="citation"):
+        GroundingVerificationOutput(**kwargs, citations=[])
+
+
 # --- 8.2 declared output strategy ---
 
 
