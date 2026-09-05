@@ -20,6 +20,7 @@ from app.config import get_settings
 from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, celery_app
 from app.connections.celery_task_names import AGENT_MEMORY_CONSOLIDATION
 from app.shared.langchain_layer.agents.memory.agent_memory_service import (
+    AgentMemoryError,
     AgentMemoryService,
     make_neo4j_procedures_probe,
     memory_partition,
@@ -111,6 +112,14 @@ async def _consolidate_async(
             try:
                 await service.consolidate(tenant_ids=[tenant_id])
                 consolidated.append(tenant_id)
+            except AgentMemoryError as exc:
+                # Named precondition/identity refusal: logged and recorded
+                # with its typed name, never silent, never stopping the rest.
+                exc.add_note(f"task=agent_memory_consolidation, tenant={tenant_id}")
+                logger.bind(tenant=tenant_id, error=str(exc)).warning(
+                    "agent_memory_consolidation_refused"
+                )
+                refused.append({"tenant": tenant_id, "error": type(exc).__name__})
             except Exception as exc:  # noqa: BLE001 — one tenant's refusal must not stop the rest
                 exc.add_note(f"task=agent_memory_consolidation, tenant={tenant_id}")
                 logger.bind(tenant=tenant_id, error=str(exc)).warning(

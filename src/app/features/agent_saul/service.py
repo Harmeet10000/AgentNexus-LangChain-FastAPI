@@ -58,6 +58,7 @@ from app.shared.langgraph_layer.agent_saul.state import (
     GRAPH_NODE_NAMES,
     STATE_SCHEMA_VERSION,
     HITLInterruptType,
+    StateSchemaVersionError,
     WorkflowStatus,
     hydrate_state,
 )
@@ -135,11 +136,30 @@ class AgentSaulService:
         # Checkpointed values may predate schema_version. Hydrate them before
         # the first node sees state; the checkpointer itself stays generic.
         persisted = await self._graph.aget_state(config)
-        initial_input = (
-            hydrate_state(dict(persisted.values))
-            if persisted.values
-            else hydrate_state(initial_input)
-        )
+        try:
+            initial_input = (
+                hydrate_state(dict(persisted.values))
+                if persisted.values
+                else hydrate_state(initial_input)
+            )
+        except StateSchemaVersionError as exc:
+            # Persisted state this runtime refuses: fail the session loudly
+            # with a typed frame, never by crashing the loop or resuming on
+            # an unmigrated shape.
+            exc.add_note(f"thread_id={thread_id}")
+            self._log.bind(thread_id=thread_id, error=str(exc)).warning(
+                "saul_session_state_schema_refused"
+            )
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="STATE_SCHEMA_INCOMPATIBLE",
+                    message="Saved session state is incompatible with this runtime; start a new session",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return
 
         # current_input alternates between:
         #   - dict (LegalAgentState subset) on first run

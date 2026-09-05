@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 from pydantic import BaseModel, ConfigDict
-from returns.result import Failure, Success, Result
+from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.connections.tavily import get_shared_tavily_http_client

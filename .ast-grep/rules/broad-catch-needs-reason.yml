@@ -1,0 +1,13 @@
+id: broad-catch-needs-reason
+language: python
+severity: warning
+message: "Broad catch needs a reason — a bare BLE001 suppression silences the only rule that asks why the catch is broad."
+note: |
+  shared-infrastructure-errors deliberate-degradation rule — append the reason
+  after the code (`# noqa: BLE001 — <why the failure is survivable>`). A blind
+  `except` that ends in a bare `raise` is a logging pass-through, not a
+  degradation, and owes no reason (matches BLE001's own behaviour); an
+  unsuppressed broad catch is ruff BLE001's jurisdiction, not this rule's.
+rule:
+  kind: comment
+  regex: 'BLE001\s*$'

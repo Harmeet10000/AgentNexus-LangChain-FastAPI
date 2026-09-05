@@ -3,6 +3,7 @@
 
 from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, Depends, Request
 from httpx import AsyncClient
 
@@ -29,10 +30,15 @@ async def generate_text(
             async with AsyncClient() as client:
                 response = await client.get("https://api.example.com/generate")
                 response.raise_for_status()
-                data = response.json()
-        except Exception as e:
-            # Any exception counts as a failure and will be recorded by the circuit breaker
+        except httpx.HTTPError as e:
+            # Only named provider failures count as a downstream outage and
+            # are recorded by the circuit breaker.
             msg = "External API call failed"
             raise ServiceUnavailableException(msg) from e
 
-        return {"generated_text": data["text"]}
+    # Parsing is project code, not a provider signal: a TypeError/KeyError
+    # here is a local defect and must propagate unwrapped — and, by sitting
+    # outside the breaker, it never counts toward the failure threshold.
+    data = response.json()
+
+    return {"generated_text": data["text"]}

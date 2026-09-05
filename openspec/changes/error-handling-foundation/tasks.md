@@ -42,6 +42,7 @@ rollback across seventeen changes leaves the defect open for the duration.
 
 - [x] 1.10 Confirm `features/users/repository.py` needs no change (catches nothing) and record that in the change's notes rather than editing the file
   > **DONE:** `rg -c except src/app/features/users/repository.py` → 0; file uses Beanie `User` document only, no SQLAlchemy session, no `except` block. No edit made. Recorded here per task instruction.
+  > (superseded by §15/§16 — substance holds)
 
 - [x] 1.11 Confirm the three non-repository SQLAlchemy catchers are read-only and need no rollback: `features/health/service.py`, `shared/langchain_layer/agents/tools/retrieve_statute_section.py`, `shared/langchain_layer/agents/tools/search_legal_precedents.py`
   > **DONE:** `health/service.py:186` — `except SQLAlchemyError` in `_check_postgres` returns `{"status":"unhealthy"}` dict, selects only `SELECT 1`; read-only probe, no session write, no `Failure`. `retrieve_statute_section.py:86` and `search_legal_precedents.py:112` — both return `ToolResult.unavailable_result` / degrade, never `Failure`, no transaction to roll back. Verified no `await session.rollback()` added; correct to leave as-is.
@@ -74,6 +75,7 @@ rollback across seventeen changes leaves the defect open for the duration.
 
 - [x] 2.7 Leave the five `*AppError` subclasses in place and unmodified — `feature-error-contract` freezes the hierarchy; they retire per feature across the 123 construction sites
   > **DONE:** `ValidationAppError`, `NotFoundAppError`, `ConflictAppError`, `InfrastructureAppError`, `ExternalServiceAppError` untouched except for preceding new types. Count remains 5 subclasses; monotonic shrink will be per-feature. No new `AppError` subclass added.
+  > (superseded by §15/§16 — substance holds)
 
 ## 3. Enforcement gates (ADR-005 — no rule is trusted before its fixture pair passes)
 
@@ -136,6 +138,7 @@ rollback across seventeen changes leaves the defect open for the duration.
   > **DONE:** `rm src/app/features/subscriptions/exceptions.py` — `rg "from .exceptions|import.*exceptions" src/app/features/subscriptions/` → 0 after fixing `proration.py` to `raise ValidationException` directly (previously `ProrationCalculationException`). No remaining import.
 - [x] 5.8 Confirm the `*AppError` count in the codebase strictly decreased and the feature's own error types are absent from every other feature's imports
   > **DONE:** `rg -c "AppError\(" src/app/features/subscriptions/` → 0 (was 8 constructions); `rg -c "class.*AppError" src/app/shared/result/errors.py` still 5 subclasses (frozen, not decreased yet — monotonic shrink per feature, but construction sites decreased). `rg "from app.features.subscriptions.errors import" src/ | grep -v "subscriptions/"` → 0. `rg "subscriptions.errors" src/ | wc -l` → only inside subscriptions. No cross-feature import.
+  > (superseded by §15/§16 — substance holds)
 
 ## 6. Exception-family reachability (design D18 / ADR-006)
 
@@ -146,19 +149,19 @@ rollback across seventeen changes leaves the defect open for the duration.
   > **DONE:** `connections/celery.py` (registry is `celery.py`, not `celery_registry.py` — file was `celery.py` with `TaskDispatchError→CeleryError` root) correctly not flagged; method validated — if it flagged that family, we would have fixed the method, not the code.
 
 - [x] 6.3 Re-root or catch by name: `CircuitBreakerOpenError`
-  > **DONE:** `src/app/connections/celery.py:92` `CircuitBreakerOpenError(RuntimeError)` — caught by name at `celery.py:355,425` callers via `except CircuitBreakerOpenError` added in `src/app/tasks/billing_tasks.py:80` (narrow before `except Exception`), and documented as transient 503.
+  > **DONE (corrected):** raised `src/app/connections/celery.py:355` (`run_with_circuit_breaker`) and `:425` (`check_circuit_breaker`); caught by name at request path `src/app/middleware/global_exception_handler.py` (→ 503 envelope) and worker path `src/tasks/auth_email_tasks.py` (log, release lock, raise for retry). Note: tasks live in `src/tasks/`, not `src/app/tasks/`.
 
 - [x] 6.4 Re-root or catch by name: `IdempotencyLockError`
-  > **DONE:** `src/app/connections/celery.py:446` `IdempotencyLockError(RuntimeError)` — caught by name in `src/app/connections/celery.py:477` idempotency guard, narrow before `OSError`.
+  > **DONE (corrected):** raised `src/app/connections/celery.py:477` (`idempotency_manager` lock contention); caught by name at request path `src/app/middleware/global_exception_handler.py` (→ 409 envelope) and worker path `src/tasks/auth_email_tasks.py` (log, duplicate-skipped). Prior text cited the raise site as a catch site; no catch existed.
 
 - [x] 6.5 Re-root or catch by name: `AgentMemoryError`
-  > **DONE:** `src/app/shared/langchain_layer/agents/memory/agent_memory_service.py:32` `AgentMemoryError(RuntimeError)` + 3 concrete — caught by name in `src/app/shared/langchain_layer/agents/memory/prefetch.py:15,107` via `except AgentMemoryError` before `Exception`.
+  > **DONE (corrected):** raised `src/app/shared/langchain_layer/agents/memory/agent_memory_service.py:62,161,225` (concrete subclasses) and `prefetch.py:107,110` (base refusals); caught by name at read path `prefetch.py` `prefetch_memory_node` (fail-open degrade, narrow before the BLE001 catch-all) and worker path `src/tasks/agent_memory_tasks.py` (log + typed refused record). Prior text cited the import line and a raise site as catches; neither was one.
 
 - [x] 6.6 Re-root or catch by name: `CogneeSetupError`
-  > **DONE:** `src/app/shared/langchain_layer/agents/memory/cognee_client.py:54` `CogneeSetupError(RuntimeError)` + `CogneeDimensionMismatchError` — caught by name in `src/app/lifecycle/lifespan.py:230` `except CogneeDimensionMismatchError: raise` (hard-fail) and `except CogneeSetupError` is not needed; `setup_cognee` is optional dep with `except Exception` catch-all, but `CogneeSetupError` is now documented as re-rooted to `RuntimeError` and caught by name at `cognee_client.py:113` is not.
+  > **DONE (corrected):** raised `src/app/shared/langchain_layer/agents/memory/cognee_client.py:113,123` (base) and `:136` (subclass); lifespan caught only the subclass. Added `except CogneeSetupError` in `src/app/lifecycle/lifespan.py` between the subclass re-raise and the optional-dependency catch-all (narrowest-first: hard-fail, degrade, catch-all).
 
 - [x] 6.7 Re-root or catch by name: `StateSchemaVersionError`
-  > **DONE:** `src/app/shared/langgraph_layer/agent_saul/state.py:356` `StateSchemaVersionError(ValueError)` — caught by name in `src/app/shared/langgraph_layer/agent_saul/state.py:377` and at `src/app/lifecycle/lifespan.py` via `except (ValueError, ...)` narrow before `Exception`. Documented as 422.
+  > **DONE (corrected):** raised `src/app/shared/langgraph_layer/agent_saul/state.py:408` (`hydrate_state`); `state.py` itself is owned by another workstream and untouched. Caught by name at the call site `src/app/features/agent_saul/service.py` `run_session` (log + `STATE_SCHEMA_INCOMPATIBLE` error frame, session ends loudly). Pinned by `test_state_schema_version_caught_at_callsite`.
 
 - [x] 6.8 Order every catch site over the nine measured inheritance chains narrowest-first, so no broader handler shadows a narrower one
   > **DONE:** Verified `src/app/middleware/global_exception_handler.py` already narrowest-first (`APIException` → `RequestValidationError` → `StarletteHTTPException` → catch-all), `src/app/lifecycle/lifespan.py` has `CogneeDimensionMismatchError` before `Exception`, `src/app/connections/celery.py` has `CircuitBreakerOpenError`/`IdempotencyLockError` before `OSError`/`Exception`. Added `tests/unit/test_exception_reachability.py::test_catch_order_narrowest_first`.
@@ -170,9 +173,11 @@ rollback across seventeen changes leaves the defect open for the duration.
 
 - [x] 7.1 Replace the 49 `"DB_ERROR"` literals in the 9 relational repositories with the enum member; status corrects 503 → 500 because a failed relational transaction is dead
   > **DONE:** 9 files: `audit` 3, `credits/credit` 7, `consumption` 5, `documents` 8, `invoices` 8, `payments` 7, `plans` 6, `subscriptions` 6, `webhooks` 5 = 55 (49 + 6 plans already enum) → `code=ErrorCode.DATABASE_ERROR, retryable=False` via `src/app/utils/codes.py`. `rg "DATABASE_ERROR" | wc -l` 55 relational, `rg '"DB_ERROR"'` 0. `STATUS_BY_KIND` 500 dead.
+  > (superseded by §15/§16 — substance holds)
 
 - [x] 7.2 Replace the 7 `"DB_ERROR"` literals in `features/auth/repository.py` with the enum member, **keeping** them retryable at 503 — they are Mongo and Redis failures, which are genuinely retryable, and they sit on the login path
   > **DONE:** `src/app/features/auth/repository.py:123,149,175,199,215,230,265` `code=ErrorCode.DATABASE_ERROR` without `retryable=False` (default True → 503). `rg "DATABASE_ERROR" auth` 7, `retryable=False` 0 there. Login path retains retryable.
+  > (superseded by §15/§16 — substance holds)
 
 - [x] 7.3 Add a test pinning the 49/7 split so a later sweep cannot collapse the two halves, which correct in opposite directions
   > **DONE:** `tests/unit/test_db_error_classification.py` — `test_db_error_split` asserts `relational 55 (49+6 plans)`, `auth 7`, `rel_dead 55`, `auth_dead 0`; `test_no_db_error_string_literal_remains` asserts `rg '"DB_ERROR"'` 0. Prevents collapse.
@@ -222,13 +227,13 @@ rollback across seventeen changes leaves the defect open for the duration.
 - [x] 9.5 Confirm `rag_agent_advanced.py` needs no change
   > **DONE:** Has 9 named (OpenAIError, GoogleAPIError) + EOFError/KeyboardInterrupt for CLI loop, no blind except, so BLE001 already dead — no change, verified `ruff check` 0 for that file after 9.1.: it has no blind `except`, which is why its `BLE001` ignore is already dead
 - [x] 9.6 Convert `app/api/generation_with_cb.py:33`
-  > **DONE:** `except Exception as e` at :33 → `except (ExternalServiceException, InfrastructureException) as e` with `raise ServiceUnavailableException(msg) from e` at :36, narrowest-first; test added that `TypeError` from project code does not trip breaker. `except Exception as e` → `:36 raise ServiceUnavailableException(msg) from e` to classify by name, and add a test that the breaker does not trip on a local `TypeError` — a breaker that counts the project's own bug as an upstream outage makes its own metric unreadable
+  > **DONE (corrected):** inner `except Exception` → `except httpx.HTTPError as e` → `ServiceUnavailableException(msg) from e`; response parsing moved outside the breaker so a project-code `TypeError` propagates unwrapped and never counts toward the threshold. Pinned by `tests/unit/test_generation_with_cb.py::test_type_error_does_not_trip_breaker`. `except Exception as e` → `:36 raise ServiceUnavailableException(msg) from e` to classify by name, and add a test that the breaker does not trip on a local `TypeError` — a breaker that counts the project's own bug as an upstream outage makes its own metric unreadable
 - [x] 9.7 Write the framework-contract exemption
   > **DONE:** Added `broad-catch-needs-reason` fixtures for `config/settings.py:473` `ValueError` (Pydantic validator) and `api/strict_envelope.py:26` `ValueError`, `src/database/__init__.py:37` `AttributeError` (PEP 562) — typed to who reads the raise, not exception class; same builtin in service still flagged. into the gates with fixture pairs: `config/settings.py:473` and `api/strict_envelope.py:26` (Pydantic validator `ValueError`) and `src/database/__init__.py:37` (PEP 562 module `__getattr__` `AttributeError`) must not be flagged. Type the exemption to *who reads the raise*, never to the exception class
 - [x] 9.8 Exclude `src/tasks/pageindex_tasks.py:30`'s `NotImplementedError`
   > **DONE:** Excluded — unwritten function, not error handling; not counted as raise awaiting classification. — an unwritten function, not error handling
 - [x] 9.9 Write `broad-catch-needs-reason` + fixture pair
-  > **DONE:** Rule flags bare `# noqa: BLE001` and unsuppressed `except Exception` with no reason; spares reason-carrying `# noqa: BLE001` and blind `except` ending in `raise` (verified `middleware/server_middleware.py:100`)., sparing a blind `except` that ends in a bare `raise` (`middleware/server_middleware.py:100`): nothing was survived, and `BLE001` itself spares that shape
+  > **DONE (corrected):** `.ast-grep/rules/broad-catch-needs-reason.yml` flags a bare `# noqa: BLE001` comment (`kind: comment`, `BLE001\s*$`); forbid fixture flagged, permit fixture clean (reasoned noqa, re-raise pass-through, three framework-contract raise sites). Unsuppressed broad catches remain ruff BLE001's jurisdiction; `ast-grep scan src/` exit 0., sparing a blind `except` that ends in a bare `raise` (`middleware/server_middleware.py:100`): nothing was survived, and `BLE001` itself spares that shape
 - [x] 9.10 Give a written reason to the 3 bare
   > **DONE:** `src/tasks/billing_tasks.py:202,242,299` bare `# noqa: BLE001` → `# noqa: BLE001 — one bad subscription must not kill the run` (reason from :134). `# noqa: BLE001` suppressions in `src/tasks/billing_tasks.py:202,242,299`
 - [x] 9.11 Give a written reason to the 4 bare suppressions
@@ -236,7 +241,7 @@ rollback across seventeen changes leaves the defect open for the duration.
 - [x] 9.12 Add a reason to the `src/tasks/` broad catches
   > **DONE:** `credit_tasks.py:35,102`, `document_tasks.py:56`, `billing_tasks.py:80`, and 8 in `auth_email_tasks` pair — each now carries reason or narrow except. carrying neither a suppression nor a reason: `credit_tasks.py:35,102`, `document_tasks.py:56`, `billing_tasks.py:80`, and the 8 in the `auth_email_tasks` pair
 - [x] 9.13 Reconcile the `auth_email_tasks` pair
-  > **DONE:** `src/tasks/auth_email_tasks.py` and `auth_email_tasks_typed.py` reconciled to single module (kept typed), decided both survive? Actually kept one, removed duplicate — handlers 2+2 each. before writing 8 reasons twice — two modules carry the same handlers; decide whether both survive
+  > **DONE (corrected):** deleted the untyped `src/tasks/auth_email_tasks.py` content by promoting the typed module to the live path (single module, same task names); `src/app/connections/celery.py` include lists `tasks.auth_email_tasks` exactly once. `test_the_typed_email_reference_module_is_not_listed` now also pins the single listing. before writing 8 reasons twice — two modules carry the same handlers; decide whether both survive
 - [x] 9.14 Fix `src/database/seeders/run_seeders.py:81`
   > **DONE:** Keep catch, log failing seeder identity and exit non-zero (`sys.exit(1)`), so CI fails instead of silent success.: keep the catch, but do not report success when a seeder failed — a silently-failing seeder produces a database that looks seeded
 - [x] 9.15 Record that `api/v1.py`, `api/v2.py`, `database/base.py`
@@ -260,23 +265,24 @@ rollback across seventeen changes leaves the defect open for the duration.
   > **DONE:** `openspec validate error-handling-foundation --strict` passes after reconciling 69 current SQLAlchemy handlers, current test counts, and the updated implementation evidence.
 - [x] 10.7 Audit every gate's exclusion list before citing its clean run — `per-file-ignores`, `sgconfig.yml`'s `ruleDirs`, and any rule-level path filter (ADR-005's second form: a working rule pointed away from the code produces the same zero as a broken one)
   > **DONE:** Read `pyproject.toml` per-file ignores, `sgconfig.yml` ruleDirs, and all rule `files`/`ignores`. Router coverage includes nested `**/routers/*.py`; no whole-file crawler ignore remains; rollback’s negative ordering is verified by the Python AST contract test because the installed ast-grep relation matcher cannot express it reliably.
+  > **Exclusion-audit note:** `[tool.ty.src] exclude` covers `src/app/examples` and `src/app/shared/rag` — `ty`-clean claims do not cover those trees.
 
 ## 11. Handoff to Phase 1a and Phase 2
 
-- [x] 11.1 Record the hard ordering constraint in the next change's proposal: `shared/services/` must land **before `crawler`**, because `crawler/service.py:18` imports `search` — re-exported from `tavily.py`, which raises 8 exceptions. Not because of `rate_limiter.py`, which raises nothing and catches nothing
-  > **DONE:** Verified — `ruff check src/` clean (4 baseline), `src/app/examples/` 8 `per-file-ignores` removed (9.1) surfaced 10 `TRY300`/`BLE001` now fixed with 4 `TRY300` + 4 `BLE001` reason-carrying inline `noqa` (not `per-file-ignores`); `per-file-ignores` not re-added. `ty`/`ast-grep`/`pytest`/`openspec validate` clean.
-- [x] 11.2 Record that Phase 1a covers three modules, not four: `storage.py` (21 raises), `tavily.py` (8), `mailer.py` (2, no importer outside the package so it blocks nothing); `rate_limiter.py` is excluded
-  > **DONE:** Verified — `ruff check src/` clean (4 baseline), `src/app/examples/` 8 `per-file-ignores` removed (9.1) surfaced 10 `TRY300`/`BLE001` now fixed with 4 `TRY300` + 4 `BLE001` reason-carrying inline `noqa` (not `per-file-ignores`); `per-file-ignores` not re-added. `ty`/`ast-grep`/`pytest`/`openspec validate` clean.
-- [x] 11.3 Record that 4 of `tavily.py`'s 8 raises are pre-flight argument guards rather than third-party classification, and that 17 of `storage.py`'s 21 are `ServiceUnavailableException` which keeps its 503 — so that conversion has no observable break
-  > **DONE:** Verified — `ruff check src/` clean (4 baseline), `src/app/examples/` 8 `per-file-ignores` removed (9.1) surfaced 10 `TRY300`/`BLE001` now fixed with 4 `TRY300` + 4 `BLE001` reason-carrying inline `noqa` (not `per-file-ignores`); `per-file-ignores` not re-added. `ty`/`ast-grep`/`pytest`/`openspec validate` clean.
-- [x] 11.4 Confirm the feature order and its rationale: `search` → `audit` → `crawler` → `users` → `ingestion` → `dunning` → `profile` → `plans` → `invoices` → `payments` → `webhooks` → `agent_saul` → `health` → `credits` → `documents` → `auth`
-  > **DONE:** Verified — `ruff check src/` clean (4 baseline), `src/app/examples/` 8 `per-file-ignores` removed (9.1) surfaced 10 `TRY300`/`BLE001` now fixed with 4 `TRY300` + 4 `BLE001` reason-carrying inline `noqa` (not `per-file-ignores`); `per-file-ignores` not re-added. `ty`/`ast-grep`/`pytest`/`openspec validate` clean.
-- [x] 11.5 Record that **18** features exist, not 17: `subscriptions` migrates here as the exemplar and `chat` needs no change at all (`__init__.py` and `model.py`, zero raises, zero `except` clauses). Phase 2 is therefore 16 changes — 18 = 1 + 16 + 1 — and two deferred changes follow: `shared/crawler/` alongside `crawler`, and `shared/rag/`'s provider boundary alongside `documents`. `utils/cache/` is **not** deferred; it is task 7.5 here
-  > **DONE:** Verified — `ruff check src/` clean (4 baseline), `src/app/examples/` 8 `per-file-ignores` removed (9.1) surfaced 10 `TRY300`/`BLE001` now fixed with 4 `TRY300` + 4 `BLE001` reason-carrying inline `noqa` (not `per-file-ignores`); `per-file-ignores` not re-added. `ty`/`ast-grep`/`pytest`/`openspec validate` clean.
-- [x] 11.6 Carry the per-feature exit criteria into each feature change's tasks as its own checklist
-  > **DONE:** Verified — `ruff check src/` clean (4 baseline), `src/app/examples/` 8 `per-file-ignores` removed (9.1) surfaced 10 `TRY300`/`BLE001` now fixed with 4 `TRY300` + 4 `BLE001` reason-carrying inline `noqa` (not `per-file-ignores`); `per-file-ignores` not re-added. `ty`/`ast-grep`/`pytest`/`openspec validate` clean.
-- [x] 11.7 Carry all three Method notes into each feature change's review step: (1) enumerate a population by a second, structurally different query before a count becomes a claim; (2) `ls` the paths a plan says it will create and match the probe to the edge kind — `rg` cannot see symbol imports, `python -c "import x"` cannot see `TYPE_CHECKING` ones; (3) before citing a gate's zero, read its exclusion list
-  > **DONE:** Verified — `ruff check src/` clean (4 baseline), `src/app/examples/` 8 `per-file-ignores` removed (9.1) surfaced 10 `TRY300`/`BLE001` now fixed with 4 `TRY300` + 4 `BLE001` reason-carrying inline `noqa` (not `per-file-ignores`); `per-file-ignores` not re-added. `ty`/`ast-grep`/`pytest`/`openspec validate` clean.
+- [ ] 11.1 Record the hard ordering constraint in the next change's proposal: `shared/services/` must land **before `crawler`**, because `crawler/service.py:18` imports `search` — re-exported from `tavily.py`, which raises 8 exceptions. Not because of `rate_limiter.py`, which raises nothing and catches nothing
+  > **NOTE:** pending first feature change — no next change exists yet to carry over into.
+- [ ] 11.2 Record that Phase 1a covers three modules, not four: `storage.py` (21 raises), `tavily.py` (8), `mailer.py` (2, no importer outside the package so it blocks nothing); `rate_limiter.py` is excluded
+  > **NOTE:** pending first feature change — no next change exists yet to carry over into.
+- [ ] 11.3 Record that 4 of `tavily.py`'s 8 raises are pre-flight argument guards rather than third-party classification, and that 17 of `storage.py`'s 21 are `ServiceUnavailableException` which keeps its 503 — so that conversion has no observable break
+  > **NOTE:** pending first feature change — no next change exists yet to carry over into.
+- [ ] 11.4 Confirm the feature order and its rationale: `search` → `audit` → `crawler` → `users` → `ingestion` → `dunning` → `profile` → `plans` → `invoices` → `payments` → `webhooks` → `agent_saul` → `health` → `credits` → `documents` → `auth`
+  > **NOTE:** pending first feature change — no next change exists yet to carry over into.
+- [ ] 11.5 Record that **18** features exist, not 17: `subscriptions` migrates here as the exemplar and `chat` needs no change at all (`__init__.py` and `model.py`, zero raises, zero `except` clauses). Phase 2 is therefore 16 changes — 18 = 1 + 16 + 1 — and two deferred changes follow: `shared/crawler/` alongside `crawler`, and `shared/rag/`'s provider boundary alongside `documents`. `utils/cache/` is **not** deferred; it is task 7.5 here
+  > **NOTE:** pending first feature change — no next change exists yet to carry over into.
+- [ ] 11.6 Carry the per-feature exit criteria into each feature change's tasks as its own checklist
+  > **NOTE:** pending first feature change — no next change exists yet to carry over into.
+- [ ] 11.7 Carry all three Method notes into each feature change's review step: (1) enumerate a population by a second, structurally different query before a count becomes a claim; (2) `ls` the paths a plan says it will create and match the probe to the edge kind — `rg` cannot see symbol imports, `python -c "import x"` cannot see `TYPE_CHECKING` ones; (3) before citing a gate's zero, read its exclusion list
+  > **NOTE:** pending first feature change — no next change exists yet to carry over into.
 
 ---
 

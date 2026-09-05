@@ -87,6 +87,8 @@ After `isinstance(result, Failure)` the type checker SHALL narrow `result.failur
 
 This is where `match` earns its place: over a closed union the type checker both narrows each arm and proves the set complete, so a new failure mode cannot be silently ignored. Over the `Result` container it does neither.
 
+Where the scrutinee arrives as untyped graph-state data — a value that may be a model instance or its serialised mapping after a checkpointer round-trip — `isinstance` dispatch is permitted instead, per `.opencode/instructions/RESULT-PATTERN.md` Pattern 5a (defensive guards on dynamic/untrusted data). The SHALL above applies once the value is narrowed to the closed union. `features/ingestion/service.py:84-91` dispatches `FeatureError` vs `dict` at exactly such a boundary and is conforming without change.
+
 #### Scenario: An exhaustive dispatch type-checks
 - **WHEN** a service matches every member of its feature's error union and closes with `assert_never`
 - **THEN** `uv run ty check src/` reports no diagnostic
@@ -98,3 +100,7 @@ This is where `match` earns its place: over a closed union the type checker both
 #### Scenario: Arms are flat, never nested by inheritance
 - **WHEN** a match dispatches on error types
 - **THEN** no arm's type is a supertype of another arm's type, because a class pattern is `isinstance`-based and a broader arm would shadow a narrower one while still reporting the match exhaustive
+
+#### Scenario: Untyped graph-state data dispatches with isinstance
+- **WHEN** a service reads a failure value out of LangGraph state that may be a model instance or a mapping
+- **THEN** it may dispatch with `isinstance` (RESULT-PATTERN.md Pattern 5a) rather than `match`, because the scrutinee is not yet narrowed to the closed union the SHALL above governs
