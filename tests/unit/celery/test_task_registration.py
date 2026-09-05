@@ -113,5 +113,6 @@ def test_declared_but_unimplemented_task_is_registered_and_fails_explicitly(real
 
 
 def test_the_typed_email_reference_module_is_not_listed(real_celery):
-    """It declares the live email names; listing it lets import order pick the winner."""
+    """The duplicate email module was reconciled to one; listing is single."""
     assert "tasks.auth_email_tasks_typed" not in real_celery.app.conf.include
+    assert list(real_celery.app.conf.include).count("tasks.auth_email_tasks") == 1

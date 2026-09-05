@@ -9,6 +9,7 @@ from fastapi.utils import is_body_allowed_for_status_code
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
+from app.connections.celery import CircuitBreakerOpenError, IdempotencyLockError
 from app.utils import APIException, APIResponse, ErrorCode, execution_path, http_error, logger
 
 
@@ -135,6 +136,47 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
             flow=current_flow,
         )
         return _json_error_response(payload, status_code, headers=exc.headers)
+
+    # ────────────────────────────────────────────────
+    # 3b. Celery reliability families — RuntimeError-rooted by design,
+    # unreachable by the APIException branch above. Named here so a request
+    # path raising them renders a deliberate status, not the 500 catch-all.
+    # ────────────────────────────────────────────────
+    if isinstance(exc, CircuitBreakerOpenError):
+        status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        error_code = ErrorCode.SERVICE_UNAVAILABLE
+        message = "Downstream service is temporarily unavailable"
+
+        logger.bind(status_code=status_code, error_code=error_code).warning(
+            message,
+            error=str(exc),
+        )
+
+        payload = http_error(
+            message=message,
+            status_code=status_code,
+            error_code=error_code,
+            flow=current_flow,
+        )
+        return _json_error_response(payload, status_code)
+
+    if isinstance(exc, IdempotencyLockError):
+        status_code = status.HTTP_409_CONFLICT
+        error_code = ErrorCode.CONFLICT
+        message = "Operation is already processing"
+
+        logger.bind(status_code=status_code, error_code=error_code).warning(
+            message,
+            error=str(exc),
+        )
+
+        payload = http_error(
+            message=message,
+            status_code=status_code,
+            error_code=error_code,
+            flow=current_flow,
+        )
+        return _json_error_response(payload, status_code)
 
     # ────────────────────────────────────────────────
     # 4. Catch-all — unexpected server errors (500)

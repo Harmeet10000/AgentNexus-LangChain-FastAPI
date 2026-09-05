@@ -60,6 +60,12 @@ def make_prefetch_memory_node(
                 conversation_id=str(conversation_id) if conversation_id else None,
             )
             memory_context = "\n".join(str(item.get("text", "")) for item in results[:5])
+        except AgentMemoryError as exc:
+            # Named caller error (bad partition identity, missing
+            # conversation): fail open per 8.3, continuing on current-run
+            # context rather than tripping the run on a memory refusal.
+            exc.add_note("node=prefetch_memory")
+            logger.bind(error=str(exc)).warning("agent_memory_prefetch_refused")
         except Exception as exc:  # noqa: BLE001 — fail-open read path (8.3)
             exc.add_note("node=prefetch_memory")
             logger.bind(error=str(exc)).warning("agent_memory_prefetch_failed")

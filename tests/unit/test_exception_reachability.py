@@ -117,3 +117,69 @@ def test_catch_order_narrowest_first():
     assert text2.find("CogneeDimensionMismatchError") < text2.find(
         "except Exception as exc:  # noqa: BLE001 — optional dependency"
     )
+
+
+def _repo_excepts() -> set[str]:
+    excepts = set()
+    for p in pathlib.Path("src").rglob("*.py"):
+        if p.stat().st_size == 0:
+            continue
+        excepts |= _collect_excepts(p)
+    return excepts
+
+
+def test_orphan_families_caught_by_name():
+    """§6: every formerly-orphan family has a by-name catch site repo-wide."""
+    excepts = _repo_excepts()
+    for family in (
+        "CircuitBreakerOpenError",
+        "IdempotencyLockError",
+        "AgentMemoryError",
+        "CogneeSetupError",
+        "StateSchemaVersionError",
+    ):
+        assert family in excepts, f"{family} must be caught by name"
+
+
+def test_cognee_setup_base_caught_not_just_subclass():
+    """The base CogneeSetupError degrades; only the dimension subclass hard-fails."""
+    text = pathlib.Path("src/app/lifecycle/lifespan.py").read_text(encoding="utf-8")
+    sub_idx = text.find("except CogneeDimensionMismatchError:")
+    base_idx = text.find("except CogneeSetupError")
+    generic_idx = text.find("except Exception as exc:  # noqa: BLE001 — optional dependency")
+    assert sub_idx != -1
+    assert base_idx != -1
+    assert generic_idx != -1
+    assert sub_idx < base_idx < generic_idx, "narrowest-first: subclass, base, catch-all"
+
+
+def test_state_schema_version_caught_at_callsite():
+    """hydrate_state's raise is handled in the WS session loop, not in state.py."""
+    text = pathlib.Path("src/app/features/agent_saul/service.py").read_text(encoding="utf-8")
+    assert "except StateSchemaVersionError" in text
+
+
+def test_breaker_and_idempotency_render_deliberate_status():
+    """Request-path dispatcher renders 503/409, never the 500 catch-all."""
+    text = pathlib.Path("src/app/middleware/global_exception_handler.py").read_text(
+        encoding="utf-8"
+    )
+    breaker_idx = text.find("isinstance(exc, CircuitBreakerOpenError)")
+    idem_idx = text.find("isinstance(exc, IdempotencyLockError)")
+    catch_all_idx = text.find("status.HTTP_500_INTERNAL_SERVER_ERROR")
+    assert breaker_idx != -1
+    assert idem_idx != -1
+    assert breaker_idx < catch_all_idx
+    assert idem_idx < catch_all_idx
+    assert "HTTP_503_SERVICE_UNAVAILABLE" in text
+    assert "HTTP_409_CONFLICT" in text
+
+
+def test_agent_memory_narrow_before_broad():
+    """Prefetch degrades on the named family before the fail-open catch-all."""
+    text = pathlib.Path("src/app/shared/langchain_layer/agents/memory/prefetch.py").read_text(
+        encoding="utf-8"
+    )
+    assert text.find("except AgentMemoryError") < text.find(
+        "except Exception as exc:  # noqa: BLE001 — fail-open read path (8.3)"
+    )
