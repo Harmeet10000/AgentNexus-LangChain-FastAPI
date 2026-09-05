@@ -199,7 +199,7 @@ Deliberately **outside** the set, each with its owner named:
 
 ### Requirement: Stored chunks SHALL record when they were last written
 
-The chunk relation SHALL carry a last-written timestamp that is never null and is supplied by the database when
+The chunk relation SHALL carry a last-written timestamp that is never null and is supplied by the ORM when
 a writer does not set it. Without it, a re-embedding campaign cannot distinguish a current-generation embedding
 from one carried over from an earlier generation.
 
@@ -207,7 +207,13 @@ from one carried over from an earlier generation.
 
 - **WHEN** the deployed database has been upgraded to head
 - **THEN** the chunk relation SHALL have a non-null `updated_at` timestamp column carrying a time zone
-- **AND** inserting a chunk without supplying that column SHALL succeed, with the database supplying the value
+- **AND** inserting a chunk without supplying that column SHALL succeed, with the ORM supplying the value —
+  default ownership is application-side, not database-side. Revision `0015` deliberately dropped the server
+  default (`ALTER TABLE chunks ALTER COLUMN updated_at DROP DEFAULT`): a server default would leave every
+  chunk's `updated_at` equal to its creation time forever, because SQLAlchemy does not merge `onupdate` into
+  an explicit `DO UPDATE SET`, so the application's row builder supplies the timestamp and the chunk upsert's
+  conflict set refreshes it explicitly, mirroring `documents.updated_at`. A raw-SQL writer that omits the
+  column therefore SHALL NOT expect the database to fill it in.
 
 ### Requirement: The authoritative revision SHALL NOT claim relations an earlier revision already claims
 
