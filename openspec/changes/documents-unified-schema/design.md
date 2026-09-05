@@ -407,7 +407,7 @@ dedup key, and it is the pair, never the digest alone**; `ix_documents_user_id`;
 | `preamble` | text | NOT NULL | `''` |
 | `clause_type` | varchar(128) | NULL | none |
 | `instrument_name` | varchar(255) | NULL | none |
-| `section_ref` | varchar(64) | NULL | none |
+| `section_ref` | varchar(255) | NULL | none |
 | `instrument_year` | smallint | NULL | none |
 | `page_no` | integer | NOT NULL | `0` |
 | `embedding` | vector(*configured dimension*) | NULL | none |

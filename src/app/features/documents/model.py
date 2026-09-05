@@ -128,15 +128,21 @@ class UnifiedChunk(Base):
             postgresql_using="gin",
             postgresql_ops={"search_text": "gin_trgm_ops"},
         ),
-        # Serves the legal-corpus statute point lookup (instrument + section).
-        # Year DESC NULLS LAST lets the newest dated version come off the
-        # same scan; NULL years (unversioned rows) sort after dated ones
-        # under PostgreSQL's DESC ordering. Created by revision 0016.
+        # Serves the legal-corpus statute point lookup (instrument + section),
+        # tenant-scoped and partial: every read is tenant-scoped, so user_id
+        # leads; the two identity columns next make the lookup one index
+        # descent. Year DESC NULLS LAST lets the newest dated version come off
+        # the same scan; NULL years (unversioned rows) sort after dated ones
+        # under PostgreSQL's DESC ordering. The partial predicate keeps the
+        # non-statute majority of chunks off the index entirely.
+        # Created by revision 0016; rescoped by revision 0017.
         Index(
             "ix_chunks_instrument_section",
+            "user_id",
             "instrument_name",
             "section_ref",
             sa_text("instrument_year DESC NULLS LAST"),
+            postgresql_where=sa_text("instrument_name IS NOT NULL"),
         ),
     )
 
