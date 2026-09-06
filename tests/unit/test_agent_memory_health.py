@@ -11,7 +11,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from app.middleware.health_check import check_cognee
+from app.features.health.health_check import check_cognee
 
 if TYPE_CHECKING:
     from typing import Any

@@ -43,15 +43,15 @@ for _mod in (
 import pytest
 from returns.result import Success
 
-from app.features.credits.dto.consumption_dto import CreditConsumptionResult
-from app.features.credits.dto.credit_dto import (
+from app.features.billing.credits.dto.consumption_dto import CreditConsumptionResult
+from app.features.billing.credits.dto.credit_dto import (
     CreditBalanceResponse,
     CreditGrantDTO,
     CreditGrantResponse,
     CreditHistoryResponse,
 )
-from app.features.credits.models.credit import CreditStatus, CreditType, UserCredit
-from app.features.credits.services.credit_service import CreditService
+from app.features.billing.credits.models.credit import CreditStatus, CreditType, UserCredit
+from app.features.billing.credits.services.credit_service import CreditService
 
 
 def _make_credit(

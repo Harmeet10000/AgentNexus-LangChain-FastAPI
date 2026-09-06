@@ -36,11 +36,11 @@ for _mod in (
 
 from returns.result import Success
 
-from app.features.credits.models.credit import CreditStatus
-from app.features.credits.repositories.consumption_repository import (
+from app.features.billing.credits.models.credit import CreditStatus
+from app.features.billing.credits.repositories.consumption_repository import (
     ConsumptionRepository,
 )
-from app.features.credits.repositories.credit_repository import CreditRepository
+from app.features.billing.credits.repositories.credit_repository import CreditRepository
 
 
 def _mock_session():

@@ -1,4 +1,4 @@
-from app.features.payments.clients.razorpay_client import _CircuitBreaker
+from app.features.billing.payments.clients.razorpay_client import _CircuitBreaker
 
 
 class TestCircuitBreaker:

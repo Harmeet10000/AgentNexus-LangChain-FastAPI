@@ -18,7 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.shared.langchain_layer.agents.memory.setup_types import CogneeSetupConfig
-from app.utils import logger
+from app.utils import logger, trace_layer
 
 from .dto import HealthChecksDTO, HealthDataDTO, HealthResultDTO, SelfInfoDTO
 
@@ -73,6 +73,7 @@ class HealthService:
         self.start_time = time.time()
 
     @staticmethod
+    @trace_layer("service")
     async def get_self_info(
         server_name: str,
         server_version: str,
@@ -86,6 +87,7 @@ class HealthService:
             timestamp=time.time(),
         )
 
+    @trace_layer("service")
     async def get_health(self) -> HealthResultDTO:
         """Run all health checks and return aggregated status."""
         database_check = (
@@ -150,7 +152,9 @@ class HealthService:
                 "version": server_info.get("version", "unknown"),
             }
         except PyMongoError as exc:
-            logger.bind(error=str(exc)).warning("MongoDB health check failed")
+            logger.bind(error=str(exc), component="mongodb").exception(
+                "MongoDB health check failed"
+            )
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
 
     async def _check_redis(self) -> dict[str, Any]:
@@ -170,7 +174,7 @@ class HealthService:
                 "connectedClients": info.get("connected_clients", 0),
             }
         except RedisError as exc:
-            logger.bind(error=str(exc)).warning("Redis health check failed")
+            logger.bind(error=str(exc), component="redis").exception("Redis health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
 
     async def _check_postgres(self) -> dict[str, Any]:
@@ -185,7 +189,13 @@ class HealthService:
                 version = version_result.scalar() or "unknown"
         except SQLAlchemyError as exc:
             exc.add_note("table=health_probe, operation=check_postgres, query=SELECT 1")
-            logger.bind(error=str(exc)).warning("Postgres health check failed")
+            logger.bind(
+                error=str(exc),
+                component="postgres",
+                table="health_probe",
+                operation="check_postgres",
+                query="SELECT 1",
+            ).exception("Postgres health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
         response_time = (time.perf_counter() - start) * 1000
         return {
@@ -212,7 +222,7 @@ class HealthService:
                 "ok": bool(record and record.get("ok") == 1),
             }
         except Neo4jError as exc:
-            logger.bind(error=str(exc)).warning("Neo4j health check failed")
+            logger.bind(error=str(exc), component="neo4j").exception("Neo4j health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
 
     async def _check_graphiti(self) -> dict[str, Any]:
@@ -235,7 +245,9 @@ class HealthService:
             async with asyncio.timeout(_GRAPH_MEMORY_PROBE_TIMEOUT_S):
                 await client.driver.execute_query(_GRAPH_MEMORY_PROBE_QUERY)
         except (Neo4jError, DriverError, OSError, TimeoutError) as exc:
-            logger.bind(error_type=type(exc).__name__).warning("Graphiti health check failed")
+            logger.bind(error_type=type(exc).__name__, component="graphiti").exception(
+                "Graphiti health check failed"
+            )
             return {
                 "status": "unhealthy",
                 "state": "disconnected",
@@ -277,7 +289,7 @@ class HealthService:
                 )
                 graph_procedures_available = bool(records and count > 0)
             except (Neo4jError, DriverError, OSError, TimeoutError) as exc:
-                logger.bind(error_type=type(exc).__name__).warning(
+                logger.bind(error_type=type(exc).__name__, component="agent_memory").exception(
                     "Agent memory health check failed"
                 )
                 return {
@@ -307,7 +319,7 @@ class HealthService:
             conn.release()
             response_time = (time.perf_counter() - start) * 1000
         except (ConnectionRefusedError, TimeoutError, OSError) as exc:
-            logger.bind(error=str(exc)).warning("Celery health check failed")
+            logger.bind(error=str(exc), component="celery").exception("Celery health check failed")
             return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
         else:
             return {
@@ -347,7 +359,7 @@ class HealthService:
                 "percent": f"{disk.percent:.1f}%",
             }
         except (FileNotFoundError, PermissionError, OSError) as exc:
-            logger.bind(error=str(exc)).warning("Disk health check failed")
+            logger.bind(error=str(exc), component="disk").exception("Disk health check failed")
             return {"status": "unhealthy", "accessible": False, "error": str(exc)}
 
     @staticmethod

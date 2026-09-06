@@ -7,14 +7,14 @@ from pathlib import Path
 
 _REPOSITORIES = (
     "audit/repository.py",
-    "credits/repositories/credit_repository.py",
-    "credits/repositories/consumption_repository.py",
+    "billing/credits/repositories/credit_repository.py",
+    "billing/credits/repositories/consumption_repository.py",
     "documents/repository.py",
-    "invoices/repository.py",
-    "payments/repository.py",
-    "plans/repository.py",
-    "subscriptions/repository.py",
-    "webhooks/repository.py",
+    "billing/invoices/repository.py",
+    "billing/payments/repository.py",
+    "billing/plans/repository.py",
+    "billing/subscriptions/repository.py",
+    "billing/webhooks/repository.py",
 )
 
 
