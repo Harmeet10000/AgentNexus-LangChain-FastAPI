@@ -11,17 +11,17 @@ from os.path import relpath
 from pathlib import Path
 from typing import Any
 
-from app.utils.logger import logger as loguru_logger
+from app.utils.logger import logger
 
 from .chunker import chunk_document, chunk_document_simple, create_hybrid_chunker, get_tokenizer
 from .embedder import embed_chunks
-from .models import IngestionConfig, IngestionResult
+from .models import ChunkRequest, IngestionConfig, IngestionResult
 
 
 def find_document_files(documents_folder: str) -> list[str]:
     """Find all supported document files in the documents folder."""
     if not Path(documents_folder).exists():
-        loguru_logger.error("Documents folder not found: {}", documents_folder)
+        logger.bind(documents_folder=documents_folder).error("Documents folder not found")
         return []
 
     # Supported file patterns - Docling + text formats + audio
@@ -82,10 +82,12 @@ def extract_document_metadata(content: str, file_path: str) -> dict[str, Any]:
                 if isinstance(yaml_metadata, dict):
                     metadata.update(yaml_metadata)
         except ImportError:
-            loguru_logger.warning("PyYAML not installed, skipping frontmatter extraction")
+            logger.warning("PyYAML not installed, skipping frontmatter extraction")
         except yaml.YAMLError as e:
             e.add_note(f"file={file_path}, operation=parse_frontmatter")
-            loguru_logger.warning(f"Failed to parse frontmatter: {e}")
+            logger.bind(file=file_path, operation="parse_frontmatter").warning(
+                "Failed to parse frontmatter"
+            )
 
     lines = content.split("\n")
     metadata["line_count"] = len(lines)
@@ -118,19 +120,21 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
         try:
             from docling.document_converter import DocumentConverter
 
-            loguru_logger.info(
-                "Converting {} file using Docling: {}", file_ext, Path(file_path).name
+            logger.bind(file_ext=file_ext, file=Path(file_path).name).info(
+                "Converting file using Docling"
             )
 
             converter = DocumentConverter()
             result = converter.convert(file_path)
 
             markdown_content = result.document.export_to_markdown()
-            loguru_logger.info("Successfully converted {} to markdown", Path(file_path).name)
+            logger.bind(file=Path(file_path).name).info("Successfully converted to markdown")
 
         except Exception as e:  # noqa: BLE001 — Docling conversion, fallback to raw text
             e.add_note(f"file={file_path}, operation=docling_conversion")
-            loguru_logger.error(f"Failed to convert {file_path} with Docling: {e}")
+            logger.bind(file=file_path, operation="docling_conversion").exception(
+                "Failed to convert document with Docling"
+            )
             try:
                 with Path(file_path).open(encoding="utf-8") as f:  # noqa: ASYNC230
                     return (f.read(), None)
@@ -176,7 +180,7 @@ async def ingest_single_document(
     document_source = relpath(file_path, "documents")  # noqa: ASYNC240
     document_metadata = extract_document_metadata(document_content, file_path)
 
-    loguru_logger.info("Processing document: {}", document_title)
+    logger.bind(document_title=document_title).info("Processing document")
 
     # Chunk the document
     if config.use_semantic_chunking:
@@ -186,13 +190,15 @@ async def ingest_single_document(
             hybrid_chunker = create_hybrid_chunker(tokenizer, config)
 
         chunks = await chunk_document(
-            content=document_content,
-            title=document_title,
-            source=document_source,
-            config=config,
-            tokenizer=tokenizer,
+            ChunkRequest(
+                content=document_content,
+                title=document_title,
+                source=document_source,
+                config=config,
+                metadata=document_metadata,
+            ),
+            tokenizer,
             hybrid_chunker=hybrid_chunker,
-            metadata=document_metadata,
             docling_doc=docling_doc,
         )
     else:
@@ -205,7 +211,7 @@ async def ingest_single_document(
         )
 
     if not chunks:
-        loguru_logger.warning("No chunks created for {}", document_title)
+        logger.bind(document_title=document_title).warning("No chunks created")
         return IngestionResult(
             document_id="",
             title=document_title,
@@ -215,11 +221,11 @@ async def ingest_single_document(
             errors=["No chunks created"],
         )
 
-    loguru_logger.info("Created {} chunks", len(chunks))
+    logger.bind(chunk_count=len(chunks)).info("Created chunks")
 
     # Generate embeddings
     embedded_chunks = await embed_chunks(chunks)
-    loguru_logger.info("Generated embeddings for {} chunks", len(embedded_chunks))
+    logger.bind(chunk_count=len(embedded_chunks)).info("Generated embeddings for chunks")
 
     # Save to database (if pool provided)
     document_id = ""
@@ -232,7 +238,7 @@ async def ingest_single_document(
             chunks=embedded_chunks,
             metadata=document_metadata,
         )
-        loguru_logger.info("Saved document to PostgreSQL with ID: {}", document_id)
+        logger.bind(document_id=document_id).info("Saved document to PostgreSQL")
 
     processing_time = (datetime.now(tz=datetime.timezone.utc) - start_time).total_seconds() * 1000
 
@@ -320,10 +326,10 @@ async def ingest_documents(
     document_files = find_document_files(documents_folder)
 
     if not document_files:
-        loguru_logger.warning("No supported document files found in {}", documents_folder)
+        logger.bind(documents_folder=documents_folder).warning("No supported document files found")
         return []
 
-    loguru_logger.info("Found {} document files to process", len(document_files))
+    logger.bind(document_count=len(document_files)).info("Found document files to process")
 
     results = []
 
@@ -336,7 +342,9 @@ async def ingest_documents(
 
     for i, file_path in enumerate(document_files):
         try:
-            loguru_logger.info("Processing file {}/{}: {}", i + 1, len(document_files), file_path)
+            logger.bind(file_index=i + 1, file_count=len(document_files), file=file_path).info(
+                "Processing file"
+            )
 
             result = await ingest_single_document(
                 file_path,
@@ -352,7 +360,9 @@ async def ingest_documents(
 
         except Exception as e:  # noqa: BLE001 — per-file processing, varied failure modes
             e.add_note(f"file={file_path}, operation=process_document")
-            loguru_logger.error(f"Failed to process {file_path}: {e}")
+            logger.bind(file=file_path, operation="process_document").exception(
+                "Failed to process document"
+            )
             results.append(
                 IngestionResult(
                     document_id="",
@@ -367,22 +377,22 @@ async def ingest_documents(
     total_chunks = sum(r.chunks_created for r in results)
     total_errors = sum(len(r.errors) for r in results)
 
-    loguru_logger.info(
-        f"Ingestion complete: {len(results)} documents, {total_chunks} chunks, {total_errors} errors"
-    )
+    logger.bind(
+        document_count=len(results), chunk_count=total_chunks, error_count=total_errors
+    ).info("Ingestion complete")
 
     return results
 
 
 async def clean_databases(db_pool: Any) -> None:
     """Clean existing data from databases."""
-    loguru_logger.warning("Cleaning existing data from databases...")
+    logger.warning("Cleaning existing data from databases...")
 
     async with db_pool.acquire() as conn, conn.transaction():
         await conn.execute("DELETE FROM chunks")
         await conn.execute("DELETE FROM documents")
 
-    loguru_logger.info("Cleaned PostgreSQL database")
+    logger.info("Cleaned PostgreSQL database")
 
 
 def create_ingestion_pipeline(

@@ -15,8 +15,9 @@ import base64
 import csv
 import hashlib
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from io import BytesIO, StringIO
+from typing import Any, NamedTuple
 
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -26,7 +27,7 @@ from docling_core.types.doc import DoclingDocument
 from google import genai
 from PIL import Image
 
-from app.utils import logger as loguru_logger
+from app.utils import logger
 
 from .models import (
     DoclingEnhancementConfig,
@@ -44,11 +45,12 @@ def check_gpu_available() -> bool:
 
         gpu_available = torch.cuda.is_available()
         if gpu_available:
-            loguru_logger.info(f"GPU detected: {torch.cuda.get_device_name(0)}")
+            device_name = torch.cuda.get_device_name(0)
+            logger.bind(device_name=device_name).info("GPU detected")
         else:
-            loguru_logger.info("No GPU detected, using CPU pipeline")
+            logger.info("No GPU detected, using CPU pipeline")
     except ImportError:
-        loguru_logger.warning("PyTorch not available, using CPU pipeline")
+        logger.warning("PyTorch not available, using CPU pipeline")
         return False
     else:
         return gpu_available
@@ -57,10 +59,10 @@ def check_gpu_available() -> bool:
 def create_document_converter(gpu_available: bool) -> DocumentConverter:
     """Create Docling converter with appropriate pipeline."""
     if gpu_available:
-        loguru_logger.info("Using GPU-accelerated PDF pipeline")
+        logger.info("Using GPU-accelerated PDF pipeline")
         pipeline_options = PdfPipelineOptions()
     else:
-        loguru_logger.info("Using CPU-efficient pipeline")
+        logger.info("Using CPU-efficient pipeline")
         pipeline_options = PdfPipelineOptions()
 
     pipeline_options.do_ocr = True
@@ -127,12 +129,14 @@ def extract_tables(doc: DoclingDocument) -> list[ExtractedTable]:
             # problem worth crashing on.
             except (DoclingError, ValueError, IndexError, KeyError) as e:
                 e.add_note(f"table_index={idx}, operation=extract_table")
-                loguru_logger.warning(f"Failed to extract table {idx}: {e}")
+                logger.bind(table_index=idx, operation="extract_table").warning(
+                    "Failed to extract table"
+                )
 
     except ImportError:
-        loguru_logger.warning("docling_core not available for table extraction")
+        logger.warning("docling_core not available for table extraction")
 
-    loguru_logger.info(f"Extracted {len(tables)} tables")
+    logger.bind(table_count=len(tables)).info("Extracted tables")
     return tables
 
 
@@ -166,15 +170,17 @@ def extract_code_blocks(doc: DoclingDocument) -> list[ExtractedCodeBlock]:
                     )
             except DoclingError as e:
                 e.add_note(f"block_index={idx}, operation=extract_code_block")
-                loguru_logger.warning(f"Failed to extract code block {idx}: {e}")
+                logger.bind(block_index=idx, operation="extract_code_block").warning(
+                    "Failed to extract code block"
+                )
 
     except ImportError:
-        loguru_logger.warning("docling_core not available for code extraction")
+        logger.warning("docling_core not available for code extraction")
 
     if not code_blocks:
         code_blocks = _extract_code_fallback(doc.export_to_markdown())
 
-    loguru_logger.info(f"Extracted {len(code_blocks)} code blocks")
+    logger.bind(code_block_count=len(code_blocks)).info("Extracted code blocks")
     return code_blocks
 
 
@@ -263,12 +269,14 @@ async def extract_images(
                     )
             except DoclingError as e:
                 e.add_note(f"image_index={idx}, operation=extract_image")
-                loguru_logger.warning(f"Failed to extract image {idx}: {e}")
+                logger.bind(image_index=idx, operation="extract_image").warning(
+                    "Failed to extract image"
+                )
 
     except ImportError:
-        loguru_logger.warning("docling_core not available for image extraction")
+        logger.warning("docling_core not available for image extraction")
 
-    loguru_logger.info(f"Extracted {len(images)} images")
+    logger.bind(image_count=len(images)).info("Extracted images")
     return images
 
 
@@ -286,7 +294,7 @@ async def _generate_vlm_caption(image_data) -> str | None:
 
     except Exception as e:  # noqa: BLE001 — VLM API can raise varied provider errors
         e.add_note("operation=vlm_caption")
-        loguru_logger.warning(f"VLM captioning failed: {e}")
+        logger.bind(operation="vlm_caption").warning("VLM captioning failed")
         return None
     else:
         return response.text or None
@@ -343,6 +351,71 @@ def _markdown_to_html(md_table: str) -> str:
     return "\n".join(html)
 
 
+class ExtractionStage(NamedTuple):
+    """One `convert_document` enrichment: when it runs and how to run it.
+
+    `enabled` reads the existing `DoclingEnhancementConfig` flags — the config
+    model stays the only toggle store, there is no second flag registry.
+    `run` is always async so the loop below awaits uniformly; the synchronous
+    extractors are wrapped in trivial coroutines.
+    """
+
+    name: str
+    enabled: Callable[[DoclingEnhancementConfig], bool]
+    run: Callable[[DoclingDocument, str, DoclingEnhancementConfig], Awaitable[Any]]
+
+
+async def _run_doctags_stage(
+    doc: DoclingDocument, source: str, _config: DoclingEnhancementConfig
+) -> str | None:
+    """DocTags export; a failed export degrades to None, never to a failed convert."""
+    try:
+        return doc.export_to_doc_tags()
+    except DoclingError as e:
+        e.add_note(f"document={source}, operation=export_doctags")
+        logger.bind(document=source, operation="export_doctags").warning("DocTags export failed")
+        return None
+
+
+async def _run_tables_stage(
+    doc: DoclingDocument, _source: str, _config: DoclingEnhancementConfig
+) -> list[ExtractedTable]:
+    """Table extraction stage."""
+    return extract_tables(doc)
+
+
+async def _run_code_stage(
+    doc: DoclingDocument, _source: str, _config: DoclingEnhancementConfig
+) -> list[ExtractedCodeBlock]:
+    """Code-block extraction stage."""
+    return extract_code_blocks(doc)
+
+
+async def _run_images_stage(
+    doc: DoclingDocument, source: str, config: DoclingEnhancementConfig
+) -> list[ExtractedImage]:
+    """Image extraction stage, honouring the VLM-captioning toggle."""
+    return await extract_images(doc, source, config.use_vlm_captioning)
+
+
+# Ordered enrichment registry for `convert_document`. Adding a stage is a
+# registration here — the gate loop below does not change.
+EXTRACTION_STAGES: tuple[ExtractionStage, ...] = (
+    ExtractionStage(
+        name="doctags",
+        enabled=lambda config: config.generate_doctags,
+        run=_run_doctags_stage,
+    ),
+    ExtractionStage(
+        name="tables", enabled=lambda config: config.extract_tables, run=_run_tables_stage
+    ),
+    ExtractionStage(name="code", enabled=lambda config: config.extract_code, run=_run_code_stage),
+    ExtractionStage(
+        name="images", enabled=lambda config: config.extract_images, run=_run_images_stage
+    ),
+)
+
+
 async def convert_document(
     source: str,
     document_id: str | None = None,
@@ -363,14 +436,14 @@ async def convert_document(
     if converter is None:
         converter = create_document_converter(gpu_available)
 
-    loguru_logger.info(f"Converting document: {source}")
+    logger.bind(source=source).info("Converting document")
 
     try:
         result = converter.convert(source)
         doc = result.document
     except DoclingError as e:
         e.add_note(f"document={source}, operation=convert")
-        loguru_logger.error(f"Docling conversion failed: {e}")
+        logger.bind(document=source, operation="convert").exception("Docling conversion failed")
         return DoclingExtractionResult(
             document_id=document_id,
             markdown_content=f"[Conversion error: {e}]",
@@ -378,25 +451,16 @@ async def convert_document(
 
     markdown_content = doc.export_to_markdown()
 
-    doctags_content = None
-    if config.generate_doctags:
-        try:
-            doctags_content = doc.export_to_doc_tags()
-        except DoclingError as e:
-            e.add_note(f"document={source}, operation=export_doctags")
-            loguru_logger.warning(f"DocTags export failed: {e}")
+    stage_outputs: dict[str, Any] = {}
+    for stage in EXTRACTION_STAGES:
+        if not stage.enabled(config):
+            continue
+        stage_outputs[stage.name] = await stage.run(doc, source, config)
 
-    tables = []
-    if config.extract_tables:
-        tables = extract_tables(doc)
-
-    code_blocks = []
-    if config.extract_code:
-        code_blocks = extract_code_blocks(doc)
-
-    images = []
-    if config.extract_images:
-        images = await extract_images(doc, source, config.use_vlm_captioning)
+    doctags_content = stage_outputs.get("doctags")
+    tables = stage_outputs.get("tables", [])
+    code_blocks = stage_outputs.get("code", [])
+    images = stage_outputs.get("images", [])
 
     metadata = {
         "source": source,
@@ -450,7 +514,7 @@ async def process_documents_batch(
     valid_results = []
     for idx, result in enumerate(results):
         if isinstance(result, Exception):
-            loguru_logger.error(f"Failed to process {sources[idx]}: {result}")
+            logger.bind(source=sources[idx], error=str(result)).error("Failed to process document")
             valid_results.append(
                 DoclingExtractionResult(
                     document_id=f"error_{idx}",

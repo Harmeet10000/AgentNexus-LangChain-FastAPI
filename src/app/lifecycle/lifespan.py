@@ -1,9 +1,9 @@
 """Application lifespan management."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import redis
 from celery import Celery
@@ -31,6 +31,7 @@ from app.connections import (
 )
 from app.features.auth import TokenAuditLog, User, build_websocket_security_service
 from app.features.auth.repository import RefreshTokenRepository
+from app.features.health.health_check import ALL_PROBES, check_cognee, check_graphiti
 from app.middleware import initialize_fastapi_guard
 from app.shared.langchain_layer.agents.memory import setup_cognee
 from app.shared.langchain_layer.agents.memory.cognee_client import (
@@ -41,7 +42,7 @@ from app.shared.langgraph_layer.checkpointer import teardown_langgraph_checkpoin
 from app.shared.otel import shutdown_otel
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.services.storage import StorageService
-from app.utils import ServiceUnavailableException, logger
+from app.utils import DependencyHealth, ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
@@ -54,7 +55,9 @@ async def setup_redis(url: str) -> redis.asyncio.Redis | None:
         client: Redis = create_redis_client(url)
         await client.ping()
     except (ConnectionError, TimeoutError, OSError, redis.exceptions.RedisError) as exc:
-        logger.warning("Redis startup failed, continuing without cache", error=str(exc))
+        logger.bind(component="redis", error=str(exc)).warning(
+            "Redis startup failed, continuing without cache"
+        )
         return None
 
     logger.info("Redis connected")
@@ -74,7 +77,9 @@ async def setup_mongodb(
         await mongo_client.admin.command(command="ping")
         server_info = await mongo_client.server_info()
     except (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError) as exc:
-        logger.warning("MongoDB startup failed, continuing without document store", error=str(exc))
+        logger.bind(component="mongodb", error=str(exc)).warning(
+            "MongoDB startup failed, continuing without document store"
+        )
         return None
 
     logger.info(
@@ -99,7 +104,9 @@ async def setup_neo4j() -> AsyncDriver | None:
         ServiceUnavailable,
         ConfigurationError,
     ) as exc:
-        logger.warning("Neo4j startup failed, continuing without graph features", error=str(exc))
+        logger.bind(component="neo4j", error=str(exc)).warning(
+            "Neo4j startup failed, continuing without graph features"
+        )
         return None
 
     logger.info("Neo4j driver initialized")
@@ -114,7 +121,9 @@ def setup_celery() -> Celery | None:
         conn.release()
         logger.info("Celery connected to RabbitMQ")
     except (ServiceUnavailableException, OperationalError, OSError) as e:
-        logger.warning("Celery connection failed, tasks will be unavailable", error=str(e))
+        logger.bind(component="celery", error=str(e)).warning(
+            "Celery connection failed, tasks will be unavailable"
+        )
         return None
     else:
         return celery_app
@@ -133,7 +142,7 @@ async def _init_object_storage(app: FastAPI, settings: Any) -> None:
             )
             app.state.object_store = None
             return
-        logger.info("Object storage initialized: bucket={}", settings.S3_BUCKET_NAME)
+        logger.bind(bucket=settings.S3_BUCKET_NAME).info("Object storage initialized")
     else:
         app.state.object_store = None
         logger.info("Object storage not configured, skipping")
@@ -159,11 +168,200 @@ async def _init_outbox_relay(app: FastAPI, celery_app: Celery | None) -> None:
     logger.info("Outbox relay started")
 
 
+class StartupPolicy(NamedTuple):
+    """One optional-dependency boot block as data.
+
+    `setup` does the work against `app.state`; `fatal_on` types propagate out
+    of boot; `degrade_on` types are reported via `report` and land
+    `state_attr` on None. `probe` links the policies whose dependency maps 1:1
+    to a deep-health probe to that same function object in
+    `health_check.ALL_PROBES` (the canonical dependency inventory) instead of
+    restating the name; policies with no 1:1 probe leave it None.
+    """
+
+    name: str
+    setup: Callable[[FastAPI, Any], Awaitable[None]]
+    state_attr: str
+    fatal_on: tuple[type[BaseException], ...]
+    degrade_on: tuple[type[BaseException], ...]
+    report: Callable[[BaseException], None]
+    probe: Callable[[FastAPI], Awaitable[DependencyHealth]] | None = None
+
+
+async def _setup_cognee_state(app: FastAPI, settings: Any) -> None:
+    """Configure episodic memory; the hard-fail class propagates to the runner."""
+    app.state.cognee_config = await setup_cognee(settings)
+    logger.info("Cognee configured")
+
+
+async def _setup_graphiti_state(app: FastAPI, settings: Any) -> None:
+    """Initialise the legal knowledge graph and its indices."""
+    graphiti: Graphiti = await setup_graphiti(
+        neo4j_uri=settings.NEO4J_URI,
+        neo4j_user=settings.NEO4J_USERNAME,
+        neo4j_password=settings.NEO4J_PASSWORD.get_secret_value(),
+    )
+    await setup_graphiti_indices(graphiti)
+    app.state.graphiti = graphiti
+    logger.info("Graphiti initialized")
+
+
+async def _setup_crawl4ai_state(app: FastAPI, _settings: Any) -> None:
+    """Initialise the Crawl4AI browser."""
+    app.state.crawl4ai_crawler = await create_crawl4ai_crawler()
+    logger.info("Crawl4AI browser initialized")
+
+
+async def _setup_object_storage_state(app: FastAPI, settings: Any) -> None:
+    """Initialise object storage; access-verification failure degrades inside."""
+    await _init_object_storage(app, settings)
+
+
+async def _setup_celery_state(app: FastAPI, _settings: Any) -> None:
+    """Verify the Celery/RabbitMQ connection without blocking boot."""
+    celery: Celery | None = await asyncio.wait_for(asyncio.to_thread(setup_celery), timeout=3.0)
+    app.state.celery = celery
+
+
+async def _setup_outbox_relay_state(app: FastAPI, _settings: Any) -> None:
+    """Start the outbox relay listener on the existing session factory."""
+    await _init_outbox_relay(app, celery_app)
+
+
+def _report_cognee_degraded(exc: BaseException) -> None:
+    """Cognee degrade path: misconfiguration and unexpected failure log differently."""
+    exc.add_note("operation=setup_cognee")
+    if isinstance(exc, CogneeSetupError):
+        logger.bind(component="cognee", operation="setup_cognee", error=str(exc)).warning(
+            "Cognee misconfigured, continuing without episodic memory"
+        )
+    else:
+        logger.bind(component="cognee", operation="setup_cognee", error=str(exc)).warning(
+            "Cognee startup failed, continuing without episodic memory"
+        )
+
+
+def _report_graphiti_degraded(exc: BaseException) -> None:
+    """Graphiti degrade path."""
+    exc.add_note("operation=setup_graphiti")
+    logger.bind(component="graphiti", operation="setup_graphiti", error=str(exc)).warning(
+        "Graphiti startup failed, continuing without graph features"
+    )
+
+
+def _report_crawl4ai_degraded(_exc: BaseException) -> None:
+    """Crawl4AI degrade path: keeps the original `logger.exception` shape."""
+    logger.exception("Crawl4AI browser startup failed, continuing without crawl capability")
+
+
+def _report_object_storage_degraded(_exc: BaseException) -> None:
+    """Object-storage degrade path: keeps the original `logger.exception` shape."""
+    logger.exception("Object storage startup failed, continuing without")
+
+
+def _report_celery_degraded(exc: BaseException) -> None:
+    """Celery degrade path: a slow broker and a refusing broker log differently."""
+    if isinstance(exc, TimeoutError):
+        logger.warning("Celery setup timed out, continuing without task queue")
+    else:
+        logger.bind(component="celery", error=str(exc)).exception("Celery setup failed")
+
+
+def _report_outbox_relay_degraded(exc: BaseException) -> None:
+    """Outbox-relay degrade path."""
+    exc.add_note("operation=setup_outbox_relay")
+    logger.bind(component="outbox_relay", operation="setup_outbox_relay", error=str(exc)).warning(
+        "Outbox relay startup failed, continuing without outbox"
+    )
+
+
+# Optional-dependency boot order. Each entry replaces one hand-rolled
+# try/except-degrade block: adding an optional dependency is one entry here
+# plus its two small functions — no new try/except inside `lifespan`.
+STARTUP_POLICIES: tuple[StartupPolicy, ...] = (
+    StartupPolicy(
+        name="cognee",
+        setup=_setup_cognee_state,
+        state_attr="cognee_config",
+        fatal_on=(CogneeDimensionMismatchError,),
+        # Single catch-all for the optional dep: anything that is not the
+        # hard-fail class degrades without episodic memory.
+        degrade_on=(Exception,),
+        report=_report_cognee_degraded,
+        probe=check_cognee,
+    ),
+    StartupPolicy(
+        name="graphiti",
+        setup=_setup_graphiti_state,
+        state_attr="graphiti",
+        fatal_on=(),
+        degrade_on=(ConnectionError, TimeoutError, OSError, ServiceUnavailable),
+        report=_report_graphiti_degraded,
+        probe=check_graphiti,
+    ),
+    StartupPolicy(
+        name="crawl4ai",
+        setup=_setup_crawl4ai_state,
+        state_attr="crawl4ai_crawler",
+        fatal_on=(),
+        degrade_on=(ConnectionError, TimeoutError, OSError, PlaywrightError),
+        report=_report_crawl4ai_degraded,
+    ),
+    StartupPolicy(
+        name="object_storage",
+        setup=_setup_object_storage_state,
+        state_attr="object_store",
+        fatal_on=(),
+        degrade_on=(ConnectionError, TimeoutError, OSError),
+        report=_report_object_storage_degraded,
+    ),
+    StartupPolicy(
+        name="celery",
+        setup=_setup_celery_state,
+        state_attr="celery",
+        fatal_on=(),
+        degrade_on=(TimeoutError, ServiceUnavailableException),
+        report=_report_celery_degraded,
+    ),
+    StartupPolicy(
+        name="outbox_relay",
+        setup=_setup_outbox_relay_state,
+        state_attr="outbox_relay",
+        fatal_on=(),
+        degrade_on=(ConnectionError, TimeoutError, OSError, RuntimeError, ValueError),
+        report=_report_outbox_relay_degraded,
+    ),
+)
+
+_POLICY_PROBES = frozenset(policy.probe for policy in STARTUP_POLICIES if policy.probe is not None)
+if not _POLICY_PROBES.issubset(ALL_PROBES):
+    msg = "STARTUP_POLICIES probes must be members of health_check.ALL_PROBES"
+    raise RuntimeError(msg)
+
+
+async def _run_startup_policy(app: FastAPI, settings: Any, policy: StartupPolicy) -> None:
+    """Run one boot policy: fatal types propagate, degrade types degrade in place.
+
+    The `fatal_on` clause comes first deliberately: `CogneeDimensionMismatchError`
+    subclasses `CogneeSetupError`, which the cognee policy also degrades on — a
+    broad-first order would swallow the one hard-fail class and silently degrade
+    retrieval quality instead of stopping the boot.
+    """
+    try:
+        await policy.setup(app, settings)
+    except policy.fatal_on:
+        raise
+    except policy.degrade_on as exc:
+        policy.report(exc)
+        setattr(app.state, policy.state_attr, None)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR0914, PLR0915
     """Manage application startup and shutdown with parallel execution.
 
-    Exception families survived (14 named handlers, single catch-all is `except Exception` for Cognee):
+    Exception families survived (per-policy degrade tuples in `STARTUP_POLICIES`;
+    single catch-all is the cognee policy's `degrade_on=(Exception,)`):
     Redis (ConnectionError, TimeoutError, OSError, redis.exceptions.RedisError),
     MongoDB (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError),
     Neo4j (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError, ServiceUnavailable, ConfigurationError),
@@ -173,7 +371,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     Crawl4AI (ConnectionError, TimeoutError, OSError, PlaywrightError),
     Object storage (ConnectionError, TimeoutError, OSError), Celery TimeoutError,
     Celery ServiceUnavailableException, Outbox (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError).
-    Single `except Exception` for Cognee optional dep remains.
     """
     settings = get_settings()
     logger.info("Application starting", app_name=app.title, version=app.version)
@@ -192,9 +389,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
             redis_task = tg.create_task(coro=setup_redis(url=settings.REDIS_URL))
             neo_task = tg.create_task(coro=setup_neo4j())
     except ExceptionGroup as exc_group:
-        logger.warning(
-            "One or more startup tasks failed; continuing with available services",
-            error=str(exc_group),
+        logger.bind(error=str(exc_group)).warning(
+            "One or more startup tasks failed, continuing with available services"
         )
         pg_task = None
         mongo_task = None
@@ -248,40 +444,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
         coro=app.state.websocket_security.run_revocation_loop(),
     )
 
-    # Setup Cognee for episodic + procedural memory (optional)
-    try:
-        cognee_config = await setup_cognee(settings)
-        app.state.cognee_config = cognee_config
-        logger.info("Cognee configured")
-    except CogneeDimensionMismatchError:
-        # Decision 15 hard-fail class: incomparable embedding spaces must stop
-        # the boot rather than silently degrade retrieval quality.
-        raise
-    except CogneeSetupError as exc:
-        # Named configuration failure (placeholder/divergent connection
-        # settings): degrade without episodic memory, never crash startup.
-        exc.add_note("operation=setup_cognee")
-        logger.warning("Cognee misconfigured, continuing without episodic memory", error=str(exc))
-        app.state.cognee_config = None
-    except Exception as exc:  # noqa: BLE001 — optional dependency; app degrades without it
-        exc.add_note("operation=setup_cognee")
-        logger.warning("Cognee startup failed, continuing without episodic memory", error=str(exc))
-        app.state.cognee_config = None
-
-    # Setup Graphiti for legal knowledge graph (optional)
-    try:
-        graphiti: Graphiti = await setup_graphiti(
-            neo4j_uri=settings.NEO4J_URI,
-            neo4j_user=settings.NEO4J_USERNAME,
-            neo4j_password=settings.NEO4J_PASSWORD.get_secret_value(),
-        )
-        await setup_graphiti_indices(graphiti)
-        app.state.graphiti = graphiti
-        logger.info("Graphiti initialized")
-    except (ConnectionError, TimeoutError, OSError, ServiceUnavailable) as exc:
-        exc.add_note("operation=setup_graphiti")
-        logger.warning("Graphiti startup failed, continuing without graph features", error=str(exc))
-        app.state.graphiti = None
+    # Optional dependencies boot through the policy registry in order. The
+    # Neo4j/Graphiti consistency warnings below stay inline: they cross-cut two
+    # policies (the TaskGroup neo4j result and the graphiti policy outcome) and
+    # are a check, not a setup — registry form would force behaviour change.
+    for policy in STARTUP_POLICIES:
+        await _run_startup_policy(app, settings, policy)
 
     # Warn on Neo4j/Graphiti state inconsistency
     neo4j_ok = getattr(app.state, "neo4j_driver", None) is not None
@@ -316,40 +484,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     # Initialize Tavily HTTP client
     app.state.tavily_http_client = await create_tavily_http_client()
     logger.info("Tavily HTTP client initialized")
-
-    # Initialize Crawl4AI browser
-    try:
-        app.state.crawl4ai_crawler = await create_crawl4ai_crawler()
-        logger.info("Crawl4AI browser initialized")
-    except (ConnectionError, TimeoutError, OSError, PlaywrightError):
-        logger.exception("Crawl4AI browser startup failed, continuing without crawl capability")
-        app.state.crawl4ai_crawler = None
-    settings = get_settings()
-    # Initialize object storage (S3/R2) — optional, graceful degradation
-    try:
-        await _init_object_storage(app, settings)
-    except (ConnectionError, TimeoutError, OSError):
-        logger.exception("Object storage startup failed, continuing without")
-        app.state.object_store = None
-
-    # Celery setup (optional, non-blocking)
-    try:
-        celery: Celery | None = await asyncio.wait_for(asyncio.to_thread(setup_celery), timeout=3.0)
-        app.state.celery = celery
-    except TimeoutError:
-        logger.warning("Celery setup timed out, continuing without task queue")
-        app.state.celery = None
-    except ServiceUnavailableException as e:
-        logger.error("Celery setup failed", error=str(e))
-        app.state.celery = None
-
-    # Outbox relay (uses existing database session factory)
-    try:
-        await _init_outbox_relay(app, celery_app)
-    except (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError) as exc:
-        exc.add_note("operation=setup_outbox_relay")
-        logger.warning("Outbox relay startup failed, continuing without outbox", error=str(exc))
-        app.state.outbox_relay = None
 
     # FastAPI-Guard setup (depends on Redis, but non-blocking)
     await initialize_fastapi_guard(app=app, settings=settings)

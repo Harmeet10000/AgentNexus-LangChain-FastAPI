@@ -2,6 +2,9 @@
 
 import ast
 import pathlib
+from types import SimpleNamespace
+
+import pytest
 
 
 def _collect_raises(path: pathlib.Path) -> set[str]:
@@ -113,10 +116,10 @@ def test_catch_order_narrowest_first():
     star_idx = text.find("isinstance(exc, StarletteHTTPException)")
     catch_all_idx = text.find("status.HTTP_500_INTERNAL_SERVER_ERROR")
     assert api_idx < req_idx < star_idx < catch_all_idx
-    text2 = pathlib.Path("src/app/lifecycle/lifespan.py").read_text(encoding="utf-8")
-    assert text2.find("CogneeDimensionMismatchError") < text2.find(
-        "except Exception as exc:  # noqa: BLE001 — optional dependency"
-    )
+    # The lifespan half of this ordering lives in outcome tests below
+    # (`test_cognee_setup_base_caught_not_just_subclass`): the boot registry
+    # expresses narrowest-first as data (`fatal_on` checked before
+    # `degrade_on`), so there is no `except` text left to pin here.
 
 
 def _repo_excepts() -> set[str]:
@@ -129,28 +132,68 @@ def _repo_excepts() -> set[str]:
 
 
 def test_orphan_families_caught_by_name():
-    """§6: every formerly-orphan family has a by-name catch site repo-wide."""
+    """§6: every formerly-orphan family has a by-name catch site repo-wide.
+
+    `CogneeSetupError` is absent on purpose: the boot registry handles it as
+    data (`degrade_on`), not as an `except` clause, so the AST walk below
+    cannot see it. Its coverage lives in
+    `test_cognee_setup_base_caught_not_just_subclass`, which degrades it
+    through the real policy instead of asserting on syntax.
+    """
     excepts = _repo_excepts()
     for family in (
         "CircuitBreakerOpenError",
         "IdempotencyLockError",
         "AgentMemoryError",
-        "CogneeSetupError",
         "StateSchemaVersionError",
     ):
         assert family in excepts, f"{family} must be caught by name"
 
 
-def test_cognee_setup_base_caught_not_just_subclass():
-    """The base CogneeSetupError degrades; only the dimension subclass hard-fails."""
-    text = pathlib.Path("src/app/lifecycle/lifespan.py").read_text(encoding="utf-8")
-    sub_idx = text.find("except CogneeDimensionMismatchError:")
-    base_idx = text.find("except CogneeSetupError")
-    generic_idx = text.find("except Exception as exc:  # noqa: BLE001 — optional dependency")
-    assert sub_idx != -1
-    assert base_idx != -1
-    assert generic_idx != -1
-    assert sub_idx < base_idx < generic_idx, "narrowest-first: subclass, base, catch-all"
+def _cognee_policy():
+    from app.lifecycle.lifespan import STARTUP_POLICIES
+
+    (policy,) = [p for p in STARTUP_POLICIES if p.name == "cognee"]
+    return policy
+
+
+def _stub_boot_app():
+    return SimpleNamespace(state=SimpleNamespace())
+
+
+async def test_cognee_setup_base_caught_not_just_subclass():
+    """The base CogneeSetupError degrades; only the dimension subclass hard-fails.
+
+    Outcome version of the old narrowest-first text pin. The cognee boot
+    policy carries the hard-fail class in `fatal_on` while the base degrades,
+    and the runner checks fatal first — which matters precisely because the
+    subclass relationship (`CogneeDimensionMismatchError` extends
+    `CogneeSetupError`) would let a broad-first order swallow the hard fail.
+    """
+    from app.lifecycle.lifespan import _run_startup_policy
+    from app.shared.langchain_layer.agents.memory.cognee_client import (
+        CogneeDimensionMismatchError,
+        CogneeSetupError,
+    )
+
+    policy = _cognee_policy()
+    assert policy.fatal_on == (CogneeDimensionMismatchError,)
+    assert issubclass(CogneeDimensionMismatchError, CogneeSetupError)
+
+    async def _misconfigured(_app, _settings):
+        msg = "placeholder connection settings"
+        raise CogneeSetupError(msg)
+
+    app = _stub_boot_app()
+    await _run_startup_policy(app, object(), policy._replace(setup=_misconfigured))
+    assert app.state.cognee_config is None
+
+    async def _mismatched(_app, _settings):
+        msg = "embedding width 768 != 1536"
+        raise CogneeDimensionMismatchError(msg)
+
+    with pytest.raises(CogneeDimensionMismatchError):
+        await _run_startup_policy(_stub_boot_app(), object(), policy._replace(setup=_mismatched))
 
 
 def test_state_schema_version_caught_at_callsite():

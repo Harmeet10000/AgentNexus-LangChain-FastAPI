@@ -15,7 +15,7 @@ from typing import Any
 
 from graphiti_core.errors import GraphitiError
 
-from app.utils.logger import logger as loguru_logger
+from app.utils.logger import logger
 
 from .models import Entity, ExtractionResult, Relationship
 
@@ -58,11 +58,13 @@ async def extract_with_graphiti(
             neo4j_password=neo4j_password,
         )
     except ImportError:
-        loguru_logger.warning("graphiti_graph not available, using fallback extraction")
+        logger.warning("graphiti_graph not available, using fallback extraction")
         return await extract_with_fallback(text, document_id, start_time)
     except GraphitiError as e:
         e.add_note(f"document_id={document_id}, operation=extract_entities")
-        loguru_logger.error(f"Graphiti extraction failed: {e}")
+        logger.bind(document_id=document_id, operation="extract_entities").exception(
+            "Graphiti extraction failed"
+        )
         return await extract_with_fallback(text, document_id, start_time)
 
 
@@ -81,7 +83,7 @@ async def _do_extract_graph_entities(
         neo4j_uri=neo4j_uri,
         neo4j_auth=(neo4j_user, neo4j_password),
     )
-    loguru_logger.info("Graphiti client initialized")
+    logger.info("Graphiti client initialized")
     episode = await client.add_episode(
         name=f"document_{document_id}",
         text=text,
@@ -110,7 +112,9 @@ async def _do_extract_graph_entities(
                 source_document_id=document_id,
             )
             relationships.append(relationship)
-    loguru_logger.info(f"Extracted {len(entities)} entities and {len(relationships)} relationships")
+    logger.bind(entity_count=len(entities), relationship_count=len(relationships)).info(
+        "Extracted entities and relationships"
+    )
     processing_time = (time.time() - start_time) * 1000
     return ExtractionResult(
         document_id=document_id,
@@ -186,7 +190,7 @@ def _extract_entities_simple(text: str, document_id: str) -> list[Entity]:
         )
         entity_id += 1
 
-    loguru_logger.info("Fallback extraction found {} entities", len(entities))
+    logger.bind(entity_count=len(entities)).info("Fallback extraction found entities")
     return entities
 
 

@@ -125,7 +125,9 @@ def make_query_analyzer_node(
         # left this degradation branch dead in production.
         except (LangChainException, TransientExternalError) as exc:
             exc.add_note(f"query={query[:80]}, operation=query_analyzer")
-            logger.bind(error=str(exc)).warning("query_analyzer_failed_using_default")
+            logger.bind(query=query[:80], operation="query_analyzer", error=str(exc)).warning(
+                "query_analyzer_failed_using_default"
+            )
             plan = QueryPlan(rewritten_query=query, sub_queries=[query])
 
         cache_key = _answer_cache_key(plan.rewritten_query, state.get("doc_ids_filter", []))
@@ -164,7 +166,9 @@ def make_graph_retrieval_node(
         # arrives as the boundary's type, not as `GraphitiError`.
         except (GraphitiError, TransientExternalError) as exc:
             exc.add_note(f"query={plan.rewritten_query[:80]}, operation=graph_retrieval")
-            logger.bind(error=str(exc)).warning("graph_retrieval_failed")
+            logger.bind(
+                query=plan.rewritten_query[:80], operation="graph_retrieval", error=str(exc)
+            ).warning("graph_retrieval_failed")
             return {"graph_chunk_ids": []}
 
         chunk_ids: list[str] = []
@@ -197,34 +201,40 @@ def make_hybrid_retrieval_node(
             label="gemini_query_embedding",
         )
         chunk_ids = state.get("graph_chunk_ids") or None
+        # Local import (noqa: PLC0415): `documents.service` imports this package at
+        # module load, so a top-level import would close a cycle. The DTO lives
+        # with the other retrieval-region policy in the service module.
+        from app.features.documents.service import RetrievalQuery  # noqa: PLC0415
+
         # `user_id` is not a translation of an old argument — the reader this replaces had no
         # tenant predicate at all, so every fused search read across all owners and was held
         # back only by the caller never passing another user's chunk ids. The unified query
         # scopes on the parent document's owner, which is why the state field is required here
         # rather than optional.
+        retrieval_query = RetrievalQuery(
+            user_id=state["user_id"],
+            query_text=plan.rewritten_query,
+            query_embedding=embedding,
+            limit=20,
+            vector_weight=plan.vector_weight,
+            keyword_weight=plan.keyword_weight,
+            jurisdiction=plan.jurisdiction,
+            contract_type=plan.contract_type,
+            # The one filter the old reader accepted from the request and then dropped on
+            # the floor: `doc_ids_filter` reached the analyzer prompt, the Graphiti group
+            # ids and the answer cache key, but never the SQL.
+            document_ids=state.get("doc_ids_filter") or None,
+            chunk_ids=chunk_ids,
+            # Explicit, not defaulted: `QueryPlan` forbids extra fields, so the graph has
+            # nowhere to carry either of these. Passing them by name records that the
+            # omission is a property of the plan object, not an oversight here.
+            clause_type=None,
+            require_graphiti_verified=False,
+            bm25_threshold=plan.bm25_threshold,
+            exact_phrase=plan.exact_phrase,
+        )
         rows_result = await retry_immediate(
-            lambda: repo.legal_rrf_search(
-                user_id=state["user_id"],
-                query_text=plan.rewritten_query,
-                query_embedding=embedding,
-                limit=20,
-                vector_weight=plan.vector_weight,
-                keyword_weight=plan.keyword_weight,
-                jurisdiction=plan.jurisdiction,
-                contract_type=plan.contract_type,
-                # The one filter the old reader accepted from the request and then dropped on
-                # the floor: `doc_ids_filter` reached the analyzer prompt, the Graphiti group
-                # ids and the answer cache key, but never the SQL.
-                document_ids=state.get("doc_ids_filter") or None,
-                chunk_ids=chunk_ids,
-                # Explicit, not defaulted: `QueryPlan` forbids extra fields, so the graph has
-                # nowhere to carry either of these. Passing them by name records that the
-                # omission is a property of the plan object, not an oversight here.
-                clause_type=None,
-                require_graphiti_verified=False,
-                bm25_threshold=plan.bm25_threshold,
-                exact_phrase=plan.exact_phrase,
-            ),
+            lambda: repo.legal_rrf_search(**retrieval_query.model_dump()),
             label="postgres_legal_rrf_search",
         )
         if isinstance(rows_result, Failure):
@@ -289,7 +299,9 @@ def make_context_grader_node(
             grade: ContextGrade = ContextGrade.model_validate(raw_grade)
         except Exception as exc:  # noqa: BLE001 — fall back to chunk-presence heuristic
             exc.add_note("operation=context_grader")
-            logger.bind(error=str(exc)).warning("context_grader_failed_using_chunk_presence")
+            logger.bind(operation="context_grader", error=str(exc)).warning(
+                "context_grader_failed_using_chunk_presence"
+            )
             grade = ContextGrade(sufficient=bool(chunks), missing_aspects=[])
         return {"context_grade": grade, "iteration_count": state.get("iteration_count", 0) + 1}
 
@@ -332,7 +344,9 @@ def make_generator_node(
             answer: GeneratedAnswer = GeneratedAnswer.model_validate(raw_answer)
         except Exception as exc:  # noqa: BLE001 — generator failure must return hard fallback
             exc.add_note("operation=generator")
-            logger.bind(error=str(exc)).warning("generator_failed_using_fallback")
+            logger.bind(operation="generator", error=str(exc)).warning(
+                "generator_failed_using_fallback"
+            )
             answer = GeneratedAnswer(answer=FALLBACK_ANSWER, citations=[], confidence="uncertain")
 
         if answer.confidence == "uncertain" and FALLBACK_ANSWER not in answer.answer:
