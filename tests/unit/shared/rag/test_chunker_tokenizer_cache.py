@@ -220,18 +220,21 @@ def test_the_load_is_logged_once_rather_than_on_every_call(spy, monkeypatch) -> 
     loader, so one line in the log means one real load.
     """
     recorder = MagicMock()
-    monkeypatch.setattr(chunker_module, "loguru_logger", recorder)
+    monkeypatch.setattr(chunker_module, "logger", recorder)
 
     get_tokenizer()
     get_tokenizer()
     get_tokenizer()
 
-    load_lines = [
-        call for call in recorder.info.call_args_list if "Loading tokenizer" in str(call.args[0])
-    ]
+    # `mock_calls`, not `info.call_args_list`: whether the line is logged
+    # positionally or through a `bind(...).info(...)` chain is a style choice,
+    # and the requirement is one line per real load either way. The model id
+    # may ride along in either call, so it is asserted over the whole chain.
+    all_calls = " ".join(str(call) for call in recorder.mock_calls)
+    load_lines = [call for call in recorder.mock_calls if "Loading tokenizer" in str(call)]
     assert spy.count == 1
     assert len(load_lines) == 1
-    assert load_lines[0].args[1] == DEFAULT_TOKENIZER_MODEL_ID
+    assert DEFAULT_TOKENIZER_MODEL_ID in all_calls
 
 
 def test_clearing_the_cache_makes_the_next_call_load_again(spy) -> None:

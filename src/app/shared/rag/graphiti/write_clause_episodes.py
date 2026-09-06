@@ -39,6 +39,7 @@ from .schemas import ClauseEpisodeMetadata, LegalEdgeInput
 
 if TYPE_CHECKING:
     from app.shared.langgraph_layer.agent_saul.state import ClauseSegment, LegalRelationship
+    from app.shared.rag.langextract.langextract_to_graph import GraphIngestionContext
 
 
 class GraphitiService(Protocol):
@@ -83,13 +84,8 @@ class RelationshipWriteResult(BaseModel):
 async def write_clause_episodes_to_graphiti(
     segments: list[ClauseSegment],
     relationships: list[LegalRelationship],
-    doc_id: str,
-    user_id: str,
-    thread_id: str,
+    ctx: GraphIngestionContext,
     *,
-    jurisdiction: str,
-    document_type: str,
-    human_reviewed: bool,
     graphiti_service: GraphitiService,
     idempotency: IdempotencyGuard,
 ) -> tuple[list[ClauseWriteResult], list[RelationshipWriteResult]]:
@@ -99,7 +95,7 @@ async def write_clause_episodes_to_graphiti(
     Partial failures are recorded per-item — caller decides on retry.
     """
     log = logger.bind(
-        doc_id=doc_id,
+        doc_id=ctx.document_id,
         clause_count=len(segments),
         relationship_count=len(relationships),
     )
@@ -109,12 +105,12 @@ async def write_clause_episodes_to_graphiti(
     clause_tasks = [
         _write_single_clause_episode(
             segment=seg,
-            doc_id=doc_id,
-            user_id=user_id,
-            thread_id=thread_id,
-            jurisdiction=jurisdiction,
-            document_type=document_type,
-            human_reviewed=human_reviewed,
+            doc_id=ctx.document_id,
+            user_id=ctx.user_id,
+            thread_id=ctx.thread_id,
+            jurisdiction=ctx.jurisdiction,
+            document_type=ctx.document_type,
+            human_reviewed=ctx.human_reviewed,
             graphiti_service=graphiti_service,
             idempotency=idempotency,
             sem=sem,
@@ -132,9 +128,9 @@ async def write_clause_episodes_to_graphiti(
     for rel in relationships:
         result = await _write_single_relationship_edge(
             relationship=rel,
-            doc_id=doc_id,
-            user_id=user_id,
-            thread_id=thread_id,
+            doc_id=ctx.document_id,
+            user_id=ctx.user_id,
+            thread_id=ctx.thread_id,
             graphiti_service=graphiti_service,
             idempotency=idempotency,
         )

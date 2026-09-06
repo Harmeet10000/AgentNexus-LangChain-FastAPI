@@ -12,6 +12,8 @@ from returns.result import Failure
 
 from app.utils import InfrastructureException
 
+from .dto import IngestionJob, IngestionRuntime
+
 if TYPE_CHECKING:
     from typing import Any
 
@@ -80,15 +82,19 @@ def _make_ingest_document_node(
 ) -> Callable[[DocumentIngestionState], Awaitable[dict[str, object]]]:
     async def ingest_document_node(state: DocumentIngestionState) -> dict[str, object]:
         result = await ingest_document_fn(
-            document_id=state.document_id,
-            user_id=state.user_id,
-            filename=state.filename,
-            content_type=state.content_type,
-            object_uri=state.object_uri,
-            object_store=object_store,
-            repo=repo,
-            graphiti=graphiti,
-            llm=llm,
+            job=IngestionJob(
+                document_id=state.document_id,
+                user_id=state.user_id,
+                filename=state.filename,
+                content_type=state.content_type,
+                object_uri=state.object_uri,
+            ),
+            runtime=IngestionRuntime(
+                object_store=object_store,
+                repo=repo,
+                graphiti=graphiti,
+                llm=llm,
+            ),
         )
         if isinstance(result, Failure):
             error = result.failure()

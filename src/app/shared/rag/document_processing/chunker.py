@@ -47,16 +47,16 @@ chunker cannot see which provider will embed what it emits.
 """
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, overload
 
 from docling.chunking import HybridChunker
 from docling.exceptions import BaseError as DoclingError
 from docling_core.types.doc import DoclingDocument
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from app.utils.logger import logger as loguru_logger
+from app.utils.logger import logger
 
-from .models import Chunk, IngestionConfig
+from .models import Chunk, ChunkRequest, IngestionConfig
 
 DEFAULT_TOKENIZER_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -83,7 +83,7 @@ def _load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:
     load. Emitted per call it would be false for every call after the first,
     which is what it was before this became a cache.
     """
-    loguru_logger.info("Loading tokenizer (first use in this process): {}", model_id)
+    logger.bind(model_id=model_id).info("Loading tokenizer (first use in this process)")
     return AutoTokenizer.from_pretrained(model_id)
 
 
@@ -102,7 +102,7 @@ def create_hybrid_chunker(
     tokenizer: PreTrainedTokenizerBase, config: IngestionConfig
 ) -> HybridChunker:
     """Create HybridChunker instance."""
-    loguru_logger.info("HybridChunker initialized (max_tokens={})", config.max_tokens)
+    logger.bind(max_tokens=config.max_tokens).info("HybridChunker initialized")
     return HybridChunker(
         tokenizer=tokenizer,
         max_tokens=config.max_tokens,
@@ -110,33 +110,101 @@ def create_hybrid_chunker(
     )
 
 
+@overload
 async def chunk_document(
+    request: ChunkRequest,
+    tokenizer: PreTrainedTokenizerBase,
+    *,
+    hybrid_chunker: HybridChunker | None = ...,
+    docling_doc: DoclingDocument | None = ...,
+) -> list[Chunk]: ...
+
+
+@overload
+async def chunk_document(
+    *,
     content: str,
     title: str,
     source: str,
     config: IngestionConfig,
     tokenizer: PreTrainedTokenizerBase,
+    hybrid_chunker: HybridChunker | None = ...,
+    metadata: dict[str, Any] | None = ...,
+    docling_doc: DoclingDocument | None = ...,
+) -> list[Chunk]: ...
+
+
+async def chunk_document(
+    request: ChunkRequest | None = None,
+    tokenizer: PreTrainedTokenizerBase | None = None,
     *,
     hybrid_chunker: HybridChunker | None = None,
     metadata: dict[str, Any] | None = None,
     docling_doc: DoclingDocument | None = None,
+    content: str | None = None,
+    title: str | None = None,
+    source: str | None = None,
+    config: IngestionConfig | None = None,
 ) -> list[Chunk]:
     """
     Chunk a document using Docling's HybridChunker or fallback.
 
+    Preferred: pass a `ChunkRequest` bundling the data inputs, with runtime
+    services (`tokenizer`, `hybrid_chunker`, `docling_doc`) explicit.
+
     Args:
-        content: Document content (markdown format)
-        title: Document title
-        source: Document source
-        config: Chunking configuration
-        tokenizer: Initialized tokenizer
-        hybrid_chunker: Optional pre-created HybridChunker instance
-        metadata: Additional metadata
-        docling_doc: Optional pre-converted DoclingDocument (for efficiency)
+        request: Frozen bundle of content/title/source/config/metadata.
+        tokenizer: Initialized tokenizer.
+        hybrid_chunker: Optional pre-created HybridChunker instance.
+        metadata: Additional metadata (merged over `request.metadata`).
+        docling_doc: Optional pre-converted DoclingDocument (for efficiency).
+        content: Legacy path (deprecated): document content (markdown format).
+        title: Legacy path (deprecated): document title.
+        source: Legacy path (deprecated): document source.
+        config: Legacy path (deprecated): chunking configuration.
 
     Returns:
         List of document chunks with contextualized content
     """
+    if request is None:
+        if content is None or title is None or source is None or config is None:
+            msg = "chunk_document requires either a ChunkRequest or content/title/source/config"
+            raise ValueError(msg)
+        request = ChunkRequest(
+            content=content,
+            title=title,
+            source=source,
+            config=config,
+            metadata=metadata or {},
+        )
+        metadata = None
+    if tokenizer is None:
+        msg = "chunk_document requires a tokenizer"
+        raise ValueError(msg)
+    effective_metadata = dict(request.metadata)
+    if metadata:
+        effective_metadata.update(metadata)
+    return await _chunk_document_impl(
+        request=request,
+        tokenizer=tokenizer,
+        hybrid_chunker=hybrid_chunker,
+        effective_metadata=effective_metadata,
+        docling_doc=docling_doc,
+    )
+
+
+async def _chunk_document_impl(
+    request: ChunkRequest,
+    tokenizer: PreTrainedTokenizerBase,
+    *,
+    hybrid_chunker: HybridChunker | None,
+    effective_metadata: dict[str, Any],
+    docling_doc: DoclingDocument | None,
+) -> list[Chunk]:
+    content = request.content
+    title = request.title
+    source = request.source
+    config = request.config
     if not content.strip():
         return []
 
@@ -144,11 +212,11 @@ async def chunk_document(
         "title": title,
         "source": source,
         "chunk_method": "hybrid" if docling_doc and hybrid_chunker else "simple_fallback",
-        **(metadata or {}),
+        **effective_metadata,
     }
 
     if docling_doc is None or hybrid_chunker is None:
-        loguru_logger.warning(
+        logger.warning(
             "No DoclingDocument or HybridChunker provided, using simple chunking fallback"
         )
         return _simple_fallback_chunk(content, base_metadata, config, tokenizer)
@@ -159,10 +227,12 @@ async def chunk_document(
         )
     except DoclingError as e:
         e.add_note("operation=hybrid_chunk")
-        loguru_logger.error(f"HybridChunker failed: {e}, falling back to simple chunking")
+        logger.bind(operation="hybrid_chunk").exception(
+            "HybridChunker failed, falling back to simple chunking"
+        )
         return _simple_fallback_chunk(content, base_metadata, config, tokenizer)
 
-    loguru_logger.info("Created {} chunks using HybridChunker", len(document_chunks))
+    logger.bind(chunk_count=len(document_chunks)).info("Created chunks using HybridChunker")
     return document_chunks
 
 
@@ -256,7 +326,7 @@ def _simple_fallback_chunk(
     for chunk in chunks:
         chunk.metadata["total_chunks"] = len(chunks)
 
-    loguru_logger.info("Created {} chunks using simple fallback", len(chunks))
+    logger.bind(chunk_count=len(chunks)).info("Created chunks using simple fallback")
     return chunks
 
 

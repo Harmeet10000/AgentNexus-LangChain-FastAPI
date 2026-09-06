@@ -14,7 +14,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from neo4j import AsyncGraphDatabase, basic_auth
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from app.config import get_settings
 from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, celery_app
@@ -42,6 +42,16 @@ class AgentMemoryConsolidationPayload(CeleryTaskPayload):
 
 
 CeleryTaskRegistry.register(AGENT_MEMORY_CONSOLIDATION, AgentMemoryConsolidationPayload)
+
+
+class Neo4jCredentials(BaseModel):
+    """Narrow frozen credentials for the consolidation probe's Neo4j driver."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    uri: str
+    username: str
+    password: SecretStr
 
 
 @celery_app.task(
@@ -72,7 +82,7 @@ def agent_memory_consolidation(
     )
 
 
-def _connect_graph_driver(settings: Settings) -> AsyncDriver | None:
+def _connect_graph_driver(credentials: Neo4jCredentials) -> AsyncDriver | None:
     """Open the consolidation probe's own Neo4j driver, or None when unavailable.
 
     Driver creation is lazy (no I/O), so a failure here means misconfiguration,
@@ -80,10 +90,10 @@ def _connect_graph_driver(settings: Settings) -> AsyncDriver | None:
     """
     try:
         return AsyncGraphDatabase.driver(
-            settings.NEO4J_URI,
+            credentials.uri,
             auth=basic_auth(
-                settings.NEO4J_USERNAME,
-                settings.NEO4J_PASSWORD.get_secret_value(),
+                credentials.username,
+                credentials.password.get_secret_value(),
             ),
         )
     except Exception as exc:  # noqa: BLE001 — no driver means the probe answers False
@@ -99,7 +109,13 @@ async def _consolidate_async(
     session_ids: list[str] | None,
 ) -> dict[str, Any]:
     """Consolidate each tenant with a live procedures probe, then close the driver."""
-    driver = _connect_graph_driver(settings)
+    driver = _connect_graph_driver(
+        Neo4jCredentials(
+            uri=settings.NEO4J_URI,
+            username=settings.NEO4J_USERNAME,
+            password=settings.NEO4J_PASSWORD,
+        )
+    )
     service = AgentMemoryService(
         partition_prefix=settings.COGNEE_DATASET_PREFIX,
         pending_sessions=set(session_ids or []),

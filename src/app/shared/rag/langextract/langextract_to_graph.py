@@ -1,14 +1,17 @@
 # src/app/shared/document_processing/langextract_to_graph.py
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
+from app.utils import ValidationException
 
 if TYPE_CHECKING:
     import langextract as lx
 
 
+@runtime_checkable
 class Neo4jClient(Protocol):
     """Minimal protocol for Neo4j operations."""
 
@@ -16,12 +19,18 @@ class Neo4jClient(Protocol):
 
 
 class GraphIngestionContext(BaseModel):
-    """Narrow context for graph mapping."""
+    """Narrow context for graph mapping (langextract + clause-episode writers)."""
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
     document_id: str
-    source_url: str
-    neo4j_client: Neo4jClient  # or protocol
+    source_url: str = ""
+    neo4j_client: Neo4jClient | None = None
+    user_id: str = ""
+    thread_id: str = ""
+    jurisdiction: str = "unspecified"
+    document_type: str = "generic"
+    human_reviewed: bool = False
 
 
 async def ingest_extractions_to_graph(
@@ -29,6 +38,9 @@ async def ingest_extractions_to_graph(
     ctx: GraphIngestionContext,
 ) -> int:
     """Convert grounded LangExtract output → property graph nodes/rels."""
+    if ctx.neo4j_client is None:
+        msg = "GraphIngestionContext.neo4j_client is required"
+        raise ValidationException(msg)
     ingested = 0
 
     for doc in annotated_docs:

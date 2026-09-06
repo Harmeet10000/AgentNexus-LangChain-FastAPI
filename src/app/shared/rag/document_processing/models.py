@@ -174,16 +174,6 @@ class AgentDependencies(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
-class AgentContext(BaseModel):
-    """Agent execution context."""
-
-    session_id: str
-    messages: list[Message] = Field(default_factory=list)
-    tool_calls: list[ToolCall] = Field(default_factory=list)
-    search_results: list[ChunkResult] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
 # Ingestion Models
 class IngestionConfig(BaseModel):
     """Configuration for document ingestion."""
@@ -217,6 +207,23 @@ class IngestionResult(BaseModel):
     relationships_created: int = 0
     processing_time_ms: float
     errors: list[str] = Field(default_factory=list)
+
+
+class ChunkRequest(BaseModel):
+    """Data bundle for `chunk_document` (frozen read model).
+
+    Distinct from `DoclingProcessingContext` (preprocessing: output_dir and
+    table/figure flags) — this bundles chunking inputs only. Runtime services
+    (`tokenizer`, `hybrid_chunker`, `docling_doc`) stay explicit params.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    content: str
+    title: str
+    source: str
+    config: IngestionConfig
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # Extraction Models

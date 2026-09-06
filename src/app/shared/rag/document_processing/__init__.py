@@ -35,9 +35,9 @@ from app.shared.rag.document_processing.entity_extractor import (
     extract_with_graphiti,
 )
 from app.shared.rag.document_processing.models import (
-    AgentContext,
     AgentDependencies,
     Chunk,
+    ChunkRequest,
     Document,
     DocumentMetadata,
     IngestionConfig,
@@ -53,9 +53,9 @@ from app.shared.rag.document_processing.models import (
 )
 
 __all__ = [
-    "AgentContext",
     "AgentDependencies",
     "Chunk",
+    "ChunkRequest",
     "DoclingEnhancementConfig",
     "DoclingExtractionResult",
     "Document",

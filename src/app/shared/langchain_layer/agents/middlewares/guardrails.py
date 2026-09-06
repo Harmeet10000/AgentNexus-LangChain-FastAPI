@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import TYPE_CHECKING, override
 
-logger = logging.getLogger(__name__)
-
-from langchain.agents.middleware import (  # noqa: E402
+from langchain.agents.middleware import (
     HumanInTheLoopMiddleware,
     LLMToolSelectorMiddleware,
     SummarizationMiddleware,
@@ -15,11 +12,12 @@ from langchain.agents.middleware import (  # noqa: E402
     before_model,
     wrap_model_call,
 )
-from langchain_core.exceptions import LangChainException  # noqa: E402
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage  # noqa: E402
-from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
+from langchain_core.exceptions import LangChainException
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from pydantic import BaseModel, ConfigDict, Field
 
-from app.shared.langchain_layer.chains import build_guardrail_chain  # noqa: E402
+from app.shared.langchain_layer.chains import build_guardrail_chain
+from app.utils import logger
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -55,13 +53,12 @@ class ModelRetryMiddleware(BaseModel):
                     if attempt == self.max_retries:
                         raise
                     delay = self.base_delay * (2**attempt)
-                    logger.warning(
-                        "Model call failed (attempt %d/%d), retrying in %.1fs: %s",
-                        attempt + 1,
-                        self.max_retries,
-                        delay,
-                        exc,
-                    )
+                    logger.bind(
+                        attempt=attempt + 1,
+                        max_retries=self.max_retries,
+                        delay=delay,
+                        error=str(exc),
+                    ).warning("Model call failed, retrying")
                     await asyncio.sleep(delay)
             return None
 
@@ -231,14 +228,14 @@ class GuardrailMiddleware(BaseModel):
                 )
             except LangChainException as exc:
                 exc.add_note("operation=guardrail_check")
-                logger.exception("Guardrail check failed: %s")
+                logger.bind(operation="guardrail_check", error=str(exc)).exception(
+                    "Guardrail check failed"
+                )
                 return response
 
             if not result.get("safe", True):
-                logger.warning(
-                    "Guardrail blocked response. Reason: %s Severity: %s",
-                    result.get("reason"),
-                    result.get("severity"),
+                logger.bind(reason=result.get("reason"), severity=result.get("severity")).warning(
+                    "Guardrail blocked response"
                 )
                 if raise_on:
                     msg = f"Guardrail violation: {result.get('reason')}"
@@ -301,15 +298,23 @@ class DynamicSystemPromptMiddleware(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class MiddlewareConfig(BaseModel):
+    """Scalar config for the default middleware stack (frozen read model)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    fast_model_name: str = "gemini-2.0-flash"
+    max_tokens_before_summary: int = 4000
+    messages_to_keep: int = 8
+    human_loop_tools: dict[str, bool] | None = None
+
+
 def build_default_middleware_stack(
     *,
-    fast_model_name: str = "gemini-2.0-flash",
-    max_tokens_before_summary: int = 4000,
-    messages_to_keep: int = 8,
+    config: MiddlewareConfig | None = None,
     enable_guardrails: bool = True,
     enable_tool_selector: bool = True,
     enable_human_loop: bool = False,
-    human_loop_tools: dict[str, bool] | None = None,
 ) -> list[Any]:
     """
     Production-ready default middleware stack.
@@ -325,19 +330,20 @@ def build_default_middleware_stack(
       Guardrails           — validate response (after_model)
     """
     stack: list[Any] = []
+    cfg = config or MiddlewareConfig()
 
     # 1. Summarization (context management)
     stack.append(
         SummarizationMiddleware(
-            model=fast_model_name,
-            max_tokens_before_summary=max_tokens_before_summary,
-            messages_to_keep=messages_to_keep,
+            model=cfg.fast_model_name,
+            max_tokens_before_summary=cfg.max_tokens_before_summary,
+            messages_to_keep=cfg.messages_to_keep,
         )
     )
 
     # 2. Tool selector (reduces tool-call noise)
     if enable_tool_selector:
-        stack.append(LLMToolSelectorMiddleware(model=fast_model_name))
+        stack.append(LLMToolSelectorMiddleware(model=cfg.fast_model_name))
 
     # 3. Tool retry / 4. Model retry
     stack.extend(
@@ -349,7 +355,7 @@ def build_default_middleware_stack(
 
     # 5. Human in the loop
     if enable_human_loop:
-        stack.append(HumanInTheLoopMiddleware(interrupt_on=human_loop_tools or {}))  # ty: ignore[invalid-argument-type]
+        stack.append(HumanInTheLoopMiddleware(interrupt_on=cfg.human_loop_tools or {}))  # ty: ignore[invalid-argument-type]
 
     # 6. Guardrails (after_model — runs last in after-model chain)
     if enable_guardrails:

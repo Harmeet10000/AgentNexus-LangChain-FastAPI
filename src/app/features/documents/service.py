@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
 
 from app.config import get_settings
@@ -29,7 +30,7 @@ from app.shared.langgraph_layer.retrieval_kb import (
 from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.result import log_expected_failure
 from app.shared.services.storage import StorageService, build_s3_key, key_from_s3_uri
-from app.utils import logger, to_sorted_key_bytes
+from app.utils import logger, to_sorted_key_bytes, trace_layer
 
 from .classification import classify_document, segment_chunks
 from .constants import (
@@ -68,7 +69,7 @@ from .rag import SearchChunkRecord, assemble_rag_context
 from .repository import DocumentRepository, build_chunk_rows, build_search_filter_params
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Awaitable, Callable, Sequence
     from typing import Any, Literal
 
     from graphiti_core.graphiti import Graphiti
@@ -81,6 +82,7 @@ if TYPE_CHECKING:
 
     from . import dto as documents_dto
     from .classification import ClassifiedDocument, ParsedDocument, PreparedChunk, QualityWarning
+    from .dto import IngestionJob, IngestionRuntime
     from .errors import DocumentResult
     from .legal_metadata import (
         LegalMetadataExtraction,
@@ -96,12 +98,110 @@ _FALLBACK_ANSWER = (
     "I do not have enough grounded document context to answer this reliably. "
     "Please narrow the question or ingest the relevant document sections."
 )
-# Positional, and `zip(..., strict=True)` below is what keeps it honest: these names label the
-# three coroutines handed to `asyncio.gather` in order, and `gather` preserves argument order
-# regardless of completion order. Reorder the gather without reordering this and the strict zip
-# still passes while every failure is attributed to the wrong branch — so the pairing is asserted
-# by a unit test, not by this comment.
-_SEARCH_BRANCHES = ("bm25", "vector", "trigram")
+
+
+# Retrieval branch registry. Each branch is a (name, run) record: `name` is the
+# attribution label a failure carries, and `run` builds that branch's coroutine
+# from one shared input. The pairing between names and `asyncio.gather`'s
+# positional results used to live in the `_SEARCH_BRANCHES` tuple alone; a
+# reorder there silently misattributed every failure, so the name now travels
+# with the callable and the zip in `_fuse_search_branches` pairs records with
+# results. Adding branch #4 is a registration below — the gather/zip/fusion
+# does not change. There is no per-branch weight field on purpose: the fused
+# path fuses unweighted ranks (`RRF_K`), and the weights live in the
+# `legal_rrf_search` SQL, which is read-only here.
+class RetrievalQuery(BaseModel):
+    """One assembled legal-search query, built once and unpacked at the leaf.
+
+    Both `legal_rrf_search` callers (`ask` below and the retrieval-graph hybrid
+    node) assembled these arguments by hand; the DTO is the single place that
+    assembly lives. Field names mirror `legal_rrf_search` exactly so the call
+    stays `repo.legal_rrf_search(**query.model_dump())`, and the leaf keeps
+    its precise signature.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    user_id: str
+    query_text: str
+    query_embedding: list[float]
+    limit: int
+    vector_weight: float
+    keyword_weight: float
+    jurisdiction: str | None = None
+    contract_type: str | None = None
+    document_ids: list[str] | None = None
+    chunk_ids: list[str] | None = None
+    clause_type: str | None = None
+    require_graphiti_verified: bool = False
+    bm25_threshold: float | None = None
+    exact_phrase: str | None = None
+
+
+class _BranchInput(NamedTuple):
+    """Shared input every fused-retrieval branch runs from."""
+
+    user_id: str
+    query_text: str
+    query_embedding: list[float]
+    candidate_limit: int
+    filter_params: dict[str, Any]
+
+
+async def _run_bm25_branch(
+    repo: DocumentRepository, args: _BranchInput
+) -> DocumentResult[list[dict[str, Any]]]:
+    """Keyword branch coroutine."""
+    return await repo.bm25_search(
+        user_id=args.user_id,
+        query=args.query_text,
+        candidate_limit=args.candidate_limit,
+        filter_params=args.filter_params,
+    )
+
+
+async def _run_vector_branch(
+    repo: DocumentRepository, args: _BranchInput
+) -> DocumentResult[list[dict[str, Any]]]:
+    """Dense-vector branch coroutine."""
+    return await repo.vector_search(
+        user_id=args.user_id,
+        embedding=args.query_embedding,
+        candidate_limit=args.candidate_limit,
+        filter_params=args.filter_params,
+    )
+
+
+async def _run_trigram_branch(
+    repo: DocumentRepository, args: _BranchInput
+) -> DocumentResult[list[dict[str, Any]]]:
+    """Fuzzy-trigram branch coroutine."""
+    return await repo.trigram_search(
+        user_id=args.user_id,
+        query=args.query_text,
+        candidate_limit=args.candidate_limit,
+        filter_params=args.filter_params,
+    )
+
+
+class RetrievalBranchPolicy(NamedTuple):
+    """One fused-retrieval branch: attribution name plus how to run it."""
+
+    name: str
+    run: Callable[
+        [DocumentRepository, _BranchInput], Awaitable[DocumentResult[list[dict[str, Any]]]]
+    ]
+
+
+RETRIEVAL_BRANCHES: tuple[RetrievalBranchPolicy, ...] = (
+    RetrievalBranchPolicy(name="bm25", run=_run_bm25_branch),
+    RetrievalBranchPolicy(name="vector", run=_run_vector_branch),
+    RetrievalBranchPolicy(name="trigram", run=_run_trigram_branch),
+)
+
+# Derived, not authored: the i-th label names the i-th gathered result, and the
+# pairing tests pin this derivation rather than a hand-kept tuple.
+_SEARCH_BRANCHES = tuple(branch.name for branch in RETRIEVAL_BRANCHES)
 
 
 class DocumentCommandService:
@@ -115,6 +215,7 @@ class DocumentCommandService:
         self.repo: DocumentRepository = repo
         self.object_store: StorageService | None = object_store
 
+    @trace_layer("service")
     async def upload_document(
         self,
         *,
@@ -229,6 +330,7 @@ class DocumentCommandService:
             )
         )
 
+    @trace_layer("service")
     async def get_status(
         self, *, user_id: str, document_id: str
     ) -> DocumentResult[DocumentStatusResponse]:
@@ -287,6 +389,7 @@ class DocumentQueryService:
             self._llm = self._llm_factory()
         return self._llm
 
+    @trace_layer("service")
     async def search(
         self, *, user_id: str, payload: UnifiedSearchRequest
     ) -> DocumentResult[UnifiedSearchResponse]:
@@ -377,28 +480,18 @@ class DocumentQueryService:
         caller is the ownership boundary, and a test can assert the branch name without having to
         catch an exception and re-parse its message.
         """
+        branch_input = _BranchInput(
+            user_id=user_id,
+            query_text=payload.query,
+            query_embedding=query_embedding,
+            candidate_limit=payload.candidate_limit,
+            filter_params=filter_params,
+        )
         results = await asyncio.gather(
-            self.repo.bm25_search(
-                user_id=user_id,
-                query=payload.query,
-                candidate_limit=payload.candidate_limit,
-                filter_params=filter_params,
-            ),
-            self.repo.vector_search(
-                user_id=user_id,
-                embedding=query_embedding,
-                candidate_limit=payload.candidate_limit,
-                filter_params=filter_params,
-            ),
-            self.repo.trigram_search(
-                user_id=user_id,
-                query=payload.query,
-                candidate_limit=payload.candidate_limit,
-                filter_params=filter_params,
-            ),
+            *(branch.run(self.repo, branch_input) for branch in RETRIEVAL_BRANCHES)
         )
         row_sets: list[list[RankedResultRow]] = []
-        for branch, branch_result in zip(_SEARCH_BRANCHES, results, strict=True):
+        for branch, branch_result in zip(RETRIEVAL_BRANCHES, results, strict=True):
             if isinstance(branch_result, Failure):
                 error = branch_result.failure()
                 # `model_copy` rather than a fresh infrastructure error: re-wrapping would
@@ -408,8 +501,8 @@ class DocumentQueryService:
                 return Failure(
                     error.model_copy(
                         update={
-                            "message": f"{branch} retrieval branch failed: {error.message}",
-                            "details": {**(error.details or {}), "branch": branch},
+                            "message": f"{branch.name} retrieval branch failed: {error.message}",
+                            "details": {**(error.details or {}), "branch": branch.name},
                         }
                     )
                 )
@@ -425,6 +518,7 @@ class DocumentQueryService:
             )
         )
 
+    @trace_layer("service")
     async def rag(
         self, *, user_id: str, payload: documents_dto.UnifiedRagRequest
     ) -> DocumentResult[UnifiedRagResponse]:
@@ -468,6 +562,7 @@ class DocumentQueryService:
             )
         )
 
+    @trace_layer("service")
     async def ask_via_retrieval_graph(
         self, *, user_id: str, payload: documents_dto.UnifiedAskRequest
     ) -> DocumentResult[UnifiedAskResponse]:
@@ -520,6 +615,7 @@ class DocumentQueryService:
             )
         )
 
+    @trace_layer("service")
     async def ask(  # noqa: PLR0914
         self,
         *,
@@ -580,7 +676,7 @@ class DocumentQueryService:
                 ),
                 label="documents_query_embedding",
             )
-            rows_result = await self.repo.legal_rrf_search(
+            retrieval_query = RetrievalQuery(
                 user_id=user_id,
                 query_text=plan.rewritten_query,
                 query_embedding=embedding,
@@ -596,6 +692,7 @@ class DocumentQueryService:
                 bm25_threshold=plan.bm25_threshold,
                 exact_phrase=plan.exact_phrase,
             )
+            rows_result = await self.repo.legal_rrf_search(**retrieval_query.model_dump())
             if isinstance(rows_result, Failure):
                 return Failure(rows_result.failure())
             rows = rows_result.unwrap()
@@ -664,36 +761,32 @@ async def _load_document_bytes(
     return Success(object_result.unwrap())
 
 
+@trace_layer("service")
 async def process_document_ingestion(
     *,
-    document_id: str,
-    user_id: str,
-    filename: str,
-    content_type: str,
-    object_uri: str,
-    object_store: StorageService,
-    repo: DocumentRepository,
-    graphiti: Graphiti | None,
-    llm: BaseChatModel,
+    job: IngestionJob,
+    runtime: IngestionRuntime,
 ) -> DocumentResult[dict[str, object]]:
-    raw_result = await _load_document_bytes(object_store, object_uri)
+    raw_result = await _load_document_bytes(runtime.object_store, job.object_uri)
     if isinstance(raw_result, Failure):
         return raw_result
     raw_bytes = raw_result.unwrap()
     parsed: ParsedDocument = await parse_document(
-        raw_bytes=raw_bytes, filename=filename, content_type=content_type
+        raw_bytes=raw_bytes, filename=job.filename, content_type=job.content_type
     )
-    classified: ClassifiedDocument = classify_document(markdown=parsed.markdown, filename=filename)
+    classified: ClassifiedDocument = classify_document(
+        markdown=parsed.markdown, filename=job.filename
+    )
     legal_metadata: LegalMetadataExtraction | None = None
     metadata_warnings: list[QualityWarning] = []
     if classified.graphiti_required:
         legal_metadata, metadata_warnings = await extract_legal_metadata(
-            llm=llm,
+            llm=runtime.llm,
             markdown=parsed.markdown,
             classified=classified,
         )
-    status_result = await repo.update_document_status(
-        document_id=document_id,
+    status_result = await runtime.repo.update_document_status(
+        document_id=job.document_id,
         status="parsed",
         title=parsed.title,
         document_kind=classified.document_kind,
@@ -703,8 +796,8 @@ async def process_document_ingestion(
         ),
         parties=[*(legal_metadata.parties if legal_metadata else classified.parties)],
         metadata_={
-            "content_type": content_type,
-            "filename": filename,
+            "content_type": job.content_type,
+            "filename": job.filename,
             **classified.metadata_,
             **(legal_metadata.model_dump(exclude_none=True) if legal_metadata else {}),
         },
@@ -719,33 +812,33 @@ async def process_document_ingestion(
             metadata=legal_metadata,
         )
     chunk_rows = await _embed_chunks(
-        user_id=user_id,
-        document_id=document_id,
+        user_id=job.user_id,
+        document_id=job.document_id,
         chunks=chunks,
         extra_warnings=segmentation_warnings + classified.warnings + metadata_warnings,
     )
-    upsert_result = await repo.upsert_chunks(
-        build_chunk_rows(document_id=document_id, user_id=user_id, chunks=chunk_rows)
+    upsert_result = await runtime.repo.upsert_chunks(
+        build_chunk_rows(document_id=job.document_id, user_id=job.user_id, chunks=chunk_rows)
     )
     if isinstance(upsert_result, Failure):
         log_expected_failure(upsert_result.failure(), operation="document_ingestion")
         return Failure(upsert_result.failure())
     if len(chunk_rows) > ANALYZE_THRESHOLD_CHUNKS:
-        analyze_result = await repo.analyze_chunks()
+        analyze_result = await runtime.repo.analyze_chunks()
         if isinstance(analyze_result, Failure):
             return Failure(analyze_result.failure())
-    status_result = await repo.update_document_status(
-        document_id=document_id, status="stored_postgres"
+    status_result = await runtime.repo.update_document_status(
+        document_id=job.document_id, status="stored_postgres"
     )
     if isinstance(status_result, Failure):
         return Failure(status_result.failure())
     if classified.graphiti_required:
-        await _write_contract_events(graphiti, legal_metadata, document_id)
+        await _write_contract_events(runtime.graphiti, legal_metadata, job.document_id)
         verify_result = await _verify_legal_chunks(
-            repo=repo,
-            graphiti=graphiti,
-            user_id=user_id,
-            document_id=document_id,
+            repo=runtime.repo,
+            graphiti=runtime.graphiti,
+            user_id=job.user_id,
+            document_id=job.document_id,
             chunk_rows=chunk_rows,
         )
         if isinstance(verify_result, Failure):
@@ -761,13 +854,15 @@ async def process_document_ingestion(
             else "completed_with_warnings"
         )
         verified_count = 0
-    status_result = await repo.update_document_status(document_id=document_id, status=final_status)
+    status_result = await runtime.repo.update_document_status(
+        document_id=job.document_id, status=final_status
+    )
     if isinstance(status_result, Failure):
         return Failure(status_result.failure())
     return Success(
         {
             "status": final_status,
-            "document_id": document_id,
+            "document_id": job.document_id,
             "chunk_count": len(chunk_rows),
             "verified_chunk_count": verified_count,
             "document_kind": classified.document_kind,
@@ -805,6 +900,7 @@ async def _write_contract_events(
             ).warning("graphiti_event_episode_failed", error=str(exc))
 
 
+@trace_layer("service")
 async def run_document_ingestion_task(
     *,
     document_id: str,

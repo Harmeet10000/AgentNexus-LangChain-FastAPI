@@ -50,7 +50,7 @@ from app.config import get_settings
 
 from ..models import _build_chat_model
 from ..prompts import AGENT_SYSTEM_PROMPT, SystemPromptParts
-from .middlewares import build_default_middleware_stack
+from .middlewares import MiddlewareConfig, build_default_middleware_stack
 from .tools.registry import get_tool_registry
 
 if TYPE_CHECKING:
@@ -152,12 +152,14 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
     # Build middleware stack
     middleware = (
         build_default_middleware_stack(
-            max_tokens_before_summary=spec.max_tokens_before_summary,
-            messages_to_keep=spec.messages_to_keep,
+            config=MiddlewareConfig(
+                max_tokens_before_summary=spec.max_tokens_before_summary,
+                messages_to_keep=spec.messages_to_keep,
+                human_loop_tools=spec.human_loop_tools,
+            ),
             enable_guardrails=spec.enable_guardrails,
             enable_tool_selector=spec.enable_tool_selector and bool(resolved_tools),
             enable_human_loop=spec.enable_human_loop,
-            human_loop_tools=spec.human_loop_tools,
         )
         + spec.extra_middleware
     )

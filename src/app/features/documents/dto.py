@@ -1,10 +1,21 @@
 """DTOs for unified document ingestion and retrieval."""
 
-from typing import Literal
+from __future__ import annotations
 
+from typing import Literal  # noqa: TC003 — resolved at runtime by Pydantic
+
+from graphiti_core.graphiti import Graphiti  # noqa: TC002 — resolved at runtime by Pydantic
+from langchain_core.language_models import (
+    BaseChatModel,  # noqa: TC002 — resolved at runtime by Pydantic
+)
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.shared.services.storage import (
+    StorageService,  # noqa: TC001 — resolved at runtime by Pydantic
+)
+
 from .constants import DEFAULT_PAGE_SIZE, DEFAULT_RAG_TOKEN_BUDGET, MAX_PAGE_SIZE
+from .repository import DocumentRepository  # noqa: TC001 — resolved at runtime by Pydantic
 
 _STRICT_CONFIG = ConfigDict(extra="forbid")
 _READ_MODEL_CONFIG = ConfigDict(extra="forbid", frozen=True, from_attributes=True)
@@ -143,3 +154,26 @@ class UnifiedAskResponse(BaseModel):
     confidence: Literal["high", "medium", "uncertain"]
     warnings: list[QualityWarningDTO] = Field(default_factory=list)
     cache_hit: bool = False
+
+
+class IngestionJob(BaseModel):
+    """Identity/data cluster for one document ingestion job (read model)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    document_id: str
+    user_id: str
+    filename: str
+    content_type: str
+    object_uri: str
+
+
+class IngestionRuntime(BaseModel):
+    """Runtime services for document ingestion (explicit per-call dependencies)."""
+
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
+    object_store: StorageService
+    repo: DocumentRepository
+    graphiti: Graphiti | None = None
+    llm: BaseChatModel
