@@ -222,7 +222,9 @@ async def supervisor_tools(
                 )
             )
         except (RuntimeError, ValueError, AttributeError) as exc:
-            logger.bind(error=str(exc)).warning("deep_research_supervisor_tool_failed")
+            logger.bind(operation="supervisor_tool", error=str(exc)).warning(
+                "deep_research_supervisor_tool_failed"
+            )
             return Command(  # ty: ignore[invalid-return-type]
                 goto="__end__",
                 update={

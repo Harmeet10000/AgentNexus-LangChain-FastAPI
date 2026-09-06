@@ -88,7 +88,7 @@ def _provider_failure(detail: str, *, model: str, text_count: int) -> RagResult[
     a grep for the literal, and prose that spells it out would defeat the guard.)
     """
     return Failure(
-        RagProviderError(
+        inner_value=RagProviderError(
             message=detail,
             source="rag_embedder",
             model=model,
@@ -171,17 +171,19 @@ async def generate_embedding(
                 contents=text,
                 config={"task_type": GEMINI_TASK_TYPE},
             )
-        except genai_errors.ClientError as e:
-            logger.error("Gemini API error: {}", e)
+        except genai_errors.ClientError:
+            logger.bind(model=model, attempt=attempt).exception("Gemini API error")
             if attempt == max_retries - 1:
                 raise
             delay = retry_delay * (2**attempt)
-            logger.warning("Rate limit hit, retrying in {}s", delay)
+            logger.bind(retry_in_s=delay).warning("Rate limit hit, retrying")
             await asyncio.sleep(delay)
 
         except genai_errors.APIError as e:
             e.add_note(f"model={model}, operation=generate_embedding")
-            logger.error(f"Unexpected error generating embedding: {e}")
+            logger.bind(model=model, operation="generate_embedding").exception(
+                "Unexpected error generating embedding"
+            )
             if attempt == max_retries - 1:
                 raise
             await asyncio.sleep(retry_delay)
@@ -247,15 +249,17 @@ async def generate_embeddings_batch(
                     )
                 )
 
-        except genai_errors.ClientError as e:
-            logger.error("Gemini API error in batch: {}", e)
+        except genai_errors.ClientError:
+            logger.bind(model=model, attempt=attempt).exception("Gemini API error in batch")
             if attempt == max_retries - 1:
                 return await _process_embeddings_individually(processed_texts, model, retry_delay)
             await asyncio.sleep(retry_delay)
 
         except genai_errors.APIError as e:
             e.add_note(f"model={model}, operation=generate_embeddings_batch")
-            logger.error(f"Unexpected error in batch embedding: {e}")
+            logger.bind(model=model, operation="generate_embeddings_batch").exception(
+                "Unexpected error in batch embedding"
+            )
             if attempt == max_retries - 1:
                 return await _process_embeddings_individually(processed_texts, model, retry_delay)
             await asyncio.sleep(retry_delay)
@@ -295,7 +299,7 @@ async def _process_embeddings_individually(
         try:
             embedding = await generate_embedding(text, model=model)
         except genai_errors.APIError as e:
-            logger.error("Failed to embed text: {}", e)
+            logger.bind(model=model, text_count=len(texts)).exception("Failed to embed text")
             msg = "provider failed while embedding a batch text individually"
             try:
                 _raise_provider_failure(msg, model=model, text_count=len(texts))
@@ -335,7 +339,7 @@ async def embed_chunks(
     if not chunks:
         return chunks
 
-    logger.info("Generating embeddings for {} chunks", len(chunks))
+    logger.bind(chunk_count=len(chunks)).info("Generating embeddings for chunks")
 
     embedded_chunks = []
     total_batches = (len(chunks) + batch_size - 1) // batch_size
@@ -353,14 +357,20 @@ async def embed_chunks(
             # form here; `raise ... from` is for the type change one level down.
             e.add_note(f"batch={current_batch}/{total_batches}")
             e.add_note(f"chunks_embedded_before_failure={len(embedded_chunks)}")
-            logger.error("Failed to process batch {}/{}", current_batch, total_batches)
+            logger.bind(
+                current_batch=current_batch,
+                total_batches=total_batches,
+                chunks_embedded_before_failure=len(embedded_chunks),
+            ).exception("Failed to process batch")
             raise
 
         if progress_callback:
             progress_callback(current_batch, total_batches)
-        logger.info("Processed batch {}/{}", current_batch, total_batches)
+        logger.bind(current_batch=current_batch, total_batches=total_batches).info(
+            "Processed batch"
+        )
 
-    logger.info("Generated embeddings for {} chunks", len(embedded_chunks))
+    logger.bind(chunk_count=len(embedded_chunks)).info("Generated embeddings for chunks")
     return embedded_chunks
 
 

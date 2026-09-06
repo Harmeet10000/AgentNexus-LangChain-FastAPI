@@ -196,10 +196,10 @@ async def summarize_webpage(model: Any, webpage_content: str) -> str:
             f"<key_excerpts>\n{summary.key_excerpts}\n</key_excerpts>"
         )
     except TimeoutError:
-        logger.warning("summarization_timeout")
+        logger.bind(operation="summarize_webpage").warning("summarization_timeout")
         return webpage_content
     except (RuntimeError, ValueError, AttributeError) as exc:
-        logger.bind(error=str(exc)).warning("summarization_failed")
+        logger.bind(operation="summarize_webpage", error=str(exc)).warning("summarization_failed")
         return webpage_content
 
 

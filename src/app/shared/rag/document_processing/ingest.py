@@ -96,16 +96,20 @@ class DocumentIngestionPipeline:
         document_files = self._find_document_files()
 
         if not document_files:
-            logger.warning("No supported document files found in {}", self.documents_folder)
+            logger.bind(documents_folder=self.documents_folder).warning(
+                "No supported document files found"
+            )
             return []
 
-        logger.info("Found {} document files to process", len(document_files))
+        logger.bind(document_count=len(document_files)).info("Found document files to process")
 
         results = []
 
         for i, file_path in enumerate(document_files):
             try:
-                logger.info("Processing file {}/{}: {}", i + 1, len(document_files), file_path)
+                logger.bind(file_index=i + 1, file_count=len(document_files), file=file_path).info(
+                    "Processing file"
+                )
 
                 result = await self._ingest_single_document(file_path)
                 results.append(result)
@@ -115,7 +119,9 @@ class DocumentIngestionPipeline:
 
             except Exception as e:  # noqa: BLE001 — per-file processing, varied failure modes
                 e.add_note(f"file={file_path}, operation=process_document")
-                logger.error(f"Failed to process {file_path}: {e}")
+                logger.bind(file=file_path, operation="process_document").exception(
+                    "Failed to process document"
+                )
                 results.append(
                     IngestionResult(
                         document_id="",
@@ -132,9 +138,9 @@ class DocumentIngestionPipeline:
         total_chunks = sum(r.chunks_created for r in results)
         total_errors = sum(len(r.errors) for r in results)
 
-        logger.info(
-            f"Ingestion complete: {len(results)} documents, {total_chunks} chunks, {total_errors} errors"
-        )
+        logger.bind(
+            document_count=len(results), chunk_count=total_chunks, error_count=total_errors
+        ).info("Ingestion complete")
 
         return results
 
@@ -158,7 +164,7 @@ class DocumentIngestionPipeline:
         # Extract metadata from content
         document_metadata = self._extract_document_metadata(document_content, file_path)
 
-        logger.info("Processing document: {}", document_title)
+        logger.bind(document_title=document_title).info("Processing document")
 
         # Chunk the document - pass DoclingDocument for HybridChunker
         chunks = await self.chunker.chunk_document(
@@ -170,7 +176,7 @@ class DocumentIngestionPipeline:
         )
 
         if not chunks:
-            logger.warning("No chunks created for {}", document_title)
+            logger.bind(document_title=document_title).warning("No chunks created")
             return IngestionResult(
                 document_id="",
                 title=document_title,
@@ -184,14 +190,14 @@ class DocumentIngestionPipeline:
                 errors=["No chunks created"],
             )
 
-        logger.info("Created {} chunks", len(chunks))
+        logger.bind(chunk_count=len(chunks)).info("Created chunks")
 
         # Entity extraction removed (graph-related functionality)
         entities_extracted = 0
 
         # Generate embeddings
         embedded_chunks = await self.embedder.embed_chunks(chunks)
-        logger.info("Generated embeddings for {} chunks", len(embedded_chunks))
+        logger.bind(chunk_count=len(embedded_chunks)).info("Generated embeddings for chunks")
 
         # Save to PostgreSQL
         document_id = await self._save_to_postgres(
@@ -202,7 +208,7 @@ class DocumentIngestionPipeline:
             document_metadata,
         )
 
-        logger.info("Saved document to PostgreSQL with ID: {}", document_id)
+        logger.bind(document_id=document_id).info("Saved document to PostgreSQL")
 
         # Knowledge graph functionality removed
         relationships_created = 0
@@ -226,7 +232,7 @@ class DocumentIngestionPipeline:
     def _find_document_files(self) -> list[str]:
         """Find all supported document files in the documents folder."""
         if not Path(self.documents_folder).exists():
-            logger.error("Documents folder not found: {}", self.documents_folder)
+            logger.bind(documents_folder=self.documents_folder).error("Documents folder not found")
             return []
 
         # Supported file patterns - Docling + text formats + audio
@@ -288,20 +294,24 @@ class DocumentIngestionPipeline:
             try:
                 from docling.document_converter import DocumentConverter
 
-                logger.info("Converting {} file using Docling: {}", file_ext, Path(file_path).name)
+                logger.bind(file_ext=file_ext, file=Path(file_path).name).info(
+                    "Converting file using Docling"
+                )
 
                 converter = DocumentConverter()
                 result = converter.convert(file_path)
 
                 # Export to markdown for consistent processing
                 markdown_content = result.document.export_to_markdown()
-                logger.info("Successfully converted {} to markdown", Path(file_path).name)
+                logger.bind(file=Path(file_path).name).info("Successfully converted to markdown")
 
             except Exception as e:  # noqa: BLE001 — Docling conversion, fallback to raw text
                 e.add_note(f"file={file_path}, operation=docling_conversion")
-                logger.error(f"Failed to convert {file_path} with Docling: {e}")
+                logger.bind(file=file_path, operation="docling_conversion").exception(
+                    "Failed to convert document with Docling"
+                )
                 # Fall back to raw text if Docling fails
-                logger.warning("Falling back to raw text extraction for {}", file_path)
+                logger.bind(file=file_path).warning("Falling back to raw text extraction")
                 try:
                     with Path(file_path).open(encoding="utf-8") as f:
                         return (f.read(), None)
@@ -336,8 +346,8 @@ class DocumentIngestionPipeline:
 
             # Use Path object - Docling expects this
             audio_path = Path(file_path).resolve()
-            logger.info("Transcribing audio file using Whisper Turbo: {}", audio_path.name)
-            logger.info("Audio file absolute path: {}", audio_path)
+            logger.bind(file=audio_path.name).info("Transcribing audio file using Whisper Turbo")
+            logger.bind(audio_path=str(audio_path)).info("Audio file absolute path")
 
             # Verify file exists
             if not audio_path.exists():
@@ -362,10 +372,12 @@ class DocumentIngestionPipeline:
 
             # Export to markdown with timestamps
             markdown_content = result.document.export_to_markdown()
-            logger.info("Successfully transcribed {}", Path(file_path).name)
+            logger.bind(file=Path(file_path).name).info("Successfully transcribed")
         except Exception as e:  # noqa: BLE001 — Whisper ASR failure
             e.add_note(f"file={file_path}, operation=transcribe_audio")
-            logger.error(f"Failed to transcribe {file_path} with Whisper ASR: {e}")
+            logger.bind(file=file_path, operation="transcribe_audio").exception(
+                "Failed to transcribe audio with Whisper ASR"
+            )
             return f"[Error: Could not transcribe audio file {Path(file_path).name}]"
         else:
             return markdown_content
@@ -407,7 +419,9 @@ class DocumentIngestionPipeline:
                 logger.warning("PyYAML not installed, skipping frontmatter extraction")
             except yaml.YAMLError as e:
                 e.add_note(f"file={file_path}, operation=parse_frontmatter")
-                logger.warning(f"Failed to parse frontmatter: {e}")
+                logger.bind(file=file_path, operation="parse_frontmatter").warning(
+                    "Failed to parse frontmatter"
+                )
 
         # Extract some basic metadata from content
         lines = content.split("\n")
@@ -514,7 +528,7 @@ async def main() -> None:
     )
 
     def progress_callback(current: int, total: int) -> None:
-        logger.info("Progress: {}/{} documents processed", current, total)
+        logger.bind(current=current, total=total).info("Progress: documents processed")
 
     try:
         start_time = datetime.now(tz=datetime.timezone.utc)
@@ -528,25 +542,27 @@ async def main() -> None:
         logger.info("=" * 50)
         logger.info("INGESTION SUMMARY")
         logger.info("=" * 50)
-        logger.info("Documents processed: {}", len(results))
-        logger.info("Total chunks created: {}", sum(r.chunks_created for r in results))
-        logger.info("Total errors: {}", sum(len(r.errors) for r in results))
-        logger.info("Total processing time: {:.2f} seconds", total_time)
+        logger.bind(document_count=len(results)).info("Documents processed")
+        logger.bind(chunk_count=sum(r.chunks_created for r in results)).info("Total chunks created")
+        logger.bind(error_count=sum(len(r.errors) for r in results)).info("Total errors")
+        logger.bind(processing_time_s=total_time).info("Total processing time")
 
         # Individual results
         for result in results:
             status = "✓" if not result.errors else "✗"
-            logger.info("{} {}: {} chunks", status, result.title, result.chunks_created)
+            logger.bind(
+                status=status, title=result.title, chunks_created=result.chunks_created
+            ).info("Document ingestion result")
 
             if result.errors:
                 for error in result.errors:
-                    logger.error("  Error: {}", error)
+                    logger.bind(error=error).error("Ingestion error")
 
     except KeyboardInterrupt:
         logger.info("Ingestion interrupted by user")
     except Exception as e:  # top-level ingestion failure, re-raised
         e.add_note("operation=main_ingestion")
-        logger.error(f"Ingestion failed: {e}")
+        logger.bind(operation="main_ingestion").exception("Ingestion failed")
         raise
     finally:
         await pipeline.close()

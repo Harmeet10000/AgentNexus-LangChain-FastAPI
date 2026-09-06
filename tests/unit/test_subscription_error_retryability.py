@@ -8,15 +8,15 @@ from fastapi import Response
 from returns.result import Failure
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.features.invoices.errors import InvoiceCollaboratorError
-from app.features.invoices.service import _translate_collaborator_error
-from app.features.plans.errors import PlanInfrastructureError
-from app.features.subscriptions.errors import (
+from app.features.billing.invoices.errors import InvoiceCollaboratorError
+from app.features.billing.invoices.service import _translate_collaborator_error
+from app.features.billing.plans.errors import PlanInfrastructureError
+from app.features.billing.subscriptions.errors import (
     SubscriptionInfrastructureError,
     SubscriptionTransientInfrastructureError,
 )
-from app.features.subscriptions.repository import SubscriptionRepository
-from app.features.subscriptions.service import (
+from app.features.billing.subscriptions.repository import SubscriptionRepository
+from app.features.billing.subscriptions.service import (
     SubscriptionService,
     subscription_error_to_http_status,
 )

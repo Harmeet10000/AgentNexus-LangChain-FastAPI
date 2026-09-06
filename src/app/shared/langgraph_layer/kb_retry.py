@@ -215,7 +215,8 @@ def _log_before_sleep(label: str, attempts: int) -> Callable[[RetryCallState], N
             attempt=state.attempt_number,
             attempts=attempts,
             wait_seconds=state.idle_for,
-        ).warning("kb_retry_transient_retry", error=str(error))
+            error=str(error),
+        ).warning("kb_retry_transient_retry")
 
     return _hook
 

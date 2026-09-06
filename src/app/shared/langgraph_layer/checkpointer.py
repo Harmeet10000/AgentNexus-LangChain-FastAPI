@@ -168,11 +168,16 @@ async def setup_langgraph_checkpointer(conn_string: str | None = None) -> AsyncP
         # `psycopg.OperationalError`. Naming both would imply they were siblings and
         # invite someone to "complete" the tuple with more of the same family.
         e.add_note(f"operation=setup_langgraph_checkpointer, pool_min_size={_POOL_MIN_SIZE}")
-        logger.error(
-            "Failed to initialise LangGraph checkpointer",
+        # Deliberately .error, not .exception: the traceback would quote the
+        # raw DSN (psycopg reports the connection info it failed on, secret
+        # included), bypassing the scrubbed binds below. Guarded by
+        # test_a_failed_setup_logs_no_credential_even_when_the_driver_quotes_the_dsn.
+        logger.bind(
+            operation="setup_langgraph_checkpointer",
+            pool_min_size=_POOL_MIN_SIZE,
             error=_scrub(str(e), dsn),
             error_type=type(e).__name__,
-        )
+        ).error("Failed to initialise LangGraph checkpointer")
         raise
     else:
         pool_handed_off = True
@@ -240,11 +245,11 @@ async def teardown_langgraph_checkpointer(
         await held.close(timeout=_POOL_CLOSE_TIMEOUT_SECONDS)
     except (psycopg.Error, OSError) as e:
         e.add_note("operation=teardown_langgraph_checkpointer")
-        logger.warning(
-            "Error closing LangGraph checkpointer pool",
+        logger.bind(
+            operation="teardown_langgraph_checkpointer",
             error=_scrub(str(e)),
             error_type=type(e).__name__,
-        )
+        ).warning("Error closing LangGraph checkpointer pool")
         return CheckpointerTeardown.CLOSE_FAILED
     else:
         logger.info("LangGraph checkpointer connection pool closed")

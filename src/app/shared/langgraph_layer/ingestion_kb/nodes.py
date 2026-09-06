@@ -199,9 +199,9 @@ def make_segment_document_node(
         # so no amount of chaining makes this `except` match.
         except (LangChainException, TransientExternalError) as exc:
             exc.add_note(f"doc_id={state.doc_id}, operation=segmentation")
-            logger.bind(doc_id=state.doc_id, error=describe_failure(exc)).warning(
-                "structured_segmentation_failed_using_fallback"
-            )
+            logger.bind(
+                doc_id=state.doc_id, operation="segmentation", error=describe_failure(exc)
+            ).warning("structured_segmentation_failed_using_fallback")
             segments: list[ClauseSegment] = _fallback_segments(parsed.markdown)
 
         return {"segments": _ensure_chunk_enrichment(segments)}
@@ -274,6 +274,7 @@ def make_contextualize_chunk_node(
                 doc_id=doc_id,
                 clause_id=segment.clause_id,
                 chunk_index=segment.chunk_index,
+                operation="contextualize",
                 error=describe_failure(exc),
             ).warning("contextualize_failed_using_deterministic_preamble")
             chunk: ContextualizedChunk = ContextualizedChunk(
@@ -325,9 +326,9 @@ def make_classify_extract_node(
         # required and why chaining alone was not a fix.
         except (LangChainException, TransientExternalError) as exc:
             exc.add_note(f"doc_id={state.doc_id}, operation=entity_extraction")
-            logger.bind(doc_id=state.doc_id, error=describe_failure(exc)).warning(
-                "entity_extraction_failed_continuing_without_entities"
-            )
+            logger.bind(
+                doc_id=state.doc_id, operation="entity_extraction", error=describe_failure(exc)
+            ).warning("entity_extraction_failed_continuing_without_entities")
             extraction = EntityExtractionResult()
         return {
             "extracted_entities": extraction.entities,
@@ -413,9 +414,7 @@ def make_graphiti_upsert_node(
             result = _refused_entities_failure(state.doc_id, refused_names(refused))
             log_expected_failure(result.failure(), operation="graphiti_upsert")
             return _state_failure(result.failure())
-        canonical_entity_ids = sorted(
-            record.canonical_id for record in canonical.values()
-        )
+        canonical_entity_ids = sorted(record.canonical_id for record in canonical.values())
 
         episode_ids: list[str] = []
         for chunk in state.contextualized_chunks:
@@ -626,10 +625,7 @@ def _resolve_object_uri(state: IngestionState, parsed: ParsedDocument) -> str:
     the NOT NULL contract forbids.
     """
     return (
-        parsed.source
-        or state.source
-        or state.filename
-        or f"ingest://{state.doc_id or 'unknown'}"
+        parsed.source or state.source or state.filename or f"ingest://{state.doc_id or 'unknown'}"
     )
 
 
@@ -644,9 +640,7 @@ async def _store_entities(
     # refusal can never fabricate a raw-text endpoint downstream.
     _ = session
     canonical, _refused = canonicalize_entities(state.extracted_entities)
-    return {
-        entity_ref: record.canonical_id for entity_ref, record in canonical.items()
-    }
+    return {entity_ref: record.canonical_id for entity_ref, record in canonical.items()}
 
 
 async def _store_relationships(
@@ -675,9 +669,7 @@ async def _store_relationships(
     return stored
 
 
-def _refused_entities_failure(
-    doc_id: str, names: list[str]
-) -> Failure[IngestionGraphError]:
+def _refused_entities_failure(doc_id: str, names: list[str]) -> Failure[IngestionGraphError]:
     return _validation_failure(
         f"Entity canonicalisation refused {len(names)} extracted "
         f"entit{'y' if len(names) == 1 else 'ies'} with no usable identity "
@@ -732,9 +724,7 @@ async def _store_chunks(
         label="gemini_embedding",
     )
 
-    for chunk, _text_to_embed, embedding in zip(
-        ordered, embedded_texts, embeddings, strict=True
-    ):
+    for chunk, _text_to_embed, embedding in zip(ordered, embedded_texts, embeddings, strict=True):
         row_id = str(uuid4())
         chunk_id = row_id
         metadata_json = _chunk_metadata_json(
@@ -822,7 +812,9 @@ async def _force_merge_bm25(session: AsyncSession) -> None:
         await session.execute(text("SELECT bm25_force_merge('chunks_bm25_idx')"))
     except Exception as exc:  # noqa: BLE001 — extension/index may be absent in local/dev DBs
         exc.add_note("operation=bm25_force_merge")
-        logger.bind(error=str(exc)).warning("bm25_force_merge_skipped")
+        logger.bind(operation="bm25_force_merge", error=str(exc)).warning(
+            "bm25_force_merge_skipped"
+        )
 
 
 async def _graphiti_add_episode(
@@ -855,7 +847,9 @@ async def _graphiti_add_episode(
         # propagate rather than be swallowed as "graph unavailable". The write
         # still never rolls back Postgres ingestion — that property is kept.
         exc.add_note(f"name={name}, operation=graphiti_add_episode")
-        logger.bind(name=name, error=str(exc)).warning("graphiti_episode_upsert_failed")
+        logger.bind(name=name, operation="graphiti_add_episode", error=str(exc)).warning(
+            "graphiti_episode_upsert_failed"
+        )
         return None
 
 

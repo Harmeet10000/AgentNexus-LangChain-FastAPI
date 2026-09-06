@@ -68,7 +68,9 @@ class CrossEncoderReranker:
             return await asyncer.asyncify(_sync_rerank)()
         except (OSError, ValueError, RuntimeError) as exc:
             exc.add_note(f"model={self.model_name}, operation=rerank")
-            logger.bind(error=str(exc)).warning("cross_encoder_rerank_failed")
+            logger.bind(model=self.model_name, operation="rerank", error=str(exc)).warning(
+                "cross_encoder_rerank_failed"
+            )
             return chunks[:limit]
 
     def _load_model(self) -> object:
@@ -79,6 +81,8 @@ class CrossEncoderReranker:
             self._model = CrossEncoder(self.model_name)
         except (OSError, ValueError) as exc:
             exc.add_note(f"model={self.model_name}, operation=load_model")
-            logger.bind(model=self.model_name).warning("default_reranker_load_failed")
+            logger.bind(model=self.model_name, operation="load_model", error=str(exc)).warning(
+                "default_reranker_load_failed"
+            )
             self._model = CrossEncoder(_FALLBACK_RERANKER_MODEL)
         return self._model

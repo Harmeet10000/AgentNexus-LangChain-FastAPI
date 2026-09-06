@@ -12,10 +12,10 @@ from app.connections.celery_task_names import CREDITS_EXPIRE, CREDITS_RECONCILE
 from app.connections.postgres import init_db
 from app.features.audit.model import AuditLog
 from app.features.audit.repository import AuditLogRepository
-from app.features.credits.models.credit import UserCredit
-from app.features.credits.repositories.consumption_repository import ConsumptionRepository
-from app.features.credits.repositories.credit_repository import CreditRepository
-from app.features.credits.services.credit_service import CreditService
+from app.features.billing.credits.models.credit import UserCredit
+from app.features.billing.credits.repositories.consumption_repository import ConsumptionRepository
+from app.features.billing.credits.repositories.credit_repository import CreditRepository
+from app.features.billing.credits.services.credit_service import CreditService
 from app.utils import logger
 
 
@@ -56,13 +56,12 @@ async def _reconcile_credits_job() -> dict[str, int]:
             for credit in all_credits:
                 total_consumed_result = await consumption_repo.get_total_consumed(credit.id)
                 if isinstance(total_consumed_result, Failure):
+                    consumed_error = total_consumed_result.failure()
                     logger.bind(
                         operation="credits.reconcile",
                         credit_id=str(credit.id),
-                    ).warning(
-                        "Failed to get consumed total",
-                        error=total_consumed_result.failure().message,
-                    )
+                        error=consumed_error.message,
+                    ).warning("Failed to get consumed total")
                     continue
                 total_consumed = total_consumed_result.unwrap()
                 expected_remaining = credit.credit_amount - total_consumed

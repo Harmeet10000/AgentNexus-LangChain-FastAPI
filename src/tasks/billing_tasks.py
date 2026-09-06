@@ -22,19 +22,19 @@ from app.connections.celery_task_names import (
 from app.connections.postgres import independent_session, init_db
 from app.features.audit.model import AuditAction, AuditLog
 from app.features.audit.repository import AuditLogRepository
-from app.features.dunning.service import DunningService
-from app.features.invoices.model import Invoice
-from app.features.invoices.receipt import PaymentReceipt
-from app.features.invoices.repository import InvoiceRepository
-from app.features.invoices.service import InvoiceService
-from app.features.payments.clients.razorpay_client import RazorpayClient
-from app.features.payments.dto import PaymentRecordDTO
-from app.features.payments.model import Payment
-from app.features.payments.repository import PaymentRepository
-from app.features.payments.service import PaymentService
-from app.features.plans.repository import PlanRepository
-from app.features.subscriptions.model import Subscription, SubscriptionStatus
-from app.features.subscriptions.repository import SubscriptionRepository
+from app.features.billing.dunning.service import DunningService
+from app.features.billing.invoices.model import Invoice
+from app.features.billing.invoices.receipt import PaymentReceipt
+from app.features.billing.invoices.repository import InvoiceRepository
+from app.features.billing.invoices.service import InvoiceService
+from app.features.billing.payments.clients.razorpay_client import RazorpayClient
+from app.features.billing.payments.dto import PaymentRecordDTO
+from app.features.billing.payments.model import Payment
+from app.features.billing.payments.repository import PaymentRepository
+from app.features.billing.payments.service import PaymentService
+from app.features.billing.plans.repository import PlanRepository
+from app.features.billing.subscriptions.model import Subscription, SubscriptionStatus
+from app.features.billing.subscriptions.repository import SubscriptionRepository
 from app.utils import logger
 
 if TYPE_CHECKING:
@@ -137,14 +137,20 @@ async def _renewal_job(session: AsyncSession, session_factory: SessionFactory) -
                     subscription, subscription.version, values=values
                 )
                 if isinstance(update, Failure):
-                    logger.bind(operation="billing.renewal").warning(update.failure().message)
+                    renewal_error = update.failure()
+                    logger.bind(
+                        operation="billing.renewal",
+                        error=renewal_error.message,
+                        details=renewal_error.details,
+                    ).warning("Renewal update failed")
                     continue
                 renewed += 1
         except Exception as exc:  # noqa: BLE001 — one bad subscription must not kill the run
             logger.bind(
                 operation="billing.renewal",
                 subscription_id=str(subscription.id),
-            ).warning("renewal reconcile failed", error=str(exc))
+                error=str(exc),
+            ).warning("renewal reconcile failed")
 
     await audit.create(
         AuditLog(
@@ -166,7 +172,12 @@ async def _dunning_job(session: AsyncSession, session_factory: SessionFactory) -
     )
     due_result = await service.find_due_for_retry(limit=200)
     if isinstance(due_result, Failure):
-        logger.bind(operation="billing.dunning").error(due_result.failure().message)
+        dunning_error = due_result.failure()
+        logger.bind(
+            operation="billing.dunning",
+            error=dunning_error.message,
+            details=dunning_error.details,
+        ).error("Dunning query failed")
         return {"due": 0, "retried": 0, "halted": 0}
     due = due_result.unwrap()
     retried = 0
@@ -181,10 +192,13 @@ async def _dunning_job(session: AsyncSession, session_factory: SessionFactory) -
             )
             updated_result = await item_service.execute_retry(subscription)
             if isinstance(updated_result, Failure):
+                retry_error = updated_result.failure()
                 logger.bind(
                     operation="billing.dunning",
                     subscription_id=str(subscription.id),
-                ).warning(updated_result.failure().message)
+                    error=retry_error.message,
+                    details=retry_error.details,
+                ).warning("Dunning retry failed")
                 continue
             updated = updated_result.unwrap()
             if updated.status == SubscriptionStatus.HALTED.value:
@@ -231,9 +245,11 @@ async def _invoice_backfill(
                 )
                 generated += 1
         except Exception as exc:  # noqa: BLE001 -- one bad payment must not kill the run
-            logger.bind(operation="billing.invoice_backfill", payment_id=str(payment.id)).warning(
-                "invoice generation failed", error=str(exc)
-            )
+            logger.bind(
+                operation="billing.invoice_backfill",
+                payment_id=str(payment.id),
+                error=str(exc),
+            ).warning("invoice generation failed")
     return {"checked": len(payments), "generated": generated}
 
 
@@ -275,9 +291,11 @@ async def _receipt_backfill(
                 )
                 generated += 1
         except Exception as exc:  # noqa: BLE001 -- one bad payment must not kill the run
-            logger.bind(operation="billing.receipt_backfill", payment_id=str(payment.id)).warning(
-                "receipt generation failed", error=str(exc)
-            )
+            logger.bind(
+                operation="billing.receipt_backfill",
+                payment_id=str(payment.id),
+                error=str(exc),
+            ).warning("receipt generation failed")
     return {"checked": len(payments), "generated": generated}
 
 
@@ -308,9 +326,13 @@ async def _pause_resume_job(
                 extra_values={"pause_start": None, "pause_end": None},
             )
             if isinstance(update, Failure):
+                pause_error = update.failure()
                 logger.bind(
-                    operation="billing.pause_resume", subscription_id=str(subscription.id)
-                ).warning(update.failure().message)
+                    operation="billing.pause_resume",
+                    subscription_id=str(subscription.id),
+                    error=pause_error.message,
+                    details=pause_error.details,
+                ).warning("Pause resume update failed")
                 continue
             resumed += 1
     return {"checked": len(subscription_rows), "resumed": resumed}
@@ -336,8 +358,8 @@ async def _reconciliation_job(
             }
         )
     except Exception as exc:  # noqa: BLE001 -- upstream failure degrades this scheduled run
-        logger.bind(operation="billing.reconciliation").error(
-            "Razorpay payment fetch failed", error=str(exc)
+        logger.bind(operation="billing.reconciliation", error=str(exc)).exception(
+            "Razorpay payment fetch failed"
         )
         return {"reconciled": 0, "missing": 0}
 
