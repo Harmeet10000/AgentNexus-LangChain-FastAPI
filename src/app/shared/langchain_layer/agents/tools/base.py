@@ -7,20 +7,19 @@ The registry enables dynamic tool lookup and middleware (LLMToolSelector).
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Annotated
 
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, ValidationError
 from pydantic.v1 import ValidationError as ValidationErrorV1
 
+from app.utils import logger
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Any
 
     from langchain_core.tools import BaseTool
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Structured base output
@@ -45,7 +44,7 @@ class ToolRegistry:
     def register(self, t: BaseTool, *, tags: list[str] | None = None) -> None:
         self._tools[t.name] = t
         self._tags[t.name] = set(tags or [])
-        logger.debug("Registered tool: %s (tags=%s)", t.name, tags)
+        logger.bind(tool_name=t.name, tags=tags).debug("Registered tool")
 
     def get(self, name: str) -> BaseTool:
         if name not in self._tools:

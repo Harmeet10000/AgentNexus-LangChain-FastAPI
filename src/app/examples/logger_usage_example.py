@@ -1,3 +1,34 @@
+"""Canonical logging usage for this codebase (loguru, structured, redacted).
+
+Run: ``uv run python -m app.examples.logger_usage_example`` (exercises the
+happy path plus one handled failure; exits 0).
+
+The standard, in five rules:
+
+1. Import once per module: ``from app.utils import logger``. Never
+   ``from loguru import logger`` (misses the redaction patch) and never
+   stdlib ``logging`` (misses every sink). Never pass a logger as an
+   argument — loguru is a process-global registry; per-request scoping
+   comes from ``bind``/``contextualize``, not plumbing.
+2. Static messages, dynamic kwargs: ``log.bind(user_id=u).info("Payment
+   started")``. No f-string values in the message — interpolated text
+   breaks the OTLP body/attributes split and can smuggle PII into the
+   message field.
+3. Tracebacks come from ``.exception(...)`` inside ``except`` blocks, never
+   from ``error=str(exc)`` and never from ``exc_info=True`` (a dead kwarg
+   on loguru — it becomes ``extra``, no traceback attached).
+4. Severity honesty: real failures are ``error``/``exception``; only
+   degraded-but-continuing is ``warning``. A ``warning`` that nobody acts
+   on is a silenced error.
+5. ``bind`` returns a NEW logger: chain it (``logger.bind(...).info``) or
+   assign it once per request (``log = logger.bind(...)``). A bare
+   ``logger.bind(...)`` statement binds nothing.
+"""
+
+from __future__ import annotations
+
+import asyncio
+
 from app.utils import logger, trace_layer
 
 # --- REPOSITORY LAYER ---
@@ -5,56 +36,78 @@ from app.utils import logger, trace_layer
 
 @trace_layer("repository")
 async def db_create_payment(user_id: int, amount: float, currency: str) -> dict:
-    # 1. DEBUG: Good for tracing exact variable states in dev
-    logger.bind(user_id=user_id, amount=amount).debug("Attempting to insert payment record into DB")
+    log = logger.bind(operation="db_create_payment", user_id=user_id, currency=currency)
+    log.debug("Inserting payment record")
 
-    # Simulating database logic
     if amount < 0:
-        # 2. ERROR: Handled business logic failure
-        logger.bind(amount=amount, error_code="NEGATIVE_AMOUNT").error(
-            "Invalid payment amount requested"
-        )
+        # Handled business failure: still error level (the operation failed),
+        # still static message, still kwargs — and no traceback needed because
+        # nothing raised here.
+        log.bind(amount=amount, error_code="NEGATIVE_AMOUNT").error("Payment amount rejected")
         msg = "Amount cannot be negative"
         raise ValueError(msg)
 
     if amount > 10000:
-        # Simulating a catastrophic DB crash (e.g., timeout or connection drop)
+        # Catastrophic path: raise and let @trace_layer record it; the
+        # service layer below captures the traceback with .exception().
         msg = "Database connection lost during transaction"
         raise ConnectionError(msg)
 
     payment_record = {"id": "txn_998877", "status": "success", "amount": amount}
-
-    # 3. INFO: Standard success milestone
-    logger.bind(txn_id=payment_record["id"]).info("Payment record successfully created")
-
+    log.bind(txn_id=payment_record["id"]).info("Payment record created")
     return payment_record
 
 
-# --- SERVICE LAYER ---ccccc
+# --- SERVICE LAYER ---
 
 
 @trace_layer("service")
 async def process_payment(user_id: int, amount: float) -> dict:
-    # 4. INFO with extra data: Tracking the start of a business process
-    logger.bind(user_id=user_id, amount=amount).info("Initiating payment processing flow")
+    # One bound logger per request; every line below carries user_id.
+    # Secrets bound here would be redacted by the logging patch — bind them
+    # if they aid debugging, never interpolate them into the message.
+    log = logger.bind(operation="process_payment", user_id=user_id, amount=amount)
+    log.info("Payment flow started")
 
     try:
-        # Calling the repository layer
         result = await db_create_payment(user_id, amount, "USD")
-
-        # Passing an entire object/dict as extra data
-        logger.bind(payment_data=result).info("Payment flow completed successfully")
-        return result  # noqa: TRY300 -- example
-
-    except ValueError as ve:
-        # We already logged the error in the repo, so we just return or re-raise safely
-        logger.warning(f"Payment rejected due to validation: {ve}")
-        return {"status": "failed", "reason": str(ve)}
-
+    except ValueError as exc:
+        # Expected failure, already logged at the repo layer: downgrade to a
+        # terse warning, keep the error value in kwargs (not the message).
+        exc.add_note(f"operation=process_payment, user_id={user_id}")
+        log.bind(error=str(exc)).warning("Payment rejected by validation")
+        return {"status": "failed", "reason": str(exc)}
     except Exception:
-        # 5. EXCEPTION: Automatically captures the full stack trace and attaches it to the log
-        # Passing extra context helps debug exactly what caused the crash
-        logger.bind(user_id=user_id, amount=amount).exception(
-            "Catastrophic failure in payment service"
-        )
+        # Unexpected failure: .exception() attaches the full traceback.
+        # This is the ONLY way tracebacks reach the logs — error=str(exc)
+        # alone would discard the stack.
+        log.exception("Payment flow failed")
         raise
+
+    log.bind(txn_id=result["id"]).info("Payment flow completed")
+    return result
+
+
+# --- ANTI-PATTERNS (do not copy) ---
+#
+# logger.info(f"Payment {txn_id} started")      # f-string value: breaks
+#                                               # structured logging.
+# logger.error("Failed", error=str(exc))        # no traceback; use
+#                                               # .exception(...) instead.
+# logger.error("...", exc_info=True)            # dead kwarg on loguru.
+# logger.bind(user_id=u)                        # discarded: bind returns a
+# logger.info("...")                            # NEW logger; use log = ...
+# from loguru import logger                     # misses redaction patch.
+# logger.warning("DB is down, continuing")      # severity lie: a hard
+#                                               # failure is error/exception.
+
+
+async def _demo() -> None:
+    ok = await process_payment(user_id=7, amount=120.0)
+    logger.bind(result=ok).info("Demo happy path finished")
+    rejected = await process_payment(user_id=7, amount=-5.0)
+    logger.bind(result=rejected).info("Demo handled failure finished")
+
+
+if __name__ == "__main__":
+    asyncio.run(_demo())

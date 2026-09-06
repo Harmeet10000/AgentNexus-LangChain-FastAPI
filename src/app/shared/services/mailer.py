@@ -67,10 +67,8 @@ def send_template(
             )
             resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        logger.bind(to=to, template_id=template_id).error(
-            "email_send_failed",
-            status_code=exc.response.status_code,
-            error=str(exc),
+        logger.bind(to=to, template_id=template_id, status_code=exc.response.status_code).exception(
+            "email_send_failed"
         )
         return Failure(
             MailerDeliveryError(
@@ -78,11 +76,8 @@ def send_template(
                 details={"status_code": exc.response.status_code},
             )
         )
-    except httpx.RequestError as exc:
-        logger.bind(to=to, template_id=template_id).error(
-            "email_send_request_failed",
-            error=str(exc),
-        )
+    except httpx.RequestError:
+        logger.bind(to=to, template_id=template_id).exception("email_send_request_failed")
         return Failure(MailerUnavailableError(message="Email service unreachable"))
     logger.bind(to=to, template_id=template_id).debug("Email dispatched via Resend")
     return Success(None)

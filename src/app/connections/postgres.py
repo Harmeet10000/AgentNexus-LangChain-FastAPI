@@ -219,7 +219,7 @@ async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     try:
         await _verify_postgres_connection(engine)
     except Exception as e:
-        logger.error("PostgreSQL initialization failed: {}", e, exc_info=True)
+        logger.bind(error=str(e)).exception("PostgreSQL initialization failed")
         await engine.dispose()
         raise
 

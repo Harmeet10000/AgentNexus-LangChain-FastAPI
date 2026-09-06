@@ -89,7 +89,7 @@ def make_retrieve_statute_section_tool(
                 exc, table="statute_sections", operation="fetch_statute_section"
             )
             # Honesty (group 6): an unreachable corpus is NOT a missing section.
-            logger.warning("statute_fetch_failed", error=str(exc))
+            log.exception("statute_fetch_failed")
             unavailable = ToolResult.unavailable_result(
                 reason=f"statute corpus unreachable ({type(exc).__name__})",
                 act_name=act_name,

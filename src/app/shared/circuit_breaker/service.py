@@ -107,8 +107,8 @@ class CircuitBreakerService:
             )
             return AcquireStatus(raw_status)
         except RedisError as exc:
-            logger.bind(service=settings.service_name, error=str(exc)).error(
-                "Circuit breaker Redis acquire failed; allowing request."
+            logger.bind(service=settings.service_name, error=str(exc)).exception(
+                "Circuit breaker Redis acquire failed, allowing request"
             )
             return AcquireStatus.ALLOW
 
@@ -136,8 +136,8 @@ class CircuitBreakerService:
                 "Circuit breaker recorded a successful downstream call."
             )
         except RedisError as exc:
-            logger.bind(service=service_name, error=str(exc)).error(
-                "Circuit breaker Redis success update failed."
+            logger.bind(service=service_name, error=str(exc)).exception(
+                "Circuit breaker Redis success update failed"
             )
 
     async def _record_failure(
@@ -158,8 +158,8 @@ class CircuitBreakerService:
                 "Circuit breaker recorded a downstream failure."
             )
         except RedisError as exc:
-            logger.bind(service=settings.service_name, error=str(exc)).error(
-                "Circuit breaker Redis failure update failed."
+            logger.bind(service=settings.service_name, error=str(exc)).exception(
+                "Circuit breaker Redis failure update failed"
             )
 
     @staticmethod

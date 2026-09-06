@@ -86,7 +86,7 @@ Return only the 3 variations, one per line, without numbers or bullets."""
 
     except (OpenAIError, GoogleAPIError) as e:
         e.add_note("operation=expand_query")
-        logger.error(f"Query expansion failed: {e}")
+        logger.bind(operation="expand_query").exception("Query expansion failed")
         return [query]  # Fallback to original query
 
 
@@ -114,7 +114,7 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
 
         # Generate query variations
         queries = await expand_query_variations(ctx, query)
-        logger.info("Multi-query search with {} variations", len(queries))
+        logger.bind(query_count=len(queries)).info("Multi-query search")
 
         # Execute searches in parallel
         all_results = []
@@ -164,7 +164,7 @@ async def search_with_multi_query(ctx: RunContext[None], query: str, limit: int 
 
     except (OpenAIError, GoogleAPIError) as e:
         e.add_note("operation=search_with_multi_query")
-        logger.error(f"Multi-query search failed: {e}", exc_info=True)
+        logger.bind(operation="search_with_multi_query").exception("Multi-query search failed")
         return f"Search error: {e!s}"
 
 
@@ -210,7 +210,7 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
             return "No relevant information found."
 
         # Stage 2: Re-rank with cross-encoder
-        logger.info("Re-ranking {} candidates", len(results))
+        logger.bind(candidate_count=len(results)).info("Re-ranking candidates")
 
         pairs = [[query, row["content"]] for row in results]
         scores = reranker.predict(pairs)
@@ -233,7 +233,7 @@ async def search_with_reranking(ctx: RunContext[None], query: str, limit: int = 
 
     except (OpenAIError, GoogleAPIError) as e:
         e.add_note("operation=search_with_reranking")
-        logger.error(f"Re-ranking search failed: {e}", exc_info=True)
+        logger.bind(operation="search_with_reranking").exception("Re-ranking search failed")
         return f"Search error: {e!s}"
 
 
@@ -279,7 +279,7 @@ async def search_knowledge_base(ctx: RunContext[None], query: str, limit: int = 
 
     except (OpenAIError, GoogleAPIError) as e:
         e.add_note("operation=search_knowledge_base")
-        logger.error(f"Knowledge base search failed: {e}", exc_info=True)
+        logger.bind(operation="search_knowledge_base").exception("Knowledge base search failed")
         return f"Search error: {e!s}"
 
 
@@ -331,7 +331,7 @@ async def retrieve_full_document(ctx: RunContext[None], document_title: str) -> 
 
     except (OpenAIError, GoogleAPIError) as e:
         e.add_note("operation=retrieve_full_document")
-        logger.error(f"Full document retrieval failed: {e}", exc_info=True)
+        logger.bind(operation="retrieve_full_document").exception("Full document retrieval failed")
         return f"Error retrieving document: {e!s}"
 
 
@@ -407,12 +407,14 @@ Respond with only a single number (1-5) and a brief reason."""
 
         except (OpenAIError, GoogleAPIError) as e:
             e.add_note("operation=self_reflection_grading")
-            logger.warning(f"Grading failed, proceeding with results: {e}")
+            logger.bind(operation="self_reflection_grading").warning(
+                "Grading failed, proceeding with results"
+            )
             grade_score = 3  # Assume moderate relevance
 
         # If relevance is low, refine query
         if grade_score < 3:
-            logger.info("Low relevance score ({}), refining query", grade_score)
+            logger.bind(grade_score=grade_score).info("Low relevance score, refining query")
 
             refine_prompt = f"""The query "{query}" returned low-relevance results.
 Suggest an improved, more specific query that might find better results.
@@ -426,7 +428,7 @@ Respond with only the improved query, nothing else."""
                 )
 
                 refined_query = refine_response.choices[0].message.content.strip()
-                logger.info("Refined query: {}", refined_query)
+                logger.bind(refined_query=refined_query).info("Refined query")
 
                 # Search again with refined query
                 refined_embedding = await embed_text(
@@ -449,7 +451,9 @@ Respond with only the improved query, nothing else."""
 
             except (OpenAIError, GoogleAPIError) as e:
                 e.add_note("operation=self_reflection_refine_query")
-                logger.warning(f"Query refinement failed: {e}")
+                logger.bind(operation="self_reflection_refine_query").warning(
+                    "Query refinement failed"
+                )
                 reflection_note = "\n[Reflection: Initial results had low relevance]\n"
         else:
             reflection_note = f"\n[Reflection: Results deemed relevant (score: {grade_score}/5)]\n"
@@ -467,7 +471,9 @@ Respond with only the improved query, nothing else."""
 
     except (OpenAIError, GoogleAPIError) as e:
         e.add_note("operation=search_with_self_reflection")
-        logger.error(f"Self-reflective search failed: {e}", exc_info=True)
+        logger.bind(operation="search_with_self_reflection").exception(
+            "Self-reflective search failed"
+        )
         return f"Search error: {e!s}"
 
 
@@ -547,7 +553,7 @@ async def run_cli() -> None:
                 break
             except (OpenAIError, GoogleAPIError) as e:
                 e.add_note("operation=run_cli_agent")
-                logger.error(f"Agent error: {e}", exc_info=True)
+                logger.bind(operation="run_cli_agent").exception("Agent error")
 
     except KeyboardInterrupt:
         logger.info("Goodbye!")

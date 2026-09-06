@@ -23,6 +23,9 @@ def console_format(record: dict[str, Any]) -> str:
     time_utc = record["time"].astimezone(UTC)
     time_str = time_utc.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     message = record["message"]
+    # Escape braces so loguru's format_map pass does not interpret
+    # user content as format fields (KeyError -> lost record).
+    message_escaped = message.replace("{", "{{").replace("}", "}}")
 
     colors: dict[str, str] = {
         "DEBUG": "<cyan>",
@@ -34,7 +37,7 @@ def console_format(record: dict[str, Any]) -> str:
     color = colors.get(level, "<white>")
     end_color = "</>"
 
-    fmt = f"{color}{level}{end_color} <dim>[{time_str}]</dim> {message}"
+    fmt = f"{color}{level}{end_color} <dim>[{time_str}]</dim> {message_escaped}"
 
     extra_data = {k: v for k, v in record["extra"].items() if not k.startswith("_")}
 
@@ -45,6 +48,8 @@ def console_format(record: dict[str, Any]) -> str:
     if extra_data:
         meta_parts = [f"<cyan>{k}</>={v!r}" for k, v in extra_data.items() if k != "trace_id"]
         meta_str = " ".join(meta_parts)
+        # Escape braces in rendered extra values for the same reason as message.
+        meta_str = meta_str.replace("{", "{{").replace("}", "}}")
         fmt += f" <dim>|</dim> {meta_str}"
 
     if record["exception"]:
@@ -134,16 +139,20 @@ def trace_layer(layer_name: str) -> Any:
                     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
                     span.set_attribute("layer.duration_ms", duration_ms)
 
-                    logger.bind(layer_duration_ms=duration_ms).debug(f"Exiting {func.__name__}")
+                    logger.bind(layer_duration_ms=duration_ms, function_name=func.__name__).debug(
+                        "Exiting layer"
+                    )
                     return result  # noqa: TRY300 — return must be inside try for trace layer span recording
 
                 except Exception as e:
                     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
                     span.record_exception(e)
                     span.set_attribute("layer.duration_ms", duration_ms)
-                    logger.bind(layer_duration_ms=duration_ms).error(
-                        f"Failed in {func.__name__} with error: {e}"
-                    )
+                    logger.bind(
+                        layer_duration_ms=duration_ms,
+                        function_name=func.__name__,
+                        error=str(e),
+                    ).exception("Layer failed")
                     raise
 
                 finally:

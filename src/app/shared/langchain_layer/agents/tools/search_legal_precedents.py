@@ -118,7 +118,7 @@ def make_search_legal_precedents_tool(
             )
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="statute_sections", operation="search_statutes")
-            logger.warning("statute_postgres_search_failed", error=str(exc))
+            log.exception("statute_postgres_search_failed")
             unavailable_layers.append("statutes")
             statute_results = []
 

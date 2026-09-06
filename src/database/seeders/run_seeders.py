@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import get_settings
-from app.features.plans.model import Plan
+from app.features.billing.plans.model import Plan
 from app.utils import logger
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ async def _run_in_transaction(session: AsyncSession) -> dict[str, int]:
                 results[name] = count
             except Exception as exc:
                 exc.add_note(f"seeder={name}")
-                logger.error("seeder_failed", seeder=name, error=str(exc))
+                logger.bind(seeder=name, error=str(exc)).exception("seeder_failed")
                 raise
     logger.info("seeding_completed", results=results)
     return results

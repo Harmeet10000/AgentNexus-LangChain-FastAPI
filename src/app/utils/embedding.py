@@ -90,6 +90,7 @@ def normalize_embedding(embedding: list[float], expected_dim: int | None = None)
 
     logger.warning(
         "embedding_dimension_mismatch",
+        operation="normalize_embedding",
         actual=actual_dim,
         expected=expected_dim,
         delta=actual_dim - expected_dim,

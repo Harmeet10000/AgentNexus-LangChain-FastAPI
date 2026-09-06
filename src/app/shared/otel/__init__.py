@@ -65,20 +65,20 @@ def shutdown_otel() -> None:
             _otel_tracer_provider.force_flush(timeout_millis=10000)
             _otel_tracer_provider.shutdown()
         except Exception:  # noqa: BLE001 — shutdown must not crash even if provider fails
-            logger.warning("OTel tracer provider shutdown failed")
+            logger.bind(component="tracer_provider").warning("OTel tracer provider shutdown failed")
 
     if _otel_meter_provider is not None:
         try:
             _otel_meter_provider.force_flush(timeout_millis=10000)
             _otel_meter_provider.shutdown()
         except Exception:  # noqa: BLE001 — shutdown must not crash even if provider fails
-            logger.warning("OTel meter provider shutdown failed")
+            logger.bind(component="meter_provider").warning("OTel meter provider shutdown failed")
 
     if _otel_logger_provider is not None:
         try:
             _otel_logger_provider.force_flush(timeout_millis=10000)
             _otel_logger_provider.shutdown()
         except Exception:  # noqa: BLE001 — shutdown must not crash even if provider fails
-            logger.warning("OTel logger provider shutdown failed")
+            logger.bind(component="logger_provider").warning("OTel logger provider shutdown failed")
 
     _otel_initialized = False

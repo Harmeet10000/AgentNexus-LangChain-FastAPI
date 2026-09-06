@@ -30,7 +30,7 @@ async def apage_index(
     api_key = runtime.api_key or settings.PAGEINDEX_API_KEY.get_secret_value()
     if not api_key:
         msg = "PAGEINDEX_API_KEY is required for PageIndex operations."
-        logger.error(msg)
+        logger.bind(operation="page_index").error("PAGEINDEX_API_KEY is required")
         raise ValueError(msg)
 
     kwargs: dict[str, object] = {
@@ -169,7 +169,9 @@ async def astream_chat_completions(
                 await queue.put(chunk)
         except Exception as exc:  # noqa: BLE001 — PageIndex SDK, must not crash producer
             exc.add_note(f"doc_id={doc_id}, operation=stream_chat_completions")
-            logger.bind(doc_id=doc_id).exception("PageIndex streaming chat completion failed")
+            logger.bind(
+                doc_id=doc_id, operation="stream_chat_completions", error=str(exc)
+            ).exception("PageIndex streaming chat completion failed")
             await queue.put(exc)
         finally:
             await queue.put(end_marker)

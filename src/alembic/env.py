@@ -20,21 +20,21 @@ from database import Base
 _MODEL_MODULE_NAMES: tuple[str, ...] = (
     "app.features.audit.model",
     "app.features.chat.model",
-    "app.features.credits.models.consumption",
-    "app.features.credits.models.credit",
+    "app.features.billing.credits.models.consumption",
+    "app.features.billing.credits.models.credit",
     "app.features.documents.model",
-    "app.features.invoices.invoice_batch",
-    "app.features.invoices.invoice_void",
-    "app.features.invoices.model",
-    "app.features.invoices.receipt",
-    "app.features.invoices.report",
-    "app.features.payments.currency",
-    "app.features.payments.model",
-    "app.features.plans.model",
-    "app.features.subscriptions.model",
-    "app.features.subscriptions.trial_extension",
-    "app.features.webhooks.email_template",
-    "app.features.webhooks.model",
+    "app.features.billing.invoices.invoice_batch",
+    "app.features.billing.invoices.invoice_void",
+    "app.features.billing.invoices.model",
+    "app.features.billing.invoices.receipt",
+    "app.features.billing.invoices.report",
+    "app.features.billing.payments.currency",
+    "app.features.billing.payments.model",
+    "app.features.billing.plans.model",
+    "app.features.billing.subscriptions.model",
+    "app.features.billing.subscriptions.trial_extension",
+    "app.features.billing.webhooks.email_template",
+    "app.features.billing.webhooks.model",
     "app.shared.outbox.model",
     # legacy shim — keeps chat_messages/document_vectors on Base.metadata
     # until 0014-repaired tables are confirmed on all envs; remove after drop.
@@ -132,7 +132,7 @@ async def run_async_migrations() -> None:
     try:
         await _run_migrations()
     except Exception as e:
-        logger.error(f"Migration failed: {e}", exc_info=True)
+        logger.bind(error=str(e)).exception("Migration failed")
         raise
 
 
@@ -141,7 +141,7 @@ def run_migrations_online() -> None:
     try:
         asyncio.run(run_async_migrations())
     except Exception as e:
-        logger.error(f"Failed to run migrations: {e}", exc_info=True)
+        logger.bind(error=str(e)).exception("Failed to run migrations")
         raise
 
 

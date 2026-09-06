@@ -78,7 +78,7 @@ class PageIndexClient:
             doc_id: str = result["doc_id"]
             logger.info("document_submitted", doc_id=doc_id)
         except Exception as exc:
-            logger.exception("submit_failed")
+            logger.bind(operation="submit_document", error=str(exc)).exception("submit_failed")
             msg = "PageIndex"
             raise ExternalServiceException(msg, "submit failed") from exc
         else:

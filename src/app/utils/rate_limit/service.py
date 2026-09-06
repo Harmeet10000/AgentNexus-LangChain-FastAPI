@@ -1,10 +1,10 @@
 import math
 import time
 
-from loguru import logger
 from redis import RedisError
 from redis.asyncio import Redis
 
+from app.utils import logger
 from app.utils.exceptions import TooManyRequestsException
 
 # GCRA Leaky Bucket Algorithm (O(1) Memory, Atomic)
@@ -81,4 +81,4 @@ class RateLimitService:
             raise
         except (RedisError, ConnectionError, TimeoutError) as e:
             # Fail open to prevent a Redis outage from taking down the API
-            logger.bind(error=str(e)).error("Redis rate limiting failed, bypassing.")
+            logger.bind(error=str(e)).exception("Redis rate limiting failed, bypassing")

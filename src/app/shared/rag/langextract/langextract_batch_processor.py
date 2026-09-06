@@ -56,10 +56,12 @@ async def run_legal_extraction_batch(
         try:
             doc = await preprocess_legal_document(url, preprocess_ctx)
             clean_docs.append(doc)
-            logger.info(f"Preprocessed {url} → {doc.char_count:,} chars")
+            logger.bind(url=url, char_count=doc.char_count).info("Preprocessed document")
         except Exception as e:  # noqa: BLE001 — docling preprocessing, unknown failure modes
             e.add_note(f"url={url}, operation=preprocess_legal_document")
-            logger.error(f"Preprocessing failed for {url}", exc_info=True)
+            logger.bind(url=url, operation="preprocess_legal_document").exception(
+                "Preprocessing failed"
+            )
             results.append(
                 BatchExtractionResult(
                     document_url=url, extractions_count=0, grounded_count=0, status="failed"
@@ -102,7 +104,9 @@ async def run_legal_extraction_batch(
             )
 
     except Exception as e:
-        logger.error("LangExtract batch failed", exc_info=True)
+        logger.bind(model_id=ctx.model_id, document_count=len(clean_docs)).exception(
+            "LangExtract batch failed"
+        )
         msg = "Batch extraction failed"
         raise APIException(msg) from e
 

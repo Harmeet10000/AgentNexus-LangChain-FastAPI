@@ -6,7 +6,6 @@ from functools import cache
 from pathlib import Path
 from typing import override
 
-from loguru import logger
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -473,10 +472,11 @@ class Settings(BaseSettings):
             raise ValueError(msg)
 
         if self.ENVIRONMENT != "production" and bad_fields:
-            logger.warning(
-                "Secret fields have default values (safe in {}): {}",
-                self.ENVIRONMENT,
-                ", ".join(bad_fields),
+            # Deferred import: app.utils pulls app.config (cycle at module top).
+            from app.utils import logger  # noqa: PLC0415
+
+            logger.bind(environment=self.ENVIRONMENT, fields=", ".join(bad_fields)).warning(
+                "Secret fields have default values"
             )
 
 

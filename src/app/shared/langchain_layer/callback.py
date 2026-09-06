@@ -12,6 +12,7 @@ from uuid import UUID  # noqa: TC003 — UUID used at runtime in callback metada
 from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
 
 from app.config import get_settings
+from app.utils import logger
 
 try:
     from langsmith import Client
@@ -53,9 +54,7 @@ class LatencyCallbackHandler(BaseCallbackHandler):
     @override
     def on_llm_end(self, *args: Any, run_id: UUID, **kwargs: Any) -> None:
         elapsed = time.perf_counter() - self._start.pop(run_id, time.perf_counter())
-        import logging
-
-        logging.getLogger(__name__).info("llm_latency_ms=%.1f", elapsed * 1000)
+        logger.bind(latency_ms=round(elapsed * 1000, 1)).info("llm latency")
 
     @override
     def on_llm_error(self, *args: Any, run_id: UUID, **kwargs: Any) -> None:

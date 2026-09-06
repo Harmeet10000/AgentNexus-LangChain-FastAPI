@@ -160,7 +160,9 @@ async def _timed_tool(
             exc.add_note(f"tool={tool_name}, operation=invoke_tool")
             status = "error"
             span.record_exception(exc)
-            logger.bind(tool=tool_name, error=str(exc)).exception("MCP tool failed")
+            logger.bind(tool=tool_name, operation="invoke_tool", error=str(exc)).exception(
+                "MCP tool failed"
+            )
             return _error("MCP tool execution failed", detail=str(exc))
         else:
             return result

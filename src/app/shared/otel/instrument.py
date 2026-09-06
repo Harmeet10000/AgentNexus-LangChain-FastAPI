@@ -9,7 +9,9 @@ def _setup_auto_instrumentation() -> None:
 
         SQLAlchemyInstrumentor().instrument()
     except Exception:  # noqa: BLE001 — optional instrumentation must not crash app
-        logger.warning("SQLAlchemy auto-instrumentation failed — continuing")
+        logger.bind(component="sqlalchemy").warning(
+            "SQLAlchemy auto-instrumentation failed, continuing"
+        )
 
     try:
         from opentelemetry.instrumentation.redis import (
@@ -18,7 +20,7 @@ def _setup_auto_instrumentation() -> None:
 
         RedisInstrumentor().instrument()
     except Exception:  # noqa: BLE001 — optional instrumentation must not crash app
-        logger.warning("Redis auto-instrumentation failed — continuing")
+        logger.bind(component="redis").warning("Redis auto-instrumentation failed, continuing")
 
     try:
         from opentelemetry.instrumentation.httpx import (
@@ -27,7 +29,7 @@ def _setup_auto_instrumentation() -> None:
 
         HTTPXClientInstrumentor().instrument()
     except Exception:  # noqa: BLE001 — optional instrumentation must not crash app
-        logger.warning("HTTPX auto-instrumentation failed — continuing")
+        logger.bind(component="httpx").warning("HTTPX auto-instrumentation failed, continuing")
 
     try:
         from opentelemetry.instrumentation.celery import (
@@ -36,6 +38,6 @@ def _setup_auto_instrumentation() -> None:
 
         CeleryInstrumentor().instrument()
     except Exception:  # noqa: BLE001 — optional instrumentation must not crash app
-        logger.warning("Celery auto-instrumentation failed — continuing")
+        logger.bind(component="celery").warning("Celery auto-instrumentation failed, continuing")
 
     # ASGI instrumentor NOT called here — deferred to per-app OpenTelemetryMiddleware

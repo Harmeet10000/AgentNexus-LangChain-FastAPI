@@ -188,7 +188,9 @@ class AgentMemoryService:
             )
         except Exception as exc:
             exc.add_note(f"operation=store_report, partition={partition}")
-            logger.bind(partition=partition, error=str(exc)).warning("agent_memory_store_failed")
+            logger.bind(operation="store_report", partition=partition, error=str(exc)).exception(
+                "agent_memory_store_failed"
+            )
             raise
 
     async def store_typed_entry(
@@ -219,7 +221,9 @@ class AgentMemoryService:
             )
         except Exception as exc:
             exc.add_note(f"operation=store_typed_entry, kind={entry_kind}")
-            logger.bind(kind=entry_kind, error=str(exc)).warning("agent_memory_store_failed")
+            logger.bind(operation="store_typed_entry", kind=entry_kind, error=str(exc)).exception(
+                "agent_memory_store_failed"
+            )
             raise
 
     async def recall(

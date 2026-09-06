@@ -139,7 +139,9 @@ class OutboxRelay:
         except (CeleryError, PostgresError) as exc:
             exc.add_note(f"event_id={event_id}, event_type={event_type}")
             await self._mark_failed(event_id, str(exc), session=session)
-            logger.error("outbox_publish_failed", event_id=event_id, error=str(exc))
+            logger.bind(event_id=event_id, event_type=event_type, error=str(exc)).exception(
+                "outbox_publish_failed"
+            )
 
     @staticmethod
     async def _mark_published(
