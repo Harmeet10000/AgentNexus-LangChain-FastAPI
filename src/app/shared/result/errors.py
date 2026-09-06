@@ -34,6 +34,14 @@ class FeatureError(BaseModel):
     retryable: ClassVar[bool] = False
 
 
+class NotFoundError(FeatureError):
+    """Generic not-found failure for boundaries without a feature owner."""
+
+    kind: ClassVar[ErrorKind] = ErrorKind.NOT_FOUND
+    code: ClassVar[str] = "NOT_FOUND"
+    retryable: ClassVar[bool] = False
+
+
 # Maps ErrorKind to HTTP status; INFRASTRUCTURE is refined by retryable (500 dead / 503 transient).
 STATUS_BY_KIND: dict[ErrorKind, int] = {
     ErrorKind.VALIDATION: 422,

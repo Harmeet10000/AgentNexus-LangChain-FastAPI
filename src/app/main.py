@@ -1,4 +1,3 @@
-import asyncio
 from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
@@ -7,12 +6,13 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
 from guard import SecurityMiddleware
 from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
+from returns.result import Failure, Success
 
 from .api import v1_router, v2_router
 from .config import get_settings
+from .features.health.router import deep_health_router
 from .lifecycle import lifespan
 from .middleware import (
-    ALL_PROBES,
     ApiDeprecationMiddleware,
     RequestStateLoggingMiddleware,
     build_fastapi_guard_config,
@@ -22,19 +22,10 @@ from .middleware import (
 )
 from .shared.langchain_layer import configure_langsmith
 from .shared.otel import setup_otel
-from .utils import (
-    APIResponse,
-    DependencyHealth,
-    ErrorCode,
-    HealthResponse,
-    HealthStatus,
-    http_error,
-    logger,
-)
+from .shared.result import APIResponse, NotFoundError, render_result
+from .utils import logger
 
 if TYPE_CHECKING:
-    from typing import Literal
-
     from guard.models import SecurityConfig
 
     from app.config.settings import Settings
@@ -116,60 +107,27 @@ def create_app() -> FastAPI:
     # `register_exception_handlers` for the full mechanism before editing this.
     # ============================================================================
     register_exception_handlers(app)
+    app.include_router(deep_health_router)
 
     # ============================================================================
     # ROUTES
     # ============================================================================
 
     @app.get(path="/", tags=["Root"])
-    async def root() -> dict[str, str]:
+    async def root(response: Response) -> APIResponse[dict[str, str]]:
         """Root endpoint - health check."""
-        return {
-            "message": "Root Route🚀",
-            "status": "healthy",
-            "version": settings.APP_VERSION,
-            "git_sha": settings.GIT_SHA,
-            "build_date": settings.BUILD_DATE,
-        }
-
-    @app.get(path="/health", tags=["Monitoring"])
-    async def health() -> Response:
-        """Deep health check — probes all critical dependencies in parallel."""
-        results: list[DependencyHealth | BaseException] = await asyncio.gather(
-            *[probe(app) for probe in ALL_PROBES],
-            return_exceptions=True,
-        )
-        deps: list[DependencyHealth] = []
-        for r in results:
-            if isinstance(r, Exception):
-                deps.append(DependencyHealth.fail("unknown", str(r)))
-            else:
-                deps.append(r)  # ty: ignore[invalid-argument-type]
-
-        failed = sum(1 for d in deps if d.status == HealthStatus.UNHEALTHY)
-        if failed >= 3:
-            overall: Literal[HealthStatus.UNHEALTHY] = HealthStatus.UNHEALTHY
-        elif failed >= 1:
-            overall: Literal[HealthStatus.DEGRADED] = HealthStatus.DEGRADED
-        else:
-            overall: Literal[HealthStatus.HEALTHY] = HealthStatus.HEALTHY
-
-        body = HealthResponse(
-            status=overall,
-            version=settings.APP_VERSION,
-            git_sha=settings.GIT_SHA,
-            build_date=settings.BUILD_DATE,
-            dependencies=deps,
-        )
-        code: Literal[503, 200] = (
-            status.HTTP_503_SERVICE_UNAVAILABLE
-            if overall == HealthStatus.UNHEALTHY
-            else status.HTTP_200_OK
-        )
-        return Response(
-            content=body.model_dump_json(),
-            status_code=code,
-            media_type="application/json",
+        return render_result(
+            Success(
+                inner_value={
+                    "message": "Root Route🚀",
+                    "status": "healthy",
+                    "version": settings.APP_VERSION,
+                    "git_sha": settings.GIT_SHA,
+                    "build_date": settings.BUILD_DATE,
+                }
+            ),
+            response,
+            message="Root route retrieved",
         )
 
     @app.get(path="/metrics", tags=["Monitoring"])
@@ -190,21 +148,27 @@ def create_app() -> FastAPI:
         response_model=APIResponse[None],
         status_code=status.HTTP_404_NOT_FOUND,
     )
-    async def catch_all(request: Request, path_name: str) -> APIResponse[None]:
+    async def catch_all(request: Request, path_name: str, response: Response) -> APIResponse[None]:
         """Handle 404 errors for undefined routes."""
         correlation_id = getattr(request.state, "correlation_id", "unknown")
-        logger.warning(
-            f"[{correlation_id}] 404 Not Found: {request.method} {request.url.path} {path_name}"
-        )
+        logger.bind(
+            correlation_id=correlation_id,
+            method=request.method,
+            path=request.url.path,
+            path_name=path_name,
+        ).warning("404 Not Found")
 
-        return http_error(
-            message=f"Can't find {request.url.path} on this server",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code=ErrorCode.NOT_FOUND,
-            data={
-                "path": request.url.path,
-                "correlation_id": correlation_id,
-            },
+        return render_result(
+            Failure(
+                inner_value=NotFoundError(
+                    message=f"Can't find {request.url.path} on this server",
+                    details={
+                        "path": request.url.path,
+                        "correlation_id": correlation_id,
+                    },
+                )
+            ),
+            response,
         )
 
     return app

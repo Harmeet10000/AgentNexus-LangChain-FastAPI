@@ -1,6 +1,23 @@
 """Utility modules for the application."""
 
+# Keep shared.result below logger exports to avoid package-init recursion.
+# ruff: noqa: I001
+
+from .logger import execution_path, logger, request_state, trace_layer
 from .api_features import APIFeatures
+from .exceptions import (
+    APIException,
+    ConflictException,
+    DatabaseException,
+    ExternalServiceException,
+    ForbiddenException,
+    InfrastructureException,
+    NotFoundException,
+    ServiceUnavailableException,
+    TooManyRequestsException,
+    UnauthorizedException,
+    ValidationException,
+)
 from .cache import (
     RedisGuardAdapter,
     add_to_bloom_filter,
@@ -33,20 +50,6 @@ from .cache import (
 )
 from .codes import Environment, ErrorCode
 from .embedding import normalize_embedding
-from .exceptions import (
-    APIException,
-    ConflictException,
-    DatabaseException,
-    ExternalServiceException,
-    ForbiddenException,
-    InfrastructureException,
-    NotFoundException,
-    ServiceUnavailableException,
-    TooManyRequestsException,
-    UnauthorizedException,
-    ValidationException,
-)
-from .http_response import http_error, http_response
 from .json_serializer import (
     from_json,
     from_json_float_list,
@@ -56,14 +59,15 @@ from .json_serializer import (
     to_json_str,
     to_sorted_key_bytes,
 )
-from .logger import execution_path, logger, request_state, trace_layer
-from .response_type import (
+from app.shared.result import (
     APIResponse,
     DependencyHealth,
     ErrorDetail,
     HealthResponse,
     HealthStatus,
     RequestMeta,
+    http_error,
+    http_response,
 )
 
 __all__ = [  # noqa: RUF022

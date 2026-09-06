@@ -1,50 +1,14 @@
 import traceback
-from collections.abc import Mapping
-from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
-from fastapi.utils import is_body_allowed_for_status_code
+from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
 from app.connections.celery import CircuitBreakerOpenError, IdempotencyLockError
-from app.utils import APIException, APIResponse, ErrorCode, execution_path, http_error, logger
-
-
-def _json_error_response(
-    payload: APIResponse[Any],
-    status_code: int,
-    headers: Mapping[str, str] | None = None,
-) -> Response:
-    # `headers` is `Mapping`, not `dict`, and that is not incidental widening. Starlette
-    # annotates `HTTPException.headers` as `Mapping[str, str] | None` and `Response.__init__`
-    # accepts the same, so `Mapping` is what both the source and the sink actually use.
-    # Annotating it `dict` here made the two `headers=exc.headers` call sites below fail
-    # `ty` — a Mapping is not assignable to a dict — and the original fix was a per-line
-    # invalid-argument-type suppression on each. Both are gone: they silenced a correct
-    # diagnostic about a needlessly narrow annotation, and each would have gone on masking any
-    # *real* argument-type error introduced at that line later.
-    #
-    # Do not spell that directive out in a comment here, in backticks or otherwise. `ty`
-    # matches the pattern anywhere in comment text and will read the mention as a live
-    # declaration, then report it as an unused one — a self-inflicted diagnostic. Describe it.
-    # 204/304/1xx forbid a message body. FastAPI's own `http_exception_handler` — which
-    # `register_exception_handlers` below displaces for every plain HTTPException — guarded
-    # this with the same helper. Displacing a handler means inheriting its obligations, so
-    # the guard moves here rather than being dropped: without it a `raise
-    # HTTPException(status_code=204)` would emit a JSON envelope plus a Content-Length on a
-    # response the HTTP spec says has neither, and a real ASGI server (unlike TestClient)
-    # rejects that as a protocol error.
-    if not is_body_allowed_for_status_code(status_code):
-        return Response(status_code=status_code, headers=headers)
-
-    return JSONResponse(
-        status_code=status_code,
-        content=payload.model_dump(mode="json"),
-        headers=headers,
-    )
+from app.shared.result import render_exception
+from app.utils import APIException, ErrorCode, execution_path, logger
 
 
 async def global_exception_handler(_request: Request, exc: Exception) -> Response:
@@ -60,7 +24,7 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
     # handler `ServerErrorMiddleware` called to render the error. Starlette does not catch
     # that, so the client received a bodiless 500: the catch-all branch was registered but
     # could never emit its envelope. Same reasoning covers `request_state` in
-    # `app.utils.http_response._build_request_meta`.
+    # `app.shared.result.render._build_request_meta`.
     current_flow = " -> ".join(execution_path.get([]))
 
     # ────────────────────────────────────────────────
@@ -76,14 +40,14 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
         )
         data = exc.detail.get("data") if isinstance(exc.detail, dict) else None
 
-        payload = http_error(
+        return render_exception(
             message=message,
             status_code=status_code,
-            data=data,
             error_code=error_code,
+            data=data,
             flow=current_flow,
+            headers=exc.headers,
         )
-        return _json_error_response(payload, status_code, headers=exc.headers)
 
     # ────────────────────────────────────────────────
     # 2. Pydantic / FastAPI validation errors (422)
@@ -106,14 +70,13 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
             message,
         )
 
-        payload: APIResponse[Any] = http_error(
+        return render_exception(
             message=message,
             status_code=status_code,
             data={"errors": validation_errors},
             error_code=error_code,
             flow=current_flow,
         )
-        return _json_error_response(payload, status_code)
 
     # ────────────────────────────────────────────────
     # 3. Plain HTTPException / Starlette exceptions
@@ -129,13 +92,13 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
         else:
             log_call.error(message)
 
-        payload = http_error(
+        return render_exception(
             message=message,
             status_code=status_code,
             error_code=error_code,
             flow=current_flow,
+            headers=exc.headers,
         )
-        return _json_error_response(payload, status_code, headers=exc.headers)
 
     # ────────────────────────────────────────────────
     # 3b. Celery reliability families — RuntimeError-rooted by design,
@@ -152,13 +115,12 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
             error=str(exc),
         )
 
-        payload = http_error(
+        return render_exception(
             message=message,
             status_code=status_code,
             error_code=error_code,
             flow=current_flow,
         )
-        return _json_error_response(payload, status_code)
 
     if isinstance(exc, IdempotencyLockError):
         status_code = status.HTTP_409_CONFLICT
@@ -170,13 +132,12 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
             error=str(exc),
         )
 
-        payload = http_error(
+        return render_exception(
             message=message,
             status_code=status_code,
             error_code=error_code,
             flow=current_flow,
         )
-        return _json_error_response(payload, status_code)
 
     # ────────────────────────────────────────────────
     # 4. Catch-all — unexpected server errors (500)
@@ -195,14 +156,13 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
         status_code=status_code, error_code=error_code, crashed_at_flow=current_flow
     ).exception(dynamic_message)
 
-    payload = http_error(
+    return render_exception(
         message=message,
         status_code=status_code,
         error_code=error_code,
         trace=trace,
         flow=current_flow,
     )
-    return _json_error_response(payload, status_code)
 
 
 def register_exception_handlers(app: FastAPI) -> None:

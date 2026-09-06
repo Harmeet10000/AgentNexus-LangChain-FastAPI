@@ -19,6 +19,29 @@ from app.features.auth.errors import (
     AuthValidationError,
     auth_error_to_http_status,
 )
+from app.features.billing.dunning.errors import (
+    DunningExternalServiceError,
+    DunningInfrastructureError,
+    dunning_error_to_http_status,
+)
+from app.features.billing.plans.errors import (
+    PlanConflictError,
+    PlanInfrastructureError,
+    PlanNotFoundError,
+    PlanValidationError,
+    plan_error_to_http_status,
+)
+from app.features.billing.subscriptions.errors import (
+    SubscriptionDuplicateError,
+    SubscriptionInfrastructureError,
+    SubscriptionInvalidTransitionError,
+    SubscriptionNotFoundError,
+    SubscriptionPlanNotFoundError,
+    SubscriptionTransientInfrastructureError,
+    SubscriptionValidationError,
+    SubscriptionVersionConflictError,
+    subscription_error_to_http_status,
+)
 from app.features.crawler.errors import (
     CrawlerSearchError,
     CrawlerValidationError,
@@ -35,23 +58,11 @@ from app.features.documents.errors import (
     DocumentValidationError,
     document_error_to_http_status,
 )
-from app.features.dunning.errors import (
-    DunningExternalServiceError,
-    DunningInfrastructureError,
-    dunning_error_to_http_status,
-)
 from app.features.ingestion.errors import (
     IngestionGraphError,
     IngestionInternalError,
     IngestionPipelineError,
     ingestion_error_to_http_status,
-)
-from app.features.plans.errors import (
-    PlanConflictError,
-    PlanInfrastructureError,
-    PlanNotFoundError,
-    PlanValidationError,
-    plan_error_to_http_status,
 )
 from app.features.profile.errors import (
     ProfileAuthenticationError,
@@ -59,17 +70,6 @@ from app.features.profile.errors import (
     ProfileInfrastructureError,
     ProfileStorageError,
     profile_error_to_http_status,
-)
-from app.features.subscriptions.errors import (
-    SubscriptionDuplicateError,
-    SubscriptionInfrastructureError,
-    SubscriptionInvalidTransitionError,
-    SubscriptionNotFoundError,
-    SubscriptionPlanNotFoundError,
-    SubscriptionTransientInfrastructureError,
-    SubscriptionValidationError,
-    SubscriptionVersionConflictError,
-    subscription_error_to_http_status,
 )
 from app.features.users.errors import (
     UsersAuthorizationError,

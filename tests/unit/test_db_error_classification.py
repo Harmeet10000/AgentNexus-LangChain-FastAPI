@@ -1,8 +1,8 @@
 """Relational and document-store errors retain opposite retry semantics."""
 
 from app.features.auth.errors import AuthInfrastructureError
+from app.features.billing.plans.errors import PlanInfrastructureError
 from app.features.documents.errors import DocumentDatabaseError
-from app.features.plans.errors import PlanInfrastructureError
 
 
 def test_relational_database_errors_are_not_retryable() -> None:
