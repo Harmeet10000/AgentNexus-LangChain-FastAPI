@@ -129,10 +129,9 @@ async def build_websocket_security_service(
                 "ws:connection:messages",
             )
         except Exception as exc:  # noqa: BLE001 — fall back to in-memory rate limiter
-            logger.warning(
-                "Redis-based WebSocket rate limiter failed, falling back to in-memory bucket",
-                error=str(exc),
-            )
+            logger.bind(
+                operation="build_websocket_security", layer="websocket", error=str(exc)
+            ).warning("Redis-based WebSocket rate limiter failed, falling back to in-memory bucket")
             user_bucket = InMemoryBucket(user_rates)
             connection_bucket = InMemoryBucket(connection_rates)
     else:
@@ -460,7 +459,9 @@ class WebSocketSecurityService:
             try:
                 await self._sweep_revoked_connections()
             except Exception as exc:  # noqa: BLE001 — monitor must survive any failure
-                logger.warning("Revocation sweep failed", error=str(exc))
+                logger.bind(operation="revocation_loop", layer="websocket", error=str(exc)).warning(
+                    "Revocation sweep failed"
+                )
 
     async def _sweep_revoked_connections(self) -> None:
         if self._token_repo is None:
@@ -474,11 +475,12 @@ class WebSocketSecurityService:
             if isinstance(result, Failure):
                 # Fail open on infrastructure errors — same policy as the
                 # per-message check in _check_session_validity.
-                logger.warning(
-                    "Failed to check session validity",
+                logger.bind(
+                    operation="sweep_revoked_connections",
+                    layer="websocket",
                     session_id=context.session_id,
                     error=str(result.failure()),
-                )
+                ).warning("Failed to check session validity")
                 continue
 
             session = result.unwrap()
@@ -503,11 +505,12 @@ class WebSocketSecurityService:
         result = await self._token_repo.get_session(context.session_id)
         if isinstance(result, Failure):
             # Log but don't crash - infrastructure error, allow connection to continue
-            logger.warning(
-                "Failed to check session validity",
+            logger.bind(
+                operation="check_session_validity",
+                layer="websocket",
                 session_id=context.session_id,
                 error=str(result.failure()),
-            )
+            ).warning("Failed to check session validity")
             return
 
         session_data = result.unwrap()

@@ -15,7 +15,7 @@ from langgraph.graph.state import CompiledStateGraph
 from returns.result import Failure, Success
 
 from app.shared.result import FeatureError
-from app.utils import logger
+from app.utils import logger, trace_layer
 
 from .dto import DocumentUploadResponse
 from .errors import (
@@ -34,6 +34,7 @@ class IngestionService:
     def __init__(self, ingestion_graph: CompiledStateGraph[Any]) -> None:
         self._graph = ingestion_graph
 
+    @trace_layer("service")
     async def ingest_document(
         self,
         raw_bytes: bytes,

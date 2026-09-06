@@ -6,7 +6,7 @@ from pymongo.errors import PyMongoError
 from returns.result import Failure, Success
 
 from app.features.auth import User, UserRole
-from app.utils import logger
+from app.utils import logger, trace_layer
 
 from .errors import UsersInfrastructureError, UsersResult, UsersValidationError
 
@@ -19,6 +19,7 @@ class UserAdminRepository:
     """
 
     @staticmethod
+    @trace_layer("repository")
     async def find_by_id(user_id: str) -> UsersResult[User | None]:
         if not PydanticObjectId.is_valid(user_id):
             return Failure(
@@ -31,8 +32,8 @@ class UserAdminRepository:
         try:
             return Success(await User.get(PydanticObjectId(user_id)))
         except PyMongoError as exc:
-            logger.bind(operation="find_by_id", user_id=user_id).error(
-                "users_repository_failed", error=str(exc)
+            logger.bind(operation="find_by_id", user_id=user_id, error=str(exc)).exception(
+                "users_repository_failed"
             )
             return Failure(
                 UsersInfrastructureError(
@@ -44,6 +45,7 @@ class UserAdminRepository:
             )
 
     @staticmethod
+    @trace_layer("repository")
     async def list_users(
         page: int,
         per_page: int,
@@ -73,7 +75,7 @@ class UserAdminRepository:
             items = await query.skip(skip).limit(per_page).to_list()
             return Success((items, total))
         except PyMongoError as exc:
-            logger.bind(operation="list_users").error("users_repository_failed", error=str(exc))
+            logger.bind(operation="list_users", error=str(exc)).exception("users_repository_failed")
             return Failure(
                 UsersInfrastructureError(
                     message="User listing failed",
@@ -84,14 +86,15 @@ class UserAdminRepository:
             )
 
     @staticmethod
+    @trace_layer("repository")
     async def update_role(user: User, role: UserRole) -> UsersResult[User]:
         try:
             await user.update(Set({User.role: role, User.updated_at: datetime.now(UTC)}))
             user.role = role
             return Success(user)
         except PyMongoError as exc:
-            logger.bind(operation="update_role", user_id=str(user.id)).error(
-                "users_repository_failed", error=str(exc)
+            logger.bind(operation="update_role", user_id=str(user.id), error=str(exc)).exception(
+                "users_repository_failed"
             )
             return Failure(
                 UsersInfrastructureError(
@@ -103,17 +106,18 @@ class UserAdminRepository:
             )
 
     @staticmethod
+    @trace_layer("repository")
     async def set_active(user: User, *, is_active: bool) -> UsersResult[User]:
         try:
             await user.update(Set({User.is_active: is_active, User.updated_at: datetime.now(UTC)}))
             user.is_active = is_active
             return Success(user)
         except PyMongoError as exc:
-            logger.bind(operation="set_active", user_id=str(user.id)).error(
-                "users_repository_failed", error=str(exc)
+            logger.bind(operation="set_active", user_id=str(user.id), error=str(exc)).exception(
+                "users_repository_failed"
             )
             return Failure(
-                UsersInfrastructureError(
+                inner_value=UsersInfrastructureError(
                     message="User active state update failed",
                     details={"user_id": str(user.id), "error": str(exc)},
                     source="users_repository",
@@ -122,13 +126,14 @@ class UserAdminRepository:
             )
 
     @staticmethod
+    @trace_layer("repository")
     async def hard_delete(user: User) -> UsersResult[None]:
         try:
             await user.delete()
             return Success(None)
         except PyMongoError as exc:
-            logger.bind(operation="hard_delete", user_id=str(user.id)).error(
-                "users_repository_failed", error=str(exc)
+            logger.bind(operation="hard_delete", user_id=str(user.id), error=str(exc)).exception(
+                "users_repository_failed"
             )
             return Failure(
                 UsersInfrastructureError(

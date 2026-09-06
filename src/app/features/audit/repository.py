@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import logger
+from app.utils import logger, trace_layer
 
 from .errors import AuditInfrastructureError
 from .model import AuditLog
@@ -36,6 +36,7 @@ class AuditLogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @trace_layer("repository")
     async def create(self, entry: AuditLog) -> AuditResult[AuditLog]:
         try:
             self.session.add(entry)
@@ -44,9 +45,9 @@ class AuditLogRepository:
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="audit_logs")
             await self.session.rollback()
-            logger.bind(operation="create", entity_type=entry.entity_type).error(
-                "audit_repository_failed", error=str(exc)
-            )
+            logger.bind(
+                operation="create", entity_type=entry.entity_type, error=str(exc)
+            ).exception("audit_repository_failed")
             return Failure(
                 AuditInfrastructureError(
                     message="Database error while creating audit log entry",
@@ -56,6 +57,7 @@ class AuditLogRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def find_by_entity(
         self,
         entity_type: str,
@@ -81,7 +83,8 @@ class AuditLogRepository:
                 operation="find_by_entity",
                 entity_type=entity_type,
                 entity_id=entity_id,
-            ).error("audit_repository_failed", error=str(exc))
+                error=str(exc),
+            ).exception("audit_repository_failed")
             return Failure(
                 AuditInfrastructureError(
                     message="Database error while querying audit logs",
@@ -91,6 +94,7 @@ class AuditLogRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def query(
         self,
         *,
@@ -133,7 +137,7 @@ class AuditLogRepository:
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="audit_logs")
             await self.session.rollback()
-            logger.bind(operation="query").error("audit_repository_failed", error=str(exc))
+            logger.bind(operation="query", error=str(exc)).exception("audit_repository_failed")
             return Failure(
                 AuditInfrastructureError(
                     message="Database error while querying audit logs",

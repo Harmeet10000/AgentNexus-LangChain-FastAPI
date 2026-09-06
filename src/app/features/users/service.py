@@ -3,7 +3,7 @@ import math
 from returns.result import Failure, Success
 
 from app.features.auth import RefreshTokenRepository, User, UserRole, create_impersonation_token
-from app.utils import logger
+from app.utils import logger, trace_layer
 
 from .dto import (
     ImpersonateResponse,
@@ -59,6 +59,7 @@ class UserAdminService:
             )
         return Success(user)
 
+    @trace_layer("service")
     async def list_users(
         self,
         page: int,
@@ -88,12 +89,14 @@ class UserAdminService:
             )
         )
 
+    @trace_layer("service")
     async def get_user(self, user_id: str) -> UsersResult[UserAdminResponse]:
         result = await self._get_user(user_id)
         if isinstance(result, Failure):
             return result
         return Success(_to_admin_response(result.unwrap()))
 
+    @trace_layer("service")
     async def update_role(
         self,
         user_id: str,
@@ -122,6 +125,7 @@ class UserAdminService:
         ).info("User role updated")
         return Success(_to_admin_response(user))
 
+    @trace_layer("service")
     async def set_active(
         self,
         user_id: str,
@@ -131,7 +135,7 @@ class UserAdminService:
     ) -> UsersResult[UserAdminResponse]:
         if user_id == requesting_admin_id:
             return Failure(
-                UsersConflictError(
+                inner_value=UsersConflictError(
                     message="Admins cannot deactivate themselves",
                     source="users_service",
                     operation="set_active",
@@ -167,6 +171,7 @@ class UserAdminService:
         ).info("User active status updated")
         return Success(_to_admin_response(user))
 
+    @trace_layer("service")
     async def hard_delete(
         self,
         user_id: str,
@@ -205,6 +210,7 @@ class UserAdminService:
         logger.bind(target_user_id=user_id, admin_id=requesting_admin_id).info("User hard deleted")
         return Success(None)
 
+    @trace_layer("service")
     async def impersonate(
         self,
         target_user_id: str,
@@ -218,13 +224,13 @@ class UserAdminService:
                     operation="impersonate",
                 )
             )
-        lookup = await self._get_user(target_user_id)
+        lookup: UsersResult[User] = await self._get_user(target_user_id)
         if isinstance(lookup, Failure):
             return lookup
         user = lookup.unwrap()
         if not user.is_active:
             return Failure(
-                UsersAuthorizationError(
+                inner_value=UsersAuthorizationError(
                     message="Cannot impersonate a disabled account",
                     source="users_service",
                     operation="impersonate",
@@ -242,7 +248,7 @@ class UserAdminService:
             admin_id=admin_user_id,
         ).warning("Admin impersonation session created")  # warning level — always audit this
         return Success(
-            ImpersonateResponse(
+            inner_value=ImpersonateResponse(
                 access_token=access_token,
                 token_type="bearer",  # noqa: S106
                 expires_in=expires_in,

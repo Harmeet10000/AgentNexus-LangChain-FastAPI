@@ -8,7 +8,7 @@ from app.features.auth import (
     verify_password,
 )
 from app.shared.services.storage import StorageService
-from app.utils import logger
+from app.utils import logger, trace_layer
 
 from .dto import AvatarResponse, UpdateProfileRequest
 from .errors import (
@@ -31,6 +31,7 @@ class ProfileService:
         self._token_repo = token_repo
         self._storage = storage
 
+    @trace_layer(layer_name="service")
     async def update_profile(
         self,
         user: User,
@@ -42,7 +43,7 @@ class ProfileService:
         if isinstance(result, Failure):
             error = result.failure()
             return Failure(
-                ProfileInfrastructureError(
+                inner_value=ProfileInfrastructureError(
                     message=error.message,
                     details=error.details,
                     source="profile_service",
@@ -53,6 +54,7 @@ class ProfileService:
         logger.bind(user_id=str(user.id)).info("Profile updated")
         return Success(updated)
 
+    @trace_layer(layer_name="service")
     async def change_password(
         self,
         user: User,
@@ -121,6 +123,7 @@ class ProfileService:
         logger.bind(user_id=str(user.id)).info("Password changed")
         return Success(None)
 
+    @trace_layer(layer_name="service")
     async def upload_avatar(
         self,
         user: User,

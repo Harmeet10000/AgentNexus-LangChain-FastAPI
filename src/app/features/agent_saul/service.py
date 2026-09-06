@@ -62,7 +62,7 @@ from app.shared.langgraph_layer.agent_saul.state import (
     WorkflowStatus,
     hydrate_state,
 )
-from app.utils import logger
+from app.utils import logger, trace_layer
 
 from .errors import AgentSaulResult
 
@@ -122,6 +122,7 @@ class AgentSaulService:
         """Create the HTTP pre-flight response before entering the WS boundary."""
         return Success(CreateSessionResponse(thread_id=thread_id, ws_url=websocket_url))
 
+    @trace_layer("service")
     async def run_session(
         self,
         ws: WebSocket,

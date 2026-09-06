@@ -10,6 +10,8 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
+from app.utils import trace_layer
+
 from .errors import (
     AuthConflictError,
     AuthInfrastructureError,
@@ -89,6 +91,7 @@ class UserRepository:
         self._db: AsyncIOMotorDatabase[Any] = db  # retained for raw Motor queries when needed
 
     @staticmethod
+    @trace_layer("repository")
     async def find_by_id(user_id: str) -> AuthResult[User | None]:
         if not PydanticObjectId.is_valid(user_id):
             return Failure(
@@ -101,6 +104,7 @@ class UserRepository:
         return Success(await User.get(PydanticObjectId(user_id)))
 
     @staticmethod
+    @trace_layer("repository")
     async def find_by_email(email: str) -> AuthResult[User | None]:
         try:
             user = await User.find_one(User.email == email.lower())
@@ -123,6 +127,7 @@ class UserRepository:
             )
 
     @staticmethod
+    @trace_layer("repository")
     async def find_by_verification_token_hash(
         token_hash: str,
     ) -> AuthResult[User | None]:
@@ -147,6 +152,7 @@ class UserRepository:
             )
 
     @staticmethod
+    @trace_layer("repository")
     async def find_by_reset_token_hash(
         token_hash: str,
     ) -> AuthResult[User | None]:
@@ -171,6 +177,7 @@ class UserRepository:
             )
 
     @staticmethod
+    @trace_layer("repository")
     async def create(user: User) -> AuthResult[User]:
         try:
             created = await user.insert()
@@ -193,6 +200,7 @@ class UserRepository:
             )
 
     @staticmethod
+    @trace_layer("repository")
     async def save(user: User) -> AuthResult[User]:
         try:
             user.updated_at = datetime.now(tz=UTC)
@@ -208,6 +216,7 @@ class UserRepository:
             )
 
     @staticmethod
+    @trace_layer("repository")
     async def email_exists(email: str) -> AuthResult[bool]:
         try:
             count = await User.find(User.email == email.lower()).count()
@@ -222,6 +231,7 @@ class UserRepository:
             )
 
     @staticmethod
+    @trace_layer("repository")
     async def find_or_create_oauth_user(
         email: str,
         provider: str,
@@ -343,6 +353,7 @@ class RefreshTokenRepository:
         )
         return Success(None)
 
+    @trace_layer("repository")
     async def store_session(self, session: SessionData) -> AuthResult[None]:
         session_key = _SESSION_KEY.format(session.session_id)
         user_key = _USER_SESSIONS_KEY.format(session.user_id)
@@ -357,6 +368,7 @@ class RefreshTokenRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def get_session(self, session_id: str) -> AuthResult[SessionData | None]:
         try:
             raw = await self._redis.get(_SESSION_KEY.format(session_id))
@@ -372,6 +384,7 @@ class RefreshTokenRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def revoke_session(
         self,
         session_id: str,
@@ -403,6 +416,7 @@ class RefreshTokenRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def get_user_sessions(self, user_id: str) -> AuthResult[list[SessionData]]:
         try:
             return await self._do_get_user_sessions(user_id)
@@ -415,6 +429,7 @@ class RefreshTokenRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def revoke_all_user_sessions(
         self,
         user_id: str,

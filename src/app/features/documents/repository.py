@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.shared.result.diagnostics import add_database_error_note
+from app.utils import trace_layer
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 
 from .constants import (
@@ -61,6 +62,7 @@ class DocumentRepository:
     def __init__(self, session: AsyncSession):
         self.session: AsyncSession = session
 
+    @trace_layer("repository")
     async def get_document_by_user_hash(
         self,
         *,
@@ -94,6 +96,7 @@ class DocumentRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def get_document_by_id(
         self,
         *,
@@ -131,6 +134,7 @@ class DocumentRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def create_document(
         self,
         *,
@@ -184,6 +188,7 @@ class DocumentRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def update_document_status(
         self,
         *,
@@ -295,6 +300,7 @@ class DocumentRepository:
 
         return None
 
+    @trace_layer("repository")
     async def upsert_chunks(self, rows: list[dict[str, Any]]) -> DocumentResult[None]:
         if not rows:
             return Success(inner_value=None)
@@ -325,6 +331,7 @@ class DocumentRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def analyze_chunks(self) -> DocumentResult[None]:
         try:
             await self.session.execute(statement=text(text="ANALYZE chunks"))
@@ -340,6 +347,7 @@ class DocumentRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def fetch_status(
         self,
         *,
@@ -393,6 +401,7 @@ class DocumentRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def bm25_search(
         self,
         *,
@@ -439,6 +448,7 @@ class DocumentRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def vector_search(
         self,
         *,
@@ -493,6 +503,7 @@ class DocumentRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def trigram_search(
         self,
         *,
@@ -541,6 +552,7 @@ class DocumentRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def fetch_chunks_by_ids(
         self, chunk_ids: Sequence[str]
     ) -> DocumentResult[dict[str, dict[str, Any]]]:
@@ -580,6 +592,7 @@ class DocumentRepository:
                 )
             )
 
+    @trace_layer("repository")
     async def legal_rrf_search(
         self,
         *,

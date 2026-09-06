@@ -18,7 +18,7 @@ from app.shared.crawler import (
 from app.shared.crawler import SchemaType as ProcessorSchemaType
 from app.shared.services import RateLimiter, RateLimitScope, get_rate_limiter, search
 from app.shared.services.errors import TavilyValidationError
-from app.utils import logger
+from app.utils import logger, trace_layer
 
 from .constants import CrawlMode
 from .dto import (
@@ -70,6 +70,7 @@ class CrawlerService:
 
         return get_rate_limiter()
 
+    @trace_layer("service")
     async def check_rate_limit(
         self,
         identifier: str,
@@ -78,6 +79,7 @@ class CrawlerService:
         """Check if rate limit is exceeded."""
         return await self.rate_limiter.check_rate_limit(identifier, scope)
 
+    @trace_layer("service")
     async def increment_rate_limit(
         self,
         identifier: str,
@@ -86,6 +88,7 @@ class CrawlerService:
         """Increment rate limit counter."""
         await self.rate_limiter.increment_rate_limit(identifier, scope)
 
+    @trace_layer("service")
     async def crawl(self, request: CrawlRequest) -> CrawlerResult[CrawlResponse]:
         """
         Crawl a URL or URLs based on request.
@@ -98,7 +101,7 @@ class CrawlerService:
         """
         start_time = time.time()
 
-        logger.info("Starting crawl for: {}", request.url)
+        logger.bind(url=request.url).info("Starting crawl")
 
         if request.max_depth > 1:
             crawl_result = await self.crawler.crawl_recursive(
@@ -211,6 +214,7 @@ class CrawlerService:
         )
 
     @staticmethod
+    @trace_layer("service")
     async def search(request: SearchRequest) -> CrawlerResult[SearchResponse]:
         """
         Search the web using Tavily.
@@ -221,7 +225,7 @@ class CrawlerService:
         Returns:
             SearchResponse with results
         """
-        logger.info("Searching for: {}", request.query)
+        logger.bind(query=request.query).info("Searching")
 
         tavily_result = await search(
             query=request.query,
@@ -259,6 +263,7 @@ class CrawlerService:
             )
         )
 
+    @trace_layer("service")
     async def close(self) -> None:
         """Close all connections."""
         if self._crawler:

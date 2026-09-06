@@ -10,7 +10,7 @@ from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.shared.result import log_expected_failure
-from app.utils import logger
+from app.utils import logger, trace_layer
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -93,6 +93,7 @@ class AuthService:
         self._token_repo = token_repo
         self._session_factory = session_factory
 
+    @trace_layer("service")
     async def register(self, dto: RegisterRequest) -> AuthResult[UserResponse]:
         email_exists_result = await self._user_repo.email_exists(dto.email)
         if isinstance(email_exists_result, Failure):
@@ -127,6 +128,7 @@ class AuthService:
         logger.bind(user_id=str(resolved.id)).info("User registered")
         return Success(_to_user_response(resolved))
 
+    @trace_layer("service")
     async def login(
         self,
         dto: LoginRequest,
@@ -181,6 +183,7 @@ class AuthService:
             user_agent=user_agent,
         )
 
+    @trace_layer("service")
     async def logout(self, refresh_token: str) -> AuthResult[None]:
         claims = decode_token(refresh_token)
         if claims.token_type != "refresh":
@@ -198,6 +201,7 @@ class AuthService:
         logger.bind(user_id=claims.sub, session_id=claims.jti).info("Session revoked")
         return Success(None)
 
+    @trace_layer("service")
     async def refresh(self, refresh_token: str) -> AuthResult[TokenResponse]:
         claims = decode_token(refresh_token)
         if claims.token_type != "refresh":
@@ -247,6 +251,7 @@ class AuthService:
             )
         )
 
+    @trace_layer("service")
     async def verify_email(self, token: str) -> AuthResult[None]:
         verify_result = await self._user_repo.find_by_verification_token_hash(hash_token(token))
         if isinstance(verify_result, Failure):
@@ -270,6 +275,7 @@ class AuthService:
         logger.bind(user_id=str(resolved.id)).info("Email verified")
         return Success(None)
 
+    @trace_layer("service")
     async def resend_verification(self, email: str) -> AuthResult[None]:
         find_result = await self._user_repo.find_by_email(email)
         if isinstance(find_result, Success):
@@ -277,26 +283,27 @@ class AuthService:
         else:
             return Success(None)  # silent — don't reveal email existence
 
-        if resolved.is_verified:  # ty: ignore[unresolved-attribute]
+        if resolved.is_verified:
             return Failure(
                 AuthConflictError(message="Email already verified", source="auth_service")
             )
 
         new_token = generate_token()
-        resolved.verification_token_hash = hash_token(new_token)  # ty: ignore[invalid-assignment]
-        save_result = await self._user_repo.save(resolved)  # ty: ignore[invalid-argument-type]
+        resolved.verification_token_hash = hash_token(new_token)
+        save_result = await self._user_repo.save(resolved)
         if isinstance(save_result, Failure):
             log_expected_failure(save_result.failure(), operation="save_user")
             return Failure(save_result.failure())
 
         await self._publish_outbox_event(
             aggregate_type="auth_email",
-            aggregate_id=str(resolved.id),  # ty: ignore[unresolved-attribute]
+            aggregate_id=str(resolved.id),
             event_type="auth.send_verification_email",
-            payload={"user_id": str(resolved.id), "email": resolved.email, "token": new_token},  # ty: ignore[unresolved-attribute]
+            payload={"user_id": str(resolved.id), "email": resolved.email, "token": new_token},
         )
         return Success(None)
 
+    @trace_layer("service")
     async def forgot_password(self, email: str) -> AuthResult[None]:
         find_result = await self._user_repo.find_by_email(email)
         if isinstance(find_result, Success):
@@ -325,6 +332,7 @@ class AuthService:
         )
         return Success(None)
 
+    @trace_layer("service")
     async def reset_password(self, token: str, new_password: str) -> AuthResult[None]:
         reset_result = await self._user_repo.find_by_reset_token_hash(hash_token(token))
         if isinstance(reset_result, Failure):
@@ -365,6 +373,7 @@ class AuthService:
         return Success(None)
 
     @staticmethod
+    @trace_layer("service")
     async def oauth_get_authorization_url(provider: str) -> AuthResult[tuple[str, str]]:
         """Return (authorization_url, signed_state_for_cookie)."""
 
@@ -381,6 +390,7 @@ class AuthService:
 
         return Success((str(url), sign_oauth_state(state, provider)))
 
+    @trace_layer("service")
     async def oauth_callback(
         self,
         provider: str,
@@ -424,6 +434,7 @@ class AuthService:
         )
         return await self._create_session(user=resolved_user, ip=ip, user_agent=user_agent)
 
+    @trace_layer("service")
     async def list_sessions(
         self,
         user_id: str,
@@ -450,6 +461,7 @@ class AuthService:
             ]
         )
 
+    @trace_layer("service")
     async def revoke_session(
         self,
         session_id: str,
@@ -479,6 +491,7 @@ class AuthService:
             return Failure(revoke_result.failure())
         return Success(None)
 
+    @trace_layer("service")
     async def revoke_all_sessions(
         self,
         user_id: str,
@@ -494,6 +507,7 @@ class AuthService:
             return Failure(revoke_result.failure())
         return Success(None)
 
+    @trace_layer("service")
     async def revoke_session_and_close_connections(
         self,
         session_id: str,
@@ -554,7 +568,9 @@ class AuthService:
         closed_connection_ids: list[str] = []
         try:
             if ws_security_service.redis is None:
-                logger.warning("No Redis client - skipping WebSocket connection closure")
+                logger.bind(operation="revoke_session", layer="auth").warning(
+                    "No Redis client, skipping WebSocket connection closure"
+                )
                 return Success(closed_connection_ids)
             # Retrieve all connections for this session from the sorted set
             # The sorted set key is ws:session:{session_id}
@@ -574,8 +590,8 @@ class AuthService:
                 closed_count=len(closed_connection_ids),
             ).info("Session revoked and connections closed")
         except Exception as e:  # noqa: BLE001 — connection closure is best-effort
-            logger.bind(user_id=user_id, session_id=session_id).error(
-                "Error closing connections: {}", e
+            logger.bind(user_id=user_id, session_id=session_id, error=str(e)).exception(
+                "Error closing connections"
             )
             # Don't fail the entire operation if connection closure has issues
             # The session is already revoked, so new WebSocket auth will fail
