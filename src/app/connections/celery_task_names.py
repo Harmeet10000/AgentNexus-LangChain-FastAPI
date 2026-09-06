@@ -44,8 +44,6 @@ if TYPE_CHECKING:
 # --- ingestion ---------------------------------------------------------------
 
 DOCUMENTS_INGEST: Final = "tasks.documents_ingest"
-PAGEINDEX_INGEST: Final = "tasks.pageindex_ingest"
-LEGAL_BATCH_EXTRACTION: Final = "document_extraction.legal_batch"
 
 #: The names whose work is measured in minutes, and which therefore consume the
 #: dedicated ingestion queue rather than the default one. Membership lives here,
@@ -88,7 +86,7 @@ LEGAL_BATCH_EXTRACTION: Final = "document_extraction.legal_batch"
 #: Acceptance is behavioural, not structural: with a ``legal_batch`` message in
 #: flight, a task dispatched to ``default`` must still start. Asserting the
 #: fourth queue exists only proves it was declared.
-INGESTION_TASK_NAMES: Final[frozenset[str]] = frozenset({DOCUMENTS_INGEST, PAGEINDEX_INGEST})
+INGESTION_TASK_NAMES: Final[frozenset[str]] = frozenset({DOCUMENTS_INGEST})
 
 # --- transactional email -----------------------------------------------------
 
@@ -113,12 +111,6 @@ CREDITS_RECONCILE: Final = "credits.reconcile"
 
 AGENT_MEMORY_CONSOLIDATION: Final = "tasks.agent_memory_consolidation"
 
-# --- reference implementations -----------------------------------------------
-
-EXAMPLE_ADD: Final = "tasks.add"
-EXAMPLE_PROCESS_DOCUMENT: Final = "tasks.process_document"
-
-
 # Module paths are private to this file: the authoritative copy for the worker is
 # the task application's ``include`` list, and a unit test asserts the two agree
 # rather than deriving one from the other. Deriving would make the ``include``
@@ -127,17 +119,12 @@ _AGENT_MEMORY_TASKS: Final = "tasks.agent_memory_tasks"
 _AUTH_EMAIL_TASKS: Final = "tasks.auth_email_tasks"
 _BILLING_TASKS: Final = "tasks.billing_tasks"
 _CREDIT_TASKS: Final = "tasks.credit_tasks"
-_DOCUMENT_EXTRACTION_TASKS: Final = "tasks.document_extraction_tasks"
 _DOCUMENT_TASKS: Final = "tasks.document_tasks"
-_EXAMPLE_TASKS: Final = "tasks.example"
-_PAGEINDEX_TASKS: Final = "tasks.pageindex_tasks"
 
 
 TASK_DECLARING_MODULES: Final[Mapping[str, str]] = {
     AGENT_MEMORY_CONSOLIDATION: _AGENT_MEMORY_TASKS,
     DOCUMENTS_INGEST: _DOCUMENT_TASKS,
-    PAGEINDEX_INGEST: _PAGEINDEX_TASKS,
-    LEGAL_BATCH_EXTRACTION: _DOCUMENT_EXTRACTION_TASKS,
     SEND_VERIFICATION_EMAIL: _AUTH_EMAIL_TASKS,
     SEND_PASSWORD_RESET_EMAIL: _AUTH_EMAIL_TASKS,
     BILLING_RENEWAL: _BILLING_TASKS,
@@ -148,6 +135,4 @@ TASK_DECLARING_MODULES: Final[Mapping[str, str]] = {
     BILLING_RECONCILIATION: _BILLING_TASKS,
     CREDITS_EXPIRE: _CREDIT_TASKS,
     CREDITS_RECONCILE: _CREDIT_TASKS,
-    EXAMPLE_ADD: _EXAMPLE_TASKS,
-    EXAMPLE_PROCESS_DOCUMENT: _EXAMPLE_TASKS,
 }

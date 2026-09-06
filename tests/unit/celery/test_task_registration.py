@@ -16,7 +16,6 @@ import pytest
 
 from app.connections.celery_task_names import (
     DOCUMENTS_INGEST,
-    PAGEINDEX_INGEST,
     TASK_DECLARING_MODULES,
 )
 
@@ -49,7 +48,7 @@ def test_every_declaring_module_is_named_in_the_include_list(real_celery):
     assert set(TASK_DECLARING_MODULES.values()) == set(real_celery.app.conf.include)
 
 
-@pytest.mark.parametrize("task_name", [DOCUMENTS_INGEST, PAGEINDEX_INGEST])
+@pytest.mark.parametrize("task_name", [DOCUMENTS_INGEST])
 def test_dispatched_task_modules_are_listed_explicitly(task_name, real_celery):
     """The dispatched names' own modules must be listed, not reached through a sibling."""
     assert TASK_DECLARING_MODULES[task_name] in real_celery.app.conf.include
@@ -93,23 +92,6 @@ def test_every_declared_task_name_is_bound_on_the_task_application(all_declaring
     unbound = sorted(name for name in TASK_DECLARING_MODULES if name not in bound)
 
     assert unbound == []
-
-
-def test_declared_but_unimplemented_task_is_registered_and_fails_explicitly(real_celery):
-    """A deferred task must fail with its own diagnostic, not an unknown-name one.
-
-    Leaving it out of the module list would have produced the worse of the two
-    failures: the dispatch succeeds, the worker rejects a name it has never seen,
-    and the only evidence is work that never happened.
-    """
-    real_celery.registry.CeleryTaskRegistry.ensure_declared_module_imported(PAGEINDEX_INGEST)
-
-    assert PAGEINDEX_INGEST in real_celery.app.tasks
-
-    # The arguments satisfy the declared signature and are otherwise irrelevant:
-    # the body raises before it looks at either of them.
-    with pytest.raises(NotImplementedError):
-        real_celery.app.tasks[PAGEINDEX_INGEST].run(file_path="unread.pdf", user_id="u1")
 
 
 def test_the_typed_email_reference_module_is_not_listed(real_celery):

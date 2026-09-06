@@ -458,8 +458,6 @@ async def idempotency_manager(
     retryable_exceptions: tuple[type[Exception], ...] = (),
 ) -> AsyncIterator[None]:
     """Context manager for idempotency lock lifecycle."""
-    from loguru import logger  # noqa: PLC0415
-
     acquired = acquire_idempotency_lock(
         redis_client,
         idempotency_key,
@@ -513,12 +511,12 @@ async def idempotency_manager(
                 ttl_seconds=ttl_seconds,
                 metadata=metadata,
             )
-            logger.error(
-                "Permanent failure, marked as failed",
+            logger.bind(
                 idempotency_key=idempotency_key,
                 task_id=task_id,
                 exception_type=type(exc).__name__,
-            )
+                error=str(exc),
+            ).exception("Permanent failure, marked as failed")
         raise
 
 
@@ -612,8 +610,6 @@ class RateLimiter:
         forwarded_for: str | None = None,
         direct_ip: str | None = None,
     ) -> RateLimitResult:
-        from loguru import logger  # noqa: PLC0415
-
         now = time.time()
         key = self._build_key()
         final_scope = self._scope
@@ -821,7 +817,8 @@ class ResilientTask(Task):
             task=self.name,
             task_id=task_id,
             retry_count=self.request.retries,
-        ).warning(f"Task scheduled for retry: {exc!s}")
+            error=str(exc),
+        ).warning("Task scheduled for retry")
 
     @override
     def on_failure(
@@ -842,7 +839,8 @@ class ResilientTask(Task):
             task=self.name,
             task_id=task_id,
             retry_count=self.request.retries,
-        ).error(f"Task failed: {exc!s}")
+            error=str(exc),
+        ).error("Task failed")
 
     @override
     def on_success(
@@ -875,10 +873,7 @@ def create_celery_app() -> Celery:
             "tasks.auth_email_tasks",
             "tasks.billing_tasks",
             "tasks.credit_tasks",
-            "tasks.document_extraction_tasks",
             "tasks.document_tasks",
-            "tasks.example",
-            "tasks.pageindex_tasks",
         ],
     )
     app.Task = ResilientTask
@@ -1071,7 +1066,7 @@ def log_task_retry(
     }
     if trace_id:
         extra["trace_id"] = trace_id
-    logger.bind(**extra).warning(f"Celery task retry emitted: {reason!s}")
+    logger.bind(**extra, reason=str(reason)).warning("Celery task retry emitted")
 
 
 @task_failure.connect
@@ -1086,7 +1081,7 @@ def log_task_failure(
     extra = {"task": sender.name if sender else None, "task_id": task_id}
     if trace_id:
         extra["trace_id"] = trace_id
-    logger.bind(**extra).error(f"Celery task failed signal: {exception!s}")
+    logger.bind(**extra, error=str(exception)).exception("Celery task failed signal")
 
 
 # ---------------------------------------------------------------------------
@@ -1182,7 +1177,9 @@ class CeleryTaskRegistry:
         try:
             return model.model_validate(kwargs)
         except ValidationError as exc:
-            logger.bind(task=task_name, errors=exc.errors()).error("Task payload validation failed")
+            logger.bind(task=task_name, errors=exc.errors()).exception(
+                "Task payload validation failed"
+            )
             raise TaskPayloadValidationError(task_name, exc) from exc
 
 
