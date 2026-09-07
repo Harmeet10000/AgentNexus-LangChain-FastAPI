@@ -783,7 +783,7 @@ Two consequences the implementer must absorb before touching anything:
    `openspec 16-passed-6-failed` / `alembic --sql exit 255` numbers were taken against the pre-split tree.
    Mid-write, the same commands began failing with `ModuleNotFoundError: No module named
    'app.features.billing.models.audit'` and then `ImportError: cannot import name 'RefundRequestDTO' from
-   'app.features.subscriptions.dto'` — i.e. the split was in progress and transiently broken.
+   'app.features.billing.subscriptions.dto'` — i.e. the split was in progress and transiently broken.
    **Step 0 must be re-run from scratch and its numbers used in place of every number above.** Do not trust a
    single figure in this file as a gate value; trust only the freshly captured `/tmp/baseline-*` files.
 

@@ -69,6 +69,9 @@ dependencies = [
     "flower>=2.0.1",
     # --- WEB SCRAPING ---
     "crawl4ai>=0.8.0,<1.0.0",
+    # Crawl4AI pulls mbstrdecoder/chardet; keep it below chardet 6, which
+    # Requests explicitly rejects and otherwise emits a warning at import time.
+    "chardet>=5.2.0,<6.0.0",
     "nh3>=0.3.3",
     # --- DOCUMENT PROCESSING ---
     "docling>=2.72.0",
@@ -828,6 +831,7 @@ python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
@@ -848,6 +852,7 @@ omit = [
 ]
 
 [tool.coverage.report]
+fail_under = 50
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",

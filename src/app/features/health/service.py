@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 # The graph-memory probe is bounded: an unreachable graph backend must report,
 # not hang. A readiness probe that blocks is worse than one that answers degraded.
 _GRAPH_MEMORY_PROBE_TIMEOUT_S = 2.0
+_HEALTH_CHECK_TIMEOUT_S = 3.0
 
 # Read-only liveness query. The graph-memory client is *set once at startup* and
 # never cleared, so a presence check alone cannot distinguish "initialised" from
@@ -95,21 +96,37 @@ class HealthService:
     @trace_layer("service")
     async def get_health(self) -> HealthResultDTO:
         """Run all health checks and return aggregated status."""
-        database_check = (
-            await self._check_mongodb() if self.mongo_client else self._not_configured()
+        # Health checks are independent. Running them concurrently keeps a slow
+        # database from serialising the latency of every other dependency.
+        (
+            database_check,
+            redis_check,
+            postgres_check,
+            neo4j_check,
+            graphiti_check,
+            agent_memory_check,
+            celery_check,
+            memory_check,
+            disk_check,
+            system_health,
+            application_health,
+        ) = await asyncio.gather(
+            self._optional_async_check(
+                self._check_mongodb, self.mongo_client is not None, "mongodb"
+            ),
+            self._optional_async_check(self._check_redis, self.redis_client is not None, "redis"),
+            self._optional_async_check(
+                self._check_postgres, self.postgres_session_factory is not None, "postgres"
+            ),
+            self._optional_async_check(self._check_neo4j, self.neo4j_driver is not None, "neo4j"),
+            self._run_async_check(self._check_graphiti, "graphiti"),
+            self._run_async_check(self._check_agent_memory, "agent_memory"),
+            self._run_sync_check(self._check_celery, "celery"),
+            self._run_sync_check(self._check_memory, "memory"),
+            self._run_sync_check(self._check_disk, "disk"),
+            asyncio.to_thread(self._get_system_health),
+            asyncio.to_thread(self._get_application_health),
         )
-        redis_check = await self._check_redis() if self.redis_client else self._not_configured()
-        postgres_check = (
-            await self._check_postgres()
-            if self.postgres_session_factory
-            else self._not_configured()
-        )
-        neo4j_check = await self._check_neo4j() if self.neo4j_driver else self._not_configured()
-        graphiti_check = await self._check_graphiti()
-        celery_check = self._check_celery()
-        memory_check = self._check_memory()
-        disk_check = self._check_disk()
-        agent_memory_check = await self._check_agent_memory()
 
         checks = HealthChecksDTO(
             database=database_check,
@@ -129,8 +146,8 @@ class HealthService:
         data = HealthDataDTO(
             status=overall_status,
             timestamp=time.time(),
-            application=self._get_application_health(),
-            system=self._get_system_health(),
+            application=application_health,
+            system=system_health,
             checks=checks,
         )
 
@@ -140,6 +157,55 @@ class HealthService:
             status_code=status_code,
             data=data,
         )
+
+    async def _optional_async_check(
+        self,
+        check: Any,
+        configured: bool,
+        component: str,
+    ) -> dict[str, Any]:
+        if not configured:
+            return self._not_configured()
+        return await self._run_async_check(check, component)
+
+    @staticmethod
+    async def _run_async_check(check: Any, component: str) -> dict[str, Any]:
+        try:
+            async with asyncio.timeout(_HEALTH_CHECK_TIMEOUT_S):
+                return await check()
+        except TimeoutError:
+            logger.bind(component=component, timeout_seconds=_HEALTH_CHECK_TIMEOUT_S).warning(
+                "Health check timed out"
+            )
+            return {"status": "unhealthy", "state": "timeout", "error": "timeout"}
+        except Exception as exc:  # noqa: BLE001 — health endpoint must fail closed
+            logger.bind(component=component, error_type=type(exc).__name__).exception(
+                "Health check failed unexpectedly"
+            )
+            return {
+                "status": "unhealthy",
+                "state": "error",
+                "error": type(exc).__name__,
+            }
+
+    @staticmethod
+    async def _run_sync_check(check: Any, component: str) -> dict[str, Any]:
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(check), timeout=_HEALTH_CHECK_TIMEOUT_S)
+        except TimeoutError:
+            logger.bind(component=component, timeout_seconds=_HEALTH_CHECK_TIMEOUT_S).warning(
+                "Health check timed out"
+            )
+            return {"status": "unhealthy", "state": "timeout", "error": "timeout"}
+        except Exception as exc:  # noqa: BLE001 — health endpoint must fail closed
+            logger.bind(component=component, error_type=type(exc).__name__).exception(
+                "Health check failed unexpectedly"
+            )
+            return {
+                "status": "unhealthy",
+                "state": "error",
+                "error": type(exc).__name__,
+            }
 
     async def _check_mongodb(self) -> dict[str, Any]:
         client = self.mongo_client
@@ -320,8 +386,10 @@ class HealthService:
         try:
             start = time.perf_counter()
             conn = self.celery_app.connection()
-            conn.ensure_connection(max_retries=1, timeout=2)
-            conn.release()
+            try:
+                conn.ensure_connection(max_retries=1, timeout=2)
+            finally:
+                conn.release()
             response_time = (time.perf_counter() - start) * 1000
         except (ConnectionRefusedError, TimeoutError, OSError) as exc:
             logger.bind(error=str(exc), component="celery").exception("Celery health check failed")
@@ -405,7 +473,10 @@ class HealthService:
 
     @staticmethod
     def _get_system_health() -> dict[str, Any]:
-        cpu_percent = psutil.cpu_percent(interval=1)
+        # ``interval=1`` blocks the caller for a full second. The probe is
+        # already dispatched to a worker thread; a non-blocking sample also
+        # prevents a health request from consuming an event-loop second.
+        cpu_percent = psutil.cpu_percent(interval=None)
         memory = psutil.virtual_memory()
         try:
             get_load_average = cast(

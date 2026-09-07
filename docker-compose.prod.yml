@@ -75,33 +75,43 @@ services:
         condition: service_healthy
 
   rabbitmq:
-    image: rabbitmq:4-management-alpine
+    image: rabbitmq:4-management-alpine@sha256:ac1201d1dc227779d93c607f976e7f9156fd5b551ee5ff7946cab6c242091bf3
     container_name: rabbitmq
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER must be set}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS must be set}
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     networks:
       - langchain-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   timescale:
-    image: timescale/timescaledb-ha:pg18
+    image: timescale/timescaledb-ha:pg18@sha256:72d93849cd0138586dc8cdcba9d9ed40f25f668a54408892493492b02c56feba
     container_name: timescale_db
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_secure_password}
-      POSTGRES_DB: ${POSTGRES_DB:-langchain_db}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
     volumes:
       - timescale-data:/home/postgres/pgdata/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - langchain-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     container_name: caddy
     ports:
       - "80:80"

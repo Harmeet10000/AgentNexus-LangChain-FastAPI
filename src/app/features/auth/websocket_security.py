@@ -173,6 +173,12 @@ class WebSocketSecurityService:
         # without holding the WebSocket object at the call site.
         self._live_connections: dict[str, tuple[WebSocket, WebSocketSecurityContext]] = {}
 
+    def close(self) -> None:
+        """Dispose rate-limit buckets and stop pyrate's background leak tasks."""
+        for limiter in (self._user_limiter, self._connection_limiter):
+            for bucket in limiter.buckets():
+                limiter.dispose(bucket)
+
     @property
     def redis(self) -> Redis | None:
         """Expose the Redis client (satisfies AuthService's WebSocketConnectionCloser)."""

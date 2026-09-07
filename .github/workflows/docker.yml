@@ -59,6 +59,17 @@ jobs:
           flavor: |
             latest=false
 
+      - name: Validate production Compose configuration
+        run: |
+          trap 'rm -f .env.production' EXIT
+          printf 'ENVIRONMENT=production\n' > .env.production
+          IMAGE_TAG=sha-ci \
+          RABBITMQ_DEFAULT_USER=ci-rabbit \
+          RABBITMQ_DEFAULT_PASS=ci-rabbit-password \
+          POSTGRES_PASSWORD=ci-postgres-password \
+          POSTGRES_DB=langchain_db \
+          docker compose -f docker-compose.prod.yml config --quiet
+
       - name: Read app version + build date
         id: version
         run: |

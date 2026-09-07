@@ -66,7 +66,7 @@ class ProfileService:
     ) -> ProfileResult[None]:
         if user.hashed_password is None:
             return Failure(
-                ProfileConflictError(
+                inner_value=ProfileConflictError(
                     message=(
                         "Password cannot be changed on an OAuth-only account. "
                         "Link a password via account settings."
@@ -77,14 +77,14 @@ class ProfileService:
             )
         if not verify_password(user.hashed_password, current_password):
             return Failure(
-                ProfileAuthenticationError(
+                inner_value=ProfileAuthenticationError(
                     message="Current password is incorrect",
                     source="profile_service",
                 )
             )
         if current_password == new_password:
             return Failure(
-                ProfileConflictError(
+                inner_value=ProfileConflictError(
                     message="New password must differ from current password",
                     source="profile_service",
                     operation="change_password",
@@ -96,7 +96,7 @@ class ProfileService:
         if isinstance(saved, Failure):
             error = saved.failure()
             return Failure(
-                ProfileInfrastructureError(
+                inner_value=ProfileInfrastructureError(
                     message=error.message,
                     details=error.details,
                     source="profile_service",
@@ -113,7 +113,7 @@ class ProfileService:
             if isinstance(revoked, Failure):
                 error = revoked.failure()
                 return Failure(
-                    ProfileInfrastructureError(
+                    inner_value=ProfileInfrastructureError(
                         message=error.message,
                         details=error.details,
                         source="profile_service",

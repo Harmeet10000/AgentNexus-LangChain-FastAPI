@@ -57,7 +57,9 @@ def mock_token_claims():
 @pytest.fixture
 async def ws_security_service(redis, mock_settings):
     """Build WebSocketSecurityService with real in-memory rate limiters."""
-    return await build_websocket_security_service(redis, mock_settings)
+    service = await build_websocket_security_service(redis, mock_settings)
+    yield service
+    service.close()
 
 
 @pytest.fixture

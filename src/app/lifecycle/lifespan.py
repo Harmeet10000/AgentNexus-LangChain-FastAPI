@@ -356,7 +356,7 @@ async def _run_startup_policy(app: FastAPI, settings: Any, policy: StartupPolicy
         setattr(app.state, policy.state_attr, None)
 
 
-async def _shutdown_resources(app: FastAPI) -> None:
+async def _shutdown_resources(app: FastAPI) -> None:  # noqa: PLR0912
     """Close application resources while always flushing observability providers."""
     try:
         if hasattr(app.state, "langgraph_checkpointer"):
@@ -370,6 +370,11 @@ async def _shutdown_resources(app: FastAPI) -> None:
         if revocation_task is not None:
             revocation_task.cancel()
             logger.info("WebSocket revocation loop stopped")
+
+        websocket_security = getattr(app.state, "websocket_security", None)
+        if websocket_security is not None:
+            websocket_security.close()
+            logger.info("WebSocket rate limiters closed")
 
         httpx_client = getattr(app.state, "httpx_client", None)
         if httpx_client is not None:

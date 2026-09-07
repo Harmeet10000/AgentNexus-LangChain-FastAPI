@@ -1,9 +1,10 @@
 """Health feature API router."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, FastAPI, Request, Response, status
 from returns.result import Success
 
 from app.config import get_settings
@@ -28,23 +29,33 @@ if TYPE_CHECKING:
 
 router = APIRouter(prefix="/health", tags=["health"])
 deep_health_router = APIRouter(tags=["Monitoring"])
+_DEEP_PROBE_TIMEOUT_S = 3.0
+_DEEP_PROBE_NAMES = ("postgres", "redis", "mongodb", "neo4j", "graphiti", "cognee")
+
+
+async def _run_probe(
+    probe: Callable[[FastAPI], Awaitable[DependencyHealth]], app: FastAPI, component: str
+) -> DependencyHealth:
+    """Run a readiness probe with one uniform request-level timeout."""
+    try:
+        async with asyncio.timeout(_DEEP_PROBE_TIMEOUT_S):
+            return await probe(app)
+    except TimeoutError:
+        return DependencyHealth.fail(component, "probe timed out")
+    except Exception as exc:  # noqa: BLE001 — readiness must fail closed
+        return DependencyHealth.fail(component, type(exc).__name__)
 
 
 @deep_health_router.get("/health")
 async def get_deep_health(request: Request, response: Response) -> APIResponse[HealthResponse]:
     """Deep health check that probes all critical dependencies in parallel."""
     settings = get_settings()
-    app = request.app
-    results: list[DependencyHealth | BaseException] = await asyncio.gather(
-        *[probe(app) for probe in ALL_PROBES],
-        return_exceptions=True,
+    dependencies = await asyncio.gather(
+        *[
+            _run_probe(probe, request.app, component)
+            for probe, component in zip(ALL_PROBES, _DEEP_PROBE_NAMES, strict=True)
+        ]
     )
-    dependencies: list[DependencyHealth] = []
-    for result in results:
-        if isinstance(result, Exception):
-            dependencies.append(DependencyHealth.fail("unknown", str(result)))
-        else:
-            dependencies.append(result)  # ty: ignore[invalid-argument-type]
 
     failed = sum(1 for dependency in dependencies if dependency.status == HealthStatus.UNHEALTHY)
     if failed >= 3:
@@ -69,7 +80,8 @@ async def get_deep_health(request: Request, response: Response) -> APIResponse[H
     return render_result(Success(body), response, message="Deep health check", success_status=code)
 
 
-@router.get("/self")
+@router.get("/self", operation_id="health_self")
+@router.get("/live", operation_id="health_live")
 async def get_self(
     request: Request,
     service: Annotated[HealthService, Depends(get_health_service)],
@@ -86,7 +98,8 @@ async def get_self(
     )
 
 
-@router.get("/")
+@router.get("/", operation_id="health_readiness")
+@router.get("/ready", operation_id="health_ready")
 async def get_health(
     response: Response,
     service: Annotated[HealthService, Depends(get_health_service)],

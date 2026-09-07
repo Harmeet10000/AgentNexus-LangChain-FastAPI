@@ -19,7 +19,9 @@ PRODUCTION_SECRET_FIELDS: dict[str, list[str]] = {
     "TAVILY_API_KEY": [""],
     "PINECONE_API_KEY": [""],
     "RABBITMQ_DEFAULT_PASS": ["guest"],
+    "RABBITMQ_DEFAULT_USER": ["guest"],
     "POSTGRES_PASSWORD": ["pass"],
+    "LANGEXTRACT_API_KEY": ["empty-langextract-api-key"],
 }
 
 
@@ -81,7 +83,10 @@ class Settings(BaseSettings):
     BUILD_DATE: str = Field(default="unknown")
     ENVIRONMENT: str = Field(default="development")
     API_PREFIX: str = Field(default="/api/v1")
-    CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
+    # Wildcard origins cannot be combined safely with credentialed requests.
+    # Keep local development convenient, but never make the insecure wildcard
+    # the default that a production process inherits.
+    CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
     CORS_ALLOW_METHODS: list[str] = Field(
         default_factory=lambda: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
     )
@@ -464,6 +469,17 @@ class Settings(BaseSettings):
                 "The following secret fields have default/insecure values:\n"
                 f"{error_lines}\n"
                 "Set these environment variables before starting the application."
+            )
+            raise ValueError(msg)
+
+        if (
+            self.ENVIRONMENT == "production"
+            and self.CORS_ALLOW_CREDENTIALS
+            and "*" in self.CORS_ORIGINS
+        ):
+            msg = (
+                "CORS_ORIGINS must list explicit trusted origins when "
+                "CORS_ALLOW_CREDENTIALS is enabled in production."
             )
             raise ValueError(msg)
 

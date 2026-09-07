@@ -24,7 +24,7 @@ http://damn-ai-service {
 
     # Health check endpoint (no rate limiting, no logging)
     handle /api/v1/health/self {
-        reverse_proxy ai-service-1:5000 ai-service-2:5000 {
+        reverse_proxy ai-service-1:5000 {
             lb_policy least_conn
             health_uri /api/v1/health/self
             health_interval 30s
@@ -33,7 +33,7 @@ http://damn-ai-service {
 
     # General API endpoints
     handle /api/* {
-        reverse_proxy ai-service-1:5000 ai-service-2:5000 {
+        reverse_proxy ai-service-1:5000 {
             lb_policy least_conn
             health_uri /api/v1/health/self
             health_interval 30s
@@ -54,7 +54,7 @@ http://damn-ai-service {
 
     # Fallback for other routes
     handle {
-        reverse_proxy ai-service-1:5000 ai-service-2:5000 {
+        reverse_proxy ai-service-1:5000 {
             lb_policy least_conn
             health_uri /api/v1/health/self
             health_interval 30s

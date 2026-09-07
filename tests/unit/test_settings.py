@@ -20,6 +20,7 @@ class TestSettingsProductionValidation:
             S3_SECRET_ACCESS_KEY="valid-key",
             TAVILY_API_KEY="valid-key",
             PINECONE_API_KEY="valid-key",
+            RABBITMQ_DEFAULT_USER="valid-rabbit-user",
             RABBITMQ_DEFAULT_PASS="valid-rabbit-password",
             POSTGRES_PASSWORD="valid-postgres-password",
         )
@@ -41,3 +42,22 @@ class TestSettingsProductionValidation:
         message = str(exc_info.value)
         assert "super-secret-change-this-in-production" not in message
         assert "password" not in message.rsplit("\n", maxsplit=1)[-1]
+
+    def test_rejects_wildcard_cors_with_credentials_in_production(self) -> None:
+        with pytest.raises(ValueError, match="explicit trusted origins"):
+            Settings(
+                ENVIRONMENT="production",
+                CORS_ORIGINS=["*"],
+                JWT_SECRET_KEY="a-very-strong-random-secret-32chars!!",
+                NEO4J_PASSWORD="real-password-123",
+                GEMINI_API_KEY="valid-key",
+                RESEND_API_KEY="valid-key",
+                OAUTH_STATE_SECRET="valid-secret",
+                S3_ACCESS_KEY_ID="valid-id",
+                S3_SECRET_ACCESS_KEY="valid-key",
+                TAVILY_API_KEY="valid-key",
+                PINECONE_API_KEY="valid-key",
+                RABBITMQ_DEFAULT_USER="valid-rabbit-user",
+                RABBITMQ_DEFAULT_PASS="valid-rabbit-password",
+                POSTGRES_PASSWORD="valid-postgres-password",
+            )

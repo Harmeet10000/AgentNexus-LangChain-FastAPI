@@ -39,7 +39,8 @@ async def ws_security_with_repo(redis, mock_settings):
     """Build WebSocketSecurityService with token repo and real in-memory rate limiters."""
     service = await build_websocket_security_service(redis, mock_settings)
     service._token_repo = RefreshTokenRepository(redis)
-    return service
+    yield service
+    service.close()
 
 
 class TestSessionRevocationIntegration:

@@ -273,6 +273,8 @@ Do you want me to:
 237. remove raise from examples/  DONE
 239. convert redis_func to the result pattern  DONE
 238. check if tasks can be added in server.py as well   DONE
+233. check and review logger config and usage to better standardise, proper biniding, file path, execution flow, anf other things  DONE
+115. logs inbetween the layers are empty or not coming except start and end, should i pass logger as an argument or should i import it where needed   DONE
 
 161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
 type Composable = Callable[[Any], Any]
@@ -348,7 +350,7 @@ Additionally, the host personally recommends adding a commit reference to these 
 221. fix the files tht are scrambled in utils,shared, combine celery, and other places
 44. correct the code for crawler and the packages used and the chucking strategy used here
 
-136. use LangExtract outputs to build rich graph knowledge from your legal documents.  
+136. use LangExtract outputs to build rich graph knowledge from your legal documents.  in document processing
 61. see docassemble, fpdf2, python-docx and other libraries for generating final PDFs/docs   
 
            
@@ -356,12 +358,11 @@ Additionally, the host personally recommends adding a commit reference to these 
 228. disable memory in claude code, opencode and remove the unnecesary skills from computer
 230. need to have a standard for marking the task done in openspec spec gated with a DONE sections that is detailed and summary of how it is done
 
-233. check and review logger config and usage to better standardise, proper biniding, file path, execution flow, anf other things
-115. logs inbetween the layers are empty or not coming except start and end, should i pass logger as an argument or should i import it where needed   
+
 234. learn about classVars and check if UUIDv7 is available in ORM
 235. need to have all graph such as ingestion graph in the lifespan rather than in service
 236. use firecrawl SEO audit workflow for website
-240. 
+240. document processing and crawler needs db instance injection
 ```
 summarise these chapters in great detail and depth and take video's transcript as reference for outputing verbatim
 
