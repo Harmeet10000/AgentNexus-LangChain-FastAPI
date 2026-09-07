@@ -7,21 +7,21 @@ from typing import Any
 from redis.asyncio import Redis
 from returns.result import Failure, Success
 
-from app.connections.crawl4ai import get_crawler
 from app.shared.crawler import (
     CrawlResult,
     GeminiProcessor,
     WebCrawler,
-    get_processor,
+    smart_chunk_markdown,
     truncate_content,
 )
 from app.shared.crawler import SchemaType as ProcessorSchemaType
-from app.shared.services import RateLimiter, RateLimitScope, get_rate_limiter, search
+from app.shared.services import RateLimiter, RateLimitScope, search
 from app.shared.services.errors import TavilyValidationError
 from app.utils import logger, trace_layer
 
 from .constants import CrawlMode
 from .dto import (
+    CrawlChunk,
     CrawlRequest,
     CrawlResponse,
     CrawlResultItem,
@@ -29,7 +29,7 @@ from .dto import (
     SearchResponse,
     SearchResultItem,
 )
-from .errors import CrawlerResult, CrawlerSearchError, CrawlerValidationError
+from .errors import CrawlerCrawlError, CrawlerResult, CrawlerSearchError, CrawlerValidationError
 
 
 class CrawlerService:
@@ -50,25 +50,23 @@ class CrawlerService:
     @property
     def crawler(self) -> WebCrawler:
         if self._crawler is None:
-            self._crawler = asyncio.run(get_crawler(redis_client=self._redis_client))
+            message = "CrawlerService requires an injected crawler"
+            raise RuntimeError(message)
         return self._crawler
 
     @property
     def processor(self) -> GeminiProcessor:
         if self._processor is None:
-            self._processor = asyncio.run(get_processor())
+            message = "CrawlerService requires an injected processor"
+            raise RuntimeError(message)
         return self._processor
 
     @property
     def rate_limiter(self) -> RateLimiter:
         if self._rate_limiter is None:
-            self._rate_limiter = asyncio.run(self._get_rate_limiter())
+            message = "CrawlerService requires an injected rate limiter"
+            raise RuntimeError(message)
         return self._rate_limiter
-
-    @staticmethod
-    async def _get_rate_limiter() -> RateLimiter:
-
-        return get_rate_limiter()
 
     @trace_layer("service")
     async def check_rate_limit(
@@ -103,21 +101,27 @@ class CrawlerService:
 
         logger.bind(url=request.url).info("Starting crawl")
 
-        if request.max_depth > 1:
-            crawl_result = await self.crawler.crawl_recursive(
-                urls=[request.url],
-                max_depth=request.max_depth,
-                max_pages=request.max_pages,
-            )
-        else:
-            crawl_result = await self.crawler.crawl(
-                url=request.url,
-                use_proxy=request.use_proxy,
-                bypass_cache=request.bypass_cache,
-            )
+        try:
+            async with asyncio.timeout(request.timeout):
+                if request.max_depth > 1:
+                    crawl_result = await self.crawler.crawl_recursive(
+                        urls=[request.url],
+                        max_depth=request.max_depth,
+                        max_pages=request.max_pages,
+                        use_proxy=request.use_proxy,
+                        bypass_cache=request.bypass_cache,
+                    )
+                else:
+                    crawl_result = await self.crawler.crawl(
+                        url=request.url,
+                        use_proxy=request.use_proxy,
+                        bypass_cache=request.bypass_cache,
+                    )
+        except TimeoutError:
+            return Failure(CrawlerCrawlError(message="Crawl operation timed out"))
         if isinstance(crawl_result, Failure):
             error = crawl_result.failure()
-            return Failure(CrawlerSearchError(message=error.message, details=error.details))
+            return Failure(CrawlerCrawlError(message=error.message, details=error.details))
         resolved = crawl_result.unwrap()
         crawl_results = resolved if isinstance(resolved, list) else [resolved]
 
@@ -126,12 +130,15 @@ class CrawlerService:
         successful_pages = 0
         failed_pages = 0
 
+        remaining_output = request.max_total_output_chars
         for crawl_result in crawl_results:
             item = await self._process_crawl_result(
                 crawl_result,
                 request,
+                output_budget=max(0, min(request.max_output_chars, remaining_output)),
             )
             results.append(item)
+            remaining_output = max(0, remaining_output - len(item.markdown or ""))
 
             if item.success:
                 successful_pages += 1
@@ -154,19 +161,22 @@ class CrawlerService:
             )
         )
 
-    async def _process_crawl_result(
+    async def _process_crawl_result(  # noqa: PLR0912
         self,
         crawl_result: CrawlResult,
         request: CrawlRequest,
+        output_budget: int,
     ) -> CrawlResultItem:
         """Process a single crawl result with optional Gemini processing."""
 
         markdown = crawl_result.markdown
         extracted_data: dict[str, Any] | None = None
         summary: str | None = None
+        content_truncated = False
 
         if crawl_result.success and markdown:
-            markdown = truncate_content(markdown)
+            content_truncated = len(markdown) > output_budget
+            markdown = truncate_content(markdown, max_length=output_budget) if output_budget else ""
 
             if request.extract_structured:
                 schema_type = None
@@ -196,14 +206,31 @@ class CrawlerService:
         else:
             content = crawl_result.markdown
 
-        links = [link.get("href", "") for link in (crawl_result.links or [])]
+        links = [link.get("href", "") for link in (crawl_result.links or [])][: request.max_links]
+        if content is None:
+            content = ""
+        if output_budget == 0 and content:
+            content = ""
+            content_truncated = True
+        elif len(content) > output_budget:
+            content = truncate_content(content, max_length=output_budget)
+            content_truncated = True
+
+        chunks = []
+        if request.include_chunks and content:
+            chunks = [
+                CrawlChunk(**chunk.model_dump())
+                for chunk in smart_chunk_markdown(content, max_len=request.chunk_size)[
+                    : request.max_chunks
+                ]
+            ]
 
         return CrawlResultItem(
             url=crawl_result.url,
             success=crawl_result.success,
             title=crawl_result.title,
             markdown=content,
-            html=crawl_result.html if request.mode == CrawlMode.HTML else None,
+            html=content if request.mode == CrawlMode.HTML else None,
             summary=summary,
             extracted_data=extracted_data,
             word_count=crawl_result.word_count,
@@ -211,6 +238,8 @@ class CrawlerService:
             cached=crawl_result.cached,
             error_message=crawl_result.error_message,
             links=links,
+            content_truncated=content_truncated,
+            chunks=chunks,
         )
 
     @staticmethod
@@ -266,7 +295,5 @@ class CrawlerService:
     @trace_layer("service")
     async def close(self) -> None:
         """Close all connections."""
-        if self._crawler:
-            await self._crawler.close()  # ty: ignore[unresolved-attribute]
         if self._rate_limiter:
             await self._rate_limiter.close()  # ty: ignore[unresolved-attribute]

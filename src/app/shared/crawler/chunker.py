@@ -18,7 +18,7 @@ class Chunk(BaseModel):
 
 def split_by_header(md: str, header_pattern: str) -> list[str]:
     """Split markdown by a specific header pattern."""
-    indices = [m.start() for m in re.finditer(header_pattern, md, re.MULTILINE)]
+    indices = [0, *(m.start() for m in re.finditer(header_pattern, md, re.MULTILINE))]
     indices.append(len(md))
     return [
         md[indices[i] : indices[i + 1]].strip()
@@ -38,10 +38,35 @@ def _chunk_recursive(sections: list[str], pattern: str, max_len: int) -> list[st
                 if len(subs) > 1:
                     result.extend(_chunk_recursive(subs, sub_pattern, max_len))
                     continue
-            result.extend(section[i : i + max_len].strip() for i in range(0, len(section), max_len))
+            result.extend(_split_text_by_length(section, max_len))
         else:
             result.append(section)
     return result
+
+
+def _split_text_by_length(text: str, max_len: int) -> list[str]:
+    """Split text on whitespace where possible, then hard-split long tokens."""
+    if len(text) <= max_len:
+        return [text.strip()]
+
+    pieces: list[str] = []
+    current = ""
+    for word in text.split():
+        if len(word) > max_len:
+            if current:
+                pieces.append(current.strip())
+                current = ""
+            pieces.extend(word[i : i + max_len] for i in range(0, len(word), max_len))
+            continue
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > max_len:
+            pieces.append(current.strip())
+            current = word
+        else:
+            current = candidate
+    if current:
+        pieces.append(current.strip())
+    return pieces
 
 
 def smart_chunk_markdown(markdown: str, max_len: int = 1000) -> list[Chunk]:
@@ -57,11 +82,21 @@ def smart_chunk_markdown(markdown: str, max_len: int = 1000) -> list[Chunk]:
     Returns:
         List of Chunk objects
     """
+    if max_len <= 0:
+        message = "max_len must be greater than zero"
+        raise ValueError(message)
+
     chunks = _chunk_recursive(split_by_header(markdown, r"^# .+$"), r"^# .+$", max_len)
 
     result_chunks = []
+    heading_context: list[str] = []
     for idx, text in enumerate([c for c in chunks if c]):
-        headers = extract_headers(text)
+        local_headers = re.findall(r"^(#+)\s+(.+)$", text, re.MULTILINE)
+        for hashes, title in local_headers:
+            level = len(hashes)
+            heading_context = heading_context[: level - 1]
+            heading_context.append(f"{hashes} {title.strip()}")
+        headers = "; ".join(heading_context)
         result_chunks.append(
             Chunk(
                 text=text,
@@ -83,14 +118,17 @@ def extract_headers(chunk: str) -> str:
 
 def truncate_content(content: str, max_length: int = 100000) -> str:
     """Truncate content to maximum length with warning."""
+    if max_length <= 0:
+        message = "max_length must be greater than zero"
+        raise ValueError(message)
+
     if len(content) <= max_length:
         return content
 
-    truncated = content[:max_length]
-    truncated += (
-        f"\n\n[Content truncated at {max_length} characters. Full content available upon request.]"
-    )
-    return truncated
+    marker = f"\n\n[Content truncated at {max_length} characters.]"
+    if len(marker) >= max_length:
+        return content[:max_length]
+    return content[: max_length - len(marker)] + marker
 
 
 def extract_title_from_markdown(markdown: str) -> str | None:
@@ -104,7 +142,6 @@ def extract_title_from_markdown(markdown: str) -> str | None:
 def clean_markdown(markdown: str) -> str:
     """Clean and normalize markdown content."""
     markdown = re.sub(r"\n{3,}", "\n\n", markdown)
-    markdown = re.sub(r" {2,}", " ", markdown)
     return markdown.strip()
 
 

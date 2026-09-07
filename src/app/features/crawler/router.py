@@ -2,8 +2,9 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 
+from app.config import get_settings
 from app.shared.result import render_result
 from app.shared.services import RateLimitScope
 from app.shared.services.rate_limiter import RateLimiter
@@ -38,10 +39,12 @@ def get_client_identifier(request: Request) -> str:
     would defeat that search.
     """
     forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
+    trusted_proxies = set(get_settings().FASTAPI_GUARD_TRUSTED_PROXIES)
+    client_host = request.client.host if request.client else "unknown"
+    if forwarded and client_host in trusted_proxies:
         return forwarded.split(",")[0].strip()
 
-    return request.client.host if request.client else "unknown"
+    return client_host
 
 
 @router.post(path="/crawl")
@@ -88,9 +91,9 @@ async def search_web(
     response: Response,
     service: Annotated[CrawlerService, Depends(get_crawler_service)],
     rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
-    query: str,
+    query: Annotated[str, Query(min_length=1, max_length=500)],
     *,
-    max_results: int = 10,
+    max_results: Annotated[int, Query(ge=1, le=20)] = 10,
     include_answer: bool = True,
 ) -> APIResponse[SearchResponse]:
     """

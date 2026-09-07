@@ -1,7 +1,9 @@
 """URL validation and SSRF protection for crawler."""
 
+import asyncio
 import ipaddress
 import re
+import socket
 from urllib.parse import urlparse
 
 PRIVATE_IP_RANGES = [
@@ -55,7 +57,7 @@ def is_private_ip(ip_str: str) -> bool:
     return False
 
 
-def validate_url(url: str) -> tuple[bool, str]:
+def validate_url(url: str) -> tuple[bool, str]:  # noqa: PLR0912
     """
     Validate URL for security (SSRF protection).
 
@@ -83,7 +85,9 @@ def validate_url(url: str) -> tuple[bool, str]:
     if not hostname:
         return False, "Invalid hostname"
 
-    hostname = hostname.lower()
+    hostname = hostname.lower().rstrip(".")
+    if parsed.username is not None or parsed.password is not None:
+        return False, "URLs with embedded credentials are not allowed"
     if hostname in BLOCKED_DOMAINS:
         return False, f"Domain '{hostname}' is not allowed"
 
@@ -94,9 +98,56 @@ def validate_url(url: str) -> tuple[bool, str]:
     if parsed.hostname is not None and is_private_ip(parsed.hostname):
         return False, f"Private IP addresses are not allowed: {parsed.hostname}"
 
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError:
+        return False, "Invalid port"
     if port and port in {22, 23, 25, 3306, 5432, 6379, 27017, 11211}:
         return False, f"Port {port} is not allowed for security reasons"
+
+    return True, ""
+
+
+async def validate_url_for_fetch(url: str) -> tuple[bool, str]:
+    """Validate a URL and all addresses returned by DNS before navigation."""
+    valid, message = validate_url(url)
+    if not valid:
+        return valid, message
+
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if hostname is None:
+        return False, "Invalid hostname"
+
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        addresses = await asyncio.to_thread(
+            socket.getaddrinfo,
+            hostname,
+            port,
+            type=socket.SOCK_STREAM,
+        )
+    except (OSError, ValueError):
+        return False, "Unable to resolve hostname"
+
+    for address in addresses:
+        ip_text = str(address[4][0])
+        try:
+            ip = ipaddress.ip_address(ip_text)
+        except ValueError:
+            return False, "Hostname resolved to an invalid address"
+        is_non_public = is_private_ip(ip_text) or any(
+            (
+                ip.is_private,
+                ip.is_loopback,
+                ip.is_link_local,
+                ip.is_multicast,
+                ip.is_reserved,
+                ip.is_unspecified,
+            )
+        )
+        if is_non_public:
+            return False, f"Hostname resolves to a private address: {ip_text}"
 
     return True, ""
 

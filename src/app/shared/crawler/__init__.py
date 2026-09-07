@@ -21,6 +21,7 @@ from .validator import (
     is_valid_url,
     sanitize_url,
     validate_url,
+    validate_url_for_fetch,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "smart_chunk_markdown",
     "truncate_content",
     "validate_url",
+    "validate_url_for_fetch",
 ]

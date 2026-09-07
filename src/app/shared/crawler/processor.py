@@ -1,5 +1,6 @@
 """Gemini processing for content extraction and summarization."""
 
+import asyncio
 import json
 from enum import StrEnum
 from typing import Any
@@ -162,7 +163,7 @@ class GeminiProcessor:
 
             Summary:"""
 
-            response = self.model.invoke(prompt)
+            response = await self._ainvoke(prompt)
             summary = _response_text(response)
 
             return ExtractionResult(
@@ -198,14 +199,25 @@ class GeminiProcessor:
         schema, _schema_name = schema_result.unwrap()
 
         try:
-            return self._do_extract_structured(content, schema)
+            return await self._do_extract_structured(content, schema)
         except Exception as e:  # noqa: BLE001 - DTO boundary preserves crawler error contract.
             return ExtractionResult(
                 success=False,
                 error=str(e),
             )
 
-    def _do_extract_structured(self, content: str, schema: dict[str, Any]) -> ExtractionResult:
+    async def _ainvoke(self, prompt: str) -> object:
+        """Invoke the model without blocking the event loop."""
+        ainvoke = getattr(self.model, "ainvoke", None)
+        if ainvoke is not None:
+            return await ainvoke(prompt)
+        return await asyncio.to_thread(self.model.invoke, prompt)
+
+    async def _do_extract_structured(
+        self,
+        content: str,
+        schema: dict[str, Any],
+    ) -> ExtractionResult:
         schema_json = json.dumps(schema, indent=2)
         prompt = f"""You are a data extraction assistant. Extract information from the
         following content and format it as JSON according to the provided schema.
@@ -218,7 +230,7 @@ class GeminiProcessor:
 
         Output ONLY valid JSON, no other text. If a field cannot be found, use null.
         JSON:"""
-        response = self.model.invoke(prompt)
+        response = await self._ainvoke(prompt)
         response_text = _response_text(response)
         extraction_result = _parse_extraction_json(response_text)
         if isinstance(extraction_result, Failure):
