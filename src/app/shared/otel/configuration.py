@@ -1,7 +1,8 @@
 """Single observability policy and OpenTelemetry exporter helpers."""
 
-from dataclasses import dataclass
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 
 def exporter_enabled(exporter: str) -> bool:
@@ -9,9 +10,10 @@ def exporter_enabled(exporter: str) -> bool:
     return exporter.strip().lower() not in {"", "none"}
 
 
-@dataclass(frozen=True, slots=True)
-class ObservabilityPolicy:
+class ObservabilityPolicy(BaseModel):
     """Immutable process-wide observability policy derived from Settings."""
+
+    model_config = ConfigDict(frozen=True)
 
     log_level: str
     structured: bool
