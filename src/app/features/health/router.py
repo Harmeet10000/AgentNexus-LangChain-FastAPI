@@ -34,8 +34,9 @@ deep_health_router = APIRouter(tags=["Monitoring"])
 async def get_deep_health(request: Request, response: Response) -> APIResponse[HealthResponse]:
     """Deep health check that probes all critical dependencies in parallel."""
     settings = get_settings()
+    app = request.app
     results: list[DependencyHealth | BaseException] = await asyncio.gather(
-        *[probe(request.app) for probe in ALL_PROBES],
+        *[probe(app) for probe in ALL_PROBES],
         return_exceptions=True,
     )
     dependencies: list[DependencyHealth] = []

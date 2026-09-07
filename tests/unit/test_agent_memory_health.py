@@ -11,6 +11,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+from app.features.health.dependencies import get_health_service
 from app.features.health.health_check import check_cognee
 
 if TYPE_CHECKING:
@@ -125,6 +126,29 @@ async def test_health_keeps_its_own_503_status_for_required_probe_failure() -> N
     assert result.status_code == 503
     assert result.data is not None
     assert result.data.status == "unhealthy"
+
+
+def test_health_service_factory_reads_clients_from_app_state() -> None:
+    state = _FakeState(
+        mongo_client=object(),
+        redis=object(),
+        db_session_local=object(),
+        neo4j_driver=object(),
+        celery=object(),
+        graphiti=object(),
+        cognee_config=object(),
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=state))
+
+    service = get_health_service(request)
+
+    assert service.mongo_client is state.mongo_client
+    assert service.redis_client is state.redis
+    assert service.postgres_session_factory is state.db_session_local
+    assert service.neo4j_driver is state.neo4j_driver
+    assert service.celery_app is state.celery
+    assert service.graph_memory_client is state.graphiti
+    assert service.cognee_config is state.cognee_config
 
 
 async def test_both_surfaces_agree_for_the_same_state() -> None:

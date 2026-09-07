@@ -1,68 +1,19 @@
 """Dependency wiring for health feature."""
 
-from typing import Any
+from fastapi import Request
 
-from celery import Celery
-from fastapi import Depends, Request
-from motor.motor_asyncio import AsyncIOMotorClient
-from neo4j import AsyncDriver
-from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-from app.shared.langchain_layer.agents.memory.cognee_client import CogneeSetupConfig
-
-from .service import GraphMemoryClient, HealthService
+from .service import HealthService
 
 
-def get_health_mongodb_client(request: Request) -> AsyncIOMotorClient[Any] | None:
-    return getattr(request.app.state, "mongo_client", None)
-
-
-def get_health_redis_client(request: Request) -> Redis | None:
-    return getattr(request.app.state, "redis", None)
-
-
-def get_health_postgres_session_factory(
-    request: Request,
-) -> async_sessionmaker[AsyncSession] | None:
-    return getattr(request.app.state, "db_session_local", None)
-
-
-def get_health_neo4j_driver(request: Request) -> AsyncDriver | None:
-    return getattr(request.app.state, "neo4j_driver", None)
-
-
-def get_health_celery_app(request: Request) -> Celery | None:
-    return getattr(request.app.state, "celery", None)
-
-
-def get_health_graph_memory_client(request: Request) -> GraphMemoryClient | None:
-    """Resolve the graph-memory client, which startup publishes as ``None`` on failure."""
-    return getattr(request.app.state, "graphiti", None)
-
-
-def get_health_cognee_config(request: Request) -> CogneeSetupConfig | None:
-    return getattr(request.app.state, "cognee_config", None)
-
-
-def get_health_service(
-    mongo_client: AsyncIOMotorClient[Any] | None = Depends(get_health_mongodb_client),
-    redis_client: Redis | None = Depends(get_health_redis_client),
-    postgres_session_factory: async_sessionmaker[AsyncSession] | None = Depends(
-        get_health_postgres_session_factory
-    ),
-    neo4j_driver: AsyncDriver | None = Depends(get_health_neo4j_driver),
-    celery_app: Celery | None = Depends(get_health_celery_app),
-    *,
-    graph_memory_client: GraphMemoryClient | None = Depends(get_health_graph_memory_client),
-    cognee_config: CogneeSetupConfig | None = Depends(get_health_cognee_config),
-) -> HealthService:
+def get_health_service(request: Request) -> HealthService:
+    """Build the health service from resources initialized during application startup."""
+    state = request.app.state
     return HealthService(
-        mongo_client=mongo_client,
-        redis_client=redis_client,
-        postgres_session_factory=postgres_session_factory,
-        neo4j_driver=neo4j_driver,
-        celery_app=celery_app,
-        graph_memory_client=graph_memory_client,
-        cognee_config=cognee_config,
+        mongo_client=getattr(state, "mongo_client", None),
+        redis_client=getattr(state, "redis", None),
+        postgres_session_factory=getattr(state, "db_session_local", None),
+        neo4j_driver=getattr(state, "neo4j_driver", None),
+        celery_app=getattr(state, "celery", None),
+        graph_memory_client=getattr(state, "graphiti", None),
+        cognee_config=getattr(state, "cognee_config", None),
     )
