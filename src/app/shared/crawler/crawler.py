@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from typing import TYPE_CHECKING, Any, Protocol, cast  # noqa: TC003
 
 import httpx
@@ -31,7 +33,12 @@ from app.utils import logger
 from .chunker import truncate_content
 from .config import get_crawler_config
 from .errors import CrawlerProviderError
-from .validator import sanitize_url, validate_url_for_fetch
+from .validator import (
+    sanitize_url,
+    validate_browser_result_urls,
+    validate_navigation_destination,
+    validate_url_for_fetch,
+)
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -50,6 +57,14 @@ class CrawlerBrowser(Protocol):
     async def arun_many(
         self, *, urls: list[str], config: CrawlerRunConfig, dispatcher: Any
     ) -> Any: ...
+
+
+def _crawl4ai_version() -> str:
+    """Return the installed Crawl4AI version for cache-key isolation."""
+    try:
+        return _pkg_version("crawl4ai")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 class CrawlResult(BaseModel):
@@ -94,6 +109,7 @@ class WebCrawler:
         cache_material = "|".join(
             (
                 self.config.cache_version,
+                _crawl4ai_version(),
                 url,
                 self.config.user_agent,
                 str(self.config.word_count_threshold),
@@ -329,14 +345,36 @@ class WebCrawler:
         *,
         use_proxy: bool = False,
     ) -> CrawlerProcessingResult[CrawlResult]:
+        # Browser-level network policy: the browser determines the real
+        # destination via DNS + redirects + subresource fetches, not the seed
+        # string. Enforce the policy on every browser-reported URL, with DNS
+        # revalidation, and fail closed. This narrows (but does not fully
+        # eliminate) DNS-rebinding windows; egress firewalling remains the
+        # outer defense layer.
+        allowed, denial = validate_browser_result_urls(result)
+        if not allowed:
+            return Failure(CrawlerProviderError(message=denial, url=url))
         final_url = sanitize_url(str(getattr(result, "url", url) or url))
-        if final_url != url:
-            valid, validation_error = await validate_url_for_fetch(final_url)
+        valid, validation_error = await validate_navigation_destination(
+            final_url, phase="post-navigation"
+        )
+        if not valid:
+            return Failure(
+                CrawlerProviderError(
+                    message=validation_error or "Redirect destination is not allowed",
+                    url=final_url,
+                )
+            )
+        redirected = getattr(result, "redirected_url", None)
+        if isinstance(redirected, str) and redirected:
+            valid, validation_error = await validate_navigation_destination(
+                sanitize_url(redirected), phase="post-navigation redirect"
+            )
             if not valid:
                 return Failure(
                     CrawlerProviderError(
                         message=validation_error or "Redirect destination is not allowed",
-                        url=final_url,
+                        url=redirected,
                     )
                 )
         crawl_result = self._bound_result(self._to_crawl_result(result, start_time))
@@ -440,17 +478,7 @@ class WebCrawler:
         results: list[CrawlResult] = []
         for raw_result in cast("list[Any]", crawl_results):
             result = self._bound_result(self._to_crawl_result(raw_result, start_time))
-            if result.success and result.url:
-                valid, validation_error = await validate_url_for_fetch(result.url)
-                if not valid:
-                    result = result.model_copy(
-                        update={
-                            "success": False,
-                            "error_message": validation_error
-                            or "Redirect destination is not allowed",
-                        }
-                    )
-            results.append(result)
+            results.append(await self._enforce_post_navigation_policy(raw_result, result))
         if self.config.url_patterns:
             results = [
                 result
@@ -462,6 +490,38 @@ class WebCrawler:
                 if result.success:
                     await self._save_to_cache(result.url, result, use_proxy=use_proxy)
         return Success(results)
+
+    @staticmethod
+    async def _enforce_post_navigation_policy(raw_result: Any, result: CrawlResult) -> CrawlResult:
+        """Fail closed when browser-reported URLs violate the network policy."""
+        if not (result.success and result.url):
+            return result
+        allowed, denial = validate_browser_result_urls(raw_result)
+        if not allowed:
+            return result.model_copy(update={"success": False, "error_message": denial})
+        valid, validation_error = await validate_navigation_destination(
+            sanitize_url(result.url), phase="post-navigation"
+        )
+        if not valid:
+            return result.model_copy(
+                update={
+                    "success": False,
+                    "error_message": validation_error or "Redirect destination is not allowed",
+                }
+            )
+        redirected = getattr(raw_result, "redirected_url", None)
+        if isinstance(redirected, str) and redirected:
+            valid, validation_error = await validate_navigation_destination(
+                sanitize_url(redirected), phase="post-navigation redirect"
+            )
+            if not valid:
+                return result.model_copy(
+                    update={
+                        "success": False,
+                        "error_message": validation_error or "Redirect destination is not allowed",
+                    }
+                )
+        return result
 
     def _bound_result(self, result: CrawlResult) -> CrawlResult:
         """Apply the process-level content and link limits before caching."""

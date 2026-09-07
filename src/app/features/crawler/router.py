@@ -57,7 +57,7 @@ def get_client_identifier(request: Request) -> str:
 
 def _is_trusted_proxy(host: str, trusted_proxies: list[str]) -> bool:
     try:
-        address = ipaddress.ip_address(host)
+        address: ipaddress.IPv4Address | ipaddress.IPv6Address = ipaddress.ip_address(host)
     except ValueError:
         return False
     for configured in trusted_proxies:

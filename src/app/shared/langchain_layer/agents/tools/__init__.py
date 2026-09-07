@@ -2,6 +2,15 @@
 
 from .base import ToolRegistry
 from .crawl import CrawlUrlTool, get_crawl_url_tool
+from .crawl_jobs import (
+    CrawlCancelTool,
+    CrawlGetChunkTool,
+    CrawlGetPageTool,
+    CrawlSearchChunksTool,
+    CrawlStartTool,
+    CrawlStatusTool,
+    get_crawl_job_tools,
+)
 from .get_obligation_chain import make_get_obligation_chain_tool
 from .idempotency import IdempotencyGuard, ToolResult
 from .query_knowledge_graph import make_query_knowledge_graph_tool
@@ -16,12 +25,19 @@ from .search_legal_precedents import make_search_legal_precedents_tool
 from .web_search import WebSearchTool, get_web_search_tool
 
 __all__ = [
+    "CrawlCancelTool",
+    "CrawlGetChunkTool",
+    "CrawlGetPageTool",
+    "CrawlSearchChunksTool",
+    "CrawlStartTool",
+    "CrawlStatusTool",
     "CrawlUrlTool",
     "IdempotencyGuard",
     "ToolRegistry",
     "ToolResult",
     "WebSearchTool",
     "get_all_tools",
+    "get_crawl_job_tools",
     "get_crawl_url_tool",
     "get_tool_registry",
     "get_web_search_tool",

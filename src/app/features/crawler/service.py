@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from redis.asyncio import Redis
@@ -32,6 +32,9 @@ from .dto import (
     SearchResultItem,
 )
 from .errors import CrawlerCrawlError, CrawlerResult, CrawlerSearchError, CrawlerValidationError
+
+if TYPE_CHECKING:
+    from app.shared.crawler.processor import SchemaType
 
 
 class CrawlerService:
@@ -131,7 +134,7 @@ class CrawlerService:
                         bypass_cache=request.bypass_cache,
                     )
         except TimeoutError:
-            return Failure(CrawlerCrawlError(message="Crawl operation timed out"))
+            return Failure(inner_value=CrawlerCrawlError(message="Crawl operation timed out"))
         if isinstance(crawl_result, Failure):
             error = crawl_result.failure()
             return Failure(CrawlerCrawlError(message=error.message, details=error.details))
@@ -145,7 +148,7 @@ class CrawlerService:
 
         remaining_output = request.max_total_output_chars
         for crawl_result in crawl_results:
-            item = await self._process_crawl_result(
+            item: CrawlResultItem = await self._process_crawl_result(
                 crawl_result,
                 request,
                 output_budget=max(0, min(request.max_output_chars, remaining_output)),
@@ -163,7 +166,7 @@ class CrawlerService:
         processing_time_ms = int((time.monotonic() - start_time) * 1000)
 
         return Success(
-            CrawlResponse(
+            inner_value=CrawlResponse(
                 success=failed_pages == 0,
                 crawl_id=crawl_id,
                 query_url=request.url,
@@ -199,7 +202,7 @@ class CrawlerService:
             if request.extract_structured:
                 schema_type = None
                 if request.schema_type:
-                    schema_type = ProcessorSchemaType(request.schema_type.value)
+                    schema_type: SchemaType = ProcessorSchemaType(request.schema_type.value)
 
                 extraction_result = await self.processor.extract_structured(
                     content=markdown,
@@ -312,7 +315,7 @@ class CrawlerService:
         ]
 
         return Success(
-            SearchResponse(
+            inner_value=SearchResponse(
                 success=True,
                 query=request.query,
                 answer=tavily_response.answer,
@@ -321,7 +324,7 @@ class CrawlerService:
             )
         )
 
-    @trace_layer("service")
+    @trace_layer(layer_name="service")
     async def close(self) -> None:
         """Close all connections."""
         if self._rate_limiter:

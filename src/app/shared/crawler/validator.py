@@ -131,11 +131,25 @@ def validate_url(url: str) -> tuple[bool, str]:  # noqa: PLR0912
 
 async def validate_url_for_fetch(url: str) -> tuple[bool, str]:
     """Validate a URL and all addresses returned by DNS before navigation."""
+    return await validate_navigation_destination(url, phase="pre-navigation")
+
+
+async def validate_navigation_destination(url: str, *, phase: str) -> tuple[bool, str]:
+    """Enforce the browser network policy before and after navigation.
+
+    Pre-navigation DNS validation cannot close DNS rebinding on its own: the
+    browser resolves the hostname again at connection time. Callers must
+    therefore invoke this helper for the seed URL *and* for the final
+    browser-reported URL (including any ``redirected_url``). Post-navigation
+    failures are treated as denials, not as retryable crawl errors.
+    """
     valid, message = validate_url(url)
     if not valid:
         return valid, message
 
     parsed = urlparse(sanitize_url(url))
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return False, f"Browser navigation blocked during {phase}: unsupported scheme"
     hostname = parsed.hostname
     if hostname is None:
         return False, "Invalid hostname"
@@ -170,6 +184,34 @@ async def validate_url_for_fetch(url: str) -> tuple[bool, str]:
         if is_non_public:
             return False, f"Hostname resolves to a private address: {ip_text}"
 
+    return True, ""
+
+
+def validate_browser_result_urls(
+    result: object,
+) -> tuple[bool, str]:
+    """Validate every URL the browser reports after navigation.
+
+    Crawl4AI exposes the final navigation target as ``result.url`` and, when a
+    redirect occurred, as ``result.redirected_url``. Both must satisfy the
+    network policy synchronously (scheme + string policy); DNS revalidation
+    happens in the async caller via :func:`validate_navigation_destination`.
+    """
+    candidates: list[str] = []
+    for attr in ("url", "redirected_url"):
+        value = getattr(result, attr, None)
+        if isinstance(value, str) and value:
+            candidates.append(value)
+    for candidate in candidates:
+        valid, message = validate_url(candidate)
+        if not valid:
+            return False, f"Browser navigation destination is not allowed: {message}"
+        try:
+            scheme = urlparse(sanitize_url(candidate)).scheme.lower()
+        except ValueError:
+            return False, "Browser navigation destination is not allowed: invalid URL"
+        if scheme not in {"http", "https"}:
+            return False, "Browser navigation destination is not allowed: unsupported scheme"
     return True, ""
 
 

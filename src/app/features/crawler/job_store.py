@@ -159,7 +159,7 @@ class CrawlJobStore:
         )
 
     async def request_cancel(self, crawl_id: str, *, owner: str) -> CrawlJob | None:
-        job = await self.get(crawl_id, owner=owner)
+        job: CrawlJob | None = await self.get(crawl_id, owner=owner)
         if job is None or job.status in {
             CrawlJobStatus.COMPLETED,
             CrawlJobStatus.PARTIAL,
