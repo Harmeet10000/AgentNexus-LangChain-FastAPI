@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 8 · Senior Anti-Patterns</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="lesson-kicker">Software Testing · Lesson 8 of 9</p>
+<h1>Senior Anti-Patterns</h1>
+<p class="byline">≈10 minutes · Prerequisites: <a href="0001-why-we-test.html">L1</a>–<a href="0007-what-not-to-test.html">L7</a> · Next: Tests for Customer-Facing Products (lesson 9)</p>
+
+<p>Suites rarely die from one bad decision. They die from six small habits compounding. Recognizing these by name — in code review, in your own PRs — is a large share of what "senior" means in testing.</p>
+
+<h2>1. Flaky tests tolerated</h2>
+
+<p>Lesson 5's rule bears repeating because teams violate it under pressure: <strong>flaky = broken</strong>. The corrosive habit is the auto-retry wrapper that re-runs failures until green.</p>
+
+<div class="callout callout--warn">Auto-retry doesn't heal flakiness — it launders it. Real nondeterminism (races, ordering, leaked state) stays in the product while the suite stops reporting it [R4]. Retry only as a temporary quarantine measure, never as policy.</div>
+
+<p>Usual root causes, in frequency order: shared mutable state between tests, timing assumptions (<code>sleep(2)</code> instead of waiting on a condition), and uncontrolled externals (clocks, random data, live third parties).</p>
+
+<h2>2. Assertion roulette</h2>
+
+<p>A test fails and the message says <code>assert False was not True</code> — or there are seven bare asserts and no way to know which one tripped. Failures must be self-explaining:</p>
+
+<pre><code># ❌ roulette — which of these failed?
+assert result.total == 90
+assert result.status == "pending"
+assert len(result.items) == 3
+
+# ✅ messages carry the diagnosis
+assert result.total == 90, f"loyal discount wrong: got {result.total}"</code></pre>
+
+<p>This compounds with Lesson 5's diagnosability principle: every test failure should read like a bug report someone already wrote for you.</p>
+
+<h2>3. Mystery guest</h2>
+
+<p>The test's behavior depends on fixtures or state defined somewhere else entirely — a base class three files up, an external seed file, leftover database rows. You can't understand the test without an archaeology dig. Tests should be legible top-to-bottom; share machinery via helpers, but keep each test's <em>inputs visible in its own body</em>.</p>
+
+<h2>4. Logic inside tests</h2>
+
+<p>Recap sharpened: loops, conditionals, and string-building inside tests mean the test itself can be buggy. Google's guidance is blunt — don't put logic in tests [R4]. If a test needs branching to compute expectations, the expected values belong in explicit constants.</p>
+
+<h2>5. Over-DRY test code</h2>
+
+<p>The counterintuitive one. Production code prizes DRY (Don't Repeat Yourself); test code pays differently. Burying Arrange/Act inside five layers of clever helpers recreates Mystery Guest at scale:</p>
+
+<table>
+  <tr><th>Production value</th><th>Test value</th></tr>
+  <tr><td>No duplication</td><td>Some duplication is fine — clarity beats brevity</td></tr>
+  <tr><td>Abstraction hides detail</td><td>The whole test should be readable in one glance</td></tr>
+  <tr><td>Change once, everywhere</td><td>Each test readable standalone beats global cleverness</td></tr>
+</table>
+
+<p>Khorikov calls this out explicitly: refactor test code toward readability, not toward reuse [R1]. Extract only genuinely repeated, boring setup — and stop there.</p>
+
+<h2>6. Erasing the red</h2>
+
+<p>A test fails; a developer "fixes" it by deleting an assert or loosening an expectation until green — without understanding why it failed. Every silent erasure converts a safety sensor into decoration. The senior norm: a red test gets explained (real bug → fix code; outdated expectation → consciously update with justification in the commit message) before anyone touches the test file.</p>
+
+<h2>The pattern underneath all six</h2>
+
+<div class="callout callout--key">Every anti-pattern here trades <strong>long-term signal</strong> for <strong>short-term convenience</strong>: retries hide nondeterminism, erasures hide regressions, cleverness hides context. Seniors protect the suite's credibility like production uptime — because functionally, that's what it is.</div>
+
+<div id="quiz1" class="quiz"></div>
+
+<h2>Your primary source this week</h2>
+
+<p><a href="https://abseil.io/resources/swe-book/html/ch14.html"><em>Software Engineering at Google</em>, ch. 14</a> on larger-testing pitfalls and flake management at scale [R4], plus Khorikov ch. 7's anti-pattern catalog [R1]. For the named patterns (roulette, mystery guest): Meszaros' <em>xUnit Test Patterns</em> remains the canonical reference.</p>
+
+<div class="callout callout--good"><strong>Teacher reminder:</strong> try spotting one of these six in any public open-source repo's test folder this week and bring me your find — pattern-spotting on unfamiliar code is exactly the senior skill we're building.</div>
+
+<nav class="footer-nav">
+  <span>Final session: <strong>Tests for Customer-Facing Products</strong></span>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../reference/test-pyramid-cheatsheet.html">Pyramid cheat sheet</a>
+  <a href="0007-what-not-to-test.html">← Lesson 7</a>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.render("quiz1", {
+  questions: [
+    {
+      prompt: "[Review · Lesson 5] An E2E journey test intermittently fails on identical code. First response:",
+      options: [
+        "Quarantine immediately and investigate the cause",
+        "Wrap retries around it until flakes stop mattering",
+        "Increase all sleep durations throughout the journey",
+        "Delete it since intermittent signals carry no meaning"
+      ],
+      correct: 0,
+      explain: "Quarantine protects suite trust while the root cause — usually shared state, sleeps-as-synchronization, or uncontrolled externals — gets genuinely fixed."
+    },
+    {
+      prompt: "Auto-retrying flaky tests until they pass is harmful because it…",
+      options: [
+        "Hides genuine nondeterminism from getting fixed",
+        "Consumes excessive computing resources across teams",
+        "Prevents coverage percentages from ever improving",
+        "Breaks the framework's parallel execution guarantees"
+      ],
+      correct: 0,
+      explain: "Retries convert a signal into noise. The race or leak still exists — in the suite AND likely the product — but nothing reports it anymore."
+    },
+    {
+      prompt: "Assertion roulette describes test failures that…",
+      options: [
+        "Leave unclear which assertion actually failed",
+        "Appear only during full-suite continuous integration",
+        "Vanish after restarting the developer workstation",
+        "Alternate randomly between passing and failing states"
+      ],
+      correct: 0,
+      explain: "Multiple bare asserts without messages make failures undiagnosable. Each assertion should carry a message explaining the broken promise."
+    },
+    {
+      prompt: "The 'mystery guest' anti-pattern appears when tests depend on…",
+      options: [
+        "State configured somewhere far outside themselves",
+        "Unreleased features hidden behind feature flags",
+        "Customer data accidentally copied into test systems",
+        "Third-party APIs lacking deterministic sandbox modes"
+      ],
+      correct: 0,
+      explain: "If reading the test top-to-bottom doesn't reveal its inputs — base-class magic, external seeds, leftover rows — comprehension requires archaeology. Keep inputs in the test body."
+    },
+    {
+      prompt: "[Review · Lesson 7] The healthy role of a coverage report:",
+      options: [
+        "Spotting risky modules sitting near zero percent",
+        "Certifying release readiness through numeric thresholds",
+        "Enforcing identical minimums across all module types",
+        "Comparing individual developers' testing productivity"
+      ],
+      correct: 0,
+      explain: "Coverage as detector finds blind spots; coverage as target breeds hollow assertions chasing the metric. Direction of use determines whether it helps or harms."
+    }
+  ]
+});
+</script>
+
+</body>
+</html>

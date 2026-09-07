@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 4 · Integration Tests</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="lesson-kicker">Software Testing · Lesson 4 of 9</p>
+<h1>Integration Tests: Real Boundaries</h1>
+<p class="byline">≈10 minutes · Prerequisites: <a href="0001-why-we-test.html">L1</a>–<a href="0003-test-doubles-stubs-mocks-fakes.html">L3</a> · Next: E2E Tests (lesson 5)</p>
+
+<p>Your unit tests are green. The customer signs up and… the order never saves, because your ORM mapping and your schema disagree. Every component passed in isolation; the <em>seams</em> were never checked. Integration tests exist for the seams.</p>
+
+<h2>The definition that matters</h2>
+
+<blockquote>An integration test verifies that multiple components work together across a <strong>real boundary</strong>: a database, a message queue, the file system, another service.<cite>— after Vocke, <a href="https://martinfowler.com/articles/practical-test-pyramid.html"><em>The Practical Test Pyramid</em></a>, §Integration Tests (R2)</cite></blockquote>
+
+<p>The dividing line from Lesson 3 sharpens here:</p>
+
+<table>
+  <tr><th>Ask yourself…</th><th>If yes →</th></tr>
+  <tr><td>Does execution leave my process? (DB, network, disk)</td><td>Integration test against the real thing</td></tr>
+  <tr><td>Is everything in-process and controllable?</td><td>Unit test (double whatever's slow)</td></tr>
+</table>
+
+<div class="callout callout--key"><strong>Why this layer is special:</strong> Kent C. Dodds argues integration tests give the best confidence-per-millisecond of any kind — they check that things work <em>together</em> without paying full E2E costs [R3]. Many senior teams weight their suites toward this layer.</div>
+
+<h2>The two classic shapes</h2>
+
+<h3>1. Database-backed tests</h3>
+
+<pre><code>test "saves an order and finds it again":
+    db = start_test_database()          # real DB — container or embedded
+    repo = OrderRepository(db)
+    repo.save(order)                    # Act 1
+    loaded = repo.find(order.id)        # Act 2
+    assert loaded.status == "pending"</code></pre>
+
+<ul>
+  <li><strong>Use the real engine when you can.</strong> An in-memory fake can't reveal that your SQL uses a Postgres-only feature. Containers (Docker) made spinning up a real database per test run cheap [R2].</li>
+  <li><strong>Fakes are acceptable</strong> when the real thing is too heavy and you own the abstraction — but you inherit the risk of drift from reality.</li>
+  <li><strong>Determinism discipline:</strong> seed known data, reset state between tests (transaction rollback or re-seeding), never let tests depend on execution order.</li>
+</ul>
+
+<h3>2. API-level tests</h3>
+
+<pre><code>test "POST /orders returns 201 and persists":
+    app = start_application(test_config)
+    response = http_post(app, "/orders", payload=valid_order_json)
+
+    assert response.status == 201
+    assert db_has_order(id=response.body.id)</code></pre>
+
+<p>This drives a real HTTP request through routing, validation, handlers, persistence — the whole request path minus the network itself. Assert on what a client observes: <strong>status codes and response bodies</strong>. This shape is the workhorse of backend teams.</p>
+
+<h2>The trade-offs you accept</h2>
+
+<table>
+  <tr><th>Cost</th><th>Mitigation</th></tr>
+  <tr><td>Slower (seconds, not milliseconds)</td><td>Keep counts moderate; run in parallel with isolated databases</td></tr>
+  <tr><td>More setup/teardown machinery</td><td>Invest in fixtures/helpers once; reuse everywhere</td></tr>
+  <tr><td>Flakiness risk</td><td>No sleeps, no ordering assumptions, fresh state per test</td></tr>
+</table>
+
+<p>Notice what's <em>not</em> on the cost list: "uncertainty about what to assert." That stays exactly as it was in Lessons 1–2 — observable outcomes through public surfaces. Only the scope widened.</p>
+
+<div id="quiz1" class="quiz"></div>
+
+<h2>Your primary source this week</h2>
+
+<p>Vocke, <a href="https://martinfowler.com/articles/practical-test-pyramid.html#IntegrationTests"><em>The Practical Test Pyramid</em>, §Integration Tests</a> — includes working examples of database and contract testing [R2]. Then read Dodds' short manifesto <a href="https://kentcdodds.com/blog/write-tests"><em>Write tests. Not too many. Mostly integration.</em></a> to see why many seniors invert the pyramid's emphasis [R3].</p>
+
+<div class="callout callout--good"><strong>Teacher reminder:</strong> if the phrase "assert on outcomes, not choreography" now feels obvious — good, that's storage strength forming. Ask me anything that isn't obvious yet.</div>
+
+<nav class="footer-nav">
+  <span>Next session: <strong>E2E Tests — few, slow, critical paths</strong></span>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../reference/test-pyramid-cheatsheet.html">Pyramid cheat sheet</a>
+  <a href="0003-test-doubles-stubs-mocks-fakes.html">← Lesson 3</a>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.render("quiz1", {
+  questions: [
+    {
+      prompt: "[Review · Lesson 3] Covering a third-party payment API's failure path, your best tool:",
+      options: [
+        "A stub returning canned failure responses",
+        "A live account deliberately holding zero funds",
+        "Removing the failure branch from consideration",
+        "A mock verifying internal retry loop call counts"
+      ],
+      correct: 0,
+      explain: "Stubs summon hard-to-trigger states deterministically. Live accounts are slow and nondeterministic; deleting untested branches hides production risk."
+    },
+    {
+      prompt: "[Review · Lesson 3] Mocking YOUR OWN internal classes is brittle because tests end up…",
+      options: [
+        "Verifying implementation instead of behavior",
+        "Running too slowly for continuous integration",
+        "Requiring real databases for every assertion",
+        "Losing access to the framework's spy features"
+      ],
+      correct: 0,
+      explain: "Expectations about internal calls shatter under refactoring even when behavior is preserved — the tests block the exact change-confidence they were built to provide."
+    },
+    {
+      prompt: "An integration test properly differs from a unit test because it…",
+      options: [
+        "Crosses at least one real process boundary",
+        "Uses more mocking frameworks within its fixtures",
+        "Asserts exclusively on logged output text lines",
+        "Runs only during nightly scheduled pipeline windows"
+      ],
+      correct: 0,
+      explain: "The defining trait is a genuine dependency: real database, real queue, real service. Speed alone doesn't define the category — scope does."
+    },
+    {
+      prompt: "Keeping integration tests deterministic over one shared database:",
+      options: [
+        "Seed known data and reset state between runs",
+        "Insert random delays until races stop appearing",
+        "Allow natural ordering since databases handle it",
+        "Share one long-lived dataset mutated by all tests"
+      ],
+      correct: 0,
+      explain: "Determinism comes from controlled state: seed, run, reset. Sleeps mask races instead of removing them; shared mutable datasets create order dependencies."
+    },
+    {
+      prompt: "[Review · Testing Trophy] The layer many seniors weight most heavily:",
+      options: [
+        "Integration tests exercising mostly-real components",
+        "Unit tests reaching into every private helper",
+        "Manual exploratory sessions before each release",
+        "End-to-end journeys replayed inside production"
+      ],
+      correct: 0,
+      explain: "Dodds' trophy puts integration at its center: near-E2E confidence at near-unit speed. Unit tests remain plentiful but narrow; E2E stays small."
+    }
+  ]
+});
+</script>
+
+</body>
+</html>

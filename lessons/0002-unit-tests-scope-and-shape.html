@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 2 · Unit Tests — Scope and Shape</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="lesson-kicker">Software Testing · Lesson 2 of 9</p>
+<h1>Unit Tests: Scope and Shape</h1>
+<p class="byline">≈10 minutes · Prerequisites: <a href="0001-why-we-test.html">Lesson 1</a> · Next: Test Doubles (lesson 3)</p>
+
+<p>Unit tests are the foundation of every pyramid — the layer you'll write most. Get their <em>scope</em> wrong here and the whole suite rots. Two ideas carry this lesson: what a "unit" actually is, and the shape every unit test shares.</p>
+
+<h2>The unit is a <em>behavior</em>, not a class</h2>
+
+<p>Beginners define a unit test as "a test of one class or one function." That definition quietly produces terrible suites: tests get glued to internal structure, then break on every refactor.</p>
+
+<blockquote>A unit under test is a <strong>unit of behavior</strong> — an observable outcome that matters to someone using the code. It might span one function, or several classes collaborating.<cite>— Khorikov, <a href="https://www.manning.com/books/unit-testing"><em>Unit Testing</em></a>, ch. 2 (R1)</cite></blockquote>
+
+<p>Ask: "if this behavior broke, would someone notice through the public surface?" If yes, it's a unit worth testing. Private helper methods usually aren't — they're implementation details serving some public behavior that gets tested anyway.</p>
+
+<div class="callout callout--key"><strong>Heuristic:</strong> test through the smallest public API that exhibits the behavior — never by reaching into privates.</div>
+
+<h2>Shape: Arrange–Act–Assert</h2>
+
+<p>Every well-formed unit test reads as three beats (pseudocode):</p>
+
+<pre><code>test "discount applies for loyal customers":
+    # Arrange — build inputs and context
+    cart   = Cart(items=[Item(price=100)])
+    client = Client(loyal_since_years=5)
+
+    # Act — perform exactly ONE action under test
+    total = checkout_price(cart, client)
+
+    # Assert — check ONE observable outcome
+    assert total == 90</code></pre>
+
+<ul>
+  <li><strong>Act contains exactly one call.</strong> Two actions means two behaviors crammed together.</li>
+  <li><strong>Assert checks one outcome.</strong> Multiple related asserts on the same result are fine; asserting five unrelated things means you wrote three tests.</li>
+  <li><strong>No logic in tests</strong>: no loops, no branching, no computation. A test containing <code>if</code> can have its own bugs — and then who tests the test? [S-source: Google Testing Blog, <em>Don't Put Logic in Tests</em>]</li>
+</ul>
+
+<h2>Naming: the name IS the documentation</h2>
+
+<p>Name tests as claims about behavior: <code>"applies discount when customer is loyal"</code>. When this test fails months later in CI, the failure message alone tells the team which promise was broken. Names like <code>test_cart_2</code> or <code>testCheckoutWorks</code> throw away that value.</p>
+
+<h2>What disqualifies a test from being a "unit"</h2>
+
+<p>Recall Lesson 1's traits: fast, deterministic, independent. Anything violating them pushes a test out of the unit layer:</p>
+
+<table>
+  <tr><th>The code touches…</th><th>Consequence</th></tr>
+  <tr><td>A real database</td><td>Slow + stateful + order-dependent → integration territory</td></tr>
+  <tr><td>The network / another service</td><td>Slow + nondeterministic → integration territory (with doubles)</td></tr>
+  <tr><td>The system clock or randomness</td><td>Nondeterministic → inject time/randomness so tests control it</td></tr>
+</table>
+
+<p>That third row plants a seed for Lesson 3: when a dependency makes tests slow or flaky, you don't delete the test — you substitute the dependency. Those substitutes are <strong>test doubles</strong>.</p>
+
+<div id="quiz1" class="quiz"></div>
+
+<h2>Your primary source this week</h2>
+
+<p>Khorikov, <a href="https://www.manning.com/books/unit-testing"><em>Unit Testing</em> ch. 2</a> — "The anatomy of a unit test." It covers everything above with far more depth, including why he considers shared test state the root of most suite pain [R1].</p>
+
+<div class="callout callout--good"><strong>Stuck anywhere?</strong> I'm your teacher — ask me anything about this lesson before moving on. Especially the "behavior, not class" idea; it's the one beginners most often half-absorb.</div>
+
+<nav class="footer-nav">
+  <span>Next session: <strong>Test Doubles — stubs, mocks, fakes</strong></span>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../reference/test-pyramid-cheatsheet.html">Pyramid cheat sheet</a>
+  <a href="0001-why-we-test.html">← Lesson 1</a>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.render("quiz1", {
+  questions: [
+    {
+      prompt: "[Review · Lesson 1] Why do teams lacking suites eventually stop refactoring?",
+      options: [
+        "Every change becomes risky and slow",
+        "Older codebases are simply unmodifiable",
+        "Managers prohibit edits after each release",
+        "Version control prevents simultaneous editing"
+      ],
+      correct: 0,
+      explain: "Without regression guards, every edit risks silent breakage, so change slows to a crawl. The suite is what keeps change cheap."
+    },
+    {
+      prompt: "In a unit test, the 'unit' properly refers to…",
+      options: [
+        "One observable behavior of the system",
+        "One public method within one class",
+        "One source file small enough to read",
+        "One developer's work during one sprint"
+      ],
+      correct: 0,
+      explain: "Khorikov: units are units of BEHAVIOR, possibly spanning several collaborating classes. Tying tests to class boundaries couples them to implementation."
+    },
+    {
+      prompt: "Arrange–Act–Assert: what happens during the Act phase?",
+      options: [
+        "Performing the single action under test",
+        "Preparing all inputs and fixture data",
+        "Verifying outcomes against stated expectations",
+        "Cleaning up resources created by the setup"
+      ],
+      correct: 0,
+      explain: "Act is exactly one action. Multiple actions mean multiple behaviors jammed into one test — split them."
+    },
+    {
+      prompt: "Your unit test fails in CI six months later. Its name should reveal…",
+      options: [
+        "Which promised behavior has now broken",
+        "Which line number triggered this failure",
+        "Which engineer authored the failing assertion",
+        "Which framework version produced the report"
+      ],
+      correct: 0,
+      explain: "Behavior-style names ('applies discount when customer is loyal') turn failures into self-explaining bug reports. The stack trace covers line numbers already."
+    },
+    {
+      prompt: "A function's result depends on today's date. To keep its test a true unit test you…",
+      options: [
+        "Inject time so tests control the clock",
+        "Delete the feature as fundamentally untestable",
+        "Move this coverage into slower nightly jobs",
+        "Accept occasional failures as normal flakiness"
+      ],
+      correct: 0,
+      explain: "Nondeterminism comes from uncontrolled dependencies. Dependency injection hands the test a fixed clock — deterministic again, and Lesson 3 builds on exactly this move."
+    }
+  ]
+});
+</script>
+
+</body>
+</html>

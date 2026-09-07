@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Test Pyramid — One-Page Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .pyr-e2e   { width: 34%; background: #8d6e63; }
+  .pyr-int   { width: 58%; background: #a0522d; }
+  .pyr-unit  { width: 82%; background: #5d4037; }
+</style>
+</head>
+<body>
+
+<p class="lesson-kicker">Reference · Cheat Sheet</p>
+<h1>The Test Pyramid, On One Page</h1>
+<p class="byline">After Ham Vocke, <em>The Practical Test Pyramid</em> (martinfowler.com). Print-friendly.</p>
+
+<div class="pyr">
+  <div class="pyr__band pyr-e2e">E2E — few · critical journeys only</div>
+  <div class="pyr__band pyr-int">Integration — some · real boundaries</div>
+  <div class="pyr__band pyr-unit">Unit — many · fast behavior checks</div>
+</div>
+
+<h2>Decision map: which kind, where</h2>
+<table>
+  <tr><th>Question about the code</th><th>Test kind</th></tr>
+  <tr><td>Pure logic: calculations, parsing, state rules, validation</td><td>Unit</td></tr>
+  <tr><td>Does my code talk to the database/queue/API correctly?</td><td>Integration</td></tr>
+  <tr><td>Do the pieces compose into a working request flow?</td><td>Integration (API-level)</td></tr>
+  <tr><td>Can a user actually sign up, buy, reset their password?</td><td>E2E</td></tr>
+  <tr><td>"Does it boot and serve at all?" after each deploy</td><td>Smoke</td></tr>
+</table>
+
+<h2>Rough proportions</h2>
+<ul>
+  <li><strong>Unit:</strong> the bulk — hundreds. Each runs in milliseconds.</li>
+  <li><strong>Integration:</strong> dozens–hundreds. Seconds each; still run on every commit.</li>
+  <li><strong>E2E:</strong> a handful — one per money-critical or mission-critical journey.</li>
+</ul>
+
+<h2>Do NOT test</h2>
+<ul>
+  <li>Trivial code: one-line getters, constants, pure delegation with no logic</li>
+  <li>Third-party library internals — test <em>your</em> usage of them instead</li>
+  <li>Generated code and configuration files</li>
+  <li>Private implementation details of well-tested public behavior</li>
+</ul>
+
+<h2>A good test is…</h2>
+<table>
+  <tr><th>Trait</th><th>Test</th></tr>
+  <tr><td><strong>Fast</strong></td><td>You'll run it thousands of times; slowness compounds.</td></tr>
+  <tr><td><strong>Deterministic</strong></td><td>Same input → same result, every run. No sleeps, no random.</td></tr>
+  <tr><td><strong>Independent</strong></td><td>Passes alone and in any order; shares no mutable state.</td></tr>
+  <tr><td><strong>Behavior-focused</strong></td><td>Asserts observable outcomes, not internal call sequences.</td></tr>
+</table>
+
+<p class="citations">Source: Vocke, <em><a href="https://martinfowler.com/articles/practical-test-pyramid.html">The Practical Test Pyramid</a></em>; see also Khorikov, <em>Unit Testing</em> (Manning) ch. 1–2.</p>
+
+<nav class="footer-nav">
+  <a href="../reference/glossary.html">→ Glossary</a>
+  <a href="../lessons/0001-why-we-test.html">← Lesson 1</a>
+</nav>
+
+</body>
+</html>

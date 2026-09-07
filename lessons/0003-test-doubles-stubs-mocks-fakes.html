@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 3 · Test Doubles</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="lesson-kicker">Software Testing · Lesson 3 of 9</p>
+<h1>Test Doubles: Stubs, Mocks, Fakes</h1>
+<p class="byline">≈10 minutes · Prerequisites: <a href="0001-why-we-test.html">L1</a>, <a href="0002-unit-tests-scope-and-shape.html">L2</a> · Next: Integration Tests (lesson 4)</p>
+
+<p>Lesson 2 ended with a problem: some dependencies — databases, networks, clocks — make unit tests slow or nondeterministic. The fix is to substitute them. Those substitutes are <strong>test doubles</strong>. Used well, they're your sharpest tool. Used carelessly, they're the #1 cause of brittle suites.</p>
+
+<h2>Why doubles exist at all</h2>
+
+<p>A double stands in for a real dependency so the test controls it. You swap reality for something:</p>
+
+<table>
+  <tr><th>Real dependency problem</th><th>What a double gives you</th></tr>
+  <tr><td>Slow (database, network)</td><td>Speed — milliseconds instead of seconds</td></tr>
+  <tr><td>Nondeterministic (clock, random, external API)</td><td>Control — fixed time, fixed responses</td></tr>
+  <tr><td>Stateful (needs cleanup between runs)</td><td>Isolation — no shared mutable state</td></tr>
+  <tr><td>Hard to trigger (payment failure, outage)</td><td>Reachability — error paths on demand</td></tr>
+</table>
+
+<p>The last row matters more than beginners expect: without doubles, the code paths for <em>failures</em> — the paths that matter most in production — go untested because nobody can summon a bank outage on cue.</p>
+
+<h2>The taxonomy: five doubles, one family</h2>
+
+<p>All definitions below are from Meszaros' classic taxonomy, preserved in the <a href="../reference/glossary.html#glossary">glossary</a>:</p>
+
+<table>
+  <tr><th>Double</th><th>Behavior</th><th>Typical use</th></tr>
+  <tr><td><strong>Dummy</strong></td><td>Fills a parameter; never used</td><td>Satisfying a required argument</td></tr>
+  <tr><td><strong>Stub</strong></td><td>Returns canned answers</td><td><em>Queries</em>: "what does X return?"</td></tr>
+  <tr><td><strong>Spy</strong></td><td>Stub + records how it was called</td><td>Checking calls after the fact</td></tr>
+  <tr><td><strong>Mock</strong></td><td>Pre-programmed call expectations</td><td><em>Commands</em>: "did we tell X to happen?"</td></tr>
+  <tr><td><strong>Fake</strong></td><td>Working lightweight implementation</td><td>Stateful deps: in-memory database</td></tr>
+</table>
+
+<div class="callout callout--key"><strong>The one distinction that matters most:</strong> stubs answer <em>queries</em> (you assert on the SUT's <em>result</em>). Mocks verify <em>commands</em> (you assert on the <em>interaction itself</em>) — legitimate only when the interaction IS the observable outcome, like "an email got sent."</div>
+
+<h2>The trap: over-mocking</h2>
+
+<p>Here's where suites die. A beginner mocks everything, including internals:</p>
+
+<pre><code># ❌ Brittle — tests implementation, not behavior
+test "checkout":
+    repo   = mock()          # internal collaborator mocked
+    pricer = mock()
+    expect(pricer).calculate(cart) → returns 90
+    expect(repo).save(order)
+    checkout(cart, repo, pricer)
+    verify_all_expectations()</code></pre>
+
+<pre><code># ✅ Robust — asserts the outcome through public API
+test "checkout returns discounted total and persists order":
+    repo = FakeOrderRepository()
+    total = checkout(cart, client, repo)
+    assert total == 90
+    assert repo.saved_order.total == 90</code></pre>
+
+<p>Both pass today. But refactor tomorrow — rename <code>pricer.calculate</code>, merge two internal calls into one — and the first version shatters while verifying nothing real changed. It was checking <em>how</em> the work got done, not <em>that</em> it got done.</p>
+
+<table>
+  <tr><th>Rule of thumb</th><th>Rationale</th></tr>
+  <tr><td>Double <strong>out-of-process deps</strong> (DB, APIs, queues)</td><td>They violate speed/determinism [R1]</td></tr>
+  <tr><td>Don't double <strong>in-process collaborators</strong> (your own classes)</td><td>You'd be testing implementation details</td></tr>
+  <tr><td>Never mock what <strong>you don't own</strong> (third-party internals)</td><td>Your suite can't vouch for someone else's code — wrap it behind your own interface instead</td></tr>
+  <tr><td>Prefer <strong>fakes over mocks</strong> for stateful things</td><td>Fakes keep assertions on outcomes, not choreography</td></tr>
+</table>
+
+<div id="quiz1" class="quiz"></div>
+
+<h2>Your primary source this week</h2>
+
+<p>Khorikov, <a href="https://www.manning.com/books/unit-testing"><em>Unit Testing</em> ch. 4–5</a> — covers test-double anatomy and, crucially, why mocks make tests fragile ("the mocks vs stubs distinction"). This is the deepest treatment anywhere [R1]. For the community-canonical definitions see Meszaros' <em>xUnit Test Patterns</em> glossary.</p>
+
+<div class="callout callout--good"><strong>Teacher reminder:</strong> the stub-vs-mock distinction is genuinely confusing at first — if it hasn't clicked yet, ask me before Lesson 4 builds directly on it.</div>
+
+<nav class="footer-nav">
+  <span>Next session: <strong>Integration Tests — real boundaries</strong></span>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../reference/test-pyramid-cheatsheet.html">Pyramid cheat sheet</a>
+  <a href="0002-unit-tests-scope-and-shape.html">← Lesson 2</a>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.render("quiz1", {
+  questions: [
+    {
+      prompt: "[Review · Lessons 1–2] Refactoring breaks many tests though behavior is unchanged. This reveals…",
+      options: [
+        "Tests were coupled to implementation details",
+        "The refactoring quietly introduced new bugs",
+        "Overall coverage was too low across modules",
+        "The team needs newer testing frameworks installed"
+      ],
+      correct: 0,
+      explain: "Pure refactoring preserves behavior, so behavior-focused tests stay green. Breaking tests were asserting HOW the code worked — the over-mocking pattern this lesson attacks."
+    },
+    {
+      prompt: "[Review · Lesson 2] The Act phase of a proper unit test contains…",
+      options: [
+        "Exactly one action performed under test",
+        "All setup calls needed by later assertions",
+        "One loop exercising every relevant branch",
+        "Several related actions sharing fixture data"
+      ],
+      correct: 0,
+      explain: "One action per test. Multiple actions mean multiple behaviors jammed together — split them into separate tests."
+    },
+    {
+      prompt: "A STUB differs from a MOCK because a stub simply…",
+      options: [
+        "Returns canned answers without any expectations",
+        "Fails unless exact expected calls occur correctly",
+        "Records every incoming call for later inspection",
+        "Implements the full dependency using memory storage"
+      ],
+      correct: 0,
+      explain: "Stubs feed inputs (queries); the assertion lands on the SUT's result. Mocks carry expectations about interactions themselves. Recording is the spy's job; working implementations are fakes."
+    },
+    {
+      prompt: "For stateful dependencies like databases, the preferred double is…",
+      options: [
+        "A working lightweight in-memory implementation",
+        "A strict object expecting precisely ordered calls",
+        "A blank placeholder returning null for all calls",
+        "A wrapper delegating to the production system instance"
+      ],
+      correct: 0,
+      explain: "Fakes keep tests fast AND let assertions stay on outcomes ('order was saved') rather than call choreography."
+    },
+    {
+      prompt: "Testing that checkout sends a confirmation email, the soundest approach:",
+      options: [
+        "Assert the send command against a test double",
+        "Inspect a real mail server's received messages",
+        "Trust manual QA to click links after each deploy",
+        "Log the email content and grep the log output"
+      ],
+      correct: 0,
+      explain: "This is the legitimate mock use case: the interaction itself IS the observable outcome. Sending email is a side effect with no return value to assert on."
+    }
+  ]
+});
+</script>
+
+</body>
+</html>

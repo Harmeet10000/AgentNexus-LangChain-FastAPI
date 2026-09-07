@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 · Why We Test</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="lesson-kicker">Software Testing · Lesson 1 of 9</p>
+<h1>Why We Test</h1>
+<p class="byline">≈10 minutes · Prerequisites: none · Next: Unit Tests (lesson 2)</p>
+
+<p>Most beginners think testing means "checking my code works." That's backwards, and fixing this one idea changes everything about <em>how</em> you'll write tests.</p>
+
+<h2>The real job: buying confidence to change</h2>
+
+<p>Code that never changes doesn't really need automated tests. You could verify it once by hand and be done forever.</p>
+
+<p>Real software is never finished. Requirements shift, dependencies update, teammates refactor. Every change carries the same quiet question: <em>did I just break something?</em></p>
+
+<blockquote>Automated tests exist to answer that question instantly and mechanically. Their job is <strong>regression prevention</strong> — catching behavior that used to work and stopped.<cite>— The thesis of Vladimir Khorikov's <a href="https://www.manning.com/books/unit-testing"><em>Unit Testing</em></a>, ch. 1 (R1)</cite></blockquote>
+
+<p>This reframes everything. A test suite isn't proof your code is correct today. It's a machine that lets you change code tomorrow without fear. Teams with strong suites refactor aggressively; teams without them freeze, because every edit feels like defusing a bomb.</p>
+
+<div class="callout callout--key"><strong>The one-sentence takeaway:</strong> you don't write tests to check code — you write them so that <em>future changes become cheap</em>.</div>
+
+<h2>Why late bugs hurt most</h2>
+
+<p>A bug's cost explodes the later it's found:</p>
+
+<table>
+  <tr><th>Found during…</th><th>Cost &amp; pain</th></tr>
+  <tr><td>Your own coding session</td><td>Nearly free — you fix it while context is fresh</td></tr>
+  <tr><td>CI / code review</td><td>Cheap — minutes of someone's attention</td></tr>
+  <tr><td>QA / staging</td><td>Moderate — round trips, blocked releases</td></tr>
+  <tr><td><strong>Production</strong></td><td>Expensive — customer trust, incidents, hotfixes under pressure, sometimes revenue</td></tr>
+</table>
+
+<p>Tests move defect discovery leftward on this table. That leftward shift — not "quality" as an abstract virtue — is the concrete business value of testing. It's why mature companies treat their suite as infrastructure, not overhead [R4].</p>
+
+<h2>What separates a good test</h2>
+
+<p>Not all tests buy confidence. Some buy false confidence. Four traits separate the two:</p>
+
+<table>
+  <tr><th>Trait</th><th>Why it matters</th></tr>
+  <tr><td><strong>Fast</strong></td><td>You run tests thousands of times; each wasted second compounds into a suite nobody runs</td></tr>
+  <tr><td><strong>Deterministic</strong></td><td>Same code must give the same result — one flaky failure trains people to ignore red</td></tr>
+  <tr><td><strong>Independent</strong></td><td>Tests share no state; any subset passes in any order</td></tr>
+  <tr><td><strong>Behavior-focused</strong></td><td>Asserts what the code <em>does</em>, not how it does it internally</td></tr>
+</table>
+
+<p>The fourth trait is the subtlest and the source of most bad suites. We'll spend lessons 3 and 8 on it. For now: if refactoring code — changing <em>how</em> it works without changing <em>what</em> it does — breaks your tests, those tests were testing implementation, not behavior. They now block the exact activity they existed to enable.</p>
+
+<div class="callout"><strong>Where all of this lives:</strong> the kinds of tests (unit, integration, E2E) and where each belongs are mapped in the <a href="../reference/test-pyramid-cheatsheet.html">Test Pyramid cheat sheet</a>. New vocabulary? Check the <a href="../reference/glossary.html">glossary</a>.</div>
+
+<div id="quiz1" class="quiz"></div>
+
+<h2>Your primary source this week</h2>
+
+<p>Read <a href="https://www.manning.com/books/unit-testing">Chapter 1 of <em>Unit Testing</em> by Vladimir Khorikov</a> (free sample chapter on Manning's page). It's the best single treatment of "what is a good test" ever written, and the backbone of this course [R1]. Pair it with Google's take on test sizes [R4, R5] once you want the enterprise view.</p>
+
+<div class="callout callout--good"><strong>I'm your teacher — use me.</strong> Anything unclear, disagree with, or want to go deeper on? Ask me follow-up questions right now. Confusion compounding across nine lessons is the only real way this course fails.</div>
+
+<nav class="footer-nav">
+  <span>Next session: <strong>Unit Tests — scope and shape</strong></span>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../reference/test-pyramid-cheatsheet.html">Pyramid cheat sheet</a>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.render("quiz1", {
+  questions: [
+    {
+      prompt: "What is the core job of an automated test suite?",
+      options: [
+        "Catching regressions before your users do",
+        "Proving the code contains zero defects",
+        "Documenting every function's internal logic",
+        "Removing the need for human code review"
+      ],
+      correct: 0,
+      explain: "Suites prevent regressions — behavior that worked and broke. 'Zero defects' is impossible; documentation and review are side benefits, not the job."
+    },
+    {
+      prompt: "A teammate edits one module and two distant features silently break. What was missing?",
+      options: [
+        "A test guarding the distant behaviors",
+        "A faster continuous integration pipeline",
+        "More mock objects inside the unit tests",
+        "Extra comments explaining the module design"
+      ],
+      correct: 0,
+      explain: "This is the classic regression gap: nothing verified behavior beyond the edited module. Integration or E2E coverage at those boundaries would have caught it."
+    },
+    {
+      prompt: "Which trait matters most for tests run thousands of times?",
+      options: [
+        "Being fast and fully deterministic",
+        "Covering the maximum lines of code",
+        "Using the latest mocking framework available",
+        "Testing private methods directly for accuracy"
+      ],
+      correct: 0,
+      explain: "Speed and determinism decide whether anyone trusts and runs the suite. Coverage and tooling mean little if the suite is slow or flaky."
+    },
+    {
+      prompt: "Refactoring changes HOW code works, not WHAT it does. Good tests should…",
+      options: [
+        "Stay green through pure refactoring work",
+        "Fail until comments are updated to match",
+        "Require rewriting after every internal change",
+        "Be deleted since old behavior no longer exists"
+      ],
+      correct: 0,
+      explain: "Behavior-focused tests stay green through refactors — that's the confidence machine working. Tests that break during pure refactoring were coupled to implementation details."
+    }
+  ]
+});
+</script>
+
+</body>
+</html>

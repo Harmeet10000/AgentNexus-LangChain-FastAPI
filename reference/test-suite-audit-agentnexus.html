@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test Suite Audit — AgentNexus</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .sev-high { color: #c62828; font-weight: bold; }
+  .sev-med { color: #a0522d; font-weight: bold; }
+  .sev-low { color: #2e7d32; font-weight: bold; }
+  .good { background: #eef7ee; border-left: 4px solid #2e7d32; }
+</style>
+<!--
+  ============================================================================
+  MAINTAINER NOTES — READ THIS BLOCK FIRST (humans only; agents skip comments)
+  ============================================================================
+  Every finding below follows the Incident–Why–Outcome framework:
+
+    INCIDENT : the concrete failure or risk observed in THIS repo, cited by
+               file:line (or a real historical event if one exists).
+    WHY      : which curriculum rule (lesson #) prevents recurrence and how.
+    OUTCOME  : what success looks like once applied / evidence if already seen.
+
+  Commit references are included where git history supports them. Where no
+  incident has occurred YET, the comment says so honestly — a rule guarding
+  against a hypothetical states its hypothesis instead of inventing history.
+  Vague comments ("added to fix issues") are banned by policy: they carry no
+  more information than no comment at all.
+  ============================================================================
+-->
+</head>
+<body>
+
+<p class="lesson-kicker">Reference · Audit Report · AgentNexus Test Suite</p>
+<h1>Test Suite Audit — Against the Nine-Lesson Curriculum</h1>
+<p class="byline">Audited 2026-08-24 · Scope: <code>tests/</code> (66 files, ~7,450 lines) + CI workflow · Rubric: Lessons 1–9</p>
+
+<h2>Executive verdict</h2>
+
+<p><strong>Shape:</strong> a healthy-looking pyramid on paper — 56 unit files (~6,600 lines), 6 integration files (~650 lines), 0 E2E tests, 2 property files. But measured against this codebase's actual risk (infra-heavy FastAPI: PostgreSQL, Redis, MongoDB, Celery, WebSockets, LangGraph), the mass sits <em>too high on pure units and too thin at the seams</em>. This is a pyramid drifting toward the Testing Trophy's diagnosis: most of your real risk lives at boundaries your suite barely touches [L4, L6].</p>
+
+<p><strong>Culture:</strong> unusually self-aware. Your own <code>conftest.py</code> documents why stubs were removed and what defect they were hiding — that's senior behavior most suites never exhibit. The problems below are localized, not systemic.</p>
+
+<h2>1. Shape &amp; inventory</h2>
+
+<table>
+  <tr><th>Layer</th><th>Files</th><th>Lines</th><th>Curriculum expectation</th><th>Verdict</th></tr>
+  <tr><td>Unit</td><td>56</td><td>~6,591</td><td>Bulk — many fast behavior checks</td><td>Present, but several aren't true unit tests (see §3)</td></tr>
+  <tr><td>Integration</td><td>6</td><td>~656</td><td>Dozens for an app with 5+ backing services [L4]</td><td><span class="sev-high">Thin</span> — seams undertested</td></tr>
+  <tr><td>E2E</td><td>1 (empty <code>__init__.py</code>)</td><td>0</td><td>Few, critical journeys only [L5]</td><td><span class="sev-high">Absent</span></td></tr>
+  <tr><td>Property</td><td>2</td><td>~205</td><td>Optional bonus</td><td>Good addition (credit invariants)</td></tr>
+  <tr><td>Performance</td><td>0</td><td>0</td><td>Optional; contains only TODO notes</td><td>Acknowledged gap</td></tr>
+</table>
+
+<!--
+  FINDING F1 (shape): integration:e2e ratio inverted vs risk.
+  INCIDENT  : tests/e2e/ contains only __init__.py. No test drives signup,
+              login, or any money-touching journey end-to-end. Meanwhile the
+              app's blast-radius surface (auth, credits, payments circuit
+              breaker, websockets) is exactly what E2E exists to guard [L5].
+  WHY       : Lesson 5 — one E2E per critical customer journey; Lesson 9 —
+              gates before canary. Unit+integration passing proves components
+              compose in isolation, not that a user can complete signup.
+  OUTCOME   : target 3-5 E2E journeys max (signup→login, credit consumption,
+              password reset), run post-deploy as smoke, not per-commit.
+  COMMIT    : n/a (absence, not regression).
+-->
+
+<p><!-- F1 above -->The empty <code>tests/e2e/</code> directory is the single highest-severity gap. It currently provides the <em>feeling</em> of a layer without the function — worse than no directory, because it reads as coverage in structure maps.</p>
+
+<!--
+  FINDING F2 (shape): repositories tested against fakes live in tests/unit/.
+  INCIDENT  : tests/unit/credits/test_repositories.py exercises repository
+              classes (Postgres/Mongo-backed in production) via in-memory
+              fakes inside the UNIT layer. No integration counterpart hits a
+              real database engine.
+  WHY       : Lesson 4 — use the real engine when you can; fakes drift from
+              reality exactly where ORMs, SQL dialects, and constraints live.
+              A fake cannot reveal a Postgres-only syntax error or a missing
+              index-induced N+1.
+  OUTCOME   : keep the fast fake-based tests (they pin business rules), and
+              add DB-backed integration twins for each repository behind the
+              requires_db marker you already defined. CI already provisions
+              Postgres (test.yml), so the marginal cost is low.
+  COMMIT    : cf. db46a6b (unified-schema migration) — schema-level changes
+              are precisely the class of change fake-based repo tests cannot
+              catch.
+-->
+
+<h2>2. What's genuinely good (keep these)</h2>
+
+<div class="callout good">
+<ul>
+  <li><strong>Marker taxonomy + strict markers</strong> (<code>pyproject.toml</code>): <code>--strict-markers</code> with <code>slow/integration/unit/requires_db</code>, default-deselecting integration locally — fast inner loop, explicit opt-in [L1 speed trait].</li>
+  <li><strong>CI ordering</strong> (<code>.github/workflows/test.yml</code>): lint → format → unit → integration → coverage. Fast gates first, exactly the L9 gate ladder.</li>
+  <li><strong>The retry-policy test's sleep interception</strong> (<code>tests/unit/shared/langgraph_layer/test_kb_retry_policy.py:52</code>): intercepts the sleeper instead of sleeping — the exact pattern L5/L8 demand. This file is the house style for time-dependency testing.</li>
+  <li><strong>Self-documenting fixture surgery</strong>: both conftests explain <em>why</em> stubs exist, cite commits (<code>319c698</code>, <code>6525c6f</code>), and record the caught defect. Rare and valuable.</li>
+  <li><strong>Patch-at-binding-site discipline</strong> (<code>test_parser_offload_and_tables.py:109-116</code>): monkeypatches where the name is bound, with a docstring teaching why — implementation-coupling avoided correctly.</li>
+  <li><strong>Assert messages where stakes are high</strong> (capacity overflow message, <code>test_websocket_security_bug_conditions.py:231</code>).</li>
+  <li><strong>Property-based tests</strong> for credit invariants — beyond-curriculum maturity.</li>
+</ul>
+</div>
+
+<h2>3. Anti-patterns found (named per Lesson 8)</h2>
+
+<h3>3.1 <span class="sev-high">Wall-clock dependency in unit tests</span> — flakiness by construction</h3>
+
+<table>
+  <tr><th>Location</th><th>What happens</th></tr>
+  <tr><td><code>tests/unit/test_websocket_security_bug_conditions.py:156</code></td><td><code>await asyncio.sleep(2)</code> to let a Redis TTL lapse — even though <code>expires_at</code> was already set one second <em>in the past</em> at line 150. The sleep likely guards nothing the data doesn't already encode.</td></tr>
+  <tr><td><code>tests/unit/test_websocket_security_preservation.py:116</code></td><td><code>await asyncio.sleep(0.1)</code> as synchronization hope.</td></tr>
+  <tr><td><code>tests/unit/features/documents/test_parser_offload_and_tables.py:94</code></td><td><code>time.sleep(0.15)</code> inside a fake converter to simulate blocking — deliberate, but still wall-clock.</td></tr>
+</table>
+
+<!--
+  FINDING F3 (sleeps): three wall-clock dependencies inside the UNIT layer.
+  INCIDENT  : asyncio.sleep(2) at test_websocket_security_bug_conditions.py:156
+              adds ≥2s to every run and will intermittently fail on loaded CI
+              runners if TTL expiry races the check. Sleeps-as-synchronization
+              is the #1 flake root cause named in L8 §1.
+  WHY       : Lesson 8 anti-pattern #1 (tolerated flakiness begins as sleeps);
+              Lesson 5 determinism rule (no timing assumptions). The repo
+              ALREADY contains the cure: test_kb_retry_policy.py intercepts
+              the sleeper object instead of waiting on real time.
+  OUTCOME   : delete line 156's sleep (expires_at is already past — verify
+              the check reads stored state, then the sleep is provably dead);
+              convert preservation-test sync to events/futures. Parser fake:
+              acceptable short-term; consider event-driven blocking later.
+  HYPOTHESIS (no incident yet): no recorded flake from these lines as of
+              audit date — this rule guards future CI load, and states that
+              honestly rather than inventing an incident.
+-->
+
+<h3>3.2 <span class="sev-high">Swallowed exceptions make a test passable-for-the-wrong-reason</span></h3>
+
+<p><code>test_websocket_security_bug_conditions.py:225</code> — the TOCTOU capacity test wraps connection attempts in <code>except Exception: rejected += 1</code>. Any bug — TypeError, AttributeError, a typo in the service — counts as a "rejection," and the test can go green while the capacity guard is completely broken. Combined with the loop-and-counter structure, this is logic-in-tests [L2] plus assertion roulette [L8]: two failure modes hiding one real assertion.</p>
+
+<!--
+  FINDING F4 (weak verification):
+  INCIDENT  : except Exception at test_websocket_security_bug_conditions.py:225
+              converts ANY exception into a counted "rejection".
+  WHY       : Lesson 2 (no logic in tests — branching computes expectations);
+              Lesson 8 (erasing the red's cousin: the test cannot fail for the
+              right reason, so green means little). Catch the SPECIFIC expected
+              exception (e.g. WebSocketCapacityExceededError) and let anything
+              else fail loudly.
+  OUTCOME   : replace `except Exception` with the narrow type; the final
+              count assert (line 231, which is excellent) then actually means
+              "capacity enforced atomically."
+  HYPOTHESIS: guard against future refactors introducing unrelated errors;
+              no recorded false-green incident yet.
+-->
+
+<h3>3.3 <span class="sev-high">Bare <code>assert True</code> — a test verifying nothing</span></h3>
+
+<p><code>tests/integration/test_websocket_security_integration.py:324</code> ends with a literal <code>assert True</code> after calling <code>touch_connection()</code> three times. The comment admits it: <em>"This is hard to test directly."</em> But throttling IS observable through the boundary you already have — read Redis before and after rapid touches and assert the last-touch timestamp did <em>not</em> advance on calls two and three. The infrastructure to observe it is in the same file.</p>
+
+<!--
+  FINDING F5 (assert True):
+  INCIDENT  : test_websocket_security_integration.py:324 — assert True.
+  WHY       : Lesson 1 — a test with no real assertion buys zero confidence;
+              Lesson 7 economics — permanent maintenance cost, zero protection.
+              The docstring claims throttle verification; the code verifies
+              merely "did not raise."
+  OUTCOME   : assert on observable state: snapshot redis key TTL/timestamp,
+              touch twice rapidly, assert unchanged; touch after throttle
+              window, assert changed. Converts a decorative test into a real
+              regression guard for a latency optimization worth guarding.
+  HYPOTHESIS: no incident; the throttle could silently regress tomorrow and
+              this test would stay green — that is the incident being guarded.
+-->
+
+<h3>3.4 <span class="sev-med">Tautological and near-empty assertions</span></h3>
+
+<ul>
+  <li><code>tests/unit/test_agent_saul_persist_memory.py:75</code>: <code>assert result["status"].value == "completed" or result["status"] == "completed"</code> — an OR-assert passes if <em>either</em> representation holds; it can't distinguish a real enum from an accidentally-stringified one. Normalize the result once, assert once.</li>
+  <li>Same file, lines 92 &amp; 100: <code>assert ... is not None</code> — presence-only checks where the lesson rubric asks for the value [L1: behavior-focused assertions].</li>
+</ul>
+
+<h3>3.5 <span class="sev-med">Private reach-ins — implementation coupling in unit tests</span></h3>
+
+<p><code>test_websocket_security_bug_conditions.py:159,180</code>: assigns <code>ws_security_service._token_repo = token_repo</code> and calls <code>_check_session_validity(...)</code> directly. Two underscore-deep privates in one test = the test breaks on refactor regardless of behavior [L2's core trap]. Drive through the public method that performs session checks on message receipt.</p>
+
+<h3>3.6 <span class="sev-med">Mock discipline: 104 bare MagicMocks, 2 specs</span></h3>
+
+<p>Repo-wide: <code>MagicMock(</code> appears 104×; <code>spec=</code> appears 2×. The starkest contrast is inside one file: <code>conftest.py:84</code> builds the auth service with <code>MagicMock(spec=UserRepository)</code> (correct!), while <code>make_mock_user()</code> at line 88 returns a bare <code>MagicMock</code> — so every auth test would pass even if the real <code>User</code> model renamed <code>hashed_password</code> tomorrow. Unspec'd mocks verify nothing about the interface they impersonate [L3].</p>
+
+<!--
+  FINDING F6 (mock drift):
+  INCIDENT  : conftest.py:88 make_mock_user() returns unspec'd MagicMock;
+              repo-wide ratio 104 MagicMock() : 2 spec=.
+  WHY       : Lesson 3 — doubles stand in for REAL interfaces; without spec,
+              renames/attribute drift pass silently (false confidence, L1's
+              "false confidence" failure mode).
+  OUTCOME   : spec=User on make_mock_user (one-line fix, catches all auth
+              user-attribute drift immediately); adopt spec= (or AsyncMock
+              spec) as review norm for new mocks. Outcome metric: mock-related
+              false-greens drop to zero.
+  HYPOTHESIS: no recorded drift incident; guarded class = model renames.
+-->
+
+<h3>3.7 <span class="sev-low">Loop-asserts in API tests</span></h3>
+
+<p><code>tests/integration/test_health.py:40-44</code> loops over dependencies asserting four fields each. Legible, but a failure names no dependency; unroll or include <code>dep["name"]</code> in each assert message [L2: failures must self-explain]. Minor.</p>
+
+<h2>4. Architectural smell: the global stub registry</h2>
+
+<p>The root <code>conftest.py</code> injects 16+ <code>sys.modules</code> MagicMock stubs before any import; <code>integration/conftest.py</code> must then surgically pop them to build the real app. Your own comments record the cost: the stubbed <code>app.shared.langgraph_layer</code> package was hiding an uninstantiable <code>IngestionState</code> (removed in <code>319c698</code>/<code>6525c6f</code>) — the stub didn't isolate tests from the package, it erased the package, defects included. That history is the strongest possible evidence for the remaining rule:</p>
+
+<!-- FINDING F7 (stub registry drift + risk):
+     INCIDENT  : conftest.py:39-55 records that sys.modules stubbing hid a live
+                 defect (IngestionState not constructible; Annotated behind
+                 TYPE_CHECKING) until stubs were removed (commits 319c698,
+                 6525c6f). Additionally, integration/conftest.py:19-24 still
+                 lists app.shared.langgraph_layer* in _STUBBED_MODULES although
+                 root conftest no longer stubs them — the registries drifted.
+     WHY       : Lesson 3 (never mock what you own at the import-system level;
+                 wrap behind interfaces instead) and Lesson 8 (mystery guest:
+                 behavior configured far outside the test). A stub registry two
+                 files apart WILL drift again — it already has.
+     OUTCOME   : extract the stub list to ONE module imported by both conftests
+                 (single source of truth), delete the four stale langgraph
+                 entries from integration/conftest, and track each surviving
+                 stub with a teardown ticket. Long-term outcome: registry shrinks
+                 to zero as import cycles get fixed at source.
+     COMMIT    : 319c698, 6525c6f (stub removal); 8051b13, db46a6b context. -->
+
+<h2>5. File organization — better arrangements</h2>
+
+<table>
+  <tr><th>Current</th><th>Suggested</th><th>Rationale</th></tr>
+  <tr><td><code>tests/e2e/</code> contains only <code>__init__.py</code></td><td>Either populate with 3–5 critical journeys or delete until real</td><td>An empty layer misrepresents coverage [L5]</td></tr>
+  <tr><td>Security-critical websocket tests sit loose in <code>tests/unit/</code> root</td><td><code>tests/unit/features/websocket_security/…</code></td><td>You already mirror <code>src/</code> for celery/, credits/, documents/, shared/ — finish the pattern; discoverability is maintainability</td></tr>
+  <tr><td><code>test_agent_memory_*.{health,read_seam,service}.py</code> + <code>test_agent_saul_persist_memory.py</code> at root</td><td>Gather under <code>tests/unit/features/agent_memory/</code></td><td>Same mirroring argument; five related files currently scatter alphabetically</td></tr>
+  <tr><td>Property tests carry no marker</td><td>Add <code>property</code> marker; performance TODO likewise</td><td><code>--strict-markers</code> rewards explicit taxonomy; enables selective runs</td></tr>
+  <tr><td>Stub lists duplicated across two conftests</td><td>Single <code>tests/_stubs.py</code> imported by both</td><td>The drift already occurred (§4)</td></tr>
+</table>
+
+<h2>6. Prioritized action plan</h2>
+
+<ol>
+  <li><span class="sev-high">P0</span> — Fix <code>except Exception</code> → specific exception type (§3.2); delete the dead <code>asyncio.sleep(2)</code> (§3.1). Both are minutes of work protecting P0 security guarantees.</li>
+  <li><span class="sev-high">P0</span> — <code>spec=User</code> on <code>make_mock_user()</code> (§3.6).</li>
+  <li><span class="sev-med">P1</span> — Replace <code>assert True</code> with Redis-state throttle assertions (§3.3).</li>
+  <li><span class="sev-med">P1</span> — Consolidate stub registry; purge stale entries (§4).</li>
+  <li><span class="sev-med">P1</span> — Add DB-backed integration twins for credits repositories (CI already has Postgres) (§1/F2).</li>
+  <li><span class="sev-med">P2</span> — First three E2E journeys: signup→login, credit consumption, password reset — smoke-tier, post-deploy (§F1).</li>
+  <li><span class="sev-low">P2</span> — Reorganize directories per §5; normalize tautology asserts (§3.4).</li>
+</ol>
+
+<h2>Addendum — second-pass findings (CI &amp; pipeline deep-dive)</h2>
+
+<p>The first pass audited the suite; this pass audits what happens <em>around</em> it. Six additional findings, several more severe than anything in §3.</p>
+
+<h3>A1. <span class="sev-high">A database-requiring test sits in the unit layer and never executes in CI</span></h3>
+
+<p><code>tests/unit/test_schema_orm_matches_database.py</code> carries <code>@pytest.mark.requires_db</code>. Trace its execution through the pipeline:</p>
+
+<pre><code>addopts = ["-m", "not integration and not requires_db"]   # pyproject.toml
+
+CI step 1:  pytest tests/            → excludes requires_db  (skipped)
+CI step 2:  pytest tests/ -m integration  → selects ONLY integration
+                                          → requires_db-only test excluded again</code></pre>
+
+<p>Both marker expressions miss it. The ORM-matches-database invariant — precisely the check that catches schema drift — runs on <strong>zero</strong> CI executions. It's also misfiled: a live-database test in the <code>tests/unit/</code> directory contradicts both its marker and L4's boundary rule.</p>
+
+<!--
+  FINDING A1 (dead test in pipeline):
+  INCIDENT  : tests/unit/test_schema_orm_matches_database.py marked
+              requires_db. pyproject addopts exclude requires_db from default
+              runs; CI step 2 selects -m integration exclusively. Union of the
+              two steps = the test NEVER runs remotely. Locally it only runs
+              if someone manually passes -m overrides.
+  WHY       : Lesson 9 — a gate that never fires is decoration; Lesson 8 —
+              erasing-the-red's silent cousin, erasing-by-configuration. The
+              suite REPORTS an ORM/DB consistency guard that it does not HAVE.
+  OUTCOME   : either move it to tests/integration/ with @pytest.mark.integration
+              (+ keep requires_db for local deselection) so step 2 executes it,
+              or add a third CI step: pytest -m requires_db. Success metric:
+              the schema-drift guard appears in CI logs on every PR.
+  COMMIT    : n/a (configuration gap, not regression).
+-->
+
+<h3>A2. <span class="sev-high">Marker discipline is directory-based, not declared — selection is unreliable</span></h3>
+
+<p>Of 66 test files, roughly a dozen carry any explicit <code>pytest.mark.unit/integration</code>; the rest rely on their directory name. But markers are what CI <em>selects by</em>, and directories are what humans navigate by — when they disagree (see A1), configuration silently wins. You also have <code>--strict-markers</code> enforcing marker <em>validity</em>, nothing enforcing marker <em>presence</em>.</p>
+
+<!--
+  FINDING A2 (marker/directory split-brain):
+  INCIDENT  : marker usage count ~12 files vs 66 total. One file already
+              contradicts its directory (A1). Any future test author who
+              marks correctly but files wrongly — or vice versa — recreates
+              the same dead-test failure mode invisibly.
+  WHY       : Lesson 9 gates must select exactly what they claim; Lesson 8
+              mystery-guest family (behavior determined by distant config).
+  OUTCOME   : one-line autouse safety net in tests/conftest.py asserting
+              node's nearest directory matches its marker (or a collect hook),
+              making disagreement fail loudly at collection. Metric: zero
+              marker/dir mismatches thereafter.
+  HYPOTHESIS: guard stated honestly — one mismatch exists today (A1); rule
+              prevents the next N.
+-->
+
+<h3>A3. <span class="sev-med">The suite effectively runs twice per CI invocation</span></h3>
+
+<p><code>test.yml</code> executes three pytest steps: default run (unit+property), integration run, then a coverage run repeating the default set with <code>--cov=src</code>. Unit tests execute twice every push. On a suite containing sleeps (§3.1) that's pure paid latency.</p>
+
+<!--
+  FINDING A3 (duplicate execution):
+  INCIDENT  : test.yml lines 116-127 — three pytest invocations; steps 116
+              and 127 execute the identical default-selected set, second time
+              carrying --cov flags.
+  WHY       : Lesson 1 (speed compounds: thousands of runs × wasted minutes);
+              Lesson 9 (fast feedback gates).
+  OUTCOME   : merge into two steps: `pytest tests/ -m "not integration"
+              --cov=src ...` then `pytest tests/ -m integration`. Wall-time
+              saving equals full unit-suite duration per push.
+  COMMIT    : n/a.
+-->
+
+<h3>A4. <span class="sev-med">No timeout plugin — one hung async test burns the whole job</span></h3>
+
+<p>The job has a 30-minute ceiling but nothing fails a wedged <em>test</em>. This repo's own history makes the risk concrete: websocket/async code paths are heavily tested here, and async hangs characteristically produce no exception — just silence until the job dies without a useful report. <code>pytest-timeout</code> (e.g., <code>--timeout=60</code>) converts an opaque job-death into a named failing test.</p>
+
+<!--
+  FINDING A4 (hang exposure):
+  INCIDENT  : no pytest-timeout dependency (pyproject test extra lists only
+              pytest, pytest-asyncio, pytest-cov, httpx, factory-boy,
+              fakeredis). Job-level timeout-minutes: 30 is the only backstop.
+  WHY       : Lesson 8 flakiness family — nondeterministic waits must fail
+              loudly and NAME themselves; a 30-minute silent burn teaches the
+              team to re-run blindly.
+  OUTCOME   : add pytest-timeout, --timeout=60 --timeout-method=thread in
+              addopts. Metric: hung tests report within ~1 minute with the
+              guilty test named.
+  HYPOTHESIS: no recorded hang yet; async websocket surface makes it likely.
+-->
+
+<h3>A5. <span class="sev-med">Small workflow defects compounding quietly</span></h3>
+
+<ul>
+  <li><strong>Coverage artifact references a report never generated:</strong> the archive step uploads <code>htmlcov/</code>, but the coverage run produces only lcov + term-missing — no <code>--cov-report=html</code>. The artifact is permanently half-empty.</li>
+  <li><strong>Cache key omits <code>uv.lock</code>:</strong> keyed on <code>hashFiles('pyproject.toml')</code> only; lockfile-only changes restore stale caches (uv self-heals, so cost = time, not correctness).</li>
+  <li><strong>No <code>concurrency</code> group:</strong> push + PR of the same branch run duplicate full jobs.</li>
+  <li><strong>Migrations run before lint:</strong> services spin up and alembic runs <em>before</em> ruff/ty — a lint typo discovered in minute 4 costs the service-startup overhead of minutes 0–4. Cheap checks should gate expensive ones [L9 ordering].</li>
+  <li><strong>factory-boy installed but unused:</strong> <code>make_mock_user()</code> hand-rolls what your existing dependency builds properly — factories give spec'd, varied fixtures for free.</li>
+</ul>
+
+<!--
+  FINDING A5 (workflow hygiene bundle):
+  INCIDENT  : each bullet above verified against test.yml / pyproject.toml at
+              audit time (htmlcov path, cache key line 72, absent concurrency
+              block, step order 104-114, unused factory-boy dep line 215).
+  WHY       : Lesson 9 — pipeline IS part of the test system; its defects are
+              test-system defects even though no assert fails.
+  OUTCOME   : five mechanical fixes, none touching test code. Metric: cache
+              hit correctness on lockfile changes; artifacts contain rendered
+              HTML coverage; duplicate jobs collapse to one per branch.
+  COMMIT    : n/a.
+-->
+
+<h3>A6. <span class="sev-low">Positive additions to §2 worth naming</span></h3>
+
+<ul>
+  <li>All three backing services in CI carry proper health checks with retries (<code>test.yml:19-52</code>) — textbook service provisioning.</li>
+  <li><code>alembic upgrade head</code> runs in CI before tests — migration chain verified continuously (and <code>test_migration_chain.py</code> guards it at unit level too).</li>
+  <li><code>hypothesis</code>-powered property tests exist for credit invariants — most professional suites never reach this.</li>
+</ul>
+
+<h2>Addendum action plan (merges with §6)</h2>
+
+<ol>
+  <li><span class="sev-high">P0</span> — Rescue the dead <code>requires_db</code> test: move to <code>tests/integration/</code>, mark <code>integration</code> + <code>requires_db</code> (A1).</li>
+  <li><span class="sev-high">P0</span> — Add <code>pytest-timeout</code> with 60s default (A4).</li>
+  <li><span class="sev-med">P1</span> — Merge duplicate pytest steps; add <code>--cov-report=html</code> (A3, A5).</li>
+  <li><span class="sev-med">P1</span> — Marker/directory agreement check in root conftest (A2).</li>
+  <li><span class="sev-low">P2</span> — Cache key + uv.lock, concurrency group, reorder lint before services, adopt factory-boy (A5).</li>
+</ol>
+
+<h2>7. Grade against the curriculum</h2>
+
+<table>
+  <tr><th>Lesson rubric</th><th>Score</th></tr>
+  <tr><td>L1 · Good-test traits (fast/deterministic/independent/behavior)</td><td>7/10 — sleeps and swallow-excepts dent determinism &amp; honesty</td></tr>
+  <tr><td>L2 · Unit scope &amp; shape (behavior-not-class, AAA)</td><td>7/10 — private reach-ins; otherwise strong AAA legibility</td></tr>
+  <tr><td>L3 · Doubles discipline</td><td>5/10 — excellent fakes &amp; binding-site patches, but 104:2 spec ratio</td></tr>
+  <tr><td>L4 · Integration coverage of real boundaries</td><td>4/10 — health/auth only; DB, celery, ws seams undertested</td></tr>
+  <tr><td>L5 · E2E critical journeys</td><td>1/10 — layer absent</td></tr>
+  <tr><td>L6 · Shape matches risk</td><td>5/10 — infra-heavy app wearing a logic-heavy suite's shape</td></tr>
+  <tr><td>L7 · Restraint (not testing trivia)</td><td>9/10 — no getter-tests, no coverage theater detected</td></tr>
+  <tr><td>L8 · Anti-pattern hygiene</td><td>6/10 — three sleeps, one swallow, one assert True, roulette instances</td></tr>
+  <tr><td>L9 · Pipeline gates</td><td>8/10 → <strong>6/10 after addendum</strong> — ordered gates exist, but a dead guard, duplicate runs, and no hang protection (A1–A4)</td></tr>
+  <tr><td><strong>Overall</strong></td><td><strong>≈5.8/10 — solid foundation, precise fixes available</strong></td></tr>
+</table>
+
+<p class="citations">Rubric sources: Khorikov, <em>Unit Testing</em> (R1) · Vocke, <em>Practical Test Pyramid</em> (R2) · Dodds, <em>Testing Trophy</em> (S2) · Google <em>SWE Book</em> ch. 11–14 (R4) · Google SRE (R6). All file:line evidence verified against working tree at audit time.</p>
+
+<nav class="footer-nav">
+  <a href="glossary.html">Glossary</a>
+  <a href="test-pyramid-cheatsheet.html">Pyramid cheat sheet</a>
+  <a href="../lessons/0010-applied-capstone-audit-and-write.html">← Capstone lesson</a>
+</nav>
+
+</body>
+</html>

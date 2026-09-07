@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 10 · Applied Capstone</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="lesson-kicker">Software Testing · Capstone · Real Code</p>
+<h1>Applied Capstone: Audit &amp; Extend a Real Suite</h1>
+<p class="byline">≈45–60 minutes of hands-on work · Target: <strong>this repository</strong> (AgentNexus) · Coaching: ask me anything mid-work</p>
+
+<p>Nine lessons of theory, perfect scores throughout. Now the only exam that matters: unfamiliar-enough real code, judged and extended <em>by you</em>. This capstone has three parts. Do them in order; bring results back to me for review after each.</p>
+
+<h2>Part 1 — The Five-Minute Suite Audit (L6)</h2>
+
+<p>Run each check yourself, in order, and write down what you find:</p>
+
+<table>
+  <tr><th>#</th><th>Check</th><th>How</th></tr>
+  <tr><td>1</td><td>Count tests per layer</td><td>Count files under <code>tests/unit/</code>, <code>tests/integration/</code>, <code>tests/e2e/</code>; then run <code>uv run pytest --collect-only -q</code> and compare totals per directory</td></tr>
+  <tr><td>2</td><td>Does mass match risk?</td><td>Pick the two most business-critical modules you know in <code>src/</code> — do their layers dominate the counts?</td></tr>
+  <tr><td>3</td><td>Failure localization</td><td>Open three failing-looking candidates: would a failure there point precisely at behavior, or vaguely at choreography?</td></tr>
+  <tr><td>4</td><td>Anti-pattern scan (L8)</td><td>Grep the suite for <code>sleep(</code>, bare <code>assert True</code>-style weak asserts, auto-retry wrappers, and fixtures defined far from use (mystery guest)</td></tr>
+  <tr><td>5</td><td>Run the suite</td><td><code>uv run pytest tests/unit -x -q</code> — note wall time. Then integration. Would anyone wait for full green before merging?</td></tr>
+</table>
+
+<div class="callout callout--key"><strong>Deliverable 1:</strong> a five-line verdict — what shape is this suite, where does its mass sit relative to risk, and which anti-patterns did you spot? Bring it to me; I'll pressure-test it like a senior reviewing your PR description.</div>
+
+<h2>Part 2 — Read Before Writing (L2, L4)</h2>
+
+<p>Before writing anything, read these existing tests closely — they show this repo's conventions:</p>
+
+<ul>
+  <li><code>tests/unit/test_circuit_breaker.py</code> — unit-layer example</li>
+  <li><code>tests/integration/test_health.py</code> — API-level integration example</li>
+  <li><code>tests/conftest.py</code> — shared fixtures (note what's visible vs hidden from each test)</li>
+</ul>
+
+<p>While reading, judge: are names behavior-style? Is AAA legible top-to-bottom? Any doubles on in-process collaborators?</p>
+
+<h2>Part 3 — Write Two Tests (the real exam)</h2>
+
+<p>In <code>src/</code>, pick ONE module that currently lacks direct coverage. Then:</p>
+
+<h3>3a. One unit test</h3>
+<ul>
+  <li>Targets one observable <em>behavior</em> through the smallest public surface — no private reach-ins</li>
+  <li>Strict AAA, exactly one Act, self-explaining assert messages</li>
+  <li>Name: <code>test_&lt;behavior&gt;_when_&lt;condition&gt;.py</code>-style claim</li>
+  <li>Doubles only for out-of-process dependencies — prefer stubs/fakes over mocks [L3]</li>
+</ul>
+
+<h3>3b. One integration test</h3>
+<ul>
+  <li>Crosses a real boundary (API endpoint → handler → persistence) following <code>test_health.py</code>'s pattern</li>
+  <li>Asserts on status codes / response bodies / persisted state — never internals [L4]</li>
+  <li>Deterministic: seeded data, no ordering assumptions, no sleeps</li>
+</ul>
+
+<p>Verify both: <code>uv run pytest path/to/your/tests -v</code> — then deliberately break the source code they guard and watch them fail. <strong>A test you've never seen fail proves nothing.</strong></p>
+
+<div class="callout callout--warn"><strong>The trap to avoid:</strong> don't chase coverage numbers here. One sharp behavioral test beats ten hollow ones — Lesson 7's economics apply to your own PR most of all.</div>
+
+<div class="callout callout--key"><strong>Deliverable 2:</strong> open the two test files with me. I'll review them against every rubric from Lessons 2–8: scope, shape, naming, doubles discipline, determinism, diagnosability.</div>
+
+<h2>Why this works</h2>
+
+<p>This is desirable difficulty by design: retrieval (audit from memory), transfer (theory → unfamiliar code), and production pressure (tests must actually run and actually catch breakage). Fluency got you perfect scores; this builds storage strength.</p>
+
+<div class="callout callout--good"><strong>I'm your pair-programmer for this.</strong> Stuck choosing a module? Unsure whether something deserves a stub or a fake? Found something weird in the audit? Bring it to me immediately — that conversation IS the lesson.</div>
+
+<nav class="footer-nav">
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../reference/test-pyramid-cheatsheet.html">Pyramid cheat sheet</a>
+  <a href="0009-tests-for-customer-facing-products.html">← Lesson 9</a>
+</nav>
+
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Testing Glossary — Reference</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="lesson-kicker">Reference · Glossary</p>
+<h1>Software Testing Glossary</h1>
+<p class="byline">Canonical vocabulary used across every lesson in this course. Print it, keep it beside you.</p>
+
+<h2>Test kinds</h2>
+<table>
+  <tr><th>Term</th><th>Meaning</th></tr>
+  <tr><td><strong>Unit test</strong></td><td>Verifies one small piece of behavior (a function, a class) in isolation from slow collaborators like databases or networks. Fast enough to run constantly.</td></tr>
+  <tr><td><strong>Integration test</strong></td><td>Verifies that several components work together — especially across a real boundary: database, message queue, file system, another service.</td></tr>
+  <tr><td><strong>End-to-end (E2E) test</strong></td><td>Drives the whole deployed system the way a user would — through the UI or public API — verifying a complete user journey. Slowest, fewest.</td></tr>
+  <tr><td><strong>Smoke test</strong></td><td>A minimal sanity check that the system basically works ("does it boot and serve?") before deeper tests run. Often the first gate in deployment.</td></tr>
+  <tr><td><strong>Contract test</strong></td><td>Verifies two services agree on the shape of their communication (request/response schema) without needing to run both live.</td></tr>
+</table>
+
+<h2>Anatomy &amp; structure</h2>
+<table>
+  <tr><th>Term</th><th>Meaning</th></tr>
+  <tr><td><strong>SUT</strong></td><td>"System Under Test" — the specific thing being verified by a given test. Everything else is either a collaborator or scaffolding.</td></tr>
+  <tr><td><strong>AAA</strong></td><td><em>Arrange–Act–Assert</em>: set up inputs, do the one action, check the outcome. The standard three-beat shape of every good test.</td></tr>
+  <tr><td><strong>Fixture</strong></td><td>The known, fixed context a test needs: data, files, configured objects. Good frameworks let fixtures be shared without copy-paste.</td></tr>
+  <tr><td><strong>Assertion</strong></td><td>The single statement that checks reality against expectation. A test with weak assertions can't fail when it should — a silent danger.</td></tr>
+</table>
+
+<h2>Test doubles</h2>
+<p>A <strong>test double</strong> is any object standing in for a real dependency during a test (the movie-stunt-double metaphor).</p>
+<table>
+  <tr><th>Double</th><th>What it does</th></tr>
+  <tr><td><strong>Dummy</strong></td><td>Fills a parameter slot; never actually used.</td></tr>
+  <tr><td><strong>Stub</strong></td><td>Returns canned answers to calls — you don't care how it was used, only what comes back.</td></tr>
+  <tr><td><strong>Spy</strong></td><td>A stub that also records how it was called, so assertions can inspect the record later.</td></tr>
+  <tr><td><strong>Mock</strong></td><td>Pre-programmed with expectations: the test fails if the expected calls don't happen exactly. Overuse creates brittle tests.</td></tr>
+  <tr><td><strong>Fake</strong></td><td>A working lightweight implementation (e.g., in-memory database). Preferred over mocks for stateful dependencies.</td></tr>
+</table>
+
+<h2>Strategy &amp; health</h2>
+<table>
+  <tr><th>Term</th><th>Meaning</th></tr>
+  <tr><td><strong>Test pyramid</strong></td><td>Fowler/Vocke's model: many unit tests at the base, fewer integration tests in the middle, few E2E tests at the top (<a href="../reference/test-pyramid-cheatsheet.html">cheat sheet</a>).</td></tr>
+  <tr><td><strong>Testing trophy</strong></td><td>Kent C. Dodds' counter-model: integration tests are the biggest, most valuable layer; static analysis below, unit and E2E smaller.</td></tr>
+  <tr><td><strong>Flaky test</strong></td><td>A test that passes and fails on identical code — usually timing, ordering, or shared-state bugs. Flakiness destroys trust in the whole suite.</td></tr>
+  <tr><td><strong>Regression</strong></td><td>Previously-working behavior broken by a change. The suite's core job is preventing regressions.</td></tr>
+  <tr><td><strong>Code coverage</strong></td><td>% of code executed by tests. Necessary but insufficient — high coverage with weak assertions proves nothing.</td></tr>
+  <tr><td><strong>CI (Continuous Integration)</strong></td><td>Every change automatically builds and runs the suite on a shared server; red build = change doesn't merge.</td></tr>
+  <tr><td><strong>Canary release</strong></td><td>Shipping a change to a small slice of real users first; production telemetry acts as the final test layer.</td></tr>
+</table>
+
+<h2>Process terms</h2>
+<table>
+  <tr><th>Term</th><th>Meaning</th></tr>
+  <tr><td><strong>TDD</strong></td><td>Test-Driven Development: write the failing test first, then make it pass, then refactor. Red → green → refactor.</td></tr>
+  <tr><td><strong>BDD</strong></td><td>Behavior-Driven Development: express tests as user-visible behaviors ("given/when/then") to bridge business and engineering language.</td></tr>
+  <tr><td><strong>Exploratory testing</strong></td><td>Skilled, unscripted investigation of a running system — humans finding what scripts didn't think to ask.</td></tr>
+</table>
+
+<nav class="footer-nav">
+  <a href="../reference/test-pyramid-cheatsheet.html">→ Test pyramid cheat sheet</a>
+  <a href="../lessons/0001-why-we-test.html">← Lesson 1</a>
+</nav>
+
+</body>
+</html>

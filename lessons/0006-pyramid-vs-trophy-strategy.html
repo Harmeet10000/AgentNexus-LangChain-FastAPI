@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 6 · The Pyramid vs The Trophy</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .pyr-e2e   { width: 30%; background: #8d6e63; }
+  .pyr-int   { width: 55%; background: #a0522d; }
+  .pyr-unit  { width: 80%; background: #5d4037; }
+  .trophy-unit { width: 34%; background: #5d4037; }
+  .trophy-int  { width: 62%; background: #a0522d; }
+  .trophy-e2e  { width: 26%; background: #8d6e63; margin-top: .9em !important; }
+</style>
+</head>
+<body>
+
+<p class="lesson-kicker">Software Testing · Lesson 6 of 9</p>
+<h1>The Pyramid vs The Trophy</h1>
+<p class="byline">≈10 minutes · Prerequisites: <a href="0001-why-we-test.html">L1</a>–<a href="0005-e2e-tests-critical-paths.html">L5</a> · Next: What NOT to Test (lesson 7)</p>
+
+<p>You now own all three layers. Two respected maps disagree about how to weight them — and understanding <em>why</em> they disagree is what separates seniors from people who memorized a diagram.</p>
+
+<h2>The Test Pyramid</h2>
+
+<div class="pyr">
+  <div class="pyr__band pyr-e2e">E2E — few</div>
+  <div class="pyr__band pyr-int">Integration — some</div>
+  <div class="pyr__band pyr-unit">Unit — many</div>
+</div>
+
+<p>Vocke's restatement of Mike Cohn's classic [R2]. Logic: fast tests are cheap to run and pinpoint failures, so build wide at the base; expensive slow layers stay narrow.</p>
+
+<h2>The Testing Trophy</h2>
+
+<div class="pyr">
+  <div class="pyr__band trophy-e2e">E2E — thin</div>
+  <div class="pyr__band trophy-int">Integration — the prize</div>
+  <div class="pyr__band trophy-unit">Unit — smaller</div>
+</div>
+
+<p>Kent C. Dodds' counter-model [R3], quoting Guillermo Rauch: <em>"write tests; not too many; mostly integration."</em> Claim: integration checks deliver near-E2E confidence at near-unit cost, while heavy unit investment often just locks in implementation details — Lesson 3's trap at scale.</p>
+
+<h2>Where they actually agree</h2>
+
+<ul>
+  <li><strong>E2E stays scarce</strong> in both models — no serious practitioner argues otherwise</li>
+  <li><strong>Behavior over implementation</strong>: both punish suites that break on refactoring</li>
+  <li><strong>Fast feedback rules everything</strong>: slow suites die socially before they die technically</li>
+</ul>
+
+<h2>The real question underneath the disagreement</h2>
+
+<table>
+  <tr><th>Your codebase looks like…</th><th>Lean toward…</th></tr>
+  <tr><td>Rich domain logic: pricing engines, parsers, state machines, algorithms</td><td>Pyramid — pure logic rewards unit-level breadth</td></tr>
+  <tr><td>Thin logic over infrastructure: CRUD services, API orchestration, glue code</td><td>Trophy — most risk lives AT the boundaries, so test there</td></tr>
+</table>
+
+<div class="callout callout--key"><strong>Senior move:</strong> don't pick a religion — read your codebase. The shape follows where your risk lives. That judgment call, made consciously per project, IS senior-level test strategy.</div>
+
+<h2>Judging any suite in five minutes</h2>
+
+<ol>
+  <li>Count tests per layer — is the mass where the codebase's risk lives?</li>
+  <li>Break one small behavior mentally — would failure localize precisely or vaguely?</li>
+  <li>Ask the team: how often do refactors break tests that shouldn't care?</li>
+  <li>Check CI wall-time — does anyone actually wait for green before merging?</li>
+  <li>Look for quarantined/flaky tests — a growing pile means eroding trust [R4]</li>
+</ol>
+
+<h2>Your wisdom layer starts now</h2>
+
+<p>Knowledge and skills you get from me. Wisdom — judgment tested against practitioners who've maintained suites through real incidents — needs community:</p>
+
+<ul>
+  <li><strong><a href="https://www.ministryoftesting.com">Ministry of Testing</a></strong> — the largest global software-testing community: forums, free courses, local meetups. Join, lurk the forums for a week, then answer a beginner question — teaching cements learning.</li>
+  <li><strong><a href="https://www.reddit.com/r/softwaretesting/">r/softwaretesting</a></strong> — career threads, tool debates, war stories. Read the anti-pattern horror threads; they're Lesson 8 before it exists.</li>
+</ul>
+
+<div id="quiz1" class="quiz"></div>
+
+<h2>Your primary source this week</h2>
+
+<p>Fowler's curated <a href="https://martinfowler.com/testing/">Software Testing Guide</a> [S3] plus Dodds' fuller treatment, <a href="https://kentcdodds.com/blog/the-testing-trophy-and-testing-classifications"><em>The Testing Trophy and Testing Classifications</em></a> [S2]. Read both sides before picking a side — or better, neither.</p>
+
+<div class="callout callout--good"><strong>Halfway checkpoint:</strong> six lessons done. Ask me anything — or try articulating your own position: "for MY projects, which shape and why?" I'll pressure-test it with you.</div>
+
+<nav class="footer-nav">
+  <span>Next session: <strong>What NOT to Test — restraint as skill</strong></span>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../reference/test-pyramid-cheatsheet.html">Pyramid cheat sheet</a>
+  <a href="0005-e2e-tests-critical-paths.html">← Lesson 5</a>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.render("quiz1", {
+  questions: [
+    {
+      prompt: "[Review · Lesson 2] Directly testing private helper methods is discouraged because…",
+      options: [
+        "Public behaviors already verify their correctness",
+        "Private methods execute too slowly in pipelines",
+        "Test frameworks cannot access private members",
+        "Helpers change less frequently than public APIs"
+      ],
+      correct: 0,
+      explain: "Privates serve some public behavior; testing through the smallest public surface covers them AND survives refactors. Direct private tests are implementation coupling."
+    },
+    {
+      prompt: "[Review · Lesson 3] A MOCK fundamentally differs from a STUB because mocks…",
+      options: [
+        "Verify interactions instead of returned values",
+        "Return canned responses without any expectations",
+        "Provide working storage implemented within memory",
+        "Record calls without ever failing a test run"
+      ],
+      correct: 0,
+      explain: "Mocks carry expectations about interactions (commands); stubs feed inputs (queries) and you assert on results. Recording-without-failing describes spies."
+    },
+    {
+      prompt: "[Review · Lesson 4] Checkout fails only when database and cache disagree. Best-catching layer:",
+      options: [
+        "Integration tests running real components together",
+        "Unit tests holding every dependency behind mocks",
+        "End-to-end journeys executed inside production systems",
+        "Static analysis scanning configuration file contents"
+      ],
+      correct: 0,
+      explain: "Cross-component state disagreements live exactly at seams — invisible to isolated units, wasteful to reach via full E2E. Integration is the precision instrument."
+    },
+    {
+      prompt: "The Testing Trophy chiefly disagrees with the Pyramid about…",
+      options: [
+        "How much weight integration testing deserves",
+        "Whether end-to-end journeys require any coverage",
+        "Whether static analysis counts as genuine testing",
+        "If unit tests should exist at professional scale"
+      ],
+      correct: 0,
+      explain: "Both keep E2E thin and both accept unit tests. The contested middle is integration: modest slice versus the whole prize."
+    },
+    {
+      prompt: "[Review · Lesson 5] The clearest symptom of an ice-cream-cone suite:",
+      options: [
+        "Failures take hours to localize and then fix",
+        "Unit tests outnumber every other kind combined",
+        "Coverage dashboards report ninety percent upward",
+        "New developers onboard faster than veterans expected"
+      ],
+      correct: 0,
+      explain: "Top-heavy suites fail vaguely ('checkout broke somewhere') and demand constant surface repairs. High coverage numbers can coexist with — even mask — the disease."
+    }
+  ]
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 7 · What NOT to Test</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="lesson-kicker">Software Testing · Lesson 7 of 9</p>
+<h1>What NOT to Test</h1>
+<p class="byline">≈10 minutes · Prerequisites: <a href="0001-why-we-test.html">L1</a>–<a href="0006-pyramid-vs-trophy-strategy.html">L6</a> · Next: Senior Anti-Patterns (lesson 8)</p>
+
+<p>Beginners ask "how do I test more?" Seniors ask "what does each test buy me?" Every test costs three times: once to write, forever to maintain, and on every CI run until deleted. Testing the wrong things spends that budget while adding zero protection.</p>
+
+<h2>The economics of a test</h2>
+
+<blockquote>A test earns its keep when the cost of writing and maintaining it is lower than the expected cost of the defects it prevents.<cite>— distilling Khorikov's value/cost framing, <a href="https://www.manning.com/books/unit-testing"><em>Unit Testing</em></a>, ch. 1–2 (R1)</cite></blockquote>
+
+<p>This single equation generates every rule below. Nothing here is dogma — it's arithmetic.</p>
+
+<h2>The do-not-test list</h2>
+
+<table>
+  <tr><th>Skip testing…</th><th>Why the math fails</th></tr>
+  <tr><td><strong>Trivial code</strong>: one-line getters, constants, pure delegation</td><td>No logic → no realistic way to be wrong in a way tests catch. The assertion just restates the implementation</td></tr>
+  <tr><td><strong>Third-party library internals</strong></td><td>You can't fix their bugs anyway. Test <em>your usage</em>: wrap the library behind your own interface and test the wrapper</td></tr>
+  <tr><td><strong>Generated code &amp; config</strong></td><td>Verified upstream or by schema validation; hand-written tests rot against regeneration</td></tr>
+  <tr><td><strong>Private implementation details</strong></td><td>Lesson 2 &amp; 3's core trap — such tests break refactors without catching anything real</td></tr>
+  <tr><td><strong>Constructors / DI wiring alone</strong></td><td>If nothing else, they'd fail instantly in integration tests anyway</td></tr>
+</table>
+
+<div class="callout callout--key"><strong>Two senior questions before writing any test:</strong>
+<ol style="margin:.5em 0 0">
+  <li>"If this code broke, would someone notice through observable behavior?" If no — skip.</li>
+  <li>"Could this code realistically break in a way this test catches?" Trivial code fails this question.</li>
+</ol></div>
+
+<h2>The coverage-theater warning</h2>
+
+<p>Chasing these exclusions feels wrong to beginners because coverage numbers drop. Resist the feeling:</p>
+
+<ul>
+  <li>Coverage measures <em>execution</em>, not <em>verification</em>. Code touched by weak assertions counts the same as code guarded by sharp ones.</li>
+  <li>Khorikov argues chasing a specific coverage target optimizes the metric instead of the goal [R1]. Teams hit "90%" and still ship regressions — the number was never the safety net.</li>
+  <li>Healthy use: coverage as a <em>detector</em> — "this risky module has 0%?" — never as a <em>target</em> — "everything must reach 80%".</li>
+</ul>
+
+<h2>Where restraint meets strategy</h2>
+
+<p>Lesson 6 taught you to read your codebase's risk. This lesson completes the loop: spend your test budget <em>exactly there</em>, and refuse to spend it anywhere else — including places that merely make coverage dashboards feel good. Restraint isn't laziness; it's concentration of force.</p>
+
+<div id="quiz1" class="quiz"></div>
+
+<h2>Your primary source this week</h2>
+
+<p>Khorikov, <a href="https://www.manning.com/books/unit-testing"><em>Unit Testing</em> ch. 1 &amp; 7</a> — chapter 7 ("Targeting out-of-scope code") is the deepest public treatment of what to leave untested [R1]. Pair with Fowler's note on avoiding test duplication in <a href="https://martinfowler.com/articles/practical-test-pyramid.html#AvoidTestDuplication">the Pyramid article</a> [R2].</p>
+
+<div class="callout callout--good"><strong>Teacher reminder:</strong> this is the least intuitive lesson so far — "don't test" contradicts beginner instincts. If any row of that table still feels like heresy, challenge me on it now.</div>
+
+<nav class="footer-nav">
+  <span>Next session: <strong>Senior Anti-Patterns — flaky tests, assertion roulette, more</strong></span>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../reference/test-pyramid-cheatsheet.html">Pyramid cheat sheet</a>
+  <a href="0006-pyramid-vs-trophy-strategy.html">← Lesson 6</a>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.render("quiz1", {
+  questions: [
+    {
+      prompt: "[Review · Lesson 6] Judging suite health, seniors count tests per layer to check…",
+      options: [
+        "Whether mass sits where the codebase risk lives",
+        "Whether every module owns identical test quantities",
+        "Whether total counts grew during the last quarter",
+        "Whether naming conventions stay uniform across teams"
+      ],
+      correct: 0,
+      explain: "Shape follows risk (Lesson 6's core move). Uniform counts or raw growth mean nothing; alignment between test mass and actual risk means everything."
+    },
+    {
+      prompt: "A getter returning a stored field deserves no unit test because…",
+      options: [
+        "Trivial delegation offers nothing meaningful to verify",
+        "Getters execute too slowly inside continuous integration",
+        "Coverage tools already record their execution automatically",
+        "Compilers statically prove simple assignments are correct"
+      ],
+      correct: 0,
+      explain: "With no logic, there's no realistic failure mode the test catches — the assert merely restates the implementation. Zero protection purchased, permanent maintenance owed."
+    },
+    {
+      prompt: "Correct treatment of a third-party library's internals:",
+      options: [
+        "Test your wrapper around the external dependency",
+        "Write unit tests importing their private functions",
+        "Copy their repository's tests into your codebase",
+        "Trust vendor release notes as complete verification"
+      ],
+      correct: 0,
+      explain: "You can't fix their bugs and their internals shift under you. Wrap the library behind your own interface; test that boundary — where YOUR decisions live."
+    },
+    {
+      prompt: "Ninety percent coverage achieved through weak assertions proves…",
+      options: [
+        "Almost nothing about whether behavior stays correct",
+        "Customers will never encounter production regressions",
+        "Engineers followed modern testing practices thoroughly",
+        "Every branch contains at least one meaningful check"
+      ],
+      correct: 0,
+      explain: "Coverage measures execution, not verification. Code brushed past by hollow asserts counts identically to code guarded sharply — hence 'coverage theater.'"
+    },
+    {
+      prompt: "[Review · Lessons 1+3] Refactoring renames internal helpers; many tests shatter. Those tests were…",
+      options: [
+        "Asserting implementation details instead of outcomes",
+        "Written before the team adopted static type checking",
+        "Missing proper fixture data for their arrange phases",
+        "Correctly catching the behavioral regression introduced"
+      ],
+      correct: 0,
+      explain: "Pure renaming preserves behavior, so green-behavior tests should survive. Shattering tests reveal coupling to internals — the exact brittleness doubles-on-collaborators creates."
+    }
+  ]
+});
+</script>
+
+</body>
+</html>

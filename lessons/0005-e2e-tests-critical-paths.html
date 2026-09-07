@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 5 · E2E Tests</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="lesson-kicker">Software Testing · Lesson 5 of 9</p>
+<h1>E2E Tests: Few, Slow, Critical Paths</h1>
+<p class="byline">≈10 minutes · Prerequisites: <a href="0001-why-we-test.html">L1</a>–<a href="0004-integration-tests-real-boundaries.html">L4</a> · Next: The Pyramid &amp; Trophy (lesson 6)</p>
+
+<p>Unit tests verify pieces. Integration tests verify seams. End-to-end tests answer the only question customers actually ask: <em>can I sign up, buy the thing, and get my receipt?</em> They're also the easiest layer to wreck a team with.</p>
+
+<h2>The definition</h2>
+
+<blockquote>An E2E test drives the <strong>entire deployed system</strong> exactly as a user would — through the real UI or public API, against a real environment — verifying a complete journey.<cite>— after Vocke, <a href="https://martinfowler.com/articles/practical-test-pyramid.html#End-to-endTests"><em>The Practical Test Pyramid</em></a>, §End-to-End Tests (R2)</cite></blockquote>
+
+<pre><code>test "customer can purchase an item":
+    open storefront_homepage()
+    add_item_to_cart("widget")
+    complete_checkout_with(test_card)
+    assert confirmation_email_sent_to(test_user)</code></pre>
+
+<p>Notice what's absent: any knowledge of internals. The test speaks only the language of the user. That black-box quality is its whole value — and the reason it survives refactors better than any other kind.</p>
+
+<h2>Why the pyramid puts them at the top — few</h2>
+
+<table>
+  <tr><th>Cost</th><th>Consequence if ignored</th></tr>
+  <tr><td><strong>Minutes per test</strong></td><td>A hundred E2E tests = hours of CI time; developers stop waiting</td></tr>
+  <tr><td><strong>Brittle to surface change</strong></td><td>Every button rename breaks tests; teams spend days on "test maintenance"</td></tr>
+  <tr><td><strong>Flakiness-prone</strong></td><td>Timing races, network hiccups — intermittent reds erode trust in everything</td></tr>
+  <tr><td><strong>Hard failures to diagnose</strong></td><td>"Checkout broke" — but where? Unit/integration failures point precisely; E2E points vaguely</td></tr>
+</table>
+
+<div class="callout callout--warn"><strong>The ice-cream cone anti-pattern:</strong> teams that find E2E "more realistic" often end up with many E2E tests and few fast ones. Result: slow, flaky, expensive suites where nobody can localize failures. Google calls large-test-heavy suites one of the classic failure modes [R4].</div>
+
+<h2>What belongs at this layer</h2>
+
+<ul>
+  <li><strong>Critical journeys only</strong>: signup → login → core action → payment → password reset. Ask: "if this journey breaks in production tonight, does money or trust evaporate?" If yes, it earns an E2E test.</li>
+  <li><strong>Smoke subset</strong>: after each deploy, one tiny pass — "does it boot, serve, and accept a login?" — before deeper testing runs.</li>
+  <li><strong>Deterministic data setup</strong>: seed accounts and products via APIs or fixtures, never by clicking through the UI (UI setup multiplies brittleness).</li>
+  <li><strong>Flaky = broken</strong>: seniors quarantine a flaky test immediately and fix its root cause. A test that randomly fails teaches everyone to ignore red [R4].</li>
+</ul>
+
+<h2>The strategic picture so far</h2>
+
+<p>You now hold all three layers. The pattern across Lessons 2–5:</p>
+
+<table>
+  <tr><th>Layer</th><th>Verifies</th><th>Speed</th><th>Count</th></tr>
+  <tr><td>Unit</td><td>One behavior, dependencies doubled</td><td>ms</td><td>Many</td></tr>
+  <tr><td>Integration</td><td>Real boundaries and seams</td><td>seconds</td><td>Some</td></tr>
+  <tr><td>E2E</td><td>Complete customer journeys</td><td>minutes</td><td>Few</td></tr>
+</table>
+
+<p>Next session we assemble these into the two competing strategy maps — the pyramid and the trophy — and you'll be able to look at any suite and judge its shape.</p>
+
+<div id="quiz1" class="quiz"></div>
+
+<h2>Your primary source this week</h2>
+
+<p>Vocke, <a href="https://martinfowler.com/articles/practical-test-pyramid.html#End-to-endTests"><em>Practical Test Pyramid</em>, §End-to-End Tests &amp; UI Tests</a> — includes the pragmatic advice on keeping E2E counts brutal [R2]. For the enterprise-scale view of large-test costs: <a href="https://abseil.io/resources/swe-book/html/ch14.html"><em>Software Engineering at Google</em>, ch. 14</a> [R4].</p>
+
+<div class="callout callout--good"><strong>Teacher reminder:</strong> three layers down, two strategy lessons to go. Questions welcome — especially "when is E2E worth it despite all these costs?" That's a genuinely contested question among practitioners.</div>
+
+<nav class="footer-nav">
+  <span>Next session: <strong>The Pyramid vs the Trophy — assembling your strategy</strong></span>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../reference/test-pyramid-cheatsheet.html">Pyramid cheat sheet</a>
+  <a href="0004-integration-tests-real-boundaries.html">← Lesson 4</a>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.render("quiz1", {
+  questions: [
+    {
+      prompt: "[Review · Lesson 4] An API-level integration test should assert primarily on…",
+      options: [
+        "Status codes and response bodies returned",
+        "Internal handler functions invoked per request",
+        "Exact SQL statement text sent to databases",
+        "Line coverage percentages achieved during execution"
+      ],
+      correct: 0,
+      explain: "Assert on what a client observes. Internal queries and coverage are implementation concerns — asserting on them recreates the brittleness trap."
+    },
+    {
+      prompt: "The right number of end-to-end tests for most products:",
+      options: [
+        "One covering each critical customer journey",
+        "One exercising each visible product screen",
+        "One duplicating every lower-level automated test",
+        "One written for every sprint demo ever given"
+      ],
+      correct: 0,
+      explain: "E2E earns its cost only where breakage means lost money or trust: signup, checkout, password reset. Screen-count and test-duplication strategies produce ice-cream cones."
+    },
+    {
+      prompt: "[Review · Lesson 1] An E2E test fails intermittently on identical code. Seniors respond by…",
+      options: [
+        "Quarantining it and fixing the root cause",
+        "Retrying runs until green and moving along",
+        "Adding longer sleeps before each fragile step",
+        "Ignoring it since flaky tests self-resolve eventually"
+      ],
+      correct: 0,
+      explain: "Flakiness destroys trust in the entire suite — one intermittent red teaches people to dismiss all reds. Quarantine protects signal while the cause gets fixed."
+    },
+    {
+      prompt: "Teams whose suites are mostly end-to-end tests typically suffer…",
+      options: [
+        "Slow feedback plus heavy maintenance burdens",
+        "Instant pipelines yet weak customer confidence",
+        "Perfect determinism but shallow business relevance",
+        "Low infrastructure cost yet poor hiring outcomes"
+      ],
+      correct: 0,
+      explain: "The ice-cream cone: minutes-long tests, constant selector repairs, and vague failure diagnostics. Speed and precision were sacrificed without gaining reliability."
+    },
+    {
+      prompt: "Immediately after each deployment, the first automated check:",
+      options: [
+        "A smoke test confirming basic system health",
+        "The full regression suite across every module",
+        "An exploratory session scheduled with stakeholders",
+        "A database migration replayed from empty state"
+      ],
+      correct: 0,
+      explain: "Smoke tests answer 'is it fundamentally alive?' cheaply and fast, gating deeper — slower — verification behind a quick sanity pass."
+    }
+  ]
+});
+</script>
+
+</body>
+</html>

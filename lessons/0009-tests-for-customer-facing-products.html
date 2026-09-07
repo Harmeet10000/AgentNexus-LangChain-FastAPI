@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 9 · Tests for Customer-Facing Products</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="lesson-kicker">Software Testing · Lesson 9 of 9</p>
+<h1>Tests for Customer-Facing Products</h1>
+<p class="byline">≈10 minutes · Prerequisites: <a href="0001-why-we-test.html">L1</a>–<a href="0008-senior-anti-patterns.html">L8</a> · Next: applied capstone</p>
+
+<p>Everything so far happens <em>before</em> release. But customers don't use your test suite — they use production, where reality exceeds anything CI simulated: real traffic patterns, real data shapes, real third-party outages. Mature organizations extend the testing philosophy <em>past</em> the deploy button.</p>
+
+<h2>The pipeline as a series of gates</h2>
+
+<pre><code>commit → unit tests        (seconds — reject fast)
+      → integration tests  (minutes — verify seams)
+      → E2E smoke          (critical journeys only)
+      → staged rollout     (canary → percentage → full)</code></pre>
+
+<p>Each gate is Lesson 1's cost-of-defect table operationalized: catch it as cheaply as possible, escalate what escapes. Two properties matter more than any tooling:</p>
+
+<ul>
+  <li><strong>Red means stop.</strong> A gate everyone bypasses is decoration. The suite's authority comes from the discipline to block merges [R4].</li>
+  <li><strong>Fast gates first.</strong> Ordering by speed keeps feedback cheap — the pyramid's logic applied to time.</li>
+</ul>
+
+<h2>Canary releases: the experiment becomes the test</h2>
+
+<p>Instead of betting the whole customer base on one deploy, ship to 1–5% of traffic first. Production telemetry — error rates, latency, conversion — now acts as a test with real inputs at real scale. If the canary's metrics deviate, roll back; blast radius was one-twentieth of your users, not all of them [R6].</p>
+
+<h2>Feature flags: decoupling deploy from release</h2>
+
+<p>A flag lets broken-but-deployed code stay dark until toggled. This transforms incident response from "roll back the deployment" (slow, risky) into "flip the flag off" (seconds). It also enables testing in production deliberately: enable for internal users, then beta cohort, then everyone.</p>
+
+<h2>Error budgets: reliability as a number</h2>
+
+<blockquote>If you promise 99.9% availability, your error budget is 0.1% — roughly 43 minutes of downtime per month. Spend it fixing things; exceed it, and new feature launches freeze until reliability recovers.<cite>— the Google SRE model [R6]</cite></blockquote>
+
+<div class="callout callout--key"><strong>The deep insight:</strong> error budgets turn the age-old fight between "ship features" and "stay reliable" into arithmetic. Reliability stops being a vibe and becomes a budget line — which is exactly how testing stopped being a vibe back in Lesson 1.</div>
+
+<h2>Observability: the always-running test</h2>
+
+<table>
+  <tr><th>Pre-production test</th><th>Production counterpart</th></tr>
+  <tr><td>Unit/integration asserts</td><td>Alerts on metric thresholds (error rate, latency)</td></tr>
+  <tr><td>E2E journey tests</td><td>Synthetic monitors replaying critical journeys continuously</td></tr>
+  <tr><td>Test failure report</td><td>Dashboards + traces localizing which service degraded</td></tr>
+</table>
+
+<p>Synthetic monitors are worth naming: scripts that log in and click through checkout every few minutes from outside your network. They're E2E tests running permanently — often catching certificate expiries, DNS breakage, and regional outages nothing in CI could see.</p>
+
+<h2>The complete picture you now own</h2>
+
+<p>Nine lessons assembled into one stance:</p>
+
+<ol>
+  <li>Tests buy <strong>confidence to change</strong> (L1), through behavior-focused units (L2) using doubles sparingly and honestly (L3)</li>
+  <li>Integration verifies seams (L4); E2E guards critical journeys (L5); shape follows risk (L6)</li>
+  <li>Restraint concentrates force (L7); six named habits protect signal (L8)</li>
+  <li>And past the deploy button: gates, canaries, flags, budgets, telemetry (L9)</li>
+</ol>
+
+<div id="quiz1" class="quiz"></div>
+
+<h2>Your primary source this week</h2>
+
+<p>Google's <a href="https://sre.google/books/"><em>Site Reliability Engineering</em> book</a> — especially the chapters on monitoring and alerting philosophy, plus <a href="https://abseil.io/resources/swe-book/html/ch14.html"><em>SWE at Google</em> ch. 14</a> for release gating [R4, R6].</p>
+
+<h2>What's next: the applied capstone</h2>
+
+<p>You've completed the curriculum — perfect scores throughout, concepts transferring across lessons. The next stage is wisdom-building on <strong>real code</strong>: pick a repository (AgentNexus qualifies), run the five-minute suite audit from Lesson 6, identify its shape, its anti-patterns, its untested risks — and then write one proper unit test and one integration test for it. Tell me when ready and I'll build the capstone session.</p>
+
+<div class="callout callout--good"><strong>Course complete — I remain your teacher.</strong> Bring me code reviews, interview questions, anti-pattern finds, design disputes. The glossary and pyramid cheat sheet stay current as references forever.</div>
+
+<nav class="footer-nav">
+  <span>Congratulations — curriculum complete · Next: <strong>Applied Capstone</strong></span>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../reference/test-pyramid-cheatsheet.html">Pyramid cheat sheet</a>
+  <a href="0008-senior-anti-patterns.html">← Lesson 8</a>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.render("quiz1", {
+  questions: [
+    {
+      prompt: "[Review · Lesson 8] Auto-retry wrappers around flaky tests ultimately cause…",
+      options: [
+        "Nondeterminism surviving silently inside systems",
+        "Suites finishing noticeably faster than previously",
+        "Dashboards finally reaching their coverage targets",
+        "Root causes surfacing faster during quiet periods"
+      ],
+      correct: 0,
+      explain: "Retries convert signal into noise: the race or leak persists while red badges disappear. Quarantine plus root-cause work is the senior alternative."
+    },
+    {
+      prompt: "An error budget fundamentally quantifies the tension between…",
+      options: [
+        "Reliability promises and shipping new functionality",
+        "Cloud infrastructure spending and developer salaries",
+        "Manual testing hours versus automation investments",
+        "Frontend performance against backend throughput limits"
+      ],
+      correct: 0,
+      explain: "Budget = allowed unreliability. Under budget, ship freely; exhausted, freeze launches. The feature-versus-stability argument becomes measurable arithmetic."
+    },
+    {
+      prompt: "Canary releases limit deployment risk primarily by…",
+      options: [
+        "Exposing changes initially to a small traffic slice",
+        "Postponing deployments until long stabilization windows",
+        "Replaying every recorded customer session automatically",
+        "Running full regression suites inside production regions"
+      ],
+      correct: 0,
+      explain: "One-to-five-percent exposure makes production telemetry a controlled experiment: deviation triggers rollback with a twentieth of the blast radius."
+    },
+    {
+      prompt: "Feature flags improve production safety because they…",
+      options: [
+        "Decouple deploying code from exposing new behavior",
+        "Eliminate the need for any pre-deployment testing",
+        "Guarantee zero regressions once fully rolled outward",
+        "Automatically rewrite buggy handlers during incidents"
+      ],
+      correct: 0,
+      explain: "Dark code deploys safely, activates gradually, and disables in seconds — turning incident response from rollback surgery into a toggle flip."
+    },
+    {
+      prompt: "After every automated gate passes, the final safety layer:",
+      options: [
+        "Telemetry observing genuine user behavior continuously",
+        "Extended manual QA campaigns preceding each launch",
+        "Executive sign-off collected across all stakeholders",
+        "Weekly retrospective meetings reviewing past incidents"
+      ],
+      correct: 0,
+      explain: "Reality always exceeds simulation: real traffic, data shapes, and outages. Monitoring and synthetic journeys run the tests permanently, where customers actually live."
+    }
+  ]
+});
+</script>
+
+</body>
+</html>
