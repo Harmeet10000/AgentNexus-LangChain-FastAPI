@@ -647,9 +647,12 @@ class SubscriptionService:
                 )
             )
 
-        proration: ProrationCalculation = calculate_plan_change_proration(
+        proration_result = calculate_plan_change_proration(
             subscription, current_plan, new_plan, effective_date=dto.effective_date
         )
+        if isinstance(proration_result, Failure):
+            return proration_result
+        proration: ProrationCalculation = proration_result.unwrap()
         payment_url: str | None = None
         if proration.direction.value == "upgrade" and proration.proration_amount > 0:
             if self._razorpay_enabled():
@@ -717,7 +720,7 @@ class SubscriptionService:
         if isinstance(new_plan_result, Failure):
             return new_plan_result
         new_plan = new_plan_result.unwrap()
-        return Success(calculate_plan_change_proration(subscription, current_plan, new_plan))
+        return calculate_plan_change_proration(subscription, current_plan, new_plan)
 
     @trace_layer("service")
     async def request_trial_extension(

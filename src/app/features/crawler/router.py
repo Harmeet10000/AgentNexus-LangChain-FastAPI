@@ -78,18 +78,6 @@ async def _owner_job(request: Request, crawl_id: str, store: CrawlJobStore) -> C
     return job
 
 
-def _cursor(value: str) -> int:
-    try:
-        cursor = int(value)
-    except ValueError as exc:
-        message = "cursor must be a non-negative integer"
-        raise ValueError(message) from exc
-    if cursor < 0:
-        message = "cursor must be a non-negative integer"
-        raise ValueError(message)
-    return cursor
-
-
 @router.post(path="/crawl")
 async def crawl_url(  # noqa: PLR0917
     request_data: CrawlRequest,
@@ -146,7 +134,9 @@ async def crawl_status(
     crawl_id: str,
     store: Annotated[CrawlJobStore, Depends(get_crawl_job_store)],
 ) -> APIResponse[CrawlJob]:
-    return http_response(message="Crawler job status", data=await _owner_job(request, crawl_id, store))
+    return http_response(
+        message="Crawler job status", data=await _owner_job(request, crawl_id, store)
+    )
 
 
 @router.get(path="/crawl/{crawl_id}/pages")
@@ -154,12 +144,12 @@ async def crawl_pages(
     request: Request,
     crawl_id: str,
     store: Annotated[CrawlJobStore, Depends(get_crawl_job_store)],
-    cursor: Annotated[str, Query(min_length=1, max_length=32)] = "0",
+    cursor: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=20)] = 10,
 ) -> APIResponse[CrawlJobPageList]:
     await _owner_job(request, crawl_id, store)
     result = await store.pages(
-        crawl_id, owner=get_client_identifier(request), cursor=_cursor(cursor), limit=limit
+        crawl_id, owner=get_client_identifier(request), cursor=cursor, limit=limit
     )
     if result is None:
         message = "Crawler result is not available yet"
@@ -172,12 +162,12 @@ async def crawl_chunks(
     request: Request,
     crawl_id: str,
     store: Annotated[CrawlJobStore, Depends(get_crawl_job_store)],
-    cursor: Annotated[str, Query(min_length=1, max_length=32)] = "0",
+    cursor: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> APIResponse[CrawlJobChunkList]:
     await _owner_job(request, crawl_id, store)
     chunk_result = await store.chunks(
-        crawl_id, owner=get_client_identifier(request), cursor=_cursor(cursor), limit=limit
+        crawl_id, owner=get_client_identifier(request), cursor=cursor, limit=limit
     )
     if chunk_result is None:
         message = "Crawler result is not available yet"
@@ -258,6 +248,8 @@ async def get_rate_limit_info(
     crawl_remaining = await rate_limiter.get_remaining(owner, RateLimitScope.CRAWL)
     search_remaining = await rate_limiter.get_remaining(owner, RateLimitScope.SEARCH)
     return RateLimitInfo(
-        remaining_minute=min(crawl_remaining["remaining_minute"], search_remaining["remaining_minute"]),
+        remaining_minute=min(
+            crawl_remaining["remaining_minute"], search_remaining["remaining_minute"]
+        ),
         remaining_hour=min(crawl_remaining["remaining_hour"], search_remaining["remaining_hour"]),
     )

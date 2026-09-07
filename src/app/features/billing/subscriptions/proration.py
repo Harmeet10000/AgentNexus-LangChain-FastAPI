@@ -6,20 +6,24 @@ from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import TYPE_CHECKING
 
+from returns.result import Failure, Success
+
 from app.features.billing.invoices.tax import split_tax_inclusive
-from app.utils import ValidationException
 
 from .dto import ProrationCalculation, ProrationDirection
+from .errors import SubscriptionValidationError
 from .model import SubscriptionStatus
 
 if TYPE_CHECKING:
     from app.features.billing.plans.model import Plan
     from app.features.billing.subscriptions.model import Subscription
 
+    from .errors import SubscriptionResult
+
 
 def calculate_proration_fraction(
     *, effective_date: datetime, period_start: datetime, period_end: datetime
-) -> Decimal:
+) -> SubscriptionResult[Decimal]:
     """Fraction of the billing period remaining after ``effective_date``.
 
     Uses integer microsecond arithmetic (Requirement 33) so no precision is
@@ -28,21 +32,30 @@ def calculate_proration_fraction(
     total_microseconds = int((period_end - period_start).total_seconds() * 1_000_000)
     if total_microseconds <= 0:
         msg = "Billing period is empty or inverted"
-        raise ValidationException(
-            msg,
-            data={"period_start": period_start.isoformat(), "period_end": period_end.isoformat()},
+        return Failure(
+            SubscriptionValidationError(
+                message=msg,
+                details={
+                    "period_start": period_start.isoformat(),
+                    "period_end": period_end.isoformat(),
+                },
+                source="proration",
+            )
         )
     remaining_microseconds = int((period_end - effective_date).total_seconds() * 1_000_000)
     if remaining_microseconds < 0:
         msg = "Effective date is after the current billing period end"
-        raise ValidationException(
-            msg,
-            data={
-                "effective_date": effective_date.isoformat(),
-                "period_end": period_end.isoformat(),
-            },
+        return Failure(
+            SubscriptionValidationError(
+                message=msg,
+                details={
+                    "effective_date": effective_date.isoformat(),
+                    "period_end": period_end.isoformat(),
+                },
+                source="proration",
+            )
         )
-    return Decimal(remaining_microseconds) / Decimal(total_microseconds)
+    return Success(Decimal(remaining_microseconds) / Decimal(total_microseconds))
 
 
 def _round_paisa(value: Decimal) -> int:
@@ -55,33 +68,51 @@ def calculate_plan_change_proration(
     new_plan: Plan,
     *,
     effective_date: datetime | None = None,
-) -> ProrationCalculation:
+) -> SubscriptionResult[ProrationCalculation]:
     """Compute the prorated charge/credit for a mid-cycle plan change."""
     if current_plan.interval != new_plan.interval:
         msg = "Cannot change between different billing intervals"
-        raise ValidationException(
-            msg,
-            data={"current_interval": current_plan.interval, "new_interval": new_plan.interval},
+        return Failure(
+            SubscriptionValidationError(
+                message=msg,
+                details={
+                    "current_interval": current_plan.interval,
+                    "new_interval": new_plan.interval,
+                },
+                source="proration",
+            )
         )
     if subscription.status != SubscriptionStatus.ACTIVE:
         msg = "Proration is only valid for active subscriptions"
-        raise ValidationException(
-            msg,
-            data={"subscription_id": str(subscription.id), "status": subscription.status},
+        return Failure(
+            SubscriptionValidationError(
+                message=msg,
+                details={
+                    "subscription_id": str(subscription.id),
+                    "status": subscription.status,
+                },
+                source="proration",
+            )
         )
     if subscription.current_period_start is None or subscription.current_period_end is None:
         msg = "Subscription has no active billing period"
-        raise ValidationException(
-            msg,
-            data={"subscription_id": str(subscription.id)},
+        return Failure(
+            SubscriptionValidationError(
+                message=msg,
+                details={"subscription_id": str(subscription.id)},
+                source="proration",
+            )
         )
 
     now = effective_date or datetime.now(tz=UTC)
-    fraction = calculate_proration_fraction(
+    fraction_result = calculate_proration_fraction(
         effective_date=now,
         period_start=subscription.current_period_start,
         period_end=subscription.current_period_end,
     )
+    if isinstance(fraction_result, Failure):
+        return fraction_result
+    fraction = fraction_result.unwrap()
 
     current_prorated = _round_paisa(Decimal(current_plan.amount) * fraction)
     new_prorated = _round_paisa(Decimal(new_plan.amount) * fraction)
@@ -97,16 +128,18 @@ def calculate_plan_change_proration(
         direction = ProrationDirection.NO_CHANGE
         tax_amount = 0
 
-    return ProrationCalculation(
-        subscription_id=str(subscription.id),
-        current_plan_id=str(current_plan.id),
-        new_plan_id=str(new_plan.id),
-        effective_date=now,
-        remaining_fraction=fraction,
-        current_plan_prorated=current_prorated,
-        new_plan_prorated=new_prorated,
-        proration_amount=proration_amount,
-        tax_amount=tax_amount,
-        total_amount=abs(proration_amount),
-        direction=direction,
+    return Success(
+        ProrationCalculation(
+            subscription_id=str(subscription.id),
+            current_plan_id=str(current_plan.id),
+            new_plan_id=str(new_plan.id),
+            effective_date=now,
+            remaining_fraction=fraction,
+            current_plan_prorated=current_prorated,
+            new_plan_prorated=new_prorated,
+            proration_amount=proration_amount,
+            tax_amount=tax_amount,
+            total_amount=abs(proration_amount),
+            direction=direction,
+        )
     )

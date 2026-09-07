@@ -1,0 +1,26 @@
+id: no-raise-in-result-service
+language: python
+severity: error
+message: Result-typed services return Failure, they do not raise for expected failures
+note: |
+  RESULT-PATTERN.md Pattern 1 — a service method returning `<Feature>Result[T]`
+  answers expected failures with `Failure(...)` and unwraps collaborators with
+  `isinstance(result, Failure)`. Raising a typed exception for an expected
+  failure (e.g. `raise ValidationException` from a proration helper) bypasses
+  the union and breaks exhaustive `assert_never` handling at the caller.
+  Exempt shapes (programmer errors, not expected failures):
+  1) bare `raise` re-raising a caught exception
+  2) builtin guards (`RuntimeError`, `ValueError`, `KeyError`,
+     `AttributeError`, `TypeError`, `NotImplementedError`) for missing
+     injection or invalid internal arguments
+  Example violation: `raise SubscriptionValidationError(...)` inside
+  `features/billing/subscriptions/service.py`.
+rule:
+  all:
+    - pattern: raise $EXCEPTION($$$ARGS)
+    - not:
+        regex: "raise\\s+(RuntimeError|ValueError|KeyError|AttributeError|TypeError|NotImplementedError)\\s*\\("
+files:
+  - src/app/features/**/service.py
+  - src/app/features/**/services/*.py
+  - .ast-grep/fixtures/no-raise-in-result-service/**

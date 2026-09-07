@@ -37,6 +37,12 @@ def _bound(text: str, limit: int = MAX_TOOL_CHARS) -> str:
     return text[: max(0, limit - 24)] + "\n[truncated for agent]"
 
 
+_UNCONFIGURED_MESSAGE = (
+    "Crawl job store is not configured. "
+    "Create tools via get_crawl_job_tools(job_store, ...) or use the REST API."
+)
+
+
 class _StoreMixin:
     """Owner-scoped store access shared by durable-job tools.
 
@@ -50,15 +56,13 @@ class _StoreMixin:
         owner: Any = getattr(self, "_owner", "agent")
         return owner if isinstance(owner, str) else "agent"
 
-    def _require_store(self) -> Any:
-        store: Any = getattr(self, "_job_store", None)
-        if store is None:
-            message = (
-                "Crawl job store is not configured. "
-                "Create tools via get_crawl_job_tools(job_store, ...) or use the REST API."
-            )
-            raise RuntimeError(message)
-        return store
+    def _optional_store(self) -> Any:
+        """Return the injected job store, or None when tools are miswired.
+
+        LangChain tools communicate through return strings, so a missing
+        store is answered with guidance text at each call site — never raised.
+        """
+        return getattr(self, "_job_store", None)
 
 
 class CrawlStartInput(BaseModel):
@@ -133,7 +137,9 @@ class CrawlStartTool(_StoreMixin, BaseTool):
 
     @override
     async def _arun(self, url: str, max_depth: int = 1, max_pages: int = 10) -> str:
-        store = self._require_store()
+        store = self._optional_store()
+        if store is None:
+            return _bound(_UNCONFIGURED_MESSAGE)
         crawl_id = uuid4().hex
         payload = {"url": url, "max_depth": max_depth, "max_pages": max_pages}
         job, _ = await store.create(
@@ -168,7 +174,9 @@ class CrawlStatusTool(_StoreMixin, BaseTool):
 
     @override
     async def _arun(self, crawl_id: str) -> str:
-        store = self._require_store()
+        store = self._optional_store()
+        if store is None:
+            return _bound(_UNCONFIGURED_MESSAGE)
         job = await store.get(crawl_id, owner=self.store_owner)
         if job is None:
             return f"crawl_id={crawl_id} status=not_found"
@@ -200,7 +208,9 @@ class CrawlGetPageTool(_StoreMixin, BaseTool):
 
     @override
     async def _arun(self, crawl_id: str, cursor: int = 0, limit: int = 5) -> str:
-        store = self._require_store()
+        store = self._optional_store()
+        if store is None:
+            return _bound(_UNCONFIGURED_MESSAGE)
         result = await store.pages(crawl_id, owner=self.store_owner, cursor=cursor, limit=limit)
         if result is None:
             return f"crawl_id={crawl_id} pages=pending"
@@ -234,7 +244,9 @@ class CrawlGetChunkTool(_StoreMixin, BaseTool):
 
     @override
     async def _arun(self, crawl_id: str, cursor: int = 0, limit: int = 10) -> str:
-        store = self._require_store()
+        store = self._optional_store()
+        if store is None:
+            return _bound(_UNCONFIGURED_MESSAGE)
         result = await store.chunks(crawl_id, owner=self.store_owner, cursor=cursor, limit=limit)
         if result is None:
             return f"crawl_id={crawl_id} chunks=pending"
@@ -267,7 +279,9 @@ class CrawlSearchChunksTool(_StoreMixin, BaseTool):
 
     @override
     async def _arun(self, crawl_id: str, query: str, limit: int = 10) -> str:
-        store = self._require_store()
+        store = self._optional_store()
+        if store is None:
+            return _bound(_UNCONFIGURED_MESSAGE)
         result = await store.search_chunks(
             crawl_id, owner=self.store_owner, query=query, limit=limit
         )
@@ -300,7 +314,9 @@ class CrawlCancelTool(_StoreMixin, BaseTool):
 
     @override
     async def _arun(self, crawl_id: str) -> str:
-        store = self._require_store()
+        store = self._optional_store()
+        if store is None:
+            return _bound(_UNCONFIGURED_MESSAGE)
         job = await store.request_cancel(crawl_id, owner=self.store_owner)
         if job is None:
             return f"crawl_id={crawl_id} status=not_found"

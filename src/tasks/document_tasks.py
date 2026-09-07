@@ -7,7 +7,7 @@ import asyncio
 from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, ResilientTask, celery_app
 from app.connections.celery_task_names import DOCUMENTS_INGEST
 from app.features.documents.service import run_document_ingestion_task
-from app.utils import logger
+from app.utils import InfrastructureException, logger
 
 
 class DocumentIngestPayload(CeleryTaskPayload):
@@ -56,5 +56,19 @@ def ingest_document(
     except Exception:
         self.release_idempotency_processing_lock(idempotency_key)
         raise
+    # The graph never raises for expected ingestion failures; it returns an
+    # error state instead. Retryable failures must still raise so Celery
+    # retries; permanent ones are returned as failure dicts.
+    if result.get("status") == "failed":
+        if result.get("error_retryable"):
+            self.release_idempotency_processing_lock(idempotency_key)
+            raise InfrastructureException(
+                detail=str(result.get("error_message") or "Document ingestion failed"),
+                error_code=str(result.get("error_code") or "INGESTION_FAILED"),
+                retryable=True,
+                data={"document_id": document_id},
+            )
+        self.mark_idempotency_completed(idempotency_key, metadata={"document_id": document_id})
+        return result
     self.mark_idempotency_completed(idempotency_key, metadata={"document_id": document_id})
     return result

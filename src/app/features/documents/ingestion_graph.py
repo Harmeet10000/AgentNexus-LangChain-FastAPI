@@ -10,7 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
 from returns.result import Failure
 
-from app.utils import InfrastructureException
+from app.shared.result import log_expected_failure
 
 from .dto import IngestionJob, IngestionRuntime
 
@@ -40,6 +40,9 @@ class DocumentIngestionState(BaseModel):
     chunk_count: int = 0
     verified_chunk_count: int = 0
     document_kind: str = ""
+    error_code: str = ""
+    error_message: str = ""
+    error_retryable: bool = False
 
 
 def build_document_ingestion_graph(
@@ -98,12 +101,13 @@ def _make_ingest_document_node(
         )
         if isinstance(result, Failure):
             error = result.failure()
-            raise InfrastructureException(
-                detail=error.message,
-                error_code=error.code,
-                retryable=error.retryable,
-                data=error.details,
-            )
+            log_expected_failure(error=error, operation="ingest_document_node")
+            return {
+                "status": "failed",
+                "error_code": str(error.code),
+                "error_message": error.message,
+                "error_retryable": error.retryable,
+            }
         return result.unwrap()
 
     return ingest_document_node
