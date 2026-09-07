@@ -17,12 +17,13 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from datetime import UTC, datetime
 from functools import cache
 from importlib import import_module
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Literal, TypedDict, cast, override
+from uuid import uuid4
 
 import opentelemetry.trace as otel_trace
 from celery import Celery, Task
@@ -34,14 +35,17 @@ from celery.signals import (
     task_postrun,
     task_prerun,
     task_retry,
+    worker_process_init,
+    worker_shutdown,
 )
 from kombu import Exchange, Queue
-from opentelemetry import metrics
+from opentelemetry import context as otel_context
+from opentelemetry import metrics, propagate
 from pydantic import BaseModel, ValidationError
 
 from app.config import get_settings
 from app.connections.redis import create_redis_client
-from app.utils import logger
+from app.utils import execution_path, logger, setup_logging
 from app.utils.cache import Redis
 from app.utils.json_serializer import from_json, to_json_str
 
@@ -622,7 +626,8 @@ class RateLimiter:
         current_count = cast("int", await cast("Awaitable[object]", self._redis.zcard(key)))
         allowed = current_count < self._burst
         if allowed:
-            await cast("Awaitable[object]", self._redis.zadd(key, {str(now): now}))
+            member = f"{now:.9f}:{uuid4().hex}"
+            await cast("Awaitable[object]", self._redis.zadd(key, {member: now}))
             await cast("Awaitable[object]", self._redis.expire(key, self._period * 2))
             remaining = self._burst - current_count - 1
         else:
@@ -987,6 +992,39 @@ def create_celery_app() -> Celery:
 celery_app = create_celery_app()
 
 
+def initialize_celery_observability(**_: Any) -> None:
+    """Initialize observability inside each Celery worker process."""
+    settings = get_settings()
+    setup_logging()
+    if settings.OTEL_ENABLED:
+        from app.shared.otel import setup_otel  # noqa: PLC0415
+
+        setup_otel(service_name=settings.OTEL_SERVICE_NAME)
+
+
+def shutdown_celery_observability(**_: Any) -> None:
+    """Flush worker telemetry when Celery is shutting down."""
+    from app.shared.otel import shutdown_otel  # noqa: PLC0415
+
+    shutdown_otel()
+
+
+worker_process_init.connect(initialize_celery_observability)
+worker_shutdown.connect(shutdown_celery_observability)
+
+
+_task_observability_contexts: dict[str, tuple[Any, Any, Any]] = {}
+
+
+def _inject_trace_context(carrier: dict[str, Any], *, context: Any = None) -> None:
+    """Inject the active W3C trace context into a Celery message carrier."""
+    propagate.inject(carrier, context=context)
+
+
+def _task_context_key(task_id: str | None, task: Task | None) -> str:
+    return task_id or f"anonymous:{id(task)}"
+
+
 @cache
 def _celery_meters() -> tuple[Any, Any, Any]:
     """Create the Celery meters on first use and reuse them for this process."""
@@ -1007,6 +1045,8 @@ def log_task_published(
     routing_key: str | None = None,
     **_: Any,
 ) -> None:
+    if headers is not None:
+        _inject_trace_context(headers)
     logger.bind(
         task=sender,
         task_id=(headers or {}).get("id"),
@@ -1023,10 +1063,26 @@ def log_task_prerun(
     kwargs: dict[str, Any] | None = None,
     **_: Any,
 ) -> None:
+    task_name = task.name if task else "unknown"
+    key = _task_context_key(task_id, task)
+    parent_context = propagate.extract(
+        getattr(getattr(task, "request", None), "headers", None) or {}
+    )
+    context_token = otel_context.attach(parent_context)
+    execution_token = execution_path.set([f"celery:{task_name}"])
+    log_context = ExitStack()
+    log_context.enter_context(logger.contextualize(
+        task=task_name,
+        task_id=task_id,
+        layer="task",
+        flow=f"celery:{task_name}",
+    ))
+    _task_observability_contexts[key] = (context_token, execution_token, log_context)
+
     span_ctx = otel_trace.get_current_span().get_span_context()
     trace_id = format(span_ctx.trace_id, "032x") if span_ctx.is_valid else None
     extra = {
-        "task": task.name if task else None,
+        "task": task_name,
         "task_id": task_id,
         "args_count": len(args or ()),
         "kwargs_keys": sorted((kwargs or {}).keys()),
@@ -1048,7 +1104,15 @@ def log_task_postrun(
     extra = {"task": task.name if task else None, "task_id": task_id, "state": state}
     if trace_id:
         extra["trace_id"] = trace_id
-    logger.bind(**extra).info("Celery task finished")
+    try:
+        logger.bind(**extra).info("Celery task finished")
+    finally:
+        context_data = _task_observability_contexts.pop(_task_context_key(task_id, task), None)
+        if context_data is not None:
+            context_token, execution_token, log_context = context_data
+            log_context.close()
+            execution_path.reset(execution_token)
+            otel_context.detach(context_token)
 
 
 @task_retry.connect

@@ -1,3 +1,4 @@
+import re
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -17,6 +18,18 @@ if TYPE_CHECKING:
 
 RATE_LIMIT_EXCLUDED_PATH_PREFIXES = ("/api-docs", "/api-redoc")
 RATE_LIMIT_EXCLUDED_PATHS = {"/metrics", "/swagger.json"}
+_CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _request_url(scope: dict[str, Any]) -> str:
+    query_string = scope.get("query_string", b"").decode("latin-1")
+    path = scope["path"]
+    return path if not query_string else f"{path}?{query_string}"
+
+
+def _client_ip(scope: dict[str, Any]) -> str | None:
+    client = scope.get("client")
+    return client[0] if client else None
 
 
 class RequestStateLoggingMiddleware:
@@ -42,9 +55,12 @@ class RequestStateLoggingMiddleware:
             return
 
         request_id = self._read_correlation_id(scope) or generate(size=21)
+        path = scope["path"]
         state = {
             "request_id": request_id,
-            "path": scope["path"],
+            "path": path,
+            "url": _request_url(scope),
+            "ip": _client_ip(scope),
             "method": scope["method"],
             "user_id": None,
             "layer": "middleware",
@@ -113,7 +129,11 @@ class RequestStateLoggingMiddleware:
     def _read_correlation_id(scope: dict[str, Any]) -> str | None:
         for key, value in scope.get("headers", []):
             if key == b"x-correlation-id":
-                return value.decode()
+                try:
+                    correlation_id = value.decode("ascii")
+                except UnicodeDecodeError:
+                    return None
+                return correlation_id if _CORRELATION_ID_PATTERN.fullmatch(correlation_id) else None
         return None
 
 
@@ -224,7 +244,10 @@ def build_fastapi_guard_config(settings: "Settings") -> SecurityConfig:
         blocked_countries=settings.FASTAPI_GUARD_BLOCKED_COUNTRIES,
         whitelist_countries=settings.FASTAPI_GUARD_WHITELIST_COUNTRIES,
         block_cloud_providers=set(settings.FASTAPI_GUARD_BLOCK_CLOUD_PROVIDERS),
-        custom_log_file=str(settings.LOG_DIR / "security.log"),
+        # The application owns the stdout/OTLP pipeline.  Letting Guard create
+        # its own file sink would bypass redaction, correlation context, and
+        # container log collection.
+        custom_log_file=None,
         log_format="json" if settings.FASTAPI_GUARD_LOG_FORMAT == "json" else "text",
         rate_limit=settings.RATE_LIMIT_REQUESTS,
         rate_limit_window=settings.RATE_LIMIT_PERIOD,

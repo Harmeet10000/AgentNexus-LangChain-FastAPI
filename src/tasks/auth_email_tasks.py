@@ -48,7 +48,7 @@ def _send_verification_email(email: str, token: str) -> dict[str, str]:
         raise ExternalServiceException(
             service="resend", detail=error.message, error_code=error.code.value
         )
-    logger.bind(email=email, url=url).info("Verification email dispatched")
+    logger.bind(email=email).info("Verification email dispatched")
     return {"status": "sent", "email": email}
 
 
@@ -65,7 +65,7 @@ def _send_password_reset_email(email: str, token: str) -> dict[str, str]:
         raise ExternalServiceException(
             service="resend", detail=error.message, error_code=error.code.value
         )
-    logger.bind(email=email, url=url).info("Password reset email dispatched")
+    logger.bind(email=email).info("Password reset email dispatched")
     return {"status": "sent", "email": email}
 
 

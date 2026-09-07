@@ -6,7 +6,6 @@ extraction from documents.
 """
 
 import asyncio
-import os
 import re
 import time
 from collections.abc import Callable
@@ -15,6 +14,7 @@ from typing import Any
 
 from graphiti_core.errors import GraphitiError
 
+from app.config import get_settings
 from app.utils.logger import logger
 
 from .models import Entity, ExtractionResult, Relationship
@@ -44,9 +44,10 @@ async def extract_with_graphiti(
     """
     start_time = time.time()
 
-    neo4j_uri = neo4j_uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    neo4j_user = neo4j_user or os.getenv("NEO4J_USER", "neo4j")
-    neo4j_password = neo4j_password or os.getenv("NEO4J_PASSWORD", "password")
+    settings = get_settings()
+    neo4j_uri = neo4j_uri or settings.NEO4J_URI
+    neo4j_user = neo4j_user or settings.NEO4J_USERNAME
+    neo4j_password = neo4j_password or settings.NEO4J_PASSWORD.get_secret_value()
 
     try:
         return await _do_extract_graph_entities(

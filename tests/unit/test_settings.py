@@ -20,6 +20,8 @@ class TestSettingsProductionValidation:
             S3_SECRET_ACCESS_KEY="valid-key",
             TAVILY_API_KEY="valid-key",
             PINECONE_API_KEY="valid-key",
+            RABBITMQ_DEFAULT_PASS="valid-rabbit-password",
+            POSTGRES_PASSWORD="valid-postgres-password",
         )
         assert settings.ENVIRONMENT == "production"
 

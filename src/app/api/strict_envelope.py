@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import os
 from typing import get_origin, override
 
 from fastapi import APIRouter
 
+from app.config import get_settings
 from app.utils import APIResponse
 
 
 class StrictEnvelopeAPIRouter(APIRouter):
     """APIRouter that validates `response_model` uses `APIResponse[T]`."""
-
-    strict_enforce: bool = os.getenv("STRICT_ENVELOPE_ENFORCE", "false").lower() == "true"
 
     @override
     def add_api_route(self, path: str, endpoint, **kwargs) -> None:
@@ -22,7 +20,7 @@ class StrictEnvelopeAPIRouter(APIRouter):
         if self._is_envelope_violation(response_model=response_model):
             endpoint_name = getattr(endpoint, "__name__", "unknown")
             message = f"Route '{path}' ({endpoint_name}) must declare response_model=APIResponse[T]"
-            if self.strict_enforce:
+            if get_settings().STRICT_ENVELOPE_ENFORCE:
                 raise ValueError(message)
             # logger.warning(message)
 

@@ -356,8 +356,58 @@ async def _run_startup_policy(app: FastAPI, settings: Any, policy: StartupPolicy
         setattr(app.state, policy.state_attr, None)
 
 
+async def _shutdown_resources(app: FastAPI) -> None:
+    """Close application resources while always flushing observability providers."""
+    try:
+        if hasattr(app.state, "langgraph_checkpointer"):
+            await teardown_langgraph_checkpointer(app.state.langgraph_checkpointer)
+
+        if hasattr(app.state, "outbox_relay_task") and app.state.outbox_relay_task is not None:
+            app.state.outbox_relay_task.cancel()
+            logger.info("Outbox relay stopped")
+
+        revocation_task = getattr(app.state, "websocket_revocation_task", None)
+        if revocation_task is not None:
+            revocation_task.cancel()
+            logger.info("WebSocket revocation loop stopped")
+
+        httpx_client = getattr(app.state, "httpx_client", None)
+        if httpx_client is not None:
+            await httpx_client.aclose()
+
+        tavily_http_client = getattr(app.state, "tavily_http_client", None)
+        if tavily_http_client is not None:
+            await close_tavily_http_client(tavily_http_client)
+
+        if hasattr(app.state, "graphiti"):
+            await close_graphiti(app.state.graphiti)
+
+        if hasattr(app.state, "crawl4ai_crawler"):
+            await close_crawl4ai_crawler(app.state.crawl4ai_crawler)
+
+        mongo_client = getattr(app.state, "mongo_client", None)
+        if mongo_client is not None:
+            mongo_client.close()
+
+        async with asyncio.TaskGroup() as tg:
+            redis_client = getattr(app.state, "redis", None)
+            if redis_client is not None:
+                tg.create_task(coro=redis_client.aclose(close_connection_pool=True))
+
+            db_engine = getattr(app.state, "db_engine", None)
+            if db_engine is not None:
+                tg.create_task(coro=db_engine.dispose())
+
+            neo4j_driver = getattr(app.state, "neo4j_driver", None)
+            if neo4j_driver is not None:
+                tg.create_task(coro=close_neo4j_driver(driver=neo4j_driver))
+    finally:
+        logger.bind(status="stopped").info("Application shutdown complete")
+        shutdown_otel()
+
+
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR0914, PLR0915
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR0915
     """Manage application startup and shutdown with parallel execution.
 
     Exception families survived (per-policy degrade tuples in `STARTUP_POLICIES`;
@@ -373,7 +423,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     Celery ServiceUnavailableException, Outbox (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError).
     """
     settings = get_settings()
-    logger.info("Application starting", app_name=app.title, version=app.version)
+    logger.bind(app_name=app.title, version=app.version).info("Application starting")
 
     # STARTUP: Parallel execution for optional services; PostgreSQL remains required for the app to function.
     try:
@@ -506,63 +556,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     #     )
     #     app.state.langgraph_checkpointer = None
 
-    logger.info("Application ready", status="running")
+    logger.bind(status="running").info("Application ready")
 
     try:
         yield
     finally:
-        # SHUTDOWN: Parallel graceful cleanup
-        logger.info("Application shutting down", status="stopping")
-
-        # Close LangGraph checkpointer connection pool
-        if hasattr(app.state, "langgraph_checkpointer"):
-            await teardown_langgraph_checkpointer(app.state.langgraph_checkpointer)
-
-        # Stop outbox relay
-        if hasattr(app.state, "outbox_relay_task") and app.state.outbox_relay_task is not None:
-            app.state.outbox_relay_task.cancel()
-            logger.info("Outbox relay stopped")
-
-        # Stop WebSocket revocation loop
-        revocation_task = getattr(app.state, "websocket_revocation_task", None)
-        if revocation_task is not None:
-            revocation_task.cancel()
-            logger.info("WebSocket revocation loop stopped")
-
-        # Close HTTPX client
-        httpx_client = getattr(app.state, "httpx_client", None)
-        if httpx_client is not None:
-            await httpx_client.aclose()
-
-        # Close Tavily HTTP client
-        tavily_http_client = getattr(app.state, "tavily_http_client", None)
-        if tavily_http_client is not None:
-            await close_tavily_http_client(tavily_http_client)
-
-        if hasattr(app.state, "graphiti"):
-            await close_graphiti(app.state.graphiti)
-
-        if hasattr(app.state, "crawl4ai_crawler"):
-            await close_crawl4ai_crawler(app.state.crawl4ai_crawler)
-
-        # MongoDB close is synchronous - run outside TaskGroup
-        mongo_client = getattr(app.state, "mongo_client", None)
-        if mongo_client is not None:
-            mongo_client.close()
-
-        async with asyncio.TaskGroup() as tg:
-            redis_client = getattr(app.state, "redis", None)
-            if redis_client is not None:
-                tg.create_task(coro=redis_client.aclose(close_connection_pool=True))
-
-            db_engine = getattr(app.state, "db_engine", None)
-            if db_engine is not None:
-                tg.create_task(coro=db_engine.dispose())
-
-            neo4j_driver = getattr(app.state, "neo4j_driver", None)
-            if neo4j_driver is not None:
-                tg.create_task(coro=close_neo4j_driver(driver=neo4j_driver))
-        # Shutdown OpenTelemetry (flush remaining spans/metrics/logs)
-        shutdown_otel()
-
-        logger.info("Application shutdown complete", status="stopped")
+        logger.bind(status="stopping").info("Application shutting down")
+        await _shutdown_resources(app)

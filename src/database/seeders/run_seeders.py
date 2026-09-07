@@ -49,7 +49,7 @@ async def _seed_plans(session: AsyncSession) -> int:
         )
         result = await session.execute(stmt)
         inserted += result.rowcount or 0
-    logger.info("seed_plans", inserted=inserted)
+    logger.bind(inserted=inserted).info("seed_plans")
     return inserted
 
 
@@ -87,7 +87,7 @@ async def _run_in_transaction(session: AsyncSession) -> dict[str, int]:
                 exc.add_note(f"seeder={name}")
                 logger.bind(seeder=name, error=str(exc)).exception("seeder_failed")
                 raise
-    logger.info("seeding_completed", results=results)
+    logger.bind(results=results).info("seeding_completed")
     return results
 
 
@@ -95,7 +95,7 @@ def main() -> None:
     """CLI entrypoint: `uv run seed`."""
     settings = get_settings()
     if settings.ENVIRONMENT == "production":
-        logger.warning("seed_skip_production", environment=settings.ENVIRONMENT)
+        logger.bind(environment=settings.ENVIRONMENT).warning("seed_skip_production")
         return
     asyncio.run(run_all_seeders())
     logger.info("seed_done")

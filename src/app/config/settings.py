@@ -3,7 +3,6 @@
 import warnings
 from decimal import Decimal
 from functools import cache
-from pathlib import Path
 from typing import override
 
 from pydantic import Field, SecretStr, model_validator
@@ -119,6 +118,8 @@ class Settings(BaseSettings):
     # --- API Versioning ---
     API_SUNSET_DATE: str = Field(default="2027-06-15")
     API_V2_BASE_PATH: str = Field(default="/api/v2")
+    STRICT_ENVELOPE_ENFORCE: bool = Field(default=False)
+    PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: str | None = Field(default=None)
 
     # --- MCP Configuration ---
     MCP_ENABLE_STDIO: bool = Field(default=True)
@@ -336,13 +337,8 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False)
     LOG_LEVEL: str = Field(default="INFO")
     LOG_FORMAT: str = Field(default="json")
-    LOG_FILE: str = Field(default="logs/app.log")
     LOG_BACKTRACE: bool = Field(default=True)
     LOG_DIAGNOSE: bool = Field(default=True)
-    LOG_ROTATION: str = Field(default="10 MB")
-    LOG_RETENTION: str = Field(default="7 days")
-    LOG_COMPRESSION: str = Field(default="zip")
-    LOG_DIR: Path = Path("logs")
 
     # --- Rate Limiting ---
     RATE_LIMIT_ENABLED: bool = Field(default=True)

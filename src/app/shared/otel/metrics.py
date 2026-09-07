@@ -7,6 +7,8 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 
+from app.shared.otel.configuration import exporter_enabled
+
 if TYPE_CHECKING:
     from typing import Any
 
@@ -16,15 +18,20 @@ _otel_prometheus_reader: PrometheusMetricReader | None = None
 def _setup_meter_provider(
     resource: Resource,
     export_interval_ms: int = 15000,
+    *,
+    exporter: str = "otlp",
+    endpoint: str | None = None,
 ) -> MeterProvider:
     global _otel_prometheus_reader  # noqa: PLW0603 — intentional module-level state for OTEL metrics
 
-    readers: list[Any] = [
-        PeriodicExportingMetricReader(
-            OTLPMetricExporter(),
-            export_interval_millis=export_interval_ms,
-        ),
-    ]
+    readers: list[Any] = []
+    if exporter_enabled(exporter):
+        readers.append(
+            PeriodicExportingMetricReader(
+                OTLPMetricExporter(endpoint=endpoint),
+                export_interval_millis=export_interval_ms,
+            )
+        )
 
     try:
         prometheus_reader = PrometheusMetricReader()

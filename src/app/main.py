@@ -1,6 +1,13 @@
-from typing import TYPE_CHECKING
+# ruff: noqa: E402 — dotenv must load before modules that cache Settings
 
 from dotenv import load_dotenv
+
+# Load environment variables before importing modules that construct cached
+# settings at import time (models, LangChain callbacks, and routers).
+load_dotenv(dotenv_path=".env.development")
+
+from typing import TYPE_CHECKING
+
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
@@ -23,7 +30,7 @@ from .middleware import (
 from .shared.langchain_layer import configure_langsmith
 from .shared.otel import setup_otel
 from .shared.result import APIResponse, NotFoundError, render_result
-from .utils import logger
+from .utils import logger, setup_logging
 
 if TYPE_CHECKING:
     from guard.models import SecurityConfig
@@ -31,8 +38,7 @@ if TYPE_CHECKING:
     from app.config.settings import Settings
 
 configure_langsmith()
-# Load environment variables
-load_dotenv(dotenv_path=".env.development")
+setup_logging()
 
 if get_settings().OTEL_ENABLED:
     setup_otel(service_name="langchain-fastapi")

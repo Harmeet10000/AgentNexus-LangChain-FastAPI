@@ -45,18 +45,27 @@ def run_mcp_server(
     port: int | None = None,
     path: str | None = None,
 ) -> None:
-    settings = get_settings()
-    server = get_mcp_server()
-    resolved_transport = transport or settings.MCP_RUN_TRANSPORT
-
-    if resolved_transport == "stdio":
-        server.run(transport="stdio", log_level=settings.MCP_LOG_LEVEL)
-        return
-
-    server.run(
-        transport=resolved_transport,
-        host=host or settings.MCP_HOST,
-        port=port or settings.MCP_PORT,
-        path=path or settings.MCP_HTTP_PATH,
-        log_level=settings.MCP_LOG_LEVEL,
+    from mcp_core.lifespan_mcp import (
+        initialize_mcp_observability,
+        shutdown_mcp_observability,
     )
+
+    initialize_mcp_observability()
+    settings = get_settings()
+    try:
+        server = get_mcp_server()
+        resolved_transport = transport or settings.MCP_RUN_TRANSPORT
+
+        if resolved_transport == "stdio":
+            server.run(transport="stdio", log_level=settings.MCP_LOG_LEVEL)
+            return
+
+        server.run(
+            transport=resolved_transport,
+            host=host or settings.MCP_HOST,
+            port=port or settings.MCP_PORT,
+            path=path or settings.MCP_HTTP_PATH,
+            log_level=settings.MCP_LOG_LEVEL,
+        )
+    finally:
+        shutdown_mcp_observability()

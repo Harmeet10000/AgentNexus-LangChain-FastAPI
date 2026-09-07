@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -50,8 +49,9 @@ class Configuration(BaseModel):
         """Create a Configuration instance from RunnableConfig and environment."""
         configurable = config.get("configurable", {}) if config else {}
         field_names = list(cls.model_fields.keys())
+        settings_values = get_settings().model_dump()
         values: dict[str, Any] = {
-            field_name: os.environ.get(field_name.upper(), configurable.get(field_name))
+            field_name: settings_values.get(field_name.upper(), configurable.get(field_name))
             for field_name in field_names
         }
         return cls(**{k: v for k, v in values.items() if v is not None})

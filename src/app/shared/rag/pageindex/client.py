@@ -76,7 +76,7 @@ class PageIndexClient:
         try:
             result = await asyncify(self._sdk.submit_document)(file_path)
             doc_id: str = result["doc_id"]
-            logger.info("document_submitted", doc_id=doc_id)
+            logger.bind(doc_id=doc_id).info("document_submitted")
         except Exception as exc:
             logger.bind(operation="submit_document", error=str(exc)).exception("submit_failed")
             msg = "PageIndex"

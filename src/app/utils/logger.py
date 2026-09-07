@@ -1,19 +1,31 @@
 import functools
+import logging
 import sys
 import time
+from collections.abc import Mapping
 from contextvars import ContextVar
 from datetime import UTC
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 if TYPE_CHECKING:
     from _contextvars import Token
 
 import opentelemetry.trace as otel_trace
 from loguru import logger as loguru_logger
+from opentelemetry.trace import Status, StatusCode
+from returns.result import Failure
+
+from app.config import get_settings
 
 # 1. Context Variables
 request_state: ContextVar[dict[str, Any]] = ContextVar("request_state")
 execution_path: ContextVar[list[str]] = ContextVar("execution_path")
+
+
+def set_request_actor(user_id: str | None) -> None:
+    """Attach a validated authenticated actor to the active request context."""
+    state = request_state.get({})
+    state["user_id"] = user_id
 
 
 # 2. Console Formatter (Unchanged - Your logic here is perfect)
@@ -58,49 +70,102 @@ def console_format(record: dict[str, Any]) -> str:
     return fmt + "\n"
 
 
-def setup_logging() -> None:
-    """Configure loguru logger with console and file handlers."""
-    # settings = get_settings()
+def setup_logging(*, level: str | None = None) -> None:
+    """Configure the single stdout/stderr Loguru pipeline from application settings."""
+    settings = get_settings() if level is None else None
+    configured_level = level or (settings.LOG_LEVEL if settings else "INFO")
+    serialize = bool(settings and getattr(settings, "LOG_FORMAT", "text").lower() == "json")
     loguru_logger.remove()
 
     loguru_logger.add(
         sink=sys.stderr,
         format=console_format,
-        level="DEBUG",  # Set to debug to see the layer timings
-        colorize=True,
+        level=configured_level,
+        colorize=not serialize,
+        serialize=serialize,
     )  # ty:ignore[no-matching-overload]
-    # File handler with JSON serialization
-    # settings.LOG_DIR.mkdir(parents=True, exist_ok=True)
-    # loguru_logger.add(
-    #     sink=settings.LOG_DIR / "app_{time:YYYY-MM-DD}.log",
-    #     format="{message}",
-    #     level=settings.LOG_LEVEL,
-    #     rotation=settings.LOG_ROTATION,
-    #     retention=settings.LOG_RETENTION,
-    #     compression=settings.LOG_COMPRESSION,
-    #     serialize=True,
-    #     backtrace=settings.LOG_BACKTRACE,
-    #     diagnose=settings.LOG_DIAGNOSE,
-    # )
+    _install_stdlib_bridge()
 
 
-def redact_sensitive_data(record) -> None:
-    """Intercepts the log record and blanks out dangerous keys."""
-    sensitive_keys = {"password", "token", "credit_card", "secret"}
+_REDACTED = "*** REDACTED ***"
+_SENSITIVE_KEY_PARTS = (
+    "access_key",
+    "api_key",
+    "authorization",
+    "cookie",
+    "credential",
+    "credit_card",
+    "password",
+    "private_key",
+    "secret",
+    "session_token",
+    "token",
+)
 
-    # We iterate through the extra data bound to the log
-    for key, value in list(record["extra"].items()):
-        if any(sensitive in key.lower() for sensitive in sensitive_keys):
-            record["extra"][key] = "*** REDACTED ***"
 
-        # If a whole dictionary is passed (like payment_data), we can scrub inside it too
-        elif isinstance(value, dict):
-            for sub_key in value:
-                if any(sensitive in sub_key.lower() for sensitive in sensitive_keys):
-                    record["extra"][key][sub_key] = "*** REDACTED ***"
+def _is_sensitive_key(key: object) -> bool:
+    normalized_key = str(key).lower().replace("-", "_")
+    return any(part in normalized_key for part in _SENSITIVE_KEY_PARTS)
 
 
-setup_logging()
+def _redact_value(value: Any, *, depth: int = 0) -> Any:
+    """Return a bounded redacted copy of structured log metadata."""
+    if depth >= 8:
+        return "<nested value omitted>"
+    if isinstance(value, Mapping):
+        return {
+            key: _REDACTED if _is_sensitive_key(key) else _redact_value(item, depth=depth + 1)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_value(item, depth=depth + 1) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_value(item, depth=depth + 1) for item in value)
+    if isinstance(value, set):
+        return {_redact_value(item, depth=depth + 1) for item in value}
+    return value
+
+
+def redact_sensitive_data(record: Any) -> None:
+    """Redact credential-bearing keys throughout structured log metadata."""
+    context = request_state.get({})
+    record["extra"].update({key: value for key, value in context.items() if value is not None})
+    record["extra"] = _redact_value(record["extra"])
+
+
+class _InterceptHandler(logging.Handler):
+    """Forward stdlib records into the configured Loguru sinks."""
+
+    @override
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level = loguru_logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+        loguru_logger.opt(exception=record.exc_info).log(level, record.getMessage())
+
+
+def _install_stdlib_bridge() -> None:
+    handler = _InterceptHandler()
+    root_logger = logging.getLogger()
+    root_logger.handlers = [handler]
+    root_logger.setLevel(logging.NOTSET)
+    for name in (
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+        "fastapi",
+        "starlette",
+        "celery",
+        "sqlalchemy",
+    ):
+        stdlib_logger = logging.getLogger(name)
+        stdlib_logger.handlers = [handler]
+        stdlib_logger.propagate = False
+        stdlib_logger.setLevel(logging.NOTSET)
+
+
+setup_logging(level="INFO")
 logger = loguru_logger.patch(patcher=redact_sensitive_data)
 
 
@@ -128,7 +193,7 @@ def trace_layer(layer_name: str) -> Any:
             token: Token[list[str]] = execution_path.set(current_flow)
             flow_str = " -> ".join(current_flow)
 
-            span_name = f"layer.{layer_name}"
+            span_name = f"layer.{layer_name}.{func.__module__}.{func.__name__}"
             attrs = {"layer.name": layer_name, "function.name": func.__name__}
             with (
                 tracer.start_as_current_span(span_name, attributes=attrs) as span,
@@ -138,6 +203,8 @@ def trace_layer(layer_name: str) -> Any:
                     result = await func(*args, **kwargs)
                     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
                     span.set_attribute("layer.duration_ms", duration_ms)
+                    if isinstance(result, Failure):
+                        span.set_attribute("result.outcome", "failure")
 
                     logger.bind(layer_duration_ms=duration_ms, function_name=func.__name__).debug(
                         "Exiting layer"
@@ -147,6 +214,7 @@ def trace_layer(layer_name: str) -> Any:
                 except Exception as e:
                     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
                     span.record_exception(e)
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
                     span.set_attribute("layer.duration_ms", duration_ms)
                     logger.bind(
                         layer_duration_ms=duration_ms,

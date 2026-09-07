@@ -15,6 +15,7 @@ from app.utils import (
     NotFoundException,
     UnauthorizedException,
     ValidationException,
+    set_request_actor,
 )
 
 from .errors import (
@@ -137,6 +138,7 @@ async def get_token_claims(
     if claims.token_type != _ACCESS_TOKEN_TYPE:
         msg = "Expected an access token"
         raise UnauthorizedException(msg)
+    set_request_actor(claims.sub)
     return claims
 
 
@@ -147,6 +149,7 @@ async def get_websocket_token_claims(websocket: WebSocket) -> TokenClaims:
     if claims.token_type != _ACCESS_TOKEN_TYPE:
         msg = "Expected an access token"
         raise UnauthorizedException(msg)
+    set_request_actor(claims.sub)
     return claims
 
 

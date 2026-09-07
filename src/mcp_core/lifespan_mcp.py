@@ -9,7 +9,8 @@ from uvicorn.config import Config
 from uvicorn.server import Server
 
 from app.config import get_settings
-from app.shared.otel import setup_otel
+from app.shared.otel import setup_otel, shutdown_otel
+from app.utils import setup_logging
 from mcp_core.server.http import get_mcp_http_app
 
 if TYPE_CHECKING:
@@ -22,13 +23,23 @@ class MCPServerHandle:
     task: asyncio.Task[None] = field(repr=False)
 
 
+def initialize_mcp_observability() -> None:
+    """Configure logging and telemetry for a standalone MCP process."""
+    settings = get_settings()
+    setup_logging()
+    if settings.OTEL_ENABLED:
+        setup_otel(service_name=settings.OTEL_SERVICE_NAME)
+
+
+def shutdown_mcp_observability() -> None:
+    """Flush telemetry for a standalone MCP process."""
+    shutdown_otel()
+
+
 async def serve_mcp(parent_app: FastAPI) -> MCPServerHandle | None:
     settings = get_settings()
     if not settings.MCP_ENABLE_HTTP:
         return None
-
-    if settings.OTEL_ENABLED:
-        setup_otel(service_name="langchain-fastapi-mcp")
 
     mcp_app = get_mcp_http_app(parent_app=parent_app)
     config = Config(

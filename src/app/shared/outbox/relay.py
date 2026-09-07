@@ -68,13 +68,13 @@ class OutboxRelay:
                 )
 
                 if rows:
-                    logger.info("outbox_startup_scan", found=len(rows))
+                    logger.bind(found=len(rows)).info("outbox_startup_scan")
                     for row in rows:
                         await self._publish(dict(row), session=session)
                 else:
-                    logger.info("outbox_startup_scan", found=0)
+                    logger.bind(found=0).info("outbox_startup_scan")
         except Exception as exc:  # noqa: BLE001 — best-effort scan, any failure is logged and skipped
-            logger.warning("outbox_startup_scan_skipped", error=str(exc))
+            logger.bind(error=str(exc)).warning("outbox_startup_scan_skipped")
 
     async def run_listener(self) -> None:
         """Long-running listen loop. Subscribe to outbox_channel, handle notifications."""
@@ -88,7 +88,7 @@ class OutboxRelay:
                 notification_timeout=asyncpg_listen.NO_TIMEOUT,
             )
         except Exception as exc:  # noqa: BLE001 — listener is long-running; log and re-enter loop
-            logger.warning("outbox_listener_stopped", error=str(exc))
+            logger.bind(error=str(exc)).warning("outbox_listener_stopped")
 
     async def _handle_notification(
         self,
@@ -135,7 +135,7 @@ class OutboxRelay:
         try:
             CeleryTaskRegistry.typed_send(event_type, kwargs=cast("dict[str, object]", payload))
             await self._mark_published(event_id, session=session)
-            logger.info("outbox_published", event_id=event_id, event_type=event_type)
+            logger.bind(event_id=event_id, event_type=event_type).info("outbox_published")
         except (CeleryError, PostgresError) as exc:
             exc.add_note(f"event_id={event_id}, event_type={event_type}")
             await self._mark_failed(event_id, str(exc), session=session)

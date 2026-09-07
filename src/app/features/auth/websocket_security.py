@@ -168,6 +168,7 @@ class WebSocketSecurityService:
         self._token_repo = token_repo
         # Task 3.2: Track last touch time per connection for throttling
         self._last_touch_time: dict[str, float] = {}
+        self._presence_score: dict[str, float] = {}
         # Task 3.4: live connection registry so a connection id can be closed
         # without holding the WebSocket object at the call site.
         self._live_connections: dict[str, tuple[WebSocket, WebSocketSecurityContext]] = {}
@@ -289,6 +290,7 @@ class WebSocketSecurityService:
 
         # Initialize last touch time for throttling
         self._last_touch_time[context.connection_id] = current_epoch
+        self._presence_score[context.connection_id] = current_epoch
 
         if websocket is not None:
             self._live_connections[context.connection_id] = (websocket, context)
@@ -316,6 +318,7 @@ class WebSocketSecurityService:
 
         # Clean up touch time tracking and live registry
         self._last_touch_time.pop(context.connection_id, None)
+        self._presence_score.pop(context.connection_id, None)
         self._live_connections.pop(context.connection_id, None)
 
     async def touch_connection(self, context: WebSocketSecurityContext) -> None:
@@ -329,7 +332,11 @@ class WebSocketSecurityService:
         if current_epoch - last_touch < 30:
             return
 
+        last_score = self._presence_score.get(context.connection_id, last_touch)
+        current_epoch = max(current_epoch, last_score + 0.000001)
+
         self._last_touch_time[context.connection_id] = current_epoch
+        self._presence_score[context.connection_id] = current_epoch
         ttl = self._settings.WEBSOCKET_PRESENCE_TTL_SECONDS
 
         async with self._redis.pipeline(transaction=True) as pipe:

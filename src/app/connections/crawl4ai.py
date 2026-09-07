@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from crawl4ai import AsyncWebCrawler, BrowserConfig
 from fastapi.requests import HTTPConnection
 
+from app.config import get_settings
 from app.shared.crawler import get_crawler_config
 
 if TYPE_CHECKING:
@@ -27,7 +28,7 @@ def _ensure_playwright_platform_override() -> None:
     it when no explicit override is set. Only on Linux, only when unset — an
     operator's own override always wins.
     """
-    if sys.platform != "linux" or os.environ.get("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE"):
+    if sys.platform != "linux" or get_settings().PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:
         return
     try:
         version_id = ""

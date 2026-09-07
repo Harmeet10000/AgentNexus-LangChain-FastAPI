@@ -2,8 +2,9 @@
 
 import asyncio
 import os
+import platform
 import time
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import psutil
 from celery import Celery
@@ -17,10 +18,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.config import get_settings
 from app.shared.langchain_layer.agents.memory.setup_types import CogneeSetupConfig
 from app.utils import logger, trace_layer
 
 from .dto import HealthChecksDTO, HealthDataDTO, HealthResultDTO, SelfInfoDTO
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # The graph-memory probe is bounded: an unreachable graph backend must report,
 # not hang. A readiness probe that blocks is worse than one that answers degraded.
@@ -389,7 +394,7 @@ class HealthService:
         memory_info = process.memory_info()
         uptime = time.time() - self.start_time
         return {
-            "environment": os.getenv("ENVIRONMENT", "development"),
+            "environment": get_settings().ENVIRONMENT,
             "uptime": f"{uptime:.2f} seconds",
             "memoryUsage": {
                 "rss": f"{memory_info.rss / 1024 / 1024:.2f} MB",
@@ -403,7 +408,11 @@ class HealthService:
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
         try:
-            load_avg = list(os.getloadavg())
+            get_load_average = cast(
+                "Callable[[], tuple[float, float, float]]",
+                psutil.__dict__["getloadavg"],
+            )
+            load_avg = list(get_load_average())
         except (AttributeError, OSError):
             logger.warning("System load average unavailable")
             load_avg = [0.0, 0.0, 0.0]
@@ -412,6 +421,6 @@ class HealthService:
             "cpuUsagePercent": f"{cpu_percent:.2f}%",
             "totalMemory": f"{memory.total / 1024 / 1024:.2f} MB",
             "freeMemory": f"{memory.available / 1024 / 1024:.2f} MB",
-            "platform": os.uname().sysname,
-            "arch": os.uname().machine,
+            "platform": platform.system(),
+            "arch": platform.machine(),
         }
