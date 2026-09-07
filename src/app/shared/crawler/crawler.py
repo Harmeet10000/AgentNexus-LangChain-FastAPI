@@ -47,7 +47,9 @@ class CrawlerBrowser(Protocol):
 
     async def arun(self, *, url: str, config: CrawlerRunConfig) -> Any: ...
 
-    async def arun_many(self, *, urls: list[str], config: CrawlerRunConfig, dispatcher: Any) -> Any: ...
+    async def arun_many(
+        self, *, urls: list[str], config: CrawlerRunConfig, dispatcher: Any
+    ) -> Any: ...
 
 
 class CrawlResult(BaseModel):
@@ -80,29 +82,39 @@ class WebCrawler:
         self.redis_client = redis_client
         self.browser = browser
 
-    def _get_cache_key(self, url: str) -> str:
+    @staticmethod
+    async def close() -> None:
+        """Release operation-owned resources without closing the shared browser."""
+        # The application lifespan owns ``browser``. Per-operation fallback
+        # crawlers use an ``async with`` context inside each call, so there is
+        # no resource left for this service instance to close.
+
+    def _get_cache_key(self, url: str, *, use_proxy: bool = False) -> str:
         """Generate a cache key that changes when content policy changes."""
         cache_material = "|".join(
             (
-                "v2",
+                self.config.cache_version,
                 url,
                 self.config.user_agent,
                 str(self.config.word_count_threshold),
                 str(self.config.pruning_threshold),
                 ",".join(self.config.excluded_tags),
                 str(self.config.max_content_size),
+                str(use_proxy),
+                self.config.proxy_server or "",
+                self.config.cache_mode,
             )
         )
         url_hash = hashlib.sha256(cache_material.encode()).hexdigest()[:16]
         return f"crawl:cache:{url_hash}"
 
-    async def _get_from_cache(self, url: str) -> CrawlResult | None:
+    async def _get_from_cache(self, url: str, *, use_proxy: bool = False) -> CrawlResult | None:
         """Get cached crawl result."""
         if not self.redis_client:
             return None
 
         try:
-            cache_key = self._get_cache_key(url)
+            cache_key = self._get_cache_key(url, use_proxy=use_proxy)
             cached = await self.redis_client.get(cache_key)
 
             if cached:
@@ -124,14 +136,20 @@ class WebCrawler:
             logger.bind(operation="cache_read", url=url).exception("Cache read failed")
         return None
 
-    async def _save_to_cache(self, url: str, result: CrawlResult) -> None:
+    async def _save_to_cache(
+        self,
+        url: str,
+        result: CrawlResult,
+        *,
+        use_proxy: bool = False,
+    ) -> None:
         """Save crawl result to cache."""
         if not self.redis_client:
             return
 
         try:
             settings: Settings = get_settings()
-            cache_key = self._get_cache_key(url)
+            cache_key = self._get_cache_key(url, use_proxy=use_proxy)
 
             data: dict[str, str | int | list[dict[str, Any]] | None] = {
                 "url": result.url,
@@ -145,10 +163,17 @@ class WebCrawler:
                 "word_count": result.word_count,
             }
 
+            encoded = json.dumps(data)
+            if len(encoded.encode("utf-8")) > self.config.max_cache_size:
+                logger.bind(operation="cache_write", url=url).debug(
+                    "Skipping oversized crawler cache entry"
+                )
+                return
+
             await self.redis_client.setex(
                 cache_key,
                 settings.REDIS_CRAWL_CACHE_TTL,
-                json.dumps(data),
+                encoded,
             )
         except (RedisError, TypeError, ValueError) as exc:
             exc.add_note(f"url={url}, operation=cache_write")
@@ -157,7 +182,7 @@ class WebCrawler:
     @staticmethod
     def _to_crawl_result(result: Any, start_time: float) -> CrawlResult:
         """Convert crawl4ai result to domain CrawlResult."""
-        crawl_time_ms = int((time.time() - start_time) * 1000)
+        crawl_time_ms = int((time.monotonic() - start_time) * 1000)
 
         if result.success:
             markdown = None
@@ -239,11 +264,11 @@ class WebCrawler:
             )
 
         if not bypass_cache:
-            cached_result = await self._get_from_cache(url)
+            cached_result = await self._get_from_cache(url, use_proxy=use_proxy)
             if cached_result:
                 return Success(cached_result)
 
-        start_time = time.time()
+        start_time = time.monotonic()
 
         browser_config_dict = self.config.to_browser_config()
         if use_proxy and self.config.proxy_server:
@@ -254,6 +279,9 @@ class WebCrawler:
         # SPEC-05: Use MarkdownGenerator with content filters
         md_generator = self.config.get_markdown_generator()
         run_config_dict = self.config.to_crawler_run_config()
+        if bypass_cache:
+            run_config_dict["cache_mode"] = "bypass"
+            run_config_dict["bypass_cache"] = True
 
         # Auto-detect PDF URLs
         if self._is_pdf_url(url):
@@ -267,11 +295,15 @@ class WebCrawler:
         try:
             if self.browser is not None:
                 result = await self.browser.arun(url=url, config=run_config)
-                return await self._finish_single_result(url, result, start_time)
+                return await self._finish_single_result(
+                    url, result, start_time, use_proxy=use_proxy
+                )
 
             async with AsyncWebCrawler(config=browser_config) as crawler:
                 result = await crawler.arun(url=url, config=run_config)
-                return await self._finish_single_result(url, result, start_time)
+                return await self._finish_single_result(
+                    url, result, start_time, use_proxy=use_proxy
+                )
 
         except TimeoutError:
             return Failure(
@@ -294,10 +326,22 @@ class WebCrawler:
         url: str,
         result: Any,
         start_time: float,
+        *,
+        use_proxy: bool = False,
     ) -> CrawlerProcessingResult[CrawlResult]:
+        final_url = sanitize_url(str(getattr(result, "url", url) or url))
+        if final_url != url:
+            valid, validation_error = await validate_url_for_fetch(final_url)
+            if not valid:
+                return Failure(
+                    CrawlerProviderError(
+                        message=validation_error or "Redirect destination is not allowed",
+                        url=final_url,
+                    )
+                )
         crawl_result = self._bound_result(self._to_crawl_result(result, start_time))
         if crawl_result.success:
-            await self._save_to_cache(url, crawl_result)
+            await self._save_to_cache(url, crawl_result, use_proxy=use_proxy)
         if not crawl_result.success:
             return Failure(
                 CrawlerProviderError(
@@ -307,7 +351,7 @@ class WebCrawler:
             )
         return Success(crawl_result)
 
-    async def crawl_recursive(
+    async def crawl_recursive(  # noqa: PLR0912
         self,
         urls: list[str],
         max_depth: int = 1,
@@ -337,7 +381,7 @@ class WebCrawler:
                 )
             normalized_urls.append(url)
 
-        start_time: int | float = time.time()
+        start_time = time.monotonic()
 
         browser_config_dict = self.config.to_browser_config()
         if use_proxy and self.config.proxy_server:
@@ -393,10 +437,30 @@ class WebCrawler:
                 )
             )
 
-        results = [
-            self._bound_result(self._to_crawl_result(result, start_time))
-            for result in cast("list[Any]", crawl_results)
-        ]
+        results: list[CrawlResult] = []
+        for raw_result in cast("list[Any]", crawl_results):
+            result = self._bound_result(self._to_crawl_result(raw_result, start_time))
+            if result.success and result.url:
+                valid, validation_error = await validate_url_for_fetch(result.url)
+                if not valid:
+                    result = result.model_copy(
+                        update={
+                            "success": False,
+                            "error_message": validation_error
+                            or "Redirect destination is not allowed",
+                        }
+                    )
+            results.append(result)
+        if self.config.url_patterns:
+            results = [
+                result
+                for result in results
+                if any(pattern in result.url for pattern in self.config.url_patterns)
+            ]
+        if not bypass_cache:
+            for result in results:
+                if result.success:
+                    await self._save_to_cache(result.url, result, use_proxy=use_proxy)
         return Success(results)
 
     def _bound_result(self, result: CrawlResult) -> CrawlResult:
@@ -410,6 +474,6 @@ class WebCrawler:
                 "html": truncate_content(result.html, max_size)
                 if result.html is not None
                 else None,
-                "links": (result.links or [])[:1_000],
+                "links": (result.links or [])[: self.config.max_links],
             }
         )

@@ -7,11 +7,11 @@ from pydantic import ValidationError
 
 from app.features.crawler.dto import CrawlRequest
 from app.features.crawler.service import CrawlerService
-from app.shared.crawler.chunker import smart_chunk_markdown, truncate_content
+from app.shared.crawler.chunker import clean_markdown, smart_chunk_markdown, truncate_content
 from app.shared.crawler.config import CrawlerConfig
 from app.shared.crawler.crawler import CrawlResult, WebCrawler
 from app.shared.crawler.processor import GeminiProcessor
-from app.shared.crawler.validator import validate_url, validate_url_for_fetch
+from app.shared.crawler.validator import sanitize_url, validate_url, validate_url_for_fetch
 
 
 class _FakeCrawler:
@@ -58,6 +58,24 @@ def test_chunker_preserves_heading_context_for_split_sections() -> None:
 
     assert len(chunks) > 1
     assert all(chunk.headers for chunk in chunks)
+
+
+def test_chunker_ignores_headings_inside_code_and_preserves_code_whitespace() -> None:
+    markdown = "# Real\n\n```python\n# Not a heading\n\nvalue = 1\n```\n\nBody"
+
+    chunks = smart_chunk_markdown(markdown, max_len=200)
+
+    assert len(chunks) == 1
+    assert chunks[0].headers == "# Real"
+    assert clean_markdown("```\nline\n\n\nline\n```") == "```\nline\n\n\nline\n```"
+
+
+def test_chunker_supports_overlap_and_setext_headings() -> None:
+    chunks = smart_chunk_markdown("Title\n=====\n\n" + ("word " * 30), max_len=40, overlap=5)
+
+    assert len(chunks) > 1
+    assert chunks[0].headers == "# Title"
+    assert any(chunks[index].text[:5] in chunks[index - 1].text for index in range(1, len(chunks)))
 
 
 def test_web_crawler_accepts_a_shared_browser() -> None:
@@ -226,9 +244,24 @@ def test_url_validation_rejects_embedded_credentials() -> None:
     assert "credentials" in message.lower()
 
 
+def test_url_validation_normalizes_fragments_and_rejects_alternate_ports() -> None:
+    assert sanitize_url("HTTPS://Example.COM/path#fragment") == "https://example.com/path"
+    valid, message = validate_url("https://example.com:8080")
+    assert valid is False
+    assert "port" in message.lower()
+
+    valid, message = validate_url("https://2130706433")
+    assert valid is False
+    assert "private" in message.lower()
+
+
 @pytest.mark.asyncio
-async def test_fetch_validation_rejects_private_dns_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
-    def resolve(*_args: object, **_kwargs: object) -> list[tuple[object, object, object, object, tuple[str, int]]]:
+async def test_fetch_validation_rejects_private_dns_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def resolve(
+        *_args: object, **_kwargs: object
+    ) -> list[tuple[object, object, object, object, tuple[str, int]]]:
         return [(0, 0, 0, "", ("10.0.0.5", 443))]
 
     monkeypatch.setattr("app.shared.crawler.validator.socket.getaddrinfo", resolve)

@@ -76,15 +76,18 @@ def get_crawl4ai_crawler(connection: HTTPConnection) -> AsyncWebCrawler | None:
     return getattr(connection.app.state, "crawl4ai_crawler", None)
 
 
-async def get_crawler(redis_client: Redis | None = None) -> WebCrawler:
+async def get_crawler(
+    redis_client: Redis | None = None,
+    browser: AsyncWebCrawler | None = None,
+) -> WebCrawler:
     """Get a WebCrawler domain service instance.
 
-    Creates a new WebCrawler with optional Redis for caching.
-    The underlying AsyncWebCrawler browser is created per-crawl call
-    (context-managed), not from the lifespan-managed instance.
+    Creates a WebCrawler with optional Redis and an application-owned browser.
+    Callers outside a FastAPI lifespan may omit ``browser`` and receive the
+    isolated per-operation fallback.
     """
     from app.shared.crawler import (
         WebCrawler,
     )
 
-    return WebCrawler(redis_client=redis_client)
+    return WebCrawler(redis_client=redis_client, browser=browser)

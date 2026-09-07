@@ -16,10 +16,66 @@ class Chunk(BaseModel):
     word_count: int
 
 
+def _markdown_heading_starts(markdown: str) -> list[int]:
+    """Return real Markdown heading offsets, ignoring fenced code blocks."""
+    starts: list[int] = []
+    offset = 0
+    fenced = False
+    fence_marker = ""
+    lines = markdown.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            if not fenced:
+                fenced = True
+                fence_marker = marker
+            elif marker == fence_marker:
+                fenced = False
+            offset += len(line)
+            continue
+        if not fenced:
+            is_atx = re.match(r"^#{1,6}\s+\S", stripped) is not None
+            next_line = lines[index + 1].strip() if index + 1 < len(lines) else ""
+            is_setext = bool(line.strip()) and re.fullmatch(r"(=|-){3,}", next_line) is not None
+            if is_atx or is_setext:
+                starts.append(offset)
+        offset += len(line)
+    return starts
+
+
+def _extract_heading_context(markdown: str) -> list[tuple[int, str]]:
+    """Extract ATX and Setext headings outside fenced code blocks."""
+    headings: list[tuple[int, str]] = []
+    lines = markdown.splitlines()
+    fenced = False
+    fence_marker = ""
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            if not fenced:
+                fenced = True
+                fence_marker = marker
+            elif marker == fence_marker:
+                fenced = False
+            continue
+        if fenced:
+            continue
+        atx = re.match(r"^(#{1,6})\s+(.+?)\s*#*$", stripped)
+        if atx:
+            headings.append((len(atx.group(1)), atx.group(2).strip()))
+            continue
+        if index + 1 < len(lines) and re.fullmatch(r"(=|-){3,}", lines[index + 1].strip()):
+            level = 1 if lines[index + 1].strip()[0] == "=" else 2
+            headings.append((level, stripped))
+    return headings
+
+
 def split_by_header(md: str, header_pattern: str) -> list[str]:
-    """Split markdown by a specific header pattern."""
-    indices = [0, *(m.start() for m in re.finditer(header_pattern, md, re.MULTILINE))]
-    indices.append(len(md))
+    """Split Markdown by headings without treating code samples as headings."""
+    del header_pattern  # Kept for backwards compatibility with the public helper.
+    indices = [0, *_markdown_heading_starts(md), len(md)]
     return [
         md[indices[i] : indices[i + 1]].strip()
         for i in range(len(indices) - 1)
@@ -69,7 +125,12 @@ def _split_text_by_length(text: str, max_len: int) -> list[str]:
     return pieces
 
 
-def smart_chunk_markdown(markdown: str, max_len: int = 1000) -> list[Chunk]:
+def smart_chunk_markdown(
+    markdown: str,
+    max_len: int = 1000,
+    *,
+    overlap: int = 0,
+) -> list[Chunk]:
     """
     Hierarchically split markdown by #, ##, ### headers, then by characters.
 
@@ -85,18 +146,34 @@ def smart_chunk_markdown(markdown: str, max_len: int = 1000) -> list[Chunk]:
     if max_len <= 0:
         message = "max_len must be greater than zero"
         raise ValueError(message)
+    if overlap < 0 or overlap >= max_len:
+        message = "overlap must be between zero and max_len - 1"
+        raise ValueError(message)
 
     chunks = _chunk_recursive(split_by_header(markdown, r"^# .+$"), r"^# .+$", max_len)
 
     result_chunks = []
     heading_context: list[str] = []
-    for idx, text in enumerate([c for c in chunks if c]):
-        local_headers = re.findall(r"^(#+)\s+(.+)$", text, re.MULTILINE)
-        for hashes, title in local_headers:
-            level = len(hashes)
+    document_headings = _extract_heading_context(markdown)
+    if document_headings:
+        level, title = document_headings[0]
+        heading_context.append(f"{'#' * level} {title}")
+    non_empty_chunks = [c for c in chunks if c]
+    for idx, chunk_text in enumerate(non_empty_chunks):
+        text = chunk_text
+        local_headers = _extract_heading_context(text)
+        for level, title in local_headers:
             heading_context = heading_context[: level - 1]
-            heading_context.append(f"{hashes} {title.strip()}")
+            heading_context.append(f"{'#' * level} {title}")
         headers = "; ".join(heading_context)
+        if overlap and idx > 0:
+            previous = non_empty_chunks[idx - 1]
+            prefix = previous[-overlap:].lstrip()
+            if prefix and not text.startswith(prefix):
+                text = f"{prefix}\n\n{text}"
+                if len(text) > max_len:
+                    text = text[-max_len:]
+
         result_chunks.append(
             Chunk(
                 text=text,
@@ -141,8 +218,14 @@ def extract_title_from_markdown(markdown: str) -> str | None:
 
 def clean_markdown(markdown: str) -> str:
     """Clean and normalize markdown content."""
-    markdown = re.sub(r"\n{3,}", "\n\n", markdown)
-    return markdown.strip()
+    pieces = re.split(r"(```[\s\S]*?```|~~~[\s\S]*?~~~)", markdown)
+    cleaned: list[str] = []
+    for index, piece in enumerate(pieces):
+        if index % 2 == 0:
+            cleaned.append(re.sub(r"\n{3,}", "\n\n", piece))
+        else:
+            cleaned.append(piece)
+    return "".join(cleaned).strip()
 
 
 def get_chunk_summary(chunk: Chunk) -> dict[str, Any]:

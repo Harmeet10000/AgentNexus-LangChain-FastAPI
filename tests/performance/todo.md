@@ -359,9 +359,9 @@ Additionally, the host personally recommends adding a commit reference to these 
 230. need to have a standard for marking the task done in openspec spec gated with a DONE sections that is detailed and summary of how it is done
 
 
-234. learn about classVars and check if UUIDv7 is available in ORM
+234. learn about classVars, policy, strEnum, namedTuple, final, mapping, list, set, learn crawler/processor.py policy  and check if UUIDv7 is available in ORM
 235. need to have all graph such as ingestion graph in the lifespan rather than in service
-236. use firecrawl SEO audit workflow for website
+236. 
 240. document processing and crawler needs db instance injection
 ```
 summarise these chapters in great detail and depth and take video's transcript as reference for outputing verbatim

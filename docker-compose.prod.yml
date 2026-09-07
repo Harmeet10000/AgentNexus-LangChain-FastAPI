@@ -59,6 +59,21 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  celery-worker-crawler:
+    image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:?IMAGE_TAG must be set}
+    container_name: celery-worker-crawler
+    command: celery -A app.connections.celery:celery_app worker --loglevel=info -Q crawler --concurrency=2
+    environment:
+      ENVIRONMENT: production
+    env_file:
+      - .env.production
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
   celery-beat:
     image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:?IMAGE_TAG must be set}
     container_name: celery-beat

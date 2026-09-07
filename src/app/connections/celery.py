@@ -63,6 +63,7 @@ from .celery_task_names import (
     BILLING_INVOICE_GENERATION,
     BILLING_RECEIPT_GENERATION,
     BILLING_RECONCILIATION,
+    CRAWLER_CRAWL,
     CREDITS_EXPIRE,
     CREDITS_RECONCILE,
     INGESTION_TASK_NAMES,
@@ -721,8 +722,18 @@ def _task_routes() -> dict[str, dict[str, str]]:
         "queue": settings.CELERY_INGESTION_QUEUE,
         "routing_key": settings.CELERY_INGESTION_ROUTING_KEY,
     }
+    crawler_route = {
+        "queue": settings.CELERY_CRAWLER_QUEUE,
+        "routing_key": settings.CELERY_CRAWLER_ROUTING_KEY,
+    }
     return {
-        name: dict(ingestion_route if name in INGESTION_TASK_NAMES else default_route)
+        name: dict(
+            ingestion_route
+            if name in INGESTION_TASK_NAMES
+            else crawler_route
+            if name == CRAWLER_CRAWL
+            else default_route
+        )
         for name in TASK_DECLARING_MODULES
     }
 
@@ -879,6 +890,7 @@ def create_celery_app() -> Celery:
             "tasks.billing_tasks",
             "tasks.credit_tasks",
             "tasks.document_tasks",
+            "tasks.crawler_tasks",
         ],
     )
     app.Task = ResilientTask
@@ -931,6 +943,17 @@ def create_celery_app() -> Celery:
                 name=settings.CELERY_INGESTION_QUEUE,
                 exchange=TASK_EXCHANGE,
                 routing_key=settings.CELERY_INGESTION_ROUTING_KEY,
+                durable=True,
+                queue_arguments={
+                    "x-queue-type": "quorum",
+                    "x-dead-letter-exchange": settings.CELERY_DEAD_LETTER_EXCHANGE,
+                    "x-dead-letter-routing-key": settings.CELERY_DEAD_LETTER_ROUTING_KEY,
+                },
+            ),
+            Queue(
+                name=settings.CELERY_CRAWLER_QUEUE,
+                exchange=TASK_EXCHANGE,
+                routing_key=settings.CELERY_CRAWLER_ROUTING_KEY,
                 durable=True,
                 queue_arguments={
                     "x-queue-type": "quorum",

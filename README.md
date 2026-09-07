@@ -280,6 +280,7 @@ uv run ruff format
 uv run pytest -x
 uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q default --concurrency=8
 uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q ingestion --concurrency=2
+uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q crawler --concurrency=2
 uv run celery -A app.connections.celery:celery_app beat --loglevel=info
 ```
 

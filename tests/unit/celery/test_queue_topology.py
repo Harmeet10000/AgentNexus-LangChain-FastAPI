@@ -35,6 +35,7 @@ from celery.exceptions import QueueNotFound
 
 from app.config import get_settings
 from app.connections.celery_task_names import (
+    CRAWLER_CRAWL,
     DOCUMENTS_INGEST,
     INGESTION_TASK_NAMES,
     SEND_PASSWORD_RESET_EMAIL,
@@ -57,8 +58,8 @@ _COMPOSE_CELERY_COMMAND = re.compile(
 
 #: One per worker, one for the scheduler. Asserted rather than assumed, so that a service deleted by
 #: accident shows up as a failure here instead of as a smaller set that still satisfies everything.
-_EXPECTED_CELERY_SERVICES = 3
-_EXPECTED_WORKER_SERVICES = 2
+_EXPECTED_CELERY_SERVICES = 4
+_EXPECTED_WORKER_SERVICES = 3
 
 
 def _compose_celery_commands() -> list[str]:
@@ -193,7 +194,9 @@ def test_the_latency_sensitive_names_route_to_the_default_queue(routed_queue) ->
     misrouted = {
         name: routed_queue(name)
         for name in TASK_DECLARING_MODULES
-        if name not in INGESTION_TASK_NAMES and routed_queue(name) != _settings.CELERY_DEFAULT_QUEUE
+        if name not in INGESTION_TASK_NAMES
+        and name != CRAWLER_CRAWL
+        and routed_queue(name) != _settings.CELERY_DEFAULT_QUEUE
     }
 
     assert misrouted == {}
@@ -267,9 +270,21 @@ def test_the_two_worker_pools_share_no_queue(routed_queue) -> None:
 
     assert ingestion_queue != latency_sensitive_queue
 
-    first, second = selections
+    assert len(selections) == 3
+    crawler_queue = routed_queue(CRAWLER_CRAWL)
+    assert crawler_queue not in {ingestion_queue, latency_sensitive_queue}
+    assert all(len(selected) == 1 for selected in selections)
+    assert {next(iter(selected)) for selected in selections} == {
+        ingestion_queue,
+        latency_sensitive_queue,
+        crawler_queue,
+    }
+    first, second, third = selections
     assert not (first & second), f"the two worker pools both consume {sorted(first & second)}"
 
     consumes_ingestion = [selected for selected in selections if ingestion_queue in selected]
     assert len(consumes_ingestion) == 1
     assert latency_sensitive_queue not in consumes_ingestion[0]
+    assert crawler_queue not in consumes_ingestion[0]
+    assert not (second & third)
+    assert not (first & third)

@@ -12,7 +12,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .base import ToolRegistry
-from .crawl import get_crawl_url_tool
 from .handoff import make_handoff_tools
 from .web_search import get_web_search_tool
 
@@ -41,7 +40,6 @@ def register_default_tools() -> ToolRegistry:
     """
     r = get_tool_registry()
     r.register(get_web_search_tool(), tags=["web", "search"])
-    r.register(get_crawl_url_tool(), tags=["web", "crawl"])
     for tool in make_handoff_tools():
         r.register(tool, tags=["handoff", tool.name.removeprefix("transfer_to_")])
     from . import (  # noqa: PLC0415 — D-1(c): entry-point import keeps package import side-effect free

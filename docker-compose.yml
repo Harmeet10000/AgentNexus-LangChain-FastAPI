@@ -188,6 +188,35 @@ services:
     depends_on:
       timescale:
         condition: service_healthy
+
+  celery-worker-crawler:
+    image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:-dev}
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+      target: dev
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        APP_VERSION: ${APP_VERSION:-1.0.0}
+    container_name: celery-worker-crawler
+    command: uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q crawler --concurrency=2
+    volumes:
+      - ./src:/app/src:ro
+      - ./data:/app/data
+    environment:
+      ENVIRONMENT: development
+      GIT_SHA: ${GIT_SHA:-unknown}
+      BUILD_DATE: ${BUILD_DATE:-unknown}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your_secure_password}@timescale:5432/${POSTGRES_DB:-langchain_db}
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672//
+    env_file:
+      - .env.development
+    networks:
+      - langchain-network
+    restart: unless-stopped
+    depends_on:
       rabbitmq:
         condition: service_healthy
 

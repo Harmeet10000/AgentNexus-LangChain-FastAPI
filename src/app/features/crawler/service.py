@@ -1,8 +1,10 @@
 """Crawler feature service."""
 
 import asyncio
+import hashlib
 import time
 from typing import Any
+from uuid import uuid4
 
 from redis.asyncio import Redis
 from returns.result import Failure, Success
@@ -87,7 +89,9 @@ class CrawlerService:
         await self.rate_limiter.increment_rate_limit(identifier, scope)
 
     @trace_layer("service")
-    async def crawl(self, request: CrawlRequest) -> CrawlerResult[CrawlResponse]:
+    async def crawl(  # noqa: PLR0914
+        self, request: CrawlRequest, *, crawl_id: str | None = None
+    ) -> CrawlerResult[CrawlResponse]:
         """
         Crawl a URL or URLs based on request.
 
@@ -97,17 +101,26 @@ class CrawlerService:
         Returns:
             CrawlResponse with results
         """
-        start_time = time.time()
+        start_time = time.monotonic()
+        crawl_id = crawl_id or str(uuid4())
 
-        logger.bind(url=request.url).info("Starting crawl")
+        logger.bind(crawl_id=crawl_id, url=request.url).info("Starting crawl")
 
         try:
-            async with asyncio.timeout(request.timeout):
+            crawler_config = getattr(self.crawler, "config", None)
+            configured_timeout = max(
+                1,
+                getattr(crawler_config, "timeout", request.timeout * 1_000) // 1_000,
+            )
+            configured_max_depth = getattr(crawler_config, "max_depth", request.max_depth)
+            configured_max_pages = getattr(crawler_config, "max_pages", request.max_pages)
+            operation_timeout = min(request.timeout, configured_timeout)
+            async with asyncio.timeout(operation_timeout):
                 if request.max_depth > 1:
                     crawl_result = await self.crawler.crawl_recursive(
                         urls=[request.url],
-                        max_depth=request.max_depth,
-                        max_pages=request.max_pages,
+                        max_depth=min(request.max_depth, configured_max_depth),
+                        max_pages=min(request.max_pages, configured_max_pages),
                         use_proxy=request.use_proxy,
                         bypass_cache=request.bypass_cache,
                     )
@@ -136,6 +149,7 @@ class CrawlerService:
                 crawl_result,
                 request,
                 output_budget=max(0, min(request.max_output_chars, remaining_output)),
+                crawl_id=crawl_id,
             )
             results.append(item)
             remaining_output = max(0, remaining_output - len(item.markdown or ""))
@@ -146,11 +160,12 @@ class CrawlerService:
             else:
                 failed_pages += 1
 
-        processing_time_ms = int((time.time() - start_time) * 1000)
+        processing_time_ms = int((time.monotonic() - start_time) * 1000)
 
         return Success(
             CrawlResponse(
                 success=failed_pages == 0,
+                crawl_id=crawl_id,
                 query_url=request.url,
                 results=results,
                 total_pages=len(results),
@@ -158,6 +173,7 @@ class CrawlerService:
                 failed_pages=failed_pages,
                 total_word_count=total_word_count,
                 processing_time_ms=processing_time_ms,
+                content_truncated=any(item.content_truncated for item in results),
             )
         )
 
@@ -166,6 +182,7 @@ class CrawlerService:
         crawl_result: CrawlResult,
         request: CrawlRequest,
         output_budget: int,
+        crawl_id: str,
     ) -> CrawlResultItem:
         """Process a single crawl result with optional Gemini processing."""
 
@@ -173,6 +190,7 @@ class CrawlerService:
         extracted_data: dict[str, Any] | None = None
         summary: str | None = None
         content_truncated = False
+        processing_errors: list[str] = []
 
         if crawl_result.success and markdown:
             content_truncated = len(markdown) > output_budget
@@ -191,11 +209,15 @@ class CrawlerService:
 
                 if extraction_result.success:
                     extracted_data = extraction_result.extracted_data
+                elif extraction_result.error:
+                    processing_errors.append(f"structured extraction: {extraction_result.error}")
 
             if request.summary:
                 summary_result = await self.processor.summarize(markdown)
                 if summary_result.success:
                     summary = summary_result.summary
+                elif summary_result.error:
+                    processing_errors.append(f"summary: {summary_result.error}")
 
         if request.mode == CrawlMode.HTML:
             content = crawl_result.html
@@ -216,10 +238,15 @@ class CrawlerService:
             content = truncate_content(content, max_length=output_budget)
             content_truncated = True
 
-        chunks = []
+        chunks: list[CrawlChunk] = []
         if request.include_chunks and content:
             chunks = [
-                CrawlChunk(**chunk.model_dump())
+                CrawlChunk(
+                    **chunk.model_dump(),
+                    token_count=len(chunk.text.split()),
+                    content_hash=hashlib.sha256(chunk.text.encode("utf-8")).hexdigest(),
+                    truncated=False,
+                )
                 for chunk in smart_chunk_markdown(content, max_len=request.chunk_size)[
                     : request.max_chunks
                 ]
@@ -227,6 +254,7 @@ class CrawlerService:
 
         return CrawlResultItem(
             url=crawl_result.url,
+            page_id=hashlib.sha256(f"{crawl_id}:{crawl_result.url}".encode()).hexdigest()[:24],
             success=crawl_result.success,
             title=crawl_result.title,
             markdown=content,
@@ -237,6 +265,7 @@ class CrawlerService:
             crawl_time_ms=crawl_result.crawl_time_ms,
             cached=crawl_result.cached,
             error_message=crawl_result.error_message,
+            processing_errors=processing_errors,
             links=links,
             content_truncated=content_truncated,
             chunks=chunks,

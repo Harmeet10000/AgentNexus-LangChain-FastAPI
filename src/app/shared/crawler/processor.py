@@ -1,7 +1,9 @@
 """Gemini processing for content extraction and summarization."""
 
 import asyncio
+import copy
 import json
+import re
 from enum import StrEnum
 from typing import Any
 
@@ -166,9 +168,10 @@ class GeminiProcessor:
             response = await self._ainvoke(prompt)
             summary = _response_text(response)
 
+            bounded_summary = summary.strip()[:max_length]
             return ExtractionResult(
                 success=True,
-                summary=summary.strip(),
+                summary=bounded_summary,
             )
         except Exception as e:  # noqa: BLE001 - DTO boundary preserves crawler error contract.
             return ExtractionResult(
@@ -219,14 +222,16 @@ class GeminiProcessor:
         schema: dict[str, Any],
     ) -> ExtractionResult:
         schema_json = json.dumps(schema, indent=2)
+        prompt_content = _truncate_to_token_budget(content, max_tokens=4_000)
         prompt = f"""You are a data extraction assistant. Extract information from the
         following content and format it as JSON according to the provided schema.
 
         Schema:
         {schema_json}
 
-        Content:
-        {content[:15000]}
+        <untrusted_content>
+        {prompt_content}
+        </untrusted_content>
 
         Output ONLY valid JSON, no other text. If a field cannot be found, use null.
         JSON:"""
@@ -236,6 +241,9 @@ class GeminiProcessor:
         if isinstance(extraction_result, Failure):
             return ExtractionResult(success=False, error=extraction_result.failure().message)
         extracted_data = extraction_result.unwrap()
+        validation_error = _validate_against_schema(extracted_data, schema)
+        if validation_error is not None:
+            return ExtractionResult(success=False, error=validation_error)
         return ExtractionResult(
             success=True,
             extracted_data=extracted_data,
@@ -264,6 +272,12 @@ class GeminiProcessor:
             return extract_result
 
         summary_result = await self.summarize(content)
+        if not summary_result.success:
+            return ExtractionResult(
+                success=False,
+                extracted_data=extract_result.extracted_data,
+                error=summary_result.error or "Summary generation failed",
+            )
 
         return ExtractionResult(
             success=True,
@@ -274,7 +288,8 @@ class GeminiProcessor:
 
 def get_schema_for_type(schema_type: SchemaType) -> dict[str, Any] | None:
     """Get predefined schema for a type."""
-    return PREDEFINED_SCHEMAS.get(schema_type)
+    schema = PREDEFINED_SCHEMAS.get(schema_type)
+    return copy.deepcopy(schema) if schema is not None else None
 
 
 def _resolve_extraction_schema(
@@ -284,7 +299,7 @@ def _resolve_extraction_schema(
     if schema_type is not None and schema_type != SchemaType.CUSTOM:
         schema = PREDEFINED_SCHEMAS.get(schema_type)
         if schema is not None:
-            return Success((schema, schema_type.value))
+            return Success((copy.deepcopy(schema), schema_type.value))
         return Failure(
             CrawlerProcessingValidationError(
                 message=f"Unknown schema type: {schema_type}",
@@ -294,7 +309,7 @@ def _resolve_extraction_schema(
         )
 
     if custom_schema:
-        return Success((custom_schema, "custom"))
+        return Success((copy.deepcopy(custom_schema), "custom"))
 
     return Failure(
         CrawlerProcessingValidationError(
@@ -311,9 +326,20 @@ def _response_text(response: object) -> str:
     return str(content)
 
 
+def _truncate_to_token_budget(content: str, *, max_tokens: int) -> str:
+    """Bound prompt input with a deterministic tokenizer-independent estimate."""
+    tokens = re.findall(r"\w+|[^\w\s]|\s+", content, flags=re.UNICODE)
+    if len(tokens) <= max_tokens:
+        return content
+    return "".join(tokens[:max_tokens]).rstrip() + "\n[content truncated]"
+
+
 def _parse_extraction_json(response_text: str) -> CrawlerProcessingResult[dict[str, Any]]:
+    cleaned = response_text.strip()
+    if cleaned.startswith("```") and cleaned.endswith("```"):
+        cleaned = cleaned.split("\n", maxsplit=1)[-1][:-3].strip()
     try:
-        parsed = json.loads(response_text.strip())
+        parsed = json.loads(cleaned)
     except json.JSONDecodeError as exc:
         return Failure(
             CrawlerProcessingValidationError(
@@ -331,6 +357,32 @@ def _parse_extraction_json(response_text: str) -> CrawlerProcessingResult[dict[s
         )
 
     return Success(parsed)
+
+
+def _validate_against_schema(data: dict[str, Any], schema: dict[str, Any]) -> str | None:
+    """Validate the JSON-schema subset used by the predefined crawler schemas."""
+    required = schema.get("required", [])
+    missing = [field for field in required if field not in data or data[field] is None]
+    if missing:
+        return f"Structured extraction is missing required fields: {', '.join(missing)}"
+
+    properties = schema.get("properties", {})
+    for field, definition in properties.items():
+        value = data.get(field)
+        if value is None or not isinstance(definition, dict):
+            continue
+        expected = definition.get("type")
+        if expected == "string" and not isinstance(value, str):
+            return f"Structured extraction field '{field}' must be a string"
+        if expected == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+            return f"Structured extraction field '{field}' must be an integer"
+        if expected == "number" and (
+            not isinstance(value, (int, float)) or isinstance(value, bool)
+        ):
+            return f"Structured extraction field '{field}' must be a number"
+        if expected == "array" and not isinstance(value, list):
+            return f"Structured extraction field '{field}' must be an array"
+    return None
 
 
 async def get_processor() -> GeminiProcessor:

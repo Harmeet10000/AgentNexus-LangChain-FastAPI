@@ -77,6 +77,7 @@ _SOURCE_PATH_PREFIX = "src.app."
 _CELERY_COMMAND_VARIABLES = (
     "CELERY_DEFAULT_WORKER_CMD",
     "CELERY_INGESTION_WORKER_CMD",
+    "CELERY_CRAWLER_WORKER_CMD",
     "CELERY_BEAT_CMD",
 )
 
@@ -262,7 +263,7 @@ def test_exactly_one_of_the_defined_commands_is_the_scheduler() -> None:
     workers = [command for command in commands if _is_worker_command(command)]
     schedulers = [command for command in commands if not _is_worker_command(command)]
 
-    assert len(workers) == 2, f"expected two worker commands, found {workers}"
+    assert len(workers) == 3, f"expected three worker commands, found {workers}"
     assert len(schedulers) == 1, f"expected one scheduler command, found {schedulers}"
 
 

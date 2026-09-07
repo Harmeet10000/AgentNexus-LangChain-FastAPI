@@ -1,10 +1,14 @@
 """Crawler feature DTOs (Data Transfer Objects)."""
 
+import json
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.features.crawler.constants import CrawlMode, SchemaType
+from app.shared.crawler.validator import sanitize_url, validate_url
 
 
 class CrawlRequest(BaseModel):
@@ -30,6 +34,15 @@ class CrawlRequest(BaseModel):
     chunk_size: int = Field(default=1_000, ge=256, le=8_000)
     max_chunks: int = Field(default=100, ge=1, le=500)
 
+    @field_validator("url")
+    @classmethod
+    def validate_url_value(cls, value: str) -> str:
+        normalized = sanitize_url(value)
+        valid, message = validate_url(normalized)
+        if not valid:
+            raise ValueError(message)
+        return normalized
+
     @model_validator(mode="after")
     def validate_extraction_schema(self) -> Self:
         if not self.extract_structured:
@@ -43,6 +56,18 @@ class CrawlRequest(BaseModel):
         if self.schema_type not in {None, SchemaType.CUSTOM} and self.custom_schema is not None:
             message = "custom_schema requires schema_type=custom"
             raise ValueError(message)
+        if self.custom_schema is not None:
+            if self.custom_schema.get("type") != "object":
+                message = "custom_schema must describe a JSON object"
+                raise ValueError(message)
+            try:
+                schema_size = len(json.dumps(self.custom_schema, separators=(",", ":")))
+            except (TypeError, ValueError) as exc:
+                message = "custom_schema must be JSON serializable"
+                raise ValueError(message) from exc
+            if schema_size > 32_000:
+                message = "custom_schema is too large"
+                raise ValueError(message)
         return self
 
 
@@ -52,6 +77,7 @@ class CrawlResultItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     url: str
+    page_id: str | None = None
     success: bool
     title: str | None = None
     markdown: str | None = None
@@ -62,6 +88,7 @@ class CrawlResultItem(BaseModel):
     crawl_time_ms: int | None = None
     cached: bool = False
     error_message: str | None = None
+    processing_errors: list[str] = Field(default_factory=list)
     links: list[str] = Field(default_factory=list)
     content_truncated: bool = False
     chunks: list["CrawlChunk"] = Field(default_factory=list)
@@ -77,6 +104,9 @@ class CrawlChunk(BaseModel):
     headers: str
     char_count: int
     word_count: int
+    token_count: int | None = None
+    content_hash: str | None = None
+    truncated: bool = False
 
 
 class CrawlResponse(BaseModel):
@@ -85,6 +115,7 @@ class CrawlResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     success: bool
+    crawl_id: str | None = None
     query_url: str
     results: list[CrawlResultItem]
     total_pages: int
@@ -92,6 +123,83 @@ class CrawlResponse(BaseModel):
     failed_pages: int
     total_word_count: int
     processing_time_ms: int
+    content_truncated: bool = False
+
+
+class CrawlJobStatus(StrEnum):
+    """Durable lifecycle states for a crawler job."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    CANCELLING = "cancelling"
+    CANCELLED = "cancelled"
+
+
+class CrawlJob(BaseModel):
+    """Public durable crawler-job representation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    crawl_id: str
+    status: CrawlJobStatus
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    total_pages: int = 0
+    successful_pages: int = 0
+    failed_pages: int = 0
+    next_page_cursor: str | None = None
+    error_message: str | None = None
+    content_truncated: bool = False
+
+
+class CrawlJobPageList(BaseModel):
+    """Paginated durable page results."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    crawl_id: str
+    items: list[CrawlResultItem]
+    next_cursor: str | None = None
+
+
+class CrawlJobChunk(BaseModel):
+    """A chunk plus its page identity for retrieval-oriented consumers."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    crawl_id: str
+    page_id: str
+    page_url: str
+    chunk: CrawlChunk
+
+
+class CrawlJobChunkList(BaseModel):
+    """Paginated chunks across a completed crawl."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    crawl_id: str
+    items: list[CrawlJobChunk]
+    next_cursor: str | None = None
+
+
+class CrawlJobSearchResponse(BaseModel):
+    """Bounded text search over persisted crawl chunks."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    crawl_id: str
+    query: str
+    items: list[CrawlJobChunk]
+
+
+def utc_now() -> datetime:
+    """Return a timezone-aware timestamp for job records."""
+    return datetime.now(UTC)
 
 
 class SearchRequest(BaseModel):

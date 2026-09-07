@@ -15,14 +15,22 @@ class CrawlerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     headless: bool = Field(default_factory=lambda: get_settings().CRAWL4AI_HEADLESS)
-    timeout: int = Field(default_factory=lambda: get_settings().CRAWL4AI_TIMEOUT)
+    timeout: int = Field(default_factory=lambda: get_settings().CRAWL4AI_TIMEOUT, gt=0)
     user_agent: str = Field(default_factory=lambda: get_settings().CRAWL4AI_USER_AGENT)
-    max_depth: int = Field(default_factory=lambda: get_settings().CRAWL4AI_MAX_DEPTH)
-    max_pages: int = Field(default_factory=lambda: get_settings().CRAWL4AI_MAX_PAGES)
-    max_content_size: int = Field(default_factory=lambda: get_settings().CRAWL4AI_MAX_CONTENT_SIZE)
+    max_depth: int = Field(default_factory=lambda: get_settings().CRAWL4AI_MAX_DEPTH, ge=1, le=5)
+    max_pages: int = Field(default_factory=lambda: get_settings().CRAWL4AI_MAX_PAGES, ge=1, le=50)
+    max_content_size: int = Field(
+        default_factory=lambda: get_settings().CRAWL4AI_MAX_CONTENT_SIZE,
+        ge=1,
+        le=1_000_000,
+    )
+    max_links: int = Field(default=1_000, ge=0, le=10_000)
+    max_cache_size: int = Field(default=2_000_000, ge=0, le=10_000_000)
+    cache_version: str = Field(default="v3", min_length=1, max_length=32)
     max_concurrent: int = 10
     memory_threshold: float = 70.0
     cache_mode: str = "bypass"
+    respect_robots_txt: bool = True
 
     proxy_server: str | None = Field(default_factory=lambda: get_settings().CRAWL4AI_PROXY)
     proxy_enabled: bool = Field(default_factory=lambda: get_settings().CRAWL4AI_PROXY_ENABLED)
@@ -114,6 +122,8 @@ class CrawlerConfig(BaseModel):
             "excluded_tags": self.excluded_tags,
             "exclude_external_links": True,
             "exclude_social_media_links": True,
+            "check_robots_txt": self.respect_robots_txt,
+            "user_agent": self.user_agent,
         }
         if self.page_timeout:
             config["page_timeout"] = self.page_timeout
@@ -133,6 +143,8 @@ class CrawlerConfig(BaseModel):
                 "latitude": self.geolocation_lat,
                 "longitude": self.geolocation_lon,
             }
+        if self.url_patterns:
+            config["url_matcher"] = self.url_patterns
         return config
 
     def get_markdown_generator(

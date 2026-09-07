@@ -95,6 +95,7 @@ CELERY_WORKER_CMD := uv run celery -A $(CELERY_APP) worker --loglevel=info
 # it multiplies peak memory by whatever the largest document costs.
 CELERY_DEFAULT_WORKER_CMD := $(CELERY_WORKER_CMD) -Q default --concurrency=8
 CELERY_INGESTION_WORKER_CMD := $(CELERY_WORKER_CMD) -Q ingestion --concurrency=2
+CELERY_CRAWLER_WORKER_CMD := $(CELERY_WORKER_CMD) -Q crawler --concurrency=2
 CELERY_BEAT_CMD := uv run celery -A $(CELERY_APP) beat --loglevel=info
 
 celery:
@@ -102,6 +103,9 @@ celery:
 
 celery-ingestion:
 	$(CELERY_INGESTION_WORKER_CMD)
+
+celery-crawler:
+	$(CELERY_CRAWLER_WORKER_CMD)
 
 celery-beat:
 	$(CELERY_BEAT_CMD)
@@ -111,6 +115,7 @@ celery-beat:
 celery-command:
 	@echo '$(CELERY_DEFAULT_WORKER_CMD)'
 	@echo '$(CELERY_INGESTION_WORKER_CMD)'
+	@echo '$(CELERY_CRAWLER_WORKER_CMD)'
 	@echo '$(CELERY_BEAT_CMD)'
 
 # --- Docker image versioning (git-sha) ---------------------------------------

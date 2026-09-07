@@ -205,6 +205,8 @@ class Settings(BaseSettings):
     # occupied. Two queues with disjoint consumers is what removes the coupling.
     CELERY_INGESTION_QUEUE: str = Field(default="ingestion")
     CELERY_INGESTION_ROUTING_KEY: str = Field(default="task.ingestion")
+    CELERY_CRAWLER_QUEUE: str = Field(default="crawler")
+    CELERY_CRAWLER_ROUTING_KEY: str = Field(default="task.crawler")
     CELERY_RETRY_MAX_RETRIES: int = Field(default=5)
     CELERY_RETRY_BACKOFF_MAX: int = Field(default=600)
     CELERY_DEFAULT_RETRY_DELAY: int = Field(default=5)
@@ -215,6 +217,8 @@ class Settings(BaseSettings):
     CELERY_IDEMPOTENCY_TTL_SECONDS: int = Field(default=86400)
     CELERY_CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = Field(default=5)
     CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT: int = Field(default=60)
+    CRAWL_JOB_TTL_SECONDS: int = Field(default=86_400, ge=300, le=7_776_000)
+    CRAWL_JOB_MAX_RESULT_BYTES: int = Field(default=8_000_000, ge=100_000, le=50_000_000)
 
     # --- Credit System ---
     CREDIT_EXPIRATION_CRON_HOUR: int = Field(

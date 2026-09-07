@@ -4,9 +4,11 @@ import asyncio
 import ipaddress
 import re
 import socket
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
-PRIVATE_IP_RANGES = [
+MAX_URL_LENGTH = 4_096
+
+PRIVATE_IP_RANGES: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
@@ -66,6 +68,12 @@ def validate_url(url: str) -> tuple[bool, str]:  # noqa: PLR0912
     """
     if not url:
         return False, "URL cannot be empty"
+    if len(url) > MAX_URL_LENGTH:
+        return False, "URL is too long"
+    if any(ord(character) < 0x20 for character in url):
+        return False, "URL contains control characters"
+    if "\\" in url:
+        return False, "URL contains an invalid path separator"
 
     try:
         parsed = urlparse(url)
@@ -75,17 +83,23 @@ def validate_url(url: str) -> tuple[bool, str]:  # noqa: PLR0912
     if not parsed.scheme:
         return False, "URL must include a scheme (http:// or https://)"
 
-    if parsed.scheme not in {"http", "https"}:
+    if parsed.scheme.lower() not in {"http", "https"}:
         return False, "Only http and https schemes are allowed"
 
     if not parsed.netloc:
         return False, "URL must include a domain"
 
-    hostname = parsed.hostname
+    try:
+        hostname = parsed.hostname
+    except ValueError:
+        return False, "Invalid hostname"
     if not hostname:
         return False, "Invalid hostname"
 
-    hostname = hostname.lower().rstrip(".")
+    try:
+        hostname = hostname.encode("idna").decode("ascii").lower().rstrip(".")
+    except UnicodeError:
+        return False, "Invalid internationalized hostname"
     if parsed.username is not None or parsed.password is not None:
         return False, "URLs with embedded credentials are not allowed"
     if hostname in BLOCKED_DOMAINS:
@@ -95,14 +109,21 @@ def validate_url(url: str) -> tuple[bool, str]:  # noqa: PLR0912
         if re.match(pattern, hostname):
             return False, f"Hostname '{hostname}' is not allowed"
 
-    if parsed.hostname is not None and is_private_ip(parsed.hostname):
-        return False, f"Private IP addresses are not allowed: {parsed.hostname}"
+    if hostname is not None:
+        ip_candidate = hostname
+        if ip_candidate.isdigit():
+            try:
+                ip_candidate = str(ipaddress.ip_address(int(ip_candidate)))
+            except ValueError:
+                return False, "Invalid numeric hostname"
+        if is_private_ip(ip_candidate):
+            return False, f"Private IP addresses are not allowed: {hostname}"
 
     try:
         port = parsed.port
     except ValueError:
         return False, "Invalid port"
-    if port and port in {22, 23, 25, 3306, 5432, 6379, 27017, 11211}:
+    if port is not None and port not in {80, 443}:
         return False, f"Port {port} is not allowed for security reasons"
 
     return True, ""
@@ -114,7 +135,7 @@ async def validate_url_for_fetch(url: str) -> tuple[bool, str]:
     if not valid:
         return valid, message
 
-    parsed = urlparse(url)
+    parsed = urlparse(sanitize_url(url))
     hostname = parsed.hostname
     if hostname is None:
         return False, "Invalid hostname"
@@ -156,10 +177,22 @@ def sanitize_url(url: str) -> str:
     """Sanitize and normalize a URL."""
     url = url.strip()
 
-    if not url.startswith(("http://", "https://")):
+    try:
+        has_http_scheme = urlparse(url).scheme.lower() in {"http", "https"}
+    except ValueError:
+        return url
+    if not has_http_scheme:
         url = f"https://{url}"
-
-    return url
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return url
+    normalized = parsed._replace(
+        scheme=parsed.scheme.lower(),
+        netloc=parsed.netloc.lower(),
+        fragment="",
+    )
+    return urlunparse(normalized)
 
 
 def get_domain_from_url(url: str) -> str:

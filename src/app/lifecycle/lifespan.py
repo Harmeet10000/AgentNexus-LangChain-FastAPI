@@ -208,7 +208,10 @@ async def _setup_graphiti_state(app: FastAPI, settings: Any) -> None:
 
 async def _setup_crawl4ai_state(app: FastAPI, _settings: Any) -> None:
     """Initialise the Crawl4AI browser."""
+    from app.shared.crawler.processor import get_processor
+
     app.state.crawl4ai_crawler = await create_crawl4ai_crawler()
+    app.state.crawler_processor = await get_processor()
     logger.info("Crawl4AI browser initialized")
 
 

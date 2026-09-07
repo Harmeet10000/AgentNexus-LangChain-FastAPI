@@ -17,6 +17,32 @@ There are no obvious dedicated crawler tests covering these critical paths.
 
 I would rate the current crawler subsystem approximately 5.8/10 for production/agent readiness.
 
+## Final execution contract
+
+The crawler API is deliberately fully asynchronous and durable. `POST /crawler/crawl` never runs
+Crawl4AI in the FastAPI request process and always returns `202` with a `crawl_id`. Redis stores
+job metadata, idempotency records, cancellation flags, and bounded results; RabbitMQ transports
+the Celery task; the dedicated `crawler` worker queue owns the Crawl4AI browser lifecycle.
+
+Tavily is the immediate LLM-facing web tool for these five cases:
+
+1. One URL.
+2. Strictly bounded Markdown/HTML output.
+3. A short timeout.
+4. Small extraction requests.
+5. Interactive API clients that need an immediate answer.
+
+The durable crawler is the system of record for every Crawl4AI request, including a single-page
+request when it is invoked through the crawler API. Its retrieval contract is intentionally split
+into `crawl_status`, paginated `crawl_get_page`, paginated `crawl_get_chunk`, bounded
+`crawl_search_chunks`, and `crawl_cancel` operations. Raw page content is never returned from the
+job-creation response.
+
+The Celery RPC result backend is not used as crawler persistence: RPC replies are transient and
+consumer-oriented. Redis job records are the authoritative state, and Celery task IDs are retained
+only for operational revoke/cancellation. Worker processes create and close their own Crawl4AI
+browser; a FastAPI lifespan browser is never passed across a process boundary.
+
 What is good
 
 The code is split into feature-level and shared crawler modules.
@@ -313,11 +339,10 @@ streaming,
 retrieval-oriented, or
 a combination.
 
-Recommended design:
+Implemented design:
 
-Small single-page crawl: synchronous response with a strict output budget.
-Recursive/large crawl: asynchronous job.
-Agent tool: return summaries, metadata, chunks, or artifact references—not full raw pages.
+All Crawl4AI requests are asynchronous jobs. Tavily handles the bounded immediate-agent contract;
+the crawler API handles durable execution, pagination, cancellation, and result retrieval.
 
 Define limits for:
 

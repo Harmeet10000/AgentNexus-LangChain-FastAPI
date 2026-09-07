@@ -95,6 +95,41 @@ class RateLimiter:
             "remaining_hour": config.per_hour - current_hour - 1,
         }
 
+    async def acquire(
+        self,
+        identifier: str,
+        scope: RateLimitScope,
+    ) -> tuple[bool, dict[str, Any]]:
+        """Atomically consume one request from both rate-limit windows."""
+        if not self.redis_client:
+            return True, {}
+
+        config = RATE_LIMIT_CONFIGS.get(scope)
+        if config is None:
+            return True, {}
+
+        minute_key = f"rate:{scope.value}:{identifier}:min"
+        hour_key = f"rate:{scope.value}:{identifier}:hour"
+        pipe = self.redis_client.pipeline(transaction=True)
+        pipe.incr(minute_key)
+        pipe.expire(minute_key, 60)
+        pipe.incr(hour_key)
+        pipe.expire(hour_key, 3600)
+        minute_count, _minute_expiry, hour_count, _hour_expiry = await pipe.execute()
+
+        if minute_count > config.per_minute or hour_count > config.per_hour:
+            return False, {
+                "error": "Rate limit exceeded",
+                "limit": min(config.per_minute, config.per_hour),
+                "window": "minute" if minute_count > config.per_minute else "hour",
+                "retry_after": 60 if minute_count > config.per_minute else 3600,
+            }
+
+        return True, {
+            "remaining_minute": config.per_minute - minute_count,
+            "remaining_hour": config.per_hour - hour_count,
+        }
+
     async def increment_rate_limit(
         self,
         identifier: str,

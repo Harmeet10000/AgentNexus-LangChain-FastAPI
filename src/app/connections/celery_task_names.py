@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 # --- ingestion ---------------------------------------------------------------
 
 DOCUMENTS_INGEST: Final = "tasks.documents_ingest"
+CRAWLER_CRAWL: Final = "tasks.crawler_crawl"
 
 #: The names whose work is measured in minutes, and which therefore consume the
 #: dedicated ingestion queue rather than the default one. Membership lives here,
@@ -125,6 +126,7 @@ _DOCUMENT_TASKS: Final = "tasks.document_tasks"
 TASK_DECLARING_MODULES: Final[Mapping[str, str]] = {
     AGENT_MEMORY_CONSOLIDATION: _AGENT_MEMORY_TASKS,
     DOCUMENTS_INGEST: _DOCUMENT_TASKS,
+    CRAWLER_CRAWL: "tasks.crawler_tasks",
     SEND_VERIFICATION_EMAIL: _AUTH_EMAIL_TASKS,
     SEND_PASSWORD_RESET_EMAIL: _AUTH_EMAIL_TASKS,
     BILLING_RENEWAL: _BILLING_TASKS,
