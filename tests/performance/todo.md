@@ -222,7 +222,6 @@ It will be compatible before version 2.0.0.
 217. customise openspec, ast-grep  DONE
 215. add knowledge from other projects and this to OFK folder including agent, DB, python, JS/TS optimisations, skills, BDD, research for SDD from gemini chat history, set of best practices for deployment, version pinning, maintaining docker image history with git commit hash, terraform practices, book wisdom. add research done in Kiro. use OpenWiki if it suits and see cole medin videos for organising files in a scalable manner, ring buffers, debugging tips, eBPF, how ABI works, how to make FFIs, SGLang and vLLM, webhooks, errors best practices, finance and other stuff as well  DONE
 211. check agent router usage  DONE
-136. use LangExtract outputs to build rich graph knowledge from your legal documents.  ABANDONDED
 220. check the alembic warning having 2 heads   DONE
 223. need to make standardise alembic file naming scheme  DONE
 228. fix the failing websocket tests  DONE
@@ -260,6 +259,20 @@ also need to check how exactly error msg should be written. should it be string 
 need to standardise what happens in except block      DONE
  224. fix this def _celery_meters() -> tuple[Any, Any, Any]:
     global _otel_celery_meters                                 DONE
+184. You correctly called out that documents/chunks should be the sole retrieval truth.
+But a lot of current Agent Saul / precedent / reconciliation code still reads clauses directly.
+Do you want me to:
+- A. keep the architecture clean now: new documents/chunks become the only retrieval substrate, and any old code still tied to clauses is left stale/disabled until second pass   DONE
+148. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc  DONE
+158. add tests that suits the project   DONE
+173. rewrite the tools for the new grpahiti, cognee etc  DONE
+174. add proper cognee functions, graphiti from docs    DONE
+210. fix ingestion -> docuements -> tools -> cognee   DONE
+231. need to check all the stashed item in git   DONE
+232. check graphify not being installed   DONE
+237. remove raise from examples/  DONE
+239. convert redis_func to the result pattern  DONE
+238. check if tasks can be added in server.py as well   DONE
 
 161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
 type Composable = Callable[[Any], Any]
@@ -271,22 +284,20 @@ def compose(*functions: Composable) -> Composable:
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses can be used to make the lynk linter     DELAYED    
 156. check the page https://docs.langchain.com/langsmith/deployments#
-153. set up performance tests 
-157. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform plugin
+153. set up performance tests  DELAYED
+157. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform    DELAYED
+194. add headroom-ai for **comrpression**   ABANDONED
+53. add voice support by using gemini 3 for TTS and STT  with websockets   ABANDONED
+170. write cron job for memory decay and then send to celery for off loading for cognee   ABANDONED
 
-158. add tests that suits the project
 159. discover RAGFlow, OpenRAG if or if not to use it
 160. check how can Port & Adapter/strategy & factory can help 
 
 
 64. No eval framework. Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
-61. see docassemble, fpdf2, python-docx and other libraries for generating final PDFs/docs
-53. add voice support by using gemini 3 for TTS and STT  with websockets
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
-44. correct the code for crawler and the packages used
-115. logs inbetween the layers are empty or not coming except start and end, should i pass logger as an argument or should i import it where needed 
 140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
 
 151. add langchain-cisco-aidefense, compact-middleware, langchain-collapse
@@ -294,31 +305,23 @@ def compose(*functions: Composable) -> Composable:
 153. add a hydration node after checkpointer  LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
 
     The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
-194. add headroom-ai for **comrpression**
 162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
 163. refactor vectorStore code        TSVECTOR,
 164. refactor RAG code
 
-170. write cron job for memory decay and then send to celery for off loading for cognee
 171. use CacheBackedEmbeddings fore reusing embeddings
 172. use prebuilt and custom middlewares in langchain 
-173. rewrite the tools for the new grpahiti, cognee etc
-174. add proper cognee functions, graphiti from docs
+
 176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
 179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
-184. You correctly called out that documents/chunks should be the sole retrieval truth.
-But a lot of current Agent Saul / precedent / reconciliation code still reads clauses directly.
-Do you want me to:
-- A. keep the architecture clean now: new documents/chunks become the only retrieval substrate, and any old code still tied to clauses is left stale/disabled until second pass   
+
 185. remove ts_vector(think if it is required here or other extension can do the job here) from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
 
 
-148. figure out the types of memory that a agent can have and which type does fit my needs    eg cognee, honcho, episodic etc
 57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
 165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384     
 195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
 196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node 
-210. fix ingestion -> docuements -> tools -> cognee
 155. complete the ingestion pipeline to working condition and see where reconciliation comes init. i want to remove reconciliation and replace it with agent memory made with cognee entirely.
 todos:-
     1. toons reusable , point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
@@ -343,18 +346,24 @@ Why the Rule Helps: Explain how the specific instruction prevents that failure f
 The Outcome: Provide evidence of the rule's success (e.g., "no orphan rows in 11 months").
 Additionally, the host personally recommends adding a commit reference to these comments to help future developers trace the history of the decision (3:45-3:49). The host warns that vague comments like "added to fix an issue" are ineffective and perform no better than having no comments at all 
 221. fix the files tht are scrambled in utils,shared, combine celery, and other places
+44. correct the code for crawler and the packages used and the chucking strategy used here
 
+136. use LangExtract outputs to build rich graph knowledge from your legal documents.  
+61. see docassemble, fpdf2, python-docx and other libraries for generating final PDFs/docs   
 
            
 227. agentState should be typedDict and not a baseModel
 228. disable memory in claude code, opencode and remove the unnecesary skills from computer
 230. need to have a standard for marking the task done in openspec spec gated with a DONE sections that is detailed and summary of how it is done
-231. need to check all the stashed item in git 
-232. check graphify not being installed
+
 233. check and review logger config and usage to better standardise, proper biniding, file path, execution flow, anf other things
+115. logs inbetween the layers are empty or not coming except start and end, should i pass logger as an argument or should i import it where needed   
 234. learn about classVars and check if UUIDv7 is available in ORM
+235. need to have all graph such as ingestion graph in the lifespan rather than in service
+236. use firecrawl SEO audit workflow for website
+240. 
 ```
-summarise these chapters in great detail and take video's transcript as reference for summarising
+summarise these chapters in great detail and depth and take video's transcript as reference for outputing verbatim
 
 summarise this video in great detail and depth by dividing it into 5 minute chunk and take video's transcript as reference for summarising
 
