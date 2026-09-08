@@ -229,3 +229,12 @@ docs-site/node_modules/
 .opencode/opencode.json*
 *.openchamber.backup
 .opencode/*.backup
+
+# Local tool/agent configs: live keys live here — never track them
+.agents/
+.claude/
+.codegraph/
+.codex/
+.opencode/
+.serena/
+.kiro/
