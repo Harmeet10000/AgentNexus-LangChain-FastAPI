@@ -224,3 +224,8 @@ celerybeat-schedule.db
 # Mintlify docs build artifacts (docs-site/ source is committed; builds are not)
 docs-site/.mintlify/
 docs-site/node_modules/
+
+# Local tool configs/backups may embed live API keys — never commit them
+.opencode/opencode.json*
+*.openchamber.backup
+.opencode/*.backup
