@@ -21,6 +21,7 @@ from .factory import _build_graph_nodes, build_agent_registry
 from .nodes import (
     _VALID_WORKER_NODES,
     dispatch_entity_extraction,
+    make_state_hydration_node,
     route_after_qna,
     route_deep_research,
     route_from_orchestrator,
@@ -53,7 +54,12 @@ def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
     for name in GRAPH_NODE_NAMES:
         graph.add_node(name, getattr(nodes, name))
 
-    graph.set_entry_point("gateway")
+    # Hydration runs before gateway on every run and is never a routing
+    # target: it is wired explicitly so it stays out of GRAPH_NODE_NAMES,
+    # _VALID_WORKER_NODES, and the orchestrator's dispatch table.
+    graph.add_node("state_hydration", make_state_hydration_node())
+    graph.set_entry_point("state_hydration")
+    graph.add_edge("state_hydration", "gateway")
     graph.add_edge("gateway", "qna")
     graph.add_conditional_edges(
         "qna",

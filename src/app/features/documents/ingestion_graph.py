@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import BaseModel, ConfigDict
 from returns.result import Failure
 
 from app.shared.result import log_expected_failure
@@ -28,21 +27,21 @@ if TYPE_CHECKING:
 type IngestDocumentFn = Callable[..., Awaitable[DocumentResult[dict[str, object]]]]
 
 
-class DocumentIngestionState(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class DocumentIngestionState(TypedDict, total=False):
+    """Per-job ingestion state: plain-data channels, natively checkpointer-safe."""
 
-    document_id: str = ""
-    user_id: str = ""
-    filename: str = ""
-    content_type: str = ""
-    object_uri: str = ""
-    status: str = ""
-    chunk_count: int = 0
-    verified_chunk_count: int = 0
-    document_kind: str = ""
-    error_code: str = ""
-    error_message: str = ""
-    error_retryable: bool = False
+    document_id: str
+    user_id: str
+    filename: str
+    content_type: str
+    object_uri: str
+    status: str
+    chunk_count: int
+    verified_chunk_count: int
+    document_kind: str
+    error_code: str
+    error_message: str
+    error_retryable: bool
 
 
 def build_document_ingestion_graph(
@@ -55,7 +54,7 @@ def build_document_ingestion_graph(
 ) -> CompiledStateGraph[Any]:
     """Build the per-job ingestion graph."""
 
-    graph = StateGraph(DocumentIngestionState)
+    graph = StateGraph(DocumentIngestionState)  # ty: ignore[invalid-argument-type] - stub bound is imprecise for TypedDicts; same ignore as retrieval_kb/graph.py
     graph.add_node(
         "ingest_document",
         cast(
@@ -68,11 +67,11 @@ def build_document_ingestion_graph(
                 llm=llm,
             ),
         ),
-        input_schema=DocumentIngestionState,
+        input_schema=cast("Any", DocumentIngestionState),
     )
     graph.set_entry_point("ingest_document")
     graph.add_edge("ingest_document", END)
-    return graph.compile()
+    return cast("CompiledStateGraph[Any]", graph.compile())
 
 
 def _make_ingest_document_node(
@@ -86,11 +85,11 @@ def _make_ingest_document_node(
     async def ingest_document_node(state: DocumentIngestionState) -> dict[str, object]:
         result = await ingest_document_fn(
             job=IngestionJob(
-                document_id=state.document_id,
-                user_id=state.user_id,
-                filename=state.filename,
-                content_type=state.content_type,
-                object_uri=state.object_uri,
+                document_id=state.get("document_id", ""),
+                user_id=state.get("user_id", ""),
+                filename=state.get("filename", ""),
+                content_type=state.get("content_type", ""),
+                object_uri=state.get("object_uri", ""),
             ),
             runtime=IngestionRuntime(
                 object_store=object_store,

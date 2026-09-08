@@ -2,8 +2,8 @@
 
 A5's stated premise is refuted, and the amendment in `tasks.md` records why: the node
 the task names builds its note from a local validated `ClauseSegment`, and the two nodes
-that *do* read `state.doc_id` receive `IngestionState`, a Pydantic model whose `doc_id` is
-a defaulted field — so no attribute access in any handler can raise.
+that *do* read the doc id receive `IngestionState`, a TypedDict whose channels
+are read with `.get()` fallbacks — so no key access in any handler can raise.
 
 What A5's Proof 2(c) exposes is real and smaller. `dispatch_contextualize_chunks` built
 its `Send` payload without `doc_id`, and because `Send` *replaces* the state for the
@@ -40,12 +40,13 @@ from app.shared.langgraph_layer.ingestion_kb.nodes import (
 )
 from app.shared.langgraph_layer.ingestion_kb.state import (
     ClauseSegment,
-    IngestionState,
 )
 from app.shared.langgraph_layer.kb_retry import TransientExternalError, retry_immediate
 
 if TYPE_CHECKING:
     from typing import Any
+
+    from app.shared.langgraph_layer.ingestion_kb.state import IngestionState
 
 _DOC_ID = "doc-42"
 _CLAUSE_ID = "clause-7"
@@ -91,7 +92,10 @@ def _raising_boundary(error: Exception) -> Any:
 
 
 def test_dispatcher_puts_doc_id_in_every_send_payload() -> None:
-    state = IngestionState(doc_id=_DOC_ID, segments=[_segment("a", 0), _segment("b", 1)])
+    state: IngestionState = {
+        "doc_id": _DOC_ID,
+        "segments": [_segment("a", 0), _segment("b", 1)],
+    }
 
     sends = dispatch_contextualize_chunks(state)
 
@@ -106,7 +110,7 @@ def test_dispatcher_send_payload_keys_are_exactly_what_the_node_reads() -> None:
     is unreachable from the node and anything present but unread is dead weight that
     reads like a contract.
     """
-    state = IngestionState(doc_id=_DOC_ID, segments=[_segment()])
+    state: IngestionState = {"doc_id": _DOC_ID, "segments": [_segment()]}
 
     assert set(dispatch_contextualize_chunks(state)[0].arg) == {
         "doc_id",
@@ -117,14 +121,14 @@ def test_dispatcher_send_payload_keys_are_exactly_what_the_node_reads() -> None:
 
 
 def test_dispatcher_targets_the_contextualize_node() -> None:
-    state = IngestionState(doc_id=_DOC_ID, segments=[_segment()])
+    state: IngestionState = {"doc_id": _DOC_ID, "segments": [_segment()]}
 
     assert dispatch_contextualize_chunks(state)[0].node == "contextualize_chunks"
 
 
 def test_dispatcher_fans_out_one_send_per_segment() -> None:
     segments = [_segment(f"clause-{index}", index) for index in range(5)]
-    state = IngestionState(doc_id=_DOC_ID, segments=segments)
+    state: IngestionState = {"doc_id": _DOC_ID, "segments": segments}
 
     assert len(dispatch_contextualize_chunks(state)) == 5
 

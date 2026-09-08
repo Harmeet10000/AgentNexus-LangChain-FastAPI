@@ -1,0 +1,37 @@
+reviews:
+  profile: assertive
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+  path_filters:
+    - "!uv.lock"
+    - "!graphify-out/**"
+    - "!docs/learning/**"
+    - "!openspec/changes/**/archive/**"
+    - "!tests/performance/**"
+  path_instructions:
+    - path: "src/app/features/crawler/**"
+      instructions: |
+        - Hunt for SSRF gaps: every URL reaching the browser must pass DNS + redirect revalidation. Flag any fetch path that skips validate_navigation_destination.
+        - Check Redis job-state races: read-modify-write transitions, TTL expiry mid-crawl, idempotency-key collisions.
+        - Verify Celery worker browser lifecycle: per-worker reuse must not leak across tasks; shutdown must close cleanly.
+        - Flag unbounded output, missing timeouts, or uncapped recursion depth.
+    - path: "src/app/features/billing/**"
+      instructions: |
+        - Money correctness is critical: all arithmetic must stay in Decimal/paisa, never float. Verify proration fractions, tax splits (CGST/SGCT/IGST), and rounding.
+        - Check that Failure returns propagate instead of raising, and that Celery retry splits (retryable vs permanent) match the error's retryable flag.
+    - path: "src/app/shared/langgraph_layer/**"
+      instructions: |
+        - All graph state must be TypedDict with total=False; flag any BaseModel used as graph state.
+        - State reads must use .get() with documented fallbacks so resumed plain dicts behave like fresh ones.
+        - Checkpointer resume paths must hydrate/migrate before logic nodes touch state.
+    - path: "src/tasks/**"
+      instructions: |
+        - Entry points must raise (never swallow) so Celery retry/DLQ semantics hold. Flag any success-return on failure paths.
+  tools:
+    ruff:
+      enabled: true
+    ast-grep:
+      enabled: true
+      rule_dirs:
+        - .ast-grep/rules

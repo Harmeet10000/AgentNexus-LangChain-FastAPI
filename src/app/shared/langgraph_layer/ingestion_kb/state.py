@@ -7,18 +7,19 @@ from enum import StrEnum
 
 # `Annotated` is imported at runtime, not under `TYPE_CHECKING`, and the suppression is
 # load-bearing rather than cosmetic. `from __future__ import annotations` makes every
-# annotation below a string, so `TC003` is right by the language's rules — but Pydantic
-# *evaluates* those strings when it builds the model, and `IngestionState.contextualized_chunks`
+# annotation below a string, so `TC003` is right by the language's rules — but LangGraph
+# *evaluates* those strings when it builds the graph, and
+# `IngestionState.contextualized_chunks`
 # is annotated `Annotated[list[ContextualizedChunk], operator.add]`. With the import confined
-# to a type-checking block the name is absent at runtime, the model is never fully defined, and
-# every `IngestionState(...)` raises `PydanticUserError`. The same reasoning already guards
-# The state failure import below is runtime-load-bearing for Pydantic.
-from typing import Annotated, Any  # noqa: TC003 - Pydantic resolves these fields at runtime.
+# to a type-checking block the name is absent at runtime and the reducer is lost.
+# The state failure import below is runtime-load-bearing for the same reason:
+# tools reading `IngestionState.__annotations__` resolve every name in it.
+from typing import Annotated, Any, TypedDict  # noqa: TC003 - hints evaluated at graph build.
 
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict, Field
 
-from .errors import IngestionGraphError  # noqa: TC001 - Pydantic resolves this field at runtime.
+from .errors import IngestionGraphError  # noqa: TC001 - hints evaluated at graph build.
 
 
 class ClauseType(StrEnum):
@@ -167,40 +168,37 @@ class StoredChunk(BaseModel):
     clause_type: str
 
 
-class IngestionState(BaseModel):
+class IngestionState(TypedDict, total=False):
     # Decision 2: no arbitrary-types permission — every channel is a plain
-    # scalar, a validated model, or a container of those, which is what keeps
-    # this state convertible to a typed-dict schema later. Adding a channel
+    # scalar, a validated model, or a container of those. Adding a channel
     # holding an arbitrary object must come with the permission *and* the
     # justification, not just the permission.
-    model_config = ConfigDict(extra="forbid")
+    # Channels have no defaults: readers use .get() with the documented
+    # fallback, so resumed plain dicts behave exactly like fresh ones.
+    doc_id: str
+    user_id: str
+    thread_id: str
+    source: str
+    filename: str
+    raw_bytes: bytes
+    document_type: str
+    jurisdiction: str
 
-    doc_id: str = ""
-    user_id: str = ""
-    thread_id: str = ""
-    source: str = ""
-    filename: str = ""
-    raw_bytes: bytes = b""
-    document_type: str = "unknown"
-    jurisdiction: str = "India"
+    parsed_document: ParsedDocument | None
+    contract_metadata: ContractMetadata | None
+    segments: list[ClauseSegment]
+    contextualized_chunks: Annotated[list[ContextualizedChunk], operator.add]
+    extracted_entities: list[ExtractedEntity]
+    extracted_relationships: list[ExtractedRelationship]
 
-    parsed_document: ParsedDocument | None = None
-    contract_metadata: ContractMetadata | None = None
-    segments: list[ClauseSegment] = Field(default_factory=list)
-    contextualized_chunks: Annotated[list[ContextualizedChunk], operator.add] = Field(
-        default_factory=list
-    )
-    extracted_entities: list[ExtractedEntity] = Field(default_factory=list)
-    extracted_relationships: list[ExtractedRelationship] = Field(default_factory=list)
-
-    parent_doc_id: str | None = None
-    stored_clause_ids: list[str] = Field(default_factory=list)
-    stored_chunks: list[StoredChunk] = Field(default_factory=list)
-    stored_entity_ids: list[str] = Field(default_factory=list)
-    stored_relationship_ids: list[str] = Field(default_factory=list)
-    graphiti_episode_ids: list[str] = Field(default_factory=list)
-    ingestion_complete: bool = False
-    failure: IngestionGraphError | None = None
+    parent_doc_id: str | None
+    stored_clause_ids: list[str]
+    stored_chunks: list[StoredChunk]
+    stored_entity_ids: list[str]
+    stored_relationship_ids: list[str]
+    graphiti_episode_ids: list[str]
+    ingestion_complete: bool
+    failure: IngestionGraphError | None
 
 
 StructuredRunnable = Runnable[list[Any], Any]

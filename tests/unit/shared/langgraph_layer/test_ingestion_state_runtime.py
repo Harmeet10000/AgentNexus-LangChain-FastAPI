@@ -1,25 +1,24 @@
-"""Regression tests — the ingestion graph's state model must be constructible at runtime.
+"""Regression tests — the ingestion graph's state schema must resolve at runtime.
 
-`IngestionState` could not be constructed at all. `state.py` carries
-`from __future__ import annotations`, so every annotation in it is a string, and Pydantic
-**evaluates** those strings when it builds the model. `Annotated` was imported inside an
-`if TYPE_CHECKING:` block, so the name was absent at runtime and
-`IngestionState.contextualized_chunks` — annotated
-`Annotated[list[ContextualizedChunk], operator.add]` — could never be resolved. Every
-`IngestionState(...)` raised `PydanticUserError`.
+`IngestionState` is a TypedDict LangGraph evaluates when it builds the graph.
+`state.py` carries `from __future__ import annotations`, so every annotation in
+it is a string; names used in those strings must exist at runtime or the graph
+build fails. `Annotated` and the `operator.add` reducer on
+`contextualized_chunks` are the load-bearing cases: with the import confined
+to a type-checking block the reducer metadata is silently absent.
 
-Three things kept it invisible, and each is worth knowing:
+Three things kept the equivalent defect invisible last time, and each is worth
+knowing:
 
 * **Ruff was right and the advice was wrong.** Under `from __future__ import annotations`
   the import genuinely is typing-only by the language's rules, so `TC003` correctly asked
-  for it to be moved. That rule does not know Pydantic resolves annotations at runtime. The
-  suppression on the import is therefore load-bearing, not cosmetic, and the neighbouring
-  `AppError` import already carried the same one for the same reason.
+  for it to be moved. That rule does not know annotation consumers resolve strings at
+  runtime. The suppression on the import is therefore load-bearing, not cosmetic.
 * **`ty` cannot see it.** Nothing is mis-typed; the name resolves fine under type checking.
-  The failure exists only at runtime, in Pydantic's namespace lookup.
+  The failure exists only at runtime, in namespace lookup.
 * **The suite could not reach it.** `tests/conftest.py` replaced
-  `app.shared.langgraph_layer` with a `MagicMock`, so no test had ever constructed this
-  model — or could have.
+  `app.shared.langgraph_layer` with a `MagicMock`, so no test had ever resolved these
+  hints — or could have.
 
 The reducer test below is the one that matters most. `Annotated[..., operator.add]` is what
 makes `Send` fan-out results **accumulate** rather than overwrite, so a silent regression
@@ -48,18 +47,18 @@ def _chunk(clause_id: str, chunk_index: int) -> ContextualizedChunk:
     )
 
 
-def test_the_state_model_can_be_constructed() -> None:
-    """The whole defect, in one line. It raised `PydanticUserError` before the fix."""
-    assert IngestionState(doc_id="doc-1").doc_id == "doc-1"
+def test_the_state_schema_is_a_typed_dict() -> None:
+    """Item 227: agent state is a TypedDict, never a validation model."""
+    assert typing.is_typeddict(IngestionState)
+    assert not hasattr(IngestionState, "model_fields")
 
 
-def test_the_state_model_is_fully_defined() -> None:
-    """Asserted directly, because construction can succeed while a field stays unresolved.
-
-    Pydantic defers the failure to first use, so a model with an unresolvable annotation on
-    a field nothing touches looks healthy until something touches it.
+def test_the_state_hints_resolve_fully_at_runtime() -> None:
+    """Asserted directly, because a graph can compile while a channel hint stays
+    unresolved — the failure then surfaces on first use, far from the import.
     """
-    assert IngestionState.__pydantic_complete__ is True
+    hints = typing.get_type_hints(IngestionState, include_extras=True)
+    assert set(hints) >= {"doc_id", "segments", "contextualized_chunks", "failure"}
 
 
 def test_annotated_is_available_at_runtime_not_only_to_the_type_checker() -> None:
@@ -78,9 +77,10 @@ def test_the_fan_out_reducer_accumulates_rather_than_overwrites() -> None:
     Without `operator.add` as the reducer, the last one to finish wins and every other
     chunk is silently dropped — no exception, just a document short of most of its chunks.
     """
-    field = IngestionState.model_fields["contextualized_chunks"]
+    hints = typing.get_type_hints(IngestionState, include_extras=True)
+    metadata = getattr(hints["contextualized_chunks"], "__metadata__", ())
 
-    assert operator.add in field.metadata
+    assert operator.add in metadata
 
 
 def test_the_reducer_actually_concatenates() -> None:
@@ -88,26 +88,52 @@ def test_the_reducer_actually_concatenates() -> None:
     first = [_chunk("clause-1", 0)]
     second = [_chunk("clause-2", 1)]
 
-    reducer = next(item for item in IngestionState.model_fields["contextualized_chunks"].metadata)
+    hints = typing.get_type_hints(IngestionState, include_extras=True)
+    metadata = getattr(hints["contextualized_chunks"], "__metadata__", ())
+    reducer = next(item for item in metadata)
     merged = reducer(first, second)
 
     assert [chunk.clause_id for chunk in merged] == ["clause-1", "clause-2"]
 
 
-def test_defaults_make_a_bare_state_usable() -> None:
-    """The graph's entry node builds a state before it has parsed anything."""
-    state = IngestionState()
+def test_bare_dict_is_a_usable_state_with_documented_fallbacks() -> None:
+    """Channels have no defaults; readers use .get() with the documented fallback,
+    so resumed plain dicts behave exactly like fresh ones."""
+    state: IngestionState = {}
 
-    assert state.doc_id == ""
-    assert state.segments == []
-    assert state.contextualized_chunks == []
-    assert state.parsed_document is None
+    assert state.get("doc_id", "") == ""
+    assert state.get("segments", []) == []
+    assert state.get("contextualized_chunks", []) == []
+    assert state.get("parsed_document") is None
+    assert state.get("failure") is None
 
 
-def test_extra_keys_are_forbidden() -> None:
-    """`extra="forbid"` is why a typo in a node's return dict is an error, not a silent no-op."""
-    import pytest
-    from pydantic import ValidationError
-
-    with pytest.raises(ValidationError):
-        IngestionState(doc_id="doc-1", contextualised_chunks=[])  # British spelling, deliberate
+def test_channel_names_are_closed_and_explicit() -> None:
+    """Replaces `extra="forbid"`: a typo in a node's return dict is silent on a
+    TypedDict, so the channel set is pinned here — adding a channel updates
+    this list in the same change, deliberately."""
+    expected = {
+        "doc_id",
+        "user_id",
+        "thread_id",
+        "source",
+        "filename",
+        "raw_bytes",
+        "document_type",
+        "jurisdiction",
+        "parsed_document",
+        "contract_metadata",
+        "segments",
+        "contextualized_chunks",
+        "extracted_entities",
+        "extracted_relationships",
+        "parent_doc_id",
+        "stored_clause_ids",
+        "stored_chunks",
+        "stored_entity_ids",
+        "stored_relationship_ids",
+        "graphiti_episode_ids",
+        "ingestion_complete",
+        "failure",
+    }
+    assert set(typing.get_type_hints(IngestionState)) == expected

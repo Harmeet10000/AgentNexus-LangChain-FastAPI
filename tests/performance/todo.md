@@ -275,14 +275,14 @@ Do you want me to:
 238. check if tasks can be added in server.py as well   DONE
 233. check and review logger config and usage to better standardise, proper biniding, file path, execution flow, anf other things  DONE
 115. logs inbetween the layers are empty or not coming except start and end, should i pass logger as an argument or should i import it where needed   DONE
+140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.  DONE
+61. see docassemble, fpdf2, python-docx and other libraries for generating final PDFs/docs     DONE
+153. add a hydration node after checkpointer  LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
 
-161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
-type Composable = Callable[[Any], Any]
-def compose(*functions: Composable) -> Composable:
-    def apply(value: Any, fn: Composable) -> Any:add headroom-ai for comrpression
-        return fn(value)
+    The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.   DONE
+44. correct the code for crawler and the packages used and the chunking strategy used here  DONE
+227. agentState should be typedDict and not a baseModel  DONE
 
-    return lambda data: reduce(apply, functions, data)   DELAYED
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses can be used to make the lynk linter     DELAYED    
 156. check the page https://docs.langchain.com/langsmith/deployments#
@@ -291,34 +291,40 @@ def compose(*functions: Composable) -> Composable:
 194. add headroom-ai for **comrpression**   ABANDONED
 53. add voice support by using gemini 3 for TTS and STT  with websockets   ABANDONED
 170. write cron job for memory decay and then send to celery for off loading for cognee   ABANDONED
+152. see cogneeRetriver how does vertex ai differ from google_genai  ABANDONDED
 
-159. discover RAGFlow, OpenRAG if or if not to use it
 160. check how can Port & Adapter/strategy & factory can help 
+161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
+type Composable = Callable[[Any], Any]
+def compose(*functions: Composable) -> Composable:
+    def apply(value: Any, fn: Composable) -> Any:add headroom-ai for comrpression
+        return fn(value)
 
+    return lambda data: reduce(apply, functions, data)
 
 64. No eval framework. Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
 116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
-140. in cognee GRAPH_COMPLETION_COT if the FEELING_LUCKY router returns a complexity score $>0.8$. This prevents token-burn on simple questions while ensuring "God-Mode" accuracy for architectural queries. If you connect to a "bare" Neo4j instance without APOC installed, the initial cognee.add() will work, but the cognee.cognify() step will fail silently or throw cryptic Cypher errors. Always verify your Neo4j instance has the APOC and GDS (Graph Data Science) plugins enabled.
+
+218. add a small gloassary of the project from the screenshot, we are open at the core, we share about are roadmap, how we think about things, and of course we share all our code and should strive to be in that way. its important to maintian the things they live and iterate over the product. 
+219.  add in the system prompt to add a search, implementation, verifier, reviewer, check if i can give specific system propmts, skills, tools, MCP servers to subagents, defining models for subagents, permissions, need to have taht matt pocock line to have agents give me non verbose answers(see his short)
+always write why Use Block-Level HTML Comments: Since Claude Code strips HTML comments from the context it reads, you can include detailed notes for human maintainers without increasing token usage (3:02-3:12).  need to have a proper git branch/worktrees workflow along with specs, adr, design
+The "Incident-Why-Outcome" Framework: The host recommends structuring your comments to record three specific pieces of information for every rule (3:14-3:43):
+The Failure/Incident: Describe the specific event or bug that necessitated the rule (e.g., citing a specific incident number or date).
+Why the Rule Helps: Explain how the specific instruction prevents that failure from reoccurring.
+The Outcome: Provide evidence of the rule's success (e.g., "no orphan rows in 11 months").
+Additionally, the host personally recommends adding a commit reference to these comments to help future developers trace the history of the decision (3:45-3:49). The host warns that vague comments like "added to fix an issue" are ineffective and perform no better than having no comments at all 
+Relay skill need to have a plan when to delete/let go of old files maybe after archiving a specs(reference relay docuements in openspec spec gated scehmas)
+228. disable memory in claude code, opencode and remove the unnecesary skills from computer
+230. need to have a standard for marking the task done in openspec spec gated with a DONE sections that is detailed and summary of how it is done
 
 151. add langchain-cisco-aidefense, compact-middleware, langchain-collapse
-152. see cogneeRetriver how does vertex ai differ from google_genai
-153. add a hydration node after checkpointer  LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
 
-    The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
-162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
-163. refactor vectorStore code        TSVECTOR,
-164. refactor RAG code
 
 171. use CacheBackedEmbeddings fore reusing embeddings
 172. use prebuilt and custom middlewares in langchain 
-
-176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
 179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
-
-185. remove ts_vector(think if it is required here or other extension can do the job here) from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
-
 
 57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
 165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384     
@@ -338,35 +344,27 @@ todos:-
     i. use MessagesState to standardise the moving of data between Agent A and Agent 
     j. use tenacity for retries, new capabilities, output format from chatpromptparts,
 190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
-
-218. add a small gloassary of the project from the screenshot, we are open at the core, we share about are roadmap, how we think about things, and of course we share all our code and should strive to be in that way. its important to maintian the things they live and iterate over the product. 
-219.  add in the system prompt to add a search, implementation, verifier, reviewer, check if i can give specific system propmts, skills, tools, MCP servers to subagents, defining models for subagents, permissions, need to have taht matt pocock line to have agents give me non verbose answers(see his short)
-always write why Use Block-Level HTML Comments: Since Claude Code strips HTML comments from the context it reads, you can include detailed notes for human maintainers without increasing token usage (3:02-3:12).  need to have a proper git branch/worktrees workflow along with specs, adr, design
-The "Incident-Why-Outcome" Framework: The host recommends structuring your comments to record three specific pieces of information for every rule (3:14-3:43):
-The Failure/Incident: Describe the specific event or bug that necessitated the rule (e.g., citing a specific incident number or date).
-Why the Rule Helps: Explain how the specific instruction prevents that failure from reoccurring.
-The Outcome: Provide evidence of the rule's success (e.g., "no orphan rows in 11 months").
-Additionally, the host personally recommends adding a commit reference to these comments to help future developers trace the history of the decision (3:45-3:49). The host warns that vague comments like "added to fix an issue" are ineffective and perform no better than having no comments at all 
-221. fix the files tht are scrambled in utils,shared, combine celery, and other places
-44. correct the code for crawler and the packages used and the chucking strategy used here
-
 136. use LangExtract outputs to build rich graph knowledge from your legal documents.  in document processing
-61. see docassemble, fpdf2, python-docx and other libraries for generating final PDFs/docs   
 
-           
-227. agentState should be typedDict and not a baseModel
-228. disable memory in claude code, opencode and remove the unnecesary skills from computer
-230. need to have a standard for marking the task done in openspec spec gated with a DONE sections that is detailed and summary of how it is done
-
-
-234. learn about classVars, policy, strEnum, namedTuple, final, mapping, list, set, learn crawler/processor.py policy  and check if UUIDv7 is available in ORM
 235. need to have all graph such as ingestion graph in the lifespan rather than in service
-236. 
+221. fix the files tht are scrambled in utils,shared, combine celery, and other places
 240. document processing and crawler needs db instance injection
+163. refactor vectorStore code        TSVECTOR,
+164. refactor RAG code
+185. remove ts_vector(think if it is required here or other extension can do the job here) from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
+162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
+176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
+
+159. discover RAGFlow, OpenRAG if or if not to use it
+236. make new cognee skills for documentation
+234. learn about classVars, policy, strEnum, namedTuple, final, mapping, list, set, learn crawler/processor.py policy  and check if UUIDv7 is available in ORM
+240. remove build chat model from documents/ and review chunking strategy used here and in crawler and find out from where to add them 
+241. add post on dev.to
 ```
 summarise these chapters in great detail and depth and take video's transcript as reference for outputing verbatim
 
-summarise this video in great detail and depth by dividing it into 5 minute chunk and take video's transcript as reference for summarising
+summarise this video in great detail and depth by dividing it into 5 minute chunk and take video's transcript as reference for  outputing verbatim
+
 
 
 

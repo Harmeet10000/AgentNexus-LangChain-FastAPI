@@ -68,8 +68,14 @@ def test_durability_mode_is_declared_explicitly() -> None:
 
 
 def test_state_carries_no_arbitrary_types_permission() -> None:
+    import typing
+
     from app.shared.langgraph_layer.ingestion_kb.state import IngestionState
 
-    assert IngestionState.model_config.get("arbitrary_types_allowed") is not True
-    # The model still builds: nothing in it needed the permission.
-    assert IngestionState(doc_id="doc-1").doc_id == "doc-1"
+    hints = typing.get_type_hints(IngestionState, include_extras=True)
+    assert "arbitrary_types_allowed" not in str(hints)
+    # The hints resolve at runtime (what LangGraph evaluates at graph build):
+    # a missing name here is a build-time failure, not a silent channel.
+    assert "contextualized_chunks" in hints
+    state: IngestionState = {"doc_id": "doc-1"}
+    assert state["doc_id"] == "doc-1"

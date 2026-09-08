@@ -24,11 +24,12 @@ from app.shared.langgraph_layer.ingestion_kb.state import (
     ContextualizedChunk,
     EntityType,
     ExtractedEntity,
-    IngestionState,
 )
 
 if TYPE_CHECKING:
     from typing import Any
+
+    from app.shared.langgraph_layer.ingestion_kb.state import IngestionState
 
 
 def _entity(
@@ -104,9 +105,9 @@ class _FakeSession:
 
 async def test_store_entities_skips_refused_without_sql() -> None:
     session = _FakeSession()
-    state = IngestionState(
-        extracted_entities=[_entity("!!!", ref="bad"), _entity("Acme Inc", ref="good")]
-    )
+    state: IngestionState = {
+        "extracted_entities": [_entity("!!!", ref="bad"), _entity("Acme Inc", ref="good")]
+    }
     entity_map = await _store_entities(session, state)
     assert session.statements == []
     assert set(entity_map) == {"good"}
@@ -123,10 +124,10 @@ async def test_graphiti_upsert_refuses_before_any_episode() -> None:
             raise AssertionError(msg)
 
     node = make_graphiti_upsert_node(_Graphiti())
-    state = IngestionState(
-        doc_id="doc-1",
-        extracted_entities=[_entity("...", ref="bad")],
-        contextualized_chunks=[
+    state: IngestionState = {
+        "doc_id": "doc-1",
+        "extracted_entities": [_entity("...", ref="bad")],
+        "contextualized_chunks": [
             ContextualizedChunk(
                 clause_id="clause-1",
                 chunk_index=0,
@@ -135,7 +136,7 @@ async def test_graphiti_upsert_refuses_before_any_episode() -> None:
                 tokens=3,
             )
         ],
-    )
+    }
     result = await node(state)
     assert calls == []
     # A refusal returns the terminal-failure shape, which carries no episode
@@ -157,10 +158,10 @@ async def test_graphiti_upsert_carries_canonical_entity_references() -> None:
             return _Episode()
 
     node = make_graphiti_upsert_node(_Graphiti())
-    state = IngestionState(
-        doc_id="doc-1",
-        extracted_entities=[_entity("Acme Inc.")],
-        contextualized_chunks=[
+    state: IngestionState = {
+        "doc_id": "doc-1",
+        "extracted_entities": [_entity("Acme Inc.")],
+        "contextualized_chunks": [
             ContextualizedChunk(
                 clause_id="clause-1",
                 chunk_index=0,
@@ -169,23 +170,22 @@ async def test_graphiti_upsert_carries_canonical_entity_references() -> None:
                 tokens=3,
             )
         ],
-        stored_chunks=[],
-    )
+        "stored_chunks": [],
+    }
     # A stored chunk id is required for the episode to reference the clause row.
     from app.shared.langgraph_layer.ingestion_kb.state import StoredChunk
 
-    state = state.model_copy(
-        update={
-            "stored_chunks": [
-                StoredChunk(
-                    chunk_id="chunk-uuid-1",
-                    clause_id="clause-1",
-                    chunk_index=0,
-                    clause_type="indemnity",
-                )
-            ]
-        }
-    )
+    state = {
+        **state,
+        "stored_chunks": [
+            StoredChunk(
+                chunk_id="chunk-uuid-1",
+                clause_id="clause-1",
+                chunk_index=0,
+                clause_type="indemnity",
+            )
+        ],
+    }
     result = await node(state)
     assert result["graphiti_episode_ids"] == ["episode-1"]
     assert result["ingestion_complete"] is True
@@ -207,12 +207,12 @@ async def test_graphiti_upsert_skips_when_upstream_failed() -> None:
             raise AssertionError(msg)
 
     node = make_graphiti_upsert_node(_Graphiti())
-    state = IngestionState(
-        doc_id="doc-1",
-        failure=IngestionGraphValidationError(
+    state: IngestionState = {
+        "doc_id": "doc-1",
+        "failure": IngestionGraphValidationError(
             message="upstream refused", source="test"
         ),
-    )
+    }
     result = await node(state)
     assert result["graphiti_episode_ids"] == []
     assert result["ingestion_complete"] is False

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -37,13 +37,14 @@ from app.shared.langgraph_layer.ingestion_kb.state import (
     EntityType,
     ExtractedEntity,
     ExtractedRelationship,
-    IngestionState,
     ParsedDocument,
     RelationType,
 )
 
 if TYPE_CHECKING:
     from typing import Any
+
+    from app.shared.langgraph_layer.ingestion_kb.state import IngestionState
 
 _NODES_SOURCE = Path(nodes_module.__file__).read_text(encoding="utf-8")
 
@@ -103,7 +104,7 @@ def _state(**overrides: Any) -> IngestionState:
         "filename": "contract.pdf",
     }
     values.update(overrides)
-    return IngestionState(**values)
+    return cast("IngestionState", values)
 
 
 def _parsed(**overrides: Any) -> ParsedDocument:

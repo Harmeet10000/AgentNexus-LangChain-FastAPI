@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
@@ -49,6 +49,7 @@ from .state import (
     RiskAnalysisOutput,
     RiskLabel,
     WorkflowStatus,
+    hydrate_state,
 )
 
 _CLARIFICATION_THRESHOLD = 0.72
@@ -123,6 +124,28 @@ class RelationshipMappingOutput(BaseModel):
 
 
 type StateNode = Callable[[LegalAgentState], Awaitable[dict[str, Any]]]
+
+
+def make_state_hydration_node() -> StateNode:
+    """First node on every run: migrate persisted state before logic reads it.
+
+    The service pre-hydrates on the UX path, so this is the defense layer for
+    any future direct graph entrypoint: matching versions pass through
+    unchanged, legacy shapes upgrade deterministically, and unknown versions
+    raise StateSchemaVersionError — fail-closed, never a KeyError downstream.
+    """
+
+    async def state_hydration_node(state: LegalAgentState) -> dict[str, Any]:
+        # cast: TypedDict is a dict at runtime; hydrate_state only reads.
+        current = cast("dict[str, Any]", state)
+        hydrated = hydrate_state(current)
+        return {
+            key: value
+            for key, value in hydrated.items()
+            if key not in current or current[key] != value
+        }
+
+    return state_hydration_node
 
 
 def make_gateway_node() -> StateNode:

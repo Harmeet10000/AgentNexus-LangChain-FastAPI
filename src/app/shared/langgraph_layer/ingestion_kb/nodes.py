@@ -99,16 +99,18 @@ def _validation_failure(message: str, *, doc_id: str = "") -> Failure[IngestionG
 
 def make_parse_document_node() -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def parse_document_node(state: IngestionState) -> dict[str, object]:
-        if not state.raw_bytes:
+        if not state.get("raw_bytes", b""):
             result = _validation_failure(
                 "Uploaded document is empty",
-                doc_id=state.doc_id,
+                doc_id=state.get("doc_id", ""),
             )
             log_expected_failure(result.failure(), operation="parse_document")
             return _state_failure(result.failure())
 
         parsed: ParsedDocument = await retry_immediate(
-            lambda: _parse_document_with_docling(state.raw_bytes, state.filename, state.source),
+            lambda: _parse_document_with_docling(
+                state.get("raw_bytes", b""), state.get("filename", ""), state.get("source", "")
+            ),
             label="docling_parse_document",
         )
         return {"parsed_document": parsed}
@@ -120,19 +122,19 @@ def make_extract_schema_node(
     schema_llm: StructuredRunnable,
 ) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def extract_schema_node(state: IngestionState) -> dict[str, object]:
-        parsed: ParsedDocument | None = state.parsed_document
+        parsed: ParsedDocument | None = state.get("parsed_document")
         if parsed is None:
             result: Failure[IngestionGraphError] = _validation_failure(
                 "Parsed document is required before schema extraction",
-                doc_id=state.doc_id,
+                doc_id=state.get("doc_id", ""),
             )
             log_expected_failure(result.failure(), operation="extract_schema")
             return _state_failure(result.failure())
 
         payload = serialize_to_toon(
             {
-                "document_type": state.document_type,
-                "jurisdiction_hint": state.jurisdiction,
+                "document_type": state.get("document_type", "unknown"),
+                "jurisdiction_hint": state.get("jurisdiction", "India"),
                 "source": parsed.source,
                 "markdown": parsed.markdown[:40_000],
             }
@@ -148,7 +150,7 @@ def make_extract_schema_node(
         metadata: ContractMetadata = ContractMetadata.model_validate(metadata)
         if metadata.jurisdiction is None:
             metadata: ContractMetadata = metadata.model_copy(
-                update={"jurisdiction": state.jurisdiction}
+                update={"jurisdiction": state.get("jurisdiction", "India")}
             )
         return {"contract_metadata": metadata}
 
@@ -159,12 +161,12 @@ def make_segment_document_node(
     segmentation_llm: StructuredRunnable,
 ) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def segment_document_node(state: IngestionState) -> dict[str, object]:
-        parsed: ParsedDocument | None = state.parsed_document
-        metadata: ContractMetadata | None = state.contract_metadata
+        parsed: ParsedDocument | None = state.get("parsed_document")
+        metadata: ContractMetadata | None = state.get("contract_metadata")
         if parsed is None or metadata is None:
             result: Failure[IngestionGraphError] = _validation_failure(
                 "Parsed document and metadata are required before segmentation",
-                doc_id=state.doc_id,
+                doc_id=state.get("doc_id", ""),
             )
             log_expected_failure(result.failure(), operation="segment_document")
             return _state_failure(result.failure())
@@ -198,9 +200,11 @@ def make_segment_document_node(
         # and cannot be one — it populates the cause, it does not change the type raised,
         # so no amount of chaining makes this `except` match.
         except (LangChainException, TransientExternalError) as exc:
-            exc.add_note(f"doc_id={state.doc_id}, operation=segmentation")
+            exc.add_note(f"doc_id={state.get('doc_id', '')}, operation=segmentation")
             logger.bind(
-                doc_id=state.doc_id, operation="segmentation", error=describe_failure(exc)
+                doc_id=state.get("doc_id", ""),
+                operation="segmentation",
+                error=describe_failure(exc),
             ).warning("structured_segmentation_failed_using_fallback")
             segments: list[ClauseSegment] = _fallback_segments(parsed.markdown)
 
@@ -210,9 +214,9 @@ def make_segment_document_node(
 
 
 def dispatch_contextualize_chunks(state: IngestionState) -> list[Send]:
-    metadata: ContractMetadata = state.contract_metadata or ContractMetadata()
-    parsed: ParsedDocument = state.parsed_document or ParsedDocument(
-        markdown="", title="", source=state.source
+    metadata: ContractMetadata = state.get("contract_metadata") or ContractMetadata()
+    parsed: ParsedDocument = state.get("parsed_document") or ParsedDocument(
+        markdown="", title="", source=state.get("source", "")
     )
     return [
         Send(
@@ -224,13 +228,13 @@ def dispatch_contextualize_chunks(state: IngestionState) -> list[Send]:
                 # the graph state. `doc_id` was missing, which made a degraded
                 # contextualization attributable to a clause but not to a document, and
                 # `clause_id` alone does not disambiguate under concurrent ingestion.
-                "doc_id": state.doc_id,
+                "doc_id": state.get("doc_id", ""),
                 "segment": segment.model_dump(),
                 "contract_metadata": metadata.model_dump(),
                 "source": parsed.source,
             },
         )
-        for segment in state.segments
+        for segment in state.get("segments", [])
     ]
 
 
@@ -297,11 +301,11 @@ def make_classify_extract_node(
     extraction_llm: StructuredRunnable,
 ) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def classify_extract_node(state: IngestionState) -> dict[str, object]:
-        metadata: ContractMetadata | None = state.contract_metadata
+        metadata: ContractMetadata | None = state.get("contract_metadata")
         if metadata is None:
             result: Failure[IngestionGraphError] = _validation_failure(
                 "Contract metadata is required before entity extraction",
-                doc_id=state.doc_id,
+                doc_id=state.get("doc_id", ""),
             )
             log_expected_failure(result.failure(), operation="classify_extract")
             return _state_failure(result.failure())
@@ -309,7 +313,7 @@ def make_classify_extract_node(
         payload = serialize_to_toon(
             {
                 "contract_metadata": metadata.model_dump(),
-                "chunks": [chunk.model_dump() for chunk in state.contextualized_chunks],
+                "chunks": [chunk.model_dump() for chunk in state.get("contextualized_chunks", [])],
             }
         )
         messages: list[SystemMessage | HumanMessage] = [
@@ -325,9 +329,11 @@ def make_classify_extract_node(
         # Both routes into this branch — see the segmentation node for why the pair is
         # required and why chaining alone was not a fix.
         except (LangChainException, TransientExternalError) as exc:
-            exc.add_note(f"doc_id={state.doc_id}, operation=entity_extraction")
+            exc.add_note(f"doc_id={state.get('doc_id', '')}, operation=entity_extraction")
             logger.bind(
-                doc_id=state.doc_id, operation="entity_extraction", error=describe_failure(exc)
+                doc_id=state.get("doc_id", ""),
+                operation="entity_extraction",
+                error=describe_failure(exc),
             ).warning("entity_extraction_failed_continuing_without_entities")
             extraction = EntityExtractionResult()
         return {
@@ -343,12 +349,12 @@ def make_embed_store_node(
     redis: Redis | None = None,
 ) -> Callable[[IngestionState], Awaitable[dict[str, object]]]:
     async def embed_store_node(state: IngestionState) -> dict[str, object]:
-        parsed: ParsedDocument | None = state.parsed_document
-        metadata: ContractMetadata | None = state.contract_metadata
+        parsed: ParsedDocument | None = state.get("parsed_document")
+        metadata: ContractMetadata | None = state.get("contract_metadata")
         if parsed is None or metadata is None:
             result: Failure[IngestionGraphError] = _validation_failure(
                 "Parsed document and metadata are required before storage",
-                doc_id=state.doc_id,
+                doc_id=state.get("doc_id", ""),
             )
             log_expected_failure(result.failure(), operation="embed_store")
             return _state_failure(result.failure())
@@ -356,9 +362,9 @@ def make_embed_store_node(
         # ADR-2 ordering: canonicalisation precedes every graph-bound write, and
         # a refusal stops the document before a single row or episode exists.
         # There is no raw-text fallback identity.
-        _canonical, refused = canonicalize_entities(state.extracted_entities)
+        _canonical, refused = canonicalize_entities(state.get("extracted_entities", []))
         if refused:
-            result = _refused_entities_failure(state.doc_id, refused_names(refused))
+            result = _refused_entities_failure(state.get("doc_id", ""), refused_names(refused))
             log_expected_failure(result.failure(), operation="embed_store")
             return _state_failure(result.failure())
 
@@ -401,7 +407,7 @@ def make_graphiti_upsert_node(
     async def graphiti_upsert_node(state: IngestionState) -> dict[str, object]:
         # A terminal failure upstream means no episode is written for this
         # document — the refusal scenario requires exactly this.
-        if state.failure is not None:
+        if state.get("failure") is not None:
             return {"graphiti_episode_ids": [], "ingestion_complete": False}
         if graphiti is None:
             return {"graphiti_episode_ids": [], "ingestion_complete": True}
@@ -409,15 +415,15 @@ def make_graphiti_upsert_node(
         # ADR-2: every episode write keys on the canonical identity. The episode
         # carries the canonical entity ids as its entity references; a refusal
         # records a terminal failure and writes no episode at all.
-        canonical, refused = canonicalize_entities(state.extracted_entities)
+        canonical, refused = canonicalize_entities(state.get("extracted_entities", []))
         if refused:
-            result = _refused_entities_failure(state.doc_id, refused_names(refused))
+            result = _refused_entities_failure(state.get("doc_id", ""), refused_names(refused))
             log_expected_failure(result.failure(), operation="graphiti_upsert")
             return _state_failure(result.failure())
         canonical_entity_ids = sorted(record.canonical_id for record in canonical.values())
 
         episode_ids: list[str] = []
-        for chunk in state.contextualized_chunks:
+        for chunk in state.get("contextualized_chunks", []):
             postgres_chunk_id: str | None = _stored_chunk_id(state, chunk.clause_id)
             if postgres_chunk_id is None:
                 continue
@@ -427,7 +433,7 @@ def make_graphiti_upsert_node(
             )
             source_description = json.dumps(
                 {
-                    "doc_id": state.doc_id,
+                    "doc_id": state.get("doc_id", ""),
                     "clause_id": chunk.clause_id,
                     "postgres_chunk_id": postgres_chunk_id,
                     "clause_type": chunk.clause_type.value,
@@ -437,23 +443,27 @@ def make_graphiti_upsert_node(
             )
             episode_id: str | None = await _graphiti_add_episode(
                 graphiti=graphiti,
-                name=f"clause:{state.doc_id}:{chunk.clause_id}",
+                name=f"clause:{state.get('doc_id', '')}:{chunk.clause_id}",
                 body=body,
                 source_description=source_description,
-                group_id=state.doc_id,
+                group_id=state.get("doc_id", ""),
             )
             if episode_id:
                 episode_ids.append(episode_id)
 
-        for event_name, event_date in _contract_events(state.contract_metadata):
+        for event_name, event_date in _contract_events(state.get("contract_metadata")):
             episode_id: str | None = await _graphiti_add_episode(
                 graphiti=graphiti,
-                name=f"{event_name}:{state.doc_id}:{event_date}",
-                body=f"{event_name} for {state.doc_id} occurs on {event_date}.",
+                name=f"{event_name}:{state.get('doc_id', '')}:{event_date}",
+                body=f"{event_name} for {state.get('doc_id', '')} occurs on {event_date}.",
                 source_description=json.dumps(
-                    {"doc_id": state.doc_id, "event_type": event_name, "event_date": event_date}
+                    {
+                        "doc_id": state.get("doc_id", ""),
+                        "event_type": event_name,
+                        "event_date": event_date,
+                    }
                 ),
-                group_id=state.doc_id,
+                group_id=state.get("doc_id", ""),
             )
             if episode_id:
                 episode_ids.append(episode_id)
@@ -592,19 +602,19 @@ async def _upsert_parent_document(
             query,
             {
                 "id": str(uuid4()),
-                "user_id": state.user_id,
+                "user_id": state.get("user_id", ""),
                 "title": parsed.title,
-                "source_uri": state.source or None,
+                "source_uri": state.get("source", "") or None,
                 "object_uri": _resolve_object_uri(state, parsed),
                 "content_hash": content_hash,
-                "document_kind": state.document_type or "generic",
+                "document_kind": state.get("document_type", "unknown") or "generic",
                 "status": "processing",
-                "jurisdiction": metadata.jurisdiction or state.jurisdiction or None,
+                "jurisdiction": metadata.jurisdiction or state.get("jurisdiction", "India") or None,
                 "contract_type": metadata.contract_type or None,
                 "parties": json.dumps(list(metadata.parties)),
                 "metadata_": json.dumps(
                     _contract_metadata_json(
-                        metadata, parsed.source, thread_id=state.thread_id or None
+                        metadata, parsed.source, thread_id=state.get("thread_id", "") or None
                     )
                 ),
             },
@@ -625,7 +635,10 @@ def _resolve_object_uri(state: IngestionState, parsed: ParsedDocument) -> str:
     the NOT NULL contract forbids.
     """
     return (
-        parsed.source or state.source or state.filename or f"ingest://{state.doc_id or 'unknown'}"
+        parsed.source
+        or state.get("source", "")
+        or state.get("filename", "")
+        or f"ingest://{state.get('doc_id', '') or 'unknown'}"
     )
 
 
@@ -639,7 +652,7 @@ async def _store_entities(
     # already stopped upstream, and are skipped here as a double-guard so a
     # refusal can never fabricate a raw-text endpoint downstream.
     _ = session
-    canonical, _refused = canonicalize_entities(state.extracted_entities)
+    canonical, _refused = canonicalize_entities(state.get("extracted_entities", []))
     return {entity_ref: record.canonical_id for entity_ref, record in canonical.items()}
 
 
@@ -656,7 +669,7 @@ async def _store_relationships(
     # fabricate an endpoint.
     _ = session
     stored: list[str] = []
-    for relationship in state.extracted_relationships:
+    for relationship in state.get("extracted_relationships", []):
         from_id: str | None = entity_id_map.get(relationship.from_entity)
         to_id: str | None = entity_id_map.get(relationship.to_entity)
         if from_id is None or to_id is None:
@@ -700,7 +713,7 @@ async def _store_chunks(
     redis: Redis | None,
 ) -> list[StoredChunk]:
     stored: list[StoredChunk] = []
-    ordered = sorted(state.contextualized_chunks, key=lambda item: item.chunk_index)
+    ordered = sorted(state.get("contextualized_chunks", []), key=lambda item: item.chunk_index)
     if not ordered:
         return stored
 
@@ -778,7 +791,7 @@ async def _store_chunks(
         params = {
             "id": row_id,
             "document_id": parent_doc_id,
-            "user_id": state.user_id,
+            "user_id": state.get("user_id", ""),
             "chunk_index": chunk.chunk_index,
             "chunk_kind": "clause",
             "content": _naturalize_tables(chunk.text),
@@ -865,7 +878,7 @@ def _contract_events(metadata: ContractMetadata | None) -> list[tuple[str, str]]
 
 
 def _stored_chunk_id(state: IngestionState, clause_id: str) -> str | None:
-    for chunk in state.stored_chunks:
+    for chunk in state.get("stored_chunks", []):
         if chunk.clause_id == clause_id:
             return chunk.chunk_id
     return None

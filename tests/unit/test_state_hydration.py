@@ -93,3 +93,63 @@ def test_service_layer_imports_the_constant_instead_of_a_literal() -> None:
     service_src = (app_root / "features/agent_saul/service.py").read_text()
     assert "STATE_SCHEMA_VERSION" in service_src
     assert '"schema_version": 1' not in service_src
+
+
+async def test_hydration_node_passes_through_current_version() -> None:
+    from app.shared.langgraph_layer.agent_saul.nodes import make_state_hydration_node
+
+    node = make_state_hydration_node()
+    state = {"schema_version": STATE_SCHEMA_VERSION, "user_query": "q"}
+    assert await node(state) == {}  # type: ignore[arg-type]
+
+
+async def test_hydration_node_upgrades_legacy_shape() -> None:
+    from app.shared.langgraph_layer.agent_saul.nodes import make_state_hydration_node
+
+    node = make_state_hydration_node()
+    updated = await node({"user_id": "u1"})  # type: ignore[arg-type]
+    expected = {
+        **state_module._LEGACY_STATE_DEFAULTS,
+        "schema_version": STATE_SCHEMA_VERSION,
+    }
+    expected.pop("user_id")
+    assert updated == expected
+
+
+async def test_hydration_node_refuses_unknown_version() -> None:
+    from app.shared.langgraph_layer.agent_saul.nodes import make_state_hydration_node
+
+    node = make_state_hydration_node()
+    with pytest.raises(StateSchemaVersionError):
+        await node({"schema_version": 99})  # type: ignore[arg-type]
+
+
+def test_hydration_node_is_entry_point_not_a_routing_target() -> None:
+    from types import SimpleNamespace
+
+    from app.shared.langgraph_layer.agent_saul.graph import _wire_graph
+    from app.shared.langgraph_layer.agent_saul.nodes import _VALID_WORKER_NODES
+    from app.shared.langgraph_layer.agent_saul.state import GRAPH_NODE_NAMES
+
+    calls: list[tuple[str, object]] = []
+
+    class _FakeGraph:
+        def add_node(self, name: str, fn: object) -> None:
+            calls.append(("add_node", name))
+
+        def set_entry_point(self, name: str) -> None:
+            calls.append(("set_entry_point", name))
+
+        def add_edge(self, source: str, target: str) -> None:
+            calls.append(("add_edge", (source, target)))
+
+        def add_conditional_edges(self, *args: object) -> None:
+            calls.append(("add_conditional_edges", args[0]))
+
+    nodes = SimpleNamespace(**{name: object() for name in GRAPH_NODE_NAMES})
+    _wire_graph(_FakeGraph(), nodes)  # type: ignore[arg-type]
+    assert ("add_node", "state_hydration") in calls
+    assert ("set_entry_point", "state_hydration") in calls
+    assert ("add_edge", ("state_hydration", "gateway")) in calls
+    assert "state_hydration" not in GRAPH_NODE_NAMES
+    assert "state_hydration" not in _VALID_WORKER_NODES

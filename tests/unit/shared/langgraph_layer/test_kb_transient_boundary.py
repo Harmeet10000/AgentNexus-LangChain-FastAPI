@@ -41,7 +41,6 @@ from app.shared.langgraph_layer.ingestion_kb.nodes import (
 from app.shared.langgraph_layer.ingestion_kb.state import (
     ClauseSegment,
     ContractMetadata,
-    IngestionState,
     ParsedDocument,
 )
 from app.shared.langgraph_layer.kb_retry import (
@@ -53,6 +52,8 @@ from app.shared.langgraph_layer.kb_retry import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from typing import Any
+
+    from app.shared.langgraph_layer.ingestion_kb.state import IngestionState
 
 _DOC_ID = "doc-42"
 _CLAUSE_ID = "clause-7"
@@ -115,15 +116,15 @@ def _segment() -> ClauseSegment:
 
 
 def _segmentation_state() -> IngestionState:
-    return IngestionState(
-        doc_id=_DOC_ID,
-        parsed_document=ParsedDocument(
+    return {
+        "doc_id": _DOC_ID,
+        "parsed_document": ParsedDocument(
             markdown="1. Indemnity\n\nThe Supplier shall indemnify the Customer.",
             title="Supply Agreement",
             source="upload",
         ),
-        contract_metadata=ContractMetadata(),
-    )
+        "contract_metadata": ContractMetadata(),
+    }
 
 
 def _contextualize_payload() -> dict[str, Any]:
@@ -239,7 +240,7 @@ async def test_an_exhausted_retry_reaches_the_entity_extraction_degradation_bran
         _no_real_waiting(),
         patch.object(nodes_module, "logger", logger_double),
     ):
-        result = await node(IngestionState(doc_id=_DOC_ID, contract_metadata=ContractMetadata()))
+        result = await node({"doc_id": _DOC_ID, "contract_metadata": ContractMetadata()})
 
     # The degradation branch executed: extraction continued with no entities rather than
     # aborting the ingestion.

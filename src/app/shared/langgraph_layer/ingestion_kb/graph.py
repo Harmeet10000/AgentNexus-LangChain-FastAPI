@@ -76,7 +76,7 @@ def build_ingestion_graph(
         logger.bind(operation="build_ingestion_graph").warning(
             "ingestion_graph_built_without_checkpointer"
         )
-    graph = StateGraph(IngestionState)
+    graph = StateGraph(IngestionState)  # ty: ignore[invalid-argument-type] - stub bound is imprecise for TypedDicts; same ignore as retrieval_kb/graph.py
     graph.add_node("parse_document", cast("Any", make_parse_document_node()))
     graph.add_node(
         "extract_schema",
@@ -115,7 +115,7 @@ def build_ingestion_graph(
     graph.add_edge("embed_store", "graphiti_upsert")
     graph.add_edge("graphiti_upsert", END)
 
-    return graph.compile(checkpointer=checkpointer)
+    return cast("CompiledStateGraph[Any]", graph.compile(checkpointer=checkpointer))
 
 
 def _structured(llm: Any, schema: type[Any]) -> Any:
