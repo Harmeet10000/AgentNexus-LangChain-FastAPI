@@ -116,8 +116,11 @@ class InvoiceRepository:
         try:
             conditions = [
                 Invoice.user_id == user_id,
-                Invoice.status.in_(["issued", "paid"]),
             ]
+            if status is not None:
+                conditions.append(Invoice.status == status)
+            else:
+                conditions.append(Invoice.status.in_(["issued", "paid"]))
             if subscription_id is not None:
                 conditions.append(Invoice.subscription_id == subscription_id)
             if status is not None:

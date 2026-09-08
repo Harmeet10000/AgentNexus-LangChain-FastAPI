@@ -110,19 +110,26 @@ class RateLimiter:
 
         minute_key = f"rate:{scope.value}:{identifier}:min"
         hour_key = f"rate:{scope.value}:{identifier}:hour"
+        # NOTE: expiry is set only on the first increment of a window. Setting
+        # EXPIRE on every call would extend the window on each request and pin
+        # steady traffic above the limit forever.
         pipe = self.redis_client.pipeline(transaction=True)
         pipe.incr(minute_key)
-        pipe.expire(minute_key, 60)
         pipe.incr(hour_key)
-        pipe.expire(hour_key, 3600)
-        minute_count, _minute_expiry, hour_count, _hour_expiry = await pipe.execute()
+        minute_count, hour_count = await pipe.execute()
+        if minute_count == 1:
+            await self.redis_client.expire(minute_key, 60)
+        if hour_count == 1:
+            await self.redis_client.expire(hour_key, 3600)
 
         if minute_count > config.per_minute or hour_count > config.per_hour:
+            exceeded_minute = minute_count > config.per_minute
+            retry_after = await self.redis_client.ttl(minute_key if exceeded_minute else hour_key)
             return False, {
                 "error": "Rate limit exceeded",
-                "limit": min(config.per_minute, config.per_hour),
-                "window": "minute" if minute_count > config.per_minute else "hour",
-                "retry_after": 60 if minute_count > config.per_minute else 3600,
+                "limit": config.per_minute if exceeded_minute else config.per_hour,
+                "window": "minute" if exceeded_minute else "hour",
+                "retry_after": max(int(retry_after), 0),
             }
 
         return True, {

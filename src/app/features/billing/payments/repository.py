@@ -85,6 +85,40 @@ class PaymentRepository:
             )
 
     @trace_layer("repository")
+    async def find_by_id_for_update(self, payment_id: str | UUID) -> PaymentResult[Payment | None]:
+        """Load a payment holding a row lock for a validate-and-update sequence.
+
+        The lock is held until the surrounding transaction commits or rolls
+        back, so two concurrent refunds cannot both pass the remaining-amount
+        check against the same snapshot.
+        """
+        try:
+            statement: Select[tuple[Payment]] = (
+                select(Payment).where(Payment.id == payment_id).with_for_update()
+            )
+            result = await self.session.execute(statement)
+            payment = result.scalar_one_or_none()
+            if payment is None:
+                return Failure(
+                    PaymentNotFoundError(
+                        message="Payment not found",
+                        details={"payment_id": str(payment_id)},
+                        source="payment_repository",
+                    )
+                )
+            return Success(payment)
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="payments")
+            await self.session.rollback()
+            return Failure(
+                PaymentInfrastructureError(
+                    message="Database error while locking payment",
+                    details={"payment_id": str(payment_id), "error": str(exc)},
+                    source="payment_repository",
+                )
+            )
+
+    @trace_layer("repository")
     async def find_by_razorpay_id(self, razorpay_payment_id: str) -> PaymentResult[Payment | None]:
         try:
             statement: Select[tuple[Payment]] = select(Payment).where(
@@ -98,6 +132,30 @@ class PaymentRepository:
             return Failure(
                 PaymentInfrastructureError(
                     message="Database error while fetching payment by Razorpay ID",
+                    details={"razorpay_payment_id": razorpay_payment_id, "error": str(exc)},
+                    source="payment_repository",
+                )
+            )
+
+    @trace_layer("repository")
+    async def find_by_razorpay_id_for_update(
+        self, razorpay_payment_id: str
+    ) -> PaymentResult[Payment | None]:
+        """Row-locked variant for webhook redelivery races on the same payment."""
+        try:
+            statement: Select[tuple[Payment]] = (
+                select(Payment)
+                .where(Payment.razorpay_payment_id == razorpay_payment_id)
+                .with_for_update()
+            )
+            result = await self.session.execute(statement)
+            return Success(result.scalar_one_or_none())
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="payments")
+            await self.session.rollback()
+            return Failure(
+                PaymentInfrastructureError(
+                    message="Database error while locking payment by Razorpay ID",
                     details={"razorpay_payment_id": razorpay_payment_id, "error": str(exc)},
                     source="payment_repository",
                 )

@@ -54,8 +54,11 @@ def split_tax_inclusive(amount_paisa: int, tax_rate: Decimal) -> tuple[int, int]
 
     ``subtotal = amount / (1 + rate)`` rounded half-even; ``tax`` is the
     exact remainder so the two always sum to the original amount.
+
+    A zero rate is a real rate (exempt supply) and must survive: only a
+    missing rate falls back to the default.
     """
-    rate: Decimal = tax_rate or GST_RATE
+    rate: Decimal = GST_RATE if tax_rate is None else tax_rate
     subtotal: Decimal = (Decimal(amount_paisa) / (Decimal(1) + rate)).quantize(
         _PAISA, rounding=ROUND_HALF_EVEN
     )

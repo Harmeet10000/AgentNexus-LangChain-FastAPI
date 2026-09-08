@@ -337,7 +337,11 @@ def _truncate_to_token_budget(content: str, *, max_tokens: int) -> str:
 def _parse_extraction_json(response_text: str) -> CrawlerProcessingResult[dict[str, Any]]:
     cleaned = response_text.strip()
     if cleaned.startswith("```") and cleaned.endswith("```"):
-        cleaned = cleaned.split("\n", maxsplit=1)[-1][:-3].strip()
+        # Strip both fences in one pattern: handles the no-newline
+        # single-line form (```{"a": 1}```) as well as fenced blocks.
+        fenced = re.match(r"^```[a-zA-Z]*\s*(.*?)\s*```$", cleaned, re.DOTALL)
+        if fenced is not None:
+            cleaned = fenced.group(1).strip()
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError as exc:

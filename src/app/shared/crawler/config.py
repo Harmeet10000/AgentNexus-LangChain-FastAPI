@@ -143,8 +143,10 @@ class CrawlerConfig(BaseModel):
                 "latitude": self.geolocation_lat,
                 "longitude": self.geolocation_lon,
             }
-        if self.url_patterns:
-            config["url_matcher"] = self.url_patterns
+        # NOTE: url_patterns are enforced by post-run filtering, not by
+        # Crawl4AI's url_matcher. A lone config with url_matcher makes every
+        # non-matching URL fail with "No matching configuration found", so it
+        # must never be set on the single config passed to arun_many.
         return config
 
     def get_markdown_generator(

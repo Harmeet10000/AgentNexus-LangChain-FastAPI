@@ -10,7 +10,7 @@ from returns.result import Failure, Success
 
 from app.features.audit.model import AuditAction, AuditLog
 from app.features.billing.invoices.tax import paisa_to_rupees
-from app.utils import trace_layer
+from app.utils import logger, trace_layer
 
 from .clients.razorpay_client import (
     CircuitOpenError,
@@ -56,6 +56,32 @@ def _payment_to_response(payment: Payment) -> PaymentResponse:
         refund_amount=payment.refund_amount,
         created_at=payment.created_at,
     )
+
+
+_PROCESSED_REFUND_IDS_KEY = "processed_refund_ids"
+
+
+def _recorded_refund_ids(payment: Payment) -> list[str]:
+    metadata = payment.metadata_ or {}
+    recorded = metadata.get(_PROCESSED_REFUND_IDS_KEY, [])
+    if not isinstance(recorded, list):
+        return []
+    return [entry for entry in recorded if isinstance(entry, str)]
+
+
+def _with_recorded_refund(payment: Payment, refund_id: str | None) -> dict[str, object]:
+    """Merge one refund id into the payment's idempotency ledger.
+
+    Stored in ``metadata_`` so no schema change is needed. Callers hold a
+    row lock (``find_by_*_for_update``), so the read-merge-write here is
+    serialized per payment.
+    """
+    metadata = dict(payment.metadata_ or {})
+    recorded = _recorded_refund_ids(payment)
+    if refund_id and refund_id not in recorded:
+        recorded.append(refund_id)
+    metadata[_PROCESSED_REFUND_IDS_KEY] = recorded
+    return metadata
 
 
 class PaymentService:
@@ -161,7 +187,7 @@ class PaymentService:
     async def refund(
         self, payment_id: str, dto: RefundRequestDTO, *, user_id: str
     ) -> PaymentResult[RefundResponse]:
-        result = await self.payments.find_by_id(payment_id)
+        result = await self.payments.find_by_id_for_update(payment_id)
         if isinstance(result, Failure):
             return result
         payment = result.unwrap()
@@ -214,7 +240,10 @@ class PaymentService:
         result = await self.payments.update_status(
             payment,
             status=new_status,
-            extra_values={"refund_amount": paisa_to_rupees(new_refund_paisa)},
+            extra_values={
+                "refund_amount": paisa_to_rupees(new_refund_paisa),
+                "metadata_": _with_recorded_refund(payment, refund_id),
+            },
         )
         if isinstance(result, Failure):
             return result
@@ -234,7 +263,7 @@ class PaymentService:
             return Failure(PaymentCollaboratorError(message=error.message, details=error.details))
         return Success(
             RefundResponse(
-                id=str(updated.id),
+                id=refund_id,
                 razorpay_refund_id=refund_id,
                 payment_id=str(updated.id),
                 amount=dto.amount,
@@ -250,14 +279,24 @@ class PaymentService:
 
     @trace_layer("service")
     async def handle_refund_processed(
-        self, *, razorpay_payment_id: str, refund_paisa: int
+        self, *, razorpay_payment_id: str, refund_paisa: int, refund_id: str | None = None
     ) -> PaymentResult[None]:
-        """Finalize a payment after ``refund.processed`` (Requirement 11)."""
-        result = await self.payments.find_by_razorpay_id(razorpay_payment_id)
+        """Finalize a payment after ``refund.processed`` (Requirement 11).
+
+        Idempotent on the Razorpay refund id: the same delivery (or a retry)
+        records each refund once, so ``refund()`` creating the refund and the
+        webhook confirming it no longer double-count.
+        """
+        result = await self.payments.find_by_razorpay_id_for_update(razorpay_payment_id)
         if isinstance(result, Failure):
             return result
         payment = result.unwrap()
         if payment is None:
+            return Success(None)
+        if refund_id is not None and refund_id in _recorded_refund_ids(payment):
+            logger.bind(operation="handle_refund_processed", refund_id=refund_id).info(
+                "Refund already recorded, skipping duplicate delivery"
+            )
             return Success(None)
         new_refund_paisa = self._refund_paisa(payment) + refund_paisa
         new_status = (
@@ -268,7 +307,10 @@ class PaymentService:
         update = await self.payments.update_status(
             payment,
             status=new_status,
-            extra_values={"refund_amount": paisa_to_rupees(new_refund_paisa)},
+            extra_values={
+                "refund_amount": paisa_to_rupees(new_refund_paisa),
+                "metadata_": _with_recorded_refund(payment, refund_id),
+            },
         )
         if isinstance(update, Failure):
             return update

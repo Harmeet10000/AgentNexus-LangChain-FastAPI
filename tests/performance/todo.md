@@ -282,6 +282,7 @@ Do you want me to:
     The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.   DONE
 44. correct the code for crawler and the packages used and the chunking strategy used here  DONE
 227. agentState should be typedDict and not a baseModel  DONE
+159. discover RAGFlow, OpenRAG if or if not to use it  DONE
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses can be used to make the lynk linter     DELAYED    
@@ -355,7 +356,6 @@ todos:-
 162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
 176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
 
-159. discover RAGFlow, OpenRAG if or if not to use it
 236. make new cognee skills for documentation
 234. learn about classVars, policy, strEnum, namedTuple, final, mapping, list, set, learn crawler/processor.py policy  and check if UUIDv7 is available in ORM
 240. remove build chat model from documents/ and review chunking strategy used here and in crawler and find out from where to add them 

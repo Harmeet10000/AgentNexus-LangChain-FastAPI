@@ -83,7 +83,7 @@ def test_relational_handlers_note_before_rollback_and_failure() -> None:
                     for statement in body
                     for node in ast.walk(statement)
                 )
-    assert checked == 69
+    assert checked == 71
 
 
 def test_rollback_gate_fixture_has_forbidden_and_permitted_forms() -> None:

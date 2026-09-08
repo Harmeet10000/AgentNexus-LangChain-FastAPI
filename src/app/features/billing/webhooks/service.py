@@ -257,7 +257,14 @@ class WebhookService:
         return {}
 
     async def _find_subscription_by_entity(self, entity: dict[str, Any]) -> Subscription | None:
-        rz_id = entity.get("subscription_id") or entity.get("id")
+        rz_id = entity.get("subscription_id")
+        if not isinstance(rz_id, str):
+            # entity["id"] is the payment/refund/dispute identifier, never a
+            # subscription — only a sub_-prefixed id is even plausible here.
+            candidate = entity.get("id")
+            rz_id = (
+                candidate if isinstance(candidate, str) and candidate.startswith("sub_") else None
+            )
         if not isinstance(rz_id, str):
             notes = entity.get("notes")
             if isinstance(notes, dict):
@@ -532,7 +539,9 @@ class WebhookService:
         if not isinstance(rz_payment_id, str) or not isinstance(amount, (int, float)):
             return Success("skipped")
         result = await self.payment_service.handle_refund_processed(
-            razorpay_payment_id=rz_payment_id, refund_paisa=int(amount)
+            razorpay_payment_id=rz_payment_id,
+            refund_paisa=int(amount),
+            refund_id=entity.get("id") if isinstance(entity.get("id"), str) else None,
         )
         if isinstance(result, Failure):
             return Failure(_collaborator_error(result.failure()))

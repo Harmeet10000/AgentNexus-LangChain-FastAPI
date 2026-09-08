@@ -22,7 +22,7 @@ class PlanCreateDTO(BaseModel):
     interval: BillingInterval
     interval_count: int = Field(default=1, ge=1)
     trial_period_days: int = Field(default=0, ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0.18"))
+    tax_rate: Decimal = Field(default=Decimal("0.18"), ge=0, le=1)
     refund_policy: str = Field(default="PRO_RATA", pattern="^(FULL|PRO_RATA|NONE)$")
     features: dict[str, object] = Field(default_factory=dict)
     metadata: dict[str, object] = Field(default_factory=dict, serialization_alias="metadata")
@@ -42,7 +42,7 @@ class PlanUpdateDTO(BaseModel):
     interval: BillingInterval | None = None
     interval_count: int | None = Field(default=None, ge=1)
     trial_period_days: int | None = Field(default=None, ge=0)
-    tax_rate: Decimal | None = None
+    tax_rate: Decimal | None = Field(default=None, ge=0, le=1)
     refund_policy: str | None = Field(default=None, pattern="^(FULL|PRO_RATA|NONE)$")
     features: dict[str, object] | None = None
     metadata: dict[str, object] | None = Field(default=None, serialization_alias="metadata")

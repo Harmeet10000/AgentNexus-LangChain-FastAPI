@@ -71,7 +71,8 @@ def test_chunker_ignores_headings_inside_code_and_preserves_code_whitespace() ->
 
 
 def test_chunker_supports_overlap_and_setext_headings() -> None:
-    chunks = smart_chunk_markdown("Title\n=====\n\n" + ("word " * 30), max_len=40, overlap=5)
+    text = "Title\n=====\n\n" + " ".join(f"token{index:03d}" for index in range(30))
+    chunks = smart_chunk_markdown(text, max_len=40, overlap=5)
 
     assert len(chunks) > 1
     assert chunks[0].headers == "# Title"

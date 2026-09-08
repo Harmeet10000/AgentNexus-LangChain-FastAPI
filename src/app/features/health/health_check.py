@@ -22,9 +22,10 @@ async def check_postgres(app: FastAPI) -> DependencyHealth:
     """Verify PostgreSQL connectivity via a lightweight SELECT 1."""
     start = time.perf_counter()
     try:
-        engine = app.state.db_engine
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
+        async with asyncio.timeout(_HEALTH_TIMEOUT_S):
+            engine = app.state.db_engine
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
         latency = (time.perf_counter() - start) * 1000
         return DependencyHealth.ok("postgres", latency)
     except (OSError, TimeoutError, SQLAlchemyError) as exc:
@@ -37,8 +38,9 @@ async def check_redis(app: FastAPI) -> DependencyHealth:
     """Verify Redis connectivity via PING."""
     start = time.perf_counter()
     try:
-        redis = app.state.redis
-        await redis.ping()
+        async with asyncio.timeout(_HEALTH_TIMEOUT_S):
+            redis = app.state.redis
+            await redis.ping()
         latency = (time.perf_counter() - start) * 1000
         return DependencyHealth.ok("redis", latency)
     except (OSError, TimeoutError) as exc:
@@ -51,8 +53,9 @@ async def check_mongodb(app: FastAPI) -> DependencyHealth:
     """Verify MongoDB connectivity via ping command."""
     start = time.perf_counter()
     try:
-        client = app.state.mongo_client
-        await client.admin.command("ping")
+        async with asyncio.timeout(_HEALTH_TIMEOUT_S):
+            client = app.state.mongo_client
+            await client.admin.command("ping")
         latency = (time.perf_counter() - start) * 1000
         return DependencyHealth.ok("mongodb", latency)
     except (OSError, TimeoutError) as exc:
@@ -68,7 +71,8 @@ async def check_neo4j(app: FastAPI) -> DependencyHealth:
         driver = app.state.neo4j_driver
         if driver is None:
             return DependencyHealth.degraded("neo4j", "not initialised")
-        await driver.verify_connectivity()
+        async with asyncio.timeout(_HEALTH_TIMEOUT_S):
+            await driver.verify_connectivity()
         latency = (time.perf_counter() - start) * 1000
         return DependencyHealth.ok("neo4j", latency)
     except (OSError, TimeoutError) as exc:

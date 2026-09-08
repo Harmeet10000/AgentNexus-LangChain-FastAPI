@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING
 
 from returns.result import Failure, Success
 
@@ -12,7 +12,7 @@ from app.features.audit.model import AuditAction, AuditLog
 from app.features.billing.payments.clients.razorpay_client import RazorpayClient
 from app.features.billing.payments.dto import RefundRequestDTO
 from app.features.billing.payments.model import PaymentStatus
-from app.shared.result.errors import ErrorKind, http_status_for_kind
+from app.shared.result.errors import ErrorKind
 from app.utils import logger, trace_layer
 
 from .dto import (
@@ -20,14 +20,12 @@ from .dto import (
     SubscriptionResponse,
 )
 from .errors import (
-    SubscriptionDuplicateError,
     SubscriptionInfrastructureError,
     SubscriptionInvalidTransitionError,
     SubscriptionNotFoundError,
     SubscriptionPlanNotFoundError,
     SubscriptionTransientInfrastructureError,
     SubscriptionValidationError,
-    SubscriptionVersionConflictError,
 )
 from .model import Subscription, SubscriptionStatus
 from .proration import calculate_plan_change_proration
@@ -89,33 +87,6 @@ def _subscription_to_response(
         created_at=subscription.created_at,
         updated_at=subscription.updated_at,
     )
-
-
-def subscription_error_to_http_status(error: SubscriptionError) -> int:
-    """Exhaustive dispatch over SubscriptionError — task 5.4.
-
-    Adding a member to SubscriptionError without an arm fails ty with
-    type-assertion-failure naming the missing type via assert_never.
-    """
-    match error:
-        case SubscriptionNotFoundError():
-            return http_status_for_kind(ErrorKind.NOT_FOUND)
-        case SubscriptionDuplicateError():
-            return http_status_for_kind(ErrorKind.CONFLICT)
-        case SubscriptionVersionConflictError():
-            return http_status_for_kind(ErrorKind.CONFLICT)
-        case SubscriptionInvalidTransitionError():
-            return http_status_for_kind(ErrorKind.VALIDATION)
-        case SubscriptionPlanNotFoundError():
-            return http_status_for_kind(ErrorKind.NOT_FOUND)
-        case SubscriptionInfrastructureError():
-            return http_status_for_kind(ErrorKind.INFRASTRUCTURE, retryable=error.retryable)
-        case SubscriptionTransientInfrastructureError():
-            return http_status_for_kind(ErrorKind.INFRASTRUCTURE, retryable=error.retryable)
-        case SubscriptionValidationError():
-            return http_status_for_kind(ErrorKind.VALIDATION)
-        case _ as unreachable:
-            assert_never(unreachable)
 
 
 class SubscriptionService:
@@ -229,7 +200,7 @@ class SubscriptionService:
             return 0
 
         try:
-            await self.payment_service.refund(
+            refund_result = await self.payment_service.refund(
                 str(payment.id),
                 RefundRequestDTO(amount=refund_paisa, reason="Immediate cancellation refund"),
                 user_id=user_id,
@@ -237,6 +208,12 @@ class SubscriptionService:
         except Exception as exc:  # noqa: BLE001 — refund is best-effort on cancel
             logger.bind(operation="cancel_subscription", error=str(exc)).exception(
                 "Refund on cancel failed"
+            )
+            return 0
+        if isinstance(refund_result, Failure):
+            error = refund_result.failure()
+            logger.bind(operation="cancel_subscription", error=error.message).warning(
+                "Refund on cancel returned failure"
             )
             return 0
         return refund_paisa
@@ -667,6 +644,18 @@ class SubscriptionService:
                 except Exception as exc:  # noqa: BLE001 -- subscription op best-effort
                     logger.bind(operation="change_plan", error=str(exc)).exception(
                         "Proration payment link creation failed"
+                    )
+                    return Failure(
+                        SubscriptionInfrastructureError(
+                            message="Could not create the prorated upgrade payment link",
+                            details={
+                                "subscription_id": str(subscription.id),
+                                "proration_amount": proration.proration_amount,
+                                "error": str(exc),
+                            },
+                            source="subscription_service",
+                            operation="change_plan",
+                        )
                     )
             else:
                 return Failure(

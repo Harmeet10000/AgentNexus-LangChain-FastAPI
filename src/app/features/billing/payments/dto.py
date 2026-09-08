@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.features.billing.payments.currency import CurrencyCode  # noqa: TC001
 from app.features.billing.payments.model import PaymentMethod  # noqa: TC001
@@ -96,6 +96,13 @@ class FXRateCreateDTO(BaseModel):
     target_currency: CurrencyCode
     rate: Decimal = Field(gt=0)
     effective_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _reject_identity_pair(self) -> FXRateCreateDTO:
+        if self.base_currency == self.target_currency:
+            msg = "base_currency and target_currency must differ"
+            raise ValueError(msg)
+        return self
 
 
 class FXRateResponse(BaseModel):

@@ -297,7 +297,6 @@ class WebCrawler:
         run_config_dict = self.config.to_crawler_run_config()
         if bypass_cache:
             run_config_dict["cache_mode"] = "bypass"
-            run_config_dict["bypass_cache"] = True
 
         # Auto-detect PDF URLs
         if self._is_pdf_url(url):

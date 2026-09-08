@@ -37,6 +37,13 @@ if TYPE_CHECKING:
 # strips "co" before checking "company" in one process and the reverse in
 # another is not deterministic. Periods are removed before matching, so the
 # entries carry none.
+#
+# Only legal-form designators are stripped: they never distinguish two
+# parties ("Acme Inc" vs "Acme LLC" still differ by the surviving stem only
+# when the stems differ). Business-line words ("holdings", "partners",
+# "services", "group", "ventures") DO distinguish parties — "Acme Holdings"
+# and "Acme Partners" are different organisations — so stripping them would
+# merge two parties into one graph node irreversibly.
 _CORPORATE_SUFFIXES: tuple[str, ...] = tuple(
     sorted(
         (
@@ -44,11 +51,6 @@ _CORPORATE_SUFFIXES: tuple[str, ...] = tuple(
             "corporation",
             "company",
             "limited",
-            "services",
-            "group",
-            "holdings",
-            "partners",
-            "ventures",
             "inc",
             "corp",
             "llc",
@@ -62,7 +64,6 @@ _CORPORATE_SUFFIXES: tuple[str, ...] = tuple(
             "lp",
             "llp",
             "pllc",
-            "ltd",
             "co",
             "ag",
             "sa",
@@ -136,9 +137,7 @@ def _normalize(name: str) -> str:
     folded = unicodedata.normalize("NFKC", name).lower()
     folded = folded.replace("&", " and ")
     # The typographic possessive apostrophe is spelled as an escape so the
-    folded = _NON_ALNUM_RE.sub(
-        " ", folded.replace(chr(39), chr(32)).replace(chr(8217), chr(32))
-    )
+    folded = _NON_ALNUM_RE.sub(" ", folded.replace(chr(39), chr(32)).replace(chr(8217), chr(32)))
     folded = _WHITESPACE_RE.sub(" ", folded).strip()
     # Possessive remnant: "acme s" (from "Acme's") is the same stem as "acme".
     words = folded.split(" ")
