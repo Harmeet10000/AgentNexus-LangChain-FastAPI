@@ -29,7 +29,7 @@ from .model import (
     InvoiceLineItem,
     InvoiceStatus,
 )
-from .pdf import render_invoice_pdf, render_receipt_pdf
+from .pdf import SellerProfile, render_invoice_pdf, render_receipt_pdf
 from .receipt import PaymentReceipt
 from .tax import (
     paisa_to_rupees,
@@ -207,7 +207,10 @@ class InvoiceService:
             return create_result
         created = create_result.unwrap()
 
-        pdf_result = await self._store_pdf(render_invoice_pdf(created), created.invoice_number)
+        pdf_result = await self._store_pdf(
+            render_invoice_pdf(created, SellerProfile.from_settings(settings)),
+            created.invoice_number,
+        )
         if isinstance(pdf_result, Failure):
             return pdf_result
         pdf_url = pdf_result.unwrap()
@@ -283,7 +286,9 @@ class InvoiceService:
             )
 
         pdf_result = await self._store_pdf(
-            render_receipt_pdf(receipt), receipt.receipt_number, folder="billing/receipts"
+            render_receipt_pdf(receipt, SellerProfile.from_settings(settings)),
+            receipt.receipt_number,
+            folder="billing/receipts",
         )
         if isinstance(pdf_result, Failure):
             return pdf_result

@@ -13,6 +13,7 @@ from ...utils import DependencyHealth, logger
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+    from neo4j import AsyncSession
 
 _HEALTH_TIMEOUT_S = 2.0
 
@@ -76,6 +77,56 @@ async def check_neo4j(app: FastAPI) -> DependencyHealth:
         return DependencyHealth.fail("neo4j", str(exc), latency)
 
 
+async def _procedure_count(session: AsyncSession, prefix: str) -> int:
+    result = await session.run(
+        "SHOW PROCEDURES YIELD name WHERE name STARTS WITH $prefix RETURN count(name) AS n",
+        {"prefix": prefix},
+    )
+    record = await result.single()
+    return int(record["n"]) if record is not None else 0
+
+
+async def check_neo4j_plugins(app: FastAPI) -> DependencyHealth:
+    """Report APOC/GDS procedure availability on the shared Neo4j instance.
+
+    Ground truth beats docs: instead of asserting which plugins consumers
+    need, the probe counts installed procedures so a bare instance fails
+    loudly here rather than surfacing as cryptic Cypher errors during
+    graph writes. APOC missing is unhealthy — Cognee's add_nodes/add_edges
+    call apoc.coll/apoc.create/apoc.merge on the write path. GDS missing is
+    degraded — only the optional graph-metrics helper calls gds.*, never
+    the add/cognify path.
+    """
+    start = time.perf_counter()
+    driver = getattr(app.state, "neo4j_driver", None)
+    if driver is None:
+        return DependencyHealth.degraded("neo4j-plugins", "not initialised")
+    try:
+        async with asyncio.timeout(_HEALTH_TIMEOUT_S):
+            async with driver.session() as session:
+                apoc = await _procedure_count(session, "apoc.")
+                gds = await _procedure_count(session, "gds.")
+    except (OSError, TimeoutError) as exc:
+        latency = (time.perf_counter() - start) * 1000
+        logger.bind(dependency="neo4j-plugins", error=str(exc)).exception("Health check failed")
+        return DependencyHealth.fail("neo4j-plugins", str(exc), latency)
+    latency = (time.perf_counter() - start) * 1000
+    if apoc == 0:
+        return DependencyHealth.fail(
+            "neo4j-plugins",
+            "APOC procedures not found; graph writes may fail with Cypher errors",
+            latency,
+        )
+    if gds == 0:
+        return DependencyHealth.degraded(
+            "neo4j-plugins",
+            "GDS procedures not found; only the optional graph-metrics helper "
+            "calls GDS, never the add/cognify path",
+            latency,
+        )
+    return DependencyHealth.ok("neo4j-plugins", latency)
+
+
 async def check_graphiti(app: FastAPI) -> DependencyHealth:
     """Verify Graphiti is initialised."""
     start = time.perf_counter()
@@ -112,6 +163,7 @@ ALL_PROBES = [
     check_redis,
     check_mongodb,
     check_neo4j,
+    check_neo4j_plugins,
     check_graphiti,
     check_cognee,
 ]

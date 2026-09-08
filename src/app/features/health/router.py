@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 router = APIRouter(prefix="/health", tags=["health"])
 deep_health_router = APIRouter(tags=["Monitoring"])
 _DEEP_PROBE_TIMEOUT_S = 3.0
-_DEEP_PROBE_NAMES = ("postgres", "redis", "mongodb", "neo4j", "graphiti", "cognee")
+_DEEP_PROBE_NAMES = ("postgres", "redis", "mongodb", "neo4j", "neo4j-plugins", "graphiti", "cognee")
 
 
 async def _run_probe(
