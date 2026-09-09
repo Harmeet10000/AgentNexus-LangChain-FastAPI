@@ -23,8 +23,24 @@ revision, which is what makes red-before/green-after provable rather than assert
 Both entry points take paths and return data:
 
 - ``audit(source_root, migrations_root) -> list[Finding]`` for the pytest guard.
-- ``python -m app.utils.schema_identifier_gate <source_root> <migrations_root>`` for a tree that
-  is not this one. Exit status is ``0`` with no findings and ``1`` otherwise.
+- ``python scripts/schema_identifier_gate.py <source_root> <migrations_root>`` for a tree that is
+  not this one. Exit status is ``0`` with no findings and ``1`` otherwise.
+
+This gate is supplemental, not a replacement for the other database checks:
+
+- ``schema_identifier_gate`` catches source-name ↔ migration-history mismatches.
+- Alembic ``check``/autogenerate catches metadata ↔ database migration drift.
+- Integration tests catch executable SQL and real database behavior.
+
+This gate does not catch misspelled table or column names, invalid SQL syntax, incorrect joins,
+wrong column definitions, runtime schema drift, dynamically constructed identifiers, database
+permissions, connection failures, or query-planner/index-effectiveness problems. Those require
+Alembic/database checks or integration tests.
+
+The module belongs in ``scripts/`` because it is a repository-quality/CI tool rather than runtime
+application behavior. Keep it as a supplemental guard when the project uses raw SQL or named
+database objects; it catches a narrow class of source/migration inconsistencies that Alembic and
+SQLAlchemy do not inspect across the whole source tree.
 """
 
 from __future__ import annotations
@@ -300,7 +316,7 @@ def audit(source_root: Path, migrations_root: Path) -> list[Finding]:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the gate over two roots and report. Returns ``1`` when anything is found."""
     parser = argparse.ArgumentParser(
-        prog="python -m app.utils.schema_identifier_gate",
+        prog="python scripts/schema_identifier_gate.py",
         description="Report index and constraint names in source that no migration truly creates.",
     )
     parser.add_argument("source_root", type=Path)

@@ -125,8 +125,8 @@ Nothing has been edited for step 14. What is already known:
 * `tests/unit/test_schema_identifier_gate.py` is 164 lines and holds 9 tests, **all of them over
   synthetic `tmp_path` trees**. Not one audits the real repository. So the gate module exists, is
   tested, and **does not yet guard this codebase** — which is exactly what step 14 is for.
-* `src/app/utils/schema_identifier_gate.py` exposes `audit(source_root, migrations_root) ->
-  list[Finding]` and a `python -m` entry point. Standard library only, opens no connection.
+* `scripts/schema_identifier_gate.py` exposes `audit(source_root, migrations_root) ->
+  list[Finding]` and a script entry point. Standard library only, opens no connection.
 
 ---
 

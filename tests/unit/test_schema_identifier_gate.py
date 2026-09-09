@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.utils.schema_identifier_gate import (
+from scripts.schema_identifier_gate import (
     MISSING_CREATOR,
     ORPHANED_TABLE,
     UNPARSED_SOURCE,

@@ -278,7 +278,7 @@ def build_fastapi_guard_config(settings: "Settings") -> SecurityConfig:
 
 def get_metrics() -> tuple[bytes, str]:
     """Get Prometheus metrics via OTel PrometheusMetricReader."""
-    from app.shared.otel_integrations import (
+    from app.shared.otel.integrations import (
         get_prometheus_metrics,
     )
 
