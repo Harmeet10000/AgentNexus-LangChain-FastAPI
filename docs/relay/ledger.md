@@ -35,4 +35,9 @@ except the two managed resources in protocol §4.
 
 ## Amendments
 
-- None yet.
+- W0 `rag-tree-repair` (orchestrator-approved, task-authorized, no
+  other change owns these paths): `pyproject.toml` (task 2.6),
+  `tests/unit/test_auth_documents_feature_errors.py` (task 2.5),
+  `src/app/shared/langchain_layer/embeddings.py` (task 2.7 repo-wide
+  proof), `src/app/features/__init__.py` (task §3), and the implied
+  `src/app/shared/rag/document_processing/` deletion (task 2.7).
