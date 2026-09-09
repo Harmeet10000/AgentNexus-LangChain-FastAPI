@@ -2,7 +2,7 @@
 
 Graph-backed, human-verified legal intelligence for Indian contracts.
 
-📚 **Documentation:** https://harmeet10000.github.io/AgentNexus-LangChain-FastAPI — Mintlify site at [`docs-site/`](docs-site/README.md) (run `npx mintlify dev` locally).
+📚 **Documentation:** Mintlify site at [`docs-site/`](docs-site/README.md) (run `npx mintlify dev` locally).
 
 This project is built with FastAPI, LangChain, LangGraph, LangSmith, Gemini, TigerData-backed Postgres, Neo4j, and Graphiti. It is not a generic agent sandbox. It is a stateful legal reasoning system designed around resumability, memory discipline, human review, and deterministic execution.
 
@@ -154,7 +154,15 @@ The same pattern shows up across domains:
 
 ## Architecture
 
-![Agent Saul architecture](tests/performance/agent_saul_full_architecture.svg)
+![Agent Saul full architecture](docs/diagrams/agent_saul_full_architecture.svg)
+
+![Agent Saul deployment topology](docs/diagrams/agent_saul_deployment_topology.svg)
+
+![Hybrid query pipeline](docs/diagrams/hybrid_query_pipeline.svg)
+
+![Memory stack architecture](docs/diagrams/memory_stack_architecture.svg)
+
+![Search system architecture overview](docs/diagrams/search_system_architecture_overview.svg)
 
 The architecture notes that drive this repo live in [tests/performance/Saul_agent_Arch.md](/home/harmeet/Desktop/Projects/langchain-fastapi-production/tests/performance/Saul_agent_Arch.md).
 
