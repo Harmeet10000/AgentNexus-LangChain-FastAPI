@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,17 @@ from .dto import (
     CrawlResponse,
     utc_now,
 )
+
+
+def _stable_page_id(crawl_id: str, page_url: str | None) -> str:
+    """Deterministic page identity so chunks stay joinable to their page.
+
+    Recursive-path results predate page_id assignment; hashing crawl_id:url
+    at read time backfills them (and any future missing IDs) without a
+    data migration.
+    """
+    seed = f"{crawl_id}:{page_url or ''}"
+    return hashlib.sha256(seed.encode()).hexdigest()[:24]
 
 
 class CrawlJobStore:
@@ -105,7 +117,9 @@ class CrawlJobStore:
     @staticmethod
     def _public_job(payload: dict[str, object]) -> CrawlJob:
         fields = set(CrawlJob.model_fields)
-        return CrawlJob.model_validate({key: value for key, value in payload.items() if key in fields})
+        return CrawlJob.model_validate(
+            {key: value for key, value in payload.items() if key in fields}
+        )
 
     async def _read_payload(self, crawl_id: str) -> dict[str, object] | None:
         raw = await self.redis.get(self._meta_key(crawl_id))
@@ -131,7 +145,9 @@ class CrawlJobStore:
         return self._public_job(payload)
 
     async def mark_running(self, crawl_id: str) -> CrawlJob:
-        return await self._update(crawl_id, status=CrawlJobStatus.RUNNING, started_at=utc_now().isoformat())
+        return await self._update(
+            crawl_id, status=CrawlJobStatus.RUNNING, started_at=utc_now().isoformat()
+        )
 
     async def attach_task_id(self, crawl_id: str, task_id: str) -> None:
         await self._update(crawl_id, task_id=task_id)
@@ -176,7 +192,9 @@ class CrawlJobStore:
     async def save_result(self, crawl_id: str, result: CrawlResponse) -> CrawlJob:
         encoded = result.model_dump_json().encode("utf-8")
         if len(encoded) > get_settings().CRAWL_JOB_MAX_RESULT_BYTES:
-            return await self.mark_failed(crawl_id, "Persisted crawler result exceeded the configured size limit")
+            return await self.mark_failed(
+                crawl_id, "Persisted crawler result exceeded the configured size limit"
+            )
         await self.redis.set(self._result_key(crawl_id), encoded, ex=self.ttl_seconds)
         status = CrawlJobStatus.PARTIAL if result.failed_pages else CrawlJobStatus.COMPLETED
         return await self._update(
@@ -199,7 +217,9 @@ class CrawlJobStore:
         try:
             return CrawlResponse.model_validate_json(raw)
         except (ValueError, TypeError) as exc:
-            logger.bind(crawl_id=crawl_id).exception("Invalid persisted crawler result", error=str(exc))
+            logger.bind(crawl_id=crawl_id).exception(
+                "Invalid persisted crawler result", error=str(exc)
+            )
             return None
 
     async def pages(
@@ -219,7 +239,12 @@ class CrawlJobStore:
         if result is None:
             return None
         chunks = [
-            CrawlJobChunk(crawl_id=crawl_id, page_id=page.page_id or "", page_url=page.url, chunk=chunk)
+            CrawlJobChunk(
+                crawl_id=crawl_id,
+                page_id=page.page_id or _stable_page_id(crawl_id, page.url),
+                page_url=page.url,
+                chunk=chunk,
+            )
             for page in result.results
             for chunk in page.chunks
         ]
@@ -241,7 +266,7 @@ class CrawlJobStore:
                     items.append(
                         CrawlJobChunk(
                             crawl_id=crawl_id,
-                            page_id=page.page_id or "",
+                            page_id=page.page_id or _stable_page_id(crawl_id, page.url),
                             page_url=page.url,
                             chunk=chunk,
                         )

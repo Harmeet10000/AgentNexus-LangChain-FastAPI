@@ -67,7 +67,20 @@ def test_distinct_parties_do_not_collide() -> None:
 def test_canonicalisation_is_deterministic() -> None:
     first = canonical_identity_key(entity_type="ORG", name="Acme Holdings Group, Inc.")
     second = canonical_identity_key(entity_type="ORG", name="Acme Holdings Group, Inc.")
-    assert first == second == "ORG:acme"
+    assert first == second == "ORG:acme holdings group"
+
+
+def test_business_line_words_distinguish_parties() -> None:
+    """Holdings/Partners/Services/Group/Ventures are not legal-form
+    designators: stripping them merges distinct organisations into one
+    irreversible graph node."""
+    holdings = canonical_identity_key(entity_type="ORG", name="Acme Holdings")
+    partners = canonical_identity_key(entity_type="ORG", name="Acme Partners")
+    services = canonical_identity_key(entity_type="ORG", name="Acme Services")
+    assert holdings != partners != services
+    assert holdings == "ORG:acme holdings"
+    # Legal-form designators still fold.
+    assert canonical_identity_key(entity_type="ORG", name="Acme LLC") == "ORG:acme"
 
 
 def test_raw_surface_form_is_retained() -> None:

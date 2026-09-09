@@ -83,7 +83,7 @@ def payment_error_to_http_status(error: PaymentError) -> int:
         case PaymentInfrastructureError():
             return http_status_for_kind(error.kind, retryable=error.retryable)
         case PaymentProviderError() | PaymentProviderUnavailableError():
-            return http_status_for_kind(error.kind)
+            return http_status_for_kind(error.kind, retryable=error.retryable)
         case PaymentCollaboratorError():
             return http_status_for_kind(error.kind, retryable=error.retryable)
         case _ as unreachable:

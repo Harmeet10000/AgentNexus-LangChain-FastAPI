@@ -81,9 +81,11 @@ def _raise_for_status(response: httpx.Response, *, operation: str) -> None:
     if response.status_code < 400:
         return
     detail = f"{operation} returned HTTP {response.status_code}: {response.text[:500]}"
-    logger.bind(
-        operation=operation, status_code=response.status_code, response_body=response.text[:500]
-    ).error("Razorpay request failed")
+    # The body is kept out of logs: Razorpay echoes request fields (email,
+    # contact) back in error responses.
+    logger.bind(operation=operation, status_code=response.status_code).error(
+        "Razorpay request failed"
+    )
     if response.status_code in _RAZORPAY_TIMEOUT_CODES:
         raise RazorpayRetryableError(service="razorpay", detail=detail)
     raise RazorpayPermanentError(service="razorpay", detail=detail)
@@ -143,7 +145,12 @@ class RazorpayClient:
                 service="razorpay", detail=f"{operation} failed with transport error: {exc}"
             ) from exc
         if response.status_code >= 400:
-            _circuit.record_failure(operation)
+            # Permanent client errors prove the provider is reachable: only
+            # server errors and transport failures count toward opening.
+            if response.status_code >= 500:
+                _circuit.record_failure(operation)
+            else:
+                _circuit.record_success(operation)
             _raise_for_status(response, operation=operation)
         _circuit.record_success(operation)
         return response.json()

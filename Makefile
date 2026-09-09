@@ -1,4 +1,4 @@
-.PHONY: help lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery celery-ingestion celery-beat celery-command image-build image-build-prod image-push image-tag
+.PHONY: help lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery celery-ingestion celery-crawler celery-beat celery-command image-build image-build-prod image-push image-tag
 
 help:
 	@echo "Available commands:"

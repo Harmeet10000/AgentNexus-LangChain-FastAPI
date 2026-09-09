@@ -9,7 +9,6 @@ from fakeredis.aioredis import FakeRedis
 from app.features.crawler.dto import CrawlChunk, CrawlResponse, CrawlResultItem
 from app.features.crawler.job_store import CrawlJobStore
 from app.shared.crawler import WebCrawler
-from app.shared.crawler.crawler import _crawl4ai_version
 from app.shared.crawler.validator import validate_browser_result_urls
 from app.shared.langchain_layer.agents.tools.crawl_jobs import get_crawl_job_tools
 
@@ -24,12 +23,17 @@ def test_browser_result_urls_reject_non_http_schemes() -> None:
     assert allowed is True
 
 
-def test_cache_key_is_isolated_by_crawler_version() -> None:
-    assert _crawl4ai_version()
+def test_cache_key_is_isolated_by_crawler_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.shared.crawler.crawler as crawler_module
+
+    monkeypatch.setattr(crawler_module, "_crawl4ai_version", lambda: "1.0.0")
     first = WebCrawler()._get_cache_key("https://example.com")
+    monkeypatch.setattr(crawler_module, "_crawl4ai_version", lambda: "2.0.0")
     second = WebCrawler()._get_cache_key("https://example.com")
-    assert first == second
     assert first.startswith("crawl:cache:")
+    assert first != second
 
 
 @pytest.mark.asyncio
@@ -38,14 +42,14 @@ async def test_finish_single_result_rejects_private_redirect(
 ) -> None:
     async def deny(_url: str, *, phase: str) -> tuple[bool, str]:
         _ = phase
-        if "10.0.0.5" in _url or "169.254" in _url:
+        if "evil-rebind.example" in _url:
             return False, "Hostname resolves to a private address: 10.0.0.5"
         return True, ""
 
     monkeypatch.setattr("app.shared.crawler.crawler.validate_navigation_destination", deny)
     raw = SimpleNamespace(
         success=True,
-        url="http://10.0.0.5/admin",
+        url="https://evil-rebind.example/admin",
         redirected_url=None,
         markdown=SimpleNamespace(fit_markdown="x", raw_markdown="x"),
         html=None,

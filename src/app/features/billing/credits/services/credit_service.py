@@ -23,6 +23,7 @@ from app.features.billing.credits.errors import (
     CreditAmountError,
     CreditCollaboratorError,
     CreditMetadataError,
+    CreditValidationError,
 )
 from app.features.billing.credits.models.consumption import CreditConsumption
 from app.features.billing.credits.models.credit import CreditStatus, CreditType, UserCredit
@@ -206,6 +207,13 @@ class CreditService:
             return available_result
         available_credits = available_result.unwrap()
 
+        if (invoice_gross_total * 100) % 1 != 0:
+            return Failure(
+                CreditValidationError(
+                    message="Invoice total has fractional paisa",
+                    details={"invoice_gross_total": str(invoice_gross_total)},
+                )
+            )
         total_due_paisa = int(invoice_gross_total * 100)
         remaining_due = total_due_paisa
         consumed_credits: list[ConsumedCredit] = []

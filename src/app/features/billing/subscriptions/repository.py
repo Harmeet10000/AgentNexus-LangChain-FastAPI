@@ -51,12 +51,14 @@ def validate_transition(
     current: str | SubscriptionStatus, target: str | SubscriptionStatus
 ) -> bool:
     """Check whether a status transition is allowed by the state machine."""
-    current_status: SubscriptionStatus = (
-        current if isinstance(current, SubscriptionStatus) else SubscriptionStatus(current)
-    )
-    target_status: SubscriptionStatus = (
-        target if isinstance(target, SubscriptionStatus) else SubscriptionStatus(target)
-    )
+    try:
+        current_status = SubscriptionStatus(current)
+        target_status = SubscriptionStatus(target)
+    except ValueError:
+        # A row holding a status outside the enum (no DB CHECK constraint)
+        # is not a transition the machine allows; the caller maps False to
+        # the typed invalid-transition failure instead of a 500.
+        return False
     return target_status in _ALLOWED_TRANSITIONS.get(current_status, set())
 
 
@@ -150,7 +152,6 @@ class SubscriptionRepository:
                         message="Subscription not found for Razorpay ID",
                         details={"razorpay_subscription_id": razorpay_subscription_id},
                         source="subscription_repository",
-                        subscription_id=razorpay_subscription_id,
                     )
                 )
             return Success(subscription)

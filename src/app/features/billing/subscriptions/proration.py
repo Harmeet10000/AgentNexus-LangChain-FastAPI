@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import TYPE_CHECKING
 
@@ -26,10 +26,11 @@ def calculate_proration_fraction(
 ) -> SubscriptionResult[Decimal]:
     """Fraction of the billing period remaining after ``effective_date``.
 
-    Uses integer microsecond arithmetic (Requirement 33) so no precision is
-    lost converting between datetimes and Decimal.
+    Uses exact integer microsecond arithmetic (Requirement 33): ``timedelta //
+    timedelta(microseconds=1)`` never passes through binary floating point,
+    so no precision is lost converting between datetimes and Decimal.
     """
-    total_microseconds = int((period_end - period_start).total_seconds() * 1_000_000)
+    total_microseconds = (period_end - period_start) // timedelta(microseconds=1)
     if total_microseconds <= 0:
         msg = "Billing period is empty or inverted"
         return Failure(
@@ -42,7 +43,7 @@ def calculate_proration_fraction(
                 source="proration",
             )
         )
-    remaining_microseconds = int((period_end - effective_date).total_seconds() * 1_000_000)
+    remaining_microseconds = (period_end - effective_date) // timedelta(microseconds=1)
     if remaining_microseconds < 0:
         msg = "Effective date is after the current billing period end"
         return Failure(
@@ -105,6 +106,15 @@ def calculate_plan_change_proration(
         )
 
     now = effective_date or datetime.now(tz=UTC)
+    if now.tzinfo is None:
+        msg = "effective_date must include a timezone offset"
+        return Failure(
+            SubscriptionValidationError(
+                message=msg,
+                details={"effective_date": str(effective_date)},
+                source="proration",
+            )
+        )
     fraction_result = calculate_proration_fraction(
         effective_date=now,
         period_start=subscription.current_period_start,

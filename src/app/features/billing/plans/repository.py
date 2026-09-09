@@ -118,10 +118,14 @@ class PlanRepository:
             )
 
     @trace_layer("repository")
-    async def list_active(self) -> PlanResult[list[Plan]]:
+    async def list_active(self, *, limit: int = 50, offset: int = 0) -> PlanResult[list[Plan]]:
         try:
             statement: Select[tuple[Plan]] = (
-                select(Plan).where(Plan.is_active.is_(True)).order_by(Plan.created_at)
+                select(Plan)
+                .where(Plan.is_active.is_(True))
+                .order_by(Plan.created_at)
+                .limit(limit)
+                .offset(offset)
             )
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))

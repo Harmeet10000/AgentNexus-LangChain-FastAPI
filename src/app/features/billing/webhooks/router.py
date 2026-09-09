@@ -3,6 +3,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request, Response
+from pydantic import ValidationError
 from returns.result import Failure, Success
 
 from app.features.auth import require_role
@@ -12,7 +13,7 @@ from app.utils import APIResponse, logger
 
 from .dependencies import WebhookServiceDep
 from .dto import WebhookPayload
-from .errors import WebhookVerificationError
+from .errors import WebhookValidationError, WebhookVerificationError
 
 router = APIRouter(tags=["billing-webhooks"])
 
@@ -32,6 +33,7 @@ async def razorpay_webhook(
     service: WebhookServiceDep,
     response: Response,
     signature: Annotated[str | None, Header(alias="X-Razorpay-Signature")] = None,
+    event_id_header: Annotated[str | None, Header(alias="X-Razorpay-Event-Id")] = None,
 ) -> APIResponse[dict[str, object]]:
     raw_body = (await request.body()).decode("utf-8")
     if signature is None:
@@ -44,8 +46,21 @@ async def razorpay_webhook(
     if isinstance(verification, Failure):
         return render_result(Failure(verification.failure()), response, message="Webhook processed")
 
-    payload = WebhookPayload.model_validate_json(raw_body)
-    event_id = _extract_event_id(payload.payload)
+    try:
+        payload = WebhookPayload.model_validate_json(raw_body)
+    except ValidationError as exc:
+        return render_result(
+            Failure(
+                WebhookValidationError(
+                    message="Invalid webhook payload", details={"error": str(exc)}
+                )
+            ),
+            response,
+            message="Webhook processed",
+        )
+    # Razorpay delivers the unique event identifier in a header; the body
+    # carries only the event type, which must never key idempotency.
+    event_id = event_id_header or _extract_event_id(payload.payload)
     if not event_id:
         logger.bind(operation="webhook", event=payload.event).warning(
             "Webhook payload missing event id"

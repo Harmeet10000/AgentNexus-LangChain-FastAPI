@@ -77,6 +77,6 @@ def invoice_error_to_http_status(error: InvoiceError) -> int:
         case InvoiceCollaboratorError():
             return http_status_for_kind(error.kind, retryable=error.retryable)
         case InvoiceStorageError():
-            return http_status_for_kind(error.kind)
+            return http_status_for_kind(error.kind, retryable=error.retryable)
         case _ as unreachable:
             assert_never(unreachable)

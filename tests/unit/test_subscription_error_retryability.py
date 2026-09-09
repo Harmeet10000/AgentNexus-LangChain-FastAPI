@@ -15,11 +15,9 @@ from app.features.billing.subscriptions.errors import (
     SubscriptionInfrastructureError,
     SubscriptionTransientInfrastructureError,
 )
+from app.features.billing.subscriptions.errors import subscription_error_to_http_status
 from app.features.billing.subscriptions.repository import SubscriptionRepository
-from app.features.billing.subscriptions.service import (
-    SubscriptionService,
-    subscription_error_to_http_status,
-)
+from app.features.billing.subscriptions.service import SubscriptionService
 from app.shared.result import render_result
 
 

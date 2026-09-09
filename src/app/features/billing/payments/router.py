@@ -43,20 +43,48 @@ async def list_payments(  # noqa: PLR0917
 async def get_payment(
     payment_id: Annotated[str, Path(min_length=1)],
     service: PaymentServiceDep,
+    sub_service: SubscriptionServiceDep,
+    user: CurrentVerifiedUser,
     response: Response,
 ) -> APIResponse[PaymentResponse]:
     result = await service.get_payment(payment_id)
+    if isinstance(result, Failure):
+        return render_result(result, response, message="Payment")
+    payment = result.unwrap()
+    ownership = await sub_service.get_subscription(str(user.id), payment.subscription_id)
+    if isinstance(ownership, Failure):
+        error = ownership.failure()
+        return render_result(
+            Failure(PaymentCollaboratorError(message=error.message, details=error.details)),
+            response,
+            message="Payment",
+        )
     return render_result(result, response, message="Payment")
 
 
 @router.post("/payments/{payment_id}/refund")
-async def refund_payment(
+async def refund_payment(  # noqa: PLR0917 - endpoint needs path payload, services, claims, response
     payment_id: Annotated[str, Path(min_length=1)],
     payload: RefundRequestDTO,
     service: PaymentServiceDep,
+    sub_service: SubscriptionServiceDep,
     claims: CurrentClaims,
     response: Response,
 ) -> APIResponse[RefundResponse]:
+    resolved = await service.get_payment(payment_id)
+    if isinstance(resolved, Failure):
+        return render_result(
+            resolved, response, message="Refund issued", success_status=status.HTTP_200_OK
+        )
+    ownership = await sub_service.get_subscription(claims.sub, resolved.unwrap().subscription_id)
+    if isinstance(ownership, Failure):
+        error = ownership.failure()
+        return render_result(
+            Failure(PaymentCollaboratorError(message=error.message, details=error.details)),
+            response,
+            message="Refund issued",
+            success_status=status.HTTP_200_OK,
+        )
     refund = await service.refund(payment_id, payload, user_id=claims.sub)
     return render_result(
         refund, response, message="Refund issued", success_status=status.HTTP_200_OK

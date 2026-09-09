@@ -6,8 +6,20 @@ from datetime import datetime  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
 from enum import StrEnum
 from typing import Any  # noqa: TC003
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _require_uuid(value: str, *, field: str) -> str:
+    # Plan ids reach a PGUUID column comparison; a malformed value would
+    # raise a driver error mapped to a 5xx. Reject it here as a 422.
+    try:
+        UUID(value)
+    except (ValueError, AttributeError, TypeError) as exc:
+        msg = f"{field} must be a valid UUID"
+        raise ValueError(msg) from exc
+    return value
 
 
 class SubscriptionCreateDTO(BaseModel):
@@ -21,6 +33,11 @@ class SubscriptionCreateDTO(BaseModel):
     customer_notify: bool = True
     trial_period_days: int | None = Field(default=None, ge=1, le=365)
 
+    @field_validator("plan_id")
+    @classmethod
+    def _validate_plan_id(cls, value: str) -> str:
+        return _require_uuid(value, field="plan_id")
+
 
 class PlanChangeDTO(BaseModel):
     """Change the plan of an active subscription."""
@@ -29,6 +46,21 @@ class PlanChangeDTO(BaseModel):
 
     new_plan_id: str
     effective_date: datetime | None = None
+
+    @field_validator("new_plan_id")
+    @classmethod
+    def _validate_new_plan_id(cls, value: str) -> str:
+        return _require_uuid(value, field="new_plan_id")
+
+    @field_validator("effective_date")
+    @classmethod
+    def _require_aware_effective_date(cls, value: datetime | None) -> datetime | None:
+        # A naive datetime would raise TypeError on subtraction against the
+        # timezone-aware billing period; reject it here as a 422 instead.
+        if value is not None and value.tzinfo is None:
+            msg = "effective_date must include a timezone offset"
+            raise ValueError(msg)
+        return value
 
 
 class SubscriptionCancelDTO(BaseModel):

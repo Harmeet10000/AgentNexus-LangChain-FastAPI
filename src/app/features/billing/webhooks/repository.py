@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from returns.result import Failure, Success
 from sqlalchemy import select, update
@@ -16,8 +17,6 @@ from .errors import WebhookConflictError, WebhookInfrastructureError, WebhookNot
 from .model import WebhookEvent
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
@@ -81,8 +80,18 @@ class WebhookEventRepository:
     @trace_layer("repository")
     async def find_by_id(self, event_id: str | UUID) -> WebhookResult[WebhookEvent | None]:
         try:
+            key = event_id if isinstance(event_id, UUID) else UUID(str(event_id))
+        except (ValueError, AttributeError, TypeError):
+            return Failure(
+                WebhookNotFoundError(
+                    message="Webhook event not found",
+                    details={"event_id": str(event_id)},
+                    source="webhook_event_repository",
+                )
+            )
+        try:
             statement: Select[tuple[WebhookEvent]] = select(WebhookEvent).where(
-                WebhookEvent.id == event_id
+                WebhookEvent.id == key
             )
             result = await self.session.execute(statement)
             event = result.scalar_one_or_none()

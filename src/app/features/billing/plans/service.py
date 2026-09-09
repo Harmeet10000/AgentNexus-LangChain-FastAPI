@@ -95,7 +95,7 @@ class PlanService:
                     )
                 )
 
-        result = await self.plans.list_active()
+        result = await self.plans.list_active(limit=limit, offset=offset)
         if isinstance(result, Failure):
             return result
         return Success([_plan_to_response(p) for p in result.unwrap()])
@@ -173,7 +173,7 @@ class PlanService:
             AuditLog(
                 entity_type="plan",
                 entity_id=str(created.id),
-                action=AuditAction.SUBSCRIPTION_CREATED.value,
+                action=AuditAction.PLAN_CREATED.value,
                 user_id=user_id,
                 changes={"name": created.name, "amount": created.amount},
             )
@@ -291,7 +291,7 @@ class PlanService:
             AuditLog(
                 entity_type="plan",
                 entity_id=str(created.id),
-                action="plan.updated",
+                action=AuditAction.PLAN_UPDATED.value,
                 user_id=user_id,
                 changes={**values, "parent_plan_id": str(plan.id)},
             )
@@ -327,7 +327,7 @@ class PlanService:
             entry=AuditLog(
                 entity_type="plan",
                 entity_id=str(plan.id),
-                action="plan.archived",
+                action=AuditAction.PLAN_ARCHIVED.value,
                 user_id=user_id,
                 changes={"is_active": False},
             )

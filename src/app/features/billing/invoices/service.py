@@ -330,7 +330,9 @@ class InvoiceService:
         if invoice is None:
             return Failure(InvoiceNotFoundError(message="Invoice not found"))
         if user_id is not None and invoice.user_id != user_id:
-            return Failure(InvoiceValidationError(message="Invoice does not belong to this user"))
+            # Deliberately indistinguishable from unknown IDs: a distinct
+            # status here would let callers probe which IDs exist.
+            return Failure(InvoiceNotFoundError(message="Invoice not found"))
         return Success(_invoice_to_response(invoice))
 
     @trace_layer("service")
@@ -345,7 +347,7 @@ class InvoiceService:
         if invoice is None:
             return Failure(InvoiceNotFoundError(message="Invoice not found"))
         if invoice.user_id != user_id:
-            return Failure(InvoiceValidationError(message="Invoice does not belong to this user"))
+            return Failure(InvoiceNotFoundError(message="Invoice not found"))
         if invoice.status == InvoiceStatus.VOID.value:
             return Failure(InvoiceValidationError(message="Invoice is already void"))
         if invoice.status not in {InvoiceStatus.ISSUED.value, InvoiceStatus.PAID.value}:
@@ -447,4 +449,6 @@ class InvoiceService:
                 )
             )
         public_base = get_settings().S3_PUBLIC_URL.rstrip("/")
-        return Success(f"{public_base}/{key}" if public_base else None)
+        # Never drop the reference silently: without a public base the
+        # storage key itself is the retrievable handle.
+        return Success(f"{public_base}/{key}" if public_base else key)
