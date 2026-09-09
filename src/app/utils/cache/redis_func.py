@@ -104,7 +104,9 @@ async def get_cache(
 ) -> CacheResult[Any]:
     async def action() -> Any:
         value = await _redis_any(redis).get(get_cache_key(object_type, key))
-        return None if value is None or not parse_json else _deserialize(value)
+        if value is None:
+            return None
+        return value if not parse_json else _deserialize(value)
 
     return await _run("get_cache", action)
 

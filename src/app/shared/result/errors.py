@@ -34,11 +34,17 @@ class FeatureError(BaseModel):
     retryable: ClassVar[bool] = False
 
 
+class NotFoundCode(StrEnum):
+    """Owned code vocabulary for the generic not-found failure."""
+
+    NOT_FOUND = "NOT_FOUND"
+
+
 class NotFoundError(FeatureError):
     """Generic not-found failure for boundaries without a feature owner."""
 
     kind: ClassVar[ErrorKind] = ErrorKind.NOT_FOUND
-    code: ClassVar[str] = "NOT_FOUND"
+    code: ClassVar[NotFoundCode] = NotFoundCode.NOT_FOUND
     retryable: ClassVar[bool] = False
 
 

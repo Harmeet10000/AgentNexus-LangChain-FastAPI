@@ -52,7 +52,7 @@ class ErrorDetail(BaseModel):
 
     code: str
     message: str
-    data: dict[str, object] | list[object] | str | None = Field(default=None)
+    data: Any = Field(default=None)
     trace: str | None = Field(default=None)
     inner_error: str | None = Field(default=None, serialization_alias="innerError")
     flow: str | None = Field(default=None)
