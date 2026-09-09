@@ -14,7 +14,7 @@ uv run python docs-site/scripts/extract_openapi.py
 ```
 
 ## Deploy
-Push to `main` triggers `.github/workflows/deploy-docs.yml` (GitHub Pages). Alternatively Mintlify Cloud builds on push.
+Docs are hosted on Mintlify Cloud, which builds on push to `main` once the repo is connected — no CI workflow needed. (The Mintlify CLI has no static-build command, so GitHub Pages deployment is not supported; `docs-ci.yml` covers validation on PRs.)
 
 ## Verification
 ```bash
