@@ -1,0 +1,158 @@
+........................................................................ [ 11%]
+........................................................................ [ 22%]
+........................................................................ [ 34%]
+........................................................................ [ 45%]
+........................................................................ [ 57%]
+........................................................................ [ 68%]
+........................................................................ [ 80%]
+........................................................................ [ 91%]
+.............................F.....................                      [100%]
+=================================== FAILURES ===================================
+____________________ test_permanent_failure_is_not_retried _____________________
+
+    async def test_permanent_failure_is_not_retried() -> None:
+        executions: list[int] = []
+    
+        @tool
+        def broken_config(query: str) -> str:
+            """Run a permanently broken call."""
+            executions.append(1)
+            msg = "misconfigured index"
+            raise PermanentConfigError(msg)
+    
+        seam = _make_tool_seam(
+            max_retries=5,
+            retry_on=lambda exc: not isinstance(exc, PermanentConfigError),
+        )
+        graph = _build_graph(seam, broken_config)
+    
+>       result = await graph.ainvoke({"messages": [], "trail": []}, _config("permanent"))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_throwaway_graph_resilience.py:173: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:4090: in ainvoke
+    async for chunk in self.astream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3440: in astream
+    async for _ in runner.atick(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:396: in atick
+    await arun_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:744: in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:756: in ainvoke
+    input = await asyncio.create_task(
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:522: in ainvoke
+    ret = await self.afunc(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_throwaway_graph_resilience.py:109: in node_a
+    message = await seam(tool_fn, args={"query": "ping"})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_throwaway_graph_resilience.py:97: in invoke_tool
+    result = await middleware.awrap_tool_call(request, handler)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langchain/agents/middleware/tool_retry.py:389: in awrap_tool_call
+    return await handler(request)
+           ^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_throwaway_graph_resilience.py:82: in handler
+    raw: Any = await req.tool.ainvoke(req.tool_call["args"])
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langchain_core/tools/structured.py:123: in ainvoke
+    return await run_in_executor(config, self.invoke, input, config, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langchain_core/runnables/config.py:707: in run_in_executor
+    return await asyncio.get_running_loop().run_in_executor(
+/usr/lib/python3.12/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langchain_core/runnables/config.py:698: in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langchain_core/tools/base.py:764: in invoke
+    return self.run(tool_input, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langchain_core/tools/base.py:1132: in run
+    raise error_to_raise
+.venv/lib/python3.12/site-packages/langchain_core/tools/base.py:1098: in run
+    response = context.run(self._run, *tool_args, **tool_kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langchain_core/tools/structured.py:152: in _run
+    return self.func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+query = 'ping'
+
+    @tool
+    def broken_config(query: str) -> str:
+        """Run a permanently broken call."""
+        executions.append(1)
+        msg = "misconfigured index"
+>       raise PermanentConfigError(msg)
+E       unit.test_throwaway_graph_resilience.PermanentConfigError: misconfigured index
+E       During task with name 'node_a' and id 'f1c80c51-bbe7-4f5f-95ff-61514863f135'
+
+tests/unit/test_throwaway_graph_resilience.py:165: PermanentConfigError
+------------------------------ Captured log setup ------------------------------
+DEBUG    asyncio:selector_events.py:64 Using selector: EpollSelector
+------------------------------ Captured log call -------------------------------
+Level 5  langsmith.client:client.py:2796 Adding compressed multipart to queue with context: trace=01a087a5-de92-7733-adfc-1c2eb7fb8578,id=01a087a5-de92-7733-adfc-1c2eb7fb8578
+Level 5  langsmith.client:client.py:2796 Adding compressed multipart to queue with context: trace=01a087a5-de92-7733-adfc-1c2eb7fb8578,id=01a087a5-de98-70c3-bd26-33bac2d3c4ae
+Level 5  langsmith.client:client.py:2796 Adding compressed multipart to queue with context: trace=01a087a5-de92-7733-adfc-1c2eb7fb8578,id=01a087a5-de9a-7141-8978-89086e1604cc
+Level 5  langsmith.client:client.py:3973 Adding compressed multipart to queue with context: trace=01a087a5-de92-7733-adfc-1c2eb7fb8578,id=01a087a5-de9a-7141-8978-89086e1604cc
+Level 5  langsmith.client:client.py:3973 Adding compressed multipart to queue with context: trace=01a087a5-de92-7733-adfc-1c2eb7fb8578,id=01a087a5-de98-70c3-bd26-33bac2d3c4ae
+Level 5  langsmith.client:client.py:3973 Adding compressed multipart to queue with context: trace=01a087a5-de92-7733-adfc-1c2eb7fb8578,id=01a087a5-de92-7733-adfc-1c2eb7fb8578
+---------------------------- Captured log teardown -----------------------------
+DEBUG    asyncio:base_events.py:710 Close <_UnixSelectorEventLoop running=False closed=False debug=True>
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/graphiti_core/driver/search_interface/search_interface.py:22
+  /home/harmeet/Desktop/Projects/lcfp-rag-tree-repair/.venv/lib/python3.12/site-packages/graphiti_core/driver/search_interface/search_interface.py:22: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class SearchInterface(BaseModel):
+
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+.venv/lib/python3.12/site-packages/cognee/infrastructure/databases/graph/config.py:45
+  /home/harmeet/Desktop/Projects/lcfp-rag-tree-repair/.venv/lib/python3.12/site-packages/cognee/infrastructure/databases/graph/config.py:45: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'env'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    graph_database_provider: str = Field("ladybug", env="GRAPH_DATABASE_PROVIDER")
+
+.venv/lib/python3.12/site-packages/cognee/infrastructure/databases/graph/config.py:63
+  /home/harmeet/Desktop/Projects/lcfp-rag-tree-repair/.venv/lib/python3.12/site-packages/cognee/infrastructure/databases/graph/config.py:63: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'env'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    kuzu_num_threads: int = Field(0, env="KUZU_NUM_THREADS")
+
+.venv/lib/python3.12/site-packages/cognee/infrastructure/databases/graph/config.py:64
+  /home/harmeet/Desktop/Projects/lcfp-rag-tree-repair/.venv/lib/python3.12/site-packages/cognee/infrastructure/databases/graph/config.py:64: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'env'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    kuzu_buffer_pool_size: int = Field(DEFAULT_KUZU_BUFFER_POOL_SIZE, env="KUZU_BUFFER_POOL_SIZE")
+
+.venv/lib/python3.12/site-packages/cognee/infrastructure/databases/graph/config.py:65
+  /home/harmeet/Desktop/Projects/lcfp-rag-tree-repair/.venv/lib/python3.12/site-packages/cognee/infrastructure/databases/graph/config.py:65: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'env'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    kuzu_max_db_size: int = Field(DEFAULT_KUZU_MAX_DB_SIZE, env="KUZU_MAX_DB_SIZE")
+
+.venv/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:319
+  /home/harmeet/Desktop/Projects/lcfp-rag-tree-repair/.venv/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:319: PydanticDeprecatedSince20: `json_encoders` is deprecated. See https://docs.pydantic.dev/2.12/concepts/serialization/#custom-serializers for alternatives. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warnings.warn(
+
+tests/unit/documents/test_segmentation_hybrid.py::test_legal_chunks_carry_their_heading_path
+tests/unit/documents/test_segmentation_hybrid.py::test_long_document_is_covered_in_full_not_truncated
+tests/unit/documents/test_segmentation_hybrid.py::test_peer_sections_merge_within_the_bound
+tests/unit/documents/test_segmentation_hybrid.py::test_clause_fitting_the_bound_is_not_split_mid_clause
+tests/unit/documents/test_segmentation_hybrid.py::test_degenerate_parse_is_reported_not_silent
+tests/unit/documents/test_segmentation_hybrid.py::test_generic_documents_use_the_same_structure_aware_path
+tests/unit/shared/rag/test_chunker_tokenizer_cache.py::test_two_chunking_initialisations_construct_the_counter_once
+  /home/harmeet/Desktop/Projects/lcfp-rag-tree-repair/.venv/lib/python3.12/site-packages/docling_core/transforms/chunker/hybrid_chunker.py:83: DeprecationWarning: Deprecated initialization parameter types for HybridChunker. For updated usage check out https://docling-project.github.io/docling/examples/hybrid_chunking/
+    warnings.warn(
+
+tests/unit/test_logger_import.py::test_logger_module_imports_with_contextvars
+  /home/harmeet/Desktop/Projects/lcfp-rag-tree-repair/src/app/utils/logger.py:151: ResourceWarning: unclosed file <_io.TextIOWrapper name='/home/harmeet/.cognee/logs/2026-09-10_00-59-22.log' mode='a' encoding='utf-8'>
+    root_logger.handlers = [handler]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/test_throwaway_graph_resilience.py::test_permanent_failure_is_not_retried
+1 failed, 626 passed, 39 deselected, 16 warnings in 55.10s
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
