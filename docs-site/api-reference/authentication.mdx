@@ -28,7 +28,7 @@ The API accepts credentials in two places, checked in this order:
 Authorization: Bearer <access_token>
 ```
 
-2. **Cookie fallback**: an HttpOnly `access_token` cookie, set automatically by `/auth/login`, `/auth/refresh`, and the OAuth callback with `Secure` + `SameSite=Lax`.
+1. **Cookie fallback**: an HttpOnly `access_token` cookie, set automatically by `/auth/login`, `/auth/refresh`, and the OAuth callback with `Secure` + `SameSite=Lax`.
 
 Header-first ordering means browsers (cookie path) and API clients (header path) work with zero special-casing on the server.
 
@@ -75,6 +75,7 @@ async with httpx.AsyncClient(base_url="http://localhost:5000/api/v1") as client:
     me = await client.get("/auth/me", headers=auth)
     print(me.json()["data"])
 ```
+
 </CodeGroup>
 
 ### Refresh and logout
@@ -130,6 +131,7 @@ if not res.json()["success"] and res.status_code == 401:
     # TOKEN_EXPIRED — call POST /auth/refresh and retry once
     ...
 ```
+
 </CodeGroup>
 
 Auth errors use the standard [error envelope](/api-reference/errors) with codes `UNAUTHORIZED`, `INVALID_TOKEN`, `TOKEN_EXPIRED`, or `REFRESH_TOKEN_INVALID`.

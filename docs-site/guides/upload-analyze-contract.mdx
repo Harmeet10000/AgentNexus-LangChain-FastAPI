@@ -29,6 +29,7 @@ client = httpx.Client(base_url=base)
 client.post("/auth/register", json={"email": "you@example.com", "password": "..."})
 client.post("/auth/login", json={"email": "you@example.com", "password": "..."})
 ```
+
 </CodeGroup>
 
 ## 1. Upload
@@ -47,6 +48,7 @@ with open("vendor-agreement.pdf", "rb") as f:
     r = client.post("/documents/upload", files={"file": f})
 print(r.json()["data"])
 ```
+
 </CodeGroup>
 
 ```json
@@ -87,6 +89,7 @@ while True:
         break
     time.sleep(10)
 ```
+
 </CodeGroup>
 
 Status walks `queued → parsed → stored_postgres → completed | completed_with_warnings`. The final payload includes `title`, `document_kind`, `jurisdiction`, `chunk_count`, `verified_chunk_count`, and typed `warnings` (`{stage, code, message, severity}`).

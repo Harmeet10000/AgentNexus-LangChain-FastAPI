@@ -24,7 +24,7 @@ The single source of truth for role → permission mapping is `ROLE_PERMISSIONS`
 | Role | Permissions |
 | --- | --- |
 | `ADMIN` | all permissions (frozenset(Permission) — auto-includes new ones) |
-| `MODERATOR` | users:read, content:* , profile:* |
+| `MODERATOR` | users:read, `content:*`, `profile:*` |
 | `USER` | content:read, profile:read/write |
 
 Permission catalog: `users:read|write|delete`, `content:read|write|delete`, `admin:panel`, `profile:read|write`.

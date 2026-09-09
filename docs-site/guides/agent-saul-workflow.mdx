@@ -33,6 +33,7 @@ r = client.post(
 session = r.json()["data"]
 print(session["thread_id"], session["ws_url"])
 ```
+
 </CodeGroup>
 
 Request fields: `doc_id` (from [upload](/guides/upload-analyze-contract)), `user_query` (1–4096 chars), optional `permissions` dict.
@@ -78,11 +79,12 @@ async def run(ws_url: str) -> None:
 
 asyncio.run(run(session["ws_url"]))
 ```
+
 </CodeGroup>
 
 ## 3. Frame reference
 
-**Client → server**
+### Client → server
 
 | Frame | Fields | Purpose |
 | --- | --- | --- |
@@ -90,7 +92,7 @@ asyncio.run(run(session["ws_url"]))
 | `resume` | `thread_id`, `action`: approve/reject/modify, `feedback?`, `modified_plan?`, `overrides?`, `reviewer_role?` | Answer an HITL gate |
 | `ping` | — | Keepalive |
 
-**Server → client**
+### Server → client
 
 | Frame | Meaning |
 | --- | --- |

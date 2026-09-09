@@ -150,6 +150,7 @@ async def register(client: httpx.AsyncClient, payload: dict) -> None:
         else:
             print(f"{res.status_code}: {err['code']} — {err['message']}")
 ```
+
 </CodeGroup>
 
 Always branch on `error.code`, never on `message` text — codes are stable across releases.

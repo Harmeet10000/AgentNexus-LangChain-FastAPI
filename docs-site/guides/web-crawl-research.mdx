@@ -48,6 +48,7 @@ r = client.post(
 page = r.json()["results"][0]
 print(page["title"], page["word_count"], page["crawl_time_ms"])
 ```
+
 </CodeGroup>
 
 Response: `{success, query_url, results[], total_pages, successful_pages, failed_pages, total_word_count, processing_time_ms}`. Each result item carries `url`, `success`, `title`, `markdown`/`html`/`text`, optional `summary`, `extracted_data`, `word_count`, `crawl_time_ms`, `cached`, and per-page `error_message`.
@@ -78,6 +79,7 @@ print(data["answer"])
 for item in data["results"]:
     print(item["score"], item["url"])
 ```
+
 </CodeGroup>
 
 Results: `{query, answer?, results[{url, title, content, score, published_date?}], total_results}`.

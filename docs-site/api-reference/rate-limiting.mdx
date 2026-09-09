@@ -102,4 +102,5 @@ async def login_with_backoff(client: httpx.AsyncClient, payload: dict) -> dict:
         await asyncio.sleep(retry_after + attempt * delay)
     raise RuntimeError("Rate limited beyond retry budget")
 ```
+
 </CodeGroup>

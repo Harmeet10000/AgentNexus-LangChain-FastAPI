@@ -98,6 +98,7 @@ import httpx
 
 print(httpx.get("http://localhost:5000/api/v1/health/self").json())
 ```
+
 </CodeGroup>
 
 `GET /health/` reports per-dependency status — postgres, redis, mongodb, neo4j, graphiti, cognee. Anything reporting unhealthy points at the corresponding `.env.development` value.

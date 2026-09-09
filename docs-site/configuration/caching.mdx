@@ -21,7 +21,7 @@ The Redis client is created once in the FastAPI lifespan and read from `app.stat
 | --- | --- | --- | --- |
 | Hybrid search (`POST /search`) | 900 | `DEFAULT_SEARCH_CACHE_TTL_SECONDS` in `documents/constants.py` | query + limit + filters |
 | RAG context (`POST /search/rag`) | 900 | same constant | query + filters + token budget |
-| Ask answers (`/search/ask`, `/legal/ask`) | derived from `CACHE_TTL`-based key builder | query + doc filter + jurisdiction/type |
+| Ask answers (`/search/ask`, `/legal/ask`) | derived from key builder | `CACHE_TTL`-based key builder | query + doc filter + jurisdiction/type |
 
 Every request DTO exposes `bypass_cache: bool` (default `false`). Responses report `cache_hit: true|false` so clients can tell fresh from cached. The cache key includes all filter fields — changing a filter is always a miss, never a wrong hit.
 

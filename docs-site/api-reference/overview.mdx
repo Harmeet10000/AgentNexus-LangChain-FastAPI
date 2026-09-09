@@ -7,7 +7,7 @@ description: "Base URL, versioning policy, response envelope, and endpoint organ
 
 All endpoints are served from a versioned prefix:
 
-```
+```text
 https://<host>/api/v1
 ```
 
@@ -97,6 +97,7 @@ async with httpx.AsyncClient(base_url="http://localhost:5000/api/v1") as client:
     assert body["success"], body["error"]["message"]
     print(body["data"])
 ```
+
 </CodeGroup>
 
 ## Where to next
