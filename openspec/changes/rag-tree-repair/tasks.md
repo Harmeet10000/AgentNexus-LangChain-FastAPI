@@ -152,7 +152,7 @@ Baseline files this change produces live in `docs/relay/` and are cited by name 
 
 ## 6 Close out
 
-- [ ] 6.1 Re-run the whole gate set and confirm the recorded baselines are the ones a reader would
+- [x] 6.1 Re-run the whole gate set and confirm the recorded baselines are the ones a reader would
   reproduce today.
   **Proof:** `openspec validate rag-tree-repair --strict` exits `0`; `uv run ruff check --no-cache src/`
   line count equals `docs/relay/baseline-ruff-after.txt`; `uv run pytest -q 2>&1 | tail -1` summary
