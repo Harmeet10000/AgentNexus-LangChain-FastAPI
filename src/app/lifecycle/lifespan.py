@@ -228,7 +228,7 @@ async def _setup_celery_state(app: FastAPI, _settings: Any) -> None:
 
 async def _setup_outbox_relay_state(app: FastAPI, _settings: Any) -> None:
     """Start the outbox relay listener on the existing session factory."""
-    await _init_outbox_relay(app, celery_app)
+    await _init_outbox_relay(app, app.state.celery)
 
 
 def _report_cognee_degraded(exc: BaseException) -> None:

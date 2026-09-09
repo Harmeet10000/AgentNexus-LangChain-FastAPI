@@ -85,7 +85,7 @@ def extract_document_metadata(content: str, file_path: str) -> dict[str, Any]:
             logger.warning("PyYAML not installed, skipping frontmatter extraction")
         except yaml.YAMLError as e:
             e.add_note(f"file={file_path}, operation=parse_frontmatter")
-            logger.bind(file=file_path, operation="parse_frontmatter").warning(
+            logger.bind(file=file_path, operation="parse_frontmatter", error=str(e)).warning(
                 "Failed to parse frontmatter"
             )
 

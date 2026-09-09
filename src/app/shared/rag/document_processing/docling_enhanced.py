@@ -129,9 +129,9 @@ def extract_tables(doc: DoclingDocument) -> list[ExtractedTable]:
             # problem worth crashing on.
             except (DoclingError, ValueError, IndexError, KeyError) as e:
                 e.add_note(f"table_index={idx}, operation=extract_table")
-                logger.bind(table_index=idx, operation="extract_table").warning(
-                    "Failed to extract table"
-                )
+                logger.bind(table_index=idx, operation="extract_table", error=str(e)).opt(
+                    exception=True
+                ).warning("Failed to extract table")
 
     except ImportError:
         logger.warning("docling_core not available for table extraction")
@@ -170,9 +170,9 @@ def extract_code_blocks(doc: DoclingDocument) -> list[ExtractedCodeBlock]:
                     )
             except DoclingError as e:
                 e.add_note(f"block_index={idx}, operation=extract_code_block")
-                logger.bind(block_index=idx, operation="extract_code_block").warning(
-                    "Failed to extract code block"
-                )
+                logger.bind(block_index=idx, operation="extract_code_block", error=str(e)).opt(
+                    exception=True
+                ).warning("Failed to extract code block")
 
     except ImportError:
         logger.warning("docling_core not available for code extraction")
@@ -269,9 +269,9 @@ async def extract_images(
                     )
             except DoclingError as e:
                 e.add_note(f"image_index={idx}, operation=extract_image")
-                logger.bind(image_index=idx, operation="extract_image").warning(
-                    "Failed to extract image"
-                )
+                logger.bind(image_index=idx, operation="extract_image", error=str(e)).opt(
+                    exception=True
+                ).warning("Failed to extract image")
 
     except ImportError:
         logger.warning("docling_core not available for image extraction")
@@ -294,7 +294,9 @@ async def _generate_vlm_caption(image_data) -> str | None:
 
     except Exception as e:  # noqa: BLE001 — VLM API can raise varied provider errors
         e.add_note("operation=vlm_caption")
-        logger.bind(operation="vlm_caption").warning("VLM captioning failed")
+        logger.bind(operation="vlm_caption", error=str(e)).opt(exception=True).warning(
+            "VLM captioning failed"
+        )
         return None
     else:
         return response.text or None
@@ -373,7 +375,9 @@ async def _run_doctags_stage(
         return doc.export_to_doc_tags()
     except DoclingError as e:
         e.add_note(f"document={source}, operation=export_doctags")
-        logger.bind(document=source, operation="export_doctags").warning("DocTags export failed")
+        logger.bind(document=source, operation="export_doctags", error=str(e)).opt(
+            exception=True
+        ).warning("DocTags export failed")
         return None
 
 
