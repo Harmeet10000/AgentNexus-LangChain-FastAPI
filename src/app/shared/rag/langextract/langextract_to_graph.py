@@ -26,8 +26,8 @@ class GraphIngestionContext(BaseModel):
     document_id: str
     source_url: str = ""
     neo4j_client: Neo4jClient | None = None
-    user_id: str = ""
-    thread_id: str = ""
+    user_id: str
+    thread_id: str
     jurisdiction: str = "unspecified"
     document_type: str = "generic"
     human_reviewed: bool = False

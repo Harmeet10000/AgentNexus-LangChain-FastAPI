@@ -116,6 +116,7 @@ async def chunk_document(
     tokenizer: PreTrainedTokenizerBase,
     *,
     hybrid_chunker: HybridChunker | None = ...,
+    metadata: dict[str, Any] | None = ...,
     docling_doc: DoclingDocument | None = ...,
 ) -> list[Chunk]: ...
 
