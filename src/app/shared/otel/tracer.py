@@ -23,11 +23,11 @@ def _setup_tracer_provider(
         sampler=ParentBased(root=TraceIdRatioBased(sample_rate)) if sample_rate < 1.0 else None,
     )
     processor = BatchSpanProcessor(
-        OTLPSpanExporter(endpoint=endpoint),
+        span_exporter=OTLPSpanExporter(endpoint=endpoint),
         max_queue_size=2048,
         max_export_batch_size=512,
         schedule_delay_millis=5000,
     )
-    provider.add_span_processor(processor)
-    trace.set_tracer_provider(provider)
+    provider.add_span_processor(span_processor=processor)
+    trace.set_tracer_provider(tracer_provider=provider)
     return provider
