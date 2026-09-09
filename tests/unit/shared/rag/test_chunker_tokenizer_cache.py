@@ -1,6 +1,6 @@
 """Unit tests for task B4 — the token counter is loaded once per process.
 
-Before B4, ``rag/document_processing/chunker.py``'s accessor ran the transformers
+Before B4, ``rag/docling/chunker.py``'s accessor ran the transformers
 auto-class loader on every call and logged "Initializing tokenizer" every time.
 The cost is not theoretical: there is no local model cache on a fresh machine, so
 the first load is a network download inside a synchronous function, and every
@@ -30,14 +30,14 @@ from unittest.mock import MagicMock
 import pytest
 from transformers import PreTrainedTokenizerBase
 
-from app.shared.rag.document_processing import chunker as chunker_module
-from app.shared.rag.document_processing.chunker import (
+from app.shared.rag.docling import chunker as chunker_module
+from app.shared.rag.docling.chunker import (
     DEFAULT_TOKENIZER_MODEL_ID,
     chunk_document,
     get_tokenizer,
     initialize_chunking,
 )
-from app.shared.rag.document_processing.models import IngestionConfig
+from app.shared.rag.docling.models import IngestionConfig
 
 _OTHER_MODEL_ID = "sentence-transformers/all-mpnet-base-v2"
 _CONTENT = "Alpha beta gamma. Delta epsilon zeta."

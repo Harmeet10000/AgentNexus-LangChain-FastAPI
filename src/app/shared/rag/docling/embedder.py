@@ -415,7 +415,7 @@ def create_embedder() -> _Embedder:
 
 # B2 removed a third embedding cache from here: an in-memory `EmbeddingCache` (LRU by access
 # time, MD5-keyed on text alone) plus `create_embedding_cache` and `create_cached_embedder`.
-# Nothing referenced any of the three — not this module, not `document_processing/__init__.py`,
+# Nothing referenced any of the three — not this module, not `docling/__init__.py`,
 # not a test. It is deleted rather than left because B2's whole subject is that a text-only
 # embedding cache key is unsound once task type is declared, and this one was per-process on top
 # of that: each worker would have kept its own copy. Leaving a dead cache of exactly the shape

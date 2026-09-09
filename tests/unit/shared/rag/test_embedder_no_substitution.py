@@ -1,6 +1,6 @@
 """Unit tests for task A2 — the batch embedder must never substitute a vector.
 
-Before A2, three sites in ``rag/document_processing/embedder.py`` appended a
+Before A2, three sites in ``rag/docling/embedder.py`` appended a
 zero-filled vector of the configured width when a provider call failed, and a
 fourth replaced a blank chunk with an empty string so the result stayed
 positionally aligned. Every one of those produces a row that inserts cleanly and
@@ -23,18 +23,18 @@ import pytest
 from google.genai import errors as genai_errors
 
 from app.config import get_settings
-from app.shared.rag.document_processing import embedder as embedder_module
-from app.shared.rag.document_processing.embedder import (
+from app.shared.rag.docling import embedder as embedder_module
+from app.shared.rag.docling.embedder import (
     GEMINI_TASK_TYPE,
     embed_chunks,
     generate_embedding,
     generate_embeddings_batch,
     get_embedding_dimension,
 )
-from app.shared.rag.document_processing.models import Chunk
+from app.shared.rag.docling.models import Chunk
 from app.utils.exceptions import ExternalServiceException
 
-_MODULE = "app.shared.rag.document_processing.embedder"
+_MODULE = "app.shared.rag.docling.embedder"
 
 # A width that is not the configured one. Read from configuration rather than
 # written down, so the test cannot quietly start passing if the setting changes.

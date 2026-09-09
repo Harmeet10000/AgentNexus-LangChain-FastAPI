@@ -20,7 +20,7 @@ def stored_width_mismatch(stored_dim: int) -> tuple[int, int] | None:
     ``assert_stored_width_matches_configured`` for the raising half.
 
     Why this is a *stored*-width check and not the provider-width check in
-    ``rag/document_processing/embedder._validated_width``: that one catches a model
+    ``rag/docling/embedder._validated_width``: that one catches a model
     returning the wrong shape right now, which is recoverable by fixing the model
     id. This one catches a column whose width was fixed at migration time against
     a setting that has since changed — nothing about that is recoverable at

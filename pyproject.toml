@@ -533,22 +533,19 @@ section-order = [
     "F821",
     "PLC0415",
 ]
-"src/app/shared/rag/document_processing/ingest.py" = [
+"src/app/shared/rag/docling/ingest_v2.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/shared/rag/document_processing/ingest_v2.py" = [
+"src/app/shared/rag/docling/embedder.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/shared/rag/document_processing/embedder.py" = [
+"src/app/shared/rag/docling/docling_enhanced.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/shared/rag/document_processing/docling_enhanced.py" = [
+"src/app/shared/rag/docling/chunker.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/shared/rag/document_processing/chunker.py" = [
-    "PLC0415", # Late imports to break circular deps
-]
-"src/app/shared/rag/document_processing/entity_extractor.py" = [
+"src/app/shared/rag/docling/entity_extractor.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
 "src/app/shared/otel/instrument.py" = [

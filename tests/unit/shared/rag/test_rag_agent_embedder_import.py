@@ -35,7 +35,7 @@ from pathlib import Path
 # Deliberately NOT imported. Every fact below is read from the source text,
 # because importing this module is the one thing that does not work — see
 # `test_module_remains_unimportable_pending_leg_e`.
-_TARGET = "app.shared.rag.document_processing.embedder"
+_TARGET = "app.shared.rag.docling.embedder"
 _SOURCE_PATH = (
     Path(__file__).resolve().parents[4] / "src" / "app" / "examples" / "rag_agent_advanced.py"
 )

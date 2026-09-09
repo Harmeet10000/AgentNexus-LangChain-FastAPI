@@ -98,7 +98,7 @@ relation, not on ``chunks``. It is not the contract for this revision.
 When this revision was written, neither the ``UnifiedChunk`` ORM model
 (``features/documents/model.py:73`` — the class is *not* named ``Chunk``; that
 name belongs to an unrelated Pydantic model in
-``shared/rag/document_processing/models.py``) nor any query in the repository
+``shared/rag/docling/models.py``) nor any query in the repository
 declared or read ``updated_at``. Only ``UnifiedDocument`` had one. A ``NOT NULL``
 column with no default would therefore break every ORM insert, because nothing
 supplies a value. ``DEFAULT now()`` keeps it satisfiable from the database side
