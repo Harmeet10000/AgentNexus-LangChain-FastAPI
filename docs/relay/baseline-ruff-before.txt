@@ -1,0 +1,23 @@
+src/app/features/agent_saul/__init__.py:1:1: implicit-namespace-package: File `src/app/features/agent_saul/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/features/audit/__init__.py:1:1: implicit-namespace-package: File `src/app/features/audit/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/features/auth/__init__.py:1:1: implicit-namespace-package: File `src/app/features/auth/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/features/billing/__init__.py:1:1: implicit-namespace-package: File `src/app/features/billing/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/features/chat/__init__.py:1:1: implicit-namespace-package: File `src/app/features/chat/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/features/crawler/__init__.py:1:1: implicit-namespace-package: File `src/app/features/crawler/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/features/documents/__init__.py:1:1: implicit-namespace-package: File `src/app/features/documents/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/features/documents/dependencies.py:13:40: import-private-name: Private name import `_build_chat_model` from external module `app.shared.langchain_layer`
+src/app/features/documents/service.py:19:47: import-private-name: Private name import `_build_chat_model` from external module `app.shared.langchain_layer.models`
+src/app/features/documents/service.py:26:5: import-private-name: Private name import `_extract_postgres_chunk_ids` from external module `app.shared.langgraph_layer.retrieval_kb`
+src/app/features/health/__init__.py:1:1: implicit-namespace-package: File `src/app/features/health/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/features/ingestion/__init__.py:1:1: implicit-namespace-package: File `src/app/features/ingestion/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/features/profile/__init__.py:1:1: implicit-namespace-package: File `src/app/features/profile/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/features/search/__init__.py:1:1: implicit-namespace-package: File `src/app/features/search/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/features/users/__init__.py:1:1: implicit-namespace-package: File `src/app/features/users/__init__.py` declares a package, but is nested under an implicit namespace package. Add an `__init__.py` to `src/app/features`.
+src/app/shared/rag/docling/chunker.py:357:5: import-outside-top-level: `import` should be at the top-level of a file
+src/app/shared/rag/docling/docling_enhanced.py:44:9: import-outside-top-level: `import` should be at the top-level of a file
+src/app/shared/rag/docling/embedder.py:69:5: import-outside-top-level: `import` should be at the top-level of a file
+src/app/shared/rag/docling/entity_extractor.py:81:5: import-outside-top-level: `import` should be at the top-level of a file
+src/app/shared/rag/docling/ingest_v2.py:76:13: import-outside-top-level: `import` should be at the top-level of a file
+src/app/shared/rag/docling/ingest_v2.py:111:9: import-outside-top-level: `import` should be at the top-level of a file
+src/app/shared/rag/docling/ingest_v2.py:121:13: import-outside-top-level: `import` should be at the top-level of a file
+Found 22 errors.
