@@ -28,47 +28,47 @@ Baseline files this change produces live in `docs/relay/` and are cited by name 
 
 ## 1 Confirm the toolchain without mutating it
 
-- [ ] 1.1 Check lock freshness. Do **not** run a bare `uv sync`: the test dependencies sit outside
+- [x] 1.1 Check lock freshness. Do **not** run a bare `uv sync`: the test dependencies sit outside
   `default-groups = ["dev"]` (`pyproject.toml:240,252`), so a bare sync uninstalls `pytest-asyncio`
   and silently breaks collection.
   **Proof:** `uv lock --check; echo $?` → `0`.
-- [ ] 1.2 Capture the pre-repair lint baseline, before any file is touched.
+- [x] 1.2 Capture the pre-repair lint baseline, before any file is touched.
   **Proof:** `uv run ruff check --no-cache --output-format concise src/ > docs/relay/baseline-ruff-before.txt; wc -l < docs/relay/baseline-ruff-before.txt`
   → a recorded count. Do not assert a specific number here; the point of the file is that the number
   is measured rather than remembered.
 
 ## 2 Repoint the rename
 
-- [ ] 2.0 **Track the replacement tree first.** `src/app/shared/rag/docling/` is untracked while
+- [x] 2.0 **Track the replacement tree first.** `src/app/shared/rag/docling/` is untracked while
   `src/app/shared/rag/document_processing/` is deleted-and-staged. Until this lands, every Proof below
   runs against files version control cannot see, and the commit at the end of this cluster would land
   a repository that does not import.
   **Proof:** `git status --porcelain src/app/shared/rag/ | rg '^\?\?'; test $? -eq 1` → exit `0`.
-- [ ] 2.1 `src/app/shared/rag/docling/__init__.py:3,9,21,27,37` — the replacement package imports the
+- [x] 2.1 `src/app/shared/rag/docling/__init__.py:3,9,21,27,37` — the replacement package imports the
   package it replaces.
   **Proof:** `uv run python -c "import app.shared.rag.docling"; echo $?` → `0`.
-- [ ] 2.2 `src/app/features/documents/classification.py:13,14` and
+- [x] 2.2 `src/app/features/documents/classification.py:13,14` and
   `src/app/features/documents/parser.py:11,12`.
   **Proof:** `uv run python -c "import app.features.documents.parser, app.features.documents.classification"; echo $?` → `0`.
-- [ ] 2.3 `src/app/shared/langgraph_layer/ingestion_kb/nodes.py:31` (the `table_markdown` import) and
+- [x] 2.3 `src/app/shared/langgraph_layer/ingestion_kb/nodes.py:31` (the `table_markdown` import) and
   `src/app/examples/policy_examples.py:36,40`.
   **Proof:** `uv run python -c "import app.shared.langgraph_layer.ingestion_kb.nodes, app.examples.policy_examples"; echo $?` → `0`.
-- [ ] 2.4 Whole-application import.
+- [x] 2.4 Whole-application import.
   **Proof:** `uv run python -c "import app.main"; echo $?` → `0`.
-- [ ] 2.5 Tests: `tests/unit/test_auth_documents_feature_errors.py:19`,
+- [x] 2.5 Tests: `tests/unit/test_auth_documents_feature_errors.py:19`,
   `tests/unit/shared/rag/test_chunker_tokenizer_cache.py:33,34,40`,
   `tests/unit/shared/rag/test_embedder_no_substitution.py:26,27,34`, and
   `tests/unit/shared/rag/test_rag_agent_embedder_import.py:38` — the last is a **patch-target string**,
   not an import, so no symbol-import probe can see it.
   **Proof:** `uv run pytest -q --collect-only > /dev/null; echo $?` → `0`. A string grep alone is an
   insufficient probe here.
-- [ ] 2.6 `pyproject.toml:536-553` — repoint five per-file-ignore entries to
+- [x] 2.6 `pyproject.toml:536-553` — repoint five per-file-ignore entries to
   `src/app/shared/rag/docling/*`, and **delete** the `document_processing/ingest.py` entry. The
   replacement package has seven modules (`__init__`, `chunker`, `docling_enhanced`, `embedder`,
   `entity_extractor`, `ingest_v2`, `models`) and `ingest.py` is not among them, so that exemption
   names a file that will never exist.
   **Proof:** `rg -n "document_processing" pyproject.toml; test $? -eq 1` → exit `0`.
-- [ ] 2.7 Non-load-bearing references: `src/app/utils/embedding.py:23`,
+- [x] 2.7 Non-load-bearing references: `src/app/utils/embedding.py:23`,
   `src/alembic/versions/0013_*.py:101` (a comment), and
   `src/app/shared/rag/langextract/langextract_to_graph.py:1` (a docstring).
   **Proof:** `rg -n "rag\.document_processing|rag/document_processing" src/ tests/ pyproject.toml; test $? -eq 1`
@@ -76,30 +76,30 @@ Baseline files this change produces live in `docs/relay/` and are cited by name 
 
 ## 3 The features package
 
-- [ ] 3.1 Create `src/app/features/__init__.py` **empty**. It was deleted in `8e25352` to sever
+- [x] 3.1 Create `src/app/features/__init__.py` **empty**. It was deleted in `8e25352` to sever
   model-import and router-import coupling; restoring content would restore the coupling.
   **Proof:** `test ! -s src/app/features/__init__.py; echo $?` → `0`.
-- [ ] 3.2 Confirm the eager coupling did not return with the file.
+- [x] 3.2 Confirm the eager coupling did not return with the file.
   **Proof:** `uv run python -c "import app.features, sys; assert not [m for m in sys.modules if m.startswith('app.features.') and m.endswith('.router')]"; echo $?`
   → `0`. If this is red, fall back to a scoped `INP001` per-file-ignore and record in `review.md` why
   the empty-package route was not available.
 
 ## 4 Measure and record the cluster baseline
 
-- [ ] 4.1 Lint after the repair.
+- [x] 4.1 Lint after the repair.
   **Proof:** `uv run ruff check --no-cache --output-format concise src/ > docs/relay/baseline-ruff-after.txt; rg -o "[A-Z]+[0-9]+" docs/relay/baseline-ruff-after.txt | sort -u`
   → `PLC2701` only, which `ingestion-chunking` owns; and the line count is strictly less than
   `baseline-ruff-before.txt`.
-- [ ] 4.2 **First real pytest measurement.** Budget wall-clock for it: a single import probe during
+- [x] 4.2 **First real pytest measurement.** Budget wall-clock for it: a single import probe during
   scouting exceeded 120 s. `addopts` already carries `--timeout=60` and deselects `integration` and
   `requires_db`.
   **Proof:** `uv run pytest -q > docs/relay/baseline-pytest.txt 2>&1; tail -1 docs/relay/baseline-pytest.txt`
   → a summary line. This file is the baseline every later change cites, under Proof rule 1.
-- [ ] 4.3 Type baseline. Measure it; do not carry a prior count forward — a previously recorded ty
+- [x] 4.3 Type baseline. Measure it; do not carry a prior count forward — a previously recorded ty
   count of 2 was actually 46, and repairing a shadowed import made the number go *up* because thirteen
   suppression comments turned dead.
   **Proof:** `uv run ty check src/ > docs/relay/baseline-ty.txt 2>&1; tail -1 docs/relay/baseline-ty.txt`.
-- [ ] 4.4 **First attempt at the live revision.** Expected to fail: `src/alembic/env.py` is known to
+- [x] 4.4 **First attempt at the live revision.** Expected to fail: `src/alembic/env.py` is known to
   break migration commands, and it needs the now-repaired tree to import at all.
   **Proof:** `uv run alembic current > docs/relay/baseline-alembic.txt 2>&1 || true; cat docs/relay/baseline-alembic.txt`
   → the file holds either a revision identifier or the verbatim failure.
@@ -115,7 +115,7 @@ Baseline files this change produces live in `docs/relay/` and are cited by name 
 
 ## 5 Restore the specification baseline
 
-- [ ] 5.1 Copy ten archived capability specs into `openspec/specs/<capability>/spec.md`. Reproduce
+- [x] 5.1 Copy ten archived capability specs into `openspec/specs/<capability>/spec.md`. Reproduce
   requirement and scenario text verbatim; replace the `## ADDED Requirements` header with
   `## Requirements`; carry the delta's `## Purpose` body across unchanged. Format authority is the
   "Main Spec Format Reference" in `.opencode/skills/openspec-sync-specs/SKILL.md` — a main spec never
@@ -136,18 +136,18 @@ Baseline files this change produces live in `docs/relay/` and are cited by name 
 
   **Proof:** for each restored file, `rg -c '^### Requirement:'` and `rg -c '^#### Scenario:'` equal
   the counts above; and `openspec validate --specs` exits `0`.
-- [ ] 5.2 Record in `review.md` the two capabilities deliberately **not** restored, and why.
+- [x] 5.2 Record in `review.md` the two capabilities deliberately **not** restored, and why.
   `graphiti-init-order` and `embedding-dimension-config` predate the requirement grammar — they use
   `## Scope` / `## Problem` / `## Solution` / `## Verification` and contain zero requirement blocks, so
   there is nothing to restore. Their content is absorbed as ordinary source facts.
   **Proof:** `rg -c '^### Requirement:' openspec/changes/archive/2026-06-22-quality-fixes-batch-2/specs/graphiti-init-order/spec.md; test $? -eq 1`
   → exit `0`.
-- [ ] 5.3 Record the four measurements behind the restore in `review.md`, so it is auditable rather
+- [x] 5.3 Record the four measurements behind the restore in `review.md`, so it is auditable rather
   than asserted: the `typed-exception-handling` comparison, the six archive tick counts, the
   `src/app/shared/rag/docling/embedder.py:44-48` deferral quoted verbatim, and the `AgentToolBundle`
   docstring's "empty tool lists" admission.
   **Proof:** `review.md` contains all four, each with a file path or an archive directory name.
-- [ ] 5.4 Confirm this change writes **no** delta against any restored capability.
+- [x] 5.4 Confirm this change writes **no** delta against any restored capability.
   **Proof:** `ls openspec/changes/rag-tree-repair/specs/` → `source-tree-integrity` only.
 
 ## 6 Close out
