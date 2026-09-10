@@ -103,11 +103,11 @@ Baseline files this change produces live in `docs/relay/` and are cited by name 
   break migration commands, and it needs the now-repaired tree to import at all.
   **Proof:** `uv run alembic current > docs/relay/baseline-alembic.txt 2>&1 || true; cat docs/relay/baseline-alembic.txt`
   → the file holds either a revision identifier or the verbatim failure.
-- [ ] 4.5 **Repair `src/alembic/env.py` until 4.4 succeeds.** Scope is strictly the environment module.
+- [x] 4.5 **Repair `src/alembic/env.py` until 4.4 succeeds.** Scope is strictly the environment module.
   No revision may be authored, edited, or applied in this change.
   **Proof:** `uv run alembic current > docs/relay/baseline-alembic.txt 2>&1; echo $?` → `0`, and the
   recorded identifier matches a `revision` literal present under `src/alembic/versions/`.
-- [ ] 4.6 Reconcile the three disagreeing claims about the head in `review.md`: disk carries
+- [x] 4.6 Reconcile the three disagreeing claims about the head in `review.md`: disk carries
   `0001`–`0017`; the handover claims `b3e7c41d92af`, which matches no revision on disk; project memory
   says the database is stamped at `0004`. The measured value wins.
   **Proof:** `review.md` names the measured identifier and states which of the three claims it
