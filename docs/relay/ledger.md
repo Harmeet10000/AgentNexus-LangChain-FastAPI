@@ -8,7 +8,25 @@ except the two managed resources in protocol §4.
 
 | Wave | Change | Branch | Worktree | State |
 |---|---|---|---|---|
-| W0 | `rag-tree-repair` | `impl/rag-tree-repair` | `../lcfp-rag-tree-repair` | in progress |
+| W0 | `rag-tree-repair` | `impl/rag-tree-repair` | (removed) | MERGED a13b384 · tagged impl/rag-tree-repair-done · archived 2026-09-10-rag-tree-repair |
+| W1 | `rag-eval-harness` ∥ `graph-lifecycle` | — | — | ready to schedule |
+
+## Merge record — W0
+
+- Merge `a13b384` (pre: a5c475b; branch replayed as deb6079, 7/7 clean).
+  38 files: 5 baselines, ticks+slots, 10 restored specs (incl.
+  `hierarchical-document-chunking`, `legal-corpus-retrieval`), rename
+  `document_processing/` → `docling/`, import repoints, 4 tests,
+  `pyproject.toml`. Post-rebase gates: ruff clean, ty 10, pytest
+  1/626/39, heads single 0017. Archive: +6 ~0 -0, no MODIFIED.
+- Handoff facts for W1: live stamp 0016 (one behind head 0017);
+  baselines at docs/relay/baseline-* on main; tree imports, suite collects.
+- Outstanding (human): rotate Timescale credential post-merge (secret
+  purged from branch history, zero matches; pack remnant possible).
+- Parked: stash@{0} holds pre-existing main-checkout dirt (perf-session:
+  document_processing deletions now obsolete, todo.md + cognee deletion,
+  divergent untracked docling/ + perf doc). Do NOT pop blindly —
+  needs ownership decision.
 
 ## Declared owned-path sets (from each proposal's Impact section)
 
