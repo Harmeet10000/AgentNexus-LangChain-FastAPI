@@ -16,7 +16,7 @@ from app.features.auth.errors import (
 )
 from app.features.auth.repository import UserRepository
 from app.features.documents.errors import DocumentDatabaseError, DocumentNotFoundError
-from app.shared.rag.document_processing.embedder import _provider_failure
+from app.shared.rag.docling.embedder import _provider_failure
 from app.shared.rag.errors import RagProviderError
 from app.shared.result import ErrorKind, render_result
 from app.utils import ForbiddenException, UnauthorizedException

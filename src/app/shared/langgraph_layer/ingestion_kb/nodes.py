@@ -28,7 +28,7 @@ from app.shared.langgraph_layer.kb_retry import (
     describe_failure,
     retry_immediate,
 )
-from app.shared.rag.document_processing.docling_enhanced import table_markdown
+from app.shared.rag.docling.docling_enhanced import table_markdown
 from app.shared.rag.graphiti.schemas import (
     GRAPHITI_EDGE_TYPE_MAP,
     GRAPHITI_EDGE_TYPES,

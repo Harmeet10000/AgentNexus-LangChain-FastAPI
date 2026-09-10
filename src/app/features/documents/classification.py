@@ -10,8 +10,8 @@ from docling_core.types.doc.document import DoclingDocument
 from docling_core.types.doc.labels import DocItemLabel
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.shared.rag.document_processing import IngestionConfig
-from app.shared.rag.document_processing.chunker import (
+from app.shared.rag.docling import IngestionConfig
+from app.shared.rag.docling.chunker import (
     DEFAULT_TOKENIZER_MODEL_ID,
     create_hybrid_chunker,
     get_tokenizer,

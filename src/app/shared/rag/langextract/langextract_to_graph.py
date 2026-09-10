@@ -1,4 +1,4 @@
-# src/app/shared/document_processing/langextract_to_graph.py
+# src/app/shared/rag/langextract/langextract_to_graph.py
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable

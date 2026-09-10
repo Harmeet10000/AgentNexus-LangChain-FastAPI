@@ -1,12 +1,12 @@
 """Document processing utilities."""
 
-from app.shared.rag.document_processing.chunker import (
+from app.shared.rag.docling.chunker import (
     chunk_document,
     chunk_document_simple,
     create_hybrid_chunker,
     get_tokenizer,
 )
-from app.shared.rag.document_processing.docling_enhanced import (
+from app.shared.rag.docling.docling_enhanced import (
     DoclingEnhancementConfig,
     DoclingExtractionResult,
     ExtractedCodeBlock,
@@ -18,13 +18,13 @@ from app.shared.rag.document_processing.docling_enhanced import (
     extract_images,
     extract_tables,
 )
-from app.shared.rag.document_processing.embedder import (
+from app.shared.rag.docling.embedder import (
     create_embedder,
     embed_chunks,
     generate_embedding,
     generate_embeddings_batch,
 )
-from app.shared.rag.document_processing.entity_extractor import (
+from app.shared.rag.docling.entity_extractor import (
     Entity,
     ExtractionResult,
     Relationship,
@@ -34,7 +34,7 @@ from app.shared.rag.document_processing.entity_extractor import (
     extract_with_fallback,
     extract_with_graphiti,
 )
-from app.shared.rag.document_processing.models import (
+from app.shared.rag.docling.models import (
     AgentDependencies,
     Chunk,
     ChunkRequest,

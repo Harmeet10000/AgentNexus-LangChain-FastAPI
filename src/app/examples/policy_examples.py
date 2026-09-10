@@ -33,11 +33,11 @@ from app.lifecycle.lifespan import (
     StartupPolicy,
     _run_startup_policy,
 )
-from app.shared.rag.document_processing.docling_enhanced import (
+from app.shared.rag.docling.docling_enhanced import (
     EXTRACTION_STAGES,
     ExtractionStage,
 )
-from app.shared.rag.document_processing.models import DoclingEnhancementConfig
+from app.shared.rag.docling.models import DoclingEnhancementConfig
 from app.utils import logger
 
 if TYPE_CHECKING:

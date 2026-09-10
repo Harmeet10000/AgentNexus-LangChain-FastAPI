@@ -9,7 +9,7 @@ Six paths existed before this module. Four of them are named by task B1; two are
    three candidate method names, embedded one text per call, declared no task type.
 4. ``langgraph_layer/retrieval_kb/nodes._call_embedding_fn`` — **byte-identical** to (3), and
    sharing its Redis keyspace. B1 counts (3) and (4) as one path; they are two files.
-5. ``rag/document_processing/embedder`` — the batch carve-out, fixed under A2/A3. Decision 15
+5. ``rag/docling/embedder`` — the batch carve-out, fixed under A2/A3. Decision 15
    keeps it batch-only, so it is deliberately **not** folded in here.
 6. ``langchain_layer/models.aembed_text`` / ``aembed_batch`` — dead: nothing imported them, and
    they offloaded the *synchronous* provider method to a thread while the client has native

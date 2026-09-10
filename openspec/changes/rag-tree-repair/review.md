@@ -112,10 +112,15 @@ next reader.
 
 Fill in after task 4.5 succeeds.
 
-- Measured `alembic current`: _pending_
-- Which of the three claims it contradicts: disk (`0001`–`0017`) / handover (`b3e7c41d92af`) /
-  project memory (`0004`): _pending_
+- Measured `alembic current`: `0016` (exit `0`, measured 2026-09-10 against the live Timescale instance; matches the `revision` literal at `src/alembic/versions/0016_add_statute_identity_index.py:19`; chain `0016 → 0017` confirmed via 0017's `down_revision`; single head `0017` via `alembic heads`, exit `0`).
+- Which of the three claims it contradicts: handover (`b3e7c41d92af` matches no revision on disk — `grep -rl` over `src/alembic/versions/` empty) and project memory (`0004` contradicted — live stamp is `0016`); disk (`0001`–`0017`, seventeen revisions on disk) confirmed. The live database sits exactly one revision behind the disk head (`0016` vs `0017`); the probe was read-only (stamp unchanged, no revision authored, edited, or applied; `src/alembic/env.py` untouched — the hypothesised env defect is unproven, the earlier Errno 111 reads as environmental/transient).
 - Consumed by: `ingestion-chunking` task 2.2, as the `down_revision` for the chunk-identity migration.
+
+## Measured — proof-text divergences recorded at 4.5/4.6 close-out (task text untouched)
+
+- Task 4.1 proof text expects `PLC2701` only; measured zero diagnostics (`All checks passed!`, byte-identical to `docs/relay/baseline-ruff-after.txt`). Better direction, not a regression; cause recorded in the 4.1–4.4 commit body (restoring `src/app/features/__init__.py` reclassifies the same-package private imports).
+- Task 5.1 proof text expects `openspec validate --specs` exit `0`; measured exit `1` with `36 passed, 2 failed`, both failures pre-existing specs owned by no change (all ten restored specs pass). Neutral; recorded here and in the commit body, never in `tasks.md`.
+- Task 4.5 proof text is satisfied with no source change: `src/alembic/env.py` is byte-identical to `main` and `alembic current` exits `0` today, so there was nothing to repair; the 4.4 failure (Errno 111) does not reproduce.
 
 ## Pending — features package fallback (task 3.2)
 

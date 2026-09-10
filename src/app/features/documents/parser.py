@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 import asyncer
 from docling.document_converter import DocumentConverter, DocumentStream
 
-from app.shared.rag.document_processing import create_document_converter
-from app.shared.rag.document_processing.docling_enhanced import table_markdown
+from app.shared.rag.docling import create_document_converter
+from app.shared.rag.docling.docling_enhanced import table_markdown
 
 from .classification import ParsedDocument
 

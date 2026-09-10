@@ -1,0 +1,203 @@
+error[no-matching-overload]: No overload of function `create_agent` matches arguments
+   --> src/app/shared/langchain_layer/agents/factory.py:188:16
+    |
+188 |       compiled = create_agent(
+    |  ________________^
+189 | |         model,
+190 | |         tools=resolved_tools,
+191 | |         system_prompt=system_text,
+192 | |         middleware=middleware,
+193 | |         response_format=spec.response_format,
+194 | |         context_schema=spec.context_schema,  # ty: ignore[invalid-argument-type]
+195 | |         checkpointer=memory.checkpointer,
+196 | |         debug=spec.debug,
+197 | |         name=spec.name,
+198 | |     )
+    | |_____^
+    |
+info: First overload defined here
+   --> .venv/lib/python3.12/site-packages/langchain/agents/factory.py:771:1
+    |
+771 | / @overload
+772 | | def create_agent(
+773 | |     model: str | BaseChatModel,
+774 | |     tools: Sequence[BaseTool | Callable[..., Any] | dict[str, Any]] | None = None,
+775 | |     *,
+776 | |     system_prompt: str | SystemMessage | None = None,
+777 | |     middleware: Sequence[AgentMiddleware[StateT_co, ContextT]] = (),
+778 | |     response_format: None = None,
+779 | |     state_schema: None = None,
+780 | |     context_schema: type[ContextT] | None = None,
+781 | |     checkpointer: Checkpointer | None = None,
+782 | |     store: BaseStore | None = None,
+783 | |     interrupt_before: list[str] | None = None,
+784 | |     interrupt_after: list[str] | None = None,
+785 | |     debug: bool = False,
+786 | |     name: str | None = None,
+787 | |     cache: BaseCache[Any] | None = None,
+788 | |     transformers: Sequence[TransformerFactory] | None = None,
+789 | | ) -> CompiledStateGraph[AgentState[Any], ContextT, InputAgentState, OutputAgentState[Any]]: ...
+    | |_______________________________________________________________________________________________^ First overload defined here
+    |
+info: Possible overloads for function `create_agent`:
+info:   [StateT_co, ContextT](model: str | BaseChatModel, tools: Sequence[BaseTool | ((...) -> Any) | dict[str, Any]] | None = None, *, system_prompt: str | SystemMessage | None = None, middleware: Sequence[AgentMiddleware[StateT_co, ContextT, Any]] = ..., response_format: None = None, state_schema: None = None, context_schema: type[ContextT] | None = None, checkpointer: None | bool | BaseCheckpointSaver[Unknown] = None, store: BaseStore | None = None, interrupt_before: list[str] | None = None, interrupt_after: list[str] | None = None, debug: bool = False, name: str | None = None, cache: BaseCache[Any] | None = None, transformers: Sequence[(tuple[str, ...], /) -> StreamTransformer] | None = None) -> CompiledStateGraph[Unknown, ContextT, Unknown, Unknown]
+info:   [StateT_co, ContextT](model: str | BaseChatModel, tools: Sequence[BaseTool | ((...) -> Any) | dict[str, Any]] | None = None, *, system_prompt: str | SystemMessage | None = None, middleware: Sequence[AgentMiddleware[StateT_co, ContextT, Any]] = ..., response_format: dict[str, Any], state_schema: type[AgentState[dict[str, Any]]] | None = None, context_schema: type[ContextT] | None = None, checkpointer: None | bool | BaseCheckpointSaver[Unknown] = None, store: BaseStore | None = None, interrupt_before: list[str] | None = None, interrupt_after: list[str] | None = None, debug: bool = False, name: str | None = None, cache: BaseCache[Any] | None = None, transformers: Sequence[(tuple[str, ...], /) -> StreamTransformer] | None = None) -> CompiledStateGraph[Unknown, ContextT, Unknown, Unknown]
+info:   [StateT_co, ContextT, ResponseT](model: str | BaseChatModel, tools: Sequence[BaseTool | ((...) -> Any) | dict[str, Any]] | None = None, *, system_prompt: str | SystemMessage | None = None, middleware: Sequence[AgentMiddleware[StateT_co, ContextT, Any]] = ..., response_format: ToolStrategy[ResponseT] | ProviderStrategy[ResponseT] | AutoStrategy[ResponseT] | type[ResponseT] | None = None, state_schema: type[AgentState[ResponseT]] | None = None, context_schema: type[ContextT] | None = None, checkpointer: None | bool | BaseCheckpointSaver[Unknown] = None, store: BaseStore | None = None, interrupt_before: list[str] | None = None, interrupt_after: list[str] | None = None, debug: bool = False, name: str | None = None, cache: BaseCache[Any] | None = None, transformers: Sequence[(tuple[str, ...], /) -> StreamTransformer] | None = None) -> CompiledStateGraph[Unknown, ContextT, Unknown, Unknown]
+info: Overload implementation defined here
+   --> .venv/lib/python3.12/site-packages/langchain/agents/factory.py:840:5
+    |
+840 |   def create_agent(
+    |  _____^
+841 | |     model: str | BaseChatModel,
+842 | |     tools: Sequence[BaseTool | Callable[..., Any] | dict[str, Any]] | None = None,
+843 | |     *,
+844 | |     system_prompt: str | SystemMessage | None = None,
+845 | |     middleware: Sequence[AgentMiddleware[StateT_co, ContextT]] = (),
+846 | |     response_format: ResponseFormat[ResponseT] | type[ResponseT] | dict[str, Any] | None = None,
+847 | |     state_schema: type[AgentState[ResponseT]] | None = None,
+848 | |     context_schema: type[ContextT] | None = None,
+849 | |     checkpointer: Checkpointer | None = None,
+850 | |     store: BaseStore | None = None,
+851 | |     interrupt_before: list[str] | None = None,
+852 | |     interrupt_after: list[str] | None = None,
+853 | |     debug: bool = False,
+854 | |     name: str | None = None,
+855 | |     cache: BaseCache[Any] | None = None,
+856 | |     transformers: Sequence[TransformerFactory] | None = None,
+857 | | ) -> CompiledStateGraph[
+858 | |     AgentState[ResponseT], ContextT, InputAgentState, OutputAgentState[ResponseT]
+859 | | ]:
+    | |_^
+    |
+
+warning[unused-ignore-comment]: Unused `ty: ignore` directive
+   --> src/app/shared/langchain_layer/agents/factory.py:194:46
+    |
+194 |         context_schema=spec.context_schema,  # ty: ignore[invalid-argument-type]
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: Remove the unused suppression comment
+    |
+193 |         response_format=spec.response_format,
+    -         context_schema=spec.context_schema,  # ty: ignore[invalid-argument-type]
+194 +         context_schema=spec.context_schema,
+195 |         checkpointer=memory.checkpointer,
+    |
+
+warning[unused-ignore-comment]: Unused `ty: ignore` directive
+  --> src/app/shared/langchain_layer/agents/middlewares/guardrails.py:47:27
+   |
+47 |         @wrap_model_call  # ty: ignore[no-matching-overload]
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: Remove the unused suppression comment
+   |
+46 |     def model_post_init(self, __context: object) -> None:
+   -         @wrap_model_call  # ty: ignore[no-matching-overload]
+47 +         @wrap_model_call
+48 |         async def _retry_wrapper(request: object, handler: object) -> Any:
+   |
+
+error[call-non-callable]: Object of type `AgentMiddleware[AgentState[Any], None, Any]` is not callable
+  --> src/app/shared/langchain_layer/agents/middlewares/guardrails.py:68:16
+   |
+68 |         return self._middleware(*args, **kwargs)
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+
+warning[unused-ignore-comment]: Unused `ty: ignore` directive
+  --> src/app/shared/langchain_layer/agents/middlewares/guardrails.py:91:24
+   |
+91 |         @before_model  # ty: ignore[no-matching-overload]
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: Remove the unused suppression comment
+   |
+90 |     def build(self) -> list[Any]:
+   -         @before_model  # ty: ignore[no-matching-overload]
+91 +         @before_model
+92 |         def inject_todos(state, request) -> Any:
+   |
+
+warning[unused-ignore-comment]: Unused `ty: ignore` directive
+   --> src/app/shared/langchain_layer/agents/middlewares/guardrails.py:111:23
+    |
+111 |         @after_model  # ty: ignore[no-matching-overload]
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: Remove the unused suppression comment
+    |
+110 |
+    -         @after_model  # ty: ignore[no-matching-overload]
+111 +         @after_model
+112 |         def parse_todo_commands(state, response) -> Any:
+    |
+
+warning[unused-ignore-comment]: Unused `ty: ignore` directive
+   --> src/app/shared/langchain_layer/agents/middlewares/guardrails.py:156:27
+    |
+156 |         @wrap_model_call  # ty: ignore[no-matching-overload]
+    |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: Remove the unused suppression comment
+    |
+155 |
+    -         @wrap_model_call  # ty: ignore[no-matching-overload]
+156 +         @wrap_model_call
+157 |         async def edit_context(request: object, handler: object) -> Any:
+    |
+
+warning[unused-ignore-comment]: Unused `ty: ignore` directive
+   --> src/app/shared/langchain_layer/agents/middlewares/guardrails.py:212:23
+    |
+212 |         @after_model  # ty: ignore[no-matching-overload]
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: Remove the unused suppression comment
+    |
+211 |
+    -         @after_model  # ty: ignore[no-matching-overload]
+212 +         @after_model
+213 |         async def check_safety(state: object, response: object) -> Any:
+    |
+
+warning[unused-ignore-comment]: Unused `ty: ignore` directive
+   --> src/app/shared/langchain_layer/agents/middlewares/guardrails.py:275:24
+    |
+275 |         @before_model  # ty: ignore[no-matching-overload]
+    |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: Remove the unused suppression comment
+    |
+274 |
+    -         @before_model  # ty: ignore[no-matching-overload]
+275 +         @before_model
+276 |         def inject_dynamic_prompt(state, request) -> Any:
+    |
+
+error[invalid-method-override]: Invalid override of method `on_llm_new_token`
+   --> src/app/shared/langchain_layer/callback.py:103:15
+    |
+103 |       async def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Definition is incompatible with `AsyncCallbackHandler.on_llm_new_token`
+    |
+   ::: .venv/lib/python3.12/site-packages/langchain_core/callbacks/base.py:632:15
+    |
+632 |       async def on_llm_new_token(
+    |  _______________-
+633 | |         self,
+634 | |         token: str | list[str | dict[str, Any]],
+635 | |         *,
+636 | |         chunk: GenerationChunk | ChatGenerationChunk | None = None,
+637 | |         run_id: UUID,
+638 | |         parent_run_id: UUID | None = None,
+639 | |         tags: list[str] | None = None,
+640 | |         **kwargs: Any,
+641 | |     ) -> None:
+    | |_____________- `AsyncCallbackHandler.on_llm_new_token` defined here
+    |
+info: parameter `token` has an incompatible type: `str | list[str | dict[str, Any]]` is not assignable to `str`
+info: └── element `list[str | dict[str, Any]]` of union `str | list[str | dict[str, Any]]` is not assignable to `str`
+info: This violates the Liskov Substitution Principle
+
+Found 10 diagnostics
