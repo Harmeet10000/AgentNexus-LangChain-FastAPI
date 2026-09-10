@@ -41,7 +41,8 @@ except the two managed resources in protocol §4.
   `src/app/shared/langchain_layer/embeddings.py` (task 2.7 repo-wide
   proof), `src/app/features/__init__.py` (task §3), and the implied
   `src/app/shared/rag/document_processing/` deletion (task 2.7).
-- Standing: `<change>/tasks.md` (tick-only edits) and
-  `docs/relay/baseline-*` artifacts are pre-authorized for every
-  change whose tasks mandate them (per reviewer recommendation;
-  tasks.md headers already state baselines live in `docs/relay/`).
+- Standing: `<change>/tasks.md` (tick-only edits), `<change>/review.md`
+  (slot-fill only), and `docs/relay/baseline-*` artifacts are
+  pre-authorized for every change whose tasks mandate them (per
+  reviewer recommendation; tasks.md headers already state baselines
+  live in `docs/relay/`).

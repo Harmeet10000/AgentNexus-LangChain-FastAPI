@@ -54,3 +54,18 @@ Worktree `/home/harmeet/Desktop/Projects/lcfp-rag-tree-repair`, branch `impl/rag
 - `alembic current` left stamp at `0016` → no migration applied by probes.
 
 **Bottom line: GREEN.** Tree imports, suite collects, gates at/better than baselines, every ticked Proof re-executes green.
+
+---
+
+# Delta verification v2 — GREEN (tip 6c2c4cc)
+
+1. tasks.md 23/23 ticked, tick-only (only checkbox chars changed; delta commit touches baseline-alembic.txt + review.md + tasks.md).
+2. 4.5 re-executed: `alembic current` → `0016`, exit 0 (= `0016_*.py:19` literal); chain 0016→0017 via 0017 down_revision; `heads` → single `0017`. Disk: 17 version files 0001–0017.
+3. 4.6 slots filled: live 0016, hash matches nothing (0 hits), 0004 contradicted, disk confirmed, DB one behind head, read-only probe, env.py untouched. (Cosmetic: section header still reads `## Pending`; content filled.)
+4. 6.1 re-run (FULL suite): strict → valid exit 0; ruff byte-identical; pytest `1 failed, 626 passed, 39 deselected` = baseline counts (exit 1 = known single failure). Collection errors 0.
+5. Secrets by count: REDACTED-family 57 placeholder lines in history diff, 0 live literals (host fragment 0, cloud-domain 0); working file 1 REDACTED_HOST + stamp 0016 + db tsdb (non-secret).
+6. Scope 38 files, all in-set (16 A / 15 M / 7 R); env.py untouched; no new migration (only M 0013 comment). Note: prior report said 34 — counting-convention gap, all 38 task-mapped, delta adds zero new paths.
+
+Unverified: Errno-111 non-reproduction cause; 34-vs-38 convention; CodeRabbit (out of scope). Stamp left at 0016 — the 0017 upgrade belongs to ingestion-chunking 2.2.
+
+**Bottom line: DELTA GREEN. Archive-ready on every measurable axis.**

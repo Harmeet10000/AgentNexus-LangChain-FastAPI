@@ -85,3 +85,35 @@ No findings against `pyproject.toml`, `policy_examples.py`, `classification.py`,
 1. Six `docling/` defects (#14–#19) → owning changes; #18's patch must be corrected before use. 2. Two restored-spec ambiguities (#7, #8) → owning changes' deltas. 3. Ledger: standing authorisation for `tasks.md` ticks + `baseline-*`. 4. After DB recovery, 4.5/4.6 re-run settles the three-way head claim — `ingestion-chunking` 2.2 consumes it. 5. Trivia: 20/23→21/23, 36→37 files, both errors safe-direction.
 
 **Bottom line:** land-blocking items are (i) the two unfilled 4.6 slots behind the dead database, and (ii) the committed credential in `baseline-alembic.txt` requiring sanitisation + rotation.
+
+---
+
+# Re-review v2 — CLEAN (remediation verified 2026-09-10)
+
+**NEW VERDICT: CLEAN** — tip `6c2c4cc` on `main@50093df`. All three v1 blockers verified remediated by independent re-execution. One required pre-merge human step (credential rotation, outside the branch).
+
+## 1. Scope — CLEAN, 38/38
+
+27 declared (7× `docling/` renames R085–R100 + implied deletion) + 4 W0 amendments + 7 standing/meta (tasks.md, 5× baseline-*, own review.md slot-fill). Outside: NONE. Worktree clean. Ledger-gap note: standing text should also name `<change>/review.md` (slot-fill only).
+
+## 2. Secret absence — CLEARED on branch (counts only)
+
+Working tree + HEAD: `password` lines 0, credential-URL shapes 0, unplaceholdered kwarg/dict-key shapes 0. Old blob: 9/9/9 values placeholder-valued, 12/12 URL shapes placeholdered; placeholders 24× REDACTED, 24× REDACTED_HOST, 24× REDACTED_USER. Remaining keyword lines benign (mapper logs, PostgresqlImpl context, Secret-defaults warning, loguru bookkeeping). `fe243af` not a valid object; fsck --unreachable empty; main never contained the file (0 hits); branch never pushed.
+
+## 3. Proofs — 23/23 ticked, zero `_pending_`
+
+Tip `6c2c4cc` records 4.5 (exit 0, `0016` = on-disk literal) + 4.6 (hash matches nothing; `0004` contradicted; disk 0001–0017; single head; 0016→0017 chain). Divergences recorded outside tasks.md. Live re-execution: `current` → 0016 exit 0; `heads` → single 0017.
+
+## 4. CodeRabbit re-review (`--light`, docs-only delta) — prior #20 GONE
+
+2 findings, both dismissed: #1 (verify doc stale Errno-111 row — out-of-scope orchestrator doc, corroborates remediation); #2 (review doc stale blocker — self-resolving, superseded by this v2). Prior triage stands (#14–#19 follow-ups, frozen-spec non-actionable, #13 Wrong). Log: /tmp/opencode/cr-rag-tree-rereview.log.
+
+## 5. Change-specific — PASS (no MODIFIED; single head 0017, twice-verified).
+
+## DoD: 1 YES (23/23) · 2 YES (0 pending) · 3 YES · 4 YES · 5 YES · 6 YES (38/38) · 7 YES · 8 N/A.
+
+## Follow-ups
+
+Six docling defects → owning changes (#18 patch needs `timezone.utc` fix); two spec ambiguities → owning deltas; ledger +review.md standing auth; `ingestion-chunking` 2.2 unblocked (`down_revision` = 0016... see verify: DB at 0016, head 0017); **human pre-merge: rotate Timescale credential** (hygiene, not branch defect).
+
+**Bottom line: CLEAN. Merge after rotation; no re-review needed for rotation itself.**
