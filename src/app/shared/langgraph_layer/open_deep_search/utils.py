@@ -79,6 +79,7 @@ async def tavily_search(
     )
 
     async def summarize_result(result: dict[str, str | None]) -> str | None:
+        """Summarize one bounded search result, if raw content is available."""
         raw_content = result.get("raw_content")
         if not raw_content:
             return None
@@ -90,6 +91,7 @@ async def tavily_search(
     gate = get_research_execution_gate(config)
 
     async def run_summary(result: dict[str, str | None]) -> str | None:
+        """Run one summary under the shared gate and preserve raw fallback content."""
         try:
             return await gate.run_summary(lambda: summarize_result(result))
         except (ExternalServiceException, LangChainException, TimeoutError) as exc:
@@ -147,6 +149,7 @@ async def tavily_search_async(
     gate = get_research_execution_gate(config)
 
     async def run_query(query: str) -> Any:
+        """Run one Tavily query and convert expected provider failures to skips."""
         try:
             return await gate.run_search(
                 lambda: search(

@@ -35,6 +35,7 @@ class Configuration(BaseModel):
     max_concurrent_summaries: int = Field(default=10, ge=1, le=20)
     max_search_queries: int = Field(default=5, ge=1, le=20)
     max_researcher_iterations: int = Field(default=6, ge=1, le=10)
+    max_tool_calls_per_turn: int = Field(default=10, ge=1, le=30)
     max_react_tool_calls: int = Field(default=10, ge=1, le=30)
 
     summarization_model: str = Field(default_factory=lambda: get_settings().GEMINI_FLASH_MODEL)

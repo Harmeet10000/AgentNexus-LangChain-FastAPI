@@ -54,6 +54,7 @@ def make_deep_research_tool(
         max_concurrent_research_units: int = 3,
         max_researcher_iterations: int = 4,
     ) -> str:
+        """Invoke the deep-research graph for one user question."""
         result = await deep_researcher.ainvoke(
             cast("Any", {"messages": [HumanMessage(content=question)]}),
             config={

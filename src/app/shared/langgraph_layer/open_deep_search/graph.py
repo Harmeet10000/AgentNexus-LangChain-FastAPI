@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import (  # noqa: TC003 — Literal resolved at runtime by LangGraph get_type_hints
     TYPE_CHECKING,
     Literal,
@@ -165,7 +164,7 @@ async def supervisor_tools(
     state: SupervisorState,
     config: RunnableConfig,
 ) -> Command[Literal["supervisor", "__end__"]]:
-    """Execute supervisor tool calls for reflection and research delegation."""
+    """Execute supervisor tool calls with bounded, cancellation-safe delegation."""
     configurable: Configuration = Configuration.from_runnable_config(config)
     supervisor_messages = state.get("supervisor_messages", [])
     research_iterations: int = state.get("research_iterations", 0)
@@ -205,9 +204,9 @@ async def supervisor_tools(
         allowed_calls = conduct_research_calls[: configurable.max_concurrent_research_units]
         overflow_calls = conduct_research_calls[configurable.max_concurrent_research_units :]
         try:
-            tool_results = await asyncio.gather(
-                *(
-                    researcher_subgraph.ainvoke(
+            tool_results = await gather_limited(
+                (
+                    lambda tool_call=tool_call: researcher_subgraph.ainvoke(
                         cast(
                             "Any",
                             {
@@ -220,7 +219,8 @@ async def supervisor_tools(
                         config,
                     )
                     for tool_call in allowed_calls
-                )
+                ),
+                limit=configurable.max_concurrent_research_units,
             )
         except (RuntimeError, ValueError, AttributeError) as exc:
             logger.bind(operation="supervisor_tool", error=str(exc)).warning(
@@ -309,7 +309,7 @@ async def researcher(
 def route_researcher(
     state: ResearcherState,
 ) -> Literal["researcher_tools", "compress_research"]:
-    """Router: crawl calls go to crawl_executor, other tool calls go to researcher_tools."""
+    """Route all tool calls to researcher_tools; otherwise, compress research."""
     researcher_messages = state.get("researcher_messages", [])
     if not researcher_messages:
         return "compress_research"
@@ -333,7 +333,7 @@ async def researcher_tools(
     state: ResearcherState,
     config: RunnableConfig,
 ) -> Command[Literal["researcher", "compress_research"]]:
-    """Execute researcher tool calls."""
+    """Execute recognized calls with per-turn and concurrent-call limits."""
     configurable = Configuration.from_runnable_config(config)
     researcher_messages = state.get("researcher_messages", [])
     most_recent_message = cast("Any", researcher_messages[-1])
@@ -344,24 +344,34 @@ async def researcher_tools(
     tools_by_name = {tool_to_call.name: tool_to_call for tool_to_call in tools}
     tool_calls = list(most_recent_message.tool_calls)
     known_tool_calls = [tool_call for tool_call in tool_calls if tool_call["name"] in tools_by_name]
+    allowed_tool_calls = known_tool_calls[: configurable.max_tool_calls_per_turn]
+    overflow_tool_call_ids = {
+        tool_call["id"] for tool_call in known_tool_calls[configurable.max_tool_calls_per_turn :]
+    }
     observations = await gather_limited(
         (
             lambda tool_call=tool_call: execute_tool_safely(
                 tools_by_name[tool_call["name"]], tool_call["args"], config
             )
-            for tool_call in known_tool_calls
+            for tool_call in allowed_tool_calls
         ),
         limit=configurable.max_concurrent_research_tools,
     )
     observations_by_id = {
         tool_call["id"]: observation
-        for observation, tool_call in zip(observations, known_tool_calls, strict=True)
+        for observation, tool_call in zip(observations, allowed_tool_calls, strict=True)
     }
+    overflow_message = (
+        "Error: maximum tool calls per turn exceeded. "
+        f"Retry with {configurable.max_tool_calls_per_turn} or fewer tool calls."
+    )
     tool_outputs = [
         ToolMessage(
             content=(
                 f"Tool unavailable: {tool_call['name']}"
                 if tool_call["name"] not in tools_by_name
+                else overflow_message
+                if tool_call["id"] in overflow_tool_call_ids
                 else observations_by_id[tool_call["id"]]
             ),
             name=tool_call["name"],
@@ -372,7 +382,7 @@ async def researcher_tools(
 
     exceeded_iterations = state.get("tool_call_iterations", 0) >= configurable.max_react_tool_calls
     research_complete = any(
-        tool_call["name"] == "ResearchComplete" for tool_call in known_tool_calls
+        tool_call["name"] == "ResearchComplete" for tool_call in allowed_tool_calls
     )
     if exceeded_iterations or research_complete:
         return Command(goto="compress_research", update={"researcher_messages": tool_outputs})  # ty: ignore[invalid-return-type]

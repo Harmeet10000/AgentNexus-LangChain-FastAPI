@@ -1,4 +1,9 @@
-"""Concurrency controls for immediate deep-research provider calls."""
+"""Concurrency controls for immediate deep-research provider calls.
+
+The execution gate is process-local. Deployments with multiple web workers or
+replicas must enforce aggregate provider quotas at a shared rate limiter,
+provider gateway, or the provider itself.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +25,7 @@ class ResearchExecutionGate:
         max_concurrent_search_requests: int = 10,
         max_concurrent_summaries: int = 10,
     ) -> None:
+        """Create provider slots for one application process."""
         if max_concurrent_search_requests < 1:
             msg = "max_concurrent_search_requests must be at least 1"
             raise ValueError(msg)
@@ -44,7 +50,11 @@ _DEFAULT_RESEARCH_EXECUTION_GATE = ResearchExecutionGate()
 
 
 def get_research_execution_gate(config: RunnableConfig | None = None) -> ResearchExecutionGate:
-    """Return the injected gate or the process-local default gate."""
+    """Return the injected gate or process-local default.
+
+    This limits work within one process only; deployment-wide limits belong in
+    shared infrastructure or provider-side rate limiting.
+    """
     if config:
         configurable = config.get("configurable", {})
         gate = configurable.get("research_execution_gate")
