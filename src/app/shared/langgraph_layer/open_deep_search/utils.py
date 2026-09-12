@@ -13,6 +13,7 @@ from typing import (  # noqa: TC003 — Annotated, Any, Literal used at runtime 
 )
 
 import httpx
+from langchain_core.exceptions import LangChainException
 from langchain_core.messages import AIMessage, HumanMessage, filter_messages
 from langchain_core.runnables import (
     RunnableConfig,  # noqa: TC002 — RunnableConfig used at runtime by LangChain tool
@@ -25,6 +26,7 @@ from app.shared.services import search
 from app.utils import ExternalServiceException, logger
 
 from .config import Configuration
+from .execution import gather_limited, get_research_execution_gate
 from .prompts import _SUMMARIZE_WEBPAGE_PROMPT
 from .state import ResearchComplete, Summary
 
@@ -48,6 +50,7 @@ async def tavily_search(
     config: RunnableConfig | None = None,
 ) -> str:
     """Fetch and summarize Tavily search results."""
+    configurable: Configuration = Configuration.from_runnable_config(config)
     search_results = await tavily_search_async(
         search_queries=queries,
         max_results=max_results,
@@ -66,7 +69,6 @@ async def tavily_search(
                     "query": response.query,
                 }
 
-    configurable: Configuration = Configuration.from_runnable_config(config)
     summarization_model = (
         _build_chat_model(
             model_name=configurable.summarization_model,
@@ -85,8 +87,21 @@ async def tavily_search(
             raw_content[: configurable.max_content_length],
         )
 
-    summaries = await asyncio.gather(
-        *(summarize_result(result) for result in unique_results.values())
+    gate = get_research_execution_gate(config)
+
+    async def run_summary(result: dict[str, str | None]) -> str | None:
+        try:
+            return await gate.run_summary(lambda: summarize_result(result))
+        except (ExternalServiceException, LangChainException, TimeoutError) as exc:
+            logger.bind(operation="summarize_webpage", error=str(exc)).warning(
+                "summarization_failed"
+            )
+            raw_content = result.get("raw_content")
+            return raw_content[: configurable.max_content_length] if raw_content else None
+
+    summaries = await gather_limited(
+        (lambda result=result: run_summary(result) for result in unique_results.values()),
+        limit=configurable.max_concurrent_summaries,
     )
     if not unique_results:
         return "No valid search results found. Try narrower or different search queries."
@@ -117,38 +132,56 @@ async def tavily_search_async(
     config: RunnableConfig | None = None,
 ) -> list[SearchResponse]:
     """Execute bounded Tavily searches through the shared service client."""
+    configurable = Configuration.from_runnable_config(config)
     http_client = _get_httpx_client_from_config(config)
+    normalized_queries = list(
+        dict.fromkeys(query.strip() for query in search_queries if query.strip())
+    )[: configurable.max_search_queries]
     search_log = logger.bind(
         component="open_deep_search",
         search_api="tavily",
-        queries=len(search_queries),
+        queries=len(normalized_queries),
         max_results=max_results,
         topic=topic,
     )
-    results = await asyncio.gather(
-        *(
-            search(
-                query=query,
-                max_results=max_results,
-                topic=topic,
-                include_answer=False,
-                include_raw_content=include_raw_content,
-                http_client=http_client,
+    gate = get_research_execution_gate(config)
+
+    async def run_query(query: str) -> Any:
+        try:
+            return await gate.run_search(
+                lambda: search(
+                    query=query,
+                    max_results=max_results,
+                    topic=topic,
+                    include_answer=False,
+                    include_raw_content=include_raw_content,
+                    http_client=http_client,
+                )
             )
-            for query in search_queries
-        )
+        except (ExternalServiceException, TimeoutError) as exc:
+            search_log.bind(query_length=len(query), error=str(exc)).warning("tavily_query_failed")
+            return None
+
+    results = await gather_limited(
+        (lambda query=query: run_query(query) for query in normalized_queries),
+        limit=configurable.max_concurrent_search_requests,
     )
     responses: list[SearchResponse] = []
     for result in results:
+        if result is None:
+            continue
         if isinstance(result, Failure):
             error = result.failure()
             search_log.bind(error_code=error.code.value).error(
                 "tavily_search_async_failed", error=error.message
             )
-            raise ExternalServiceException(
-                service="Tavily", detail=error.message, error_code=error.code.value
-            )
+            continue
         responses.append(result.unwrap())
+    if normalized_queries and not responses:
+        raise ExternalServiceException(
+            service="Tavily",
+            detail="All Tavily queries failed",
+        )
     search_log.info("tavily_search_async_complete")
     return responses
 
@@ -162,14 +195,6 @@ def _get_httpx_client_from_config(config: RunnableConfig | None) -> httpx.AsyncC
     if isinstance(http_client, httpx.AsyncClient):
         return http_client
     return None
-
-
-def _get_crawl4ai_crawler_from_config(config: RunnableConfig | None) -> Any:
-    """Read the lifespan-owned Crawl4AI AsyncWebCrawler from RunnableConfig when present."""
-    if not config:
-        return None
-    configurable = config.get("configurable", {})
-    return configurable.get("crawl4ai_crawler")
 
 
 async def summarize_webpage(model: Any, webpage_content: str) -> str:

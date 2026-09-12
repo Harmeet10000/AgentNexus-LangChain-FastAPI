@@ -22,9 +22,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from app.shared.langchain_layer.models import _build_chat_model
-from app.utils import logger
+from app.utils import ExternalServiceException, logger
 
 from .config import Configuration
+from .execution import gather_limited
 from .prompts import (
     _CLARIFY_WITH_USER_PROMPT,
     _COMPRESS_RESEARCH_SYSTEM_PROMPT,
@@ -281,7 +282,7 @@ supervisor_subgraph = supervisor_builder.compile()
 async def researcher(
     state: ResearcherState,
     config: RunnableConfig,
-) -> Command[Literal["researcher_tools", "crawl_executor", "compress_research"]]:
+) -> Command[Literal["researcher_tools", "compress_research"]]:
     """Conduct focused research on one supervisor-assigned topic."""
     configurable = Configuration.from_runnable_config(config)
     tools = await get_all_tools(config)
@@ -307,7 +308,7 @@ async def researcher(
 
 def route_researcher(
     state: ResearcherState,
-) -> Literal["researcher_tools", "crawl_executor", "compress_research"]:
+) -> Literal["researcher_tools", "compress_research"]:
     """Router: crawl calls go to crawl_executor, other tool calls go to researcher_tools."""
     researcher_messages = state.get("researcher_messages", [])
     if not researcher_messages:
@@ -316,22 +317,14 @@ def route_researcher(
     if not most_recent.tool_calls:
         return "compress_research"
 
-    tool_names = {tc["name"] for tc in most_recent.tool_calls}
-    has_crawl = "crawl_webpage" in tool_names
-    has_other = any(name != "crawl_webpage" for name in tool_names)
-
-    if has_crawl:
-        return "crawl_executor"
-    if has_other:
-        return "researcher_tools"
-    return "compress_research"
+    return "researcher_tools"
 
 
 async def execute_tool_safely(tool_to_call, args: dict[str, object], config: RunnableConfig) -> str:
     """Execute a research tool and convert failures into model-visible observations."""
     try:
         return str(await tool_to_call.ainvoke(args, config))
-    except LangChainException as exc:
+    except (ExternalServiceException, LangChainException, TimeoutError) as exc:
         exc.add_note(f"tool={tool_to_call.name}")
         return f"Error executing tool: {exc!s}"
 
@@ -349,77 +342,41 @@ async def researcher_tools(
 
     tools = await get_all_tools(config)
     tools_by_name = {tool_to_call.name: tool_to_call for tool_to_call in tools}
-    tool_calls = [
-        tool_call
-        for tool_call in most_recent_message.tool_calls
-        if tool_call["name"] in tools_by_name and tool_call["name"] != "crawl_webpage"
-    ]
-    observations = await asyncio.gather(
-        *(
-            execute_tool_safely(tools_by_name[tool_call["name"]], tool_call["args"], config)
-            for tool_call in tool_calls
-        )
+    tool_calls = list(most_recent_message.tool_calls)
+    known_tool_calls = [tool_call for tool_call in tool_calls if tool_call["name"] in tools_by_name]
+    observations = await gather_limited(
+        (
+            lambda tool_call=tool_call: execute_tool_safely(
+                tools_by_name[tool_call["name"]], tool_call["args"], config
+            )
+            for tool_call in known_tool_calls
+        ),
+        limit=configurable.max_concurrent_research_tools,
     )
+    observations_by_id = {
+        tool_call["id"]: observation
+        for observation, tool_call in zip(observations, known_tool_calls, strict=True)
+    }
     tool_outputs = [
         ToolMessage(
-            content=observation,
+            content=(
+                f"Tool unavailable: {tool_call['name']}"
+                if tool_call["name"] not in tools_by_name
+                else observations_by_id[tool_call["id"]]
+            ),
             name=tool_call["name"],
             tool_call_id=tool_call["id"],
         )
-        for observation, tool_call in zip(observations, tool_calls, strict=True)
+        for tool_call in tool_calls
     ]
 
     exceeded_iterations = state.get("tool_call_iterations", 0) >= configurable.max_react_tool_calls
-    research_complete = any(tool_call["name"] == "ResearchComplete" for tool_call in tool_calls)
+    research_complete = any(
+        tool_call["name"] == "ResearchComplete" for tool_call in known_tool_calls
+    )
     if exceeded_iterations or research_complete:
         return Command(goto="compress_research", update={"researcher_messages": tool_outputs})  # ty: ignore[invalid-return-type]
     return Command(goto="researcher", update={"researcher_messages": tool_outputs})  # ty: ignore[invalid-return-type]
-
-
-async def crawl_executor(
-    state: ResearcherState,
-    config: RunnableConfig,
-) -> Command[Literal["researcher_tools", "researcher", "compress_research"]]:
-    """Execute crawl_webpage tool calls from the researcher."""
-    configurable = Configuration.from_runnable_config(config)
-    researcher_messages = state.get("researcher_messages", [])
-    if not researcher_messages:
-        return Command(goto="compress_research")  # ty: ignore[invalid-return-type]
-    most_recent_message = cast("Any", researcher_messages[-1])
-
-    if not most_recent_message.tool_calls:
-        return Command(goto="compress_research")  # ty: ignore[invalid-return-type]
-
-    crawl_calls = [tc for tc in most_recent_message.tool_calls if tc["name"] == "crawl_webpage"]
-    if not crawl_calls:
-        return Command(goto="compress_research")  # ty: ignore[invalid-return-type]
-
-    tools = await get_all_tools(config)
-    tools_by_name = {t.name: t for t in tools}
-    crawl_tool = tools_by_name.get("crawl_webpage")
-
-    if not crawl_tool:
-        return Command(goto="compress_research")  # ty: ignore[invalid-return-type]
-
-    observations = await asyncio.gather(
-        *(execute_tool_safely(crawl_tool, call["args"], config) for call in crawl_calls)
-    )
-    crawl_outputs = [
-        ToolMessage(content=obs, name=call["name"], tool_call_id=call["id"])
-        for obs, call in zip(observations, crawl_calls, strict=True)
-    ]
-
-    non_crawl_calls = [tc for tc in most_recent_message.tool_calls if tc["name"] != "crawl_webpage"]
-    if non_crawl_calls:
-        return Command(goto="researcher_tools", update={"researcher_messages": crawl_outputs})  # ty: ignore[invalid-return-type]
-
-    exceeded = state.get("tool_call_iterations", 0) >= configurable.max_react_tool_calls
-    research_complete = any(
-        tc["name"] == "ResearchComplete" for tc in most_recent_message.tool_calls
-    )
-    if exceeded or research_complete:
-        return Command(goto="compress_research", update={"researcher_messages": crawl_outputs})  # ty: ignore[invalid-return-type]
-    return Command(goto="researcher", update={"researcher_messages": crawl_outputs})  # ty: ignore[invalid-return-type]
 
 
 async def compress_research(
@@ -471,7 +428,6 @@ researcher_builder = state_graph_factory(
 researcher_builder.add_edge(START, "researcher")
 researcher_builder.add_node("researcher", researcher)
 researcher_builder.add_node("researcher_tools", researcher_tools)
-researcher_builder.add_node("crawl_executor", crawl_executor)
 researcher_builder.add_node("compress_research", compress_research)
 researcher_builder.add_conditional_edges("researcher", route_researcher)
 researcher_builder.add_edge("compress_research", END)

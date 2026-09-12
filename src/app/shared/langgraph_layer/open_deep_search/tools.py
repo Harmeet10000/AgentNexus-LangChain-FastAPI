@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     import httpx
     from langchain_core.tools.base import BaseTool
 
+    from .execution import ResearchExecutionGate
+
 
 class DeepResearchInput(BaseModel):
     """Input schema for the Agent Saul deep research tool."""
@@ -42,6 +44,7 @@ class DeepResearchOutput(BaseModel):
 def make_deep_research_tool(
     *,
     http_client: httpx.AsyncClient | None = None,
+    execution_gate: ResearchExecutionGate | None = None,
 ) -> BaseTool:
     """Build a ToolNode-compatible deep research tool."""
 
@@ -60,6 +63,7 @@ def make_deep_research_tool(
                     "max_researcher_iterations": max_researcher_iterations,
                     "httpx_client": http_client,
                     "tavily_http_client": http_client,
+                    "research_execution_gate": execution_gate,
                 }
             },
         )
