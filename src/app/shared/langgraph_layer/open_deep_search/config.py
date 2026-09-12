@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import get_settings
 
+from .execution import get_research_execution_gate
+
 if TYPE_CHECKING:
     from typing import Any
 
@@ -28,7 +30,12 @@ class Configuration(BaseModel):
     max_structured_output_retries: int = Field(default=3, ge=1, le=10)
     allow_clarification: bool = True
     max_concurrent_research_units: int = Field(default=5, ge=1, le=20)
+    max_concurrent_research_tools: int = Field(default=5, ge=1, le=20)
+    max_concurrent_search_requests: int = Field(default=10, ge=1, le=20)
+    max_concurrent_summaries: int = Field(default=10, ge=1, le=20)
+    max_search_queries: int = Field(default=5, ge=1, le=20)
     max_researcher_iterations: int = Field(default=6, ge=1, le=10)
+    max_tool_calls_per_turn: int = Field(default=10, ge=1, le=30)
     max_react_tool_calls: int = Field(default=10, ge=1, le=30)
 
     summarization_model: str = Field(default_factory=lambda: get_settings().GEMINI_FLASH_MODEL)
@@ -72,6 +79,11 @@ def build_open_deep_search_config(
             "httpx_client": request.app.state.httpx_client,
             "tavily_http_client": getattr(request.app.state, "tavily_http_client", None),
             "crawl4ai_crawler": getattr(request.app.state, "crawl4ai_crawler", None),
+            "research_execution_gate": getattr(
+                request.app.state,
+                "research_execution_gate",
+                get_research_execution_gate(),
+            ),
             **(configurable or {}),
         },
         metadata=metadata or {},
