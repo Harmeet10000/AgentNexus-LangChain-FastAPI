@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
+    from app.shared.rag.token_counter import CountTokens
+
     from .fusion import RankedChunk
 
 
@@ -39,6 +41,7 @@ def assemble_rag_context(
     chunk_lookup: dict[str, SearchChunkRecord],
     *,
     max_tokens: int,
+    count_tokens: CountTokens,
 ) -> list[ContextSection]:
     """Group by document, restore chunk order, merge adjacent chunks, and budget output."""
     grouped: dict[str, list[tuple[RankedChunk, SearchChunkRecord]]] = {}
@@ -76,7 +79,7 @@ def assemble_rag_context(
                 continue
 
             section = _build_context_section(current_group)
-            used_tokens += len(section.content.split())
+            used_tokens += count_tokens(section.content)
             if used_tokens > max_tokens:
                 return sections
             sections.append(section)
@@ -84,7 +87,7 @@ def assemble_rag_context(
 
         if current_group:
             section = _build_context_section(current_group)
-            used_tokens += len(section.content.split())
+            used_tokens += count_tokens(section.content)
             if used_tokens > max_tokens:
                 return sections
             sections.append(section)

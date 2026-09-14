@@ -12,17 +12,21 @@ from .nodes import (
     make_generator_node,
     make_graph_retrieval_node,
     make_hybrid_retrieval_node,
+    make_post_process_node,
     make_query_analyzer_node,
     make_reranker_node,
+    make_source_identifier_node,
     should_retry_or_generate,
     should_run_graph,
 )
-from .state import ContextGrade, GeneratedAnswer, QueryPlan, RetrievalState
+from .state import ContextGrade, GeneratedAnswer, QueryPlan, RetrievalState, SourceCriteria
 
 if TYPE_CHECKING:
     from typing import Any
 
-    from .reranker import CrossEncoderReranker
+    from app.shared.rag.token_counter import CountTokens
+
+    from .reranker import Reranker
 
 
 def build_retrieval_graph(
@@ -31,7 +35,9 @@ def build_retrieval_graph(
     repo: Any,
     redis: Any = None,
     graphiti: Any = None,
-    reranker: CrossEncoderReranker | None = None,
+    reranker: Reranker | None = None,
+    post_process_max_tokens: int | None = None,
+    count_tokens: CountTokens | None = None,
 ) -> CompiledStateGraph[Any]:
     """Build a request-scoped retrieval graph over unified chunks.
 
@@ -41,17 +47,39 @@ def build_retrieval_graph(
     where it is used, so the client is process-wide and its task type is declared per call.
     """
     query_llm = _structured(llm, QueryPlan)
+    identifier_llm = _structured(llm, SourceCriteria)
     grader_llm = _structured(llm, ContextGrade)
     generator_llm = _structured(llm, GeneratedAnswer)
+    # Local imports: `features.documents` imports this package at module load.
+    from app.features.documents.constants import (  # noqa: PLC0415
+        DEFAULT_RAG_TOKEN_BUDGET,
+    )
+    from app.shared.rag.token_counter import (  # noqa: PLC0415
+        count_tokens as default_count_tokens,
+    )
 
     graph = StateGraph(RetrievalState)  # ty: ignore[invalid-argument-type]
     graph.add_node("query_analyzer", cast("Any", make_query_analyzer_node(query_llm, redis)))
+    graph.add_node(
+        "source_identifier",
+        cast("Any", make_source_identifier_node(identifier_llm, repo)),
+    )
     graph.add_node("graph_neo4j", cast("Any", make_graph_retrieval_node(graphiti)))
     graph.add_node(
         "hybrid_postgres",
         cast("Any", make_hybrid_retrieval_node(repo, redis)),
     )
     graph.add_node("reranker", cast("Any", make_reranker_node(reranker)))
+    graph.add_node(
+        "post_process",
+        cast(
+            "Any",
+            make_post_process_node(
+                max_tokens=post_process_max_tokens or DEFAULT_RAG_TOKEN_BUDGET,
+                count_tokens=count_tokens or default_count_tokens,
+            ),
+        ),
+    )
     graph.add_node("context_grader", cast("Any", make_context_grader_node(grader_llm)))
     graph.add_node("generate", cast("Any", make_generator_node(generator_llm, redis)))
 
@@ -59,11 +87,25 @@ def build_retrieval_graph(
     graph.add_conditional_edges(
         "query_analyzer",
         should_run_graph,
-        {"graph": "graph_neo4j", "hybrid": "hybrid_postgres", "generate": "generate"},
+        {
+            "graph": "source_identifier",
+            "hybrid": "source_identifier",
+            "generate": "generate",
+        },
+    )
+    graph.add_conditional_edges(
+        "source_identifier",
+        # Only the retrieval routes can reach this node (the analyzer sends
+        # cache hits and trivial queries straight to `generate`), so only
+        # they are mapped here. A `generate` arm would be an edge that fires
+        # never — topology as documentation must stay honest.
+        should_run_graph,
+        {"graph": "graph_neo4j", "hybrid": "hybrid_postgres"},
     )
     graph.add_edge("graph_neo4j", "hybrid_postgres")
     graph.add_edge("hybrid_postgres", "reranker")
-    graph.add_edge("reranker", "context_grader")
+    graph.add_edge("reranker", "post_process")
+    graph.add_edge("post_process", "context_grader")
     graph.add_conditional_edges(
         "context_grader",
         should_retry_or_generate,

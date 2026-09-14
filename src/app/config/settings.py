@@ -3,7 +3,7 @@
 import warnings
 from decimal import Decimal
 from functools import cache
-from typing import override
+from typing import Literal, override
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,6 +17,7 @@ PRODUCTION_SECRET_FIELDS: dict[str, list[str]] = {
     "S3_ACCESS_KEY_ID": [""],
     "S3_SECRET_ACCESS_KEY": [""],
     "TAVILY_API_KEY": [""],
+    "RERANKER_API_KEY": [""],
     "PINECONE_API_KEY": [""],
     "RABBITMQ_DEFAULT_PASS": ["guest"],
     "RABBITMQ_DEFAULT_USER": ["guest"],
@@ -330,8 +331,12 @@ class Settings(BaseSettings):
     TAVILY_MAX_RESULTS_LIMIT: int = Field(default=20)
     TAVILY_TIMEOUT_SECONDS: float = Field(default=30.0)
 
-    # --- PageIndex Configuration ---
-    PAGEINDEX_API_KEY: SecretStr = Field(default=SecretStr(""))
+    # --- Reranker Configuration ---
+    RERANKER_PROVIDER: Literal["hosted"] = Field(default="hosted")
+    RERANKER_MODEL: str = Field(default="rerank-v3.0")
+    RERANKER_API_KEY: SecretStr = Field(default=SecretStr(""))
+    RERANKER_ENDPOINT: str = Field(default="https://api.cohere.com/v2/rerank")
+    RERANKER_TIMEOUT_SECONDS: float = Field(default=30.0)
 
     # --- Crawl/Search Rate Limiting ---
     CRAWL_RATE_LIMIT_PER_MINUTE: int = Field(default=10)
