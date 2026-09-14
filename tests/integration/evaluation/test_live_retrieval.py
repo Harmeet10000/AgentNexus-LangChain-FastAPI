@@ -66,12 +66,14 @@ def _seed_rows(*, queries: list[GoldenQuery], user_id: str) -> list[object]:
                     id=chunk_id,
                     document_id=document_id,
                     user_id=user_id,
-                    document_version=1,
+                    # Identity columns exist only once migration 0019 lands; the
+                    # hasattr gates keep this fixture green on either side of it.
+                    **({"document_version": 1} if hasattr(UnifiedChunk, "document_version") else {}),
                     chunk_index=index,
                     chunk_kind=query.document_kind,
                     content=query.query,
                     preamble="",
-                    locus=None,
+                    **({"locus": None} if hasattr(UnifiedChunk, "locus") else {}),
                     clause_type=None,
                     page_no=1,
                     embedding=[0.01] * width,
@@ -88,6 +90,7 @@ def _seed_rows(*, queries: list[GoldenQuery], user_id: str) -> list[object]:
 
 async def test_live_retrieval_returns_real_identifiers(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     golden_result = await load_golden_set(GOLDEN_PATH)
     assert isinstance(golden_result, Success)
@@ -137,6 +140,11 @@ async def test_live_retrieval_returns_real_identifiers(
             assert retrieved, "wiring failure: live service returned no identifiers"
             assert retrieved <= snapshot
             assert expected_ids <= retrieved
+            for row in evaluation.rows:
+                assert set(row.expected_chunk_ids) <= set(row.retrieved_chunk_ids), (
+                    "identifiers attributed to the wrong query: "
+                    f"{row.query[:60]!r} is missing {set(row.expected_chunk_ids) - set(row.retrieved_chunk_ids)}"
+                )
 
             report = EvaluationReport.from_evaluation(
                 evaluation,
@@ -144,20 +152,40 @@ async def test_live_retrieval_returns_real_identifiers(
                 golden_set_version=golden.version,
                 timestamp=datetime.now(tz=UTC),
             )
-            await write_report(report, REPORT_PATH)
+            # The committed baseline report is a pinned artifact; the test proves
+            # the write path into an isolated location instead of overwriting it.
+            report_path = tmp_path / "baseline.json"
+            await write_report(report, report_path)
+            assert report_path.is_file()
         finally:
             await transaction.rollback()
     await engine.dispose()
 
 
+def _resolve_git_dir() -> Path | None:
+    """Return the git dir, following a `gitdir:` pointer in worktrees."""
+    dot_git = Path(".git")
+    if dot_git.is_dir():
+        return dot_git
+    if dot_git.is_file():
+        for line in dot_git.read_text(encoding="utf-8").splitlines():
+            if line.startswith("gitdir:"):
+                target = Path(line.removeprefix("gitdir:").strip())
+                return target if target.is_dir() else None
+    return None
+
+
 def _commit_identifier() -> str:
     """Read the current commit without spawning a subprocess."""
-    head_file = Path(".git/HEAD")
+    git_dir = _resolve_git_dir()
+    if git_dir is None:
+        return "unknown"
+    head_file = git_dir / "HEAD"
     if not head_file.is_file():
         return "unknown"
     head = head_file.read_text(encoding="utf-8").strip()
     if head.startswith("ref:"):
-        ref_path = Path(".git") / head.removeprefix("ref:").strip()
+        ref_path = git_dir / head.removeprefix("ref:").strip()
         if ref_path.is_file():
             return ref_path.read_text(encoding="utf-8").strip()[:12]
         return "unknown"
