@@ -8,15 +8,12 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.connections import init_db
 from app.connections.celery_task_names import DOCUMENTS_INGEST
 from app.shared.langchain_layer import serialize_to_toon
 from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text, embed_texts
-from app.shared.langchain_layer.models import _build_chat_model
 from app.shared.langgraph_layer.kb_retry import retry_immediate
 from app.shared.langgraph_layer.retrieval_kb import (
     ContextGrade,
@@ -27,17 +24,26 @@ from app.shared.langgraph_layer.retrieval_kb import (
     build_retrieval_graph,
     get_shared_reranker,
 )
-from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
+from app.shared.rag.langextract.service import (
+    ExtractionFailed,
+    ExtractionFailureCode,
+    ExtractionRequest,
+    ExtractionSucceeded,
+)
+from app.shared.rag.structural_navigator import navigate_tree
+from app.shared.rag.token_counter import count_tokens as default_count_tokens
 from app.shared.result import log_expected_failure
-from app.shared.services.storage import StorageService, build_s3_key, key_from_s3_uri
+from app.shared.services.storage import build_s3_key, key_from_s3_uri
 from app.utils import logger, to_sorted_key_bytes, trace_layer
 
 from .classification import classify_document, segment_chunks
 from .constants import (
     ANALYZE_THRESHOLD_CHUNKS,
     DEFAULT_SEARCH_CACHE_TTL_SECONDS,
+    HYBRID_CANDIDATE_LIMIT,
     INGEST_EMBEDDING_BATCH_SIZE,
     RRF_K,
+    RRF_WEIGHT_TRIGRAM,
 )
 from .dto import (
     DocumentSearchResultItem,
@@ -58,7 +64,6 @@ from .errors import (
 )
 from .fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
 from .graphiti_verifier import write_and_verify_chunk
-from .ingestion_graph import build_document_ingestion_graph
 from .legal_metadata import (
     contract_event_dates,
     enrich_legal_chunks,
@@ -74,11 +79,16 @@ if TYPE_CHECKING:
 
     from graphiti_core.graphiti import Graphiti
     from langchain_core.language_models import BaseChatModel
+    from langgraph.graph.state import CompiledStateGraph
     from redis.asyncio import Redis
+    from sqlalchemy.ext.asyncio import async_sessionmaker
     from ty_extensions import Unknown
 
     from app.config.settings import Settings
     from app.features.documents.rag import ContextSection
+    from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+    from app.shared.rag.graphiti.client import GraphitiService
+    from app.shared.services.storage import StorageService
 
     from . import dto as documents_dto
     from .classification import ClassifiedDocument, ParsedDocument, PreparedChunk, QualityWarning
@@ -98,6 +108,11 @@ _FALLBACK_ANSWER = (
     "I do not have enough grounded document context to answer this reliably. "
     "Please narrow the question or ingest the relevant document sections."
 )
+_KNOWLEDGE_EXTRACTION_PROMPT = (
+    "Extract grounded legal clauses and their attributes. Use extraction classes such as "
+    "indemnity, termination, payment, confidentiality, governing_law, arbitration, "
+    "limitation_of_liability, ip_ownership, or obliges. Preserve source character offsets."
+)
 
 
 # Retrieval branch registry. Each branch is a (name, run) record: `name` is the
@@ -105,37 +120,11 @@ _FALLBACK_ANSWER = (
 # from one shared input. The pairing between names and `asyncio.gather`'s
 # positional results used to live in the `_SEARCH_BRANCHES` tuple alone; a
 # reorder there silently misattributed every failure, so the name now travels
-# with the callable and the zip in `_fuse_search_branches` pairs records with
+# with the callable and the zip in `_run_branches` pairs records with
 # results. Adding branch #4 is a registration below — the gather/zip/fusion
-# does not change. There is no per-branch weight field on purpose: the fused
-# path fuses unweighted ranks (`RRF_K`), and the weights live in the
-# `legal_rrf_search` SQL, which is read-only here.
-class RetrievalQuery(BaseModel):
-    """One assembled legal-search query, built once and unpacked at the leaf.
-
-    Both `legal_rrf_search` callers (`ask` below and the retrieval-graph hybrid
-    node) assembled these arguments by hand; the DTO is the single place that
-    assembly lives. Field names mirror `legal_rrf_search` exactly so the call
-    stays `repo.legal_rrf_search(**query.model_dump())`, and the leaf keeps
-    its precise signature.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    user_id: str
-    query_text: str
-    query_embedding: list[float]
-    limit: int
-    vector_weight: float
-    keyword_weight: float
-    jurisdiction: str | None = None
-    contract_type: str | None = None
-    document_ids: list[str] | None = None
-    chunk_ids: list[str] | None = None
-    clause_type: str | None = None
-    require_graphiti_verified: bool = False
-    bm25_threshold: float | None = None
-    exact_phrase: str | None = None
+# does not change. Per-leg fusion weights travel on `retrieve_fused`'s `weights`
+# argument (one weight per leg, defaulting to unweighted); the query plan's
+# vector and keyword weights map onto the first two legs at the call sites.
 
 
 class _BranchInput(NamedTuple):
@@ -146,6 +135,13 @@ class _BranchInput(NamedTuple):
     query_embedding: list[float]
     candidate_limit: int
     filter_params: dict[str, Any]
+    bm25_threshold: float | None = None
+    exact_phrase: str | None = None
+
+
+class _LegalPreparation(NamedTuple):
+    metadata: LegalMetadataExtraction | None
+    warnings: list[QualityWarning]
 
 
 async def _run_bm25_branch(
@@ -157,6 +153,8 @@ async def _run_bm25_branch(
         query=args.query_text,
         candidate_limit=args.candidate_limit,
         filter_params=args.filter_params,
+        bm25_threshold=args.bm25_threshold,
+        exact_phrase=args.exact_phrase,
     )
 
 
@@ -202,6 +200,111 @@ RETRIEVAL_BRANCHES: tuple[RetrievalBranchPolicy, ...] = (
 # Derived, not authored: the i-th label names the i-th gathered result, and the
 # pairing tests pin this derivation rather than a hand-kept tuple.
 _SEARCH_BRANCHES = tuple(branch.name for branch in RETRIEVAL_BRANCHES)
+
+
+async def _run_branches(
+    *, repo: DocumentRepository, branch_input: _BranchInput
+) -> DocumentResult[list[list[RankedResultRow]]]:
+    """Run every retrieval branch and return ranked row sets, or fail with attribution.
+
+    A branch that *raised* keeps its own error kind via `model_copy` — re-wrapping
+    would flatten the taxonomy and turn a 422 from one branch into a 503 for the
+    whole request — with only the branch name added.
+    """
+    results = await asyncio.gather(
+        *(branch.run(repo, branch_input) for branch in RETRIEVAL_BRANCHES)
+    )
+    row_sets: list[list[RankedResultRow]] = []
+    for branch, branch_result in zip(RETRIEVAL_BRANCHES, results, strict=True):
+        if isinstance(branch_result, Failure):
+            error = branch_result.failure()
+            return Failure(
+                error.model_copy(
+                    update={
+                        "message": f"{branch.name} retrieval branch failed: {error.message}",
+                        "details": {**(error.details or {}), "branch": branch.name},
+                    }
+                )
+            )
+        # `else`, not `elif isinstance(..., Success)`. The old form had no final branch, so a
+        # value that was neither would have been dropped from `row_sets` entirely — shrinking
+        # the fusion input with no log line and no failure.
+        row_sets.append(_to_ranked_rows(branch_result.unwrap()))
+    return Success(row_sets)
+
+
+async def retrieve_fused(
+    *,
+    repo: DocumentRepository,
+    user_id: str,
+    query_text: str,
+    query_embedding: list[float],
+    candidate_limit: int,
+    limit: int,
+    filter_params: dict[str, Any],
+    weights: Sequence[float] | None = None,
+    bm25_threshold: float | None = None,
+    exact_phrase: str | None = None,
+) -> DocumentResult[tuple[list[RankedChunk], dict[str, dict[str, Any]]]]:
+    """Run the three branch legs over base chunks and fuse them in Python.
+
+    The single fused path shared by the search endpoint, `ask`, and the
+    retrieval-graph hybrid node: every caller issues the same branch SQL with the
+    same inputs and fuses with the same weights, so one query yields identical
+    chunk-id order from every door. A branch that *raised* keeps its attribution
+    (branch name in details); a branch that legitimately matches nothing
+    contributes an empty rank list and fusion proceeds.
+    """
+    branch_input = _BranchInput(
+        user_id=user_id,
+        query_text=query_text,
+        query_embedding=query_embedding,
+        candidate_limit=candidate_limit,
+        filter_params=filter_params,
+        bm25_threshold=bm25_threshold,
+        exact_phrase=exact_phrase,
+    )
+    results = await _run_branches(repo=repo, branch_input=branch_input)
+    if isinstance(results, Failure):
+        return Failure(results.failure())
+    fused = reciprocal_rank_fusion(*results.unwrap(), k=RRF_K, limit=limit, weights=weights)
+    if not fused:
+        return Success(([], {}))
+    chunk_lookup_result = await repo.fetch_chunks_by_ids([item.chunk_id for item in fused])
+    if isinstance(chunk_lookup_result, Failure):
+        return Failure(chunk_lookup_result.failure())
+    lookup: dict[str, dict[str, Any]] = chunk_lookup_result.unwrap()
+    return Success((fused, lookup))
+
+
+def lookup_to_rows(
+    fused: Sequence[RankedChunk],
+    lookup: dict[str, dict[str, Any]],
+) -> list[dict[str, object]]:
+    """Adapt fused ranks plus the chunk lookup to `_row_to_chunk` row shape."""
+    rows: list[dict[str, object]] = []
+    for item in fused:
+        record = lookup.get(item.chunk_id)
+        if record is None:
+            continue
+        rows.append(
+            {
+                "chunk_id": item.chunk_id,
+                "chunk_text": record.get("content"),
+                "preamble": record.get("preamble") or "",
+                "clause_type": record.get("clause_type"),
+                "parent_doc_id": record.get("document_id"),
+                "metadata_": record.get("chunk_metadata") or {},
+                "custom_metadata": {},
+                "quality_warnings": record.get("quality_warnings", []),
+                "graphiti_verified": bool(record.get("graphiti_verified", False)),
+                "rrf_score": item.score,
+                "title": record.get("title"),
+                "chunk_index": record.get("chunk_index"),
+                "chunk_kind": record.get("chunk_kind"),
+            }
+        )
+    return rows
 
 
 class DocumentCommandService:
@@ -390,10 +493,40 @@ class DocumentQueryService:
         return self._llm
 
     @trace_layer("service")
+    async def navigate_structure(
+        self,
+        *,
+        user_id: str,
+        query: str,
+        document_ids: list[str] | None = None,
+        limit: int = 5,
+    ) -> DocumentResult[list[tuple[str, ...]]]:
+        """Navigate stored document trees through the repository boundary."""
+        trees_result = await self.repo.fetch_structural_trees(
+            user_id=user_id,
+            document_ids=document_ids or [],
+        )
+        if isinstance(trees_result, Failure):
+            return Failure(trees_result.failure())
+        paths: list[tuple[str, ...]] = []
+        for row in trees_result.unwrap():
+            tree = row.get("structural_tree")
+            if not isinstance(tree, dict):
+                continue
+            paths.extend(navigate_tree(tree, query, limit=limit))
+            if len(paths) >= limit:
+                break
+        return Success(paths[:limit])
+
+    @trace_layer("service")
     async def search(
-        self, *, user_id: str, payload: UnifiedSearchRequest
+        self,
+        *,
+        user_id: str,
+        payload: UnifiedSearchRequest,
+        weights: Sequence[float] | None = None,
     ) -> DocumentResult[UnifiedSearchResponse]:
-        cache_key = _build_cache_key("documents:search", payload)
+        cache_key = _build_cache_key("documents:search", payload, user_id=user_id)
         lock_key = f"{cache_key}:lock"
         lock_acquired = False
         if not payload.bypass_cache and self.redis is not None:
@@ -425,11 +558,15 @@ class DocumentQueryService:
         filter_params = build_search_filter_params(
             metadata_filter=payload.metadata_filter.model_dump()
         )
-        fused_result = await self._fuse_search_branches(
+        fused_result = await retrieve_fused(
+            repo=self.repo,
             user_id=user_id,
-            payload=payload,
+            query_text=payload.query,
             query_embedding=query_embedding,
+            candidate_limit=payload.candidate_limit,
+            limit=payload.limit,
             filter_params=filter_params,
+            weights=weights,
         )
         if isinstance(fused_result, Failure):
             error = fused_result.failure()
@@ -437,13 +574,7 @@ class DocumentQueryService:
             # The setnx lock above is not released on this path. It carries a 15s expiry for
             # exactly this reason, and every other raise in this method already relied on it.
             return Failure(error)
-        fused_results: list[RankedChunk] = fused_result.unwrap()
-        chunk_lookup_result = await self.repo.fetch_chunks_by_ids(
-            [item.chunk_id for item in fused_results]
-        )
-        if isinstance(chunk_lookup_result, Failure):
-            return Failure(chunk_lookup_result.failure())
-        chunk_lookup = chunk_lookup_result.unwrap()
+        fused_results, chunk_lookup = fused_result.unwrap()
         items: list[DocumentSearchResultItem] = _build_search_items(
             fused_results=fused_results, chunk_lookup=chunk_lookup
         )
@@ -465,6 +596,7 @@ class DocumentQueryService:
         payload: UnifiedSearchRequest,
         query_embedding: list[float],
         filter_params: dict[str, Any],
+        weights: Sequence[float] | None = None,
     ) -> DocumentResult[list[RankedChunk]]:
         """Run the three retrieval modes and fuse them, or fail naming the branch that broke.
 
@@ -487,34 +619,15 @@ class DocumentQueryService:
             candidate_limit=payload.candidate_limit,
             filter_params=filter_params,
         )
-        results = await asyncio.gather(
-            *(branch.run(self.repo, branch_input) for branch in RETRIEVAL_BRANCHES)
-        )
-        row_sets: list[list[RankedResultRow]] = []
-        for branch, branch_result in zip(RETRIEVAL_BRANCHES, results, strict=True):
-            if isinstance(branch_result, Failure):
-                error = branch_result.failure()
-                # `model_copy` rather than a fresh infrastructure error: re-wrapping would
-                # flatten the taxonomy and turn a 422 from one branch into a 503 for the whole
-                # request. This keeps the branch's own error kind, so the renderer still uses
-                # the status the branch earned and this path only adds the attribution.
-                return Failure(
-                    error.model_copy(
-                        update={
-                            "message": f"{branch.name} retrieval branch failed: {error.message}",
-                            "details": {**(error.details or {}), "branch": branch.name},
-                        }
-                    )
-                )
-            # `else`, not `elif isinstance(..., Success)`. The old form had no final branch, so a
-            # value that was neither would have been dropped from `row_sets` entirely — shrinking
-            # the fusion input with no log line and no failure.
-            row_sets.append(_to_ranked_rows(branch_result.unwrap()))
+        row_sets_result = await _run_branches(repo=self.repo, branch_input=branch_input)
+        if isinstance(row_sets_result, Failure):
+            return Failure(row_sets_result.failure())
         return Success(
             reciprocal_rank_fusion(
-                *row_sets,
+                *row_sets_result.unwrap(),
                 k=RRF_K,
                 limit=payload.limit,
+                weights=weights,
             )
         )
 
@@ -543,7 +656,10 @@ class DocumentQueryService:
             for item in response.items
         ]
         context_sections: list[ContextSection] = assemble_rag_context(
-            ranked_chunks, chunk_lookup, max_tokens=payload.max_tokens
+            ranked_chunks,
+            chunk_lookup,
+            max_tokens=payload.max_tokens,
+            count_tokens=default_count_tokens,
         )
         return Success(
             UnifiedRagResponse(
@@ -624,6 +740,7 @@ class DocumentQueryService:
         require_graphiti_verified: bool,
     ) -> DocumentResult[UnifiedAskResponse]:
         answer_cache_key = _build_answer_cache_key(
+            user_id=user_id,
             query=payload.query,
             doc_ids_filter=payload.doc_ids_filter,
             jurisdiction=payload.jurisdiction,
@@ -676,26 +793,32 @@ class DocumentQueryService:
                 ),
                 label="documents_query_embedding",
             )
-            retrieval_query = RetrievalQuery(
+            filter_params = build_search_filter_params(
+                metadata_filter={
+                    "document_ids": payload.doc_ids_filter,
+                    "chunk_ids": graph_chunk_ids or [],
+                    "jurisdiction": payload.jurisdiction or plan.jurisdiction,
+                    "contract_type": payload.contract_type or plan.contract_type,
+                    "clause_type": payload.clause_type,
+                    "require_graphiti_verified": require_graphiti_verified,
+                }
+            )
+            fused_result = await retrieve_fused(
+                repo=self.repo,
                 user_id=user_id,
                 query_text=plan.rewritten_query,
                 query_embedding=embedding,
+                candidate_limit=HYBRID_CANDIDATE_LIMIT,
                 limit=20,
-                vector_weight=plan.vector_weight,
-                keyword_weight=plan.keyword_weight,
-                jurisdiction=payload.jurisdiction or plan.jurisdiction,
-                contract_type=payload.contract_type or plan.contract_type,
-                document_ids=payload.doc_ids_filter,
-                chunk_ids=graph_chunk_ids or None,
-                clause_type=payload.clause_type,
-                require_graphiti_verified=require_graphiti_verified,
+                filter_params=filter_params,
+                weights=[plan.keyword_weight, plan.vector_weight, RRF_WEIGHT_TRIGRAM],
                 bm25_threshold=plan.bm25_threshold,
                 exact_phrase=plan.exact_phrase,
             )
-            rows_result = await self.repo.legal_rrf_search(**retrieval_query.model_dump())
-            if isinstance(rows_result, Failure):
-                return Failure(rows_result.failure())
-            rows = rows_result.unwrap()
+            if isinstance(fused_result, Failure):
+                return Failure(fused_result.failure())
+            fused, lookup = fused_result.unwrap()
+            rows = lookup_to_rows(fused, lookup)
             retrieved_chunks = [_row_to_chunk(row) for row in rows]
             reranked = await get_shared_reranker().rerank(
                 plan.rewritten_query, retrieved_chunks, limit=5
@@ -777,45 +900,52 @@ async def process_document_ingestion(
     classified: ClassifiedDocument = classify_document(
         markdown=parsed.markdown, filename=job.filename
     )
-    legal_metadata: LegalMetadataExtraction | None = None
-    metadata_warnings: list[QualityWarning] = []
-    if classified.graphiti_required:
-        legal_metadata, metadata_warnings = await extract_legal_metadata(
-            llm=runtime.llm,
-            markdown=parsed.markdown,
-            classified=classified,
-        )
+    legal = await _prepare_legal_metadata(
+        runtime=runtime,
+        markdown=parsed.markdown,
+        classified=classified,
+    )
+    extraction_outcome = await _extract_document_knowledge(
+        runtime=runtime,
+        job=job,
+        markdown=parsed.markdown,
+        jurisdiction=(legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction),
+        document_type=classified.document_kind,
+    )
     status_result = await runtime.repo.update_document_status(
         document_id=job.document_id,
         status="parsed",
         title=parsed.title,
         document_kind=classified.document_kind,
-        jurisdiction=(legal_metadata.jurisdiction if legal_metadata else classified.jurisdiction),
+        jurisdiction=(legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction),
         contract_type=(
-            legal_metadata.contract_type if legal_metadata else classified.contract_type
+            legal.metadata.contract_type if legal.metadata else classified.contract_type
         ),
-        parties=[*(legal_metadata.parties if legal_metadata else classified.parties)],
+        parties=[*(legal.metadata.parties if legal.metadata else classified.parties)],
         metadata_={
             "content_type": job.content_type,
             "filename": job.filename,
             **classified.metadata_,
-            **(legal_metadata.model_dump(exclude_none=True) if legal_metadata else {}),
+            **(legal.metadata.model_dump(exclude_none=True) if legal.metadata else {}),
         },
+        structural_tree=parsed.structural_tree,
+        extraction_incomplete=isinstance(extraction_outcome, ExtractionFailed),
     )
     if isinstance(status_result, Failure):
         return Failure(status_result.failure())
     chunks, segmentation_warnings = await segment_chunks(parsed=parsed, classified=classified)
-    if legal_metadata is not None:
+    if legal.metadata is not None:
         chunks = enrich_legal_chunks(
             chunks=chunks,
             classified=classified,
-            metadata=legal_metadata,
+            metadata=legal.metadata,
         )
     chunk_rows = await _embed_chunks(
         user_id=job.user_id,
         document_id=job.document_id,
         chunks=chunks,
-        extra_warnings=segmentation_warnings + classified.warnings + metadata_warnings,
+        extra_warnings=segmentation_warnings + classified.warnings + legal.warnings,
+        extraction_outcome=extraction_outcome,
     )
     upsert_result = await runtime.repo.upsert_chunks(
         build_chunk_rows(document_id=job.document_id, user_id=job.user_id, chunks=chunk_rows)
@@ -833,7 +963,7 @@ async def process_document_ingestion(
     if isinstance(status_result, Failure):
         return Failure(status_result.failure())
     if classified.graphiti_required:
-        await _write_contract_events(runtime.graphiti, legal_metadata, job.document_id)
+        await _write_contract_events(runtime.graphiti, legal.metadata, job.document_id)
         verify_result = await _verify_legal_chunks(
             repo=runtime.repo,
             graphiti=runtime.graphiti,
@@ -868,6 +998,22 @@ async def process_document_ingestion(
             "document_kind": classified.document_kind,
         }
     )
+
+
+async def _prepare_legal_metadata(
+    *,
+    runtime: IngestionRuntime,
+    markdown: str,
+    classified: ClassifiedDocument,
+) -> _LegalPreparation:
+    if not classified.graphiti_required:
+        return _LegalPreparation(metadata=None, warnings=[])
+    metadata, warnings = await extract_legal_metadata(
+        llm=runtime.llm,
+        markdown=markdown,
+        classified=classified,
+    )
+    return _LegalPreparation(metadata=metadata, warnings=warnings)
 
 
 async def _write_contract_events(
@@ -908,43 +1054,21 @@ async def run_document_ingestion_task(
     filename: str,
     content_type: str,
     object_uri: str,
+    graph: CompiledStateGraph[Any],
+    session_local: async_sessionmaker[Any],
 ) -> dict[str, object]:
-    engine, session_local = await init_db()
-    settings: Settings = get_settings()
-    object_store: StorageService = StorageService.from_settings(settings=settings)
-    llm = _build_chat_model(
-        model_name=settings.GEMINI_FLASH_MODEL,
-        temperature=0.1,
-        implementation="generic",
-    )
-    graphiti: Graphiti = await setup_graphiti(
-        neo4j_uri=settings.NEO4J_URI,
-        neo4j_user=settings.NEO4J_USERNAME,
-        neo4j_password=settings.NEO4J_PASSWORD.get_secret_value(),
-    )
-    await setup_graphiti_indices(graphiti)
-    try:
-        async with session_local() as session, session.begin():
-            repo = DocumentRepository(session)
-            graph = build_document_ingestion_graph(
-                object_store=object_store,
-                repo=repo,
-                graphiti=graphiti,
-                ingest_document_fn=process_document_ingestion,
-                llm=llm,
-            )
-            return await graph.ainvoke(
-                {
-                    "document_id": document_id,
-                    "user_id": user_id,
-                    "filename": filename,
-                    "content_type": content_type,
-                    "object_uri": object_uri,
-                }
-            )
-    finally:
-        await close_graphiti(graphiti)
-        await engine.dispose()
+    async with session_local() as session, session.begin():
+        repo = DocumentRepository(session)
+        return await graph.ainvoke(
+            {
+                "document_id": document_id,
+                "user_id": user_id,
+                "filename": filename,
+                "content_type": content_type,
+                "object_uri": object_uri,
+            },
+            {"configurable": {"document_repository": repo}},
+        )
 
 
 async def _embed_chunks(
@@ -953,6 +1077,7 @@ async def _embed_chunks(
     document_id: str,
     chunks: list[PreparedChunk],
     extra_warnings: list[QualityWarning],
+    extraction_outcome: ExtractionSucceeded | ExtractionFailed,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for batch in _batched(chunks, INGEST_EMBEDDING_BATCH_SIZE):
@@ -961,18 +1086,21 @@ async def _embed_chunks(
             task_type=EmbeddingTaskType.DOCUMENT,
         )
         for chunk, embedding in zip(batch, embeddings, strict=True):
+            extraction_metadata = _extraction_metadata(extraction_outcome)
             rows.append(
                 {
                     "id": str(uuid4()),
                     "chunk_index": chunk.chunk_index,
+                    "document_version": chunk.document_version,
                     "chunk_kind": chunk.chunk_kind,
                     "content": chunk.content,
                     "preamble": chunk.preamble,
+                    "locus": chunk.locus,
                     "clause_type": chunk.clause_type,
                     "page_no": chunk.page_no,
                     "embedding": embedding,
                     "metadata_": chunk.metadata_,
-                    "custom_metadata": chunk.custom_metadata,
+                    "custom_metadata": {**chunk.custom_metadata, **extraction_metadata},
                     "quality_warnings": [
                         warning.model_dump()
                         for warning in [*chunk.quality_warnings, *extra_warnings]
@@ -981,6 +1109,118 @@ async def _embed_chunks(
             )
     _ = (user_id, document_id)
     return rows
+
+
+def _extraction_metadata(
+    outcome: ExtractionSucceeded | ExtractionFailed,
+) -> dict[str, object]:
+    if isinstance(outcome, ExtractionFailed):
+        return {
+            "knowledge_extraction": "incomplete",
+            "knowledge_extraction_failure": str(outcome.code),
+        }
+    classes = sorted(
+        {
+            extraction.extraction_class
+            for document in outcome.documents
+            for extraction in document.extractions
+        }
+    )
+    return {
+        "knowledge_extraction": "complete",
+        "knowledge_extraction_classes": classes,
+    }
+
+
+async def _extract_document_knowledge(
+    *,
+    runtime: IngestionRuntime,
+    job: IngestionJob,
+    markdown: str,
+    jurisdiction: str | None,
+    document_type: str,
+) -> ExtractionSucceeded | ExtractionFailed:
+    if runtime.extraction is None:
+        return ExtractionFailed(
+            code=ExtractionFailureCode.UNCONFIGURED,
+            message="LangExtract provider is not configured",
+        )
+    outcome = await runtime.extraction.extract(
+        ExtractionRequest(text=markdown, prompt_description=_KNOWLEDGE_EXTRACTION_PROMPT)
+    )
+    if isinstance(outcome, ExtractionSucceeded):
+        await _write_extracted_clause_episodes(
+            outcome=outcome,
+            graph_writer=runtime.graph_writer,
+            idempotency=runtime.idempotency,
+            document_id=job.document_id,
+            user_id=job.user_id,
+            jurisdiction=jurisdiction,
+            document_type=document_type,
+        )
+    return outcome
+
+
+async def _write_extracted_clause_episodes(
+    *,
+    outcome: ExtractionSucceeded,
+    graph_writer: object | None,
+    idempotency: object | None,
+    document_id: str,
+    user_id: str,
+    jurisdiction: str | None,
+    document_type: str,
+) -> None:
+    """Map grounded clause extractions into the existing canonical writer."""
+    if graph_writer is None or idempotency is None:
+        return
+    from app.shared.langgraph_layer.agent_saul.state import ClauseSegment, ClauseType
+    from app.shared.rag.graphiti.write_clause_episodes import write_clause_episodes_to_graphiti
+    from app.shared.rag.langextract.langextract_to_graph import GraphIngestionContext
+
+    segments: list[ClauseSegment] = []
+    valid_types = {member.value: member for member in ClauseType}
+    for document in outcome.documents:
+        for extraction in document.extractions:
+            interval = extraction.char_interval
+            if interval is None or interval.start_pos is None or interval.end_pos is None:
+                continue
+            attributes = extraction.attributes or {}
+            raw_type = str(attributes.get("clause_type") or extraction.extraction_class).casefold()
+            clause_type = valid_types.get(raw_type, ClauseType.OTHER)
+            raw_id = attributes.get("clause_id") or attributes.get("clause_number")
+            clause_id = (
+                str(raw_id)
+                if raw_id
+                else hashlib.sha256(
+                    f"{document_id}:{interval.start_pos}:{interval.end_pos}:{extraction.extraction_text}".encode()
+                ).hexdigest()[:20]
+            )
+            segments.append(
+                ClauseSegment(
+                    clause_id=clause_id,
+                    clause_type=clause_type,
+                    text=extraction.extraction_text,
+                    section_ref=str(attributes.get("section_ref") or clause_id),
+                    start_char=interval.start_pos,
+                    end_char=interval.end_pos,
+                )
+            )
+    if not segments:
+        return
+    await write_clause_episodes_to_graphiti(
+        segments,
+        [],
+        GraphIngestionContext(
+            document_id=document_id,
+            user_id=user_id,
+            thread_id=f"ingestion:{document_id}",
+            jurisdiction=jurisdiction or "unspecified",
+            document_type=document_type,
+        ),
+        graphiti_service=cast("GraphitiService", graph_writer),
+        idempotency=cast("IdempotencyGuard", idempotency),
+    )
 
 
 async def _verify_legal_chunks(
@@ -1173,12 +1413,18 @@ def _build_search_items(
     return items
 
 
-def _build_cache_key(kind: str, payload: UnifiedSearchRequest) -> str:
+def _build_cache_key(
+    kind: str,
+    payload: UnifiedSearchRequest,
+    *,
+    user_id: str,
+) -> str:
     normalized_query = " ".join(payload.query.lower().split())
     filter_json = to_sorted_key_bytes(payload.metadata_filter.model_dump())
     raw = b"|".join(
         [
             kind.encode("utf-8"),
+            user_id.encode("utf-8"),
             normalized_query.encode("utf-8"),
             filter_json,
             str(payload.limit).encode("utf-8"),
@@ -1190,6 +1436,7 @@ def _build_cache_key(kind: str, payload: UnifiedSearchRequest) -> str:
 
 def _build_answer_cache_key(
     *,
+    user_id: str,
     query: str,
     doc_ids_filter: list[str],
     jurisdiction: str | None,
@@ -1199,6 +1446,7 @@ def _build_answer_cache_key(
 ) -> str:
     raw = to_sorted_key_bytes(
         {
+            "user_id": user_id,
             "query": " ".join(query.lower().split()),
             "doc_ids_filter": sorted(doc_ids_filter),
             "jurisdiction": jurisdiction,

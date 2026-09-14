@@ -6,16 +6,29 @@ Function-based architecture with factory functions for dependency injection.
 
 import json
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from os.path import relpath
 from pathlib import Path
 from typing import Any
 
+from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_texts
 from app.utils.logger import logger
 
 from .chunker import chunk_document, chunk_document_simple, create_hybrid_chunker, get_tokenizer
-from .embedder import embed_chunks
-from .models import ChunkRequest, IngestionConfig, IngestionResult
+from .docling_enhanced import create_document_converter
+from .models import Chunk, ChunkRequest, IngestionConfig, IngestionResult
+
+
+async def embed_document_chunks(chunks: list[Chunk]) -> list[Chunk]:
+    """Attach document vectors through the application's single embedding path."""
+    vectors = await embed_texts(
+        [chunk.search_text for chunk in chunks],
+        task_type=EmbeddingTaskType.DOCUMENT,
+    )
+    return [
+        chunk.model_copy(update={"embedding": vector})
+        for chunk, vector in zip(chunks, vectors, strict=True)
+    ]
 
 
 def find_document_files(documents_folder: str) -> list[str]:
@@ -67,7 +80,7 @@ def extract_document_metadata(content: str, file_path: str) -> dict[str, Any]:
     metadata = {
         "file_path": file_path,
         "file_size": len(content),
-        "ingestion_date": datetime.now(tz=datetime.timezone.utc).isoformat(),
+        "ingestion_date": datetime.now(tz=UTC).isoformat(),
     }
 
     # Try to extract YAML frontmatter
@@ -105,26 +118,22 @@ async def read_document(file_path: str) -> tuple[str, Any | None]:
     """
     file_ext = Path(file_path).suffix.lower()
 
-    # Audio formats - transcribe with Whisper ASR
+    # Audio formats need a separately provisioned transcription service.
     audio_formats = [".mp3", ".wav", ".m4a", ".flac"]
     if file_ext in audio_formats:
-        from .docling_enhanced import _transcribe_audio
-
-        content = await _transcribe_audio(file_path)
-        return (content, None)
+        msg = "Audio transcription is not configured for document ingestion"
+        raise ValueError(msg)
 
     # Docling-supported formats
     docling_formats = [".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".html", ".htm"]
 
     if file_ext in docling_formats:
         try:
-            from docling.document_converter import DocumentConverter
-
             logger.bind(file_ext=file_ext, file=Path(file_path).name).info(
                 "Converting file using Docling"
             )
 
-            converter = DocumentConverter()
+            converter = create_document_converter(gpu_available=False)
             result = converter.convert(file_path)
 
             markdown_content = result.document.export_to_markdown()
@@ -173,7 +182,7 @@ async def ingest_single_document(
     Returns:
         Ingestion result
     """
-    start_time = datetime.now(tz=datetime.timezone.utc)
+    start_time = datetime.now(tz=UTC)
 
     document_content, docling_doc = await read_document(file_path)
     document_title = extract_title(document_content, file_path)
@@ -216,7 +225,7 @@ async def ingest_single_document(
             document_id="",
             title=document_title,
             chunks_created=0,
-            processing_time_ms=(datetime.now(tz=datetime.timezone.utc) - start_time).total_seconds()
+            processing_time_ms=(datetime.now(tz=UTC) - start_time).total_seconds()
             * 1000,
             errors=["No chunks created"],
         )
@@ -224,7 +233,7 @@ async def ingest_single_document(
     logger.bind(chunk_count=len(chunks)).info("Created chunks")
 
     # Generate embeddings
-    embedded_chunks = await embed_chunks(chunks)
+    embedded_chunks = await embed_document_chunks(chunks)
     logger.bind(chunk_count=len(embedded_chunks)).info("Generated embeddings for chunks")
 
     # Save to database (if pool provided)
@@ -240,7 +249,7 @@ async def ingest_single_document(
         )
         logger.bind(document_id=document_id).info("Saved document to PostgreSQL")
 
-    processing_time = (datetime.now(tz=datetime.timezone.utc) - start_time).total_seconds() * 1000
+    processing_time = (datetime.now(tz=UTC) - start_time).total_seconds() * 1000
 
     return IngestionResult(
         document_id=document_id,
@@ -256,7 +265,7 @@ async def save_to_postgres(
     source: str,
     content: str,
     *,
-    chunks: list,
+    chunks: list[Chunk],
     metadata: dict[str, Any],
 ) -> str:
     """Save document and chunks to PostgreSQL."""
@@ -399,7 +408,7 @@ def create_ingestion_pipeline(
     config: IngestionConfig,
     documents_folder: str = "documents",
     db_pool: Any = None,
-) -> tuple[callable, callable, callable]:
+) -> tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
     """
     Factory function to create ingestion pipeline functions.
 

@@ -19,6 +19,7 @@ from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 from .constants import (
     DISKANN_QUERY_RESCORE,
     DISKANN_QUERY_SEARCH_LIST_SIZE,
+    PHRASE_OVERFETCH_MULTIPLE,
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
 from .errors import (
@@ -45,15 +46,55 @@ if TYPE_CHECKING:
     from .errors import DocumentResult
 
 _FILTER_SQL = """
-  AND (:document_ids = '{}' OR c.document_id = ANY(CAST(:document_ids AS uuid[])))
-  AND (:document_kind IS NULL OR c.chunk_kind = :document_kind)
-  AND (:jurisdiction IS NULL OR c.metadata_->>'jurisdiction' = :jurisdiction)
-  AND (:contract_type IS NULL OR c.metadata_->>'contract_type' = :contract_type)
-  AND (:clause_type IS NULL OR c.clause_type = :clause_type)
-  AND (:require_graphiti_verified IS FALSE OR c.graphiti_verified IS TRUE)
-  AND (:metadata_filter = '{}' OR c.metadata_ @> CAST(:metadata_filter AS jsonb))
-  AND (:parties_filter = '[]' OR c.metadata_->'parties' @> CAST(:parties_filter AS jsonb))
+  AND (
+    COALESCE(array_length(CAST(:document_ids AS uuid[]), 1), 0) = 0
+    OR c.document_id = ANY(CAST(:document_ids AS uuid[]))
+  )
+  AND (
+    COALESCE(array_length(CAST(:chunk_ids AS uuid[]), 1), 0) = 0
+    OR c.id = ANY(CAST(:chunk_ids AS uuid[]))
+  )
+  AND (
+    CAST(:document_kind AS text) IS NULL
+    OR c.chunk_kind = CAST(:document_kind AS text)
+  )
+  AND (
+    CAST(:jurisdiction AS text) IS NULL
+    OR c.metadata_->>'jurisdiction' = CAST(:jurisdiction AS text)
+  )
+  AND (
+    CAST(:contract_type AS text) IS NULL
+    OR c.metadata_->>'contract_type' = CAST(:contract_type AS text)
+  )
+  AND (
+    CAST(:clause_type AS text) IS NULL
+    OR c.clause_type = CAST(:clause_type AS text)
+  )
+  AND (
+    CAST(:require_graphiti_verified AS boolean) IS FALSE
+    OR c.graphiti_verified IS TRUE
+  )
+  AND (
+    CAST(:metadata_filter AS text) = '{}'
+    OR c.metadata_ @> CAST(:metadata_filter AS jsonb)
+  )
+  AND (
+    CAST(:parties_filter AS text) = '[]'
+    OR c.metadata_->'parties' @> CAST(:parties_filter AS jsonb)
+  )
 """
+
+
+def _phrase_like_pattern(phrase: str) -> str:
+    """Build an escaped `LIKE %phrase%` pattern matching the phrase literally.
+
+    The keyword extension has no phrase syntax, so the leg over-fetches on
+    relevance and post-filters with this pattern. The wildcard (`%`, `_`) and
+    escape (`\\`) characters are escaped so a phrase containing them matches
+    literally rather than as a pattern.
+    """
+    escaped = phrase.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 class DocumentRepository:
@@ -200,6 +241,8 @@ class DocumentRepository:
         contract_type: str | None = None,
         parties: list[object] | None = None,
         metadata_: dict[str, object] | None = None,
+        structural_tree: dict[str, object] | None = None,
+        extraction_incomplete: bool | None = None,
     ) -> DocumentResult[None]:
         try:
             statement: TextClause = text(
@@ -213,8 +256,10 @@ class DocumentRepository:
                 contract_type = COALESCE(:contract_type, contract_type),
                 parties = COALESCE(CAST(:parties AS jsonb), parties),
                 metadata_ = COALESCE(CAST(:metadata_ AS jsonb), metadata_),
+                structural_tree = COALESCE(CAST(:structural_tree AS jsonb), structural_tree),
+                extraction_incomplete = COALESCE(:extraction_incomplete, extraction_incomplete),
                 updated_at = :updated_at
-            WHERE id = :document_id::uuid
+            WHERE id = CAST(:document_id AS uuid)
             """
             )
             await self.session.execute(
@@ -228,6 +273,10 @@ class DocumentRepository:
                     "contract_type": contract_type,
                     "parties": json.dumps(obj=parties) if parties is not None else None,
                     "metadata_": json.dumps(obj=metadata_) if metadata_ is not None else None,
+                    "structural_tree": (
+                        json.dumps(obj=structural_tree) if structural_tree is not None else None
+                    ),
+                    "extraction_incomplete": extraction_incomplete,
                     "updated_at": datetime.now(tz=UTC),
                 },
             )
@@ -239,6 +288,44 @@ class DocumentRepository:
                 DocumentDatabaseError(
                     message="Database error while updating document status",
                     details={"document_id": document_id, "error": str(exc)},
+                    source="document_repository",
+                )
+            )
+
+    @trace_layer("repository")
+    async def fetch_structural_trees(
+        self,
+        *,
+        user_id: str,
+        document_ids: list[str],
+    ) -> DocumentResult[list[dict[str, Any]]]:
+        """Load tenant-scoped persisted trees for structural navigation."""
+        try:
+            statement = text(
+                """
+                SELECT id::text AS document_id, structural_tree
+                FROM documents
+                WHERE user_id = :user_id
+                  AND structural_tree <> '{}'::jsonb
+                  AND (
+                    cardinality(CAST(:document_ids AS uuid[])) = 0
+                    OR id = ANY(CAST(:document_ids AS uuid[]))
+                  )
+                ORDER BY id
+                """
+            )
+            result = await self.session.execute(
+                statement,
+                params={"user_id": user_id, "document_ids": document_ids},
+            )
+            return Success([dict(row) for row in result.mappings().all()])
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="documents")
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while loading document structure",
+                    details={"user_id": user_id, "error": str(exc)},
                     source="document_repository",
                 )
             )
@@ -369,7 +456,7 @@ class DocumentRepository:
                 FROM documents AS d
                 LEFT JOIN chunks AS c
                   ON c.document_id = d.id
-                WHERE d.user_id = :user_id AND d.id = :document_id::uuid
+                WHERE d.user_id = :user_id AND d.id = CAST(:document_id AS uuid)
                 GROUP BY d.id, d.status, d.object_uri, d.title, d.document_kind
                 """
             )
@@ -409,22 +496,39 @@ class DocumentRepository:
         query: str,
         candidate_limit: int,
         filter_params: dict[str, Any],
+        bm25_threshold: float | None = None,
+        exact_phrase: str | None = None,
     ) -> DocumentResult[list[dict[str, Any]]]:
         try:
+            phrase_pattern = _phrase_like_pattern(exact_phrase) if exact_phrase else None
+            fetch_limit = (
+                candidate_limit * PHRASE_OVERFETCH_MULTIPLE
+                if phrase_pattern is not None
+                else candidate_limit
+            )
             statement: TextClause = text(
                 text="""
                 SELECT
                     c.id::text AS chunk_id,
                     (-1 * (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx'))) AS score
                 FROM chunks AS c
-                JOIN documents AS d ON d.id = c.document_id
-                WHERE d.user_id = :user_id
+                WHERE c.user_id = :user_id
                   AND (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')) < 0
+                  AND (
+                    CAST(:bm25_threshold AS double precision) IS NULL
+                    OR (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx'))
+                        < CAST(:bm25_threshold AS double precision)
+                  )
+                  AND (
+                    CAST(:phrase_pattern AS text) IS NULL
+                    OR c.search_text LIKE CAST(:phrase_pattern AS text) ESCAPE '\\'
+                  )
                 """
                 + _FILTER_SQL
                 + """
-                ORDER BY (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')) ASC
-                LIMIT :candidate_limit
+                ORDER BY (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')) ASC,
+                    c.id ASC
+                LIMIT :fetch_limit
                 """
             )
             result = await self.session.execute(
@@ -433,12 +537,16 @@ class DocumentRepository:
                     "user_id": user_id,
                     "query": query,
                     "candidate_limit": candidate_limit,
+                    "bm25_threshold": bm25_threshold,
+                    "phrase_pattern": phrase_pattern,
+                    "fetch_limit": fetch_limit,
                     **filter_params,
                 },
             )
-            return Success(inner_value=[dict(row) for row in result.mappings().all()])
+            rows = [dict(row) for row in result.mappings().all()]
+            return Success(inner_value=rows[:candidate_limit])
         except SQLAlchemyError as exc:
-            add_database_error_note(exc, table="chunks, documents")
+            add_database_error_note(exc, table="chunks")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentDatabaseError(
@@ -464,13 +572,13 @@ class DocumentRepository:
                     c.id::text AS chunk_id,
                     (1 - (c.embedding <=> CAST(:embedding AS vector))) AS score
                 FROM chunks AS c
-                JOIN documents AS d ON d.id = c.document_id
-                WHERE d.user_id = :user_id
+                WHERE c.user_id = :user_id
                   AND c.embedding IS NOT NULL
                 """
                 + _FILTER_SQL
                 + """
-                ORDER BY c.embedding <=> CAST(:embedding AS vector)
+                ORDER BY c.embedding <=> CAST(:embedding AS vector),
+                    c.id ASC
                 LIMIT :candidate_limit
                 """
             )
@@ -493,7 +601,7 @@ class DocumentRepository:
             )
             return Success(inner_value=[dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
-            add_database_error_note(exc, table="chunks, documents")
+            add_database_error_note(exc, table="chunks")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentDatabaseError(
@@ -519,14 +627,14 @@ class DocumentRepository:
                     c.id::text AS chunk_id,
                     similarity(c.search_text, :query) AS score
                 FROM chunks AS c
-                JOIN documents AS d ON d.id = c.document_id
-                WHERE d.user_id = :user_id
+                WHERE c.user_id = :user_id
                   AND c.search_text % :query
                   AND similarity(c.search_text, :query) >= :similarity_threshold
                 """
                 + _FILTER_SQL
                 + """
-                ORDER BY similarity(c.search_text, :query) DESC
+                ORDER BY similarity(c.search_text, :query) DESC,
+                    c.id ASC
                 LIMIT :candidate_limit
                 """
             )
@@ -542,12 +650,77 @@ class DocumentRepository:
             )
             return Success(inner_value=[dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
-            add_database_error_note(exc, table="chunks, documents")
+            add_database_error_note(exc, table="chunks")
             await self.session.rollback()
             return Failure(
                 inner_value=DocumentDatabaseError(
                     message="Database error while performing trigram search",
                     details={"error": str(object=exc)},
+                    source="document_repository",
+                )
+            )
+
+    @trace_layer("repository")
+    async def find_document_ids_by_metadata(
+        self,
+        *,
+        user_id: str,
+        jurisdictions: Sequence[str],
+        document_kinds: Sequence[str],
+        matters: Sequence[str],
+        limit: int,
+    ) -> DocumentResult[list[str]]:
+        """Resolve a document allowlist from cheap metadata, without retrieval.
+
+        A btree/metadata lookup over the documents relation: no vectors, no
+        ranking, no index statistics. An empty criteria set matches nothing
+        here — the caller treats that as "cannot narrow" and proceeds
+        unconstrained.
+        """
+        if not (jurisdictions or document_kinds or matters):
+            return Success(inner_value=[])
+        try:
+            statement: TextClause = text(
+                text="""
+                SELECT d.id::text AS document_id
+                FROM documents AS d
+                WHERE d.user_id = :user_id
+                  AND (
+                    (
+                      CAST(:jurisdictions AS text[]) IS NOT NULL
+                      AND d.jurisdiction = ANY(CAST(:jurisdictions AS text[]))
+                    )
+                    OR (
+                      CAST(:document_kinds AS text[]) IS NOT NULL
+                      AND d.document_kind = ANY(CAST(:document_kinds AS text[]))
+                    )
+                    OR (
+                      CAST(:matters AS text[]) IS NOT NULL
+                      AND d.metadata_->>'matter' = ANY(CAST(:matters AS text[]))
+                    )
+                  )
+                ORDER BY d.id::text ASC
+                LIMIT :limit
+                """
+            )
+            result = await self.session.execute(
+                statement,
+                {
+                    "user_id": user_id,
+                    "jurisdictions": list(jurisdictions) or None,
+                    "document_kinds": list(document_kinds) or None,
+                    "matters": list(matters) or None,
+                    "limit": limit,
+                },
+            )
+            return Success(inner_value=[str(row[0]) for row in result.all()])
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="documents")
+            await self.session.rollback()
+            return Failure(
+                inner_value=DocumentDatabaseError(
+                    message="Database error while resolving source allowlist",
+                    details={"error": str(exc)},
                     source="document_repository",
                 )
             )
@@ -566,6 +739,8 @@ class DocumentRepository:
                 c.document_id::text AS document_id,
                 d.title AS title,
                 c.content AS content,
+                c.preamble AS preamble,
+                c.search_text AS search_text,
                 c.chunk_index,
                 c.chunk_kind,
                 c.clause_type,
@@ -592,141 +767,6 @@ class DocumentRepository:
                 )
             )
 
-    @trace_layer("repository")
-    async def legal_rrf_search(
-        self,
-        *,
-        user_id: str,
-        query_text: str,
-        query_embedding: list[float],
-        limit: int,
-        vector_weight: float,
-        keyword_weight: float,
-        jurisdiction: str | None,
-        contract_type: str | None,
-        document_ids: Sequence[str] | None,
-        chunk_ids: Sequence[str] | None,
-        clause_type: str | None,
-        require_graphiti_verified: bool,
-        bm25_threshold: float | None = None,
-        exact_phrase: str | None = None,
-    ) -> DocumentResult[list[dict[str, Any]]]:
-        try:
-            statement: TextClause = text(
-                text="""
-            WITH candidate_chunks AS (
-                SELECT
-                    c.id,
-                    c.content,
-                    c.preamble,
-                    c.clause_type,
-                    c.document_id,
-                    c.metadata_,
-                    c.custom_metadata,
-                    c.embedding,
-                    c.search_text,
-                    c.quality_warnings,
-                    c.graphiti_verified
-                FROM chunks AS c
-                JOIN documents AS d ON d.id = c.document_id
-                WHERE d.user_id = :user_id
-                  AND (:document_ids IS NULL OR c.document_id = ANY(CAST(:document_ids AS uuid[])))
-                  AND (:chunk_ids IS NULL OR c.id = ANY(CAST(:chunk_ids AS uuid[])))
-                  AND (:jurisdiction IS NULL OR c.metadata_->>'jurisdiction' = :jurisdiction)
-                  AND (:contract_type IS NULL OR c.metadata_->>'contract_type' = :contract_type)
-                  AND (:clause_type IS NULL OR c.clause_type = :clause_type)
-                  AND (:require_graphiti_verified IS FALSE OR c.graphiti_verified IS TRUE)
-            ),
-            vector_search AS (
-                SELECT
-                    id,
-                    ROW_NUMBER() OVER (ORDER BY embedding <=> CAST(:query_embedding AS vector)) AS rank
-                FROM candidate_chunks
-                WHERE embedding IS NOT NULL
-                ORDER BY embedding <=> CAST(:query_embedding AS vector)
-                LIMIT 50
-            ),
-            keyword_search AS (
-                SELECT
-                    id,
-                    ROW_NUMBER() OVER (
-                        ORDER BY search_text <@> to_bm25query(:query_text, 'chunks_bm25_idx')
-                    ) AS rank
-                FROM candidate_chunks
-                WHERE (
-                    :bm25_threshold IS NULL OR
-                    search_text <@> to_bm25query(:query_text, 'chunks_bm25_idx') < :bm25_threshold
-                )
-                ORDER BY search_text <@> to_bm25query(:query_text, 'chunks_bm25_idx')
-                LIMIT 50
-            ),
-            trigram_search AS (
-                SELECT
-                    id,
-                    ROW_NUMBER() OVER (ORDER BY similarity(search_text, :query_text) DESC) AS rank
-                FROM candidate_chunks
-                WHERE search_text % :query_text
-                LIMIT 50
-            ),
-            fused AS (
-                SELECT
-                    COALESCE(v.id, k.id, t.id) AS id,
-                    (:vector_weight * COALESCE(1.0 / (60.0 + v.rank), 0.0)) +
-                    (:keyword_weight * COALESCE(1.0 / (60.0 + k.rank), 0.0)) +
-                    (0.15 * COALESCE(1.0 / (60.0 + t.rank), 0.0)) AS rrf_score
-                FROM vector_search AS v
-                FULL OUTER JOIN keyword_search AS k ON v.id = k.id
-                FULL OUTER JOIN trigram_search AS t ON COALESCE(v.id, k.id) = t.id
-            )
-            SELECT
-                c.id::text AS chunk_id,
-                c.content AS chunk_text,
-                c.preamble,
-                c.clause_type,
-                c.document_id::text AS parent_doc_id,
-                c.metadata_,
-                c.custom_metadata,
-                c.quality_warnings,
-                c.graphiti_verified,
-                f.rrf_score
-            FROM fused AS f
-            JOIN chunks AS c ON c.id = f.id
-            WHERE (:exact_phrase_like IS NULL OR c.search_text ILIKE :exact_phrase_like)
-            ORDER BY f.rrf_score DESC
-            LIMIT :limit
-            """
-            )
-            result = await self.session.execute(
-                statement,
-                params={
-                    "user_id": user_id,
-                    "query_text": query_text,
-                    "query_embedding": _vector_literal(query_embedding),
-                    "limit": limit,
-                    "vector_weight": vector_weight,
-                    "keyword_weight": keyword_weight,
-                    "jurisdiction": jurisdiction,
-                    "contract_type": contract_type,
-                    "document_ids": list(document_ids) if document_ids else None,
-                    "chunk_ids": list(chunk_ids) if chunk_ids else None,
-                    "clause_type": clause_type,
-                    "require_graphiti_verified": require_graphiti_verified,
-                    "bm25_threshold": bm25_threshold,
-                    "exact_phrase_like": f"%{exact_phrase}%" if exact_phrase else None,
-                },
-            )
-            return Success([dict(row) for row in result.mappings().all()])
-        except SQLAlchemyError as exc:
-            add_database_error_note(exc, table="chunks, documents")
-            await self.session.rollback()
-            return Failure(
-                DocumentDatabaseError(
-                    message="Database error while performing legal search",
-                    details={"error": str(exc)},
-                    source="document_repository",
-                )
-            )
-
 
 def build_chunk_upsert_statement(rows: list[dict[str, Any]]) -> Insert:
     """The chunk upsert: bulk insert with conflict-resolved refresh.
@@ -739,11 +779,12 @@ def build_chunk_upsert_statement(rows: list[dict[str, Any]]) -> Insert:
     """
     statement: Insert = insert(table=UnifiedChunk).values(rows)
     return statement.on_conflict_do_update(
-        constraint="uq_chunks_document_chunk_index",
+        constraint="uq_chunks_document_version_chunk_index",
         set_={
             "chunk_kind": statement.excluded.chunk_kind,
             "content": statement.excluded.content,
             "preamble": statement.excluded.preamble,
+            "locus": statement.excluded.locus,
             "clause_type": statement.excluded.clause_type,
             "page_no": statement.excluded.page_no,
             "embedding": statement.excluded.embedding,
@@ -764,24 +805,35 @@ def build_chunk_rows(
     *, document_id: str, user_id: str, chunks: Sequence[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     now = datetime.now(tz=UTC)
-    return [
-        {
-            **chunk,
-            "document_id": document_id,
-            "user_id": user_id,
-            # The upsert's DO UPDATE SET refreshes updated_at from the row, so
-            # every write path carries it; callers may pin their own value.
-            "updated_at": chunk.get("updated_at", now),
-        }
-        for chunk in chunks
-    ]
+    rows: list[dict[str, Any]] = []
+    for chunk in chunks:
+        locus = chunk.get("locus")
+        # Unknown structural position is absent, never "". An empty string would
+        # look populated to consumers and collide with "no locus" conventions.
+        if not locus:
+            locus = None
+        rows.append(
+            {
+                **chunk,
+                "document_id": document_id,
+                "user_id": user_id,
+                "document_version": int(chunk.get("document_version", 1)),
+                "locus": locus,
+                # The upsert's DO UPDATE SET refreshes updated_at from the row, so
+                # every write path carries it; callers may pin their own value.
+                "updated_at": chunk.get("updated_at", now),
+            }
+        )
+    return rows
 
 
 def build_search_filter_params(*, metadata_filter: dict[str, Any]) -> dict[str, Any]:
     document_ids = metadata_filter.get("document_ids") or []
     parties = metadata_filter.get("parties") or []
+    chunk_ids = metadata_filter.get("chunk_ids") or []
     return {
         "document_ids": document_ids,
+        "chunk_ids": chunk_ids,
         "document_kind": metadata_filter.get("document_kind"),
         "jurisdiction": metadata_filter.get("jurisdiction"),
         "contract_type": metadata_filter.get("contract_type"),

@@ -233,8 +233,37 @@ async def _chunk_document_impl(
         )
         return _simple_fallback_chunk(content, base_metadata, config, tokenizer)
 
+    document_chunks = _annotate_structure_aware_chunks(document_chunks, base_metadata)
     logger.bind(chunk_count=len(document_chunks)).info("Created chunks using HybridChunker")
     return document_chunks
+
+
+def _annotate_structure_aware_chunks(
+    document_chunks: list[Chunk], base_metadata: dict[str, Any]
+) -> list[Chunk]:
+    """Record policy identity and recovered locus after hybrid chunking (tasks 3.2, 4.2)."""
+    # Local imports keep the shared rag package free of an import-time cycle
+    # with features.documents while still satisfying the write-path wiring.
+    from app.features.documents.chunking import resolve_chunk_policy
+    from app.features.documents.classification import (
+        recover_locus_from_text,
+    )
+
+    kind = str(base_metadata.get("document_kind") or base_metadata.get("chunk_kind") or "generic")
+    policy = resolve_chunk_policy(kind)
+    annotated: list[Chunk] = []
+    for chunk in document_chunks:
+        metadata = {
+            **chunk.metadata,
+            "chunk_policy": policy.name,
+            "overlap": policy.overlap,
+            "impure_split": False,
+        }
+        locus = recover_locus_from_text(chunk.content)
+        if locus is not None:
+            metadata["locus"] = locus
+        annotated.append(chunk.model_copy(update={"metadata": metadata}))
+    return annotated
 
 
 def _hybrid_chunk_documents(
@@ -249,9 +278,12 @@ def _hybrid_chunk_documents(
     for i, chunk in enumerate(chunks):
         contextualized_text = hybrid_chunker.contextualize(chunk=chunk)
         token_count = len(tokenizer.encode(contextualized_text))
+        content = chunk.text.strip()
+        preamble = _context_preamble(contextualized_text, content)
         document_chunks.append(
             Chunk(
-                content=contextualized_text.strip(),
+                content=content,
+                preamble=preamble,
                 chunk_index=i,
                 document_id="",
                 metadata={
@@ -264,6 +296,23 @@ def _hybrid_chunk_documents(
             )
         )
     return document_chunks
+
+
+def _context_preamble(contextualized_text: str, content: str) -> str:
+    """Separate Docling's structural prefix from the citation-safe body.
+
+    ``HybridChunker.contextualize`` returns the headings followed by the bare
+    chunk text. Keeping only that prefix prevents the body being embedded twice
+    while preserving the old contextualized lexical/embedding input exactly.
+    """
+    contextualized = contextualized_text.strip()
+    if not content or contextualized == content:
+        return ""
+    if contextualized.endswith(content):
+        return contextualized[: -len(content)].rstrip()
+    # A custom chunker may normalize the body while contextualizing. Retain its
+    # output as context rather than silently discarding structural information.
+    return contextualized
 
 
 def _simple_fallback_chunk(
@@ -316,6 +365,8 @@ def _simple_fallback_chunk(
                         **base_metadata,
                         "chunk_method": "simple_fallback",
                         "total_chunks": -1,
+                        "impure_split": True,
+                        "overlap": overlap,
                     },
                     token_count=token_count,
                 )
