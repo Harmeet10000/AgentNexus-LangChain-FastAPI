@@ -61,9 +61,23 @@ async def parse_document(*, raw_bytes: bytes, filename: str, content_type: str) 
             # never used. (Described rather than quoted: B3's second proof greps for that literal,
             # and prose containing it would defeat the guard.)
             tables=table_markdown(document),
+            structural_tree=_serialize_structural_tree(document),
         )
 
-    return await asyncer.asyncify(_sync_parse)()
+    return await asyncer.asyncify(function=_sync_parse)()
+
+
+def _serialize_structural_tree(document: DoclingDocument) -> dict[str, object]:
+    """Serialize real Docling documents while tolerating narrow parser test doubles."""
+    export = getattr(document, "export_to_dict", None)
+    if callable(export):
+        tree = export()
+        return tree if isinstance(tree, dict) else {}
+    model_dump = getattr(document, "model_dump", None)
+    if callable(model_dump):
+        tree = model_dump(mode="json")
+        return tree if isinstance(tree, dict) else {}
+    return {}
 
 
 def _extract_title(markdown: str, filename: str) -> str:
