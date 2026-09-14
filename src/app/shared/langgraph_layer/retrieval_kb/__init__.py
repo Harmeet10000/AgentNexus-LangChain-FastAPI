@@ -2,7 +2,12 @@
 
 from .graph import build_retrieval_graph
 from .nodes import _extract_postgres_chunk_ids
-from .reranker import CrossEncoderReranker, get_shared_reranker
+from .reranker import (
+    HostedReranker,
+    Reranker,
+    get_configured_reranker,
+    get_shared_reranker,
+)
 from .state import (
     Citation,
     ContextGrade,
@@ -10,17 +15,21 @@ from .state import (
     QueryPlan,
     RetrievalState,
     RetrievedChunk,
+    SourceCriteria,
 )
 
 __all__ = [
     "Citation",
     "ContextGrade",
-    "CrossEncoderReranker",
     "GeneratedAnswer",
+    "HostedReranker",
     "QueryPlan",
+    "Reranker",
     "RetrievalState",
     "RetrievedChunk",
+    "SourceCriteria",
     "_extract_postgres_chunk_ids",
     "build_retrieval_graph",
+    "get_configured_reranker",
     "get_shared_reranker",
 ]

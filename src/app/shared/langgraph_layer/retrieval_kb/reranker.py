@@ -3,43 +3,55 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
-import asyncer
-from sentence_transformers import CrossEncoder
+import httpx
 
+from app.config import get_settings
 from app.utils import logger
 
 if TYPE_CHECKING:
     from .state import RetrievedChunk
 
-_DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
-_FALLBACK_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
+class Reranker(Protocol):
+    """Minimum reranking behaviour consumed by the retrieval graph.
 
-@lru_cache(maxsize=1)
-def get_shared_reranker() -> CrossEncoderReranker:
-    """Return the process-lifetime shared re-ranker (default model).
-
-    Every retrieval path re-ranks through this accessor rather than
-    constructing per call: the cross-encoder weights load once per process and
-    are reused. `lru_cache` (rather than a module global) is what makes "once"
-    atomic under concurrent first requests. An explicit instance may still be
-    injected (tests, alternate models) — the accessor is the default, not the
-    only construction path.
-    """
-    return CrossEncoderReranker()
-
-
-class CrossEncoderReranker:
-    """Lazy sentence-transformers cross-encoder wrapper.
-
-    CPU-bound: move this behind Celery in V2 if query latency becomes visible.
+    The keyword-only limit keeps graph and service callers on one contract.
     """
 
-    def __init__(self, model_name: str = _DEFAULT_RERANKER_MODEL) -> None:
-        self.model_name = model_name
-        self._model: object | None = None
+    async def rerank(
+        self,
+        query: str,
+        chunks: list[RetrievedChunk],
+        *,
+        limit: int = 5,
+    ) -> list[RetrievedChunk]: ...
+
+
+class HostedReranker:
+    """Provider reranking over HTTP, satisfying `Reranker` with no local model.
+
+    Speaks the Cohere-compatible rerank wire shape (`POST {endpoint}` with
+    `{model, query, documents, top_n}`); the client is injectable so tests run
+    without a network. Any provider failure — including a missing key — degrades
+    to the fused order truncated to `limit`, never raising.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        endpoint: str,
+        timeout_seconds: float = 30.0,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._api_key = api_key
+        self._model = model
+        self._endpoint = endpoint
+        self._timeout_seconds = timeout_seconds
+        self._client = client
 
     async def rerank(
         self,
@@ -50,39 +62,86 @@ class CrossEncoderReranker:
     ) -> list[RetrievedChunk]:
         if not chunks:
             return []
-
-        def _sync_rerank() -> list[RetrievedChunk]:
-            model = self._load_model()
-            pairs = [(query, f"{chunk.preamble}\n\n{chunk.chunk_text}") for chunk in chunks]
-            scores = model.predict(pairs)  # ty: ignore[unresolved-attribute]
-            ranked = sorted(
-                zip(chunks, scores, strict=False),
-                key=lambda item: float(item[1]),
-                reverse=True,
+        if not self._api_key:
+            logger.bind(operation="hosted_rerank").warning(
+                "hosted_reranker_key_absent_degrading_to_fused_order"
             )
-            return [
-                chunk.model_copy(update={"score": float(score)}) for chunk, score in ranked[:limit]
-            ]
-
+            return chunks[:limit]
         try:
-            return await asyncer.asyncify(_sync_rerank)()
-        except (OSError, ValueError, RuntimeError) as exc:
-            exc.add_note(f"model={self.model_name}, operation=rerank")
-            logger.bind(model=self.model_name, operation="rerank", error=str(exc)).warning(
-                "cross_encoder_rerank_failed"
+            return await self._rerank_remote(query, chunks, limit=limit)
+        except Exception as exc:  # noqa: BLE001 — degradation path by contract
+            exc.add_note(f"model={self._model}, operation=hosted_rerank")
+            logger.bind(model=self._model, operation="hosted_rerank", error=str(exc)).warning(
+                "hosted_rerank_failed"
             )
             return chunks[:limit]
 
-    def _load_model(self) -> object:
-        if self._model is not None:
-            return self._model
-
+    async def _rerank_remote(
+        self, query: str, chunks: list[RetrievedChunk], *, limit: int
+    ) -> list[RetrievedChunk]:
+        documents = [f"{chunk.preamble}\n\n{chunk.chunk_text}" for chunk in chunks]
+        owns_client = self._client is None
+        client = self._client or httpx.AsyncClient(timeout=self._timeout_seconds)
         try:
-            self._model = CrossEncoder(self.model_name)
-        except (OSError, ValueError) as exc:
-            exc.add_note(f"model={self.model_name}, operation=load_model")
-            logger.bind(model=self.model_name, operation="load_model", error=str(exc)).warning(
-                "default_reranker_load_failed"
+            response = await client.post(
+                self._endpoint,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self._model,
+                    "query": query,
+                    "documents": documents,
+                    "top_n": limit,
+                },
             )
-            self._model = CrossEncoder(_FALLBACK_RERANKER_MODEL)
-        return self._model
+            response.raise_for_status()
+            return self._order_by_provider(chunks, response.json(), limit=limit)
+        finally:
+            if owns_client:
+                await client.aclose()
+
+    @staticmethod
+    def _order_by_provider(
+        chunks: list[RetrievedChunk], payload: object, *, limit: int
+    ) -> list[RetrievedChunk]:
+        if not isinstance(payload, dict):
+            message = f"Unexpected rerank response shape: {type(payload).__name__}"
+            raise TypeError(message)
+        results = payload.get("results")
+        if not isinstance(results, list):
+            message = "Rerank response carries no result list"
+            raise TypeError(message)
+        ordered: list[RetrievedChunk] = []
+        for entry in results[:limit]:
+            if not isinstance(entry, dict):
+                continue
+            index = entry.get("index")
+            if not isinstance(index, int) or not 0 <= index < len(chunks):
+                continue
+            score = entry.get("relevance_score", 0.0)
+            ordered.append(
+                chunks[index].model_copy(update={"score": float(score)})
+            )
+        if not ordered:
+            message = "Rerank response ordered nothing"
+            raise ValueError(message)
+        return ordered
+
+
+@lru_cache(maxsize=1)
+def get_shared_reranker() -> HostedReranker:
+    """Return the process-shared hosted reranker configuration."""
+    settings = get_settings()
+    return HostedReranker(
+        api_key=settings.RERANKER_API_KEY.get_secret_value(),
+        model=settings.RERANKER_MODEL,
+        endpoint=settings.RERANKER_ENDPOINT,
+        timeout_seconds=settings.RERANKER_TIMEOUT_SECONDS,
+    )
+
+
+def get_configured_reranker() -> Reranker:
+    """Resolve the single hosted reranking implementation."""
+    return get_shared_reranker()

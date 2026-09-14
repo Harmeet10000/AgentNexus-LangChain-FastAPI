@@ -18,8 +18,15 @@ from app.shared.langgraph_layer.kb_retry import TransientExternalError, retry_im
 from app.shared.result import log_expected_failure
 from app.utils import InfrastructureException, logger
 
-from .reranker import get_shared_reranker
-from .state import ContextGrade, GeneratedAnswer, QueryPlan, RetrievedChunk
+from .reranker import get_configured_reranker
+from .state import (  # noqa: TC001 — RetrievalState resolves at runtime for branch schemas
+    ContextGrade,
+    GeneratedAnswer,
+    QueryPlan,
+    RetrievalState,
+    RetrievedChunk,
+    SourceCriteria,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -28,9 +35,9 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
 
     from app.features.documents.repository import DocumentRepository
+    from app.shared.rag.token_counter import CountTokens
 
-    from .reranker import CrossEncoderReranker
-    from .state import RetrievalState
+    from .reranker import Reranker
 
 _QUERY_ANALYZER_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a legal retrieval query planning engine."),
@@ -146,6 +153,102 @@ def make_query_analyzer_node(
     return query_analyzer_node
 
 
+_SOURCE_IDENTIFIER_SYSTEM_PROMPT = render_prompt_sections(
+    ("IDENTITY", "You are a corpus-narrowing source identifier."),
+    (
+        "OBJECTIVE",
+        "Extract the cheap-metadata narrowing the query names — jurisdiction, document kind, "
+        "matter — so retrieval searches a smaller corpus. Name only what the query states; "
+        "when it names nothing, return empty lists.",
+    ),
+    (
+        "FEW-SHOT EXAMPLES",
+        "Query: 'What termination rights survive under our India services agreements?' "
+        "-> {jurisdictions: ['India'], document_kinds: ['contracts'], matters: []}. "
+        "Query: 'What does section 73 provide about compensation for breach?' "
+        "-> {jurisdictions: [], document_kinds: ['statutes'], matters: []}. "
+        "Query: 'Summarise the key risks in this filing.' "
+        "-> {jurisdictions: [], document_kinds: [], matters: []}.",
+    ),
+    ("CONSTRAINTS", "Return only SourceCriteria."),
+)
+
+#: Upper bound on a resolved allowlist. More identifiers than this narrow
+#: nothing and only bloat the filter parameters, so an over-wide resolution is
+#: treated as "cannot narrow" and retrieval proceeds unconstrained.
+SOURCE_ALLOWLIST_MAX_IDS = 100
+
+
+def _intersect_doc_ids(*, request_ids: list[str], allowlist: list[str]) -> list[str]:
+    """Combine the request document filter with the identifier allowlist."""
+    if not allowlist:
+        return request_ids
+    if not request_ids:
+        return allowlist
+    narrowed = [doc_id for doc_id in allowlist if doc_id in request_ids]
+    return narrowed or request_ids
+
+
+def make_source_identifier_node(
+    identifier_llm: Any,
+    repo: DocumentRepository,
+) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
+    """Narrow the corpus to a document allowlist before retrieval runs.
+
+    On a retry iteration the previous narrowing is dropped instead: a wrong
+    allowlist that excluded the answer is unrecoverable any other way, and the
+    iteration cap (not the allowlist) is what bounds the loop.
+    """
+
+    async def source_identifier_node(state: RetrievalState) -> dict[str, object]:
+        plan: QueryPlan = state["query_plan"]
+        if state.get("iteration_count", 0) > 0:
+            if not plan.allowlist:
+                return {"query_plan": plan}
+            logger.bind(operation="source_identifier", iteration=state.get("iteration_count")).info(
+                "source_allowlist_widened_on_retry"
+            )
+            return {"query_plan": plan.model_copy(update={"allowlist": []})}
+
+        query = plan.rewritten_query
+        messages: list[SystemMessage | HumanMessage] = [
+            SystemMessage(content=_SOURCE_IDENTIFIER_SYSTEM_PROMPT),
+            HumanMessage(content=query),
+        ]
+        try:
+            raw_criteria = await retry_immediate(
+                lambda: identifier_llm.ainvoke(cast("list[Any]", messages)),
+                label="gemini_source_identifier",
+            )
+            criteria = SourceCriteria.model_validate(raw_criteria)
+        except Exception as exc:  # noqa: BLE001 — cannot narrow means unconstrained, not failed
+            exc.add_note(f"query={query[:80]}, operation=source_identifier")
+            logger.bind(query=query[:80], operation="source_identifier", error=str(exc)).warning(
+                "source_identifier_failed_proceeding_unconstrained"
+            )
+            return {"query_plan": plan}
+
+        if not (criteria.jurisdictions or criteria.document_kinds or criteria.matters):
+            return {"query_plan": plan}
+        resolved = await repo.find_document_ids_by_metadata(
+            user_id=state["user_id"],
+            jurisdictions=criteria.jurisdictions,
+            document_kinds=criteria.document_kinds,
+            matters=criteria.matters,
+            limit=SOURCE_ALLOWLIST_MAX_IDS + 1,
+        )
+        if isinstance(resolved, Failure):
+            error = resolved.failure()
+            log_expected_failure(error, operation="source_allowlist_resolve")
+            return {"query_plan": plan}
+        allowlist = resolved.unwrap()
+        if len(allowlist) > SOURCE_ALLOWLIST_MAX_IDS:
+            return {"query_plan": plan}
+        return {"query_plan": plan.model_copy(update={"allowlist": allowlist})}
+
+    return source_identifier_node
+
+
 def make_graph_retrieval_node(
     graphiti: Any,
 ) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
@@ -201,61 +304,77 @@ def make_hybrid_retrieval_node(
             label="gemini_query_embedding",
         )
         chunk_ids = state.get("graph_chunk_ids") or None
-        # Local import (noqa: PLC0415): `documents.service` imports this package at
-        # module load, so a top-level import would close a cycle. The DTO lives
-        # with the other retrieval-region policy in the service module.
-        from app.features.documents.service import RetrievalQuery  # noqa: PLC0415
+        # Local imports (noqa: PLC0415): `documents.service` imports this package at
+        # module load, so top-level imports would close a cycle. The fused
+        # retrieval helper lives with the other retrieval-region policy in the
+        # service module, and this node reaches the same shared path as `ask`.
+        from app.features.documents.constants import (  # noqa: PLC0415
+            HYBRID_CANDIDATE_LIMIT,
+            RRF_WEIGHT_TRIGRAM,
+        )
+        from app.features.documents.repository import (  # noqa: PLC0415
+            build_search_filter_params,
+        )
+        from app.features.documents.service import (  # noqa: PLC0415
+            lookup_to_rows,
+            retrieve_fused,
+        )
 
         # `user_id` is not a translation of an old argument — the reader this replaces had no
         # tenant predicate at all, so every fused search read across all owners and was held
         # back only by the caller never passing another user's chunk ids. The unified query
         # scopes on the parent document's owner, which is why the state field is required here
         # rather than optional.
-        retrieval_query = RetrievalQuery(
-            user_id=state["user_id"],
-            query_text=plan.rewritten_query,
-            query_embedding=embedding,
-            limit=20,
-            vector_weight=plan.vector_weight,
-            keyword_weight=plan.keyword_weight,
-            jurisdiction=plan.jurisdiction,
-            contract_type=plan.contract_type,
-            # The one filter the old reader accepted from the request and then dropped on
-            # the floor: `doc_ids_filter` reached the analyzer prompt, the Graphiti group
-            # ids and the answer cache key, but never the SQL.
-            document_ids=state.get("doc_ids_filter") or None,
-            chunk_ids=chunk_ids,
-            # Explicit, not defaulted: `QueryPlan` forbids extra fields, so the graph has
-            # nowhere to carry either of these. Passing them by name records that the
-            # omission is a property of the plan object, not an oversight here.
-            clause_type=None,
-            require_graphiti_verified=False,
-            bm25_threshold=plan.bm25_threshold,
-            exact_phrase=plan.exact_phrase,
+        filter_params = build_search_filter_params(
+            metadata_filter={
+                # The request filter and the identifier allowlist both constrain:
+                # intersect when both name documents, otherwise take whichever
+                # is present. A conflicting inference loses to the explicit
+                # request filter rather than silently emptying retrieval.
+                "document_ids": _intersect_doc_ids(
+                    request_ids=list(state.get("doc_ids_filter") or []),
+                    allowlist=list(plan.allowlist or []),
+                ),
+                "chunk_ids": list(chunk_ids or []),
+                "jurisdiction": plan.jurisdiction,
+                "contract_type": plan.contract_type,
+            }
         )
         rows_result = await retry_immediate(
-            lambda: repo.legal_rrf_search(**retrieval_query.model_dump()),
-            label="postgres_legal_rrf_search",
+            lambda: retrieve_fused(
+                repo=repo,
+                user_id=state["user_id"],
+                query_text=plan.rewritten_query,
+                query_embedding=embedding,
+                candidate_limit=HYBRID_CANDIDATE_LIMIT,
+                limit=20,
+                filter_params=filter_params,
+                weights=[plan.keyword_weight, plan.vector_weight, RRF_WEIGHT_TRIGRAM],
+                bm25_threshold=plan.bm25_threshold,
+                exact_phrase=plan.exact_phrase,
+            ),
+            label="postgres_fused_search",
         )
         if isinstance(rows_result, Failure):
             error = rows_result.failure()
-            log_expected_failure(error, operation="postgres_legal_rrf_search")
+            log_expected_failure(error, operation="postgres_fused_search")
             raise InfrastructureException(
                 detail=error.message,
                 error_code=error.code,
                 retryable=error.retryable,
                 data=error.details,
             )
-        rows = rows_result.unwrap()
+        fused, lookup = rows_result.unwrap()
+        rows = lookup_to_rows(fused, lookup)
         return {"retrieved_chunks": [_row_to_chunk(row) for row in rows]}
 
     return hybrid_retrieval_node
 
 
 def make_reranker_node(
-    reranker: CrossEncoderReranker | None = None,
+    reranker: Reranker | None = None,
 ) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
-    resolved: CrossEncoderReranker = reranker or get_shared_reranker()
+    resolved: Reranker = reranker or get_configured_reranker()
 
     async def reranker_node(state: RetrievalState) -> dict[str, object]:
         plan: QueryPlan = state["query_plan"]
@@ -266,6 +385,63 @@ def make_reranker_node(
         return {"reranked_chunks": reranked}
 
     return reranker_node
+
+
+def make_post_process_node(
+    *,
+    max_tokens: int,
+    count_tokens: CountTokens,
+) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
+    """Deduplicate reranked chunks and assemble document-ordered context.
+
+    A chunk returned by two branches reaches generation once, and chunks of
+    one document read in ascending in-document order rather than relevance
+    order. Assembly reuses `assemble_rag_context` — no second implementation.
+    Both the reordered chunk list (what the grader and generator read) and the
+    assembled sections are returned so the two stay consistent.
+    """
+
+    async def post_process_node(state: RetrievalState) -> dict[str, object]:
+        # Local imports (noqa: PLC0415): `documents` modules import this
+        # package at module load, so top-level imports would close a cycle.
+        from app.features.documents.fusion import RankedChunk  # noqa: PLC0415
+        from app.features.documents.rag import (  # noqa: PLC0415
+            SearchChunkRecord,
+            assemble_rag_context,
+        )
+
+        chunks: list[RetrievedChunk] = state.get("reranked_chunks", [])
+        unique: dict[str, RetrievedChunk] = {}
+        for chunk in chunks:
+            unique.setdefault(chunk.chunk_id, chunk)
+        grouped: dict[str, list[RetrievedChunk]] = {}
+        for chunk in unique.values():
+            grouped.setdefault(chunk.parent_doc_id, []).append(chunk)
+        ordered: list[RetrievedChunk] = [
+            chunk
+            for document_chunks in grouped.values()
+            for chunk in sorted(document_chunks, key=lambda item: item.chunk_index)
+        ]
+        ranked = [
+            RankedChunk(chunk_id=chunk.chunk_id, score=chunk.score, rank=index)
+            for index, chunk in enumerate(ordered, start=1)
+        ]
+        lookup = {
+            chunk.chunk_id: SearchChunkRecord(
+                document_id=chunk.parent_doc_id,
+                title="",
+                content=chunk.chunk_text,
+                chunk_index=chunk.chunk_index,
+                chunk_metadata=dict(chunk.metadata_),
+            )
+            for chunk in ordered
+        }
+        sections = assemble_rag_context(
+            ranked, lookup, max_tokens=max_tokens, count_tokens=count_tokens
+        )
+        return {"reranked_chunks": ordered, "assembled_context": sections}
+
+    return post_process_node
 
 
 def make_context_grader_node(
@@ -400,12 +576,14 @@ def _normalize_plan(plan: QueryPlan) -> QueryPlan:
 
 
 def _row_to_chunk(row: dict[str, Any]) -> RetrievedChunk:
+    chunk_index = row.get("chunk_index")
     return RetrievedChunk(
         chunk_id=str(row["chunk_id"]),
         chunk_text=str(row["chunk_text"]),
         preamble=str(row["preamble"] or ""),
         clause_type=str(row["clause_type"]),
         parent_doc_id=str(row["parent_doc_id"]),
+        chunk_index=int(chunk_index) if chunk_index is not None else 0,
         metadata_=dict(row["metadata_"] or {}),
         custom_metadata=dict(row["custom_metadata"] or {}),
         score=float(row["rrf_score"]),
