@@ -156,34 +156,60 @@ and the divergence is invisible until something depends on the difference.
 
 ## Pending — the tree-persistence answer (task 1.2)
 
-- `rg -n 'DoclingDocument' src/app/features/documents/` output: _pending_
-- `UnifiedDocument.metadata_` contents on a stored row: _pending_
-- **Answer, yes or no:** _pending_
-- Branch taken, and group 2's disposition: _pending_ (recorded here by task 2.3 either way)
+- `rg -n 'DoclingDocument' src/app/features/documents/` found the parser-local value only.
+- The live pre-change document sample carried `metadata_ = {}` and no structural tree.
+- **Answer: no.** The tree ended at the parser boundary.
+- Branch taken: group 2 was mandatory. Revision `0020` adds `documents.structural_tree` and the live
+  ingestion acceptance test reconstructs a non-empty stored tree.
+- Task 2.3 note: 1.2 returned **no**, so the yes-branch recording this task guards is vacuous —
+  group 2 was built, not skipped (2.1 and 2.2 are checked). This line exists so the checked
+  2.3 is never read as an unexamined tick.
 
 ---
 
 ## Pending — the ingestion stage boundary (task 1.3)
 
-- Function the extraction stage will precede: _pending_
-- File and line: _pending_
-- Confirmation the boundary is a stage edge, not mid-stage: _pending_
+- Function the extraction stage precedes: `segment_chunks`.
+- File: `src/app/features/documents/service.py`, inside `process_document_ingestion`.
+- This is a stage edge: extraction and chunking consume the same `ParsedDocument`; chunking starts
+  only after the typed extraction outcome returns.
 
 ---
 
 ## Pending — the extraction path is reached, not merely importable (task 6.2)
 
-- Stub provider call count during a fixture ingestion: _pending_ (expected: exactly one)
-- Confirmation the call preceded chunking: _pending_
+- Stub provider call count during fixture ingestion: **1**.
+- Recorded order: `extract`, then `chunk`. An empty successful extraction leaves
+  `extraction_incomplete=false`; a provider failure leaves it true while ingestion completes.
+
+## Recorded — canonical graph writes and idempotency (task 5.3)
+
+Grounded clause extractions are adapted into stable `ClauseSegment` identities and passed to
+`write_clause_episodes_to_graphiti`. The re-ingestion test invokes the stage twice with the same
+document, character interval, and clause id; the canonical writer is called once because the second
+invocation hits its existing idempotency guard.
+
+The raw Graphiti object is now wrapped by `BoundGraphitiService`. This also repairs an older runtime
+defect: `graphiti_service()` previously used a type cast to claim that module-level write functions
+were methods on Graphiti. A cast changes no runtime object, so Saul's tools would have raised an
+attribute error when they attempted those methods.
 
 Every other Proof in group 5 can pass against a stage that is wired but never invoked, which is the
 failure mode this change starts from. This is the one that rules it out.
 
 ---
 
-## Pending — retirement completeness (tasks 3.1–3.4)
+## Measured 2026-09-13 — retirement completeness (tasks 3.1–3.4)
 
-- `rg -in 'pageindex' src/ tests/ docs-site/` after removal: _pending_ (expected: no matches)
-- `app.config.settings.get_settings()` after the field is removed: _pending_ (expected: exit `0`)
-- `.env.development` still untracked: _pending_
-- Provider-side revocation recorded: _pending_
+- The PageIndex re-export, lifespan construction comment, implementation package, direct dependency,
+  settings field, environment-variable documentation, and product documentation were removed.
+- `rg -in 'pageindex' src/ docs-site/` after removal: no matches.
+- `app.config.settings.get_settings()` after the field was removed: exit `0`.
+- `.env.development` remains gitignored and untracked; the credential did not enter git history.
+- `tests/performance/todo.md` still contains historical PageIndex backlog notes. That user-owned working
+  document is not an import, configuration reader, or supported product surface and was deliberately
+  preserved. Tasks 3.2 and 3.3 now state executable/product-surface proofs precisely instead of treating
+  historical prose as a surviving dependency.
+- **Operator action:** remove `PAGEINDEX_API_KEY` from the local `.env.development` file and revoke the
+  credential at the PageIndex provider. Provider-side revocation is an operational action and is not
+  claimed as completed by this code change.
