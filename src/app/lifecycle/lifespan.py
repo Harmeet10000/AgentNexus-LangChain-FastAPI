@@ -31,7 +31,14 @@ from app.connections import (
 )
 from app.features.auth import TokenAuditLog, User, build_websocket_security_service
 from app.features.auth.repository import RefreshTokenRepository
+from app.features.documents.service import process_document_ingestion
 from app.features.health.health_check import ALL_PROBES, check_cognee, check_graphiti
+from app.lifecycle.graphs import (
+    graphiti_service,
+    provide_document_ingestion_graph,
+    provide_langgraph_checkpointer,
+    provide_saul_graph,
+)
 from app.middleware import initialize_fastapi_guard
 from app.shared.langchain_layer.agents.memory import setup_cognee
 from app.shared.langchain_layer.agents.memory.cognee_client import (
@@ -231,6 +238,71 @@ async def _setup_outbox_relay_state(app: FastAPI, _settings: Any) -> None:
     await _init_outbox_relay(app, app.state.celery)
 
 
+async def _setup_checkpointer_state(app: FastAPI, _settings: Any) -> None:
+    """Provision the process-owned LangGraph checkpointer pool."""
+    from app.connections.postgres import get_database_url
+
+    app.state.langgraph_checkpointer = await provide_langgraph_checkpointer(
+        get_database_url(flavour="plain")
+    )
+    logger.info("LangGraph checkpointer initialized")
+
+
+async def _setup_ingestion_graph_state(app: FastAPI, settings: Any) -> None:
+    """Compile the ingestion graph through the shared startup policy path."""
+    object_store = getattr(app.state, "object_store", None)
+    if object_store is None:
+        message = "Object storage is unavailable for ingestion graph"
+        raise ServiceUnavailableException(message)
+    from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+    from app.shared.rag.langextract.service import AsyncExtractionService
+
+    extraction = AsyncExtractionService.from_settings(settings)
+    app.state.langextract_service = extraction
+    redis_client = getattr(app.state, "redis", None)
+    graphiti = getattr(app.state, "graphiti", None)
+    writer = graphiti_service(graphiti) if graphiti is not None else None
+    idempotency = (
+        IdempotencyGuard(redis=redis_client, db_engine=app.state.db_engine)
+        if redis_client is not None
+        else None
+    )
+    app.state.ingestion_graph = provide_document_ingestion_graph(
+        settings=settings,
+        object_store=object_store,
+        graphiti=graphiti,
+        ingest_document_fn=process_document_ingestion,
+        extraction=extraction,
+        graph_writer=writer,
+        idempotency=idempotency,
+    )
+    logger.info("Document ingestion graph initialized")
+
+
+async def _setup_saul_graph_state(app: FastAPI, settings: Any) -> None:
+    """Compile Agent Saul after every collaborator it requires exists."""
+    checkpointer = getattr(app.state, "langgraph_checkpointer", None)
+    redis_client = getattr(app.state, "redis", None)
+    graphiti = getattr(app.state, "graphiti", None)
+    if checkpointer is None:
+        message = "LangGraph checkpointer is unavailable for Agent Saul"
+        raise ServiceUnavailableException(message)
+    if redis_client is None:
+        message = "Redis is unavailable for Agent Saul"
+        raise ServiceUnavailableException(message)
+    if graphiti is None:
+        message = "Graphiti is unavailable for Agent Saul"
+        raise ServiceUnavailableException(message)
+    app.state.saul_graph = provide_saul_graph(
+        settings=settings,
+        checkpointer=checkpointer,
+        redis=redis_client,
+        db_engine=app.state.db_engine,
+        graphiti=graphiti_service(graphiti),
+    )
+    logger.info("Agent Saul graph initialized")
+
+
 def _report_cognee_degraded(exc: BaseException) -> None:
     """Cognee degrade path: misconfiguration and unexpected failure log differently."""
     exc.add_note("operation=setup_cognee")
@@ -283,6 +355,16 @@ def _report_outbox_relay_degraded(exc: BaseException) -> None:
 # plus its two small functions — no new try/except inside `lifespan`.
 STARTUP_POLICIES: tuple[StartupPolicy, ...] = (
     StartupPolicy(
+        name="langgraph_checkpointer",
+        setup=_setup_checkpointer_state,
+        state_attr="langgraph_checkpointer",
+        fatal_on=(),
+        degrade_on=(Exception,),
+        report=lambda exc: logger.bind(
+            component="langgraph_checkpointer", error_type=type(exc).__name__
+        ).warning("LangGraph checkpointer unavailable; continuing without Agent Saul"),
+    ),
+    StartupPolicy(
         name="cognee",
         setup=_setup_cognee_state,
         state_attr="cognee_config",
@@ -334,6 +416,26 @@ STARTUP_POLICIES: tuple[StartupPolicy, ...] = (
         degrade_on=(ConnectionError, TimeoutError, OSError, RuntimeError, ValueError),
         report=_report_outbox_relay_degraded,
     ),
+    StartupPolicy(
+        name="document_ingestion_graph",
+        setup=_setup_ingestion_graph_state,
+        state_attr="ingestion_graph",
+        fatal_on=(),
+        degrade_on=(Exception,),
+        report=lambda exc: logger.bind(
+            component="document_ingestion_graph", error_type=type(exc).__name__
+        ).warning("Document ingestion graph unavailable; continuing without capability"),
+    ),
+    StartupPolicy(
+        name="agent_saul_graph",
+        setup=_setup_saul_graph_state,
+        state_attr="saul_graph",
+        fatal_on=(),
+        degrade_on=(Exception,),
+        report=lambda exc: logger.bind(
+            component="agent_saul_graph", error_type=type(exc).__name__
+        ).warning("Agent Saul unavailable; continuing without capability"),
+    ),
 )
 
 _POLICY_PROBES = frozenset(policy.probe for policy in STARTUP_POLICIES if policy.probe is not None)
@@ -365,8 +467,15 @@ async def _shutdown_resources(app: FastAPI) -> None:  # noqa: PLR0912
         if hasattr(app.state, "langgraph_checkpointer"):
             await teardown_langgraph_checkpointer(app.state.langgraph_checkpointer)
 
-        if hasattr(app.state, "outbox_relay_task") and app.state.outbox_relay_task is not None:
-            app.state.outbox_relay_task.cancel()
+        outbox_relay = getattr(app.state, "outbox_relay", None)
+        if outbox_relay is not None:
+            drained = await outbox_relay.drain()
+            logger.bind(drained=drained).info("Outbox relay drained")
+
+        outbox_relay_task = getattr(app.state, "outbox_relay_task", None)
+        if outbox_relay_task is not None:
+            outbox_relay_task.cancel()
+            await asyncio.gather(outbox_relay_task, return_exceptions=True)
             logger.info("Outbox relay stopped")
 
         revocation_task = getattr(app.state, "websocket_revocation_task", None)
@@ -519,23 +628,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     elif neo4j_ok and not graphiti_ok:
         logger.warning("State inconsistency: Neo4j driver available but Graphiti not initialised")
 
-    # ingestion_llm = ChatGoogleGenerativeAI(
-    #     model=settings.GEMINI_FLASH_MODEL,
-    #     api_key=settings.GEMINI_API_KEY.get_secret_value(),
-    #     temperature=0.1,
-    #     retries=0,
-    # )
-    # app.state.ingestion_graph = build_ingestion_graph(
-    #     extraction_llm=ingestion_llm,
-    #     db_engine=app.state.db_engine,
-    #     graphiti_service=graphiti,
-    #     redis=app.state.redis,
-    # )
-    # NOTE: no `embedding_fn=` here. The graph resolves the embedding client itself, from
-    # `app.shared.langchain_layer.embeddings`, and passing one is now a TypeError. If this
-    # block is ever uncommented, do not restore the argument from an older revision.
-    # logger.info("Contract KB ingestion graph initialized")
-    # app.state.pageindex_client = PageIndexClient()
     # Initialize HTTPX client (HTTP/2 + connection pooling)
     app.state.httpx_client = get_shared_httpx_client()
     logger.info("HTTPX client initialized with HTTP/2")
@@ -545,24 +637,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
 
     # FastAPI-Guard setup (depends on Redis, but non-blocking)
     await initialize_fastapi_guard(app=app, settings=settings)
-
-    # LangGraph checkpointer setup (uses existing PostgreSQL connection).
-    # Deliberately left unwired. If it is ever re-enabled: the checkpointer is
-    # psycopg-backed, so it needs the plain flavour of the accessor -- a raw
-    # settings.POSTGRES_URL carries no credential, and the async flavour carries a
-    # dialect scheme psycopg cannot parse.
-    #     from app.connections.postgres import get_database_url
-    # try:
-    #     saul_checkpointer = await setup_langgraph_checkpointer(
-    #         conn_string=get_database_url(flavour="plain"),
-    #     )
-    #     app.state.langgraph_checkpointer = saul_checkpointer
-    #     logger.info("LangGraph checkpointer initialized")
-    # except (ConnectionError, TimeoutError, OSError) as e:
-    #     logger.error(
-    #         "LangGraph checkpointer setup failed, continuing without persistence", error=str(e)
-    #     )
-    #     app.state.langgraph_checkpointer = None
 
     logger.bind(status="running").info("Application ready")
 

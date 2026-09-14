@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, ResilientTask, celery_app
 from app.connections.celery_task_names import DOCUMENTS_INGEST
 from app.features.documents.service import run_document_ingestion_task
+from app.lifecycle.document_worker import (
+    get_document_worker_resources,
+    run_on_document_worker_loop,
+)
 from app.utils import InfrastructureException, logger
 
 
@@ -44,13 +46,16 @@ def ingest_document(
         )
         return {"status": "skipped", "document_id": document_id}
     try:
-        result = asyncio.run(
-            run_document_ingestion_task(
+        resources = get_document_worker_resources()
+        result = run_on_document_worker_loop(
+            lambda: run_document_ingestion_task(
                 document_id=document_id,
                 user_id=user_id,
                 filename=filename,
                 content_type=content_type,
                 object_uri=object_uri,
+                graph=resources.ingestion_graph,
+                session_local=resources.session_local,
             )
         )
     except Exception:
