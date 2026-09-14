@@ -21,11 +21,13 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 from returns.result import Failure, Success
 
+from app.features.documents.constants import RRF_WEIGHT_TRIGRAM
+from app.features.documents.repository import build_search_filter_params
 from app.features.documents.service import (
     RETRIEVAL_BRANCHES,
     RetrievalBranchPolicy,
-    RetrievalQuery,
     _BranchInput,
+    retrieve_fused,
 )
 from app.features.health.health_check import ALL_PROBES
 from app.lifecycle.lifespan import (
@@ -139,10 +141,27 @@ class _StubRepo:
         self.calls.append("exact_phrase_search")
         return Success([{"chunk_id": "exact-1", "score": 1.0}])
 
-    async def legal_rrf_search(self, **kwargs: Any) -> DocumentResult[list[dict[str, Any]]]:
-        self.calls.append("legal_rrf_search")
-        self.last_kwargs = kwargs
-        return Success([])
+    async def fetch_chunks_by_ids(
+        self, chunk_ids: list[str]
+    ) -> DocumentResult[dict[str, dict[str, Any]]]:
+        self.calls.append("fetch_chunks_by_ids")
+        return Success({
+            cid: {
+                "chunk_id": cid,
+                "document_id": "doc-1",
+                "title": "stub",
+                "content": "stub content",
+                "preamble": "",
+                "search_text": "stub content",
+                "chunk_index": 0,
+                "chunk_kind": "generic",
+                "clause_type": None,
+                "chunk_metadata": {},
+                "quality_warnings": [],
+                "graphiti_verified": False,
+            }
+            for cid in chunk_ids
+        })
 
 
 async def _run_exact_phrase_branch(
@@ -158,25 +177,30 @@ async def _run_exact_phrase_branch(
 
 async def _demo_retrieval_policy() -> Result[None, str]:
     repo: Any = _StubRepo()
-    query = RetrievalQuery(
+    fused_result = await retrieve_fused(
+        repo=repo,
         user_id="user-1",
         query_text="indemnity cap",
         query_embedding=[0.0, 0.1, 0.2],
+        candidate_limit=50,
         limit=20,
-        vector_weight=0.4,
-        keyword_weight=0.6,
-        jurisdiction="US-CA",
-        document_ids=["doc-1"],
-        chunk_ids=None,
+        filter_params=build_search_filter_params(
+            metadata_filter={"jurisdiction": "US-CA", "document_ids": ["doc-1"]}
+        ),
+        weights=[0.6, 0.4, RRF_WEIGHT_TRIGRAM],
     )
-    await repo.legal_rrf_search(**query.model_dump())
-    result = _check(repo.calls == ["legal_rrf_search"], "DTO must unpack to one leaf call")
+    if isinstance(fused_result, Failure):
+        return Failure(f"shared fused path failed: {fused_result.failure().message}")
+    fused, _lookup = fused_result.unwrap()
+    result = _check(
+        repo.calls == ["bm25_search", "vector_search", "trigram_search", "fetch_chunks_by_ids"],
+        "one query must fan out to the three branch legs, then fetch",
+    )
     if isinstance(result, Failure):
         return result
     result = _check(
-        repo.last_kwargs["query_text"] == "indemnity cap"
-        and repo.last_kwargs["jurisdiction"] == "US-CA",
-        "DTO fields must survive the round-trip",
+        [item.chunk_id for item in fused] == ["tri-1", "bm25-1", "vec-1"],
+        "fused order must follow the shared reciprocal-rank path",
     )
     if isinstance(result, Failure):
         return result

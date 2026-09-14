@@ -65,6 +65,48 @@ reach the index built for that leg.
 - **THEN** the approximate-search query-time parameters SHALL be set in the same transaction as the
   scan they govern
 
+### Requirement: Retrieval statements prepare with default bindings
+
+Every branch statement SHALL prepare under the async driver with all-None/default bindings.
+A parameter used both in a null test and in a typed expression SHALL be CAST to its type at
+every use site, so preparation never depends on which occurrence the driver types first.
+The deleted monolithic query violated this — its `:x IS NULL` dual-context parameters
+failed preparation on both drivers for None *and* concrete bindings — which is why the
+collapse to the branch statements was a repair as well as a simplification.
+
+#### Scenario: All-None bindings prepare
+
+- **WHEN** each branch statement is explained without executing against the live schema
+  with every optional binding left at its default
+- **THEN** preparation SHALL succeed for every branch, because EXPLAIN without ANALYZE
+  exercises preparation independently of corpus content
+
+#### Scenario: A regression test pins preparability
+
+- **WHEN** the branch SQL changes
+- **THEN** an integration test SHALL fail if any branch statement stops preparing with
+  default bindings, rather than discovering it at query time
+
+### Requirement: A keyword index reference resolves to exactly one index
+
+The bare index name passed to the keyword query constructor SHALL resolve to exactly one
+index in the deployed schema. Duplicate names across schemas make resolution depend on
+`search_path` order and produce planner-rejection errors that look like optimizer
+behaviour but are really name resolution.
+
+#### Scenario: The deployed schema carries no duplicate retrieval index names
+
+- **WHEN** the production schema is inspected
+- **THEN** each retrieval index name SHALL match exactly one index, so the bare-name
+  contract cannot resolve ambiguously
+
+#### Scenario: Scratch schemas do not duplicate production index names silently
+
+- **WHEN** a scratch schema is built for measurement
+- **THEN** the queried schema SHALL come first on `search_path`, and any duplicate index
+  name SHALL be recorded as a measurement hazard rather than investigated as planner
+  behaviour
+
 ### Requirement: Keyword scoring respects the inverted sign convention
 
 The keyword extension returns negative relevance scores. Ordering and filtering SHALL be written for

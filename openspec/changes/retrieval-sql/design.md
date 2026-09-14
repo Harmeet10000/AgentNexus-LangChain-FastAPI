@@ -98,13 +98,18 @@ trigger threshold from the 5.1 recall numbers rather than a guessed one.
 
 ## Phrase search without a full-text vector column
 
-The keyword extension provides no phrase query and no boolean query syntax. The vendor's prescribed
-remedy is to over-fetch ranked candidates and post-filter them with a literal pattern match.
+The keyword extension (`pg_textsearch`, ParadeDB) matches on indexed terms and
+exposes no phrase or boolean query operator: its documented query surface is
+term matching with BM25 scoring, so a multi-word phrase cannot be expressed as
+a single index predicate. The vendor-prescribed remedy is the one implemented
+here — over-fetch ranked candidates on the term query, then post-filter with a
+literal pattern match (`LIKE ... ESCAPE`, `PHRASE_OVERFETCH_MULTIPLE = 5`).
 
-The repository already does this at `repository.py:694` — but unescaped, and on only one path. Both
-defects matter: unescaped, a phrase containing a wildcard metacharacter matches far more than the user
-asked for; on one path only, the same phrase query behaves differently depending on which door it
-entered, which is the change's central complaint in miniature.
+Implemented in `bm25_search`: the pattern is built by `_phrase_like_pattern`,
+which escapes the wildcard (`%`, `_`) and escape (`\`) characters so a phrase
+containing them matches literally. Before this change the repository did the
+unescaped variant inside the deleted monolithic query only; the escaped filter
+now lives on the shared branch input, so both fused-path callers get it.
 
 **A `tsvector` column is not added**, and this is a decision rather than an omission. Adding one would
 put a second lexical signal into a three-branch fusion that already has two lexical branches — keyword
