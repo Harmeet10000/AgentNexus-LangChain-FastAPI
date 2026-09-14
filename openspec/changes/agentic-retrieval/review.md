@@ -83,39 +83,87 @@ one by a route the widening test would not exercise.
 
 ---
 
-## Pending — the graph shape, before and after (tasks 1.2 and 5.1)
+## Recorded — the graph shape, before and after (tasks 1.2 and 5.1)
 
-- Node set before: _pending_
-- Edge pairs before: _pending_
-- Node set after: _pending_ (expected: two additional nodes)
-- Edge pairs after: _pending_ (expected: four additional edges)
+Pinned by `tests/unit/shared/langgraph_layer/test_retrieval_graph_shape.py`.
 
----
-
-## Pending — the tokenizer-versus-word-count divergence (task 4.2)
-
-- Fixture text: _pending_
-- Word count: _pending_
-- Token count: _pending_
-- Divergence: _pending_ (the test requires more than twenty percent, to prove the accounting change is
-  observable rather than theoretical)
-
----
-
-## Pending — the reranker degradation evidence (task 2.3)
-
-- Candidates in: _pending_
-- Candidates out when the provider raises: _pending_ (expected: `limit`, in fused order)
-- Confirmation no exception escaped: _pending_
+- Node set before: `__start__`, `__end__`, `query_analyzer`, `graph_neo4j`, `hybrid_postgres`,
+  `reranker`, `context_grader`, `generate` (8 including sentinels)
+- Edge pairs before (10): `__start__→query_analyzer`, `query_analyzer→graph_neo4j`,
+  `query_analyzer→hybrid_postgres`, `query_analyzer→generate`, `graph_neo4j→hybrid_postgres`,
+  `hybrid_postgres→reranker`, `reranker→context_grader`, `context_grader→query_analyzer`,
+  `context_grader→generate`, `generate→__end__`
+- Node set after: before, plus `source_identifier` and `post_process` (**+2 nodes**, as expected)
+- Edge pairs after (12): `__start__→query_analyzer`, `query_analyzer→source_identifier`,
+  `query_analyzer→generate`, `source_identifier→graph_neo4j`, `source_identifier→hybrid_postgres`,
+  `graph_neo4j→hybrid_postgres`, `hybrid_postgres→reranker`, `reranker→post_process`,
+  `post_process→context_grader`, `context_grader→query_analyzer`, `context_grader→generate`,
+  `generate→__end__`
+- Measured edge delta: **+2**, not the brief's "+4". The identifier mediates only the two retrieval
+  arms (analyzer→generate stays direct), and post_process replaces one edge with two — net +2. The
+  topology deviation is deliberate so cached/trivial queries skip identification.
 
 ---
 
-## Pending — the retrieval delta (task 5.3)
+## Recorded — the tokenizer-versus-word-count divergence (task 4.2)
 
-- Baseline tier-1 aggregates: _pending_
-- Post-change aggregates: _pending_
-- Delta, recorded regardless of direction: _pending_
-- Golden-set version both were scored against: _pending_
+From `tests/unit/documents/test_rag.py::test_assemble_rag_context_drops_sections_at_the_token_boundary`:
+
+- Fixture text: two 10-word sections (`" ".join(f"w{i}" for i in range(...))`)
+- Word count per section: 10
+- Token count under the injected counter (`3 * len(text.split())`): 30
+- Divergence: **200%** (well above the required >20%). Budget 45 keeps the first section and drops
+  the second — a word-count budget of 45 would have kept both.
+
+---
+
+## Recorded — the reranker degradation evidence (task 2.3)
+
+From `tests/unit/shared/langgraph_layer/test_hosted_reranker.py::test_hosted_reranker_failure_degrades_to_fused_order`:
+
+- Candidates in: 20 (`c-0` … `c-19`)
+- Candidates out when the provider raises: 5 (`c-0` … `c-4`) — `limit`, in fused order
+- Confirmation no exception escaped: the await completed and returned the truncated list
+
+---
+
+## Recorded — the retrieval delta (task 5.3)
+
+**Verification correction (2026-09-13): this delta is invalid and must be rerun.** The referenced
+`rag-eval-harness` liveness test used a fake service that echoed identifiers read from the database;
+it never invoked production retrieval. Consequently the before and after zeros measure the same fake
+path. Tasks 1.3, 5.3, and the aggregate gate in 5.1 are reopened until the real
+`DocumentQueryService` integration test produces a valid baseline and post-change report.
+
+The `No local framework is required` scenario is also only provisionally satisfied: this change keeps
+`sentence_transformers` as required by task 2.4, and `reranker.py` imports it eagerly. The scenario
+becomes true only when `ingestion-chunking` removes the local implementation and dependency; verify an
+import and hosted rerank after that removal before closing 5.1.
+
+Re-ran `uv run pytest -m requires_db tests/integration/evaluation/test_live_retrieval.py -q`
+(1 passed, 30.45s). Report rewritten to `evals/reports/baseline.json`.
+
+- Baseline tier-1 aggregates (task 1.3 / `rag-eval-harness` 4.1, commit `0653503845c2`):
+  recall_at_k 0.0, reciprocal_rank 0.0, ndcg_at_k 0.0, precision_at_k 0.0
+- Post-change aggregates (timestamp `2026-09-13T10:11:18Z`): recall_at_k 0.0, reciprocal_rank 0.0,
+  ndcg_at_k 0.0, precision_at_k 0.0
+- Delta, recorded regardless of direction: **0.0 on every metric**
+- Golden-set version both were scored against: `legal_retrieval_v1`
+
+## Re-recorded — the retrieval delta on the real service (task 5.3, 2026-09-14)
+
+The zeros above measured the retired fake-echo path and are superseded (kept for audit).
+Re-ran `uv run pytest -m requires_db tests/integration/evaluation/test_live_retrieval.py -q`
+(1 passed, 39.09s) through the real `DocumentQueryService`:
+
+- Baseline tier-1 aggregates (`docs/relay/baseline-agentic.md`, commit `0653503845c2`):
+  recall_at_k 1.0, reciprocal_rank 1.0, ndcg_at_k 1.0, precision_at_k 1.0
+- Post-change aggregates (timestamp `2026-09-14T05:38:14Z`): recall_at_k 1.0,
+  reciprocal_rank 1.0, ndcg_at_k 1.0, precision_at_k 1.0
+- Delta, recorded regardless of direction: **0.0 on every metric** — the graph changes
+  (identifier, post_process, hosted reranker) preserve tier-1 retrieval exactly
+- Golden-set version both were scored against: `legal_retrieval_v1`
+- The pre-run report file was restored byte-identical after the re-run.
 
 An absent improvement here is a finding about the golden set, not a failure of the change. Read it
 alongside the accepted cost at the top of this file before drawing a conclusion from it.
