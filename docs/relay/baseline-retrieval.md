@@ -1,7 +1,9 @@
 # Baseline — retrieval-sql measurements (2026-09-14)
 
-## Gate numbers (post-hoc: task 1.1 was checked without recording them, so these are the
-first recorded gate counts, not a pre-change baseline)
+## Gate numbers (post-hoc: task 1.1 was checked without recording a pre-change capture,
+so no immutable 1.1 baseline exists to compare against. These first-recorded counts are the
+reference for later Proofs within this change — equal-or-better relative to THESE numbers,
+never to an absolute. Do not cite them as pre-change measurements.)
 
 - `uv run pytest tests/unit/documents tests/unit/shared/langgraph_layer -q`:
   `172 passed` (7.1 re-run; includes this change's guard, parity, phrase, and preparability tests)

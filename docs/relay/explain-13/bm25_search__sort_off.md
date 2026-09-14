@@ -22,3 +22,10 @@ Planning Time: 1.136 ms
 Execution Time: 21.566 ms
 Allocated Memory: allocated_by_plan=2708kB allocated_by_exec=1787kB base_allocation=4092kB
 ```
+
+## Session settings for this capture
+
+`SET LOCAL enable_sort = off` was issued on the same connection immediately before
+`EXPLAIN (ANALYZE, BUFFERS)` (see the capture script; `EXPLAIN` output does not echo
+session GUCs). The companion `bm25_search__default_cost.md` ran the identical statement
+without that setting. Compare the two for the forced-vs-default plan choice.
