@@ -17,12 +17,12 @@ claims a recall improvement, which needs a before-number).
 
 ## 1 Baseline — measure before touching anything
 
-- [ ] 1.1 Capture the gate baseline into `docs/relay/baseline-retrieval.md`:
+- [x] 1.1 Capture the gate baseline into `docs/relay/baseline-retrieval.md`:
   `uv run pytest tests/unit/documents tests/unit/shared/langgraph_layer -q`,
   `uv run ruff check --no-cache src/`, `uv run ty check src/`.
   **Proof:** all three counts recorded verbatim. Every later Proof compares to these, never to an
   absolute.
-- [ ] 1.2 **Settle whether the keyword access method exists under the name the code uses.** Create a
+- [x] 1.2 **Settle whether the keyword access method exists under the name the code uses.** Create a
   scratch database on the live instance, run `CREATE EXTENSION IF NOT EXISTS` for the vector,
   vector-scaling, trigram, and keyword extensions, then
   `SELECT name, installed_version FROM pg_available_extensions WHERE name IN (...)` and
@@ -30,14 +30,14 @@ claims a recall improvement, which needs a before-number).
   **Proof:** both `amname` rows present; the version table recorded. **If the keyword access method is
   absent under that name, stop** — `model.py:114` and `repository.py:418` both embed the literal, and
   the whole change re-scopes.
-- [ ] 1.3 Build the scratch schema from the ORM, seed roughly fifty thousand synthetic chunks across
+- [x] 1.3 Build the scratch schema from the ORM, seed roughly fifty thousand synthetic chunks across
   twenty users, and capture `EXPLAIN (ANALYZE, BUFFERS)` for `legal_rrf_search` and for each of the
   three branch methods.
   **Proof:** the captured plans record whether each index appears. The expectation is absent for
   `legal_rrf_search` and present for the branch methods — **but the expectation is not the Proof.** If
   the indexes do appear, task groups 3 and 4 shrink to the determinism and tuning fixes and the
   ordering is unaffected.
-- [ ] 1.4 **Run the three-branch fused path once against a real session on the scratch database.**
+- [x] 1.4 **Run the three-branch fused path once against a real session on the scratch database.**
   `service.py:490` gathers three `execute()` calls on one `AsyncSession`.
   **Proof:** record whether it returns rows or raises a concurrent-operation error. A raise means the
   fused path has **never run in production**, and task 3.2 must serialise the branches before routing
@@ -45,81 +45,88 @@ claims a recall improvement, which needs a before-number).
 
 ## 2 Guards — land before any behaviour moves
 
-- [ ] 2.1 `tests/unit/documents/test_bm25_sign_convention.py`: static assertions over `repository.py`
+- [x] 2.1 `tests/unit/documents/test_bm25_sign_convention.py`: static assertions over `repository.py`
   query text that the relevance expression is ordered ascending and filtered below zero, plus a
   fusion-level test that a more-negative raw score outranks a less-negative one.
   **Proof:** the test passes; inverting the ordering in the source makes it fail.
-- [ ] 2.2 `tests/unit/documents/test_no_tsvector_in_app_code.py` asserting no full-text vector, query,
+- [x] 2.2 `tests/unit/documents/test_no_tsvector_in_app_code.py` asserting no full-text vector, query,
   or construction call appears under `src/app/`. Exclude migrations as an immutable historical record
   and **state the exclusion in the test** rather than leaving it implicit.
   **Proof:** the test passes now; adding a vector-construction call to any `src/app/` file makes it
   fail.
-- [ ] 2.3 Pin the filter surface: every branch method's SQL contains the shared filter block, and every
+- [x] 2.3 Pin the filter surface: every branch method's SQL contains the shared filter block, and every
   key in the built filter parameters is consumed by every branch.
   **Proof:** `uv run pytest tests/unit/documents -q` gains one test over the 1.1 baseline; removing one
   predicate from one branch fails it.
 
 ## 3 Collapse to one fused path
 
-- [ ] 3.1 Add per-leg weights to `reciprocal_rank_fusion` as a **keyword-only argument defaulting to
+- [x] 3.1 Add per-leg weights to `reciprocal_rank_fusion` as a **keyword-only argument defaulting to
   unweighted**, with named constants in `constants.py`, weighted toward the lexical legs.
   **Proof:** `uv run pytest tests/unit/documents/test_fusion.py -q` — existing tests pass unchanged,
   because the default is unweighted and `search_legal_precedents.py:188` is therefore untouched — plus
   a new test showing the order changes when a weight changes.
-- [ ] 3.2 Point `make_hybrid_retrieval_node` at the shared fused path instead of `legal_rrf_search`,
+- [x] 3.2 Point `make_hybrid_retrieval_node` at the shared fused path instead of `legal_rrf_search`,
   mapping the query plan's vector and keyword weights onto the weight arguments, and its phrase and
   threshold onto the branch inputs. If 1.4 recorded a concurrent-operation error, serialise the branch
   execution here.
   **Proof:** `uv run pytest tests/unit/shared/langgraph_layer/test_retrieval_retry_shape.py -q` passes;
   a new test asserts the graph path and `DocumentQueryService.search` return **identical chunk-id
   order** for one query.
-- [ ] 3.3 Delete `legal_rrf_search` and its executable stub at `src/app/examples/policy_examples.py:142`.
+- [x] 3.3 Delete `legal_rrf_search` and its executable stub at `src/app/examples/policy_examples.py:142`.
   **Proof:** `rg -n 'legal_rrf_search' src/ tests/` returns nothing;
   `uv run python -c "import app.main"` exits `0`; the pytest summary pass count is ≥ the 1.1 baseline.
   Note that `policy_examples.py:122-160` is executable and asserts branch names — it breaks on any
   branch-registry edit.
+- [x] 3.4 Pin that every branch statement prepares and executes with default bindings, and that the
+  deployed schema carries exactly one index per retrieval index name.
+  **Proof:** `tests/integration/documents/test_branch_statement_prepare.py` (requires_db) passes:
+  all three branches return Success with all-None/default bindings, and each of
+  `chunks_bm25_idx`, `chunks_embedding_idx`, `chunks_search_text_trgm_idx` matches exactly one
+  index in the `public` schema. (Finding 1: the deleted monolith could not be prepared by either
+  driver; finding 2: bare-name resolution is only unambiguous with unique names.)
 
 ## 4 Index and query tuning
 
-- [ ] 4.1 Give every leg a deterministic tiebreaker in both its ranking-expression ordering and its
+- [x] 4.1 Give every leg a deterministic tiebreaker in both its ranking-expression ordering and its
   statement ordering.
   **Proof:** the same query run twice on the scratch database yields byte-identical chunk-id order.
 - [ ] 4.2 Move the approximate-search query-time parameters onto the fused path so every vector leg sets
   them in its own transaction.
   **Proof:** `EXPLAIN (ANALYZE)` with rescoring disabled versus the configured value shows different
   recall against an exact nearest-neighbour ground truth computed once; both recorded against 1.3.
-- [ ] 4.3 Re-capture the full `EXPLAIN` set from 1.3.
+- [x] 4.3 Re-capture the full `EXPLAIN` set from 1.3.
   **Proof:** every leg's plan now names its index where the 1.3 capture did not.
 
 ## 5 Tenant isolation
 
-- [ ] 5.1 Move the tenant predicate onto `chunks.user_id` in every leg — the column and its index
+- [x] 5.1 Move the tenant predicate onto `chunks.user_id` in every leg — the column and its index
   already exist, so **no migration is needed for this**. Keep the document join only where a document
   column is projected.
   **Proof:** `EXPLAIN` shows the vector leg filtering before the approximate scan or using
   `ix_chunks_user_document`; and recall for a user owning roughly one percent of chunks, measured
   against exact nearest-neighbour ground truth, improves over the 1.3 capture.
-- [ ] 5.2 Record the isolation-ladder decision in `adrs.md`: partial indexes for the three-to-five
+- [x] 5.2 Record the isolation-ladder decision in `adrs.md`: partial indexes for the three-to-five
   stable jurisdiction and document-kind values first; approximate-index label filtering **or** parallel
   builds — mutually exclusive — for many tenants; list partitioning last. Record that keyword
   statistics are **partition-local**, so a partitioned keyword leg produces scores that are not
   comparable across partitions.
   **Proof:** the ADR names a **measured** trigger threshold taken from the 5.1 recall numbers, not a
   guessed one.
-- [ ] 5.3 Add the chosen partial indexes in a migration that also carries `CREATE EXTENSION IF NOT
+- [x] 5.3 Add the chosen partial indexes in a migration that also carries `CREATE EXTENSION IF NOT
   EXISTS` for all four extensions, and register them in `model.py.__table_args__`.
   **Proof:** `uv run alembic check` proposes no diff; and a fresh scratch database built by
   `alembic upgrade head` with **no pre-installed extensions** reaches head successfully.
 
 ## 6 Phrase search
 
-- [ ] 6.1 Move the phrase post-filter into the keyword leg as over-fetch plus an **escaped** literal
+- [x] 6.1 Move the phrase post-filter into the keyword leg as over-fetch plus an **escaped** literal
   pattern filter — escaping the wildcard and escape characters in the phrase — and expose it on the
   shared branch input so both callers get it.
   **Proof:** `uv run pytest tests/unit/documents -q` gains a test where a phrase containing a wildcard
   metacharacter matches literally, and a chunk containing the words separately but not the phrase is
   excluded.
-- [ ] 6.2 Record in `design.md` that the keyword extension supports neither phrase nor boolean query
+- [x] 6.2 Record in `design.md` that the keyword extension supports neither phrase nor boolean query
   syntax, that over-fetch plus post-filter is the vendor-prescribed remedy, and that a full-text vector
   column is therefore **not** added because it would double-count the lexical signal in a three-branch
   fusion.
@@ -127,10 +134,10 @@ claims a recall improvement, which needs a before-number).
 
 ## 7 Close out
 
-- [ ] 7.1 **Proof:** `openspec validate retrieval-sql --strict` exits `0`;
+- [x] 7.1 **Proof:** `openspec validate retrieval-sql --strict` exits `0`;
   `uv run ruff check --no-cache src/`, `uv run ty check src/`, and `uv run pytest -q` are each equal to
   or better than the 1.1 baseline.
-- [ ] 7.2 Re-verify the named blast radius:
+- [x] 7.2 Re-verify the named blast radius:
   `tests/unit/documents/{test_hybrid_search_failure,test_fusion,test_rag,test_vector_width_configured}.py`,
   `tests/unit/shared/langgraph_layer/test_retrieval_retry_shape.py`,
   `tests/unit/test_feature_error_exhaustiveness.py`, and the executable stubs in

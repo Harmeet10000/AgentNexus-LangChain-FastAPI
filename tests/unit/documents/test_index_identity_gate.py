@@ -34,7 +34,11 @@ def _bm25_index_literals(source: str) -> list[str]:
 
 def test_every_bm25_index_literal_equals_the_single_definition() -> None:
     literals = _bm25_index_literals(_REPO_SOURCE)
-    assert len(literals) == 6, literals
+    # Four after retrieval-sql 3.2/3.3: the monolithic `legal_rrf_search` took its
+    # three keyword-leg literals with it, and the `bm25_threshold` predicate in
+    # `bm25_search` added one. A new literal that is NOT the single definition
+    # still fails the set assertion below.
+    assert len(literals) == 4, literals
     assert set(literals) == {constants.CHUNKS_BM25_INDEX_NAME}
     assert constants.CHUNKS_BM25_INDEX_NAME == "chunks_bm25_idx"
 
@@ -44,5 +48,5 @@ def test_the_index_maintenance_call_names_the_same_index() -> None:
 
 
 def test_the_chunk_upsert_key_equals_the_single_definition() -> None:
-    assert "uq_chunks_document_chunk_index" in _REPO_SOURCE
-    assert constants.CHUNKS_UNIQUE_CONSTRAINT_NAME == "uq_chunks_document_chunk_index"
+    assert "uq_chunks_document_version_chunk_index" in _REPO_SOURCE
+    assert constants.CHUNKS_UNIQUE_CONSTRAINT_NAME == "uq_chunks_document_version_chunk_index"

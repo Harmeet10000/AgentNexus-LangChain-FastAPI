@@ -22,18 +22,26 @@ DEFAULT_SEARCH_CACHE_TTL_SECONDS = 900
 
 HYBRID_CANDIDATE_LIMIT = 50
 RRF_K = 60
+# Per-leg fusion weights for `reciprocal_rank_fusion`, weighted toward the lexical
+# legs. These are starting priors, not measurements — tune them against the
+# retrieval eval harness (`evals/reports/baseline.json`) before treating any value
+# as settled. The fusion default stays unweighted; callers opt in explicitly.
+RRF_WEIGHT_BM25 = 1.5
+RRF_WEIGHT_VECTOR = 1.0
+RRF_WEIGHT_TRIGRAM = 1.2
+# Keyword-leg phrase over-fetch multiple: the LIKE post-filter narrows, so the
+# leg reads this many times the candidate budget and truncates after filtering.
+PHRASE_OVERFETCH_MULTIPLE = 5
 TRIGRAM_SIMILARITY_THRESHOLD = 0.1
 DISKANN_QUERY_SEARCH_LIST_SIZE = 100
 DISKANN_QUERY_RESCORE = 50
 
 # --- ingestion ---------------------------------------------------------------
 
-INGEST_CHUNK_SIZE = 512
-INGEST_CHUNK_OVERLAP = 64
 INGEST_EMBEDDING_BATCH_SIZE = 200
 ANALYZE_THRESHOLD_CHUNKS = 10_000
 
 # --- schema identifiers (asserted by the gate; see the module docstring) ------
 
 CHUNKS_BM25_INDEX_NAME = "chunks_bm25_idx"
-CHUNKS_UNIQUE_CONSTRAINT_NAME = "uq_chunks_document_chunk_index"
+CHUNKS_UNIQUE_CONSTRAINT_NAME = "uq_chunks_document_version_chunk_index"
