@@ -49,14 +49,20 @@ _To be confirmed against the implemented report schema during 5.2._
 
 ---
 
-## Pending — the first baseline (task 4.1)
+## Recorded — the first baseline (task 4.1)
 
-- Golden-set version scored: _pending_
-- Commit identifier: _pending_
-- Aggregates, or the verbatim failure of the command that could not run: _pending_
-- Retrieval path measured: the pre-`retrieval-sql` implementation. This is the number
-  `retrieval-sql` and `agentic-retrieval` compare against, so it must be captured **before** either
-  begins.
+**Corrected 2026-09-13.** The original fake-service baseline was discarded. The replacement
+`requires_db` test seeds four transaction-scoped document/chunk pairs, calls
+`DocumentQueryService.search`, verifies every retrieved identifier exists in that same chunk-store
+snapshot, and rolls the corpus back after writing the report.
+
+- Golden-set version scored: legal_retrieval_v1
+- Commit identifier: 0653503845c2
+- Aggregates (`evals/reports/baseline.json`): recall_at_k 1.0, reciprocal_rank 1.0,
+  ndcg_at_k 1.0, precision_at_k 1.0.
+- Retrieval path measured: the current real three-branch `DocumentQueryService` path. Because the
+  earlier fake report was discovered after retrieval work had begun, it is an honest current baseline
+  and cannot serve as a valid historical before-number for those already-applied changes.
 
 ---
 

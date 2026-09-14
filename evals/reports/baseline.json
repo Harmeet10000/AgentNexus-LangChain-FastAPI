@@ -1,0 +1,77 @@
+{
+  "commit_identifier": "0653503845c2",
+  "timestamp": "2026-09-13T16:28:50.490506Z",
+  "golden_set_version": "legal_retrieval_v1",
+  "rows": [
+    {
+      "query": "What obligations survive termination of the agreement?",
+      "expected_chunk_ids": [
+        "10000000-0000-0000-0000-000000000001"
+      ],
+      "retrieved_chunk_ids": [
+        "10000000-0000-0000-0000-000000000001"
+      ],
+      "k": 1,
+      "metrics": {
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0,
+        "precision_at_k": 1.0
+      }
+    },
+    {
+      "query": "What does section 73 provide about compensation for breach?",
+      "expected_chunk_ids": [
+        "10000000-0000-0000-0000-000000000002"
+      ],
+      "retrieved_chunk_ids": [
+        "10000000-0000-0000-0000-000000000002"
+      ],
+      "k": 1,
+      "metrics": {
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0,
+        "precision_at_k": 1.0
+      }
+    },
+    {
+      "query": "How did the court apply the doctrine of legitimate expectation?",
+      "expected_chunk_ids": [
+        "10000000-0000-0000-0000-000000000003"
+      ],
+      "retrieved_chunk_ids": [
+        "10000000-0000-0000-0000-000000000003"
+      ],
+      "k": 1,
+      "metrics": {
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0,
+        "precision_at_k": 1.0
+      }
+    },
+    {
+      "query": "What material risk was disclosed in the annual filing?",
+      "expected_chunk_ids": [
+        "10000000-0000-0000-0000-000000000004"
+      ],
+      "retrieved_chunk_ids": [
+        "10000000-0000-0000-0000-000000000004"
+      ],
+      "k": 1,
+      "metrics": {
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0,
+        "precision_at_k": 1.0
+      }
+    }
+  ],
+  "aggregates": {
+    "recall_at_k": 1.0,
+    "reciprocal_rank": 1.0,
+    "ndcg_at_k": 1.0,
+    "precision_at_k": 1.0
+  }
+}
