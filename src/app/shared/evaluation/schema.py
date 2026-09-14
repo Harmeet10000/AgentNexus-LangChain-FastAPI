@@ -82,6 +82,10 @@ async def load_golden_set(path: Path) -> GoldenSetLoadResult:
         raise GoldenSetNotFoundException(path) from exc
     except OSError as exc:
         raise GoldenSetReadException(path, exc) from exc
+    except UnicodeDecodeError as exc:
+        # UnicodeDecodeError is a ValueError, not an OSError, so invalid-UTF-8
+        # input would otherwise escape the loader's typed read-error contract.
+        raise GoldenSetReadException(path, exc) from exc
 
     if not lines:
         return _malformed(row_index=1, message="Golden set is empty")

@@ -42,3 +42,14 @@ async def test_valid_schema_loads(tmp_path: Path) -> None:
 
     assert isinstance(result, Success)
     assert result.unwrap().version == "v1"
+
+
+@pytest.mark.asyncio
+async def test_invalid_utf8_raises_typed_read_exception(tmp_path: Path) -> None:
+    from app.shared.evaluation.schema import GoldenSetReadException
+
+    path = tmp_path / "binary.jsonl"
+    path.write_bytes(b'{"version":"v1"}\n\xff\xfe not utf-8 \x80\n')
+
+    with pytest.raises(GoldenSetReadException):
+        await load_golden_set(path)
