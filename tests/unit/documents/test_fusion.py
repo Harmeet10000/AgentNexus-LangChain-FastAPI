@@ -78,3 +78,26 @@ def test_reciprocal_rank_fusion_with_three_sources() -> None:
 def test_reciprocal_rank_fusion_empty_input() -> None:
     fused = reciprocal_rank_fusion(k=60, limit=10)
     assert fused == []
+
+
+def test_reciprocal_rank_fusion_weights_change_order() -> None:
+    first = [RankedResultRow(chunk_id="a", score=0.0, rank=1)]
+    second = [RankedResultRow(chunk_id="b", score=0.0, rank=1)]
+
+    unweighted = reciprocal_rank_fusion(first, second, k=60, limit=2)
+    assert [item.chunk_id for item in unweighted] == ["a", "b"]
+
+    weighted = reciprocal_rank_fusion(first, second, k=60, limit=2, weights=[1.0, 3.0])
+    assert [item.chunk_id for item in weighted] == ["b", "a"]
+
+
+def test_reciprocal_rank_fusion_weights_require_one_per_leg() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="one weight per leg"):
+        reciprocal_rank_fusion(
+            [RankedResultRow(chunk_id="a", score=0.0, rank=1)],
+            k=60,
+            limit=1,
+            weights=[1.0, 2.0],
+        )
