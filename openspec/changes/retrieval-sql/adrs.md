@@ -56,7 +56,7 @@ because a plan can look correct while recall stays poor.
 
 ## ADR-004 — The isolation ladder reaches partitioning last
 
-**Status:** accepted, with the trigger threshold to be filled from task 5.1's measurements.
+**Status:** accepted, trigger threshold measured 2026-09-13 (task 5.2).
 
 **Context.** Scaling tenant isolation past partial indexes has several options with very different
 costs.
@@ -65,12 +65,27 @@ costs.
 document-kind values; then approximate-index label filtering **or** parallel index builds, which are
 mutually exclusive; then list partitioning, last.
 
+**Measured trigger (task 5.1 numbers, scratch corpus 2026-09-13).** A tenant
+owning 496 of 54,596 chunks (0.9%) with topics interleaved 10:1 against a
+neighbour on shared centers scores recall@50 **1.00 under both the old JOIN
+shape and the new chunk-first shape** against exact-NN ground truth — the
+planner routes the old shape through `ix_documents_user_document` + exact
+sort, so no recall gap exists to close at this scale. The new leg visits 69
+rows (51 returned, 18 removed by the in-scan tenant filter) vs 496 for the
+exact old plan. **Trigger:** re-measure when any tenant under 1% of the corpus
+scores recall below 1.0, or when the vector leg's removed-to-returned row ratio
+exceeds 10x the 0.35 measured here — until then rung one (revision 0018's four
+kind-partial indexes) stands and no higher rung is taken. Rung one covers the
+document-kind axis only: the four families are a closed set, while jurisdiction
+has no measured stable value set on any available corpus, so jurisdiction
+partials are deferred until production distribution is measured rather than
+invented.
+
 **Consequences.** Partitioning is last because it **breaks the keyword leg**. Keyword relevance
-statistics on a partitioned table are partition-local: each partition scores against its own corpus
-statistics, so a cross-partition ordering by relevance compares numbers that were never on the same
-scale. The failure is silent — the query succeeds and returns plausible rows in the wrong order. The
-threshold for climbing each rung must come from the 5.1 recall numbers rather than from a guess, which
-is why this ADR is accepted with a value still to be measured.
+statistics on a partitioned table are **partition-local**: each partition's scores are computed
+against its own corpus statistics. A cross-partition `ORDER BY relevance LIMIT n` therefore compares
+numbers that were never on the same scale, and the mis-ordering is silent — the query succeeds and
+returns plausible rows in the wrong order.
 
 ## ADR-005 — No `tsvector` column is added
 
