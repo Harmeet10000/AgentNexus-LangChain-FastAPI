@@ -72,6 +72,8 @@ class UnifiedDocument(Base):
     contract_type: Mapped[str | None] = mapped_column(String(length=255), nullable=True)
     parties: Mapped[list[object]] = mapped_column(JSONB, default=list, nullable=False)
     metadata_: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict, nullable=False)
+    structural_tree: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict, nullable=False)
+    extraction_incomplete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(tz=UTC),
@@ -95,7 +97,12 @@ class UnifiedChunk(Base):
 
     __tablename__ = "chunks"
     __table_args__ = (
-        UniqueConstraint("document_id", "chunk_index", name="uq_chunks_document_chunk_index"),
+        UniqueConstraint(
+            "document_id",
+            "document_version",
+            "chunk_index",
+            name="uq_chunks_document_version_chunk_index",
+        ),
         Index("ix_chunks_user_document", "user_id", "document_id"),
         Index("ix_chunks_kind", "chunk_kind"),
         Index("ix_chunks_metadata_gin", "metadata_", postgresql_using="gin"),
@@ -144,6 +151,30 @@ class UnifiedChunk(Base):
             sa_text("instrument_year DESC NULLS LAST"),
             postgresql_where=sa_text("instrument_name IS NOT NULL"),
         ),
+        # Tenant-first partial indexes for the stable document-kind values
+        # (retrieval-sql rung one). One index per kind in the closed set the
+        # retrieval filters constrain; every other kind stays off each index.
+        # Declared here so `alembic check` proposes no diff — see revision 0018.
+        Index(
+            "ix_chunks_kind_contracts",
+            "user_id",
+            postgresql_where=sa_text("chunk_kind = 'contracts'"),
+        ),
+        Index(
+            "ix_chunks_kind_statutes",
+            "user_id",
+            postgresql_where=sa_text("chunk_kind = 'statutes'"),
+        ),
+        Index(
+            "ix_chunks_kind_judgments",
+            "user_id",
+            postgresql_where=sa_text("chunk_kind = 'judgments'"),
+        ),
+        Index(
+            "ix_chunks_kind_filings",
+            "user_id",
+            postgresql_where=sa_text("chunk_kind = 'filings'"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -153,10 +184,18 @@ class UnifiedChunk(Base):
         nullable=False,
     )
     user_id: Mapped[str] = mapped_column(String(length=255), nullable=False)
+    # Version of the parent document this chunk belongs to. Together with
+    # document_id and chunk_index it forms chunk identity — two versions of the
+    # same document coexist with distinguishable rows rather than overwriting.
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     chunk_kind: Mapped[str] = mapped_column(String(length=64), nullable=False, default="generic")
     content: Mapped[str] = mapped_column(Text, nullable=False)
     preamble: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Structural address recovered from clause numbering (e.g. "3.2(a)"). Absent
+    # (NULL) when unknown — never an empty string, which would collide with a
+    # real locus of "" under uniqueness-by-convention and confuse consumers.
+    locus: Mapped[str | None] = mapped_column(String(length=255), nullable=True)
     clause_type: Mapped[str | None] = mapped_column(String(length=128), nullable=True)
     page_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Width comes from the one configured value, not a literal. It resolves to the

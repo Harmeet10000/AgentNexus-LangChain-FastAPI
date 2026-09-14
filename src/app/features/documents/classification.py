@@ -17,6 +17,8 @@ from app.shared.rag.docling.chunker import (
     get_tokenizer,
 )
 
+from .chunking import resolve_chunk_policy
+
 
 class QualityWarning(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -46,6 +48,8 @@ class PreparedChunk(BaseModel):
     chunk_kind: str
     content: str
     preamble: str = ""
+    document_version: int = 1
+    locus: str | None = None
     clause_type: str | None = None
     page_no: int = 0
     metadata_: dict[str, object] = Field(default_factory=dict)
@@ -60,6 +64,7 @@ class ParsedDocument(BaseModel):
     markdown: str
     page_count: int
     tables: list[str] = Field(default_factory=list)
+    structural_tree: dict[str, object] = Field(default_factory=dict)
 
 
 def classify_document(*, markdown: str, filename: str) -> ClassifiedDocument:
@@ -174,6 +179,46 @@ def _is_clause_start(paragraph: str) -> bool:
     return _CLAUSE_START_RE.match(first_line) is not None
 
 
+def _recover_locus(text: str) -> str | None:
+    """Extract a clause-number locus from the opening of ``text``, or None."""
+    first_line = text.splitlines()[0] if text else ""
+    # Gate on the shared clause-start pattern so recovery and structure
+    # detection cannot drift apart.
+    if _CLAUSE_START_RE.match(first_line) is None:
+        return None
+    named = re.match(
+        r"(?i)^\s*((?:section|article|clause|schedule|exhibit|appendix|annex|part|paragraph)\s+\S+)",
+        first_line,
+    )
+    if named:
+        return named.group(1).strip().rstrip(".)")
+    numbered = re.match(r"^\s*(\d+(?:\.\d+)*[.)]|\([a-z0-9]+\))", first_line, re.IGNORECASE)
+    if numbered:
+        return numbered.group(1).strip()
+    return None
+
+
+def recover_locus_from_text(text: str) -> str | None:
+    """Public: extract a clause-number locus from text, or None if absent."""
+    return _recover_locus(text)
+
+
+def recover_clause_numbering(chunks: list[PreparedChunk]) -> list[PreparedChunk]:
+    """Fill ``locus`` from inline clause numbering when layout missed it.
+
+    Pure: reuses ``_CLAUSE_START_RE``. Chunks with no recoverable number keep an
+    absent locus rather than a synthesised value.
+    """
+    recovered: list[PreparedChunk] = []
+    for chunk in chunks:
+        if chunk.locus is not None:
+            recovered.append(chunk)
+            continue
+        locus = recover_locus_from_text(chunk.content)
+        recovered.append(chunk if locus is None else chunk.model_copy(update={"locus": locus}))
+    return recovered
+
+
 def _run_hybrid_chunker_sync(
     *, title: str, items: list[_StructuredItem], max_tokens: int
 ) -> list[_HybridChunk]:
@@ -207,6 +252,7 @@ async def _segment_hybrid_chunks(
     parsed: ParsedDocument,
     classified: ClassifiedDocument,
 ) -> tuple[list[PreparedChunk], list[QualityWarning]]:
+    policy = resolve_chunk_policy(classified.document_kind)
     items = _structure_markdown(parsed.markdown)
     warnings: list[QualityWarning] = []
     if len([item for item in items if item.kind == "text"]) <= 1:
@@ -215,15 +261,14 @@ async def _segment_hybrid_chunks(
                 stage="segment_chunks",
                 code="DEGENERATE_PARSE",
                 message=(
-                    "Structure-aware segmentation saw one section or none "
-                    f"in '{parsed.title}'."
+                    f"Structure-aware segmentation saw one section or none in '{parsed.title}'."
                 ),
                 severity="warning",
             )
         )
     try:
         hybrid_chunks = await asyncer.asyncify(_run_hybrid_chunker_sync)(
-            title=parsed.title, items=items, max_tokens=512
+            title=parsed.title, items=items, max_tokens=policy.max_tokens
         )
     except Exception as exc:  # noqa: BLE001 — chunking must degrade, not fail ingestion
         exc.add_note("operation=hybrid_chunk")
@@ -239,9 +284,7 @@ async def _segment_hybrid_chunks(
             )
         )
         hybrid_chunks = [
-            _HybridChunk(text=item.text, heading_path=())
-            for item in items
-            if item.kind == "text"
+            _HybridChunk(text=item.text, heading_path=()) for item in items if item.kind == "text"
         ]
     chunks: list[PreparedChunk] = []
     for index, hybrid_chunk in enumerate(hybrid_chunks):
@@ -263,12 +306,13 @@ async def _segment_hybrid_chunks(
                     "parties": classified.parties,
                     "heading_path": list(hybrid_chunk.heading_path),
                     "tokenizer": DEFAULT_TOKENIZER_MODEL_ID,
+                    "chunk_policy": policy.name,
                 },
                 custom_metadata={"source": "hybrid"},
                 quality_warnings=warnings.copy() if warnings else [],
             )
         )
-    return chunks, warnings
+    return recover_clause_numbering(chunks), warnings
 
 
 def _looks_like_contract(text: str) -> bool:

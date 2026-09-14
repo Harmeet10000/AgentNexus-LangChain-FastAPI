@@ -22,6 +22,7 @@ _CONFLICT_SET_COLUMNS = (
     "chunk_kind",
     "content",
     "preamble",
+    "locus",
     "clause_type",
     "page_no",
     "embedding",
