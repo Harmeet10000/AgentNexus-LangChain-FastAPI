@@ -1,51 +1,56 @@
-"""Token-based chunking helpers for search ingestion."""
+"""Pure chunk-policy resolution for structure-aware ingestion."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class TextChunk(BaseModel):
-    """Normalized text chunk plus its ordinal position."""
+class ChunkPolicy(BaseModel):
+    """Resolved chunking policy for one classified document kind.
+
+    Identity (`name`) is recorded on every emitted chunk so a reader can tell
+    which policy was in force without re-running classification. Overlap is
+    zero for every structure-aware policy; only the flagged fallback path may
+    overlap (task 5.3).
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    chunk_index: int
-    content: str
-    token_count: int
+    name: str
+    max_tokens: int = Field(gt=0)
+    overlap: int = Field(default=0, ge=0)
 
 
-def chunk_text(text: str, *, chunk_size: int, chunk_overlap: int) -> list[TextChunk]:
-    """Split text into overlapping token windows while preserving order."""
-    normalized = " ".join(text.split())
-    if not normalized:
-        return []
-    if chunk_size <= 0:
-        msg = "chunk_size must be greater than zero"
-        raise ValueError(msg)
-    if chunk_overlap < 0:
-        msg_0 = "chunk_overlap must be non-negative"
-        raise ValueError(msg_0)
-    if chunk_overlap >= chunk_size:
-        msg_1 = "chunk_overlap must be smaller than chunk_size"
-        raise ValueError(msg_1)
+_POLICIES: dict[str, ChunkPolicy] = {
+    "contract": ChunkPolicy(name="contract", max_tokens=512, overlap=0),
+    "statute": ChunkPolicy(name="statute", max_tokens=384, overlap=0),
+    "judgment": ChunkPolicy(name="judgment", max_tokens=640, overlap=0),
+    "filing": ChunkPolicy(name="filing", max_tokens=448, overlap=0),
+    "default": ChunkPolicy(name="default", max_tokens=512, overlap=0),
+}
 
-    tokens = normalized.split(" ")
-    step = chunk_size - chunk_overlap
-    chunks: list[TextChunk] = []
+_KIND_ALIASES: dict[str, str] = {
+    "contracts": "contract",
+    "legal_contract": "contract",
+    "contract": "contract",
+    "statutes": "statute",
+    "legal_statute": "statute",
+    "statute": "statute",
+    "judgments": "judgment",
+    "legal_judgment": "judgment",
+    "judgment": "judgment",
+    "filings": "filing",
+    "legal_filing": "filing",
+    "filing": "filing",
+    "legal_policy": "filing",
+}
 
-    for chunk_index, start in enumerate(range(0, len(tokens), step)):
-        window = tokens[start : start + chunk_size]
-        if not window:
-            continue
-        chunks.append(
-            TextChunk(
-                chunk_index=chunk_index,
-                content=" ".join(window),
-                token_count=len(window),
-            )
-        )
-        if start + chunk_size >= len(tokens):
-            break
 
-    return chunks
+def resolve_chunk_policy(document_kind: str) -> ChunkPolicy:
+    """Map a classified document kind to a chunk policy. Pure — no I/O.
+
+    Unclassifiable kinds resolve the default policy rather than raising, so
+    chunking proceeds.
+    """
+    key = _KIND_ALIASES.get((document_kind or "").strip().lower(), "default")
+    return _POLICIES[key]

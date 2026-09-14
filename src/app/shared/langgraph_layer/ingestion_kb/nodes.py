@@ -11,7 +11,6 @@ from uuid import uuid4
 
 import asyncer
 from docling.datamodel.document import ConversionResult
-from docling.document_converter import DocumentConverter
 from graphiti_core.nodes import EpisodeType
 from langchain_core.exceptions import LangChainException
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -28,7 +27,7 @@ from app.shared.langgraph_layer.kb_retry import (
     describe_failure,
     retry_immediate,
 )
-from app.shared.rag.docling.docling_enhanced import table_markdown
+from app.shared.rag.docling.docling_enhanced import create_document_converter, table_markdown
 from app.shared.rag.graphiti.schemas import (
     GRAPHITI_EDGE_TYPE_MAP,
     GRAPHITI_EDGE_TYPES,
@@ -483,7 +482,9 @@ async def _parse_document_with_docling(
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
             tmp.write(raw_bytes)
             tmp.flush()
-            result: ConversionResult = DocumentConverter().convert(tmp.name)
+            result: ConversionResult = create_document_converter(gpu_available=False).convert(
+                tmp.name
+            )
             document: DoclingDocument = result.document
             markdown = document.export_to_markdown()
             # Was a comprehension over `table.to_markdown()` guarded by
@@ -755,8 +756,9 @@ async def _store_chunks(
         }
         # D15: `chunks` is the sole retrieval truth — `clauses` does not exist.
         # `clause` survives only as a `chunk_kind` value with the clause's own
-        # label in `clause_type`. The upsert key is (document_id, chunk_index),
-        # named via `uq_chunks_document_chunk_index`; `search_text` is generated
+        # label in `clause_type`. The upsert key is
+        # (document_id, document_version, chunk_index), named via
+        # `uq_chunks_document_version_chunk_index`; `search_text` is generated
         # by the database and is never supplied. `updated_at` appears in both
         # the row payload and the conflict set (the D15 trap: the ORM hook does
         # not fire for a conflict-resolved upsert, so omitting either leaves a
@@ -764,20 +766,22 @@ async def _store_chunks(
         query: TextClause = text(
             """
                     INSERT INTO chunks
-                        (id, document_id, user_id, chunk_index, chunk_kind,
-                         content, preamble, clause_type, page_no, embedding,
-                         metadata_, custom_metadata, quality_warnings, updated_at)
+                        (id, document_id, user_id, document_version, chunk_index,
+                         chunk_kind, content, preamble, locus, clause_type,
+                         page_no, embedding, metadata_, custom_metadata,
+                         quality_warnings, updated_at)
                     VALUES
-                        (:id, :document_id, :user_id, :chunk_index, :chunk_kind,
-                         :content, :preamble, :clause_type, :page_no,
-                         CAST(:embedding AS vector), CAST(:metadata AS JSONB),
-                         CAST(:custom_metadata AS JSONB),
+                        (:id, :document_id, :user_id, :document_version,
+                         :chunk_index, :chunk_kind, :content, :preamble, :locus,
+                         :clause_type, :page_no, CAST(:embedding AS vector),
+                         CAST(:metadata AS JSONB), CAST(:custom_metadata AS JSONB),
                          CAST(:quality_warnings AS JSONB), NOW())
-                    ON CONFLICT ON CONSTRAINT uq_chunks_document_chunk_index
+                    ON CONFLICT ON CONSTRAINT uq_chunks_document_version_chunk_index
                     DO UPDATE SET
                         chunk_kind = EXCLUDED.chunk_kind,
                         content = EXCLUDED.content,
                         preamble = EXCLUDED.preamble,
+                        locus = EXCLUDED.locus,
                         clause_type = EXCLUDED.clause_type,
                         page_no = EXCLUDED.page_no,
                         embedding = EXCLUDED.embedding,
@@ -792,10 +796,12 @@ async def _store_chunks(
             "id": row_id,
             "document_id": parent_doc_id,
             "user_id": state.get("user_id", ""),
+            "document_version": 1,
             "chunk_index": chunk.chunk_index,
             "chunk_kind": "clause",
             "content": _naturalize_tables(chunk.text),
             "preamble": chunk.preamble,
+            "locus": None,
             "clause_type": chunk.clause_type.value,
             "page_no": chunk.page_no,
             "embedding": _vector_literal(embedding),

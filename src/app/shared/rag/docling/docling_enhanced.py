@@ -20,7 +20,7 @@ from io import BytesIO, StringIO
 from typing import Any, NamedTuple
 
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.exceptions import BaseError as DoclingError
 from docling_core.types.doc import DoclingDocument
@@ -39,34 +39,26 @@ from .models import (
 
 
 def check_gpu_available() -> bool:
-    """Check if GPU is available for accelerated processing."""
-    try:
-        import torch
+    """GPU detection is disabled: the OCR backend is RapidOCR on onnxruntime.
 
-        gpu_available = torch.cuda.is_available()
-        if gpu_available:
-            device_name = torch.cuda.get_device_name(0)
-            logger.bind(device_name=device_name).info("GPU detected")
-        else:
-            logger.info("No GPU detected, using CPU pipeline")
-    except ImportError:
-        logger.warning("PyTorch not available, using CPU pipeline")
-        return False
-    else:
-        return gpu_available
+    torch was the only GPU probe and task 7.2 removes it. Callers already pass
+    `gpu_available=False` through `create_document_converter`, which ignores the
+    flag; this function now reports CPU unconditionally so no import can
+    reintroduce the tensor runtime by accident.
+    """
+    logger.info("GPU detection disabled, using CPU pipeline")
+    return False
 
 
 def create_document_converter(gpu_available: bool) -> DocumentConverter:
-    """Create Docling converter with appropriate pipeline."""
-    if gpu_available:
-        logger.info("Using GPU-accelerated PDF pipeline")
-        pipeline_options = PdfPipelineOptions()
-    else:
-        logger.info("Using CPU-efficient pipeline")
-        pipeline_options = PdfPipelineOptions()
+    """Create a PDF converter whose OCR backend never implies a tensor runtime."""
+    del gpu_available
+    logger.info("Using RapidOCR PDF pipeline")
+    pipeline_options = PdfPipelineOptions()
 
     pipeline_options.do_ocr = True
     pipeline_options.do_table_structure = True
+    pipeline_options.ocr_options = RapidOcrOptions(backend="onnxruntime")
 
     return DocumentConverter(
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}

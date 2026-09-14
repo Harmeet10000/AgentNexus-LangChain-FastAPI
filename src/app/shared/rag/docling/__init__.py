@@ -18,12 +18,6 @@ from app.shared.rag.docling.docling_enhanced import (
     extract_images,
     extract_tables,
 )
-from app.shared.rag.docling.embedder import (
-    create_embedder,
-    embed_chunks,
-    generate_embedding,
-    generate_embeddings_batch,
-)
 from app.shared.rag.docling.entity_extractor import (
     Entity,
     ExtractionResult,
@@ -80,10 +74,8 @@ __all__ = [
     "chunk_document_simple",
     "create_converter",
     "create_document_converter",
-    "create_embedder",
     "create_extractor",
     "create_hybrid_chunker",
-    "embed_chunks",
     "extract",
     "extract_code_blocks",
     "extract_entities_batch",
@@ -91,7 +83,5 @@ __all__ = [
     "extract_tables",
     "extract_with_fallback",
     "extract_with_graphiti",
-    "generate_embedding",
-    "generate_embeddings_batch",
     "get_tokenizer",
 ]

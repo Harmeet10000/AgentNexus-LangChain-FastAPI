@@ -123,11 +123,17 @@ class Chunk(BaseModel):
     id: str | None = None
     document_id: str
     content: str
+    preamble: str = ""
     embedding: list[float] | None = None
     chunk_index: int
     metadata: dict[str, Any] = Field(default_factory=dict)
     token_count: int | None = None
     created_at: datetime | None = None
+
+    @property
+    def search_text(self) -> str:
+        """Return the exact text used by lexical retrieval and embedding."""
+        return f"{self.preamble}\n\n{self.content}".strip()
 
     @field_validator("embedding")
     @classmethod

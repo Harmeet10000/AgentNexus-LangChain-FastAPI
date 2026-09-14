@@ -40,7 +40,6 @@ dependencies = [
     "langchain-cisco-aidefense>=1.0.0",
     "langchain-community>=0.4.1",
     "langchain-core>=1.2.11",
-    "langchain-docling>=2.0.0",
     "langchain-google-genai>=4.2.0",
     "langchain-mcp-adapters>=0.2.2",
     "langchain-tavily>=0.2.17",
@@ -48,7 +47,6 @@ dependencies = [
     "langgraph>=1.1.0",
     "langgraph-checkpoint-postgres>=3.0.1",
     "langsmith>=0.7.1",
-    "sentence-transformers>=5.1.2",
     # --- DATABASE: POSTGRESQL ---
     "alembic==1.16.5",
     "asyncpg==0.29.0",
@@ -76,7 +74,10 @@ dependencies = [
     # --- DOCUMENT PROCESSING ---
     "docling>=2.72.0",
     "langextract>=1.2.0",
-    "pageindex>=0.2.8",
+    # Docling declares these directly. Pin their CPU wheels explicitly so uv
+    # cannot resolve a multi-gigabyte CUDA runtime for a RapidOCR deployment.
+    "torch==2.9.1+cpu",
+    "torchvision==0.24.1+cpu",
     # --- AUTHENTICATION ---
     "argon2-cffi>=25.1.0",
     "authlib>=1.6.9",
@@ -147,7 +148,7 @@ dependencies = [
     "graphifyy>=0.5.5",
     "langcache>=0.12.0",
     "redisvl>=0.18.0",
-    "headroom-ai[all]>=0.25.0",
+    "headroom-ai>=0.25.0",
     "mypy-boto3-s3>=1.43.14",
     "opentelemetry-exporter-otlp-proto-grpc>=1.40.0",
     "opentelemetry-instrumentation-asyncio==0.61b0",
@@ -237,7 +238,8 @@ Repository = "https://github.com/Harmeet10000/langchain-fastapi-production"
 # UV – Dependency & Lockfile Management
 # ────────────────────────────────────────
 [tool.uv]
-default-groups = ["dev"] # uv sync installs dev tools by default
+default-groups = ["dev", "test"] # uv sync installs all verification tools by default
+constraint-dependencies = ["torch==2.9.1+cpu", "torchvision==0.24.1+cpu"]
 # Optional: add if you hit index issues
 # index-strategy = "first-index"
 
@@ -459,6 +461,7 @@ section-order = [
     "S104", # dummy URL host
     "ARG001", # Alembic include_object/include_name callbacks have fixed signatures
     "ARG002", # same
+    "INP001", # no __init__.py by design: it would shadow the installed alembic package under pytest's src-first path and break `import alembic.script`
 ]
 "src/alembic/versions/*.py" = [
     "ANN",
@@ -810,6 +813,15 @@ exclude = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
 [tool.setuptools.package-data]
 "*" = ["*.txt", "*.md", "*.yml", "*.yaml", "*.json"]
 
@@ -824,6 +836,7 @@ addopts = [
     "not integration and not requires_db",
 ]
 testpaths = ["tests"]
+pythonpath = [".", "src"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
