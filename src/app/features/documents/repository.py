@@ -521,7 +521,7 @@ class DocumentRepository:
                   )
                   AND (
                     CAST(:phrase_pattern AS text) IS NULL
-                    OR c.search_text LIKE CAST(:phrase_pattern AS text) ESCAPE '\\'
+                    OR c.search_text ILIKE CAST(:phrase_pattern AS text) ESCAPE '\\'
                   )
                 """
                 + _FILTER_SQL

@@ -93,7 +93,7 @@ async def test_keyword_leg_filters_phrase_with_escaped_pattern() -> None:
     assert isinstance(result, Success)
     assert len(session.statements) == 1
     sql = session.statements[0]
-    assert "LIKE CAST(:phrase_pattern AS text) ESCAPE" in sql
+    assert "ILIKE CAST(:phrase_pattern AS text) ESCAPE" in sql
     params = session.params[0]
     assert params["phrase_pattern"] == "%100\\% guarantee%"
     # Over-fetch: the leg reads a multiple of the candidate budget, then the
