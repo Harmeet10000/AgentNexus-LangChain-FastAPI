@@ -10,6 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 from returns.result import Failure
 
 from app.shared.result import log_expected_failure
+from app.utils import ServiceUnavailableException
 
 from .dto import IngestionJob, IngestionRuntime
 
@@ -18,13 +19,28 @@ if TYPE_CHECKING:
 
     from graphiti_core.graphiti import Graphiti
     from langchain_core.language_models import BaseChatModel
+    from langchain_core.runnables import RunnableConfig
 
+    from app.shared.rag.langextract.service import AsyncExtractionService
     from app.shared.services.storage import StorageService
 
     from .errors import DocumentResult
     from .repository import DocumentRepository
 
 type IngestDocumentFn = Callable[..., Awaitable[DocumentResult[dict[str, object]]]]
+
+_REPOSITORY_CONFIG_KEY = "document_repository"
+
+
+def get_document_repository(config: RunnableConfig) -> DocumentRepository:
+    """Resolve the job-scoped repository from LangGraph invocation wiring."""
+    repository = config.get("configurable", {}).get(_REPOSITORY_CONFIG_KEY)
+    if repository is None:
+        raise ServiceUnavailableException(
+            detail="Document ingestion collaborator is unavailable",
+            data={"collaborator": _REPOSITORY_CONFIG_KEY},
+        )
+    return cast("DocumentRepository", repository)
 
 
 class DocumentIngestionState(TypedDict, total=False):
@@ -47,12 +63,14 @@ class DocumentIngestionState(TypedDict, total=False):
 def build_document_ingestion_graph(
     *,
     object_store: StorageService,
-    repo: DocumentRepository,
     graphiti: Graphiti | None,
     ingest_document_fn: IngestDocumentFn,
     llm: BaseChatModel,
+    extraction: AsyncExtractionService | None = None,
+    graph_writer: object | None = None,
+    idempotency: object | None = None,
 ) -> CompiledStateGraph[Any]:
-    """Build the per-job ingestion graph."""
+    """Build the process-scoped ingestion graph without job-scoped collaborators."""
 
     graph = StateGraph(DocumentIngestionState)  # ty: ignore[invalid-argument-type] - stub bound is imprecise for TypedDicts; same ignore as retrieval_kb/graph.py
     graph.add_node(
@@ -61,10 +79,12 @@ def build_document_ingestion_graph(
             "Any",
             _make_ingest_document_node(
                 object_store=object_store,
-                repo=repo,
                 graphiti=graphiti,
                 ingest_document_fn=ingest_document_fn,
                 llm=llm,
+                extraction=extraction,
+                graph_writer=graph_writer,
+                idempotency=idempotency,
             ),
         ),
         input_schema=cast("Any", DocumentIngestionState),
@@ -77,12 +97,17 @@ def build_document_ingestion_graph(
 def _make_ingest_document_node(
     *,
     object_store: StorageService,
-    repo: DocumentRepository,
     graphiti: Graphiti | None,
     ingest_document_fn: IngestDocumentFn,
     llm: BaseChatModel,
-) -> Callable[[DocumentIngestionState], Awaitable[dict[str, object]]]:
-    async def ingest_document_node(state: DocumentIngestionState) -> dict[str, object]:
+    extraction: AsyncExtractionService | None = None,
+    graph_writer: object | None = None,
+    idempotency: object | None = None,
+) -> Callable[[DocumentIngestionState, RunnableConfig], Awaitable[dict[str, object]]]:
+    async def ingest_document_node(
+        state: DocumentIngestionState, config: RunnableConfig
+    ) -> dict[str, object]:
+        repo = get_document_repository(config)
         result = await ingest_document_fn(
             job=IngestionJob(
                 document_id=state.get("document_id", ""),
@@ -96,6 +121,9 @@ def _make_ingest_document_node(
                 repo=repo,
                 graphiti=graphiti,
                 llm=llm,
+                extraction=extraction,
+                graph_writer=graph_writer,
+                idempotency=idempotency,
             ),
         )
         if isinstance(result, Failure):

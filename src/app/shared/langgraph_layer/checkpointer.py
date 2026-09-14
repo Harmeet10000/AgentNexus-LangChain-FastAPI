@@ -8,13 +8,10 @@ parse. One is unauthenticated, the other unparseable. The plain flavour exists f
 consumer; nothing is repaired here — a Proof for this task greps this file for the string
 operations that repair would need, which is why the alias is named rather than written out.
 
-**The lifespan wiring stays commented, by decision (D17).** Ingestion runs in the queue
-worker process, which never executes the application lifespan, so "build the saver once"
-is a per-process requirement and never involved shared application state at all. The
-shutdown path does call ``teardown_langgraph_checkpointer``, but behind a
-``hasattr(app.state, "langgraph_checkpointer")`` guard that nothing currently satisfies —
-so teardown is reachable only from a test until that decision changes. Read nothing here
-as an invitation to re-enable the block.
+The ``graph-lifecycle`` change supersedes D17's prohibition.  The API lifespan now owns
+the saver used by Agent Saul and releases its pool during shutdown.  Document ingestion
+still runs in a Celery child, whose independent process hooks own its graph and async
+resources because workers never execute the application lifespan.
 """
 
 from __future__ import annotations
