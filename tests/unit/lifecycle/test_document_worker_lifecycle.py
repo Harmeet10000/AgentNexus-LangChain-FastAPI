@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.documents.service import run_document_ingestion_task
 from app.lifecycle import document_worker
+from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -187,6 +188,8 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
 
     def provide_graph(**_kwargs: object) -> Graph:
         counts["compile"] += 1
+        idempotency = _kwargs["idempotency"]
+        assert isinstance(idempotency, IdempotencyGuard)
         return compiled_graph
 
     settings = SimpleNamespace(

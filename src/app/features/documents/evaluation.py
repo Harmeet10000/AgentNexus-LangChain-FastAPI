@@ -24,6 +24,18 @@ def stored_document_kind(kind: GoldenDocumentKind) -> str:
     return _STORED_DOCUMENT_KIND_BY_GOLDEN_KIND[kind]
 
 
+def stored_jurisdiction(kind: GoldenDocumentKind, jurisdiction: str | None) -> str | None:
+    """Mirror jurisdiction metadata retained by the current ingestion classifier.
+
+    Generic ingestion currently collapses statutes, judgments, and filings and
+    does not retain a jurisdiction. Applying the golden-set jurisdiction to those
+    rows would make the evaluator filter out the very corpus it is measuring.
+    """
+    if stored_document_kind(kind) == "generic":
+        return None
+    return jurisdiction
+
+
 class EmptyRetrievalException(InfrastructureException):
     """Live retrieval returned no identifiers and therefore proved no wiring."""
 
@@ -48,7 +60,7 @@ def service_retriever(
                 candidate_limit=max(limit, 50),
                 metadata_filter=SearchMetadataFilter(
                     document_kind=stored_document_kind(query.document_kind),
-                    jurisdiction=query.jurisdiction,
+                    jurisdiction=stored_jurisdiction(query.document_kind, query.jurisdiction),
                 ),
                 bypass_cache=True,
             ),

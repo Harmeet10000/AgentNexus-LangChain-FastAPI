@@ -116,3 +116,36 @@ def test_large_adjacent_group_is_tokenized_once_when_it_fits() -> None:
     assert len(sections) == 1
     assert sections[0].chunk_ids == [f"c{index}" for index in range(32)]
     assert calls == 1
+
+
+def test_oversized_adjacent_chunks_do_not_retokenize_every_suffix() -> None:
+    ranked_chunks = [
+        RankedChunk(chunk_id=f"c{index}", score=1.0, rank=index + 1) for index in range(32)
+    ]
+    chunk_lookup = {
+        ranked_chunk.chunk_id: SearchChunkRecord(
+            document_id="doc-1",
+            chunk_index=index,
+            content=("oversized " * 20 if index < 31 else "fits").strip(),
+            title="Doc 1",
+            chunk_metadata={},
+        )
+        for index, ranked_chunk in enumerate(ranked_chunks)
+    }
+    tokenized_characters = 0
+
+    def count_tokens(text: str) -> int:
+        nonlocal tokenized_characters
+        tokenized_characters += len(text)
+        return len(text.split())
+
+    sections = assemble_rag_context(
+        ranked_chunks,
+        chunk_lookup,
+        max_tokens=1,
+        count_tokens=count_tokens,
+    )
+
+    assert [section.chunk_ids for section in sections] == [["c31"]]
+    total_content_size = sum(len(chunk.content) for chunk in chunk_lookup.values())
+    assert tokenized_characters < total_content_size * 4
