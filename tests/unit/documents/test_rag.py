@@ -83,3 +83,36 @@ def test_assemble_rag_context_drops_sections_at_the_token_boundary() -> None:
     )
 
     assert [section.document_id for section in sections] == ["doc-1"]
+
+
+def test_large_adjacent_group_is_tokenized_once_when_it_fits() -> None:
+    ranked_chunks = [
+        RankedChunk(chunk_id=f"c{index}", score=1.0, rank=index + 1) for index in range(32)
+    ]
+    chunk_lookup = {
+        ranked_chunk.chunk_id: SearchChunkRecord(
+            document_id="doc-1",
+            chunk_index=index,
+            content=f"chunk {index}",
+            title="Doc 1",
+            chunk_metadata={},
+        )
+        for index, ranked_chunk in enumerate(ranked_chunks)
+    }
+    calls = 0
+
+    def count_tokens(text: str) -> int:
+        nonlocal calls
+        calls += 1
+        return len(text.split())
+
+    sections = assemble_rag_context(
+        ranked_chunks,
+        chunk_lookup,
+        max_tokens=100,
+        count_tokens=count_tokens,
+    )
+
+    assert len(sections) == 1
+    assert sections[0].chunk_ids == [f"c{index}" for index in range(32)]
+    assert calls == 1
