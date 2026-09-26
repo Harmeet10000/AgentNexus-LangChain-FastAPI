@@ -42,7 +42,6 @@ from .constants import (
     DEFAULT_SEARCH_CACHE_TTL_SECONDS,
     HYBRID_CANDIDATE_LIMIT,
     INGEST_EMBEDDING_BATCH_SIZE,
-    PHRASE_OVERFETCH_MULTIPLE,
     RRF_K,
     RRF_WEIGHT_TRIGRAM,
 )
@@ -268,8 +267,12 @@ async def retrieve_fused(
     results = await _run_branches(repo=repo, branch_input=branch_input)
     if isinstance(results, Failure):
         return Failure(results.failure())
-    fusion_limit = limit * PHRASE_OVERFETCH_MULTIPLE if exact_phrase else limit
-    fused = reciprocal_rank_fusion(*results.unwrap(), k=RRF_K, limit=fusion_limit, weights=weights)
+    row_sets = results.unwrap()
+    # Phrase matches may rank below many vector/trigram-only candidates. Preserve
+    # every candidate already bounded by the branch limits until the phrase
+    # constraint has been applied; a second pre-filter cutoff can lose valid hits.
+    fusion_limit = sum(len(row_set) for row_set in row_sets) if exact_phrase else limit
+    fused = reciprocal_rank_fusion(*row_sets, k=RRF_K, limit=fusion_limit, weights=weights)
     if not fused:
         return Success(([], {}))
     chunk_lookup_result = await repo.fetch_chunks_by_ids([item.chunk_id for item in fused])

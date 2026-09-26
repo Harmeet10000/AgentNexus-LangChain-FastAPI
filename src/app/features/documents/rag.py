@@ -32,6 +32,7 @@ class ContextSection(BaseModel):
     document_id: str
     title: str
     content: str
+    chunk_ids: list[str]
     chunk_indices: list[int]
     chunk_metadata: dict[str, object]
 
@@ -65,17 +66,17 @@ def assemble_rag_context(
             grouped[document_id],
             key=lambda item: item[1].chunk_index,
         )
-        current_group: list[SearchChunkRecord] = []
+        current_group: list[tuple[RankedChunk, SearchChunkRecord]] = []
 
-        for _, chunk in ordered_chunks:
+        for ranked_chunk, chunk in ordered_chunks:
             if not current_group:
-                current_group = [chunk]
+                current_group = [(ranked_chunk, chunk)]
                 continue
 
-            previous_index = current_group[-1].chunk_index
+            previous_index = current_group[-1][1].chunk_index
             current_index = chunk.chunk_index
             if current_index == previous_index + 1:
-                current_group.append(chunk)
+                current_group.append((ranked_chunk, chunk))
                 continue
 
             section = _build_context_section(current_group)
@@ -83,7 +84,7 @@ def assemble_rag_context(
             if used_tokens > max_tokens:
                 return sections
             sections.append(section)
-            current_group = [chunk]
+            current_group = [(ranked_chunk, chunk)]
 
         if current_group:
             section = _build_context_section(current_group)
@@ -95,12 +96,15 @@ def assemble_rag_context(
     return sections
 
 
-def _build_context_section(chunks: list[SearchChunkRecord]) -> ContextSection:
-    first_chunk = chunks[0]
+def _build_context_section(
+    chunks: list[tuple[RankedChunk, SearchChunkRecord]],
+) -> ContextSection:
+    first_chunk = chunks[0][1]
     return ContextSection(
         document_id=first_chunk.document_id,
         title=first_chunk.title,
-        content="\n\n".join(chunk.content for chunk in chunks),
-        chunk_indices=[chunk.chunk_index for chunk in chunks],
+        content="\n\n".join(chunk.content for _, chunk in chunks),
+        chunk_ids=[ranked_chunk.chunk_id for ranked_chunk, _ in chunks],
+        chunk_indices=[chunk.chunk_index for _, chunk in chunks],
         chunk_metadata=first_chunk.chunk_metadata,
     )

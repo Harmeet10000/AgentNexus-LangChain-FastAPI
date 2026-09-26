@@ -134,3 +134,65 @@ async def test_exact_phrase_filters_every_fusion_leg() -> None:
     fused, lookup = result.unwrap()
     assert [item.chunk_id for item in fused] == ["a"]
     assert set(lookup) == {"a"}
+
+
+async def test_exact_phrase_is_not_lost_below_nonmatching_fusion_cutoff() -> None:
+    decoy_ids = [f"decoy-{index}" for index in range(12)]
+
+    class DeepPhraseRepo(_StubRepo):
+        async def bm25_search(self, **_kwargs: Any) -> Any:
+            from returns.result import Success
+
+            return Success([{"chunk_id": "phrase", "score": -1.0}])
+
+        async def vector_search(self, **_kwargs: Any) -> Any:
+            from returns.result import Success
+
+            return Success(
+                [
+                    {"chunk_id": chunk_id, "score": 1.0 - index / 100}
+                    for index, chunk_id in enumerate(decoy_ids)
+                ]
+            )
+
+        async def trigram_search(self, **_kwargs: Any) -> Any:
+            from returns.result import Success
+
+            return Success(
+                [
+                    {"chunk_id": chunk_id, "score": 1.0 - index / 100}
+                    for index, chunk_id in enumerate(decoy_ids)
+                ]
+            )
+
+        async def fetch_chunks_by_ids(self, chunk_ids: Any) -> Any:
+            from returns.result import Success
+
+            lookup = {
+                chunk_id: {
+                    **_LOOKUP["a"],
+                    "chunk_id": chunk_id,
+                    "search_text": (
+                        "contains indemnity cap" if chunk_id == "phrase" else "unrelated text"
+                    ),
+                }
+                for chunk_id in chunk_ids
+            }
+            return Success(lookup)
+
+    result = await retrieve_fused(
+        repo=cast("Any", DeepPhraseRepo()),
+        user_id="user-1",
+        query_text="indemnity cap",
+        query_embedding=[0.0],
+        candidate_limit=50,
+        limit=2,
+        filter_params={},
+        exact_phrase="indemnity cap",
+    )
+
+    from returns.result import Success as _Success
+
+    assert isinstance(result, _Success)
+    fused, _ = result.unwrap()
+    assert [item.chunk_id for item in fused] == ["phrase"]
