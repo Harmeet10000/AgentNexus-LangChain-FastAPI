@@ -276,24 +276,20 @@ async def retrieve_fused(
     fused = reciprocal_rank_fusion(*row_sets, k=RRF_K, limit=fusion_limit, weights=weights)
     if not fused:
         return Success(([], {}))
-    chunk_lookup_result = await repo.fetch_chunks_by_ids([item.chunk_id for item in fused])
+    chunk_ids = [item.chunk_id for item in fused]
+    chunk_lookup_result = (
+        await repo.fetch_chunks_by_ids(chunk_ids, exact_phrase=exact_phrase)
+        if exact_phrase
+        else await repo.fetch_chunks_by_ids(chunk_ids)
+    )
     if isinstance(chunk_lookup_result, Failure):
         return Failure(chunk_lookup_result.failure())
     lookup: dict[str, dict[str, Any]] = chunk_lookup_result.unwrap()
     if exact_phrase:
-        normalized_phrase = exact_phrase.casefold()
-        fused = [
-            item
-            for item in fused
-            if normalized_phrase
-            in str(
-                lookup.get(item.chunk_id, {}).get("search_text")
-                or " ".join(
-                    str(lookup.get(item.chunk_id, {}).get(field) or "")
-                    for field in ("preamble", "content")
-                )
-            ).casefold()
-        ][:limit]
+        # Hydration applies the same escaped PostgreSQL ILIKE predicate used by
+        # the BM25 leg, so vector/trigram candidates cannot diverge on Unicode
+        # or wildcard semantics.
+        fused = [item for item in fused if item.chunk_id in lookup][:limit]
         lookup = {item.chunk_id: lookup[item.chunk_id] for item in fused if item.chunk_id in lookup}
     return Success((fused, lookup))
 

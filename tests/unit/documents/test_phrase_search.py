@@ -39,9 +39,7 @@ class _CapturingSession:
         self.statements: list[str] = []
         self.params: list[dict[str, Any]] = []
 
-    async def execute(
-        self, statement: Any, params: dict[str, Any] | None = None
-    ) -> Any:
+    async def execute(self, statement: Any, params: dict[str, Any] | None = None) -> Any:
         from sqlalchemy.sql.elements import TextClause
 
         assert isinstance(statement, TextClause)
@@ -126,3 +124,17 @@ async def test_keyword_leg_without_phrase_keeps_single_limit() -> None:
     assert isinstance(result, Success)
     assert session.params[0]["phrase_pattern"] is None
     assert session.params[0]["fetch_limit"] == 2
+
+
+async def test_chunk_hydration_reuses_the_escaped_database_phrase_predicate() -> None:
+    session = _CapturingSession([])
+    repo = _repository(session)
+
+    result = await repo.fetch_chunks_by_ids(
+        ["10000000-0000-0000-0000-000000000001"],
+        exact_phrase="100% clause_2",
+    )
+
+    assert isinstance(result, Success)
+    assert "c.search_text ILIKE CAST(:phrase_pattern AS text) ESCAPE" in session.statements[0]
+    assert session.params[0]["phrase_pattern"] == "%100\\% clause\\_2%"

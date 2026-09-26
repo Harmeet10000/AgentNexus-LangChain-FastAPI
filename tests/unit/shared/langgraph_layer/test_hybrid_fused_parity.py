@@ -107,15 +107,18 @@ async def test_graph_path_and_service_search_agree_on_chunk_order(
 
 async def test_exact_phrase_filters_every_fusion_leg() -> None:
     class PhraseRepo(_StubRepo):
-        async def fetch_chunks_by_ids(self, chunk_ids: Any) -> Any:
+        async def fetch_chunks_by_ids(
+            self, chunk_ids: Any, *, exact_phrase: str | None = None
+        ) -> Any:
             from returns.result import Success
 
+            assert exact_phrase == "indemnity cap"
             lookup = {
                 "a": {**_LOOKUP["a"], "search_text": "Contains Indemnity Cap here"},
                 "b": {**_LOOKUP["b"], "search_text": "indemnity and an unrelated cap"},
                 "c": {**_LOOKUP["c"], "search_text": "different content"},
             }
-            return Success({cid: lookup[cid] for cid in chunk_ids})
+            return Success({cid: lookup[cid] for cid in chunk_ids if cid == "a"})
 
     result = await retrieve_fused(
         repo=cast("Any", PhraseRepo()),
@@ -165,9 +168,12 @@ async def test_exact_phrase_is_not_lost_below_nonmatching_fusion_cutoff() -> Non
                 ]
             )
 
-        async def fetch_chunks_by_ids(self, chunk_ids: Any) -> Any:
+        async def fetch_chunks_by_ids(
+            self, chunk_ids: Any, *, exact_phrase: str | None = None
+        ) -> Any:
             from returns.result import Success
 
+            assert exact_phrase == "indemnity cap"
             lookup = {
                 chunk_id: {
                     **_LOOKUP["a"],
@@ -177,6 +183,7 @@ async def test_exact_phrase_is_not_lost_below_nonmatching_fusion_cutoff() -> Non
                     ),
                 }
                 for chunk_id in chunk_ids
+                if chunk_id == "phrase"
             }
             return Success(lookup)
 
