@@ -105,6 +105,21 @@ class UnifiedChunk(Base):
         ),
         Index("ix_chunks_user_document", "user_id", "document_id"),
         Index("ix_chunks_kind", "chunk_kind"),
+        Index(
+            "ix_chunks_kind_legal_contract",
+            "user_id",
+            postgresql_where=sa_text("chunk_kind = 'legal_contract'"),
+        ),
+        Index(
+            "ix_chunks_kind_legal_policy",
+            "user_id",
+            postgresql_where=sa_text("chunk_kind = 'legal_policy'"),
+        ),
+        Index(
+            "ix_chunks_kind_generic",
+            "user_id",
+            postgresql_where=sa_text("chunk_kind = 'generic'"),
+        ),
         Index("ix_chunks_metadata_gin", "metadata_", postgresql_using="gin"),
         Index("ix_chunks_graphiti_verified", "graphiti_verified"),
         # The three retrieval branches. Declared here, not only in the migration,
@@ -150,30 +165,6 @@ class UnifiedChunk(Base):
             "section_ref",
             sa_text("instrument_year DESC NULLS LAST"),
             postgresql_where=sa_text("instrument_name IS NOT NULL"),
-        ),
-        # Tenant-first partial indexes for the stable document-kind values
-        # (retrieval-sql rung one). One index per kind in the closed set the
-        # retrieval filters constrain; every other kind stays off each index.
-        # Declared here so `alembic check` proposes no diff — see revision 0018.
-        Index(
-            "ix_chunks_kind_contracts",
-            "user_id",
-            postgresql_where=sa_text("chunk_kind = 'contracts'"),
-        ),
-        Index(
-            "ix_chunks_kind_statutes",
-            "user_id",
-            postgresql_where=sa_text("chunk_kind = 'statutes'"),
-        ),
-        Index(
-            "ix_chunks_kind_judgments",
-            "user_id",
-            postgresql_where=sa_text("chunk_kind = 'judgments'"),
-        ),
-        Index(
-            "ix_chunks_kind_filings",
-            "user_id",
-            postgresql_where=sa_text("chunk_kind = 'filings'"),
         ),
     )
 

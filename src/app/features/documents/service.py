@@ -42,6 +42,7 @@ from .constants import (
     DEFAULT_SEARCH_CACHE_TTL_SECONDS,
     HYBRID_CANDIDATE_LIMIT,
     INGEST_EMBEDDING_BATCH_SIZE,
+    PHRASE_OVERFETCH_MULTIPLE,
     RRF_K,
     RRF_WEIGHT_TRIGRAM,
 )
@@ -267,13 +268,29 @@ async def retrieve_fused(
     results = await _run_branches(repo=repo, branch_input=branch_input)
     if isinstance(results, Failure):
         return Failure(results.failure())
-    fused = reciprocal_rank_fusion(*results.unwrap(), k=RRF_K, limit=limit, weights=weights)
+    fusion_limit = limit * PHRASE_OVERFETCH_MULTIPLE if exact_phrase else limit
+    fused = reciprocal_rank_fusion(*results.unwrap(), k=RRF_K, limit=fusion_limit, weights=weights)
     if not fused:
         return Success(([], {}))
     chunk_lookup_result = await repo.fetch_chunks_by_ids([item.chunk_id for item in fused])
     if isinstance(chunk_lookup_result, Failure):
         return Failure(chunk_lookup_result.failure())
     lookup: dict[str, dict[str, Any]] = chunk_lookup_result.unwrap()
+    if exact_phrase:
+        normalized_phrase = exact_phrase.casefold()
+        fused = [
+            item
+            for item in fused
+            if normalized_phrase
+            in str(
+                lookup.get(item.chunk_id, {}).get("search_text")
+                or " ".join(
+                    str(lookup.get(item.chunk_id, {}).get(field) or "")
+                    for field in ("preamble", "content")
+                )
+            ).casefold()
+        ][:limit]
+        lookup = {item.chunk_id: lookup[item.chunk_id] for item in fused if item.chunk_id in lookup}
     return Success((fused, lookup))
 
 
@@ -513,7 +530,8 @@ class DocumentQueryService:
             tree = row.get("structural_tree")
             if not isinstance(tree, dict):
                 continue
-            paths.extend(navigate_tree(tree, query, limit=limit))
+            document_id = str(row.get("document_id") or "")
+            paths.extend((document_id, *path) for path in navigate_tree(tree, query, limit=limit))
             if len(paths) >= limit:
                 break
         return Success(paths[:limit])
@@ -1149,7 +1167,7 @@ async def _extract_document_knowledge(
         ExtractionRequest(text=markdown, prompt_description=_KNOWLEDGE_EXTRACTION_PROMPT)
     )
     if isinstance(outcome, ExtractionSucceeded):
-        await _write_extracted_clause_episodes(
+        graph_write_succeeded = await _write_extracted_clause_episodes(
             outcome=outcome,
             graph_writer=runtime.graph_writer,
             idempotency=runtime.idempotency,
@@ -1158,6 +1176,11 @@ async def _extract_document_knowledge(
             jurisdiction=jurisdiction,
             document_type=document_type,
         )
+        if not graph_write_succeeded:
+            return ExtractionFailed(
+                code=ExtractionFailureCode.GRAPH_WRITE_ERROR,
+                message="One or more extracted clauses could not be persisted to Graphiti",
+            )
     return outcome
 
 
@@ -1170,10 +1193,10 @@ async def _write_extracted_clause_episodes(
     user_id: str,
     jurisdiction: str | None,
     document_type: str,
-) -> None:
+) -> bool:
     """Map grounded clause extractions into the existing canonical writer."""
     if graph_writer is None or idempotency is None:
-        return
+        return True
     from app.shared.langgraph_layer.agent_saul.state import ClauseSegment, ClauseType
     from app.shared.rag.graphiti.write_clause_episodes import write_clause_episodes_to_graphiti
     from app.shared.rag.langextract.langextract_to_graph import GraphIngestionContext
@@ -1207,8 +1230,8 @@ async def _write_extracted_clause_episodes(
                 )
             )
     if not segments:
-        return
-    await write_clause_episodes_to_graphiti(
+        return True
+    clause_results, relationship_results = await write_clause_episodes_to_graphiti(
         segments,
         [],
         GraphIngestionContext(
@@ -1221,6 +1244,7 @@ async def _write_extracted_clause_episodes(
         graphiti_service=cast("GraphitiService", graph_writer),
         idempotency=cast("IdempotencyGuard", idempotency),
     )
+    return all(result.success for result in [*clause_results, *relationship_results])
 
 
 async def _verify_legal_chunks(

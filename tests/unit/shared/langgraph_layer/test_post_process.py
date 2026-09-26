@@ -49,3 +49,16 @@ async def test_empty_reranked_list_assembles_nothing() -> None:
 
     assert result["reranked_chunks"] == []
     assert result["assembled_context"] == []
+
+
+async def test_token_budget_removes_chunks_from_llm_input() -> None:
+    node = make_post_process_node(max_tokens=2, count_tokens=_words)
+    reranked = [
+        _chunk("a", "doc-1", 0, 0.9),
+        _chunk("b", "doc-2", 0, 0.8),
+    ]
+
+    result = await node({"reranked_chunks": reranked})
+
+    assert [chunk.chunk_id for chunk in result["reranked_chunks"]] == ["a"]
+    assert [section.document_id for section in result["assembled_context"]] == ["doc-1"]

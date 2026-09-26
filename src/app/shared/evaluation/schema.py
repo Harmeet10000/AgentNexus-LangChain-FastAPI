@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Literal  # noqa: TC003
+from typing import TYPE_CHECKING, Literal
 
 import aiofiles
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
@@ -17,6 +17,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+type GoldenDocumentKind = Literal["contracts", "statutes", "judgments", "filings"]
+
+
 class GoldenQuery(BaseModel):
     """One human-curated retrieval expectation."""
 
@@ -26,7 +29,7 @@ class GoldenQuery(BaseModel):
     expected_chunk_ids: list[str] = Field(min_length=1)
     expected_document_ids: list[str] = Field(min_length=1)
     jurisdiction: str | None = None
-    document_kind: Literal["contracts", "statutes", "judgments", "filings"]
+    document_kind: GoldenDocumentKind
     difficulty: Literal["easy", "medium", "hard"]
     notes: str
     awaiting_sme_expansion: bool

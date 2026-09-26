@@ -439,7 +439,17 @@ def make_post_process_node(
         sections = assemble_rag_context(
             ranked, lookup, max_tokens=max_tokens, count_tokens=count_tokens
         )
-        return {"reranked_chunks": ordered, "assembled_context": sections}
+        included_positions = {
+            (section.document_id, chunk_index)
+            for section in sections
+            for chunk_index in section.chunk_indices
+        }
+        budgeted_chunks = [
+            chunk
+            for chunk in ordered
+            if (chunk.parent_doc_id, chunk.chunk_index) in included_positions
+        ]
+        return {"reranked_chunks": budgeted_chunks, "assembled_context": sections}
 
     return post_process_node
 

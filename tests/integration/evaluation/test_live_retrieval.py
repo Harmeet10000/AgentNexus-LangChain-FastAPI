@@ -19,7 +19,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.connections import init_db
 from app.features.documents import service as document_service
-from app.features.documents.evaluation import run_live_retrieval_eval
+from app.features.documents.evaluation import run_live_retrieval_eval, stored_document_kind
 from app.features.documents.model import UnifiedChunk, UnifiedDocument
 from app.features.documents.repository import DocumentRepository
 from app.features.documents.service import DocumentQueryService
@@ -38,6 +38,19 @@ pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 GOLDEN_PATH = Path("evals/golden/legal_retrieval_v1.jsonl")
 REPORT_PATH = Path("evals/reports/baseline.json")
 
+_RELEVANT_CONTENT = {
+    "contracts": "Duties concerning confidentiality, accrued payment, and indemnity survive termination.",
+    "statutes": "Section 73 awards compensation for loss caused by a breach of contract.",
+    "judgments": "The court applied legitimate expectation after examining a clear public promise.",
+    "filings": "The annual filing identifies supply interruption as a material operating risk.",
+}
+
+
+def _embedding(*, index: int, width: int) -> list[float]:
+    values = [0.0] * width
+    values[index % width] = 1.0
+    return values
+
 
 def _seed_rows(*, queries: list[GoldenQuery], user_id: str) -> list[object]:
     """Build the corpus named by the golden artifact itself."""
@@ -55,7 +68,7 @@ def _seed_rows(*, queries: list[GoldenQuery], user_id: str) -> list[object]:
                     source_uri=None,
                     object_uri=f"eval://{document_id}",
                     content_hash=f"eval-{uuid4().hex}",
-                    document_kind=query.document_kind,
+                    document_kind=stored_document_kind(query.document_kind),
                     status="completed",
                     jurisdiction=query.jurisdiction,
                     contract_type=None,
@@ -68,15 +81,38 @@ def _seed_rows(*, queries: list[GoldenQuery], user_id: str) -> list[object]:
                     user_id=user_id,
                     # Identity columns exist only once migration 0019 lands; the
                     # hasattr gates keep this fixture green on either side of it.
-                    **({"document_version": 1} if hasattr(UnifiedChunk, "document_version") else {}),
-                    chunk_index=index,
-                    chunk_kind=query.document_kind,
-                    content=query.query,
+                    **(
+                        {"document_version": 1} if hasattr(UnifiedChunk, "document_version") else {}
+                    ),
+                    chunk_index=index * 2,
+                    chunk_kind=stored_document_kind(query.document_kind),
+                    content=_RELEVANT_CONTENT[query.document_kind],
                     preamble="",
                     **({"locus": None} if hasattr(UnifiedChunk, "locus") else {}),
                     clause_type=None,
                     page_no=1,
-                    embedding=[0.01] * width,
+                    embedding=_embedding(index=index, width=width),
+                    metadata_={"jurisdiction": query.jurisdiction},
+                    custom_metadata={},
+                    quality_warnings=[],
+                    graphiti_episode_id=None,
+                    graphiti_verified=False,
+                ),
+                UnifiedChunk(
+                    id=uuid4(),
+                    document_id=document_id,
+                    user_id=user_id,
+                    **(
+                        {"document_version": 1} if hasattr(UnifiedChunk, "document_version") else {}
+                    ),
+                    chunk_index=index * 2 + 1,
+                    chunk_kind=stored_document_kind(query.document_kind),
+                    content="Administrative boilerplate unrelated to the evaluated legal question.",
+                    preamble="",
+                    **({"locus": None} if hasattr(UnifiedChunk, "locus") else {}),
+                    clause_type=None,
+                    page_no=2,
+                    embedding=_embedding(index=index + len(queries), width=width),
                     metadata_={"jurisdiction": query.jurisdiction},
                     custom_metadata={},
                     quality_warnings=[],
@@ -100,8 +136,10 @@ async def test_live_retrieval_returns_real_identifiers(
     user_id = f"eval-probe-{uuid4().hex}"
     width = get_settings().EMBEDDING_DIMENSION
 
-    async def embed_query(_text: str, **_kwargs: object) -> list[float]:
-        return [0.01] * width
+    query_indexes = {query.query: index for index, query in enumerate(queries)}
+
+    async def embed_query(text: str, **_kwargs: object) -> list[float]:
+        return _embedding(index=query_indexes[text], width=width)
 
     def no_model_provider() -> BaseChatModel:
         message = "retrieval evaluation unexpectedly constructed an LLM"

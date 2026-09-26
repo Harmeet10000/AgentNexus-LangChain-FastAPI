@@ -99,6 +99,49 @@ def test_failed_initialization_does_not_leave_a_runner_or_resources(
     assert document_worker._WORKER_RUNNER is None
 
 
+def test_non_ingestion_worker_skips_document_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provision = AsyncMock()
+    monkeypatch.setattr(document_worker, "_provision_document_worker", provision)
+    monkeypatch.setattr(document_worker.sys, "argv", ["celery", "worker", "-Q", "default"])
+    monkeypatch.setattr(
+        document_worker,
+        "get_settings",
+        lambda: SimpleNamespace(CELERY_INGESTION_QUEUE="ingestion"),
+    )
+
+    document_worker.initialize_document_worker()
+
+    provision.assert_not_awaited()
+    assert document_worker._WORKER_RUNNER is None
+    assert document_worker._WORKER_RESOURCES is None
+
+
+@pytest.mark.asyncio
+async def test_release_attempts_every_resource_after_close_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph_error = RuntimeError("graph close failed")
+    redis_error = RuntimeError("redis close failed")
+    close_graph = AsyncMock(side_effect=graph_error)
+    redis = SimpleNamespace(aclose=AsyncMock(side_effect=redis_error))
+    engine = SimpleNamespace(dispose=AsyncMock())
+    monkeypatch.setattr(document_worker, "close_graphiti", close_graph)
+    resources = cast(
+        "Any",
+        SimpleNamespace(graphiti=object(), redis=redis, engine=engine),
+    )
+
+    with pytest.raises(ExceptionGroup) as raised:
+        await document_worker._release_document_worker(resources)
+
+    assert raised.value.exceptions == (graph_error, redis_error)
+    close_graph.assert_awaited_once()
+    redis.aclose.assert_awaited_once()
+    engine.dispose.assert_awaited_once()
+
+
 def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
