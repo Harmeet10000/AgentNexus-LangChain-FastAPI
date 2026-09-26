@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from returns.result import Failure, Success
+from sqlalchemy import text
 
 from app.config import get_settings
 from app.connections.celery_task_names import DOCUMENTS_INGEST
@@ -1086,6 +1087,10 @@ async def run_document_ingestion_task(
     session_local: async_sessionmaker[Any],
 ) -> dict[str, object]:
     async with session_local() as session, session.begin():
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": _document_ingestion_lock_key(user_id, document_id)},
+        )
         repo = DocumentRepository(session)
         return await graph.ainvoke(
             {
@@ -1097,6 +1102,12 @@ async def run_document_ingestion_task(
             },
             {"configurable": {"document_repository": repo}},
         )
+
+
+def _document_ingestion_lock_key(user_id: str, document_id: str) -> int:
+    """Build a stable signed-bigint key for PostgreSQL advisory locking."""
+    identity = f"{user_id}\0{document_id}".encode()
+    return int.from_bytes(hashlib.sha256(identity).digest()[:8], byteorder="big", signed=True)
 
 
 async def _embed_chunks(
