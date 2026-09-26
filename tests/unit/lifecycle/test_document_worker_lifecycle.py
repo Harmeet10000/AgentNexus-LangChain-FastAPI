@@ -9,7 +9,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.features.documents.service import run_document_ingestion_task
+from app.features.documents.service import (
+    _document_ingestion_lock_key,
+    run_document_ingestion_task,
+)
 from app.lifecycle import document_worker
 from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
 
@@ -146,7 +149,7 @@ async def test_release_attempts_every_resource_after_close_failures(
 def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    counts = {"compile": 0, "invoke": 0}
+    counts = {"compile": 0, "invoke": 0, "lock": 0}
 
     class Transaction:
         async def __aenter__(self) -> None:
@@ -160,6 +163,11 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
             self.session = MagicMock(spec=AsyncSession)
             self.session.begin.return_value = Transaction()
 
+            async def execute(*_args: object, **_kwargs: object) -> None:
+                counts["lock"] += 1
+
+            self.session.execute.side_effect = execute
+
         async def __aenter__(self) -> AsyncSession:
             return self.session
 
@@ -168,6 +176,7 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
 
     class Graph:
         async def ainvoke(self, _state: object, config: dict[str, object]) -> dict[str, object]:
+            assert counts["lock"] == counts["invoke"] + 1
             counts["invoke"] += 1
             configurable = cast("dict[str, object]", config["configurable"])
             assert "document_repository" in configurable
@@ -220,4 +229,12 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
         )
         assert result == {"status": "completed"}
 
-    assert counts == {"compile": 1, "invoke": 2}
+    assert counts == {"compile": 1, "invoke": 2, "lock": 2}
+
+
+def test_document_ingestion_advisory_lock_key_is_stable_and_tenant_scoped() -> None:
+    first = _document_ingestion_lock_key("user-1", "doc-1")
+
+    assert first == _document_ingestion_lock_key("user-1", "doc-1")
+    assert first != _document_ingestion_lock_key("user-2", "doc-1")
+    assert -(2**63) <= first < 2**63
