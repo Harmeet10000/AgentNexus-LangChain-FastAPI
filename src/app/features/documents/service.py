@@ -1212,8 +1212,6 @@ async def _write_extracted_clause_episodes(
     document_type: str,
 ) -> bool:
     """Map grounded clause extractions into the existing canonical writer."""
-    if graph_writer is None or idempotency is None:
-        return True
     from app.shared.langgraph_layer.agent_saul.state import ClauseSegment, ClauseType
     from app.shared.rag.graphiti.write_clause_episodes import write_clause_episodes_to_graphiti
     from app.shared.rag.langextract.langextract_to_graph import GraphIngestionContext
@@ -1248,6 +1246,14 @@ async def _write_extracted_clause_episodes(
             )
     if not segments:
         return True
+    if graph_writer is None and idempotency is None:
+        return True
+    if graph_writer is None or idempotency is None:
+        logger.bind(
+            graph_writer_configured=graph_writer is not None,
+            idempotency_configured=idempotency is not None,
+        ).error("graph_clause_writer_dependencies_incomplete")
+        return False
     clause_results, relationship_results = await write_clause_episodes_to_graphiti(
         segments,
         [],
