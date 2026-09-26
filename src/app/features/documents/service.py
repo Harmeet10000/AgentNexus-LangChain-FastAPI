@@ -58,6 +58,7 @@ from .dto import (
     UnifiedSearchResponse,
 )
 from .errors import (
+    DocumentGraphWriteError,
     DocumentNotFoundError,
     DocumentStorageError,
     DocumentValidationError,
@@ -935,7 +936,7 @@ async def process_document_ingestion(
     )
     status_result = await runtime.repo.update_document_status(
         document_id=job.document_id,
-        status="parsed",
+        status="failed" if _is_graph_write_failure(extraction_outcome) else "parsed",
         title=parsed.title,
         document_kind=classified.document_kind,
         jurisdiction=(legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction),
@@ -954,6 +955,16 @@ async def process_document_ingestion(
     )
     if isinstance(status_result, Failure):
         return Failure(status_result.failure())
+    if isinstance(extraction_outcome, ExtractionFailed) and _is_graph_write_failure(
+        extraction_outcome
+    ):
+        return Failure(
+            DocumentGraphWriteError(
+                message=extraction_outcome.message,
+                details={"document_id": job.document_id},
+                source="graphiti",
+            )
+        )
     chunks, segmentation_warnings = await segment_chunks(parsed=parsed, classified=classified)
     if legal.metadata is not None:
         chunks = enrich_legal_chunks(
@@ -1151,6 +1162,13 @@ def _extraction_metadata(
         "knowledge_extraction": "complete",
         "knowledge_extraction_classes": classes,
     }
+
+
+def _is_graph_write_failure(outcome: ExtractionSucceeded | ExtractionFailed) -> bool:
+    return (
+        isinstance(outcome, ExtractionFailed)
+        and outcome.code is ExtractionFailureCode.GRAPH_WRITE_ERROR
+    )
 
 
 async def _extract_document_knowledge(

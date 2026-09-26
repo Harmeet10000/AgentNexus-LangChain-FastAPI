@@ -4,11 +4,12 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import langextract as lx
-from returns.result import Success
+from returns.result import Failure, Success
 
 from app.features.documents import service as document_service
 from app.features.documents.classification import ClassifiedDocument, ParsedDocument, PreparedChunk
 from app.features.documents.dto import IngestionJob
+from app.features.documents.errors import DocumentGraphWriteError
 from app.features.documents.service import (
     DocumentQueryService,
     _write_extracted_clause_episodes,
@@ -60,7 +61,10 @@ def _job() -> IngestionJob:
 async def _run_ingestion(
     monkeypatch: Any,
     provider: object,
-) -> tuple[list[str], _Repo]:
+    *,
+    graph_writer: object | None = None,
+    idempotency: object | None = None,
+) -> tuple[list[str], _Repo, object]:
     events: list[str] = []
     repo = _Repo()
 
@@ -100,19 +104,19 @@ async def _run_ingestion(
         graphiti=None,
         llm=object(),
         extraction=AsyncExtractionService(RecordingProvider()),
-        graph_writer=None,
-        idempotency=None,
+        graph_writer=graph_writer,
+        idempotency=idempotency,
     )
     result = await process_document_ingestion(job=_job(), runtime=cast("Any", runtime))
-    assert result.unwrap()["status"] == "completed"
-    return events, repo
+    return events, repo, result
 
 
 async def test_extraction_runs_once_before_chunking_and_empty_success_is_complete(
     monkeypatch: Any,
 ) -> None:
-    events, repo = await _run_ingestion(monkeypatch, lambda _request: ())
+    events, repo, result = await _run_ingestion(monkeypatch, lambda _request: ())
 
+    assert result.unwrap()["status"] == "completed"
     assert events == ["extract", "chunk"]
     assert repo.status_calls[0]["extraction_incomplete"] is False
     assert repo.status_calls[0]["structural_tree"]["name"] == "Fixture"
@@ -123,9 +127,50 @@ async def test_extraction_failure_is_visible_but_ingestion_completes(monkeypatch
         message = "provider down"
         raise RuntimeError(message)
 
-    events, repo = await _run_ingestion(monkeypatch, fail)
+    events, repo, result = await _run_ingestion(monkeypatch, fail)
 
+    assert result.unwrap()["status"] == "completed"
     assert events == ["extract", "chunk"]
+    assert repo.status_calls[0]["extraction_incomplete"] is True
+
+
+async def test_graph_write_failure_marks_document_failed_before_chunk_storage(
+    monkeypatch: Any,
+) -> None:
+    extraction = lx.data.Extraction(
+        extraction_class="payment",
+        extraction_text="Payment is due.",
+        char_interval=lx.data.CharInterval(start_pos=0, end_pos=15),
+    )
+
+    def extract(_request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]:
+        return (lx.data.AnnotatedDocument(text="Payment is due.", extractions=[extraction]),)
+
+    class FailingWriter:
+        async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
+            del clause_text, metadata
+            message = "graph unavailable"
+            raise RuntimeError(message)
+
+    class Idempotency:
+        async def get(self, key: str) -> None:
+            del key
+
+        async def set(self, key: str, result: object, **kwargs: object) -> None:
+            del key, result, kwargs
+
+    events, repo, result = await _run_ingestion(
+        monkeypatch,
+        extract,
+        graph_writer=FailingWriter(),
+        idempotency=Idempotency(),
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), DocumentGraphWriteError)
+    assert result.failure().retryable is True
+    assert events == ["extract"]
+    assert repo.status_calls[0]["status"] == "failed"
     assert repo.status_calls[0]["extraction_incomplete"] is True
 
 

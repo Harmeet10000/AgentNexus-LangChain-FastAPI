@@ -52,6 +52,7 @@ from app.features.documents.errors import (
     DocumentConflictError,
     DocumentDatabaseError,
     DocumentEmbeddingWidthError,
+    DocumentGraphWriteError,
     DocumentNotFoundError,
     DocumentStatusNotFoundError,
     DocumentStorageError,
@@ -120,6 +121,7 @@ def _error(error_type: type[FeatureError], **fields: object) -> FeatureError:
                     DocumentStorageError,
                     DocumentDatabaseError,
                     DocumentEmbeddingWidthError,
+                    DocumentGraphWriteError,
                 ]
             ],
         ),

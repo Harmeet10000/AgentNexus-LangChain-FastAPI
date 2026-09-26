@@ -13,7 +13,7 @@ from .service import DocumentQueryService
 
 _STORED_DOCUMENT_KIND_BY_GOLDEN_KIND: dict[GoldenDocumentKind, str] = {
     "contracts": "legal_contract",
-    "statutes": "legal_policy",
+    "statutes": "generic",
     "judgments": "generic",
     "filings": "generic",
 }
