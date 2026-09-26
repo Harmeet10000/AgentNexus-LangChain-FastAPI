@@ -67,26 +67,15 @@ def assemble_rag_context(
             key=lambda item: item[1].chunk_index,
         )
         for group in _adjacent_groups(ordered_chunks):
-            offset = 0
-            while offset < len(group):
-                remaining_tokens = max_tokens - used_tokens
-                if remaining_tokens <= 0:
-                    return sections
-
-                prefix_length, section, section_tokens = _largest_fitting_prefix(
-                    group[offset:],
-                    max_tokens=remaining_tokens,
-                    count_tokens=count_tokens,
-                )
-                if prefix_length == 0:
-                    # An oversized chunk must not prevent smaller, later
-                    # evidence in the same source document from being used.
-                    offset += 1
-                    continue
-
-                sections.append(section)
-                used_tokens += section_tokens
-                offset += prefix_length
+            fitted, consumed_tokens = _fit_adjacent_group(
+                group,
+                max_tokens=max_tokens - used_tokens,
+                count_tokens=count_tokens,
+            )
+            sections.extend(fitted)
+            used_tokens += consumed_tokens
+            if used_tokens >= max_tokens:
+                return sections
 
     return sections
 
@@ -102,6 +91,63 @@ def _adjacent_groups(
         else:
             groups.append([pair])
     return groups
+
+
+def _count_single_chunk_tokens(
+    chunks: list[tuple[RankedChunk, SearchChunkRecord]],
+    *,
+    count_tokens: CountTokens,
+) -> list[int]:
+    """Tokenize each chunk once for linear skipping after a prefix cannot fit."""
+    costs: list[int] = []
+    for pair in chunks:
+        section = _build_context_section([pair])
+        costs.append(count_tokens(section.content))
+    return costs
+
+
+def _fit_adjacent_group(
+    group: list[tuple[RankedChunk, SearchChunkRecord]],
+    *,
+    max_tokens: int,
+    count_tokens: CountTokens,
+) -> tuple[list[ContextSection], int]:
+    """Fit ordered adjacent chunks without repeatedly tokenizing suffixes."""
+    fitted: list[ContextSection] = []
+    used_tokens = 0
+    offset = 0
+    single_chunk_costs: list[int] | None = None
+    while offset < len(group) and used_tokens < max_tokens:
+        remaining_tokens = max_tokens - used_tokens
+        candidate_group = group[offset:]
+        if single_chunk_costs is not None:
+            while offset < len(group) and single_chunk_costs[offset] > remaining_tokens:
+                offset += 1
+            if offset == len(group):
+                break
+            run_end = offset + 1
+            while run_end < len(group) and single_chunk_costs[run_end] <= remaining_tokens:
+                run_end += 1
+            candidate_group = group[offset:run_end]
+
+        prefix_length, section, section_tokens = _largest_fitting_prefix(
+            candidate_group,
+            max_tokens=remaining_tokens,
+            count_tokens=count_tokens,
+        )
+        if prefix_length == 0:
+            # A failed prefix means its first chunk cannot fit. Tokenize each
+            # single chunk at most once before scanning onward, so a run of
+            # oversized evidence cannot repeatedly tokenize every suffix.
+            if single_chunk_costs is None:
+                single_chunk_costs = _count_single_chunk_tokens(group, count_tokens=count_tokens)
+            offset += 1
+            continue
+
+        fitted.append(section)
+        used_tokens += section_tokens
+        offset += prefix_length
+    return fitted, used_tokens
 
 
 def _largest_fitting_prefix(

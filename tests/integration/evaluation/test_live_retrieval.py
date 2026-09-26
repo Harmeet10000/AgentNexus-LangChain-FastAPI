@@ -19,7 +19,11 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.connections import init_db
 from app.features.documents import service as document_service
-from app.features.documents.evaluation import run_live_retrieval_eval, stored_document_kind
+from app.features.documents.evaluation import (
+    run_live_retrieval_eval,
+    stored_document_kind,
+    stored_jurisdiction,
+)
 from app.features.documents.model import UnifiedChunk, UnifiedDocument
 from app.features.documents.repository import DocumentRepository
 from app.features.documents.service import DocumentQueryService
@@ -59,6 +63,7 @@ def _seed_rows(*, queries: list[GoldenQuery], user_id: str) -> list[object]:
     for index, query in enumerate(queries):
         document_id = UUID(query.expected_document_ids[0])
         chunk_id = UUID(query.expected_chunk_ids[0])
+        jurisdiction = stored_jurisdiction(query.document_kind, query.jurisdiction)
         rows.extend(
             [
                 UnifiedDocument(
@@ -70,7 +75,7 @@ def _seed_rows(*, queries: list[GoldenQuery], user_id: str) -> list[object]:
                     content_hash=f"eval-{uuid4().hex}",
                     document_kind=stored_document_kind(query.document_kind),
                     status="completed",
-                    jurisdiction=query.jurisdiction,
+                    jurisdiction=jurisdiction,
                     contract_type=None,
                     parties=[],
                     metadata_={},
@@ -92,7 +97,7 @@ def _seed_rows(*, queries: list[GoldenQuery], user_id: str) -> list[object]:
                     clause_type=None,
                     page_no=1,
                     embedding=_embedding(index=index, width=width),
-                    metadata_={"jurisdiction": query.jurisdiction},
+                    metadata_={"jurisdiction": jurisdiction},
                     custom_metadata={},
                     quality_warnings=[],
                     graphiti_episode_id=None,
@@ -113,7 +118,7 @@ def _seed_rows(*, queries: list[GoldenQuery], user_id: str) -> list[object]:
                     clause_type=None,
                     page_no=2,
                     embedding=_embedding(index=index + len(queries), width=width),
-                    metadata_={"jurisdiction": query.jurisdiction},
+                    metadata_={"jurisdiction": jurisdiction},
                     custom_metadata={},
                     quality_warnings=[],
                     graphiti_episode_id=None,

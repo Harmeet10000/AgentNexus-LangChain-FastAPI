@@ -8,8 +8,11 @@ canonicalised free-text ``content`` (None for writes), one prefix generation.
 from __future__ import annotations
 
 import inspect
+from unittest.mock import AsyncMock
 
-from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+import pytest
+
+from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard, ToolResult
 
 
 def test_make_key_is_keyword_only_with_structural_and_content() -> None:
@@ -61,3 +64,28 @@ def test_content_none_differs_from_content_present() -> None:
         step_id="s", structural={"d": 1}, user_id="u", content={"query": "q"}
     )
     assert write != read
+
+
+@pytest.mark.asyncio
+async def test_postgres_idempotency_remains_available_without_redis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guard = IdempotencyGuard(redis=None, db_engine=object())  # type: ignore[arg-type]
+    cached = ToolResult.ok({"episode_id": "episode-1"})
+    get_from_postgres = AsyncMock(return_value=cached)
+    set_in_postgres = AsyncMock()
+    monkeypatch.setattr(guard, "_get_from_postgres", get_from_postgres)
+    monkeypatch.setattr(guard, "_set_in_postgres", set_in_postgres)
+
+    assert await guard.get("key-1") is cached
+    await guard.set(
+        "key-1",
+        cached,
+        tool_name="write_clause_episode",
+        user_id="user-1",
+        thread_id="thread-1",
+        step_id="step-1",
+    )
+
+    get_from_postgres.assert_awaited_once_with("key-1")
+    set_in_postgres.assert_awaited_once()
