@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 
 from app.features.documents.constants import RRF_WEIGHT_TRIGRAM
 from app.features.documents.dto import UnifiedSearchRequest
-from app.features.documents.service import DocumentQueryService
+from app.features.documents.service import DocumentQueryService, retrieve_fused
 from app.shared.langgraph_layer.retrieval_kb import nodes as retrieval_nodes
 from app.shared.langgraph_layer.retrieval_kb.nodes import make_hybrid_retrieval_node
 from app.shared.langgraph_layer.retrieval_kb.state import QueryPlan
@@ -77,9 +77,7 @@ async def test_graph_path_and_service_search_agree_on_chunk_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(retrieval_nodes, "embed_text", _fake_embed)
-    monkeypatch.setattr(
-        "app.features.documents.service.embed_text", _fake_embed
-    )
+    monkeypatch.setattr("app.features.documents.service.embed_text", _fake_embed)
     weights = [0.6, 0.4, RRF_WEIGHT_TRIGRAM]
     repo = _StubRepo()
 
@@ -93,14 +91,10 @@ async def test_graph_path_and_service_search_agree_on_chunk_order(
     )
     node_order = [chunk.chunk_id for chunk in node_result["retrieved_chunks"]]
 
-    service = DocumentQueryService(
-        cast("Any", repo), cast("Any", None), None, None
-    )
+    service = DocumentQueryService(cast("Any", repo), cast("Any", None), None, None)
     search_result = await service.search(
         user_id="user-1",
-        payload=UnifiedSearchRequest(
-            query="indemnity cap", limit=20, candidate_limit=50
-        ),
+        payload=UnifiedSearchRequest(query="indemnity cap", limit=20, candidate_limit=50),
         weights=weights,
     )
     from returns.result import Success as _Success
@@ -109,3 +103,34 @@ async def test_graph_path_and_service_search_agree_on_chunk_order(
     service_order = [item.chunk_id for item in search_result.unwrap().items]
 
     assert node_order == service_order == ["a", "c", "b"]
+
+
+async def test_exact_phrase_filters_every_fusion_leg() -> None:
+    class PhraseRepo(_StubRepo):
+        async def fetch_chunks_by_ids(self, chunk_ids: Any) -> Any:
+            from returns.result import Success
+
+            lookup = {
+                "a": {**_LOOKUP["a"], "search_text": "Contains Indemnity Cap here"},
+                "b": {**_LOOKUP["b"], "search_text": "indemnity and an unrelated cap"},
+                "c": {**_LOOKUP["c"], "search_text": "different content"},
+            }
+            return Success({cid: lookup[cid] for cid in chunk_ids})
+
+    result = await retrieve_fused(
+        repo=cast("Any", PhraseRepo()),
+        user_id="user-1",
+        query_text="indemnity cap",
+        query_embedding=[0.0],
+        candidate_limit=50,
+        limit=2,
+        filter_params={},
+        exact_phrase="indemnity cap",
+    )
+
+    from returns.result import Success as _Success
+
+    assert isinstance(result, _Success)
+    fused, lookup = result.unwrap()
+    assert [item.chunk_id for item in fused] == ["a"]
+    assert set(lookup) == {"a"}

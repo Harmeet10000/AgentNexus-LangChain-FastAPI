@@ -75,6 +75,70 @@ class GraphitiService(Protocol):
     ) -> list[GraphitiSearchResult]: ...
 
 
+class BoundGraphitiService:
+    """Bind the module's pure Graphiti operations to one process-owned client."""
+
+    __slots__ = ("_graphiti",)
+
+    def __init__(self, graphiti: Graphiti) -> None:
+        self._graphiti = graphiti
+
+    async def write_clause_episode(
+        self,
+        clause_text: str,
+        metadata: ClauseEpisodeMetadata,
+    ) -> str:
+        return await write_clause_episode(self._graphiti, clause_text, metadata)
+
+    async def write_relationship_edge(self, edge: LegalEdgeInput) -> str:
+        return await write_relationship_edge(self._graphiti, edge)
+
+    async def search_for_risk_context(
+        self,
+        query: str,
+        user_id: str,
+        doc_id: str | None = None,
+        num_results: int = 10,
+    ) -> list[GraphitiSearchResult]:
+        return await search_for_risk_context(
+            self._graphiti,
+            query,
+            user_id,
+            doc_id,
+            num_results,
+        )
+
+    async def search_for_precedent_chains(
+        self,
+        query: str,
+        user_id: str,
+        jurisdiction: str = "India",
+        num_results: int = 10,
+    ) -> list[GraphitiSearchResult]:
+        return await search_for_precedent_chains(
+            self._graphiti,
+            query,
+            user_id,
+            jurisdiction,
+            num_results,
+        )
+
+    async def get_obligation_chain(
+        self,
+        entity_name: str,
+        user_id: str,
+        doc_id: str | None = None,
+        depth: int = 3,
+    ) -> list[GraphitiSearchResult]:
+        return await get_obligation_chain(
+            self._graphiti,
+            entity_name,
+            user_id,
+            doc_id,
+            depth,
+        )
+
+
 # Score weights for multi-objective memory retrieval (Section 18.6)
 _W_SEMANTIC: float = 0.50
 _W_RECENCY: float = 0.20

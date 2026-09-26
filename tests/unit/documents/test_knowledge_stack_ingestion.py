@@ -136,7 +136,8 @@ async def test_structural_branch_uses_repository_and_pure_navigator() -> None:
                 "structural_tree": {
                     "name": "Agreement",
                     "children": [{"label": "section", "name": "Payment", "text": "Due in 30 days"}],
-                }
+                },
+                "document_id": "document-1",
             }
         ]
     )
@@ -146,7 +147,7 @@ async def test_structural_branch_uses_repository_and_pure_navigator() -> None:
 
     result = await service.navigate_structure(user_id="tenant-1", query="due", limit=1)
 
-    assert result.unwrap() == [("Agreement", "Payment")]
+    assert result.unwrap() == [("document-1", "Agreement", "Payment")]
 
 
 async def test_clause_extractions_use_canonical_writer_idempotently() -> None:
@@ -191,7 +192,44 @@ async def test_clause_extractions_use_canonical_writer_idempotently() -> None:
         "document_type": "contract",
     }
 
-    await _write_extracted_clause_episodes(**cast("Any", kwargs))
-    await _write_extracted_clause_episodes(**cast("Any", kwargs))
+    assert await _write_extracted_clause_episodes(**cast("Any", kwargs)) is True
+    assert await _write_extracted_clause_episodes(**cast("Any", kwargs)) is True
 
     assert writer.calls == 1
+
+
+async def test_clause_write_failure_is_reported_to_ingestion() -> None:
+    extraction = lx.data.Extraction(
+        extraction_class="payment",
+        extraction_text="Payment is due in thirty days.",
+        char_interval=lx.data.CharInterval(start_pos=10, end_pos=40),
+        attributes={"clause_id": "4.1"},
+    )
+    outcome = ExtractionSucceeded(
+        documents=(lx.data.AnnotatedDocument(text="x" * 50, extractions=[extraction]),)
+    )
+
+    class FailingWriter:
+        async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
+            del clause_text, metadata
+            message = "graph unavailable"
+            raise RuntimeError(message)
+
+    class Idempotency:
+        async def get(self, key: str) -> None:
+            del key
+
+        async def set(self, key: str, result: object, **kwargs: object) -> None:
+            del key, result, kwargs
+
+    result = await _write_extracted_clause_episodes(
+        outcome=outcome,
+        graph_writer=FailingWriter(),
+        idempotency=Idempotency(),
+        document_id="doc-1",
+        user_id="tenant-1",
+        jurisdiction="India",
+        document_type="contract",
+    )
+
+    assert result is False
