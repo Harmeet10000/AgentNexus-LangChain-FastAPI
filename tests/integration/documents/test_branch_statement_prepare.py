@@ -178,4 +178,11 @@ async def test_exact_phrase_executes_case_insensitively_with_literal_wildcards()
 
         assert isinstance(result, Success), result
         assert [row["chunk_id"] for row in result.unwrap()] == [str(matching_id)]
+
+        hydrated = await repo.fetch_chunks_by_ids(
+            [str(matching_id)],
+            exact_phrase="100% guarantee under clause_2",
+        )
+        assert isinstance(hydrated, Success), hydrated
+        assert set(hydrated.unwrap()) == {str(matching_id)}
         await session.rollback()
