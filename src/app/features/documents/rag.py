@@ -66,43 +66,79 @@ def assemble_rag_context(
             grouped[document_id],
             key=lambda item: item[1].chunk_index,
         )
-        current_group: list[tuple[RankedChunk, SearchChunkRecord]] = []
+        for group in _adjacent_groups(ordered_chunks):
+            offset = 0
+            while offset < len(group):
+                remaining_tokens = max_tokens - used_tokens
+                if remaining_tokens <= 0:
+                    return sections
 
-        for ranked_chunk, chunk in ordered_chunks:
-            pair = (ranked_chunk, chunk)
-            is_adjacent = (
-                bool(current_group) and chunk.chunk_index == current_group[-1][1].chunk_index + 1
-            )
-            if current_group and not is_adjacent:
-                section = _build_context_section(current_group)
-                used_tokens += count_tokens(section.content)
+                prefix_length, section, section_tokens = _largest_fitting_prefix(
+                    group[offset:],
+                    max_tokens=remaining_tokens,
+                    count_tokens=count_tokens,
+                )
+                if prefix_length == 0:
+                    # An oversized chunk must not prevent smaller, later
+                    # evidence in the same source document from being used.
+                    offset += 1
+                    continue
+
                 sections.append(section)
-                current_group = []
-
-            candidate_group = [*current_group, pair]
-            candidate = _build_context_section(candidate_group)
-            if used_tokens + count_tokens(candidate.content) <= max_tokens:
-                current_group = candidate_group
-                continue
-
-            # Keep the fitting prefix rather than dropping an entire adjacent
-            # group because its final chunk crosses the budget.
-            if current_group:
-                section = _build_context_section(current_group)
-                used_tokens += count_tokens(section.content)
-                sections.append(section)
-                current_group = []
-
-            single = _build_context_section([pair])
-            if used_tokens + count_tokens(single.content) <= max_tokens:
-                current_group = [pair]
-
-        if current_group:
-            section = _build_context_section(current_group)
-            used_tokens += count_tokens(section.content)
-            sections.append(section)
+                used_tokens += section_tokens
+                offset += prefix_length
 
     return sections
+
+
+def _adjacent_groups(
+    chunks: list[tuple[RankedChunk, SearchChunkRecord]],
+) -> list[list[tuple[RankedChunk, SearchChunkRecord]]]:
+    """Partition ordered chunks into maximal groups with consecutive indexes."""
+    groups: list[list[tuple[RankedChunk, SearchChunkRecord]]] = []
+    for pair in chunks:
+        if groups and pair[1].chunk_index == groups[-1][-1][1].chunk_index + 1:
+            groups[-1].append(pair)
+        else:
+            groups.append([pair])
+    return groups
+
+
+def _largest_fitting_prefix(
+    chunks: list[tuple[RankedChunk, SearchChunkRecord]],
+    *,
+    max_tokens: int,
+    count_tokens: CountTokens,
+) -> tuple[int, ContextSection, int]:
+    """Return the longest prefix within the budget using logarithmic token counts.
+
+    Most adjacent groups fit and require a single tokenizer call. Oversized groups
+    use a binary search rather than re-tokenizing every growing prefix.
+    """
+    full_section = _build_context_section(chunks)
+    full_tokens = count_tokens(full_section.content)
+    if full_tokens <= max_tokens:
+        return len(chunks), full_section, full_tokens
+
+    low = 1
+    high = len(chunks) - 1
+    best_length = 0
+    best_section = full_section
+    best_tokens = full_tokens
+
+    while low <= high:
+        middle = (low + high) // 2
+        candidate = _build_context_section(chunks[:middle])
+        candidate_tokens = count_tokens(candidate.content)
+        if candidate_tokens <= max_tokens:
+            best_length = middle
+            best_section = candidate
+            best_tokens = candidate_tokens
+            low = middle + 1
+        else:
+            high = middle - 1
+
+    return best_length, best_section, best_tokens
 
 
 def _build_context_section(
