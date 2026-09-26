@@ -69,28 +69,37 @@ def assemble_rag_context(
         current_group: list[tuple[RankedChunk, SearchChunkRecord]] = []
 
         for ranked_chunk, chunk in ordered_chunks:
-            if not current_group:
-                current_group = [(ranked_chunk, chunk)]
+            pair = (ranked_chunk, chunk)
+            is_adjacent = (
+                bool(current_group) and chunk.chunk_index == current_group[-1][1].chunk_index + 1
+            )
+            if current_group and not is_adjacent:
+                section = _build_context_section(current_group)
+                used_tokens += count_tokens(section.content)
+                sections.append(section)
+                current_group = []
+
+            candidate_group = [*current_group, pair]
+            candidate = _build_context_section(candidate_group)
+            if used_tokens + count_tokens(candidate.content) <= max_tokens:
+                current_group = candidate_group
                 continue
 
-            previous_index = current_group[-1][1].chunk_index
-            current_index = chunk.chunk_index
-            if current_index == previous_index + 1:
-                current_group.append((ranked_chunk, chunk))
-                continue
+            # Keep the fitting prefix rather than dropping an entire adjacent
+            # group because its final chunk crosses the budget.
+            if current_group:
+                section = _build_context_section(current_group)
+                used_tokens += count_tokens(section.content)
+                sections.append(section)
+                current_group = []
 
-            section = _build_context_section(current_group)
-            used_tokens += count_tokens(section.content)
-            if used_tokens > max_tokens:
-                return sections
-            sections.append(section)
-            current_group = [(ranked_chunk, chunk)]
+            single = _build_context_section([pair])
+            if used_tokens + count_tokens(single.content) <= max_tokens:
+                current_group = [pair]
 
         if current_group:
             section = _build_context_section(current_group)
             used_tokens += count_tokens(section.content)
-            if used_tokens > max_tokens:
-                return sections
             sections.append(section)
 
     return sections

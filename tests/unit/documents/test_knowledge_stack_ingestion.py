@@ -278,3 +278,39 @@ async def test_clause_write_failure_is_reported_to_ingestion() -> None:
     )
 
     assert result is False
+
+
+async def test_partially_configured_graph_writer_dependencies_fail_closed() -> None:
+    extraction = lx.data.Extraction(
+        extraction_class="payment",
+        extraction_text="Payment is due.",
+        char_interval=lx.data.CharInterval(start_pos=0, end_pos=15),
+    )
+    outcome = ExtractionSucceeded(
+        documents=(lx.data.AnnotatedDocument(text="Payment is due.", extractions=[extraction]),)
+    )
+
+    assert (
+        await _write_extracted_clause_episodes(
+            outcome=outcome,
+            graph_writer=object(),
+            idempotency=None,
+            document_id="doc-1",
+            user_id="tenant-1",
+            jurisdiction="India",
+            document_type="contract",
+        )
+        is False
+    )
+    assert (
+        await _write_extracted_clause_episodes(
+            outcome=outcome,
+            graph_writer=None,
+            idempotency=object(),
+            document_id="doc-1",
+            user_id="tenant-1",
+            jurisdiction="India",
+            document_type="contract",
+        )
+        is False
+    )
