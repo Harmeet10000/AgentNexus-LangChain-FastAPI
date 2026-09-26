@@ -62,3 +62,16 @@ async def test_token_budget_removes_chunks_from_llm_input() -> None:
 
     assert [chunk.chunk_id for chunk in result["reranked_chunks"]] == ["a"]
     assert [section.document_id for section in result["assembled_context"]] == ["doc-1"]
+
+
+async def test_token_budget_uses_chunk_identity_when_versions_share_an_index() -> None:
+    node = make_post_process_node(max_tokens=2, count_tokens=_words)
+    reranked = [
+        _chunk("version-1", "doc-1", 0, 0.9),
+        _chunk("version-2", "doc-1", 0, 0.8),
+    ]
+
+    result = await node({"reranked_chunks": reranked})
+
+    assert [chunk.chunk_id for chunk in result["reranked_chunks"]] == ["version-1"]
+    assert result["assembled_context"][0].chunk_ids == ["version-1"]
