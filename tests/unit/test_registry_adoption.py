@@ -75,7 +75,7 @@ def test_a_string_tool_name_resolves_through_the_factory(monkeypatch: Any) -> No
     # The middleware stack and model construction both need provider packages
     # this environment lacks (the D13 finding) — irrelevant to resolution.
     monkeypatch.setattr(factory, "build_default_middleware_stack", lambda **_kw: [])
-    monkeypatch.setattr(factory, "_build_chat_model", lambda **_kw: _FakeModel())
+    monkeypatch.setattr(factory, "build_chat_model", lambda **_kw: _FakeModel())
     from app.shared.langchain_layer.agents.factory import create_production_agent
 
     create_production_agent(_spec("web_search"))

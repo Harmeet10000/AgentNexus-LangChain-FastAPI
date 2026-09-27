@@ -1,0 +1,56 @@
+{
+  "skill": "OKF v0.2",
+  "fixture": {
+    "original": "fixtures/notes.md",
+    "bytes": 334,
+    "sha256": "008efd9e3c0078e9f54ffb548af08a553b768a7883a48a63cb37f7398091e003",
+    "contains_unicode": true,
+    "line_endings": "CRLF",
+    "topics": ["queue processing", "garden watering"],
+    "inherited_broken_link": "missing.md"
+  },
+  "commands_from_cwd": "/tmp",
+  "checks": [
+    {
+      "name": "strict validation before reindex",
+      "command": "uv run .../validate_okf.py <scratch>/knowledge --strict --manifest <scratch>/knowledge/maintenance/manifest.json --originals <scratch>",
+      "exit_code": 0,
+      "result": "PASS: 4 Markdown documents; 0 conformance errors; 0 producer issues; 0 preservation errors; 1 inherited unresolved link reported"
+    },
+    {
+      "name": "reindex dry run",
+      "command": "uv run .../reindex_okf.py <scratch>/knowledge --dry-run",
+      "exit_code": 0,
+      "result": "3 indexes, 3 documents, 0 links; no files written"
+    },
+    {
+      "name": "reindex write",
+      "command": "uv run .../reindex_okf.py <scratch>/knowledge",
+      "exit_code": 0,
+      "result": "3 indexes, 3 documents, 0 links"
+    },
+    {
+      "name": "authored broken link rejection",
+      "command": "strict validation after adding enhanced/authored-broken.md with missing-authored.md",
+      "exit_code": 1,
+      "result": "EXPECTED FAIL: 1 producer issue for unresolved authored local link; inherited missing.md remained advisory"
+    },
+    {
+      "name": "strict validation after cleanup and reindex",
+      "command": "uv run .../validate_okf.py <scratch>/knowledge --strict --manifest <scratch>/knowledge/maintenance/manifest.json --originals <scratch> --output <scratch>/knowledge/maintenance/forward-validation.json",
+      "exit_code": 0,
+      "result": "PASS: 7 Markdown documents; 0 conformance errors; 0 producer issues; 0 preservation errors; 1 inherited unresolved link reported"
+    }
+  ],
+  "preservation": {
+    "asset_byte_equal": true,
+    "segment_reconstructs_original": true,
+    "manifest_originals_check": "passed",
+    "originals_modified": false
+  },
+  "limitations": [
+    "The fixture intentionally uses one inherited broken link; validation reports it but strict mode still passes.",
+    "The reindexer reported zero discovered links for this tiny bundle; link correctness was verified by the validator.",
+    "No web research was needed for the fixture content."
+  ]
+}

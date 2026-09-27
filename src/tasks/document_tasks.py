@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from app.config import get_settings
 from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, ResilientTask, celery_app
 from app.connections.celery_task_names import DOCUMENTS_INGEST
@@ -11,6 +13,11 @@ from app.lifecycle.document_worker import (
     run_on_document_worker_loop,
 )
 from app.utils import InfrastructureException, logger
+
+if TYPE_CHECKING:
+    from app.lifecycle.document_worker import (
+        DocumentWorkerResources,
+    )
 
 
 class DocumentIngestPayload(CeleryTaskPayload):
@@ -56,7 +63,7 @@ def ingest_document(
         )
         return {"status": "skipped", "document_id": document_id}
     try:
-        resources = get_document_worker_resources()
+        resources: DocumentWorkerResources = get_document_worker_resources()
         result = run_on_document_worker_loop(
             lambda: run_document_ingestion_task(
                 document_id=document_id,
@@ -70,7 +77,8 @@ def ingest_document(
                 idempotency=resources.idempotency,
             )
         )
-    except Exception:
+    except Exception as exc:
+        exc.add_note(f"operation=documents.ingest, document_id={document_id}")
         if redis_lock_enabled:
             self.release_idempotency_processing_lock(idempotency_key)
         raise

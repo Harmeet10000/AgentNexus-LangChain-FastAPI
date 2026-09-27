@@ -170,11 +170,11 @@ async def test_cognee_setup_base_caught_not_just_subclass():
     subclass relationship (`CogneeDimensionMismatchError` extends
     `CogneeSetupError`) would let a broad-first order swallow the hard fail.
     """
-    from app.lifecycle.lifespan import _run_startup_policy
-    from app.shared.langchain_layer.agents.memory.cognee_client import (
+    from app.connections.cognee import (
         CogneeDimensionMismatchError,
         CogneeSetupError,
     )
+    from app.lifecycle.lifespan import _run_startup_policy
 
     policy = _cognee_policy()
     assert policy.fatal_on == (CogneeDimensionMismatchError,)

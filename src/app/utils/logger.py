@@ -37,7 +37,9 @@ def console_format(record: dict[str, Any]) -> str:
     message = record["message"]
     # Escape braces so loguru's format_map pass does not interpret
     # user content as format fields (KeyError -> lost record).
-    message_escaped = message.replace("{", "{{").replace("}", "}}")
+    message_escaped = (
+        message.replace("{", "{{").replace("}", "}}").replace("<", r"\<")
+    )
 
     colors: dict[str, str] = {
         "DEBUG": "<cyan>",
@@ -61,7 +63,7 @@ def console_format(record: dict[str, Any]) -> str:
         meta_parts = [f"<cyan>{k}</>={v!r}" for k, v in extra_data.items() if k != "trace_id"]
         meta_str = " ".join(meta_parts)
         # Escape braces in rendered extra values for the same reason as message.
-        meta_str = meta_str.replace("{", "{{").replace("}", "}}")
+        meta_str = meta_str.replace("{", "{{").replace("}", "}}").replace("<", r"\<")
         fmt += f" <dim>|</dim> {meta_str}"
 
     if record["exception"]:
@@ -212,6 +214,7 @@ def trace_layer(layer_name: str) -> Any:
                     return result  # noqa: TRY300 — return must be inside try for trace layer span recording
 
                 except Exception as e:
+                    e.add_note(f"layer={layer_name}, function={func.__module__}.{func.__name__}")
                     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
                     span.record_exception(e)
                     span.set_status(Status(StatusCode.ERROR, str(e)))

@@ -1,0 +1,10 @@
+{
+  "id": "compiler-code-generation",
+  "acquired_at": "2026-09-14T10:27:55+05:30",
+  "source_name": "input.md.txt",
+  "source_path": "assets/ingest/compiler-code-generation/input.md.txt",
+  "bytes": 3277,
+  "sha256": "11239b12752c4c6785bcbe71827afd506cc41c572d85f6f9095b129abcc7d433",
+  "topic": "Compiler Code Generation Pipeline",
+  "access_constraints": "unrestricted"
+}

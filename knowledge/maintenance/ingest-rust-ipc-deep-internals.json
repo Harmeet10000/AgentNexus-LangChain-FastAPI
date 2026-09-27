@@ -1,0 +1,10 @@
+{
+  "id": "rust-ipc-deep-internals",
+  "acquired_at": "2026-09-14T11:22:17+05:30",
+  "source_name": "input.md.txt",
+  "source_path": "assets/ingest/rust-ipc-deep-internals/input.md.txt",
+  "bytes": 5191,
+  "sha256": "b3ecad3f90c346a31fc9dc488d4eca8e7eed7b61f3faed625f4b7de2c6d7b928",
+  "topic": "Deep Internals and Protocol Comparison: Rust Inter-Process Communication",
+  "access_constraints": "unrestricted"
+}

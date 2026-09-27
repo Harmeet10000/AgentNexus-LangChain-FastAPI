@@ -1,14 +1,7 @@
-# Auto-generated graphify knowledge graph
-graphify-out/
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-
-#
-graphify-out/cost.json
-graphify-out/cache/
 
 # C extensions
 *.so
@@ -214,9 +207,10 @@ celerybeat-schedule.db
 .cursor/rules/byterover-rules.mdc
 .qoder/rules/byterover-rules.md
 .augment/rules/byterover-rules.md
-# .kiro/*
+.kiro/*
 .clinerules/*
 .amazonq/*
+.openchamber/*
 
 # Local opencode config (may contain API keys)
 .opencode/opencode.json

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import langextract as lx
 from pydantic import BaseModel
+from returns.result import Failure
 
 from app.utils import APIException, logger
 
@@ -54,9 +55,7 @@ async def run_legal_extraction_batch(
     clean_docs: list[CleanLegalDocument] = []
     for url in urls:
         try:
-            doc = await preprocess_legal_document(url, preprocess_ctx)
-            clean_docs.append(doc)
-            logger.bind(url=url, char_count=doc.char_count).info("Preprocessed document")
+            doc_result = await preprocess_legal_document(url, preprocess_ctx)
         except Exception as e:  # noqa: BLE001 — docling preprocessing, unknown failure modes
             e.add_note(f"url={url}, operation=preprocess_legal_document")
             logger.bind(url=url, operation="preprocess_legal_document").exception(
@@ -67,6 +66,21 @@ async def run_legal_extraction_batch(
                     document_url=url, extractions_count=0, grounded_count=0, status="failed"
                 )
             )
+            continue
+        if isinstance(doc_result, Failure):
+            error = doc_result.failure()
+            logger.bind(
+                url=url, operation="preprocess_legal_document", error_code=error.code
+            ).warning("Preprocessing failed")
+            results.append(
+                BatchExtractionResult(
+                    document_url=url, extractions_count=0, grounded_count=0, status="failed"
+                )
+            )
+            continue
+        doc = doc_result.unwrap()
+        clean_docs.append(doc)
+        logger.bind(url=url, char_count=doc.char_count).info("Preprocessed document")
 
     if not clean_docs:
         return results
@@ -104,10 +118,11 @@ async def run_legal_extraction_batch(
             )
 
     except Exception as e:
+        e.add_note(f"model_id={ctx.model_id}, document_count={len(clean_docs)}")
         logger.bind(model_id=ctx.model_id, document_count=len(clean_docs)).exception(
             "LangExtract batch failed"
         )
         msg = "Batch extraction failed"
-        raise APIException(msg) from e
+        raise APIException(status_code=500, detail=msg) from e
 
     return results

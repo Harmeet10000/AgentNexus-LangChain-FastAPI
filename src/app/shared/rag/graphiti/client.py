@@ -213,7 +213,8 @@ async def setup_graphiti(
             # use_custom_entities=False,  # bool — allow custom entity types?
             # destroy_graph=False,  # bool — WARNING: wipes the entire graph on init (for testing)
         )
-    except Exception:
+    except Exception as exc:
+        exc.add_note("operation=create_graphiti, service=graphiti")
         logger.bind(service="graphiti").exception("Failed to create Graphiti instance")
         raise
     else:
@@ -234,7 +235,8 @@ async def setup_graphiti_indices(graphiti: Graphiti) -> None:
     """
     try:
         await graphiti.build_indices_and_constraints()
-    except Exception:
+    except Exception as exc:
+        exc.add_note("operation=setup_graphiti_indices, service=graphiti")
         logger.bind(service="graphiti").exception("Failed to setup Graphiti indices")
         raise
     else:
@@ -303,7 +305,8 @@ async def write_clause_episode(
             group_id=metadata.doc_id,
             uuid=episode_uuid,
         )
-    except Exception:
+    except Exception as exc:
+        exc.add_note("operation=write_clause_episode, service=graphiti")
         logger.bind(service="graphiti").exception("Failed to write clause episode")
         raise
     return episode_uuid
@@ -359,7 +362,8 @@ async def write_relationship_edge(
             group_id=edge.doc_id,
             uuid=episode_uuid,
         )
-    except Exception:
+    except Exception as exc:
+        exc.add_note("operation=write_relationship_edge, service=graphiti")
         logger.bind(service="graphiti").exception("Failed to write relationship edge")
         raise
     return episode_uuid

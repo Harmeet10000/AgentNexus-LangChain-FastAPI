@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from redis.exceptions import RedisError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from returns.result import Failure, Success
 
 from app.utils.json_serializer import from_json, to_json_str
@@ -30,11 +31,16 @@ type RedisCommandArgs = list[str]
 
 
 def _error(operation: str, exc: BaseException) -> CacheError:
+    exc.add_note(f"operation={operation}, source=redis_cache")
     detail = str(exc)
     logger.bind(operation=operation, error=detail).exception("Redis cache operation failed")
     return CacheError(
         message=f"Cache operation failed: {operation}",
-        details={"operation": operation, "error": detail},
+        details={
+            "operation": operation,
+            "error": detail,
+            "notes": list(getattr(exc, "__notes__", [])),
+        },
         source="redis_cache",
     )
 
@@ -42,7 +48,7 @@ def _error(operation: str, exc: BaseException) -> CacheError:
 async def _run[T](operation: str, action: Any) -> CacheResult[T]:
     try:
         return Success(await action())
-    except (RedisError, OSError, TimeoutError, TypeError, ValueError, KeyError, IndexError) as exc:
+    except (RedisError, RedisTimeoutError, OSError, TimeoutError, TypeError, ValueError, KeyError, IndexError) as exc:
         return Failure(_error(operation, exc))
 
 

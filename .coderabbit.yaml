@@ -5,7 +5,6 @@ reviews:
     auto_incremental_review: true
   path_filters:
     - "!uv.lock"
-    - "!graphify-out/**"
     - "!docs/learning/**"
     - "!openspec/changes/**/archive/**"
     - "!tests/performance/**"

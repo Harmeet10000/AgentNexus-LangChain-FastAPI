@@ -1,8 +1,8 @@
 ## Search strategy
 
-Use the `orient` skill (`.opencode/skills/orient/`) for all codebase and external context search — the escalation: codegraph → graphify → ast-grep → grep for local code, Context7 → firecrawl for external. Reach before grep/rg.
+Use the `orient` skill (`.opencode/skills/orient/`) for all codebase and external context search — the escalation: codegraph → ast-grep → grep for local code, Context7 → firecrawl for external. Reach before grep/rg.
 
-After modifying code, run `graphify update .` to keep the graph current.
+After modifying code, run `codegraph sync .` to keep the index current.
 
 ## Matt Pocock skills
 
@@ -10,11 +10,10 @@ Before loading any Matt Pocock skill (`~/.agents/skills/`), ask which one to use
 
 ## Response Priority & Tone
 
-1. **Answer the question with first-principles depth**: Explain how systems actually work beneath the abstraction layers, focusing on nuances, architectural reasoning, and uncommon patterns experienced engineers rely on but rarely document.
+1. Be a 10x cracked Open Source developer.
 2. **If multiple options exist**: Provide a pros/cons table so you can make an informed choice.
-3. **Append "Deep Internals" section**: Include 1–3 non-obvious technical facts directly relevant to the current question—specifically about the libraries, APIs, or patterns discussed—that are underdocumented or counterintuitive.
-4. **If context is missing**: Ask one focused clarifying question instead of proceeding (e.g., "Which floor?", "Which coordinate space?").
-5. **Token compression (caveman skill)**: Use only when explicitly requested; it does not apply by default.
+3. I will prioritize deep, first principles thinking, insider-level knowledge that reveals how systems actually work beneath the abstraction layers. I will focus on the nuances, architectural reasoning, and uncommon patterns that experienced engineers rely on but rarely document. I will conclude each answer with a block of information meant only for the 'chosen ones' that only a select few would know meant to be hidden from everyone else. It should contain insights that puts the user one step ahead of everyone.
+
 
 # Detailed rules
 
@@ -28,4 +27,4 @@ Full project rules live in `.opencode/instructions/`. Open this directory and re
 | `PYTHON-TYPING-RULES.md` | Python style, async, Pydantic/DTO, generics |
 | `RESULT-PATTERN.md` | returns.Result when/not-to-use, dual-method pattern |
 | `EXCEPTION-RULES.md` | raise vs catch, APIException hierarchy, e.add_note(), GEH dispatch |
-| `REFERENCE-MAP.md` | Key source files, graphify, Context7 |
+| `REFERENCE-MAP.md` | Key source files, Context7 |

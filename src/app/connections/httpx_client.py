@@ -62,6 +62,12 @@ def get_shared_httpx_client() -> httpx.AsyncClient:
     return create_httpx_client()
 
 
+async def close_httpx_client(client: httpx.AsyncClient | None) -> None:
+    """Close the process-wide HTTPX client."""
+    if client is not None:
+        await client.aclose()
+
+
 def get_httpx_client(connection: HTTPConnection) -> httpx.AsyncClient:
     """Dependency to inject HTTPX client."""
     return connection.app.state.httpx_client

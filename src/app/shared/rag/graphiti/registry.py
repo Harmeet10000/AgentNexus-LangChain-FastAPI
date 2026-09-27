@@ -1,9 +1,8 @@
 """
 AgentToolBundle: all LangChain tools assembled once at graph-build time.
 
-build_tool_bundle() is called wherever the Saul graph is wired (see
-lifespan.py — currently commented out pending the graph wiring; task 11.4
-retargets it when group 11 lands). The bundle is passed into
+build_tool_bundle() is called by the Agent Saul provider registered in the
+application lifespan. The bundle is passed into
 build_agent_registry() in factory.py so agents get their tools at compile
 time — never at node execution time. The old class name collided with the
 unrelated tool-registry in agents/tools/base.py and is retired.
@@ -16,7 +15,7 @@ Lifespan wiring (in src/app/lifecycle/lifespan.py):
         redis=app.state.redis,
         db_engine=app.state.db_engine,
     )
-    tool_registry = build_tool_registry(
+    tool_registry = build_tool_bundle(
         graphiti_service=app.state.graphiti,
         db_engine=app.state.db_engine,
         idempotency=idempotency_guard,
@@ -26,7 +25,7 @@ Lifespan wiring (in src/app/lifecycle/lifespan.py):
 
     # Pass to graph factory:
     app.state.saul_graph = build_saul_graph(
-        checkpointer=app.state.saul_checkpointer,
+        checkpointer=app.state.langgraph_checkpointer,
         pro_llm=pro_llm,
         flash_llm=flash_llm,
         memory_service=app.state.agent_memory_service,

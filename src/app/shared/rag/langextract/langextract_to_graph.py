@@ -4,18 +4,21 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
+from returns.result import Failure, Success
 
-from app.utils import ValidationException
+from app.shared.rag.errors import RagValidationError
 
 if TYPE_CHECKING:
     import langextract as lx
+
+    from app.shared.rag.errors import RagResult
 
 
 @runtime_checkable
 class Neo4jClient(Protocol):
     """Minimal protocol for Neo4j operations."""
 
-    async def merge_node(self, label: str, props: dict) -> None: ...
+    async def merge_node(self, label: str, props: dict[str, object]) -> None: ...
 
 
 class GraphIngestionContext(BaseModel):
@@ -36,11 +39,20 @@ class GraphIngestionContext(BaseModel):
 async def ingest_extractions_to_graph(
     annotated_docs: list[lx.data.AnnotatedDocument],
     ctx: GraphIngestionContext,
-) -> int:
+) -> RagResult[int]:
     """Convert grounded LangExtract output → property graph nodes/rels."""
     if ctx.neo4j_client is None:
         msg = "GraphIngestionContext.neo4j_client is required"
-        raise ValidationException(msg)
+        return Failure(
+            RagValidationError(
+                message=msg,
+                source="langextract_to_graph",
+                details={
+                    "document_id": ctx.document_id,
+                    "operation": "ingest_extractions_to_graph",
+                },
+            )
+        )
     ingested = 0
 
     for doc in annotated_docs:
@@ -69,7 +81,7 @@ async def ingest_extractions_to_graph(
 
             ingested += 1
 
-    return ingested
+    return Success(ingested)
 
 
 #     Best Practice Prompt Strategy for Graphs:

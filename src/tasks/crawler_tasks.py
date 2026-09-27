@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import TYPE_CHECKING
 
 from celery.signals import worker_process_init, worker_process_shutdown
+from crawl4ai import AsyncWebCrawler  # noqa: TC002 — resolved at runtime by Pydantic
+from pydantic import BaseModel, ConfigDict
 from returns.result import Failure
 
 from app.config import get_settings
@@ -18,13 +21,11 @@ from app.features.crawler.job_store import CrawlJobStore
 from app.features.crawler.service import CrawlerService
 from app.shared.crawler import WebCrawler
 from app.shared.crawler.processor import get_processor
-from app.utils import logger
+from app.utils import ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine, Sequence
     from typing import Any
-
-    from crawl4ai import AsyncWebCrawler
 
 
 class CrawlerJobPayload(CeleryTaskPayload):
@@ -37,64 +38,114 @@ class CrawlerJobPayload(CeleryTaskPayload):
 CeleryTaskRegistry.register(CRAWLER_CRAWL, CrawlerJobPayload)
 
 
-_WORKER_LOOP: asyncio.AbstractEventLoop | None = None
-_WORKER_BROWSER: AsyncWebCrawler | None = None
+class CrawlerWorkerResources(BaseModel):
+    """Browser bound to one worker child and its persistent event loop."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    browser: AsyncWebCrawler
 
 
-def _get_worker_loop() -> asyncio.AbstractEventLoop:
-    """Return the persistent event loop for this worker process.
+_WORKER_RUNNER: asyncio.Runner | None = None
+_WORKER_RESOURCES: CrawlerWorkerResources | None = None
 
-    Playwright browsers are bound to the loop that created them, so every
-    task in the same prefork process must share one loop. ``asyncio.run()``
-    per task would create a fresh loop and prevent browser reuse.
+
+def _worker_consumes_queue(queue_name: str, argv: Sequence[str] | None = None) -> bool:
+    """Return whether this worker command consumes ``queue_name``.
+
+    Celery does not pass the consumer object to ``worker_process_init``. Pool
+    children do retain the worker command line, so an explicit ``-Q``/``--queues``
+    is the narrow source of truth. A command without a queue flag consumes the
+    app's configured queues and must therefore provision conservatively.
     """
-    global _WORKER_LOOP  # noqa: PLW0603
-    if _WORKER_LOOP is None or _WORKER_LOOP.is_closed():
-        _WORKER_LOOP = asyncio.new_event_loop()
-        asyncio.set_event_loop(_WORKER_LOOP)
-    return _WORKER_LOOP
+    arguments = list(argv if argv is not None else sys.argv)
+    configured: list[str] = []
+    for index, argument in enumerate(arguments):
+        if argument in {"-Q", "--queues"} and index + 1 < len(arguments):
+            configured.extend(arguments[index + 1].split(","))
+        elif argument.startswith("--queues="):
+            configured.extend(argument.partition("=")[2].split(","))
+        elif argument.startswith("-Q") and len(argument) > 2:
+            configured.extend(argument[2:].split(","))
+    if not configured:
+        return True
+    return queue_name in {name.strip() for name in configured if name.strip()}
 
 
-async def _get_shared_browser() -> AsyncWebCrawler:
-    """Return the per-worker browser, creating it lazily on first use."""
-    global _WORKER_BROWSER  # noqa: PLW0603
-    if _WORKER_BROWSER is None:
-        _WORKER_BROWSER = await create_crawl4ai_crawler()
-    return _WORKER_BROWSER
-
-
-def _run_on_worker_loop(
-    coro: Coroutine[Any, Any, None],
-) -> None:
-    _get_worker_loop().run_until_complete(coro)
+async def _provision_crawler_worker() -> CrawlerWorkerResources:
+    """Create the per-worker browser on the loop that will execute tasks."""
+    return CrawlerWorkerResources(browser=await create_crawl4ai_crawler())
 
 
 @worker_process_init.connect
-def _reset_crawler_worker_state(**_kwargs: object) -> None:
-    """Drop fork-inherited loop/browser handles in each child process."""
-    global _WORKER_LOOP, _WORKER_BROWSER  # noqa: PLW0603
-    _WORKER_LOOP = None
-    _WORKER_BROWSER = None
+def initialize_crawler_worker(**_kwargs: object) -> None:
+    """Provision once in each forked child, never in the Celery parent."""
+    global _WORKER_RESOURCES, _WORKER_RUNNER  # noqa: PLW0603
+    _WORKER_RESOURCES = None
+    crawler_queue = getattr(get_settings(), "CELERY_CRAWLER_QUEUE", "crawler")
+    if not _worker_consumes_queue(crawler_queue):
+        logger.bind(queue=crawler_queue).info(
+            "Crawler worker resources skipped for unrelated worker"
+        )
+        return
+    _WORKER_RUNNER = asyncio.Runner()
+    try:
+        _WORKER_RESOURCES = _WORKER_RUNNER.run(_provision_crawler_worker())
+    except Exception as exc:  # noqa: BLE001 — failed optional capability degrades the worker
+        exc.add_note("capability=crawler_browser, operation=provision")
+        logger.bind(error_type=type(exc).__name__).exception("Crawler worker provisioning failed")
+        _WORKER_RUNNER.close()
+        _WORKER_RUNNER = None
+    else:
+        logger.info("Crawler worker resources initialized")
+
+
+def get_crawler_worker_resources() -> CrawlerWorkerResources:
+    """Return provisioned resources or a typed, capability-naming failure."""
+    if _WORKER_RESOURCES is None:
+        raise ServiceUnavailableException(
+            detail="Crawler worker is unavailable",
+            data={"capability": "crawler_browser"},
+        )
+    return _WORKER_RESOURCES
+
+
+def run_on_crawler_worker_loop[T](
+    coroutine_factory: Callable[[], Coroutine[Any, Any, T]],
+) -> T:
+    """Run task I/O on the same loop that created the process resources."""
+    if _WORKER_RUNNER is None:
+        get_crawler_worker_resources()
+        message = "Worker resource guard returned without a runner"
+        raise AssertionError(message)
+    return _WORKER_RUNNER.run(coroutine_factory())
 
 
 @worker_process_shutdown.connect
-def _close_crawler_worker_state(**_kwargs: object) -> None:
-    """Close the per-worker browser and loop during worker shutdown."""
-    global _WORKER_LOOP, _WORKER_BROWSER  # noqa: PLW0603
+def shutdown_crawler_worker(**_kwargs: object) -> None:
+    """Release the browser once and close the persistent loop."""
+    global _WORKER_RESOURCES, _WORKER_RUNNER  # noqa: PLW0603
+    resources = _WORKER_RESOURCES
+    runner = _WORKER_RUNNER
+    _WORKER_RESOURCES = None
+    _WORKER_RUNNER = None
+    if resources is None:
+        logger.info("Crawler worker had no resources to close")
+        if runner is not None:
+            runner.close()
+        return
     try:
-        if (
-            _WORKER_BROWSER is not None
-            and _WORKER_LOOP is not None
-            and not _WORKER_LOOP.is_closed()
-        ):
-            _WORKER_LOOP.run_until_complete(close_crawl4ai_crawler(_WORKER_BROWSER))
-    except (OSError, RuntimeError):
+        if runner is None:
+            logger.error("Crawler worker loop absent during resource shutdown")
+            return
+        runner.run(close_crawl4ai_crawler(resources.browser))
+        logger.info("Crawler worker resources closed")
+    except (OSError, RuntimeError) as exc:
+        exc.add_note("operation=shutdown_crawler_worker")
         logger.exception("Could not close per-worker crawler browser")
     finally:
-        _WORKER_BROWSER = None
-        if _WORKER_LOOP is not None and not _WORKER_LOOP.is_closed():
-            _WORKER_LOOP.close()
-        _WORKER_LOOP = None
+        if runner is not None:
+            runner.close()
 
 
 async def _run_crawl_job(crawl_id: str, request_payload: dict[str, object]) -> None:
@@ -107,7 +158,7 @@ async def _run_crawl_job(crawl_id: str, request_payload: dict[str, object]) -> N
             return
         await store.mark_running(crawl_id)
         request = CrawlRequest.model_validate(request_payload)
-        browser = await _get_shared_browser()
+        browser = get_crawler_worker_resources().browser
         processor = await get_processor()
         crawler = WebCrawler(redis_client=redis, browser=browser)
         service = CrawlerService(crawler=crawler, processor=processor, redis_client=redis)
@@ -120,6 +171,7 @@ async def _run_crawl_job(crawl_id: str, request_payload: dict[str, object]) -> N
             return
         await store.save_result(crawl_id, result.unwrap())
     except Exception as exc:
+        exc.add_note(f"crawl_id={crawl_id}, operation=crawl_job")
         logger.bind(crawl_id=crawl_id).exception("Durable crawler job failed")
         try:
             await store.mark_failed(crawl_id, str(exc))
@@ -133,14 +185,12 @@ async def _run_crawl_job(crawl_id: str, request_payload: dict[str, object]) -> N
         await redis.aclose(close_connection_pool=True)
 
 
-@celery_app.task(name=CRAWLER_CRAWL, bind=True, base=ResilientTask)
+@celery_app.task(name=CRAWLER_CRAWL, base=ResilientTask)
 def crawl_job(
-    self: ResilientTask,
     *,
     crawl_id: str,
     request_payload: dict[str, object],
 ) -> dict[str, str]:
     """Execute one durable crawl in a worker-owned browser lifecycle."""
-    _ = self
-    _run_on_worker_loop(_run_crawl_job(crawl_id, request_payload))
+    run_on_crawler_worker_loop(lambda: _run_crawl_job(crawl_id, request_payload))
     return {"crawl_id": crawl_id, "status": "finished"}

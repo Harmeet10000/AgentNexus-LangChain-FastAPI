@@ -253,7 +253,7 @@ caught by name:
 | `CircuitBreakerOpenError` | `RuntimeError` | `connections/celery_reliability.py:69` | 2 | **none** |
 | `IdempotencyLockError` | `RuntimeError` | `connections/celery_reliability.py:436` | 1 | **none** |
 | `AgentMemoryError` (+3 subclasses) | `RuntimeError` | `shared/langchain_layer/agents/memory/agent_memory_service.py:32` | 2 | **none** |
-| `CogneeSetupError` (+1 subclass) | `RuntimeError` | `shared/langchain_layer/agents/memory/cognee_client.py:54` | 2 | **none** |
+| `CogneeSetupError` (+1 subclass) | `RuntimeError` | `connections/cognee.py` | 2 | **none** |
 | `StateSchemaVersionError` | `ValueError` | `shared/langgraph_layer/agent_saul/state.py:356` | 1 | **none** |
 
 `TransientExternalError` is the pattern to copy: declared at the retry boundary,

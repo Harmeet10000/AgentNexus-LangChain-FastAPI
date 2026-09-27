@@ -14,13 +14,13 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr
 
-from app.shared.langchain_layer.agents.memory.cognee_client import (
+from app.connections.cognee import (
     _ACCESS_CONTROL_ENV_KEY,
     CogneeDimensionMismatchError,
+    CogneeSetupConfig,
     CogneeSetupError,
     setup_cognee,
 )
-from app.shared.langchain_layer.agents.memory.setup_types import CogneeSetupConfig
 
 if TYPE_CHECKING:
     from typing import Any
@@ -61,10 +61,10 @@ def real_database_fields(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     Without this the real accessor reads the environment's managed-instance URL,
     which no fake settings object can agree with.
     """
-    import app.shared.langchain_layer.agents.memory.cognee_client as client
+    import app.connections.cognee as client
 
-    # cognee_client imports get_database_fields as _database_fields (private alias)
-    # after the setup_types extraction — patch the actual attribute it uses.
+    # cognee imports get_database_fields as _database_fields (private alias) —
+    # patch the actual attribute it uses.
     target = "_database_fields" if hasattr(client, "_database_fields") else "get_database_fields"
     monkeypatch.setattr(client, target, lambda: _REAL_FIELDS)
     return _REAL_FIELDS
@@ -95,7 +95,7 @@ def fake_cognee(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, An
         def set_vector_db_config(self, config_dict: dict[str, Any]) -> None:
             self._record("vector", config_dict)
 
-    import app.shared.langchain_layer.agents.memory.cognee_client as client
+    import app.connections.cognee as client
 
     monkeypatch.setattr(client, "cognee", type("_FakeCogneeModule", (), {"config": _FakeConfig()}))
     return calls
@@ -130,7 +130,7 @@ async def test_divergent_postgres_host_is_a_named_configuration_error(
 async def test_placeholder_connection_fields_are_refused(
     fake_cognee: list[tuple[str, dict[str, Any]]],
 ) -> None:
-    import app.shared.langchain_layer.agents.memory.cognee_client as client
+    import app.connections.cognee as client
 
     target = "_database_fields" if hasattr(client, "_database_fields") else "get_database_fields"
     setattr(

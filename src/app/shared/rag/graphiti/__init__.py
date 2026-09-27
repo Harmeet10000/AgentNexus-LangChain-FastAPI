@@ -37,6 +37,7 @@ Usage:
 """
 
 from .client import (
+    BoundGraphitiService,
     close_graphiti,
     get_obligation_chain,
     search_for_precedent_chains,
@@ -48,6 +49,7 @@ from .client import (
 )
 
 __all__ = [
+    "BoundGraphitiService",
     "close_graphiti",
     "get_obligation_chain",
     "search_for_precedent_chains",

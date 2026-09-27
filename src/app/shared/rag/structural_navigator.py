@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import cast
+
+from pydantic import BaseModel, ConfigDict
 
 type NodePath = tuple[str, ...]
 
@@ -14,8 +15,9 @@ _HEADING_LABELS = frozenset({"section_header", "title"})
 _STRUCTURAL_LABELS = frozenset({"chapter", "section", "subsection"})
 
 
-@dataclass(frozen=True, slots=True)
-class _Candidate:
+class _Candidate(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
     score: int
     order: int
     path: NodePath

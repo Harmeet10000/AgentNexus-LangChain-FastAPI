@@ -4,35 +4,41 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any  # noqa: TC003 — Any resolved at runtime by Pydantic
 
 from celery.signals import worker_process_init, worker_process_shutdown
+from graphiti_core import Graphiti  # noqa: TC002 — resolved at runtime by Pydantic
+from langgraph.graph.state import CompiledStateGraph
+from pydantic import BaseModel, ConfigDict
+from redis.asyncio import Redis  # noqa: TC002 — resolved at runtime by Pydantic
+from sqlalchemy.ext.asyncio import (  # noqa: TC002 — resolved at runtime by Pydantic
+    AsyncEngine,
+    async_sessionmaker,
+)
 
 from app.config import get_settings
 from app.connections import init_db
+from app.connections.graphiti import (
+    close_graphiti,
+    setup_graphiti,
+    setup_graphiti_indices,
+)
 from app.connections.redis import create_redis_client
 from app.features.documents.service import process_document_ingestion
 from app.lifecycle.graphs import graphiti_service, provide_document_ingestion_graph
 from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
-from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
 from app.shared.rag.langextract.service import AsyncExtractionService
 from app.shared.services.storage import StorageService
 from app.utils import ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Sequence
-    from typing import Any
-
-    from graphiti_core import Graphiti
-    from langgraph.graph.state import CompiledStateGraph
-    from redis.asyncio import Redis
-    from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 
-@dataclass(frozen=True)
-class DocumentWorkerResources:
+class DocumentWorkerResources(BaseModel):
     """Resources bound to one worker child and its persistent event loop."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     engine: AsyncEngine
     session_local: async_sessionmaker[Any]

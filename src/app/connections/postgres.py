@@ -218,12 +218,19 @@ async def init_db() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
 
     try:
         await _verify_postgres_connection(engine)
-    except Exception as e:
-        logger.bind(error=str(e)).exception("PostgreSQL initialization failed")
+    except Exception as exc:
+        exc.add_note("operation=init_postgres_engine")
+        logger.bind(error=str(exc)).exception("PostgreSQL initialization failed")
         await engine.dispose()
         raise
 
     return engine, session_local
+
+
+async def close_db_engine(engine: AsyncEngine | None) -> None:
+    """Dispose the process-wide SQLAlchemy engine and its pool."""
+    if engine is not None:
+        await engine.dispose()
 
 
 async def _verify_postgres_connection(engine: AsyncEngine) -> None:
@@ -248,7 +255,8 @@ async def independent_session(
         try:
             yield session
             await session.commit()
-        except Exception:
+        except Exception as exc:
+            exc.add_note("operation=independent_session_rollback")
             await session.rollback()
             raise
 
@@ -260,7 +268,8 @@ async def get_postgres_db(connection: HTTPConnection) -> AsyncGenerator[AsyncSes
         try:
             yield session  # noqa: ASYNC119
             await session.commit()
-        except Exception:
+        except Exception as exc:
+            exc.add_note("operation=get_postgres_db_rollback")
             await session.rollback()
             raise
         finally:

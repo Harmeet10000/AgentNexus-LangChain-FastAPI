@@ -29,6 +29,7 @@ async def check_postgres(app: FastAPI) -> DependencyHealth:
         latency = (time.perf_counter() - start) * 1000
         return DependencyHealth.ok("postgres", latency)
     except (OSError, TimeoutError, SQLAlchemyError) as exc:
+        exc.add_note("dependency=postgres, operation=deep_probe")
         latency = (time.perf_counter() - start) * 1000
         logger.bind(dependency="postgres", error=str(exc)).exception("Health check failed")
         return DependencyHealth.fail("postgres", str(exc), latency)
@@ -44,6 +45,7 @@ async def check_redis(app: FastAPI) -> DependencyHealth:
         latency = (time.perf_counter() - start) * 1000
         return DependencyHealth.ok("redis", latency)
     except (OSError, TimeoutError) as exc:
+        exc.add_note("dependency=redis, operation=deep_probe")
         latency = (time.perf_counter() - start) * 1000
         logger.bind(dependency="redis", error=str(exc)).exception("Health check failed")
         return DependencyHealth.fail("redis", str(exc), latency)
@@ -59,6 +61,7 @@ async def check_mongodb(app: FastAPI) -> DependencyHealth:
         latency = (time.perf_counter() - start) * 1000
         return DependencyHealth.ok("mongodb", latency)
     except (OSError, TimeoutError) as exc:
+        exc.add_note("dependency=mongodb, operation=deep_probe")
         latency = (time.perf_counter() - start) * 1000
         logger.bind(dependency="mongodb", error=str(exc)).exception("Health check failed")
         return DependencyHealth.fail("mongodb", str(exc), latency)
@@ -76,6 +79,7 @@ async def check_neo4j(app: FastAPI) -> DependencyHealth:
         latency = (time.perf_counter() - start) * 1000
         return DependencyHealth.ok("neo4j", latency)
     except (OSError, TimeoutError) as exc:
+        exc.add_note("dependency=neo4j, operation=deep_probe")
         latency = (time.perf_counter() - start) * 1000
         logger.bind(dependency="neo4j", error=str(exc)).exception("Health check failed")
         return DependencyHealth.fail("neo4j", str(exc), latency)
@@ -111,6 +115,7 @@ async def check_neo4j_plugins(app: FastAPI) -> DependencyHealth:
                 apoc = await _procedure_count(session, "apoc.")
                 gds = await _procedure_count(session, "gds.")
     except (OSError, TimeoutError) as exc:
+        exc.add_note("dependency=neo4j-plugins, operation=deep_probe")
         latency = (time.perf_counter() - start) * 1000
         logger.bind(dependency="neo4j-plugins", error=str(exc)).exception("Health check failed")
         return DependencyHealth.fail("neo4j-plugins", str(exc), latency)
@@ -155,6 +160,7 @@ async def check_cognee(app: FastAPI) -> DependencyHealth:
         async with asyncio.timeout(_HEALTH_TIMEOUT_S):
             await driver.verify_connectivity()
     except (OSError, TimeoutError) as exc:
+        exc.add_note("dependency=cognee, operation=deep_probe")
         latency = (time.perf_counter() - start) * 1000
         logger.bind(dependency="cognee", error=str(exc)).exception("Health check failed")
         return DependencyHealth.fail("cognee", str(exc), latency)

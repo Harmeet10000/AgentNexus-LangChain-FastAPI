@@ -32,10 +32,8 @@ from app.connections.celery_task_names import (
 from app.shared.services.mailer import config_from_settings, send_template
 from app.utils import ExternalServiceException, logger
 
-settings = get_settings()
 
-
-def _send_verification_email(email: str, token: str) -> dict[str, str]:
+def _send_verification_email(settings, email: str, token: str) -> dict[str, str]:
     url = f"{settings.FRONTEND_URL}/verify-email?token={token}"
     result = send_template(
         config_from_settings(settings),
@@ -52,7 +50,7 @@ def _send_verification_email(email: str, token: str) -> dict[str, str]:
     return {"status": "sent", "email": email}
 
 
-def _send_password_reset_email(email: str, token: str) -> dict[str, str]:
+def _send_password_reset_email(settings, email: str, token: str) -> dict[str, str]:
     url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
     result = send_template(
         config_from_settings(settings),
@@ -110,6 +108,7 @@ def send_verification_email(
     VerificationEmailPayload(
         user_id=user_id, email=email, token=token, idempotency_key=idempotency_key
     )
+    settings = get_settings()
 
     if not self.acquire_idempotency_lock(
         idempotency_key,
@@ -120,7 +119,7 @@ def send_verification_email(
     try:
         result = self.run_with_circuit_breaker(
             "email-provider",
-            partial(_send_verification_email, email=email, token=token),
+            partial(_send_verification_email, settings, email=email, token=token),
         )
         self.mark_idempotency_completed(idempotency_key, metadata={"user_id": user_id})
     except CircuitBreakerOpenError as exc:
@@ -135,13 +134,17 @@ def send_verification_email(
         exc.add_note("task=send_verification_email")
         logger.bind(user_id=user_id, error=str(exc)).warning("email_delivery_duplicate")
         return {"status": "duplicate-skipped", "user_id": user_id}
-    except ValueError:
+    except ValueError as exc:
+        exc.add_note("task=send_verification_email, stage=payload_validation")
+        logger.bind(user_id=user_id, error=str(exc)).warning("email_delivery_invalid")
         self.mark_idempotency_failed_permanently(
             idempotency_key,
             metadata={"user_id": user_id},
         )
         raise
-    except Exception:
+    except Exception as exc:
+        exc.add_note("task=send_verification_email")
+        logger.bind(user_id=user_id, error=str(exc)).warning("email_delivery_failed")
         self.release_idempotency_processing_lock(idempotency_key)
         raise
     else:
@@ -165,6 +168,7 @@ def send_password_reset_email(
     PasswordResetEmailPayload(
         user_id=user_id, email=email, token=token, idempotency_key=idempotency_key
     )
+    settings = get_settings()
 
     if not self.acquire_idempotency_lock(
         idempotency_key,
@@ -175,7 +179,7 @@ def send_password_reset_email(
     try:
         result = self.run_with_circuit_breaker(
             "email-provider",
-            partial(_send_password_reset_email, email=email, token=token),
+            partial(_send_password_reset_email, settings, email=email, token=token),
         )
         self.mark_idempotency_completed(idempotency_key, metadata={"user_id": user_id})
     except CircuitBreakerOpenError as exc:
@@ -190,13 +194,17 @@ def send_password_reset_email(
         exc.add_note("task=send_password_reset_email")
         logger.bind(user_id=user_id, error=str(exc)).warning("email_delivery_duplicate")
         return {"status": "duplicate-skipped", "user_id": user_id}
-    except ValueError:
+    except ValueError as exc:
+        exc.add_note("task=send_password_reset_email, stage=payload_validation")
+        logger.bind(user_id=user_id, error=str(exc)).warning("email_delivery_invalid")
         self.mark_idempotency_failed_permanently(
             idempotency_key,
             metadata={"user_id": user_id},
         )
         raise
-    except Exception:
+    except Exception as exc:
+        exc.add_note("task=send_password_reset_email")
+        logger.bind(user_id=user_id, error=str(exc)).warning("email_delivery_failed")
         self.release_idempotency_processing_lock(idempotency_key)
         raise
     else:

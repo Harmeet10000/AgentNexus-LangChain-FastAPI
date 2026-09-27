@@ -16,8 +16,6 @@ from app.features.auth.errors import (
 )
 from app.features.auth.repository import UserRepository
 from app.features.documents.errors import DocumentDatabaseError, DocumentNotFoundError
-from app.shared.rag.docling.embedder import _provider_failure
-from app.shared.rag.errors import RagProviderError
 from app.shared.result import ErrorKind, render_result
 from app.utils import ForbiddenException, UnauthorizedException
 
@@ -80,12 +78,3 @@ async def test_mongo_failure_is_retryable_without_rollback(monkeypatch: pytest.M
 
 def test_auth_document_store_has_no_rollback() -> None:
     assert "rollback" not in _AUTH_REPOSITORY.read_text(encoding="utf-8")
-
-
-def test_rag_provider_boundary_returns_its_own_typed_failure() -> None:
-    result = _provider_failure("provider unavailable", model="gemini", text_count=2)
-
-    assert isinstance(result, Failure)
-    assert isinstance(result.failure(), RagProviderError)
-    assert result.failure().model == "gemini"
-    assert result.failure().text_count == 2

@@ -30,7 +30,7 @@ def _load_env(monkeypatch: pytest.MonkeyPatch) -> Any:
     The previous ``spec_from_file_location(...).exec_module`` approach executed
     the whole file, which imports every ``app.features.*`` model to register
     ``Base.metadata``. After the memory stack gained edges through
-    ``app.shared.langchain_layer.agents.memory.cognee_client`` and
+    ``app.connections.cognee`` and
     ``app.features.health``, that full exec triggers an import cycle that
     surfaces as ``AttributeError`` during fixture setup. Extracting the two
     symbols by AST keeps the fixture independent of the application import
@@ -85,26 +85,34 @@ def test_a_memory_schema_object_is_excluded(env: Any) -> None:
 
 
 def test_an_application_table_passes_through(env: Any) -> None:
-    # Synthetic app table (no schema → public/default) must pass the filter.
+    # A reflected table with a metadata counterpart is application-owned.
     # The previous version asserted ``Base.metadata.tables`` was populated by
     # env.py's side-effect imports, which no longer holds under isolated AST
     # loading — and that coupling is what created the cycle in the first place.
     app_table = Table("app_table", MetaData(), Column("id", Integer))
-    assert env.include_object(app_table, "app_table", "table", True, None) is True
+    metadata_table = Table("app_table", MetaData(), Column("id", Integer))
+    assert env.include_object(app_table, "app_table", "table", True, metadata_table) is True
     # Keep soft compatibility: if Base happens to be populated, verify it too.
     with suppress(Exception):
         from database import Base
 
         if Base.metadata.tables:
             name, table = next(iter(Base.metadata.tables.items()))
-            assert env.include_object(table, name, "table", True, None) is True
+            assert env.include_object(table, name, "table", True, table) is True
 
 
-def test_a_table_with_no_schema_attribute_is_kept(env: Any) -> None:
+def test_an_unknown_reflected_public_table_is_excluded(env: Any) -> None:
     class _Bare:
         pass
 
-    assert env.include_object(_Bare(), "anything", "table", True, None) is True
+    assert env.include_object(_Bare(), "anything", "table", True, None) is False
+
+
+def test_a_new_metadata_table_is_kept(env: Any) -> None:
+    class _Bare:
+        pass
+
+    assert env.include_object(_Bare(), "anything", "table", False, None) is True
 
 
 def test_the_filter_is_wired_into_both_configure_calls() -> None:

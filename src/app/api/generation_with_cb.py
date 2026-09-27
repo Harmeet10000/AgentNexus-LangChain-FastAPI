@@ -33,6 +33,7 @@ async def generate_text(
         except httpx.HTTPError as e:
             # Only named provider failures count as a downstream outage and
             # are recorded by the circuit breaker.
+            e.add_note("operation=generate_text, service=openai_api")
             msg = "External API call failed"
             raise ServiceUnavailableException(msg) from e
 

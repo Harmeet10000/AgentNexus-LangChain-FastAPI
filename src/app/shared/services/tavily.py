@@ -171,19 +171,35 @@ async def search(
         response = await http_client.post(request_url, json=payload)
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
+        exc.add_note(f"operation=tavily_search, query={query}")
         log.bind(status_code=exc.response.status_code).warning("Tavily returned an error response")
         return Failure(
             TavilyExternalError(
                 message=f"Tavily returned HTTP {exc.response.status_code}",
-                details={"status_code": exc.response.status_code},
+                details={
+                    "status_code": exc.response.status_code,
+                    "notes": list(getattr(exc, "__notes__", [])),
+                },
             )
         )
-    except httpx.TimeoutException:
+    except httpx.TimeoutException as exc:
+        exc.add_note(f"operation=tavily_search, query={query}")
         log.warning("Tavily request timed out")
-        return Failure(TavilyExternalError(message="Tavily request timed out"))
+        return Failure(
+            TavilyExternalError(
+                message="Tavily request timed out",
+                details={"notes": list(getattr(exc, "__notes__", []))},
+            )
+        )
     except httpx.HTTPError as exc:
+        exc.add_note(f"operation=tavily_search, query={query}")
         log.bind(error=str(exc)).warning("Tavily request failed")
-        return Failure(TavilyExternalError(message="Tavily network request failed"))
+        return Failure(
+            TavilyExternalError(
+                message="Tavily network request failed",
+                details={"notes": list(getattr(exc, "__notes__", []))},
+            )
+        )
 
     try:
         data = response.json()

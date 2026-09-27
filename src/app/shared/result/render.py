@@ -77,6 +77,8 @@ class HealthStatus(StrEnum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
+    WARNING = "warning"
+    UNKNOWN = "unknown"
 
 
 class DependencyHealth(BaseModel):

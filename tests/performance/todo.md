@@ -1,9 +1,9 @@
 # To-Do List
 
-```py
-3. set up integration guide for FastMCP             Delayed
+```py 
+3. set up integration guide for FastMCP             Delayed 
 8. make a Copilot instructions improved final based on todo.md   DONE
-5. figure out extra in logger/loguru   DONE
+5. figure out extra in logger/loguru   DONE 
 2. figure out docker compose as it appears to be not working   DONE
 9. re write server-middleware @app.middleware('http') and check with claude   - DONE
 11. checkout why Swagger Docs not working  - DONE
@@ -283,9 +283,11 @@ Do you want me to:
 44. correct the code for crawler and the packages used and the chunking strategy used here  DONE
 227. agentState should be typedDict and not a baseModel  DONE
 159. discover RAGFlow, OpenRAG if or if not to use it  DONE
+196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node   DONE
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses can be used to make the lynk linter     DELAYED    
+236. make new cognee skills for documentation  DELAYED
 156. check the page https://docs.langchain.com/langsmith/deployments#
 153. set up performance tests  DELAYED
 157. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform    DELAYED
@@ -298,13 +300,12 @@ Do you want me to:
 161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
 type Composable = Callable[[Any], Any]
 def compose(*functions: Composable) -> Composable:
-    def apply(value: Any, fn: Composable) -> Any:add headroom-ai for comrpression
+    def apply(value: Any, fn: Composable) -> Any
         return fn(value)
 
     return lambda data: reduce(apply, functions, data)
 
 64. No eval framework. Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
-116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
 
@@ -317,8 +318,25 @@ Why the Rule Helps: Explain how the specific instruction prevents that failure f
 The Outcome: Provide evidence of the rule's success (e.g., "no orphan rows in 11 months").
 Additionally, the host personally recommends adding a commit reference to these comments to help future developers trace the history of the decision (3:45-3:49). The host warns that vague comments like "added to fix an issue" are ineffective and perform no better than having no comments at all 
 Relay skill need to have a plan when to delete/let go of old files maybe after archiving a specs(reference relay docuements in openspec spec gated scehmas)
+https://alistairmavin.com/ears/  https://en.wikipedia.org/wiki/Easy_Approach_to_Requirements_Syntax  
 228. disable memory in claude code, opencode and remove the unnecesary skills from computer
-230. need to have a standard for marking the task done in openspec spec gated with a DONE sections that is detailed and summary of how it is done
+246. add hookify, Claude Code Setup Plugin, Claude Security Plugin, security-guidance and also check lugins for opencode and pi and also p-stack skill, https://github.com/amosblomqvist/pi-config  
+244. learn data driven programing, how oceanofPDF actually works, how DDP can work with ROP, reactive and event driven, aspect orient programming,https://www.youtube.com/redirect?event=video_description&redir_token=QUZZTVljRUozXzVBcmNOenJQWExkZlBnTnEyN3xBTl9pYzRjSHlUb2VVaDhvTGhpRHF2Z0k3UWpyWkpDUmNGNmJyYjRaR1NIWDI1aXlMR3REQWFNS1hUOEhRS0dOdG9VVTd6aHZYWU9qbWJqaEdCRE5HbUN5NEpXbFV1LVF4elBQ&q=https%3A%2F%2Fgithub.com%2Fshadcn-ui%2Flint&v=tPQgw_DPIoM
+245. check if the OKF is better suited to be put inside a SQLite/turso instance or something like obsidian
+The *Karpathy* LLM wiki, often used as a personal "second brain," relies on interconnected **markdown files** (0:00-0:25). While this setup is simple and effective for individual use, it fails to scale for production applications due to several key limitations: 
+
+* **Lack of Access Control:** Markdown files lack the governance and security needed for multiple users accessing sensitive data (1:56-2:02). 
+* **Inefficient Retrieval:** As the volume of data grows, searching through a massive pile of text files becomes slow and unmanageable, unlike a structured database (2:17-2:28).
+* **High Costs:** Local agent setups often rely on personal SDK subscriptions, which are not suitable for high-traffic production environments (2:30-3:01). 
+* **Unstructured Data:** Without a database schema, it is difficult for agents to query and filter information efficiently (8:46-9:07). 
+ 
+### The Creator's Solution 
+To solve these problems, the creator shifted to a **production-grade database architecture** using *Redis Iris* as a context layer for AI agents (3:02-4:27). The solution consists of two primary components: 
+  
+1. **Context Retriever:** This acts as a wrapper over the database that provides **structure** and **schema definition** (8:53-11:00). It automatically generates *MCP* (Model Context Protocol) tools that allow the agent to filter, search, and access business data (like customer orders) through specific tool calls rather than reading entire documents (10:28-11:42). 
+2. **Agent Memory:** This system manages **short-term and long-term memory** using vector search (14:40-15:40). It includes a background process that automatically extracts "golden nuggets" of information from conversations and promotes them to long-term memory in *Redis*, ensuring the agent can recall user preferences across thousands of different sessions (15:00-16:55). 
+230. need to have a standard for marking the task done in openspec spec gated with a DONE sections that is detailed and summary of how it is done, with code references from project guidelines, order in which work will be done. 
+243. study RFC for documenting protocol specs as well as others
 
 151. add langchain-cisco-aidefense, compact-middleware, langchain-collapse
 
@@ -328,9 +346,7 @@ Relay skill need to have a plan when to delete/let go of old files maybe after a
 179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
 
 57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
-165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384     
-195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
-196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node 
+
 155. complete the ingestion pipeline to working condition and see where reconciliation comes init. i want to remove reconciliation and replace it with agent memory made with cognee entirely.
 todos:-
     1. toons reusable , point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
@@ -349,17 +365,23 @@ todos:-
 
 235. need to have all graph such as ingestion graph in the lifespan rather than in service
 221. fix the files tht are scrambled in utils,shared, combine celery, and other places
-240. document processing and crawler needs db instance injection
+240. document processing and crawler needs db instance injection and docling processong needs improvement as well. need to think of a suitable chunking strategy for legal docs, and everything that is considered best practice for docling
 163. refactor vectorStore code        TSVECTOR,
 164. refactor RAG code
 185. remove ts_vector(think if it is required here or other extension can do the job here) from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
 162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
+165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384     
+195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
 176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
 
-236. make new cognee skills for documentation
+116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
 234. learn about classVars, policy, strEnum, namedTuple, final, mapping, list, set, learn crawler/processor.py policy  and check if UUIDv7 is available in ORM
 240. remove build chat model from documents/ and review chunking strategy used here and in crawler and find out from where to add them 
-241. add post on dev.to
+241. add post on dev.to with a scheduled task
+242. fix agent tools
+
+247. One-line improvement: Add error.add_note(traceback.format_exc()) when wrapping errors to preserve full context for debugging
+248. should i use neo4j and postgres in cognee or let cognee use it own thing?
 ```
 summarise these chapters in great detail and depth and take video's transcript as reference for outputing verbatim
 
@@ -380,33 +402,6 @@ c hoose to build this thing? How has it benefited them? Are they still working o
 
 
 bit packing, texture atlasting, delta encoding, deduplication
-
-Google's Open Knowledge Format (OKF). She explains how this standardized structure allows AI agents to efficiently process her notes, research, and workflows to automate complex tasks.
-
-0:00 - 5:00: Introduction to OKF and Standardized Structure
-Marie introduces the concept of the OKF, which acts as a structured repository of information that any AI agent can interpret. She emphasizes that while the concept of organizing files in markdown for AI isn't new, Google's OKF provides a standardized framework that makes data interoperable. Key elements discussed include:
-
-YAML front matter: The mandatory metadata at the top of markdown files that tells an agent what the content represents (type, title, description, and tags).
-The Goal: Moving beyond simple RAG (Retrieval-Augmented Generation) to a structured knowledge graph where agents can logically navigate between concepts, playbooks, and references.
-The Structure: Her system uses specific types: Concepts, Playbooks, References, and Systems to categorize information effectively.
-5:00 - 10:00: OKF in Practice and AI Productivity
-In this segment, Marie demonstrates how her brain functions. Unlike traditional RAG, which might dump vast amounts of data into a context window, the OKF allows her agent to browse a directory to retrieve specific, relevant information.
-
-Playbooks: She highlights the power of "playbooks," which are sets of instructions that automate specific tasks, such as generating client proposals or analyzing Google search updates.
-Productivity: Marie argues that AI will not replace jobs but will instead augment human productivity. By offloading the need to remember every detail to her AI-managed brain, she becomes significantly more efficient in her professional SEO work.
-10:00 - 15:00: Knowledge Graphs and Ingesting Information
-Marie dives into the visual side of her brain, showing a "knowledge graph" where nodes represent interconnected markdown files.
-
-Documentation: She stores official Google SEO documentation as References within her system, allowing her to cite accurate sources instantly when generating reports.
-Visualizing connections: She explains how the agent identifies relationships between topics (e.g., AI overviews linking to historical SGE data).
-The Agent Workflow: She demonstrates the process of "ingesting" new information—such as a new Google search feature—into her OKF, where the agent proposes a plan to categorize and integrate the new data into existing topics.
-15:00 - 20:00: Approving Updates and Querying the Brain
-Marie provides a live demonstration of her agent’s workflow:
-
-Human-in-the-loop: Before the brain makes updates, it presents a plan for her to approve or modify.
-Automated Curation: The agent successfully updates multiple related files and creates new concepts based on the provided documentation.
-Querying: She demonstrates asking the brain to summarize complex information (like new AI controls in Search Console) into a format suitable for a client report. The system efficiently pulls data from the specific files it created, showcasing the speed and accuracy of the OKF approach.
-
 
 
 <!-- memory usage of FastAPI app -->
@@ -507,7 +502,7 @@ Querying: She demonstrates asking the brain to summarize complex information (li
     "confidence": 0.92
     }
 12. (future) JIT permission, IAM model might be implemented in future
-13.(after writing code) Memory Architecture (this matters)
+13. (after writing code) Memory Architecture (this matters)
 A. Persistent Memory (PostgreSQL)
 Contracts
 Versions
@@ -651,53 +646,9 @@ START: Do you need AI Gateway?
 
 
 
-the architectural design differences between Python properties and methods, emphasizing the contract these choices establish for your code.
-
-Key Takeaways:
-
-The Difference in Promise: A property communicates that an operation is cheap, safe to read repeatedly, and typically returns state (2:29 - 3:48). Conversely, a method implies that work is being done, potentially involving complexity, latency, or side effects (2:43 - 3:23).
-Derived State: Properties are ideal for computing simple values from existing object state (e.g., checking if an account is active), as they are deterministic and side-effect-free (3:48 - 6:14).
-Setters and Side Effects: While properties can have setters, they should generally avoid performing I/O or heavy operations. Persistence logic (like database saves) should be handled by explicit methods to keep code predictable and avoid blocking (8:58 - 10:29).
-Async Properties: While technically possible, making properties asynchronous is considered a design smell (13:13 - 14:31). It hides asynchronous waiting behind attribute access, which violates the expected simplicity of a property. Instead, use asynchronous methods for loading and saving data (14:31 - 16:10).
 
 
 
-This video provides a deep dive into designing a distributed cache capable of handling over a billion requests. It moves beyond basic theory to explain the architectural challenges of building a reliable, clustered caching fleet.
-
-Core Architectural Concepts
-The Routing Trap (2:03-3:06): Modular hashing (hashing a key modulo the number of servers) is a common failure point. When the cluster size changes, almost all keys map to new servers, causing a "thundering herd" of cache misses that can crash the database.
-Consistent Hashing & Virtual Nodes (3:06-5:43): By mapping keys and servers onto a circular hash ring, consistent hashing ensures that only a small portion of data is affected when nodes are added or removed. Virtual nodes are then used to smooth out statistical variance, ensuring load is distributed evenly across heterogeneous hardware.
-Freshness vs. Capacity (5:43-6:51): A critical distinction is made between TTL (Time-To-Live, which handles data freshness/staleness) and eviction policies (which handle capacity constraints when memory is full).
-Approximate LRU (6:51-8:23): Implementing strict Least Recently Used (LRU) algorithms in a distributed system is impractical due to locking overhead. Instead, production systems often use approximate LRU, where nodes randomly sample a small set of keys to decide which to evict, achieving near-optimal performance with minimal CPU cost.
-Handling Scale and Hot Keys
-The Hot Key Problem (8:23-9:57): Even with perfect distribution, a single "hot key" (e.g., a celebrity's profile picture) can overwhelm a single node's CPU. The solution is replication, where the key is suffixed with a random integer (e.g., key_1 through key_10), spreading the request volume across multiple nodes.
-Coherence and Invalidation (10:35-12:16): Replicating data introduces coherence issues. Rather than attempting complex distributed consensus, systems should use CDC-driven (Change Data Capture) invalidation. A background process reads database logs and sends invalidation events to the cache fleet via a message broker (e.g., Kafka).
-Cache Warming (12:16-13:46): Cold starts can act as a self-inflicted DDoS attack. It is essential to "warm" a cache—populating it with high-velocity data before directing live traffic to it—to prevent a miss-storm.
-Routing and Observability
-Smart Clients vs. Proxies (13:46-15:34): The video debates whether applications should handle routing directly (smart client) or use a dedicated routing layer (proxy like Envoy or Twemproxy). While smart clients save a network hop, proxies simplify management and topology synchronization at scale.
-Observability (15:34-16:53): Average metrics like a 95% hit rate can hide catastrophic localized failures. Engineers must monitor per-node CPU, network saturation, and the actual database load caused by cache misses to ensure system health.
-Memcached vs. Redis (16:53-18:08): Technology selection should come last. Memcached is favored for simple, multi-threaded, high-throughput object caching, while Redis provides a rich set of data structures and features useful for complex mutations and logic.
-
-
- Ensuring Idempotency
-Idempotency—ensuring that performing the same action multiple times results in the same outcome—is critical. Alex identifies three strategies to handle this:
-
-Fetch before processing: Use the webhook as a trigger to query the provider's API for the current state (e.g., Stripe's new event format).
-Upsert by date: Use database transactions to update or insert records only if the incoming data is newer than what is already stored.
-Tracking processing state: Maintain a separate, transactional storage to track if an event has been processed, is in progress, or is new, returning errors for incomplete attempts to trigger retries.
-10:00 - 15:00: Handling Bursts, Back Pressure, and Architecture
-Alex highlights the dangers of bursty traffic, citing a personal experience where a mass email campaign caused a production API outage due to subsequent webhook processing. He emphasizes the need for a decoupled architecture: ingest webhooks into a queue and process them separately. He also discusses optimistic filtering, where you perform quick, aggressive cache lookups during ingestion, assuming a record exists if a lookup fails, to avoid system-wide delays.
-
-15:00 - 20:00: Back Pressure and Data Integrity
-Managing back pressure requires monitoring queue depth and max age. You must understand your system's theoretical capacity versus baseline capacity. To ensure data integrity after inevitable failures (crashes, bad deploys), he suggests:
-
-Processing guarantees: Carefully managing acknowledgments (acking/nacking) through every link in the request chain.
-Reconciliation: Using the provider's events API to fetch and resync data if a failure causes significant discrepancies.
-20:00 - 25:00: Observability and Emerging Trends
-Visibility is vital. Companies should build a centralized event log (e.g., using Elasticsearch) to audit failed events and troubleshoot issues. He warns against waiting for a major incident to build replay tooling. He also discusses the shift toward Event Destinations (like AWS EventBridge support) and how platforms are increasingly offering native filtering and better event management tools.
-
-25:00 - 31:25: Event Gateways and Future Outlook
-Alex defines an Event Gateway as a cloud infrastructure primitive—similar to an API Gateway—that handles ingestion, routing, filtering, and queuing for asynchronous events. He demonstrates how Hookdeck functions as this layer, showing how users can:
 
 Manage webhooks via Terraform.
 Visualize and resolve back pressure issues by adjusting delivery rates.
@@ -727,60 +678,6 @@ In the final segment, the focus shifts to **Pruning** (16:48). This involves mai
 * **Avoiding duplication:** Ensuring every part of a skill has a single source of truth (17:15).
 * **Removing sediment:** Deleting stale or irrelevant legacy material from shared files (17:41).
 * **Eliminating "no-ops":** Removing instructions that do not actually change agent behavior (18:26).
-
-The video concludes by summarizing the framework (19:06) and directing viewers to his GitHub repository for a practical implementation of these "writing great skills" techniques (19:55).
-
-This video explains how to perform **zero-downtime database migrations** using the **Expand-Contract pattern**. This pattern is essential for mission-critical applications where even a second of downtime is unacceptable.
-
-### **Phase 1: Concept and Initial Setup (0:00 - 5:00)**
-*   **The Problem:** In a typical rolling update (e.g., using *Kubernetes*), you may have multiple versions of an application running simultaneously. If your database migration involves a breaking change—like renaming a column—the old version of your application will fail when it attempts to access the new schema, leading to 500 errors and downtime.
-*   **The Solution (Expand-Contract):** This pattern allows you to transition your database schema without breaking changes by separating the process into phases:
-    1.  **Expand:** Introduce new schema elements (e.g., a new column) while keeping the old ones intact.
-    2.  **Migrate:** Use the application to support both the old and new columns, and run backfill jobs to sync data.
-    3.  **Contract:** Once the new structure is fully adopted and verified, remove the legacy schema components.
-
-### **Phase 2: Technical Execution and Verification (5:00 - 6:36)**
-*   **Implementation Details:**
-    *   **Dual Writes:** During the transition, the application must write to both the old and new columns to ensure data consistency.
-    *   **Backfill Jobs:** Use background jobs to copy historical data from the old column to the new one. These jobs should be idempotent, meaning they can safely run repeatedly until all missing data is migrated.
-    *   **Read Strategy:** Gradually shift the application from reading the old column to reading the new column only after the data has been verified.
-*   **The Final Steps:**
-    *   **Verify:** Before cleaning up, you must perform a thorough verification to ensure no hidden processes (like *cron jobs*, *BI tools*, or *database triggers*) are still relying on the old field.
-    *   **Contracting:** Only after complete confirmation should you deploy the final code that exclusively uses the new structure and perform a final cleanup by dropping the old column.
-
-By following these steps, you ensure that your application remains functional throughout the entire migration process, regardless of which version is handling the request.
-
-```markdown
-
-
-
-|Issue           |Symptom             |Fix                                                    |
-|----------------|--------------------|-------------------------------------------------------|
-|Slow Pipeline   |>1s latency         |$match first, index all $sort/$group fields, .explain()|
-|Memory Explosion|sort exceeded memory|allowDiskUse: true, bounded $push: {$slice: 100}       |
-|N+1 Lookups     |1000 $lookup        |Batch with $facet or app-level dataloader              |
-|Sharding        |Uneven chunks       |$merge over $out, shard key on _id or driver_id        |
-|16MB Doc Limit  |$group fails        |$out intermediate collection                           |
-|Change Streams  |Real-time           |watch() on pipeline output                             |
-
-|Stage       |What it does                                    |Most common use cases                                    |Very important notes /gotchas                         |
-|------------|------------------------------------------------|---------------------------------------------------------|-------------------------------------------------------|
-|$match      |Filter documents (like find())                  |First stage almost always, biggest performance win       |Put $match as early as possible                        |
-|$sort       |Sort documents                                  |Latest first, top scores, alphabetical                   |Needs index → very expensive without index             |
-|$limit      |Take only first N documents                     |Pagination, top 10, preview                              |Usually after $sort                                    |
-|$skip       |Skip first N documents                          |Pagination                                               |Very expensive on big collections                      |
-|$project    |Select / reshape fields (like select in SQL)    |Remove unnecessary fields, rename, create computed fields|Use 1 and 0 very carefully                             |
-|$group      |Group documents & do calculations               |Count, sum, avg, group by user/category/date             |Most expensive & most powerful stage                   |
-|$unwind     |Deconstruct array field → one document per value|Working with arrays of objects                           |Can explode number of documents → be careful           |
-|$lookup     |Join with another collection (like SQL JOIN)    |Get user details with orders, populate comments          |Can be slow → use indexes properly                     |
-|$addFields  |Add new fields / override existing              |Add computed fields, flags, dates formatting             |Cleaner than $project when you want to keep most fields|
-|$set        |Same as $addFields (newer, preferred)           |Modern replacement for $addFields                        |Use this one in new code                               |
-|$count      |Count documents after previous stages           |Total number of matching documents                       |Very cheap if placed after $match                      |
-|$sortByCount|Group + count + sort descending                 |Most popular tags, top categories, most active users     |Super convenient!                                      |
-|$facet      |Run multiple aggregation pipelines in parallel  |Pagination + total count + stats in one query            |Very useful for good pagination                        |
-|$replaceRoot|Promote embedded object to top level            |After $lookup, make joined document root                 |Very useful with lookup                                |
-|$merge      |Write result to another collection              |Materialized views, incremental updates                  |Very powerful for data pipelines                       |
-|$out        |Write result to new collection (older)          |Similar to $merge but drops & recreates collection       |Less flexible than $merge                              |
+|
 
 ```
-

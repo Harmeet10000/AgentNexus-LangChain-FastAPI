@@ -94,7 +94,17 @@ def _make_tool_seam(*, max_retries: int, retry_on: Any = (Exception,)) -> Any:
                 name=req.tool_call["name"],
             )
 
-        result = await middleware.awrap_tool_call(request, handler)
+        try:
+            result = await middleware.awrap_tool_call(request, handler)
+        except GraphBubbleUp:
+            raise
+        except Exception as exc:  # non-retryable failures still become tool results
+            result = ToolMessage(
+                content=f"{type(exc).__name__}: {exc}",
+                tool_call_id=tool_call_id,
+                name=tool_fn.name,
+                status="error",
+            )
         if pauses:
             raise pauses[0]
         return result

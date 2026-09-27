@@ -100,8 +100,17 @@ class AsyncStreamingCallbackHandler(AsyncCallbackHandler):
         self._queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     @override
-    async def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
-        await self._queue.put(token)
+    async def on_llm_new_token(
+        self,
+        token: str | list[str | dict[str, Any]],
+        **kwargs: Any,
+    ) -> None:
+        rendered = (
+            token
+            if isinstance(token, str)
+            else "".join(item if isinstance(item, str) else str(item) for item in token)
+        )
+        await self._queue.put(rendered)
 
     @override
     async def on_llm_end(self, *args: Any, **kwargs: Any) -> None:

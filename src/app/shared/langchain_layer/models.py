@@ -84,7 +84,7 @@ settings: Settings = get_settings()
 # TODO: Add langchain specific middlewares here LLMToolSelectMiddleware, GuardrailMiddleware, etc.  # noqa: FIX002
 
 
-def _build_chat_model(
+def build_chat_model(
     model_name: str | None = None,
     *,
     temperature: float | None = None,
@@ -154,7 +154,7 @@ async def acreate_gemini_context_cache(
         "ChatGoogleGenerativeAI",
         model
         if isinstance(model, ChatGoogleGenerativeAI)
-        else _build_chat_model(implementation="google_genai"),
+        else build_chat_model(implementation="google_genai"),
     )
     resolved_ttl: str = ttl or settings.GEMINI_CONTEXT_CACHE_TTL
     return await asyncio.to_thread(
@@ -188,7 +188,7 @@ async def ainvoke_text(
     model: BaseChatModel | None = None,
 ) -> str:
     """Single async text call, returns plain string."""
-    llm: BaseChatModel = model or _build_chat_model()
+    llm: BaseChatModel = model or build_chat_model()
     messages: list[BaseMessage] = []
     if system:
         messages.append(SystemMessage(content=system))
@@ -208,7 +208,7 @@ async def abatch_text(
     Batch async text calls.
     Uses LangChain's native abatch which honours max_concurrency.
     """
-    llm: BaseChatModel = model or _build_chat_model()
+    llm: BaseChatModel = model or build_chat_model()
     max_c = max_concurrency or 5
 
     def _build(prompt: str) -> list[BaseMessage]:
@@ -240,7 +240,7 @@ async def astream_text(
             async for chunk in astream_text("Hello"):
                 yield f"data: {chunk}\\n\\n"
     """
-    llm: BaseChatModel = model or _build_chat_model(streaming=True)
+    llm: BaseChatModel = model or build_chat_model(streaming=True)
     parser = StrOutputParser()
     chain = llm | parser
     messages: list[BaseMessage] = []
@@ -314,7 +314,7 @@ async def ainvoke_multimodal(
     system: str | None = None,
     model: BaseChatModel | None = None,
 ) -> str:
-    llm = model or _build_chat_model(
+    llm = model or build_chat_model(
         model_name=settings.GEMINI_VISION_MODEL,
         media_resolution="low",
     )
@@ -384,7 +384,7 @@ async def aget_chat_model(
     **kwargs: Any,
 ) -> BaseChatModel:
     """Return a configured chat model, defaulting all behavior from settings."""
-    return _build_chat_model(
+    return build_chat_model(
         model_name=model_name,
         temperature=temperature,
         top_p=top_p,
@@ -416,5 +416,5 @@ async def awith_structured_output(
         chain = await awith_structured_output(Answer)
         result: Answer = await chain.ainvoke("What is 2+2?")
     """
-    llm = model or _build_chat_model()
+    llm = model or build_chat_model()
     return llm.with_structured_output(schema=schema, method=method)

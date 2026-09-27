@@ -83,6 +83,7 @@ def make_retrieve_statute_section_tool(
                 act_name=act_name,
                 section_ref=section_ref,
                 jurisdiction=jurisdiction,
+                user_id=user_id,
             )
         except SQLAlchemyError as exc:
             add_database_error_note(
@@ -137,6 +138,7 @@ async def _fetch_statute_section(
     act_name: str,
     section_ref: str,
     jurisdiction: str,  # noqa: ARG001 — kept in the tool's contract; corpus is jurisdiction-agnostic today
+    user_id: str,
 ) -> dict[str, Any] | None:
     # Task 11.1: the point lookup targets the unified chunk corpus — the only
     # relations the migration history creates — via the statute identity
@@ -160,7 +162,8 @@ async def _fetch_statute_section(
             instrument_year AS year
         FROM chunks
         WHERE
-            instrument_name = :act_name
+            user_id = :user_id
+            AND instrument_name = :act_name
             AND section_ref = :section_ref
         ORDER BY instrument_year DESC NULLS LAST
         LIMIT 1
@@ -171,6 +174,7 @@ async def _fetch_statute_section(
             await conn.execute(
                 query,
                 {
+                    "user_id": user_id,
                     "act_name": act_name.strip(),
                     "section_ref": section_ref.strip(),
                 },

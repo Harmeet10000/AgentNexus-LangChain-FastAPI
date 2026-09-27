@@ -113,7 +113,8 @@ class RequestStateLoggingMiddleware:
             try:
                 logger.info("Request started")
                 await self.app(scope, receive, send_wrapper)
-            except Exception:
+            except Exception as exc:
+                exc.add_note("layer=http_middleware, operation=request_pipeline")
                 duration_ms = round((time.perf_counter() - start_time) * 1000, 1)
                 logger.bind(
                     layer="http_middleware_exit",

@@ -1,0 +1,10 @@
+{
+  "id": "deep-internals-notes",
+  "acquired_at": "2026-09-14T11:04:22+05:30",
+  "source_name": "input.md.txt",
+  "source_path": "assets/ingest/deep-internals-notes/input.md.txt",
+  "bytes": 3209,
+  "sha256": "9779d6c0dc737ab79513b29e395ba5e4d282de634e07c4dd02de3f055820a007",
+  "topic": "Deep Internals: Android Certificate Pinning and Compiler Code Generation",
+  "access_constraints": "unrestricted"
+}
