@@ -215,7 +215,7 @@ async def test_researcher_tools_caps_recognized_calls_per_turn(
 
 
 @pytest.mark.asyncio
-async def test_research_complete_routes_to_compression_even_after_tool_limit(
+async def test_overflowed_research_complete_does_not_end_research(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeTool:
@@ -250,7 +250,10 @@ async def test_research_complete_routes_to_compression_even_after_tool_limit(
         {"configurable": {"max_tool_calls_per_turn": 1}},
     )
 
-    assert command.goto == "compress_research"
+    assert command.goto == "researcher"
+    assert command.update["researcher_messages"][1].content == (
+        "Error: maximum tool calls per turn exceeded. Retry with 1 or fewer tool calls."
+    )
 
 
 @pytest.mark.asyncio

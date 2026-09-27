@@ -382,7 +382,7 @@ async def researcher_tools(
 
     exceeded_iterations = state.get("tool_call_iterations", 0) >= configurable.max_react_tool_calls
     research_complete = any(
-        tool_call["name"] == "ResearchComplete" for tool_call in known_tool_calls
+        tool_call["name"] == "ResearchComplete" for tool_call in allowed_tool_calls
     )
     if exceeded_iterations or research_complete:
         return Command(goto="compress_research", update={"researcher_messages": tool_outputs})  # ty: ignore[invalid-return-type]
