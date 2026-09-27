@@ -149,7 +149,15 @@ async def test_release_attempts_every_resource_after_close_failures(
 def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    counts = {"commit": 0, "compile": 0, "invoke": 0, "lock": 0, "unlock": 0}
+    counts = {
+        "bound_session": 0,
+        "commit": 0,
+        "compile": 0,
+        "invoke": 0,
+        "lock": 0,
+        "unlock": 0,
+    }
+    active_lock_connections: list[object] = []
 
     class Transaction:
         async def __aenter__(self) -> None:
@@ -159,7 +167,9 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
             return None
 
     class SessionContext:
-        def __init__(self) -> None:
+        def __init__(self, **local_kw: object) -> None:
+            assert local_kw.get("bind") is active_lock_connections[-1]
+            counts["bound_session"] += 1
             self.session = MagicMock(spec=AsyncSession)
             self.session.begin.return_value = Transaction()
 
@@ -180,10 +190,11 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
 
     class LockConnection:
         async def __aenter__(self) -> LockConnection:
+            active_lock_connections.append(self)
             return self
 
         async def __aexit__(self, *_args: object) -> None:
-            return None
+            assert active_lock_connections.pop() is self
 
         async def scalar(self, *_args: object, **_kwargs: object) -> bool:
             counts["lock"] += 1
@@ -243,7 +254,14 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
         )
         assert result == {"status": "completed"}
 
-    assert counts == {"commit": 4, "compile": 1, "invoke": 2, "lock": 2, "unlock": 2}
+    assert counts == {
+        "bound_session": 2,
+        "commit": 4,
+        "compile": 1,
+        "invoke": 2,
+        "lock": 2,
+        "unlock": 2,
+    }
 
 
 def test_document_ingestion_advisory_lock_key_is_stable_and_tenant_scoped() -> None:
@@ -279,7 +297,7 @@ async def test_busy_document_advisory_lock_skips_without_waiting_or_ingesting() 
         async def ainvoke(self, *_args: object, **_kwargs: object) -> dict[str, object]:
             pytest.fail("A duplicate delivery must not enter the ingestion graph")
 
-    def session_local() -> object:
+    def session_local(**_local_kw: object) -> object:
         pytest.fail("A duplicate delivery must not open an ingestion transaction")
 
     result = await run_document_ingestion_task(
