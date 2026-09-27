@@ -67,6 +67,7 @@ def ingest_document(
                 graph=resources.ingestion_graph,
                 engine=resources.engine,
                 session_local=resources.session_local,
+                idempotency=resources.idempotency,
             )
         )
     except Exception:

@@ -20,7 +20,7 @@ from app.utils import logger
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
-    from sqlalchemy.ext.asyncio import AsyncEngine
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from redis.exceptions import RedisError
 
@@ -74,11 +74,22 @@ class IdempotencyGuard:
         db_engine: AsyncEngine,
         *,
         require_durable: bool = False,
+        db_session: AsyncSession | None = None,
     ) -> None:
         self._redis = redis
         self._db_engine = db_engine
         self._require_durable = require_durable
+        self._db_session = db_session
         self._log = logger.bind(component="idempotency_guard")
+
+    def for_session(self, session: AsyncSession) -> IdempotencyGuard:
+        """Return a job-scoped guard sharing an existing database transaction."""
+        return IdempotencyGuard(
+            redis=self._redis,
+            db_engine=self._db_engine,
+            require_durable=self._require_durable,
+            db_session=session,
+        )
 
     @staticmethod
     def _canon(value: Any) -> Any:
@@ -207,8 +218,11 @@ class IdempotencyGuard:
             """
         )
         try:
-            async with self._db_engine.connect() as connection:
-                row = (await connection.execute(query, {"key": key})).fetchone()
+            if self._db_session is not None:
+                row = (await self._db_session.execute(query, {"key": key})).fetchone()
+            else:
+                async with self._db_engine.connect() as connection:
+                    row = (await connection.execute(query, {"key": key})).fetchone()
         except Exception as exc:
             exc.add_note(f"key={key[:16]}, operation=postgres_read")
             self._log.bind(error=str(exc), key_prefix=key[:16]).warning(
@@ -244,19 +258,23 @@ class IdempotencyGuard:
             """
         )
         try:
-            async with self._db_engine.begin() as connection:
-                await connection.execute(
-                    query,
-                    {
-                        "key": key,
-                        "tool_name": tool_name,
-                        "user_id": user_id,
-                        "thread_id": thread_id,
-                        "step_id": step_id,
-                        "result": result_json,
-                        "expires_at": expires_at,
-                    },
-                )
+            parameters = {
+                "key": key,
+                "tool_name": tool_name,
+                "user_id": user_id,
+                "thread_id": thread_id,
+                "step_id": step_id,
+                "result": result_json,
+                "expires_at": expires_at,
+            }
+            if self._db_session is not None:
+                await self._db_session.execute(query, parameters)
+            else:
+                async with self._db_engine.begin() as connection:
+                    await connection.execute(
+                        query,
+                        parameters,
+                    )
         except Exception as exc:
             exc.add_note(f"key={key[:16]}, tool={tool_name}, operation=postgres_write")
             self._log.bind(

@@ -1086,6 +1086,7 @@ async def run_document_ingestion_task(
     graph: CompiledStateGraph[Any],
     engine: AsyncEngine,
     session_local: async_sessionmaker[Any],
+    idempotency: IdempotencyGuard,
 ) -> dict[str, object]:
     lock_key = _document_ingestion_lock_key(user_id, document_id)
     async with engine.connect() as lock_connection:
@@ -1102,6 +1103,7 @@ async def run_document_ingestion_task(
             # pool_size=1/max_overflow=0 deployment before ingestion can start.
             async with session_local(bind=lock_connection) as session, session.begin():
                 repo = DocumentRepository(session)
+                job_idempotency = idempotency.for_session(session)
                 return await graph.ainvoke(
                     {
                         "document_id": document_id,
@@ -1110,7 +1112,12 @@ async def run_document_ingestion_task(
                         "content_type": content_type,
                         "object_uri": object_uri,
                     },
-                    {"configurable": {"document_repository": repo}},
+                    {
+                        "configurable": {
+                            "document_repository": repo,
+                            "document_idempotency": job_idempotency,
+                        }
+                    },
                 )
         finally:
             await lock_connection.execute(

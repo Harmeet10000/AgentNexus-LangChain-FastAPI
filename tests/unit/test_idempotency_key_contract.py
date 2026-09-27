@@ -8,6 +8,8 @@ canonicalised free-text ``content`` (None for writes), one prefix generation.
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -17,6 +19,9 @@ from app.shared.langchain_layer.agents.tools.idempotency import (
     IdempotencyPersistenceError,
     ToolResult,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def test_make_key_is_keyword_only_with_structural_and_content() -> None:
@@ -120,3 +125,38 @@ async def test_required_durable_idempotency_fails_closed_on_postgres_write() -> 
         )
 
     redis_set.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_job_scoped_idempotency_reuses_existing_database_session() -> None:
+    class EmptyResult:
+        def fetchone(self) -> None:
+            return None
+
+    execute = AsyncMock(return_value=EmptyResult())
+
+    class UnexpectedEngine:
+        def connect(self) -> object:
+            pytest.fail("A bound idempotency guard must not check out another connection")
+
+        def begin(self) -> object:
+            pytest.fail("A bound idempotency guard must not check out another connection")
+
+    session = cast("AsyncSession", SimpleNamespace(execute=execute))
+    guard = IdempotencyGuard(
+        redis=None,
+        db_engine=UnexpectedEngine(),  # type: ignore[arg-type]
+        require_durable=True,
+    ).for_session(session)
+
+    assert await guard.get("key-1") is None
+    await guard.set(
+        "key-1",
+        ToolResult.ok({"episode_id": "episode-1"}),
+        tool_name="write_clause_episode",
+        user_id="user-1",
+        thread_id="thread-1",
+        step_id="step-1",
+    )
+
+    assert execute.await_count == 2

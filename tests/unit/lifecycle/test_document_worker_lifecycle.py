@@ -186,6 +186,7 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
             counts["invoke"] += 1
             configurable = cast("dict[str, object]", config["configurable"])
             assert "document_repository" in configurable
+            assert isinstance(configurable.get("document_idempotency"), IdempotencyGuard)
             return {"status": "completed"}
 
     class LockConnection:
@@ -250,6 +251,7 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
                 graph=resources.ingestion_graph,
                 engine=resources.engine,
                 session_local=resources.session_local,
+                idempotency=resources.idempotency,
             )
         )
         assert result == {"status": "completed"}
@@ -309,6 +311,7 @@ async def test_busy_document_advisory_lock_skips_without_waiting_or_ingesting() 
         graph=cast("Any", Graph()),
         engine=cast("Any", SimpleNamespace(connect=BusyConnection)),
         session_local=cast("Any", session_local),
+        idempotency=cast("Any", object()),
     )
 
     assert result == {"status": "skipped", "document_id": "doc-1"}
