@@ -8,6 +8,7 @@ durable audit/history.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
@@ -75,11 +76,13 @@ class IdempotencyGuard:
         *,
         require_durable: bool = False,
         db_session: AsyncSession | None = None,
+        db_lock: asyncio.Lock | None = None,
     ) -> None:
         self._redis = redis
         self._db_engine = db_engine
         self._require_durable = require_durable
         self._db_session = db_session
+        self._db_lock = db_lock
         self._log = logger.bind(component="idempotency_guard")
 
     def for_session(self, session: AsyncSession) -> IdempotencyGuard:
@@ -89,6 +92,7 @@ class IdempotencyGuard:
             db_engine=self._db_engine,
             require_durable=self._require_durable,
             db_session=session,
+            db_lock=asyncio.Lock(),
         )
 
     @staticmethod
@@ -144,7 +148,11 @@ class IdempotencyGuard:
                     "Idempotency Redis read failed; continuing with Postgres."
                 )
 
-        postgres_result = await self._get_from_postgres(key)
+        if self._db_lock is None:
+            postgres_result = await self._get_from_postgres(key)
+        else:
+            async with self._db_lock:
+                postgres_result = await self._get_from_postgres(key)
         if postgres_result is None:
             return None
 
@@ -168,15 +176,27 @@ class IdempotencyGuard:
 
         # Durable state is authoritative. Never publish a cache hit that is not
         # backed by the PostgreSQL record required to survive Redis expiry.
-        await self._set_in_postgres(
-            key=key,
-            result_json=result_json,
-            tool_name=tool_name,
-            user_id=user_id,
-            thread_id=thread_id,
-            step_id=step_id,
-            expires_at=expires_at,
-        )
+        if self._db_lock is None:
+            await self._set_in_postgres(
+                key=key,
+                result_json=result_json,
+                tool_name=tool_name,
+                user_id=user_id,
+                thread_id=thread_id,
+                step_id=step_id,
+                expires_at=expires_at,
+            )
+        else:
+            async with self._db_lock:
+                await self._set_in_postgres(
+                    key=key,
+                    result_json=result_json,
+                    tool_name=tool_name,
+                    user_id=user_id,
+                    thread_id=thread_id,
+                    step_id=step_id,
+                    expires_at=expires_at,
+                )
 
         if self._redis is not None:
             try:
