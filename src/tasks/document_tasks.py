@@ -76,6 +76,10 @@ def ingest_document(
     # The graph never raises for expected ingestion failures; it returns an
     # error state instead. Retryable failures must still raise so Celery
     # retries; permanent ones are returned as failure dicts.
+    if result.get("status") == "skipped":
+        if redis_lock_enabled:
+            self.release_idempotency_processing_lock(idempotency_key)
+        return result
     if result.get("status") == "failed":
         if result.get("error_retryable"):
             if redis_lock_enabled:
