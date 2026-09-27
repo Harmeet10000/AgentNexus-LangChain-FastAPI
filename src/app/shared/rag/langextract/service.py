@@ -32,6 +32,7 @@ class ExtractionFailureCode(StrEnum):
 
     UNCONFIGURED = "unconfigured"
     PROVIDER_ERROR = "provider_error"
+    GRAPH_WRITE_ERROR = "graph_write_error"
 
 
 @dataclass(frozen=True, slots=True)

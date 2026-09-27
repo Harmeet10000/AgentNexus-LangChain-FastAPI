@@ -18,6 +18,7 @@ from app.features.documents.ingestion_graph import build_document_ingestion_grap
 from app.features.documents.model import UnifiedChunk, UnifiedDocument
 from app.features.documents.repository import DocumentRepository
 from app.features.documents.service import process_document_ingestion, run_document_ingestion_task
+from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
 from app.shared.services.storage import StorageService
 
 if TYPE_CHECKING:
@@ -35,7 +36,9 @@ async def test_uploaded_fixture_reaches_chunk_rows_through_the_compiled_graph(
     user_id = f"graph-lifecycle-{run_id}"
     object_store = MagicMock(spec=StorageService)
     object_store.get_object = AsyncMock(
-        return_value=Success(b"Graph lifecycle fixture.\n\nThis paragraph becomes a searchable chunk.")
+        return_value=Success(
+            b"Graph lifecycle fixture.\n\nThis paragraph becomes a searchable chunk."
+        )
     )
     llm = FakeListChatModel(responses=["unused"])
     width = get_settings().EMBEDDING_DIMENSION
@@ -78,14 +81,20 @@ async def test_uploaded_fixture_reaches_chunk_rows_through_the_compiled_graph(
             content_type="text/markdown",
             object_uri="s3://test/fixture.txt",
             graph=graph,
+            engine=engine,
             session_local=session_local,
+            idempotency=IdempotencyGuard(
+                redis=None,
+                db_engine=engine,
+                require_durable=True,
+            ),
         )
 
         async with session_local() as session:
             chunk_count = await session.scalar(
-                select(func.count()).select_from(UnifiedChunk).where(
-                    UnifiedChunk.document_id == document_id
-                )
+                select(func.count())
+                .select_from(UnifiedChunk)
+                .where(UnifiedChunk.document_id == document_id)
             )
             stored_document = await session.scalar(
                 select(UnifiedDocument).where(UnifiedDocument.id == document_id)
@@ -99,5 +108,7 @@ async def test_uploaded_fixture_reaches_chunk_rows_through_the_compiled_graph(
     finally:
         if document_id:
             async with session_local() as session, session.begin():
-                await session.execute(delete(UnifiedDocument).where(UnifiedDocument.id == document_id))
+                await session.execute(
+                    delete(UnifiedDocument).where(UnifiedDocument.id == document_id)
+                )
         await engine.dispose()

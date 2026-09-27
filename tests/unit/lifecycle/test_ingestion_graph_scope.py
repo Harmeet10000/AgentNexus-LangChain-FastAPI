@@ -7,6 +7,8 @@ from typing import get_type_hints
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from returns.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.documents.ingestion_graph import (
@@ -15,6 +17,7 @@ from app.features.documents.ingestion_graph import (
     build_document_ingestion_graph,
 )
 from app.features.documents.repository import DocumentRepository
+from app.shared.services.storage import StorageService
 
 pytestmark = pytest.mark.unit
 
@@ -44,3 +47,39 @@ def test_compiled_graph_captures_no_repository_or_session() -> None:
     assert "repository" not in get_type_hints(DocumentIngestionState)
     assert "session" not in get_type_hints(DocumentIngestionState)
     assert graph is not None
+
+
+@pytest.mark.asyncio
+async def test_ingestion_node_prefers_job_scoped_idempotency() -> None:
+    ingest = AsyncMock(return_value=Success({"status": "completed"}))
+    default_idempotency = object()
+    job_idempotency = object()
+    repo = MagicMock(spec=DocumentRepository)
+    repo.session = MagicMock(spec=AsyncSession)
+    node = _make_ingest_document_node(
+        object_store=MagicMock(spec=StorageService),
+        graphiti=None,
+        ingest_document_fn=ingest,
+        llm=FakeListChatModel(responses=["unused"]),
+        idempotency=default_idempotency,
+    )
+
+    await node(
+        {
+            "document_id": "doc-1",
+            "user_id": "user-1",
+            "filename": "fixture.txt",
+            "content_type": "text/plain",
+            "object_uri": "s3://bucket/fixture.txt",
+        },
+        {
+            "configurable": {
+                "document_repository": repo,
+                "document_idempotency": job_idempotency,
+            }
+        },  # type: ignore[arg-type]
+    )
+
+    runtime = ingest.await_args.kwargs["runtime"]
+    assert runtime.idempotency is job_idempotency
+    assert runtime.transaction_checkpoint == repo.session.commit

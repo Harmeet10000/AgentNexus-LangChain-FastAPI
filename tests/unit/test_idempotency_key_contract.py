@@ -7,9 +7,22 @@ canonicalised free-text ``content`` (None for writes), one prefix generation.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
+from unittest.mock import AsyncMock
 
-from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+import pytest
+
+from app.shared.langchain_layer.agents.tools.idempotency import (
+    IdempotencyGuard,
+    IdempotencyPersistenceError,
+    ToolResult,
+)
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def test_make_key_is_keyword_only_with_structural_and_content() -> None:
@@ -61,3 +74,165 @@ def test_content_none_differs_from_content_present() -> None:
         step_id="s", structural={"d": 1}, user_id="u", content={"query": "q"}
     )
     assert write != read
+
+
+@pytest.mark.asyncio
+async def test_postgres_idempotency_remains_available_without_redis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guard = IdempotencyGuard(redis=None, db_engine=object())  # type: ignore[arg-type]
+    cached = ToolResult.ok({"episode_id": "episode-1"})
+    get_from_postgres = AsyncMock(return_value=cached)
+    set_in_postgres = AsyncMock()
+    monkeypatch.setattr(guard, "_get_from_postgres", get_from_postgres)
+    monkeypatch.setattr(guard, "_set_in_postgres", set_in_postgres)
+
+    assert await guard.get("key-1") is cached
+    await guard.set(
+        "key-1",
+        cached,
+        tool_name="write_clause_episode",
+        user_id="user-1",
+        thread_id="thread-1",
+        step_id="step-1",
+    )
+
+    get_from_postgres.assert_awaited_once_with("key-1")
+    set_in_postgres.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_required_durable_idempotency_fails_closed_on_postgres_write() -> None:
+    class FailingEngine:
+        def begin(self) -> object:
+            message = "database unavailable"
+            raise RuntimeError(message)
+
+    redis_set = AsyncMock()
+    guard = IdempotencyGuard(
+        redis=type("Redis", (), {"set": redis_set})(),  # type: ignore[arg-type]
+        db_engine=FailingEngine(),  # type: ignore[arg-type]
+        require_durable=True,
+    )
+
+    with pytest.raises(IdempotencyPersistenceError, match="write failed"):
+        await guard.set(
+            "key-1",
+            ToolResult.ok({"episode_id": "episode-1"}),
+            tool_name="write_clause_episode",
+            user_id="user-1",
+            thread_id="thread-1",
+            step_id="step-1",
+        )
+
+    redis_set.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_job_scoped_idempotency_reuses_existing_database_session() -> None:
+    class EmptyResult:
+        def fetchone(self) -> None:
+            return None
+
+    execute = AsyncMock(return_value=EmptyResult())
+
+    class UnexpectedEngine:
+        def connect(self) -> object:
+            pytest.fail("A bound idempotency guard must not check out another connection")
+
+        def begin(self) -> object:
+            pytest.fail("A bound idempotency guard must not check out another connection")
+
+    commit = AsyncMock()
+    rollback = AsyncMock()
+    session = cast(
+        "AsyncSession",
+        SimpleNamespace(execute=execute, commit=commit, rollback=rollback),
+    )
+    guard = IdempotencyGuard(
+        redis=None,
+        db_engine=UnexpectedEngine(),  # type: ignore[arg-type]
+        require_durable=True,
+    ).for_session(session)
+
+    assert await guard.get("key-1") is None
+    await guard.set(
+        "key-1",
+        ToolResult.ok({"episode_id": "episode-1"}),
+        tool_name="write_clause_episode",
+        user_id="user-1",
+        thread_id="thread-1",
+        step_id="step-1",
+    )
+
+    assert execute.await_count == 2
+    assert commit.await_count == 2
+    rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_job_scoped_cache_waits_for_transaction_commit() -> None:
+    commit_error = RuntimeError("commit failed")
+    session = cast(
+        "AsyncSession",
+        SimpleNamespace(
+            execute=AsyncMock(),
+            commit=AsyncMock(side_effect=commit_error),
+            rollback=AsyncMock(),
+        ),
+    )
+    redis_set = AsyncMock()
+    guard = IdempotencyGuard(
+        redis=type("Redis", (), {"set": redis_set})(),  # type: ignore[arg-type]
+        db_engine=object(),  # type: ignore[arg-type]
+        require_durable=True,
+    ).for_session(session)
+
+    with pytest.raises(IdempotencyPersistenceError, match="write failed"):
+        await guard.set(
+            "key-1",
+            ToolResult.ok({"episode_id": "episode-1"}),
+            tool_name="write_clause_episode",
+            user_id="user-1",
+            thread_id="thread-1",
+            step_id="step-1",
+        )
+
+    session.rollback.assert_awaited_once()
+    redis_set.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_job_scoped_idempotency_serializes_shared_session_access() -> None:
+    class EmptyResult:
+        def fetchone(self) -> None:
+            return None
+
+    class Session:
+        def __init__(self) -> None:
+            self.active = 0
+            self.max_active = 0
+
+        async def execute(self, *_args: object, **_kwargs: object) -> EmptyResult:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0)
+            self.active -= 1
+            return EmptyResult()
+
+        async def commit(self) -> None:
+            return None
+
+        async def rollback(self) -> None:
+            return None
+
+    session = Session()
+    guard = IdempotencyGuard(
+        redis=None,
+        db_engine=object(),  # type: ignore[arg-type]
+        require_durable=True,
+    ).for_session(cast("AsyncSession", session))
+
+    await asyncio.gather(guard.get("key-1"), guard.get("key-2"))
+
+    assert session.max_active == 1

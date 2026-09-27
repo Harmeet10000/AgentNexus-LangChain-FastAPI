@@ -4,11 +4,15 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import langextract as lx
-from returns.result import Success
+from returns.result import Failure, Success
 
 from app.features.documents import service as document_service
 from app.features.documents.classification import ClassifiedDocument, ParsedDocument, PreparedChunk
 from app.features.documents.dto import IngestionJob
+from app.features.documents.errors import (
+    DocumentGraphWriteError,
+    DocumentIngestionCheckpointError,
+)
 from app.features.documents.service import (
     DocumentQueryService,
     _write_extracted_clause_episodes,
@@ -35,6 +39,7 @@ class _Repo:
     def __init__(self, trees: list[dict[str, Any]] | None = None) -> None:
         self.status_calls: list[dict[str, Any]] = []
         self.trees = trees or []
+        self.transaction_checkpoints = 0
 
     async def update_document_status(self, **kwargs: Any) -> Success[None]:
         self.status_calls.append(kwargs)
@@ -60,9 +65,18 @@ def _job() -> IngestionJob:
 async def _run_ingestion(
     monkeypatch: Any,
     provider: object,
-) -> tuple[list[str], _Repo]:
+    *,
+    graph_writer: object | None = None,
+    idempotency: object | None = None,
+    checkpoint_error: Exception | None = None,
+) -> tuple[list[str], _Repo, object]:
     events: list[str] = []
     repo = _Repo()
+
+    async def checkpoint() -> None:
+        if checkpoint_error is not None:
+            raise checkpoint_error
+        repo.transaction_checkpoints += 1
 
     async def parse_document(**_kwargs: object) -> ParsedDocument:
         return ParsedDocument(
@@ -100,20 +114,22 @@ async def _run_ingestion(
         graphiti=None,
         llm=object(),
         extraction=AsyncExtractionService(RecordingProvider()),
-        graph_writer=None,
-        idempotency=None,
+        graph_writer=graph_writer,
+        idempotency=idempotency,
+        transaction_checkpoint=checkpoint,
     )
     result = await process_document_ingestion(job=_job(), runtime=cast("Any", runtime))
-    assert result.unwrap()["status"] == "completed"
-    return events, repo
+    return events, repo, result
 
 
 async def test_extraction_runs_once_before_chunking_and_empty_success_is_complete(
     monkeypatch: Any,
 ) -> None:
-    events, repo = await _run_ingestion(monkeypatch, lambda _request: ())
+    events, repo, result = await _run_ingestion(monkeypatch, lambda _request: ())
 
+    assert result.unwrap()["status"] == "completed"
     assert events == ["extract", "chunk"]
+    assert repo.transaction_checkpoints == 2
     assert repo.status_calls[0]["extraction_incomplete"] is False
     assert repo.status_calls[0]["structural_tree"]["name"] == "Fixture"
 
@@ -123,10 +139,66 @@ async def test_extraction_failure_is_visible_but_ingestion_completes(monkeypatch
         message = "provider down"
         raise RuntimeError(message)
 
-    events, repo = await _run_ingestion(monkeypatch, fail)
+    events, repo, result = await _run_ingestion(monkeypatch, fail)
 
+    assert result.unwrap()["status"] == "completed"
     assert events == ["extract", "chunk"]
     assert repo.status_calls[0]["extraction_incomplete"] is True
+    assert repo.transaction_checkpoints == 2
+
+
+async def test_graph_write_failure_marks_document_failed_before_chunk_storage(
+    monkeypatch: Any,
+) -> None:
+    extraction = lx.data.Extraction(
+        extraction_class="payment",
+        extraction_text="Payment is due.",
+        char_interval=lx.data.CharInterval(start_pos=0, end_pos=15),
+    )
+
+    def extract(_request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]:
+        return (lx.data.AnnotatedDocument(text="Payment is due.", extractions=[extraction]),)
+
+    class FailingWriter:
+        async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
+            del clause_text, metadata
+            message = "graph unavailable"
+            raise RuntimeError(message)
+
+    class Idempotency:
+        async def get(self, key: str) -> None:
+            del key
+
+        async def set(self, key: str, result: object, **kwargs: object) -> None:
+            del key, result, kwargs
+
+    events, repo, result = await _run_ingestion(
+        monkeypatch,
+        extract,
+        graph_writer=FailingWriter(),
+        idempotency=Idempotency(),
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), DocumentGraphWriteError)
+    assert result.failure().retryable is True
+    assert events == ["extract"]
+    assert repo.status_calls[0]["status"] == "failed"
+    assert repo.status_calls[0]["extraction_incomplete"] is True
+    assert repo.transaction_checkpoints == 0
+
+
+async def test_checkpoint_failure_is_retryable(monkeypatch: Any) -> None:
+    events, _repo, result = await _run_ingestion(
+        monkeypatch,
+        lambda _request: (),
+        checkpoint_error=RuntimeError("database unavailable"),
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), DocumentIngestionCheckpointError)
+    assert result.failure().retryable is True
+    assert events == ["extract"]
 
 
 async def test_structural_branch_uses_repository_and_pure_navigator() -> None:
@@ -136,7 +208,8 @@ async def test_structural_branch_uses_repository_and_pure_navigator() -> None:
                 "structural_tree": {
                     "name": "Agreement",
                     "children": [{"label": "section", "name": "Payment", "text": "Due in 30 days"}],
-                }
+                },
+                "document_id": "document-1",
             }
         ]
     )
@@ -146,7 +219,7 @@ async def test_structural_branch_uses_repository_and_pure_navigator() -> None:
 
     result = await service.navigate_structure(user_id="tenant-1", query="due", limit=1)
 
-    assert result.unwrap() == [("Agreement", "Payment")]
+    assert result.unwrap() == [("document-1", "Agreement", "Payment")]
 
 
 async def test_clause_extractions_use_canonical_writer_idempotently() -> None:
@@ -191,7 +264,161 @@ async def test_clause_extractions_use_canonical_writer_idempotently() -> None:
         "document_type": "contract",
     }
 
-    await _write_extracted_clause_episodes(**cast("Any", kwargs))
-    await _write_extracted_clause_episodes(**cast("Any", kwargs))
+    assert await _write_extracted_clause_episodes(**cast("Any", kwargs)) is True
+    assert await _write_extracted_clause_episodes(**cast("Any", kwargs)) is True
 
     assert writer.calls == 1
+
+
+async def test_clause_write_failure_is_reported_to_ingestion() -> None:
+    extraction = lx.data.Extraction(
+        extraction_class="payment",
+        extraction_text="Payment is due in thirty days.",
+        char_interval=lx.data.CharInterval(start_pos=10, end_pos=40),
+        attributes={"clause_id": "4.1"},
+    )
+    outcome = ExtractionSucceeded(
+        documents=(lx.data.AnnotatedDocument(text="x" * 50, extractions=[extraction]),)
+    )
+
+    class FailingWriter:
+        async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
+            del clause_text, metadata
+            message = "graph unavailable"
+            raise RuntimeError(message)
+
+    class Idempotency:
+        async def get(self, key: str) -> None:
+            del key
+
+        async def set(self, key: str, result: object, **kwargs: object) -> None:
+            del key, result, kwargs
+
+    result = await _write_extracted_clause_episodes(
+        outcome=outcome,
+        graph_writer=FailingWriter(),
+        idempotency=Idempotency(),
+        document_id="doc-1",
+        user_id="tenant-1",
+        jurisdiction="India",
+        document_type="contract",
+    )
+
+    assert result is False
+
+
+async def test_durable_idempotency_failure_is_reported_after_graph_write() -> None:
+    extraction = lx.data.Extraction(
+        extraction_class="payment",
+        extraction_text="Payment is due in thirty days.",
+        char_interval=lx.data.CharInterval(start_pos=10, end_pos=40),
+        attributes={"clause_id": "4.1"},
+    )
+    outcome = ExtractionSucceeded(
+        documents=(lx.data.AnnotatedDocument(text="x" * 50, extractions=[extraction]),)
+    )
+
+    class Writer:
+        async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
+            del clause_text, metadata
+            return "episode-1"
+
+    class SaveFailingIdempotency:
+        async def get(self, key: str) -> None:
+            del key
+
+        async def set(self, key: str, result: object, **kwargs: object) -> None:
+            del key, result, kwargs
+            message = "durable idempotency write failed"
+            raise RuntimeError(message)
+
+    result = await _write_extracted_clause_episodes(
+        outcome=outcome,
+        graph_writer=Writer(),
+        idempotency=SaveFailingIdempotency(),
+        document_id="doc-1",
+        user_id="tenant-1",
+        jurisdiction="India",
+        document_type="contract",
+    )
+
+    assert result is False
+
+
+async def test_durable_idempotency_read_failure_is_reported_before_graph_write() -> None:
+    extraction = lx.data.Extraction(
+        extraction_class="payment",
+        extraction_text="Payment is due in thirty days.",
+        char_interval=lx.data.CharInterval(start_pos=10, end_pos=40),
+        attributes={"clause_id": "4.1"},
+    )
+    outcome = ExtractionSucceeded(
+        documents=(lx.data.AnnotatedDocument(text="x" * 50, extractions=[extraction]),)
+    )
+
+    class Writer:
+        calls = 0
+
+        async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
+            del clause_text, metadata
+            self.calls += 1
+            return "episode-1"
+
+    class ReadFailingIdempotency:
+        async def get(self, key: str) -> None:
+            del key
+            message = "durable idempotency read failed"
+            raise RuntimeError(message)
+
+        async def set(self, key: str, result: object, **kwargs: object) -> None:
+            del key, result, kwargs
+
+    writer = Writer()
+    result = await _write_extracted_clause_episodes(
+        outcome=outcome,
+        graph_writer=writer,
+        idempotency=ReadFailingIdempotency(),
+        document_id="doc-1",
+        user_id="tenant-1",
+        jurisdiction="India",
+        document_type="contract",
+    )
+
+    assert result is False
+    assert writer.calls == 0
+
+
+async def test_partially_configured_graph_writer_dependencies_fail_closed() -> None:
+    extraction = lx.data.Extraction(
+        extraction_class="payment",
+        extraction_text="Payment is due.",
+        char_interval=lx.data.CharInterval(start_pos=0, end_pos=15),
+    )
+    outcome = ExtractionSucceeded(
+        documents=(lx.data.AnnotatedDocument(text="Payment is due.", extractions=[extraction]),)
+    )
+
+    assert (
+        await _write_extracted_clause_episodes(
+            outcome=outcome,
+            graph_writer=object(),
+            idempotency=None,
+            document_id="doc-1",
+            user_id="tenant-1",
+            jurisdiction="India",
+            document_type="contract",
+        )
+        is False
+    )
+    assert (
+        await _write_extracted_clause_episodes(
+            outcome=outcome,
+            graph_writer=None,
+            idempotency=object(),
+            document_id="doc-1",
+            user_id="tenant-1",
+            jurisdiction="India",
+            document_type="contract",
+        )
+        is False
+    )

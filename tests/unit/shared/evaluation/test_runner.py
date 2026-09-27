@@ -30,12 +30,34 @@ async def test_runner_aggregates_hand_computed_scores() -> None:
             _query(text="second", expected=["b"]),
         ],
         retrieve=retrieve,
+        cutoff=2,
     )
 
     assert evaluation.aggregates.recall_at_k == pytest.approx(1.0)
     assert evaluation.aggregates.reciprocal_rank == pytest.approx(0.75)
     assert evaluation.aggregates.precision_at_k == pytest.approx(0.5)
     assert evaluation.aggregates.ndcg_at_k == pytest.approx((1.0 + 1 / 1.584962500721156) / 2)
+    assert {row.k for row in evaluation.rows} == {2}
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_one_cutoff_when_result_counts_differ() -> None:
+    rankings = {"short": ["a"], "long": ["b", "x", "y"]}
+
+    async def retrieve(query: GoldenQuery) -> list[str]:
+        return rankings[query.query]
+
+    evaluation = await run_retrieval_eval(
+        queries=[
+            _query(text="short", expected=["a"]),
+            _query(text="long", expected=["b"]),
+        ],
+        retrieve=retrieve,
+        cutoff=3,
+    )
+
+    assert [row.k for row in evaluation.rows] == [3, 3]
+    assert [row.metrics.precision_at_k for row in evaluation.rows] == pytest.approx([1 / 3, 1 / 3])
 
 
 @pytest.mark.asyncio

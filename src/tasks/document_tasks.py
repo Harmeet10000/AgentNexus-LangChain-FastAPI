@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.config import get_settings
 from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry, ResilientTask, celery_app
 from app.connections.celery_task_names import DOCUMENTS_INGEST
 from app.features.documents.service import run_document_ingestion_task
@@ -25,10 +26,16 @@ class DocumentIngestPayload(CeleryTaskPayload):
 CeleryTaskRegistry.register(DOCUMENTS_INGEST, DocumentIngestPayload)
 
 
+def _redis_task_lock_enabled() -> bool:
+    """Return whether the optional Redis-backed outer task lock is configured."""
+    return bool(getattr(get_settings(), "REDIS_URL", ""))
+
+
 @celery_app.task(
     name=DOCUMENTS_INGEST,
     bind=True,
     base=ResilientTask,
+    autoretry_for=(*ResilientTask.autoretry_for, InfrastructureException),
 )
 def ingest_document(
     self: ResilientTask,
@@ -40,7 +47,10 @@ def ingest_document(
     object_uri: str,
 ) -> dict[str, object]:
     idempotency_key = f"documents-ingest:{user_id}:{document_id}"
-    if not self.acquire_idempotency_lock(idempotency_key, metadata={"document_id": document_id}):
+    redis_lock_enabled = _redis_task_lock_enabled()
+    if redis_lock_enabled and not self.acquire_idempotency_lock(
+        idempotency_key, metadata={"document_id": document_id}
+    ):
         logger.bind(document_id=document_id, task_id=self.request.id).info(
             "documents_ingest_locked"
         )
@@ -55,25 +65,35 @@ def ingest_document(
                 content_type=content_type,
                 object_uri=object_uri,
                 graph=resources.ingestion_graph,
+                engine=resources.engine,
                 session_local=resources.session_local,
+                idempotency=resources.idempotency,
             )
         )
     except Exception:
-        self.release_idempotency_processing_lock(idempotency_key)
+        if redis_lock_enabled:
+            self.release_idempotency_processing_lock(idempotency_key)
         raise
     # The graph never raises for expected ingestion failures; it returns an
     # error state instead. Retryable failures must still raise so Celery
     # retries; permanent ones are returned as failure dicts.
+    if result.get("status") == "skipped":
+        if redis_lock_enabled:
+            self.release_idempotency_processing_lock(idempotency_key)
+        return result
     if result.get("status") == "failed":
         if result.get("error_retryable"):
-            self.release_idempotency_processing_lock(idempotency_key)
+            if redis_lock_enabled:
+                self.release_idempotency_processing_lock(idempotency_key)
             raise InfrastructureException(
                 detail=str(result.get("error_message") or "Document ingestion failed"),
                 error_code=str(result.get("error_code") or "INGESTION_FAILED"),
                 retryable=True,
                 data={"document_id": document_id},
             )
-        self.mark_idempotency_completed(idempotency_key, metadata={"document_id": document_id})
+        if redis_lock_enabled:
+            self.mark_idempotency_completed(idempotency_key, metadata={"document_id": document_id})
         return result
-    self.mark_idempotency_completed(idempotency_key, metadata={"document_id": document_id})
+    if redis_lock_enabled:
+        self.mark_idempotency_completed(idempotency_key, metadata={"document_id": document_id})
     return result
