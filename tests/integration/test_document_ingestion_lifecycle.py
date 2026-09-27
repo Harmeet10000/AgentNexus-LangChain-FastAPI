@@ -18,6 +18,7 @@ from app.features.documents.ingestion_graph import build_document_ingestion_grap
 from app.features.documents.model import UnifiedChunk, UnifiedDocument
 from app.features.documents.repository import DocumentRepository
 from app.features.documents.service import process_document_ingestion, run_document_ingestion_task
+from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
 from app.shared.services.storage import StorageService
 
 if TYPE_CHECKING:
@@ -82,6 +83,11 @@ async def test_uploaded_fixture_reaches_chunk_rows_through_the_compiled_graph(
             graph=graph,
             engine=engine,
             session_local=session_local,
+            idempotency=IdempotencyGuard(
+                redis=None,
+                db_engine=engine,
+                require_durable=True,
+            ),
         )
 
         async with session_local() as session:

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 type IngestDocumentFn = Callable[..., Awaitable[DocumentResult[dict[str, object]]]]
 
 _REPOSITORY_CONFIG_KEY = "document_repository"
+_IDEMPOTENCY_CONFIG_KEY = "document_idempotency"
 
 
 def get_document_repository(config: RunnableConfig) -> DocumentRepository:
@@ -108,6 +109,10 @@ def _make_ingest_document_node(
         state: DocumentIngestionState, config: RunnableConfig
     ) -> dict[str, object]:
         repo = get_document_repository(config)
+        job_idempotency = config.get("configurable", {}).get(
+            _IDEMPOTENCY_CONFIG_KEY,
+            idempotency,
+        )
         result = await ingest_document_fn(
             job=IngestionJob(
                 document_id=state.get("document_id", ""),
@@ -123,7 +128,7 @@ def _make_ingest_document_node(
                 llm=llm,
                 extraction=extraction,
                 graph_writer=graph_writer,
-                idempotency=idempotency,
+                idempotency=job_idempotency,
             ),
         )
         if isinstance(result, Failure):

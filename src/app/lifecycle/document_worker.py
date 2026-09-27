@@ -38,6 +38,7 @@ class DocumentWorkerResources:
     session_local: async_sessionmaker[Any]
     graphiti: Graphiti
     ingestion_graph: CompiledStateGraph[Any]
+    idempotency: IdempotencyGuard
     redis: Redis | None = None
 
 
@@ -114,6 +115,11 @@ async def _provision_document_worker() -> DocumentWorkerResources:
         )
         await setup_graphiti_indices(graphiti)
         object_store = StorageService.from_settings(settings=settings)
+        idempotency = IdempotencyGuard(
+            redis=redis,
+            db_engine=engine,
+            require_durable=True,
+        )
         ingestion_graph = provide_document_ingestion_graph(
             settings=settings,
             object_store=object_store,
@@ -121,17 +127,14 @@ async def _provision_document_worker() -> DocumentWorkerResources:
             ingest_document_fn=process_document_ingestion,
             extraction=AsyncExtractionService.from_settings(settings),
             graph_writer=graphiti_service(graphiti),
-            idempotency=IdempotencyGuard(
-                redis=redis,
-                db_engine=engine,
-                require_durable=True,
-            ),
+            idempotency=idempotency,
         )
         return DocumentWorkerResources(
             engine=engine,
             session_local=session_local,
             graphiti=graphiti,
             ingestion_graph=ingestion_graph,
+            idempotency=idempotency,
             redis=redis,
         )
     except Exception:
