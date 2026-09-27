@@ -232,3 +232,5 @@ docs-site/node_modules/
 .opencode/
 .serena/
 .kiro/
+
+graphify-out/
