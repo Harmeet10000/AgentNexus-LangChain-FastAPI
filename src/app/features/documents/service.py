@@ -60,6 +60,7 @@ from .dto import (
 )
 from .errors import (
     DocumentGraphWriteError,
+    DocumentIngestionCheckpointError,
     DocumentNotFoundError,
     DocumentStorageError,
     DocumentValidationError,
@@ -904,7 +905,7 @@ async def _load_document_bytes(
 
 
 @trace_layer("service")
-async def process_document_ingestion(
+async def process_document_ingestion(  # noqa: PLR0912, PLR0914 — staged workflow
     *,
     job: IngestionJob,
     runtime: IngestionRuntime,
@@ -962,7 +963,9 @@ async def process_document_ingestion(
                 source="graphiti",
             )
         )
-    await _checkpoint_ingestion_transaction(runtime)
+    checkpoint_result = await _checkpoint_ingestion_transaction(runtime)
+    if isinstance(checkpoint_result, Failure):
+        return Failure(checkpoint_result.failure())
     chunks, segmentation_warnings = await segment_chunks(parsed=parsed, classified=classified)
     if legal.metadata is not None:
         chunks = enrich_legal_chunks(
@@ -992,7 +995,9 @@ async def process_document_ingestion(
     )
     if isinstance(status_result, Failure):
         return Failure(status_result.failure())
-    await _checkpoint_ingestion_transaction(runtime)
+    checkpoint_result = await _checkpoint_ingestion_transaction(runtime)
+    if isinstance(checkpoint_result, Failure):
+        return Failure(checkpoint_result.failure())
     if classified.graphiti_required:
         await _write_contract_events(runtime.graphiti, legal.metadata, job.document_id)
         verify_result = await _verify_legal_chunks(
@@ -1031,11 +1036,23 @@ async def process_document_ingestion(
     )
 
 
-async def _checkpoint_ingestion_transaction(runtime: IngestionRuntime) -> None:
+async def _checkpoint_ingestion_transaction(runtime: IngestionRuntime) -> DocumentResult[None]:
     """Commit database work before entering another potentially slow external phase."""
     checkpoint = getattr(runtime, "transaction_checkpoint", None)
-    if checkpoint is not None:
+    if checkpoint is None:
+        return Success(None)
+    try:
         await checkpoint()
+    except Exception as exc:  # noqa: BLE001 — injected checkpoint exposes driver errors
+        exc.add_note("operation=document_ingestion_checkpoint")
+        return Failure(
+            DocumentIngestionCheckpointError(
+                message="Document ingestion database checkpoint failed",
+                details={"error": str(exc)},
+                source="postgres",
+            )
+        )
+    return Success(None)
 
 
 async def _prepare_legal_metadata(

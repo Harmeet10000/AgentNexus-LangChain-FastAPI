@@ -9,7 +9,10 @@ from returns.result import Failure, Success
 from app.features.documents import service as document_service
 from app.features.documents.classification import ClassifiedDocument, ParsedDocument, PreparedChunk
 from app.features.documents.dto import IngestionJob
-from app.features.documents.errors import DocumentGraphWriteError
+from app.features.documents.errors import (
+    DocumentGraphWriteError,
+    DocumentIngestionCheckpointError,
+)
 from app.features.documents.service import (
     DocumentQueryService,
     _write_extracted_clause_episodes,
@@ -65,11 +68,14 @@ async def _run_ingestion(
     *,
     graph_writer: object | None = None,
     idempotency: object | None = None,
+    checkpoint_error: Exception | None = None,
 ) -> tuple[list[str], _Repo, object]:
     events: list[str] = []
     repo = _Repo()
 
     async def checkpoint() -> None:
+        if checkpoint_error is not None:
+            raise checkpoint_error
         repo.transaction_checkpoints += 1
 
     async def parse_document(**_kwargs: object) -> ParsedDocument:
@@ -180,6 +186,19 @@ async def test_graph_write_failure_marks_document_failed_before_chunk_storage(
     assert repo.status_calls[0]["status"] == "failed"
     assert repo.status_calls[0]["extraction_incomplete"] is True
     assert repo.transaction_checkpoints == 0
+
+
+async def test_checkpoint_failure_is_retryable(monkeypatch: Any) -> None:
+    events, _repo, result = await _run_ingestion(
+        monkeypatch,
+        lambda _request: (),
+        checkpoint_error=RuntimeError("database unavailable"),
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), DocumentIngestionCheckpointError)
+    assert result.failure().retryable is True
+    assert events == ["extract"]
 
 
 async def test_structural_branch_uses_repository_and_pure_navigator() -> None:

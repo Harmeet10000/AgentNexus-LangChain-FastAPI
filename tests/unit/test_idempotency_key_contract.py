@@ -7,6 +7,7 @@ canonicalised free-text ``content`` (None for writes), one prefix generation.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -199,3 +200,39 @@ async def test_job_scoped_cache_waits_for_transaction_commit() -> None:
 
     session.rollback.assert_awaited_once()
     redis_set.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_job_scoped_idempotency_serializes_shared_session_access() -> None:
+    class EmptyResult:
+        def fetchone(self) -> None:
+            return None
+
+    class Session:
+        def __init__(self) -> None:
+            self.active = 0
+            self.max_active = 0
+
+        async def execute(self, *_args: object, **_kwargs: object) -> EmptyResult:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0)
+            self.active -= 1
+            return EmptyResult()
+
+        async def commit(self) -> None:
+            return None
+
+        async def rollback(self) -> None:
+            return None
+
+    session = Session()
+    guard = IdempotencyGuard(
+        redis=None,
+        db_engine=object(),  # type: ignore[arg-type]
+        require_durable=True,
+    ).for_session(cast("AsyncSession", session))
+
+    await asyncio.gather(guard.get("key-1"), guard.get("key-2"))
+
+    assert session.max_active == 1
