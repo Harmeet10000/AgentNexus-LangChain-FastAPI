@@ -166,16 +166,16 @@ async def _write_single_clause_episode(
         user_id=user_id,
     )
 
-    cached = await idempotency.get(idem_key)
-    if cached is not None and cached.success:
-        return ClauseWriteResult(
-            clause_id=segment.clause_id,
-            episode_uuid=cached.data.get("episode_uuid", ""),
-            success=True,
-        )
-
     async with sem:
         try:
+            cached = await idempotency.get(idem_key)
+            if cached is not None and cached.success:
+                return ClauseWriteResult(
+                    clause_id=segment.clause_id,
+                    episode_uuid=cached.data.get("episode_uuid", ""),
+                    success=True,
+                )
+
             metadata = ClauseEpisodeMetadata(
                 doc_id=doc_id,
                 clause_id=segment.clause_id,
@@ -236,15 +236,15 @@ async def _write_single_relationship_edge(
         user_id=user_id,
     )
 
-    cached = await idempotency.get(idem_key)
-    if cached is not None and cached.success:
-        return RelationshipWriteResult(
-            edge_id=relationship.edge_id,
-            episode_uuid=cached.data.get("episode_uuid", ""),
-            success=True,
-        )
-
     try:
+        cached = await idempotency.get(idem_key)
+        if cached is not None and cached.success:
+            return RelationshipWriteResult(
+                edge_id=relationship.edge_id,
+                episode_uuid=cached.data.get("episode_uuid", ""),
+                success=True,
+            )
+
         edge_input = LegalEdgeInput(
             from_entity=relationship.from_node,
             relationship=relationship.relationship.value,
