@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.documents.service import (
     _document_ingestion_lock_key,
+    _release_document_ingestion_lock,
     run_document_ingestion_task,
 )
 from app.lifecycle import document_worker
@@ -198,14 +199,18 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
             assert active_lock_connections.pop() is self
 
         async def scalar(self, *_args: object, **_kwargs: object) -> bool:
-            counts["lock"] += 1
+            statement = str(_args[0])
+            if "pg_try_advisory_lock" in statement:
+                counts["lock"] += 1
+            else:
+                counts["unlock"] += 1
             return True
-
-        async def execute(self, *_args: object, **_kwargs: object) -> None:
-            counts["unlock"] += 1
 
         async def commit(self) -> None:
             counts["commit"] += 1
+
+        async def invalidate(self) -> None:
+            pytest.fail("A successful advisory unlock must not invalidate the connection")
 
     engine = SimpleNamespace(connect=LockConnection, dispose=AsyncMock())
     graphiti = object()
@@ -316,3 +321,43 @@ async def test_busy_document_advisory_lock_skips_without_waiting_or_ingesting() 
 
     assert result == {"status": "skipped", "document_id": "doc-1"}
     assert commits == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_advisory_unlock_invalidates_connection() -> None:
+    connection = SimpleNamespace(
+        scalar=AsyncMock(return_value=False),
+        commit=AsyncMock(),
+        invalidate=AsyncMock(),
+    )
+
+    with pytest.raises(RuntimeError, match="advisory lock release failed"):
+        await _release_document_ingestion_lock(
+            connection=cast("Any", connection),
+            lock_key=42,
+            primary_error=None,
+        )
+
+    connection.invalidate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_advisory_unlock_failure_does_not_replace_primary_error() -> None:
+    cleanup_error = RuntimeError("database connection lost")
+    connection = SimpleNamespace(
+        scalar=AsyncMock(side_effect=cleanup_error),
+        commit=AsyncMock(),
+        invalidate=AsyncMock(),
+    )
+    primary_error = ValueError("ingestion failed")
+
+    await _release_document_ingestion_lock(
+        connection=cast("Any", connection),
+        lock_key=42,
+        primary_error=primary_error,
+    )
+
+    connection.invalidate.assert_awaited_once()
+    assert primary_error.__notes__ == [
+        "Advisory-lock cleanup failed: RuntimeError('database connection lost')"
+    ]
