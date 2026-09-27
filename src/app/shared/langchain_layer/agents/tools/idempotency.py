@@ -8,6 +8,7 @@ durable audit/history.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
@@ -20,13 +21,17 @@ from app.utils import logger
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
-    from sqlalchemy.ext.asyncio import AsyncEngine
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from redis.exceptions import RedisError
 
 _REDIS_TTL_SECONDS = 86_400
 _POSTGRES_TTL_DAYS = 30
 _REDIS_KEY_PREFIX = "idempotency:v2:"
+
+
+class IdempotencyPersistenceError(RuntimeError):
+    """Durable idempotency state could not be read or written."""
 
 
 class ToolResult(BaseModel):
@@ -62,12 +67,33 @@ class ToolResult(BaseModel):
 
 
 class IdempotencyGuard:
-    """Redis-first, Postgres-backed idempotency guard for tool calls."""
+    """Postgres-backed idempotency guard with an optional Redis hot path."""
 
-    def __init__(self, redis: Redis, db_engine: AsyncEngine) -> None:
+    def __init__(
+        self,
+        redis: Redis | None,
+        db_engine: AsyncEngine,
+        *,
+        require_durable: bool = False,
+        db_session: AsyncSession | None = None,
+        db_lock: asyncio.Lock | None = None,
+    ) -> None:
         self._redis = redis
         self._db_engine = db_engine
+        self._require_durable = require_durable
+        self._db_session = db_session
+        self._db_lock = db_lock
         self._log = logger.bind(component="idempotency_guard")
+
+    def for_session(self, session: AsyncSession) -> IdempotencyGuard:
+        """Return a job-scoped guard sharing an existing database transaction."""
+        return IdempotencyGuard(
+            redis=self._redis,
+            db_engine=self._db_engine,
+            require_durable=self._require_durable,
+            db_session=session,
+            db_lock=asyncio.Lock(),
+        )
 
     @staticmethod
     def _canon(value: Any) -> Any:
@@ -110,12 +136,23 @@ class IdempotencyGuard:
 
     async def get(self, key: str) -> ToolResult | None:
         """Return a cached tool result when a prior execution exists."""
-        redis_value = await self._redis.get(_redis_key(key))
-        if redis_value:
-            self._log.debug("idempotency_hit_redis", key_prefix=key[:16])
-            return ToolResult.model_validate_json(redis_value)
+        if self._redis is not None:
+            try:
+                redis_value = await self._redis.get(_redis_key(key))
+                if redis_value:
+                    self._log.debug("idempotency_hit_redis", key_prefix=key[:16])
+                    return ToolResult.model_validate_json(redis_value)
+            except RedisError as exc:
+                exc.add_note(f"key={key[:16]}, operation=cache_read")
+                self._log.bind(error=str(exc), key_prefix=key[:16]).warning(
+                    "Idempotency Redis read failed; continuing with Postgres."
+                )
 
-        postgres_result = await self._get_from_postgres(key)
+        if self._db_lock is None:
+            postgres_result = await self._get_from_postgres(key)
+        else:
+            async with self._db_lock:
+                postgres_result = await self._get_from_postgres(key)
         if postgres_result is None:
             return None
 
@@ -137,30 +174,47 @@ class IdempotencyGuard:
         result_json = result.model_dump_json()
         expires_at = datetime.now(tz=UTC) + timedelta(days=_POSTGRES_TTL_DAYS)
 
-        try:
-            await self._redis.set(
-                _redis_key(key),
-                result_json,
-                ex=_REDIS_TTL_SECONDS,
+        # Durable state is authoritative. Never publish a cache hit that is not
+        # backed by the PostgreSQL record required to survive Redis expiry.
+        if self._db_lock is None:
+            await self._set_in_postgres(
+                key=key,
+                result_json=result_json,
+                tool_name=tool_name,
+                user_id=user_id,
+                thread_id=thread_id,
+                step_id=step_id,
+                expires_at=expires_at,
             )
-        except RedisError as exc:
-            exc.add_note(f"key={key[:16]}, tool={tool_name}")
-            self._log.bind(error=str(exc), tool_name=tool_name).warning(
-                "Idempotency Redis write failed; continuing with Postgres."
-            )
+        else:
+            async with self._db_lock:
+                await self._set_in_postgres(
+                    key=key,
+                    result_json=result_json,
+                    tool_name=tool_name,
+                    user_id=user_id,
+                    thread_id=thread_id,
+                    step_id=step_id,
+                    expires_at=expires_at,
+                )
 
-        await self._set_in_postgres(
-            key=key,
-            result_json=result_json,
-            tool_name=tool_name,
-            user_id=user_id,
-            thread_id=thread_id,
-            step_id=step_id,
-            expires_at=expires_at,
-        )
+        if self._redis is not None:
+            try:
+                await self._redis.set(
+                    _redis_key(key),
+                    result_json,
+                    ex=_REDIS_TTL_SECONDS,
+                )
+            except RedisError as exc:
+                exc.add_note(f"key={key[:16]}, tool={tool_name}")
+                self._log.bind(error=str(exc), tool_name=tool_name).warning(
+                    "Idempotency Redis write failed; durable PostgreSQL state is available."
+                )
         self._log.bind(tool_name=tool_name, key_prefix=key[:16]).debug("Idempotency state written.")
 
     async def _warm_redis_cache(self, key: str, result: ToolResult) -> None:
+        if self._redis is None:
+            return
         try:
             await self._redis.set(
                 _redis_key(key),
@@ -184,13 +238,25 @@ class IdempotencyGuard:
             """
         )
         try:
-            async with self._db_engine.connect() as connection:
-                row = (await connection.execute(query, {"key": key})).fetchone()
-        except Exception as exc:  # noqa: BLE001 — Postgres read, unknown driver exceptions possible
+            if self._db_session is not None:
+                row = (await self._db_session.execute(query, {"key": key})).fetchone()
+                await self._db_session.commit()
+            else:
+                async with self._db_engine.connect() as connection:
+                    row = (await connection.execute(query, {"key": key})).fetchone()
+        except Exception as exc:
+            if self._db_session is not None:
+                try:
+                    await self._db_session.rollback()
+                except Exception as rollback_error:  # noqa: BLE001 — preserve persistence error
+                    exc.add_note(f"Idempotency read rollback also failed: {rollback_error!r}")
             exc.add_note(f"key={key[:16]}, operation=postgres_read")
             self._log.bind(error=str(exc), key_prefix=key[:16]).warning(
                 "Idempotency Postgres read failed."
             )
+            if self._require_durable:
+                message = "Durable idempotency read failed"
+                raise IdempotencyPersistenceError(message) from exc
             return None
 
         if row is None:
@@ -218,26 +284,39 @@ class IdempotencyGuard:
             """
         )
         try:
-            async with self._db_engine.begin() as connection:
-                await connection.execute(
-                    query,
-                    {
-                        "key": key,
-                        "tool_name": tool_name,
-                        "user_id": user_id,
-                        "thread_id": thread_id,
-                        "step_id": step_id,
-                        "result": result_json,
-                        "expires_at": expires_at,
-                    },
-                )
-        except Exception as exc:  # noqa: BLE001 — Postgres write, unknown driver exceptions possible
+            parameters = {
+                "key": key,
+                "tool_name": tool_name,
+                "user_id": user_id,
+                "thread_id": thread_id,
+                "step_id": step_id,
+                "result": result_json,
+                "expires_at": expires_at,
+            }
+            if self._db_session is not None:
+                await self._db_session.execute(query, parameters)
+                await self._db_session.commit()
+            else:
+                async with self._db_engine.begin() as connection:
+                    await connection.execute(
+                        query,
+                        parameters,
+                    )
+        except Exception as exc:
+            if self._db_session is not None:
+                try:
+                    await self._db_session.rollback()
+                except Exception as rollback_error:  # noqa: BLE001 — preserve persistence error
+                    exc.add_note(f"Idempotency write rollback also failed: {rollback_error!r}")
             exc.add_note(f"key={key[:16]}, tool={tool_name}, operation=postgres_write")
             self._log.bind(
                 error=str(exc),
                 key_prefix=key[:16],
                 tool_name=tool_name,
             ).error("Idempotency Postgres write failed.")
+            if self._require_durable:
+                message = "Durable idempotency write failed"
+                raise IdempotencyPersistenceError(message) from exc
 
 
 def _redis_key(key: str) -> str:

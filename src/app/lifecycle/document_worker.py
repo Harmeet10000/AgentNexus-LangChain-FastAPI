@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -20,7 +21,7 @@ from app.shared.services.storage import StorageService
 from app.utils import ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
+    from collections.abc import Awaitable, Callable, Coroutine, Sequence
     from typing import Any
 
     from graphiti_core import Graphiti
@@ -37,11 +38,63 @@ class DocumentWorkerResources:
     session_local: async_sessionmaker[Any]
     graphiti: Graphiti
     ingestion_graph: CompiledStateGraph[Any]
+    idempotency: IdempotencyGuard
     redis: Redis | None = None
 
 
 _WORKER_RUNNER: asyncio.Runner | None = None
 _WORKER_RESOURCES: DocumentWorkerResources | None = None
+
+
+def _worker_consumes_queue(queue_name: str, argv: Sequence[str] | None = None) -> bool:
+    """Return whether this worker command consumes ``queue_name``.
+
+    Celery does not pass the consumer object to ``worker_process_init``. Pool
+    children do retain the worker command line, so an explicit ``-Q``/``--queues``
+    is the narrow source of truth. A command without a queue flag consumes the
+    app's configured queues and must therefore provision conservatively.
+    """
+    arguments = list(argv if argv is not None else sys.argv)
+    configured: list[str] = []
+    for index, argument in enumerate(arguments):
+        if argument in {"-Q", "--queues"} and index + 1 < len(arguments):
+            configured.extend(arguments[index + 1].split(","))
+        elif argument.startswith("--queues="):
+            configured.extend(argument.partition("=")[2].split(","))
+        elif argument.startswith("-Q") and len(argument) > 2:
+            configured.extend(argument[2:].split(","))
+    if not configured:
+        return True
+    return queue_name in {name.strip() for name in configured if name.strip()}
+
+
+async def _close_document_worker_resources(
+    *,
+    engine: AsyncEngine,
+    graphiti: Graphiti | None,
+    redis: Redis | None,
+    raise_errors: bool,
+) -> None:
+    """Attempt every close operation, optionally surfacing the combined failures."""
+    operations: list[tuple[str, Callable[[], Awaitable[None]]]] = [
+        ("graphiti", lambda: close_graphiti(graphiti)),
+    ]
+    if redis is not None:
+        operations.append(("redis", redis.aclose))
+    operations.append(("database", engine.dispose))
+
+    errors: list[Exception] = []
+    for resource, close in operations:
+        try:
+            await close()
+        except Exception as exc:  # noqa: BLE001 — cleanup must continue across resources
+            logger.bind(resource=resource, error_type=type(exc).__name__).exception(
+                "Document ingestion worker resource close failed"
+            )
+            errors.append(exc)
+    if errors and raise_errors:
+        message = "Document worker resource cleanup failed"
+        raise ExceptionGroup(message, errors)
 
 
 async def _provision_document_worker() -> DocumentWorkerResources:
@@ -62,6 +115,11 @@ async def _provision_document_worker() -> DocumentWorkerResources:
         )
         await setup_graphiti_indices(graphiti)
         object_store = StorageService.from_settings(settings=settings)
+        idempotency = IdempotencyGuard(
+            redis=redis,
+            db_engine=engine,
+            require_durable=True,
+        )
         ingestion_graph = provide_document_ingestion_graph(
             settings=settings,
             object_store=object_store,
@@ -69,30 +127,33 @@ async def _provision_document_worker() -> DocumentWorkerResources:
             ingest_document_fn=process_document_ingestion,
             extraction=AsyncExtractionService.from_settings(settings),
             graph_writer=graphiti_service(graphiti),
-            idempotency=(
-                IdempotencyGuard(redis=redis, db_engine=engine) if redis is not None else None
-            ),
+            idempotency=idempotency,
         )
         return DocumentWorkerResources(
             engine=engine,
             session_local=session_local,
             graphiti=graphiti,
             ingestion_graph=ingestion_graph,
+            idempotency=idempotency,
             redis=redis,
         )
     except Exception:
-        await close_graphiti(graphiti)
-        if redis is not None:
-            await redis.aclose()
-        await engine.dispose()
+        await _close_document_worker_resources(
+            engine=engine,
+            graphiti=graphiti,
+            redis=redis,
+            raise_errors=False,
+        )
         raise
 
 
 async def _release_document_worker(resources: DocumentWorkerResources) -> None:
-    await close_graphiti(resources.graphiti)
-    if resources.redis is not None:
-        await resources.redis.aclose()
-    await resources.engine.dispose()
+    await _close_document_worker_resources(
+        engine=resources.engine,
+        graphiti=resources.graphiti,
+        redis=resources.redis,
+        raise_errors=True,
+    )
 
 
 @worker_process_init.connect
@@ -100,6 +161,12 @@ def initialize_document_worker(**_kwargs: object) -> None:
     """Provision once in each forked child, never in the Celery parent."""
     global _WORKER_RESOURCES, _WORKER_RUNNER  # noqa: PLW0603
     _WORKER_RESOURCES = None
+    ingestion_queue = getattr(get_settings(), "CELERY_INGESTION_QUEUE", "ingestion")
+    if not _worker_consumes_queue(ingestion_queue):
+        logger.bind(queue=ingestion_queue).info(
+            "Document ingestion resources skipped for unrelated worker"
+        )
+        return
     _WORKER_RUNNER = asyncio.Runner()
     try:
         _WORKER_RESOURCES = _WORKER_RUNNER.run(_provision_document_worker())

@@ -58,7 +58,7 @@ class Configuration(BaseModel):
         field_names = list(cls.model_fields.keys())
         settings_values = get_settings().model_dump()
         values: dict[str, Any] = {
-            field_name: settings_values.get(field_name.upper(), configurable.get(field_name))
+            field_name: configurable.get(field_name, settings_values.get(field_name.upper()))
             for field_name in field_names
         }
         return cls(**{k: v for k, v in values.items() if v is not None})

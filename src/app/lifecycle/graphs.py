@@ -62,9 +62,9 @@ def provide_document_ingestion_graph(
     from app.features.documents.ingestion_graph import (  # noqa: PLC0415
         build_document_ingestion_graph,
     )
-    from app.shared.langchain_layer.models import build_chat_model  # noqa: PLC0415
+    from app.shared.langchain_layer.models import _build_chat_model  # noqa: PLC0415
 
-    llm: BaseChatModel = build_chat_model(
+    llm: BaseChatModel = _build_chat_model(
         model_name=settings.GEMINI_FLASH_MODEL,
         temperature=0.1,
         implementation="generic",
@@ -92,7 +92,7 @@ def provide_saul_graph(
     from app.shared.langchain_layer.agents.tools.idempotency import (  # noqa: PLC0415
         IdempotencyGuard,
     )
-    from app.shared.langchain_layer.models import build_chat_model  # noqa: PLC0415
+    from app.shared.langchain_layer.models import _build_chat_model  # noqa: PLC0415
     from app.shared.langgraph_layer.agent_saul import build_saul_graph  # noqa: PLC0415
     from app.shared.rag.graphiti.registry import build_tool_bundle  # noqa: PLC0415
 
@@ -103,8 +103,8 @@ def provide_saul_graph(
         db_engine=db_engine,
         idempotency=idempotency,
     )
-    pro_llm = build_chat_model(model_name=settings.GEMINI_PRO_MODEL)
-    flash_llm = build_chat_model(model_name=settings.GEMINI_FLASH_MODEL)
+    pro_llm = _build_chat_model(model_name=settings.GEMINI_PRO_MODEL)
+    flash_llm = _build_chat_model(model_name=settings.GEMINI_FLASH_MODEL)
     return build_saul_graph(
         checkpointer=checkpointer,
         pro_llm=pro_llm,

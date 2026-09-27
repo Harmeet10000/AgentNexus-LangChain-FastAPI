@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import (  # noqa: TC003 — Annotated, Any, Literal used at runtime by Pydantic/LangChain
     TYPE_CHECKING,
@@ -42,16 +43,31 @@ TAVILY_SEARCH_DESCRIPTION = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class TavilySearchBatch:
+    """Search responses plus the requests that were not successfully executed."""
+
+    responses: list[SearchResponse]
+    failed_queries: list[str]
+    omitted_queries: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _SummaryOutcome:
+    content: str | None
+    label: str
+
+
 @tool(description=TAVILY_SEARCH_DESCRIPTION)
 async def tavily_search(
     queries: list[str],
+    config: RunnableConfig,
     max_results: Annotated[int, InjectedToolArg] = 5,
     topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
-    config: RunnableConfig | None = None,
 ) -> str:
     """Fetch and summarize Tavily search results."""
     configurable: Configuration = Configuration.from_runnable_config(config)
-    search_results = await tavily_search_async(
+    search_batch = await tavily_search_async(
         search_queries=queries,
         max_results=max_results,
         topic=topic,
@@ -59,7 +75,7 @@ async def tavily_search(
         config=config,
     )
     unique_results: dict[str, dict[str, str | None]] = {}
-    for response in search_results:
+    for response in search_batch.responses:
         for result in response.results:
             if result.url not in unique_results:
                 unique_results[result.url] = {
@@ -68,6 +84,25 @@ async def tavily_search(
                     "raw_content": result.raw_content,
                     "query": response.query,
                 }
+
+    notices: list[str] = []
+    if search_batch.omitted_queries:
+        notices.append(
+            "Warning: query limit reached; these queries were not searched: "
+            + ", ".join(search_batch.omitted_queries)
+        )
+    if search_batch.failed_queries:
+        notices.append(
+            "Warning: these queries failed and have no results: "
+            + ", ".join(search_batch.failed_queries)
+        )
+    if not unique_results:
+        return "\n".join(
+            [
+                *notices,
+                "No valid search results found. Try narrower or different search queries.",
+            ]
+        )
 
     summarization_model = (
         _build_chat_model(
@@ -90,37 +125,44 @@ async def tavily_search(
 
     gate = get_research_execution_gate(config)
 
-    async def run_summary(result: dict[str, str | None]) -> str | None:
-        """Run one summary under the shared gate and preserve raw fallback content."""
+    async def run_summary(result: dict[str, str | None]) -> _SummaryOutcome:
+        """Run one summary and label fallbacks so raw text cannot masquerade as synthesis."""
         try:
-            return await gate.run_summary(lambda: summarize_result(result))
+            return _SummaryOutcome(
+                content=await gate.run_summary(lambda: summarize_result(result)),
+                label="SUMMARY",
+            )
         except (ExternalServiceException, LangChainException, TimeoutError) as exc:
             logger.bind(operation="summarize_webpage", error=str(exc)).warning(
                 "summarization_failed"
             )
             raw_content = result.get("raw_content")
-            return raw_content[: configurable.max_content_length] if raw_content else None
+            return _SummaryOutcome(
+                content=(raw_content[: configurable.max_content_length] if raw_content else None),
+                label="RAW CONTENT (summarization failed)",
+            )
 
     summaries = await gather_limited(
         (lambda result=result: run_summary(result) for result in unique_results.values()),
         limit=configurable.max_concurrent_summaries,
     )
-    if not unique_results:
-        return "No valid search results found. Try narrower or different search queries."
-
-    lines = ["Search results:"]
-    for index, ((url, result), summary) in enumerate(
+    lines = ["Search results:", *notices]
+    for index, ((url, result), summary_outcome) in enumerate(
         zip(unique_results.items(), summaries, strict=True),
         start=1,
     ):
-        content = result["content"] if summary is None else summary
+        content = summary_outcome.content
+        label = summary_outcome.label
+        if content is None:
+            content = result["content"] or "No summary or content excerpt available."
+            label = "CONTENT EXCERPT"
         lines.extend(
             [
                 "",
                 f"--- SOURCE {index}: {result['title']} ---",
                 f"URL: {url}",
                 "",
-                f"SUMMARY:\n{content}",
+                f"{label}:\n{content}",
             ]
         )
     return "\n".join(lines)
@@ -132,17 +174,20 @@ async def tavily_search_async(
     topic: Literal["general", "news", "finance"] = "general",
     include_raw_content: bool = True,
     config: RunnableConfig | None = None,
-) -> list[SearchResponse]:
+) -> TavilySearchBatch:
     """Execute bounded Tavily searches through the shared service client."""
     configurable = Configuration.from_runnable_config(config)
     http_client = _get_httpx_client_from_config(config)
-    normalized_queries = list(
+    requested_queries = list(
         dict.fromkeys(query.strip() for query in search_queries if query.strip())
-    )[: configurable.max_search_queries]
+    )
+    normalized_queries = requested_queries[: configurable.max_search_queries]
+    omitted_queries = requested_queries[configurable.max_search_queries :]
     search_log = logger.bind(
         component="open_deep_search",
         search_api="tavily",
         queries=len(normalized_queries),
+        omitted_queries=len(omitted_queries),
         max_results=max_results,
         topic=topic,
     )
@@ -170,14 +215,17 @@ async def tavily_search_async(
         limit=configurable.max_concurrent_search_requests,
     )
     responses: list[SearchResponse] = []
-    for result in results:
+    failed_queries: list[str] = []
+    for query, result in zip(normalized_queries, results, strict=True):
         if result is None:
+            failed_queries.append(query)
             continue
         if isinstance(result, Failure):
             error = result.failure()
-            search_log.bind(error_code=error.code.value).error(
+            search_log.bind(query=query, error_code=error.code.value).error(
                 "tavily_search_async_failed", error=error.message
             )
+            failed_queries.append(query)
             continue
         responses.append(result.unwrap())
     if normalized_queries and not responses:
@@ -186,7 +234,11 @@ async def tavily_search_async(
             detail="All Tavily queries failed",
         )
     search_log.info("tavily_search_async_complete")
-    return responses
+    return TavilySearchBatch(
+        responses=responses,
+        failed_queries=failed_queries,
+        omitted_queries=omitted_queries,
+    )
 
 
 def _get_httpx_client_from_config(config: RunnableConfig | None) -> httpx.AsyncClient | None:

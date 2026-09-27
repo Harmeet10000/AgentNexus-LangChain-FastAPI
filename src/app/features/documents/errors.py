@@ -17,6 +17,8 @@ class DocumentCode(StrEnum):
     STORAGE_UNAVAILABLE = "STORAGE_UNAVAILABLE"
     DATABASE_ERROR = "DATABASE_ERROR"
     EMBEDDING_WIDTH_MISMATCH = "EMBEDDING_WIDTH_MISMATCH"
+    GRAPH_WRITE_FAILED = "GRAPH_WRITE_FAILED"
+    INGESTION_CHECKPOINT_FAILED = "INGESTION_CHECKPOINT_FAILED"
 
 
 class DocumentNotFoundError(FeatureError):
@@ -67,6 +69,18 @@ class DocumentEmbeddingWidthError(FeatureError):
     retryable: ClassVar[bool] = False
 
 
+class DocumentGraphWriteError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.INFRASTRUCTURE
+    code: ClassVar[DocumentCode] = DocumentCode.GRAPH_WRITE_FAILED
+    retryable: ClassVar[bool] = True
+
+
+class DocumentIngestionCheckpointError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.INFRASTRUCTURE
+    code: ClassVar[DocumentCode] = DocumentCode.INGESTION_CHECKPOINT_FAILED
+    retryable: ClassVar[bool] = True
+
+
 type DocumentError = (
     DocumentNotFoundError
     | DocumentStatusNotFoundError
@@ -76,6 +90,8 @@ type DocumentError = (
     | DocumentStorageError
     | DocumentDatabaseError
     | DocumentEmbeddingWidthError
+    | DocumentGraphWriteError
+    | DocumentIngestionCheckpointError
 )
 type DocumentResult[T] = Result[T, DocumentError]
 
@@ -88,7 +104,13 @@ def document_error_to_http_status(error: DocumentError) -> int:
             return http_status_for_kind(error.kind)
         case DocumentValidationError():
             return http_status_for_kind(error.kind)
-        case DocumentStorageError() | DocumentDatabaseError() | DocumentEmbeddingWidthError():
+        case (
+            DocumentStorageError()
+            | DocumentDatabaseError()
+            | DocumentEmbeddingWidthError()
+            | DocumentGraphWriteError()
+            | DocumentIngestionCheckpointError()
+        ):
             return http_status_for_kind(error.kind, retryable=error.retryable)
         case _ as unreachable:
             assert_never(unreachable)

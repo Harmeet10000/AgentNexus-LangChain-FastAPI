@@ -92,13 +92,15 @@ async def test_tavily_queries_are_deduplicated_and_capped(monkeypatch: pytest.Mo
         }
     }
 
-    responses = await open_deep_search_utils.tavily_search_async(
+    batch = await open_deep_search_utils.tavily_search_async(
         [" first ", "", "second", "first", "third"],
         config=config,
     )
 
     assert calls == ["first", "second"]
-    assert len(responses) == 2
+    assert len(batch.responses) == 2
+    assert batch.failed_queries == []
+    assert batch.omitted_queries == ["third"]
 
 
 @pytest.mark.asyncio
@@ -112,12 +114,40 @@ async def test_tavily_search_preserves_successes_when_one_query_fails(
         return Success(SearchResponse(query=query, results=[], answer=None, total_results=0))
 
     monkeypatch.setattr(open_deep_search_utils, "search", fake_search)
-    responses = await open_deep_search_utils.tavily_search_async(
+    batch = await open_deep_search_utils.tavily_search_async(
         ["bad", "good"],
         config={"configurable": {"max_concurrent_search_requests": 2}},
     )
 
-    assert [response.query for response in responses] == ["good"]
+    assert [response.query for response in batch.responses] == ["good"]
+    assert batch.failed_queries == ["bad"]
+
+
+@pytest.mark.asyncio
+async def test_tavily_tool_discloses_omitted_and_failed_queries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_search(query: str, **kwargs: object):
+        _ = kwargs
+        if query == "bad":
+            return Failure(TavilyExternalError(message="upstream failure"))
+        return Success(SearchResponse(query=query, results=[], answer=None, total_results=0))
+
+    monkeypatch.setattr(open_deep_search_utils, "search", fake_search)
+    result = await open_deep_search_utils.tavily_search.ainvoke(
+        {"queries": ["bad", "good", "omitted"]},
+        config={
+            "configurable": {
+                "max_search_queries": 2,
+                "max_concurrent_search_requests": 2,
+            }
+        },
+    )
+
+    assert "bad" in result
+    assert "failed" in result
+    assert "omitted" in result
+    assert "not searched" in result
 
 
 @pytest.mark.asyncio
@@ -185,6 +215,48 @@ async def test_researcher_tools_caps_recognized_calls_per_turn(
 
 
 @pytest.mark.asyncio
+async def test_overflowed_research_complete_does_not_end_research(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeTool:
+        name = "tavily_search"
+
+        async def ainvoke(self, args: dict[str, object], config: object) -> str:
+            _ = (args, config)
+            return "observed"
+
+    class CompleteTool(FakeTool):
+        name = "ResearchComplete"
+
+    async def fake_get_all_tools(config: object) -> list[FakeTool]:
+        _ = config
+        return [FakeTool(), CompleteTool()]
+
+    monkeypatch.setattr(open_deep_search_graph, "get_all_tools", fake_get_all_tools)
+    state = {
+        "researcher_messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "tavily_search", "args": {}, "id": "call-1"},
+                    {"name": "ResearchComplete", "args": {}, "id": "call-2"},
+                ],
+            )
+        ]
+    }
+
+    command = await researcher_tools(
+        state,
+        {"configurable": {"max_tool_calls_per_turn": 1}},
+    )
+
+    assert command.goto == "researcher"
+    assert command.update["researcher_messages"][1].content == (
+        "Error: maximum tool calls per turn exceeded. Retry with 1 or fewer tool calls."
+    )
+
+
+@pytest.mark.asyncio
 async def test_supervisor_tools_cancels_researcher_siblings_after_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -196,7 +268,8 @@ async def test_supervisor_tools_cancels_researcher_siblings_after_failure(
             _ = config
             if state["research_topic"] == "bad":
                 await asyncio.sleep(0)
-                raise RuntimeError("subgraph failed")
+                message = "subgraph failed"
+                raise RuntimeError(message)
             try:
                 await asyncio.sleep(60)
             finally:

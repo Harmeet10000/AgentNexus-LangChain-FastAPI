@@ -55,28 +55,31 @@ async def run_retrieval_eval(
     queries: Sequence[GoldenQuery],
     retrieve: AsyncRetriever | Callable[[GoldenQuery], Awaitable[Sequence[str]]],
     judge_provider: object | None = None,
+    cutoff: int = 10,
 ) -> RetrievalEvaluation:
     """Retrieve and score queries with deterministic binary-relevance metrics."""
+    if cutoff <= 0:
+        message = "Evaluation cutoff must be positive"
+        raise ValueError(message)
     # The provider is an explicit attachment seam for the later judged layer. Retrieval-only
     # evaluation deliberately never invokes or inspects it.
     _ = judge_provider
     rows: list[RetrievalQueryResult] = []
     for query in queries:
         retrieved = list(await retrieve(query))
-        k = max(len(retrieved), 1)
         expected = set(query.expected_chunk_ids)
         metrics = RetrievalMetrics(
-            recall_at_k=recall_at_k(retrieved, expected, k),
-            reciprocal_rank=reciprocal_rank(retrieved, expected, k),
-            ndcg_at_k=ndcg_at_k(retrieved, expected, k),
-            precision_at_k=precision_at_k(retrieved, expected, k),
+            recall_at_k=recall_at_k(retrieved, expected, cutoff),
+            reciprocal_rank=reciprocal_rank(retrieved, expected, cutoff),
+            ndcg_at_k=ndcg_at_k(retrieved, expected, cutoff),
+            precision_at_k=precision_at_k(retrieved, expected, cutoff),
         )
         rows.append(
             RetrievalQueryResult(
                 query=query.query,
                 expected_chunk_ids=query.expected_chunk_ids,
                 retrieved_chunk_ids=retrieved,
-                k=k,
+                k=cutoff,
                 metrics=metrics,
             )
         )

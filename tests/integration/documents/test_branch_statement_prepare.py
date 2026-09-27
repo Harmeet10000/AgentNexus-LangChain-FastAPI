@@ -11,11 +11,15 @@ index name in the deployed schema.
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.config import get_settings
 from app.connections.postgres import get_database_url
+from app.features.documents.model import UnifiedChunk, UnifiedDocument
 from app.features.documents.repository import (
     DocumentRepository,
     build_search_filter_params,
@@ -91,4 +95,94 @@ async def test_deployed_schema_has_unique_retrieval_index_names() -> None:
                 {"name": index},
             )
             assert count.scalar_one() == 1, f"duplicate or missing index: {index}"
+        await session.rollback()
+
+
+async def test_exact_phrase_executes_case_insensitively_with_literal_wildcards() -> None:
+    factory = await _session_factory()
+    async with factory() as session:
+        await session.execute(sa_text("SET search_path TO scratch_13, public"))
+        user_id = f"phrase-probe-{uuid4().hex}"
+        document_id = uuid4()
+        matching_id = uuid4()
+        session.add(
+            UnifiedDocument(
+                id=document_id,
+                user_id=user_id,
+                title="Phrase matching probe",
+                source_uri=None,
+                object_uri=f"eval://{document_id}",
+                content_hash=uuid4().hex,
+                document_kind="generic",
+                status="completed",
+                jurisdiction=None,
+                contract_type=None,
+                parties=[],
+                metadata_={},
+            )
+        )
+        width = get_settings().EMBEDDING_DIMENSION
+        session.add_all(
+            [
+                UnifiedChunk(
+                    id=matching_id,
+                    document_id=document_id,
+                    user_id=user_id,
+                    document_version=1,
+                    chunk_index=0,
+                    chunk_kind="generic",
+                    content="The clause gives a 100% Guarantee under clause_2.",
+                    preamble="",
+                    locus=None,
+                    clause_type=None,
+                    page_no=1,
+                    embedding=[0.01] * width,
+                    metadata_={},
+                    custom_metadata={},
+                    quality_warnings=[],
+                    graphiti_episode_id=None,
+                    graphiti_verified=False,
+                ),
+                UnifiedChunk(
+                    document_id=document_id,
+                    user_id=user_id,
+                    document_version=1,
+                    chunk_index=1,
+                    chunk_kind="generic",
+                    content="The clause gives a 100XX guarantee under clauseA2.",
+                    preamble="",
+                    locus=None,
+                    clause_type=None,
+                    page_no=1,
+                    embedding=[0.01] * width,
+                    metadata_={},
+                    custom_metadata={},
+                    quality_warnings=[],
+                    graphiti_episode_id=None,
+                    graphiti_verified=False,
+                ),
+            ]
+        )
+        await session.flush()
+        repo = DocumentRepository(session)
+
+        result = await repo.bm25_search(
+            user_id=user_id,
+            query="guarantee",
+            candidate_limit=10,
+            filter_params=build_search_filter_params(metadata_filter={}),
+            exact_phrase="100% guarantee under clause_2",
+        )
+
+        from returns.result import Success
+
+        assert isinstance(result, Success), result
+        assert [row["chunk_id"] for row in result.unwrap()] == [str(matching_id)]
+
+        hydrated = await repo.fetch_chunks_by_ids(
+            [str(matching_id)],
+            exact_phrase="100% guarantee under clause_2",
+        )
+        assert isinstance(hydrated, Success), hydrated
+        assert set(hydrated.unwrap()) == {str(matching_id)}
         await session.rollback()

@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from returns.result import Failure, Success
+from sqlalchemy import text
 
 from app.config import get_settings
 from app.connections.celery_task_names import DOCUMENTS_INGEST
@@ -58,6 +59,8 @@ from .dto import (
     UnifiedSearchResponse,
 )
 from .errors import (
+    DocumentGraphWriteError,
+    DocumentIngestionCheckpointError,
     DocumentNotFoundError,
     DocumentStorageError,
     DocumentValidationError,
@@ -81,7 +84,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langgraph.graph.state import CompiledStateGraph
     from redis.asyncio import Redis
-    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, async_sessionmaker
     from ty_extensions import Unknown
 
     from app.config.settings import Settings
@@ -267,13 +270,29 @@ async def retrieve_fused(
     results = await _run_branches(repo=repo, branch_input=branch_input)
     if isinstance(results, Failure):
         return Failure(results.failure())
-    fused = reciprocal_rank_fusion(*results.unwrap(), k=RRF_K, limit=limit, weights=weights)
+    row_sets = results.unwrap()
+    # Phrase matches may rank below many vector/trigram-only candidates. Preserve
+    # every candidate already bounded by the branch limits until the phrase
+    # constraint has been applied; a second pre-filter cutoff can lose valid hits.
+    fusion_limit = sum(len(row_set) for row_set in row_sets) if exact_phrase else limit
+    fused = reciprocal_rank_fusion(*row_sets, k=RRF_K, limit=fusion_limit, weights=weights)
     if not fused:
         return Success(([], {}))
-    chunk_lookup_result = await repo.fetch_chunks_by_ids([item.chunk_id for item in fused])
+    chunk_ids = [item.chunk_id for item in fused]
+    chunk_lookup_result = (
+        await repo.fetch_chunks_by_ids(chunk_ids, exact_phrase=exact_phrase)
+        if exact_phrase
+        else await repo.fetch_chunks_by_ids(chunk_ids)
+    )
     if isinstance(chunk_lookup_result, Failure):
         return Failure(chunk_lookup_result.failure())
     lookup: dict[str, dict[str, Any]] = chunk_lookup_result.unwrap()
+    if exact_phrase:
+        # Hydration applies the same escaped PostgreSQL ILIKE predicate used by
+        # the BM25 leg, so vector/trigram candidates cannot diverge on Unicode
+        # or wildcard semantics.
+        fused = [item for item in fused if item.chunk_id in lookup][:limit]
+        lookup = {item.chunk_id: lookup[item.chunk_id] for item in fused if item.chunk_id in lookup}
     return Success((fused, lookup))
 
 
@@ -513,7 +532,8 @@ class DocumentQueryService:
             tree = row.get("structural_tree")
             if not isinstance(tree, dict):
                 continue
-            paths.extend(navigate_tree(tree, query, limit=limit))
+            document_id = str(row.get("document_id") or "")
+            paths.extend((document_id, *path) for path in navigate_tree(tree, query, limit=limit))
             if len(paths) >= limit:
                 break
         return Success(paths[:limit])
@@ -885,7 +905,7 @@ async def _load_document_bytes(
 
 
 @trace_layer("service")
-async def process_document_ingestion(
+async def process_document_ingestion(  # noqa: PLR0912, PLR0914 — staged workflow
     *,
     job: IngestionJob,
     runtime: IngestionRuntime,
@@ -914,7 +934,7 @@ async def process_document_ingestion(
     )
     status_result = await runtime.repo.update_document_status(
         document_id=job.document_id,
-        status="parsed",
+        status="failed" if _is_graph_write_failure(extraction_outcome) else "parsed",
         title=parsed.title,
         document_kind=classified.document_kind,
         jurisdiction=(legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction),
@@ -933,6 +953,19 @@ async def process_document_ingestion(
     )
     if isinstance(status_result, Failure):
         return Failure(status_result.failure())
+    if isinstance(extraction_outcome, ExtractionFailed) and _is_graph_write_failure(
+        extraction_outcome
+    ):
+        return Failure(
+            DocumentGraphWriteError(
+                message=extraction_outcome.message,
+                details={"document_id": job.document_id},
+                source="graphiti",
+            )
+        )
+    checkpoint_result = await _checkpoint_ingestion_transaction(runtime)
+    if isinstance(checkpoint_result, Failure):
+        return Failure(checkpoint_result.failure())
     chunks, segmentation_warnings = await segment_chunks(parsed=parsed, classified=classified)
     if legal.metadata is not None:
         chunks = enrich_legal_chunks(
@@ -962,6 +995,9 @@ async def process_document_ingestion(
     )
     if isinstance(status_result, Failure):
         return Failure(status_result.failure())
+    checkpoint_result = await _checkpoint_ingestion_transaction(runtime)
+    if isinstance(checkpoint_result, Failure):
+        return Failure(checkpoint_result.failure())
     if classified.graphiti_required:
         await _write_contract_events(runtime.graphiti, legal.metadata, job.document_id)
         verify_result = await _verify_legal_chunks(
@@ -998,6 +1034,25 @@ async def process_document_ingestion(
             "document_kind": classified.document_kind,
         }
     )
+
+
+async def _checkpoint_ingestion_transaction(runtime: IngestionRuntime) -> DocumentResult[None]:
+    """Commit database work before entering another potentially slow external phase."""
+    checkpoint = getattr(runtime, "transaction_checkpoint", None)
+    if checkpoint is None:
+        return Success(None)
+    try:
+        await checkpoint()
+    except Exception as exc:  # noqa: BLE001 — injected checkpoint exposes driver errors
+        exc.add_note("operation=document_ingestion_checkpoint")
+        return Failure(
+            DocumentIngestionCheckpointError(
+                message="Document ingestion database checkpoint failed",
+                details={"error": str(exc)},
+                source="postgres",
+            )
+        )
+    return Success(None)
 
 
 async def _prepare_legal_metadata(
@@ -1055,20 +1110,91 @@ async def run_document_ingestion_task(
     content_type: str,
     object_uri: str,
     graph: CompiledStateGraph[Any],
+    engine: AsyncEngine,
     session_local: async_sessionmaker[Any],
+    idempotency: IdempotencyGuard,
 ) -> dict[str, object]:
-    async with session_local() as session, session.begin():
-        repo = DocumentRepository(session)
-        return await graph.ainvoke(
-            {
-                "document_id": document_id,
-                "user_id": user_id,
-                "filename": filename,
-                "content_type": content_type,
-                "object_uri": object_uri,
-            },
-            {"configurable": {"document_repository": repo}},
+    lock_key = _document_ingestion_lock_key(user_id, document_id)
+    async with engine.connect() as lock_connection:
+        acquired = await lock_connection.scalar(
+            text("SELECT pg_try_advisory_lock(:lock_key)"),
+            {"lock_key": lock_key},
         )
+        await lock_connection.commit()
+        if not acquired:
+            return {"status": "skipped", "document_id": document_id}
+        primary_error: BaseException | None = None
+        try:
+            # Reuse the checked-out connection that owns the session-level lock.
+            # Opening a second connection here deadlocks against a supported
+            # pool_size=1/max_overflow=0 deployment before ingestion can start.
+            async with session_local(bind=lock_connection) as session:
+                repo = DocumentRepository(session)
+                job_idempotency = idempotency.for_session(session)
+                result = await graph.ainvoke(
+                    {
+                        "document_id": document_id,
+                        "user_id": user_id,
+                        "filename": filename,
+                        "content_type": content_type,
+                        "object_uri": object_uri,
+                    },
+                    {
+                        "configurable": {
+                            "document_repository": repo,
+                            "document_idempotency": job_idempotency,
+                        }
+                    },
+                )
+                await session.commit()
+                return result
+        except BaseException as exc:
+            primary_error = exc
+            raise
+        finally:
+            await _release_document_ingestion_lock(
+                connection=lock_connection,
+                lock_key=lock_key,
+                primary_error=primary_error,
+            )
+
+
+async def _release_document_ingestion_lock(
+    *,
+    connection: AsyncConnection,
+    lock_key: int,
+    primary_error: BaseException | None,
+) -> None:
+    """Release a session lock or discard its connection without masking failures."""
+    try:
+        released = await connection.scalar(
+            text("SELECT pg_advisory_unlock(:lock_key)"),
+            {"lock_key": lock_key},
+        )
+        await connection.commit()
+        if not released:
+            message = "Document ingestion advisory lock release failed"
+            raise RuntimeError(message)  # noqa: TRY301 — handled by the invalidation path below
+    except BaseException as cleanup_error:
+        try:
+            await connection.invalidate()
+        except BaseException as invalidation_error:  # noqa: BLE001 — cleanup must not mask primary
+            cleanup_error.add_note(
+                f"Advisory-lock connection invalidation also failed: {invalidation_error!r}"
+            )
+        if primary_error is None:
+            raise
+        primary_error.add_note(f"Advisory-lock cleanup failed: {cleanup_error!r}")
+        logger.bind(
+            error_type=type(cleanup_error).__name__,
+            lock_key=lock_key,
+        ).exception("Document ingestion advisory-lock cleanup failed")
+
+
+def _document_ingestion_lock_key(user_id: str, document_id: str) -> int:
+    """Build a stable signed-bigint key for PostgreSQL advisory locking."""
+    identity = f"{user_id}\0{document_id}".encode()
+    return int.from_bytes(hashlib.sha256(identity).digest()[:8], byteorder="big", signed=True)
 
 
 async def _embed_chunks(
@@ -1132,6 +1258,13 @@ def _extraction_metadata(
     }
 
 
+def _is_graph_write_failure(outcome: ExtractionSucceeded | ExtractionFailed) -> bool:
+    return (
+        isinstance(outcome, ExtractionFailed)
+        and outcome.code is ExtractionFailureCode.GRAPH_WRITE_ERROR
+    )
+
+
 async def _extract_document_knowledge(
     *,
     runtime: IngestionRuntime,
@@ -1149,7 +1282,7 @@ async def _extract_document_knowledge(
         ExtractionRequest(text=markdown, prompt_description=_KNOWLEDGE_EXTRACTION_PROMPT)
     )
     if isinstance(outcome, ExtractionSucceeded):
-        await _write_extracted_clause_episodes(
+        graph_write_succeeded = await _write_extracted_clause_episodes(
             outcome=outcome,
             graph_writer=runtime.graph_writer,
             idempotency=runtime.idempotency,
@@ -1158,6 +1291,11 @@ async def _extract_document_knowledge(
             jurisdiction=jurisdiction,
             document_type=document_type,
         )
+        if not graph_write_succeeded:
+            return ExtractionFailed(
+                code=ExtractionFailureCode.GRAPH_WRITE_ERROR,
+                message="One or more extracted clauses could not be persisted to Graphiti",
+            )
     return outcome
 
 
@@ -1170,10 +1308,8 @@ async def _write_extracted_clause_episodes(
     user_id: str,
     jurisdiction: str | None,
     document_type: str,
-) -> None:
+) -> bool:
     """Map grounded clause extractions into the existing canonical writer."""
-    if graph_writer is None or idempotency is None:
-        return
     from app.shared.langgraph_layer.agent_saul.state import ClauseSegment, ClauseType
     from app.shared.rag.graphiti.write_clause_episodes import write_clause_episodes_to_graphiti
     from app.shared.rag.langextract.langextract_to_graph import GraphIngestionContext
@@ -1207,8 +1343,16 @@ async def _write_extracted_clause_episodes(
                 )
             )
     if not segments:
-        return
-    await write_clause_episodes_to_graphiti(
+        return True
+    if graph_writer is None and idempotency is None:
+        return True
+    if graph_writer is None or idempotency is None:
+        logger.bind(
+            graph_writer_configured=graph_writer is not None,
+            idempotency_configured=idempotency is not None,
+        ).error("graph_clause_writer_dependencies_incomplete")
+        return False
+    clause_results, relationship_results = await write_clause_episodes_to_graphiti(
         segments,
         [],
         GraphIngestionContext(
@@ -1221,6 +1365,7 @@ async def _write_extracted_clause_episodes(
         graphiti_service=cast("GraphitiService", graph_writer),
         idempotency=cast("IdempotencyGuard", idempotency),
     )
+    return all(result.success for result in [*clause_results, *relationship_results])
 
 
 async def _verify_legal_chunks(

@@ -727,7 +727,10 @@ class DocumentRepository:
 
     @trace_layer("repository")
     async def fetch_chunks_by_ids(
-        self, chunk_ids: Sequence[str]
+        self,
+        chunk_ids: Sequence[str],
+        *,
+        exact_phrase: str | None = None,
     ) -> DocumentResult[dict[str, dict[str, Any]]]:
         if not chunk_ids:
             return Success({})
@@ -750,9 +753,21 @@ class DocumentRepository:
             FROM chunks AS c
             JOIN documents AS d ON d.id = c.document_id
             WHERE c.id = ANY(CAST(:chunk_ids AS uuid[]))
+              AND (
+                CAST(:phrase_pattern AS text) IS NULL
+                OR c.search_text ILIKE CAST(:phrase_pattern AS text) ESCAPE '\\'
+              )
             """
             )
-            result = await self.session.execute(statement, params={"chunk_ids": list(chunk_ids)})
+            result = await self.session.execute(
+                statement,
+                params={
+                    "chunk_ids": list(chunk_ids),
+                    "phrase_pattern": (
+                        _phrase_like_pattern(exact_phrase) if exact_phrase else None
+                    ),
+                },
+            )
             return Success(
                 {str(object=row["chunk_id"]): dict(row) for row in result.mappings().all()}
             )
