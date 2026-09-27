@@ -1097,7 +1097,10 @@ async def run_document_ingestion_task(
         if not acquired:
             return {"status": "skipped", "document_id": document_id}
         try:
-            async with session_local() as session, session.begin():
+            # Reuse the checked-out connection that owns the session-level lock.
+            # Opening a second connection here deadlocks against a supported
+            # pool_size=1/max_overflow=0 deployment before ingestion can start.
+            async with session_local(bind=lock_connection) as session, session.begin():
                 repo = DocumentRepository(session)
                 return await graph.ainvoke(
                     {
