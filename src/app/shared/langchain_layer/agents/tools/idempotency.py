@@ -29,6 +29,10 @@ _POSTGRES_TTL_DAYS = 30
 _REDIS_KEY_PREFIX = "idempotency:v2:"
 
 
+class IdempotencyPersistenceError(RuntimeError):
+    """Durable idempotency state could not be read or written."""
+
+
 class ToolResult(BaseModel):
     """Normalized tool output envelope."""
 
@@ -64,9 +68,16 @@ class ToolResult(BaseModel):
 class IdempotencyGuard:
     """Postgres-backed idempotency guard with an optional Redis hot path."""
 
-    def __init__(self, redis: Redis | None, db_engine: AsyncEngine) -> None:
+    def __init__(
+        self,
+        redis: Redis | None,
+        db_engine: AsyncEngine,
+        *,
+        require_durable: bool = False,
+    ) -> None:
         self._redis = redis
         self._db_engine = db_engine
+        self._require_durable = require_durable
         self._log = logger.bind(component="idempotency_guard")
 
     @staticmethod
@@ -196,11 +207,14 @@ class IdempotencyGuard:
         try:
             async with self._db_engine.connect() as connection:
                 row = (await connection.execute(query, {"key": key})).fetchone()
-        except Exception as exc:  # noqa: BLE001 — Postgres read, unknown driver exceptions possible
+        except Exception as exc:
             exc.add_note(f"key={key[:16]}, operation=postgres_read")
             self._log.bind(error=str(exc), key_prefix=key[:16]).warning(
                 "Idempotency Postgres read failed."
             )
+            if self._require_durable:
+                message = "Durable idempotency read failed"
+                raise IdempotencyPersistenceError(message) from exc
             return None
 
         if row is None:
@@ -241,13 +255,16 @@ class IdempotencyGuard:
                         "expires_at": expires_at,
                     },
                 )
-        except Exception as exc:  # noqa: BLE001 — Postgres write, unknown driver exceptions possible
+        except Exception as exc:
             exc.add_note(f"key={key[:16]}, tool={tool_name}, operation=postgres_write")
             self._log.bind(
                 error=str(exc),
                 key_prefix=key[:16],
                 tool_name=tool_name,
             ).error("Idempotency Postgres write failed.")
+            if self._require_durable:
+                message = "Durable idempotency write failed"
+                raise IdempotencyPersistenceError(message) from exc
 
 
 def _redis_key(key: str) -> str:

@@ -280,6 +280,44 @@ async def test_clause_write_failure_is_reported_to_ingestion() -> None:
     assert result is False
 
 
+async def test_durable_idempotency_failure_is_reported_after_graph_write() -> None:
+    extraction = lx.data.Extraction(
+        extraction_class="payment",
+        extraction_text="Payment is due in thirty days.",
+        char_interval=lx.data.CharInterval(start_pos=10, end_pos=40),
+        attributes={"clause_id": "4.1"},
+    )
+    outcome = ExtractionSucceeded(
+        documents=(lx.data.AnnotatedDocument(text="x" * 50, extractions=[extraction]),)
+    )
+
+    class Writer:
+        async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
+            del clause_text, metadata
+            return "episode-1"
+
+    class SaveFailingIdempotency:
+        async def get(self, key: str) -> None:
+            del key
+
+        async def set(self, key: str, result: object, **kwargs: object) -> None:
+            del key, result, kwargs
+            message = "durable idempotency write failed"
+            raise RuntimeError(message)
+
+    result = await _write_extracted_clause_episodes(
+        outcome=outcome,
+        graph_writer=Writer(),
+        idempotency=SaveFailingIdempotency(),
+        document_id="doc-1",
+        user_id="tenant-1",
+        jurisdiction="India",
+        document_type="contract",
+    )
+
+    assert result is False
+
+
 async def test_partially_configured_graph_writer_dependencies_fail_closed() -> None:
     extraction = lx.data.Extraction(
         extraction_class="payment",

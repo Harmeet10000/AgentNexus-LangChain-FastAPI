@@ -12,7 +12,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard, ToolResult
+from app.shared.langchain_layer.agents.tools.idempotency import (
+    IdempotencyGuard,
+    IdempotencyPersistenceError,
+    ToolResult,
+)
 
 
 def test_make_key_is_keyword_only_with_structural_and_content() -> None:
@@ -89,3 +93,27 @@ async def test_postgres_idempotency_remains_available_without_redis(
 
     get_from_postgres.assert_awaited_once_with("key-1")
     set_in_postgres.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_required_durable_idempotency_fails_closed_on_postgres_write() -> None:
+    class FailingEngine:
+        def begin(self) -> object:
+            message = "database unavailable"
+            raise RuntimeError(message)
+
+    guard = IdempotencyGuard(
+        redis=None,
+        db_engine=FailingEngine(),  # type: ignore[arg-type]
+        require_durable=True,
+    )
+
+    with pytest.raises(IdempotencyPersistenceError, match="write failed"):
+        await guard.set(
+            "key-1",
+            ToolResult.ok({"episode_id": "episode-1"}),
+            tool_name="write_clause_episode",
+            user_id="user-1",
+            thread_id="thread-1",
+            step_id="step-1",
+        )

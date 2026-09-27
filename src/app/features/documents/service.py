@@ -83,7 +83,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langgraph.graph.state import CompiledStateGraph
     from redis.asyncio import Redis
-    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
     from ty_extensions import Unknown
 
     from app.config.settings import Settings
@@ -1084,24 +1084,37 @@ async def run_document_ingestion_task(
     content_type: str,
     object_uri: str,
     graph: CompiledStateGraph[Any],
+    engine: AsyncEngine,
     session_local: async_sessionmaker[Any],
 ) -> dict[str, object]:
-    async with session_local() as session, session.begin():
-        await session.execute(
-            text("SELECT pg_advisory_xact_lock(:lock_key)"),
-            {"lock_key": _document_ingestion_lock_key(user_id, document_id)},
+    lock_key = _document_ingestion_lock_key(user_id, document_id)
+    async with engine.connect() as lock_connection:
+        acquired = await lock_connection.scalar(
+            text("SELECT pg_try_advisory_lock(:lock_key)"),
+            {"lock_key": lock_key},
         )
-        repo = DocumentRepository(session)
-        return await graph.ainvoke(
-            {
-                "document_id": document_id,
-                "user_id": user_id,
-                "filename": filename,
-                "content_type": content_type,
-                "object_uri": object_uri,
-            },
-            {"configurable": {"document_repository": repo}},
-        )
+        await lock_connection.commit()
+        if not acquired:
+            return {"status": "skipped", "document_id": document_id}
+        try:
+            async with session_local() as session, session.begin():
+                repo = DocumentRepository(session)
+                return await graph.ainvoke(
+                    {
+                        "document_id": document_id,
+                        "user_id": user_id,
+                        "filename": filename,
+                        "content_type": content_type,
+                        "object_uri": object_uri,
+                    },
+                    {"configurable": {"document_repository": repo}},
+                )
+        finally:
+            await lock_connection.execute(
+                text("SELECT pg_advisory_unlock(:lock_key)"),
+                {"lock_key": lock_key},
+            )
+            await lock_connection.commit()
 
 
 def _document_ingestion_lock_key(user_id: str, document_id: str) -> int:

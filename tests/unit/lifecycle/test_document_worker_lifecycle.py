@@ -149,7 +149,7 @@ async def test_release_attempts_every_resource_after_close_failures(
 def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    counts = {"compile": 0, "invoke": 0, "lock": 0}
+    counts = {"commit": 0, "compile": 0, "invoke": 0, "lock": 0, "unlock": 0}
 
     class Transaction:
         async def __aenter__(self) -> None:
@@ -163,11 +163,6 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
             self.session = MagicMock(spec=AsyncSession)
             self.session.begin.return_value = Transaction()
 
-            async def execute(*_args: object, **_kwargs: object) -> None:
-                counts["lock"] += 1
-
-            self.session.execute.side_effect = execute
-
         async def __aenter__(self) -> AsyncSession:
             return self.session
 
@@ -177,12 +172,30 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
     class Graph:
         async def ainvoke(self, _state: object, config: dict[str, object]) -> dict[str, object]:
             assert counts["lock"] == counts["invoke"] + 1
+            assert counts["commit"] == counts["invoke"] * 2 + 1
             counts["invoke"] += 1
             configurable = cast("dict[str, object]", config["configurable"])
             assert "document_repository" in configurable
             return {"status": "completed"}
 
-    engine = SimpleNamespace(dispose=AsyncMock())
+    class LockConnection:
+        async def __aenter__(self) -> LockConnection:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def scalar(self, *_args: object, **_kwargs: object) -> bool:
+            counts["lock"] += 1
+            return True
+
+        async def execute(self, *_args: object, **_kwargs: object) -> None:
+            counts["unlock"] += 1
+
+        async def commit(self) -> None:
+            counts["commit"] += 1
+
+    engine = SimpleNamespace(connect=LockConnection, dispose=AsyncMock())
     graphiti = object()
     compiled_graph = Graph()
 
@@ -224,12 +237,13 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
                 content_type="text/plain",
                 object_uri="s3://bucket/fixture.txt",
                 graph=resources.ingestion_graph,
+                engine=resources.engine,
                 session_local=resources.session_local,
             )
         )
         assert result == {"status": "completed"}
 
-    assert counts == {"compile": 1, "invoke": 2, "lock": 2}
+    assert counts == {"commit": 4, "compile": 1, "invoke": 2, "lock": 2, "unlock": 2}
 
 
 def test_document_ingestion_advisory_lock_key_is_stable_and_tenant_scoped() -> None:
@@ -238,3 +252,46 @@ def test_document_ingestion_advisory_lock_key_is_stable_and_tenant_scoped() -> N
     assert first == _document_ingestion_lock_key("user-1", "doc-1")
     assert first != _document_ingestion_lock_key("user-2", "doc-1")
     assert -(2**63) <= first < 2**63
+
+
+@pytest.mark.asyncio
+async def test_busy_document_advisory_lock_skips_without_waiting_or_ingesting() -> None:
+    commits = 0
+
+    class BusyConnection:
+        async def __aenter__(self) -> BusyConnection:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def scalar(self, *_args: object, **_kwargs: object) -> bool:
+            return False
+
+        async def commit(self) -> None:
+            nonlocal commits
+            commits += 1
+
+        async def execute(self, *_args: object, **_kwargs: object) -> None:
+            pytest.fail("A lock not owned by this task must not be unlocked")
+
+    class Graph:
+        async def ainvoke(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            pytest.fail("A duplicate delivery must not enter the ingestion graph")
+
+    def session_local() -> object:
+        pytest.fail("A duplicate delivery must not open an ingestion transaction")
+
+    result = await run_document_ingestion_task(
+        document_id="doc-1",
+        user_id="user-1",
+        filename="fixture.txt",
+        content_type="text/plain",
+        object_uri="s3://bucket/fixture.txt",
+        graph=cast("Any", Graph()),
+        engine=cast("Any", SimpleNamespace(connect=BusyConnection)),
+        session_local=cast("Any", session_local),
+    )
+
+    assert result == {"status": "skipped", "document_id": "doc-1"}
+    assert commits == 1

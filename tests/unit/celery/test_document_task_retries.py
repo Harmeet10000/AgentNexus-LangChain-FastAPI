@@ -27,7 +27,7 @@ def test_document_ingestion_runs_without_the_optional_redis_lock(
     del real_celery
     document_tasks = importlib.import_module("tasks.document_tasks")
     task = cast("Any", document_tasks.ingest_document)
-    resources = SimpleNamespace(ingestion_graph=object(), session_local=object())
+    resources = SimpleNamespace(engine=object(), ingestion_graph=object(), session_local=object())
     monkeypatch.setattr(document_tasks, "_redis_task_lock_enabled", lambda: False)
     monkeypatch.setattr(document_tasks, "get_document_worker_resources", lambda: resources)
     monkeypatch.setattr(
