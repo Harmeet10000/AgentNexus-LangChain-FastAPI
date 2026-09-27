@@ -220,10 +220,16 @@ class IdempotencyGuard:
         try:
             if self._db_session is not None:
                 row = (await self._db_session.execute(query, {"key": key})).fetchone()
+                await self._db_session.commit()
             else:
                 async with self._db_engine.connect() as connection:
                     row = (await connection.execute(query, {"key": key})).fetchone()
         except Exception as exc:
+            if self._db_session is not None:
+                try:
+                    await self._db_session.rollback()
+                except Exception as rollback_error:  # noqa: BLE001 — preserve persistence error
+                    exc.add_note(f"Idempotency read rollback also failed: {rollback_error!r}")
             exc.add_note(f"key={key[:16]}, operation=postgres_read")
             self._log.bind(error=str(exc), key_prefix=key[:16]).warning(
                 "Idempotency Postgres read failed."
@@ -269,6 +275,7 @@ class IdempotencyGuard:
             }
             if self._db_session is not None:
                 await self._db_session.execute(query, parameters)
+                await self._db_session.commit()
             else:
                 async with self._db_engine.begin() as connection:
                     await connection.execute(
@@ -276,6 +283,11 @@ class IdempotencyGuard:
                         parameters,
                     )
         except Exception as exc:
+            if self._db_session is not None:
+                try:
+                    await self._db_session.rollback()
+                except Exception as rollback_error:  # noqa: BLE001 — preserve persistence error
+                    exc.add_note(f"Idempotency write rollback also failed: {rollback_error!r}")
             exc.add_note(f"key={key[:16]}, tool={tool_name}, operation=postgres_write")
             self._log.bind(
                 error=str(exc),

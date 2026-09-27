@@ -962,6 +962,7 @@ async def process_document_ingestion(
                 source="graphiti",
             )
         )
+    await _checkpoint_ingestion_transaction(runtime)
     chunks, segmentation_warnings = await segment_chunks(parsed=parsed, classified=classified)
     if legal.metadata is not None:
         chunks = enrich_legal_chunks(
@@ -991,6 +992,7 @@ async def process_document_ingestion(
     )
     if isinstance(status_result, Failure):
         return Failure(status_result.failure())
+    await _checkpoint_ingestion_transaction(runtime)
     if classified.graphiti_required:
         await _write_contract_events(runtime.graphiti, legal.metadata, job.document_id)
         verify_result = await _verify_legal_chunks(
@@ -1027,6 +1029,13 @@ async def process_document_ingestion(
             "document_kind": classified.document_kind,
         }
     )
+
+
+async def _checkpoint_ingestion_transaction(runtime: IngestionRuntime) -> None:
+    """Commit database work before entering another potentially slow external phase."""
+    checkpoint = getattr(runtime, "transaction_checkpoint", None)
+    if checkpoint is not None:
+        await checkpoint()
 
 
 async def _prepare_legal_metadata(
@@ -1102,10 +1111,10 @@ async def run_document_ingestion_task(
             # Reuse the checked-out connection that owns the session-level lock.
             # Opening a second connection here deadlocks against a supported
             # pool_size=1/max_overflow=0 deployment before ingestion can start.
-            async with session_local(bind=lock_connection) as session, session.begin():
+            async with session_local(bind=lock_connection) as session:
                 repo = DocumentRepository(session)
                 job_idempotency = idempotency.for_session(session)
-                return await graph.ainvoke(
+                result = await graph.ainvoke(
                     {
                         "document_id": document_id,
                         "user_id": user_id,
@@ -1120,6 +1129,8 @@ async def run_document_ingestion_task(
                         }
                     },
                 )
+                await session.commit()
+                return result
         except BaseException as exc:
             primary_error = exc
             raise
