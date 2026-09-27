@@ -467,10 +467,12 @@ class WebCrawler:
                         dispatcher=dispatcher,
                     )
         except (TimeoutError, httpx.HTTPError, PlaywrightError) as exc:
+            exc.add_note(f"urls={normalized_urls!r}, operation=crawl_many")
             return Failure(
                 CrawlerProviderError(
                     message=str(exc),
                     url=normalized_urls[0],
+                    details={"notes": list(getattr(exc, "__notes__", []))},
                 )
             )
 

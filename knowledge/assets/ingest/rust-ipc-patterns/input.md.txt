@@ -1,0 +1,25 @@
+This video provides a deep dive into **Inter-Process Communication (IPC)** patterns in *Rust*, categorizing them into **remote** (network-based) and **local** (same-machine) protocols. The following summary details the key communication models discussed:
+
+### Remote Protocols
+
+*   **HTTP (0:33):** The narrator covers three variants:
+    *   **Request/Response (0:33):** The standard client-server model (e.g., *JSON-RPC*). The client sends a request (the "blue box") and receives a response (the "green square"). In *Rust*, this typically involves *Tokio* for async handling and *Axum* as the preferred web framework.
+    *   **SSE - Server-Sent Events (3:39):** Uses a long-lived HTTP connection to stream data from the server to the client. This requires **framing** to distinguish message boundaries within a byte stream, often identified by empty lines in the *text/event-stream* format.
+    *   **Websocket (10:47):** A full-duplex protocol that upgrades an HTTP connection. It allows parallel, bidirectional communication using channels, bypassing the traditional request/response cycle.
+
+*   **QUIC (15:04):** A modern, performance-oriented alternative to TCP based on UDP. 
+    *   **Streams (15:04):** Supports multiple streams per connection, meaning a slow or stalled stream does not block others. 
+    *   **Datagrams (18:09):** A specialized variant for speed where ordering and delivery are not guaranteed, making it suitable for specific low-latency use cases.
+
+*   **TCP Socket (18:48):** The standard, reliable bidirectional stream used for services like *Postgres* or *Redis*. It requires manual framing to segment byte streams into discrete messages.
+
+### Local Protocols
+
+*   **Unix Sockets (22:05):** Used for same-machine communication. Variants include:
+    *   **SOCK_STREAM (22:05):** The most common, providing a bidirectional stream similar to TCP.
+    *   **SOCK_DGRM (23:20):** Offers connectionless message-based communication.
+    *   **SOCK_SEQPACKET (23:57):** Provides a connection-oriented, message-based interface (though less widely supported).
+
+*   **STDIO & Pipes (24:25):** 
+    *   **STDIO (24:25):** Uses standard input/output streams for communication between parent and child processes. It is often abstracted as a UTF-8 string stream.
+    *   **Pipes (25:01):** Offers a peer-to-peer approach, though the narrator notes it can become "very messy" if multiple processes interact with the same pipe.

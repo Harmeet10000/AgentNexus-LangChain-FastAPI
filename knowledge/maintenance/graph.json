@@ -1,0 +1,254 @@
+{
+  "format": "okf-link-graph/1",
+  "nodes": [
+    {
+      "id": "concepts/android-certificate-pinning",
+      "path": "concepts/android-certificate-pinning.md",
+      "title": "Public Key Certificate Pinning in Android",
+      "type": "Concept",
+      "tags": [
+        "android",
+        "security",
+        "tls",
+        "certificate-pinning",
+        "ca",
+        "mitm",
+        "spki"
+      ]
+    },
+    {
+      "id": "concepts/compiler-code-generation",
+      "path": "concepts/compiler-code-generation.md",
+      "title": "Compiler Code Generation Pipeline",
+      "type": "Concept",
+      "tags": [
+        "compilers",
+        "code-generation",
+        "instruction-selection",
+        "instruction-scheduling",
+        "abi",
+        "peephole"
+      ]
+    },
+    {
+      "id": "concepts/register-allocation-graph-coloring",
+      "path": "concepts/register-allocation-graph-coloring.md",
+      "title": "Register Allocation via Graph Coloring and Linear Scan",
+      "type": "Concept",
+      "tags": [
+        "compilers",
+        "register-allocation",
+        "graph-coloring",
+        "linear-scan",
+        "np-complete",
+        "liveness-analysis"
+      ]
+    },
+    {
+      "id": "concepts/rust-ipc-protocols",
+      "path": "concepts/rust-ipc-protocols.md",
+      "title": "Inter-Process Communication Architectures in Rust",
+      "type": "Concept",
+      "tags": [
+        "rust",
+        "ipc",
+        "tokio",
+        "axum",
+        "networking",
+        "quic",
+        "unix-sockets",
+        "websockets",
+        "framing"
+      ]
+    },
+    {
+      "id": "playbooks/android-network-security-config",
+      "path": "playbooks/android-network-security-config.md",
+      "title": "Configuring Android Network Security Config for Certificate Pinning",
+      "type": "Playbook",
+      "tags": [
+        "android",
+        "security",
+        "network-security-config",
+        "xml",
+        "pin-set",
+        "playbook"
+      ]
+    },
+    {
+      "id": "references/android-certificate-pinning-guide",
+      "path": "references/android-certificate-pinning-guide.md",
+      "title": "Technical Guide: Certificate Pinning in Android Applications",
+      "type": "Reference",
+      "tags": [
+        "android",
+        "security",
+        "tls",
+        "certificate-pinning",
+        "reference"
+      ]
+    },
+    {
+      "id": "references/compiler-code-generation-guide",
+      "path": "references/compiler-code-generation-guide.md",
+      "title": "Technical Guide: Compiler Code Generation Pipeline",
+      "type": "Reference",
+      "tags": [
+        "compilers",
+        "code-generation",
+        "instruction-selection",
+        "register-allocation",
+        "peephole",
+        "reference"
+      ]
+    },
+    {
+      "id": "references/engineering-deep-internals",
+      "path": "references/engineering-deep-internals.md",
+      "title": "Engineering Notes: Deep Internals in Security, Compilers, and Rust IPC",
+      "type": "Reference",
+      "tags": [
+        "android",
+        "security",
+        "tls",
+        "compilers",
+        "code-generation",
+        "x86-64",
+        "abi",
+        "rust",
+        "ipc",
+        "unix-sockets",
+        "deep-internals",
+        "reference"
+      ]
+    },
+    {
+      "id": "references/rust-ipc-patterns-guide",
+      "path": "references/rust-ipc-patterns-guide.md",
+      "title": "Technical Guide: Inter-Process Communication (IPC) Patterns in Rust",
+      "type": "Reference",
+      "tags": [
+        "rust",
+        "ipc",
+        "networking",
+        "tokio",
+        "unix-sockets",
+        "quic",
+        "websockets",
+        "reference"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "concepts/android-certificate-pinning",
+      "target": "playbooks/android-network-security-config",
+      "relation": "links-to"
+    },
+    {
+      "source": "concepts/android-certificate-pinning",
+      "target": "references/android-certificate-pinning-guide",
+      "relation": "links-to"
+    },
+    {
+      "source": "concepts/android-certificate-pinning",
+      "target": "references/engineering-deep-internals",
+      "relation": "links-to"
+    },
+    {
+      "source": "concepts/compiler-code-generation",
+      "target": "concepts/register-allocation-graph-coloring",
+      "relation": "links-to"
+    },
+    {
+      "source": "concepts/compiler-code-generation",
+      "target": "references/compiler-code-generation-guide",
+      "relation": "links-to"
+    },
+    {
+      "source": "concepts/compiler-code-generation",
+      "target": "references/engineering-deep-internals",
+      "relation": "links-to"
+    },
+    {
+      "source": "concepts/register-allocation-graph-coloring",
+      "target": "concepts/compiler-code-generation",
+      "relation": "links-to"
+    },
+    {
+      "source": "concepts/register-allocation-graph-coloring",
+      "target": "references/compiler-code-generation-guide",
+      "relation": "links-to"
+    },
+    {
+      "source": "concepts/rust-ipc-protocols",
+      "target": "references/engineering-deep-internals",
+      "relation": "links-to"
+    },
+    {
+      "source": "concepts/rust-ipc-protocols",
+      "target": "references/rust-ipc-patterns-guide",
+      "relation": "links-to"
+    },
+    {
+      "source": "playbooks/android-network-security-config",
+      "target": "concepts/android-certificate-pinning",
+      "relation": "links-to"
+    },
+    {
+      "source": "playbooks/android-network-security-config",
+      "target": "references/android-certificate-pinning-guide",
+      "relation": "links-to"
+    },
+    {
+      "source": "references/android-certificate-pinning-guide",
+      "target": "concepts/android-certificate-pinning",
+      "relation": "links-to"
+    },
+    {
+      "source": "references/android-certificate-pinning-guide",
+      "target": "playbooks/android-network-security-config",
+      "relation": "links-to"
+    },
+    {
+      "source": "references/compiler-code-generation-guide",
+      "target": "concepts/compiler-code-generation",
+      "relation": "links-to"
+    },
+    {
+      "source": "references/compiler-code-generation-guide",
+      "target": "concepts/register-allocation-graph-coloring",
+      "relation": "links-to"
+    },
+    {
+      "source": "references/engineering-deep-internals",
+      "target": "concepts/android-certificate-pinning",
+      "relation": "links-to"
+    },
+    {
+      "source": "references/engineering-deep-internals",
+      "target": "concepts/compiler-code-generation",
+      "relation": "links-to"
+    },
+    {
+      "source": "references/engineering-deep-internals",
+      "target": "concepts/register-allocation-graph-coloring",
+      "relation": "links-to"
+    },
+    {
+      "source": "references/engineering-deep-internals",
+      "target": "concepts/rust-ipc-protocols",
+      "relation": "links-to"
+    },
+    {
+      "source": "references/engineering-deep-internals",
+      "target": "playbooks/android-network-security-config",
+      "relation": "links-to"
+    },
+    {
+      "source": "references/rust-ipc-patterns-guide",
+      "target": "concepts/rust-ipc-protocols",
+      "relation": "links-to"
+    }
+  ]
+}

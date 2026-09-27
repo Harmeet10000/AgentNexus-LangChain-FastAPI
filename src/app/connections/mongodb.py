@@ -42,5 +42,11 @@ async def create_mongo_client(
     return client, database
 
 
+def close_mongo_client(client: AsyncIOMotorClient[Any] | None) -> None:
+    """Close the process-wide MongoDB client."""
+    if client is not None:
+        client.close()
+
+
 async def get_mongodb(connection: HTTPConnection) -> AsyncIOMotorDatabase[Any]:
     return connection.app.state.db

@@ -34,8 +34,9 @@ async def init_neo4j() -> AsyncDriver:
             # database=settings.NEO4J_DATABASE,
         )
 
-    except Exception as e:
-        logger.bind(uri=settings.NEO4J_URI, error=str(e)).exception("Neo4j initialization failed")
+    except Exception as exc:
+        exc.add_note(f"uri={settings.NEO4J_URI}, operation=init_neo4j")
+        logger.bind(uri=settings.NEO4J_URI, error=str(exc)).exception("Neo4j initialization failed")
         raise
 
 
@@ -65,8 +66,9 @@ async def get_neo4j_session(
     async with driver.session(database=database or settings.NEO4J_DATABASE) as session:
         try:
             yield session
-        except Exception as e:
-            logger.bind(error=str(e)).exception("Neo4j session error")
+        except Exception as exc:
+            exc.add_note("operation=get_neo4j_session")
+            logger.bind(error=str(exc)).exception("Neo4j session error")
             raise
 
 
@@ -79,6 +81,7 @@ async def close_neo4j_driver(driver: AsyncDriver) -> None:
     try:
         await driver.close()
         # logger.info("Neo4j driver closed")
-    except Exception as e:
-        logger.bind(error=str(e)).exception("Error closing Neo4j driver")
+    except Exception as exc:
+        exc.add_note("operation=close_neo4j_driver")
+        logger.bind(error=str(exc)).exception("Error closing Neo4j driver")
         raise

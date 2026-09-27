@@ -52,6 +52,7 @@ async def exchange_subject_token_for_mcp_token(
         data = response.json()
         return data if isinstance(data, dict) else None
     except httpx.HTTPError as exc:
+        exc.add_note(f"operation=mcp_token_exchange, mcp_url={base_mcp_url}")
         logger.bind(error=str(exc), mcp_url=base_mcp_url).warning("mcp_token_exchange_failed")
         return None
     finally:

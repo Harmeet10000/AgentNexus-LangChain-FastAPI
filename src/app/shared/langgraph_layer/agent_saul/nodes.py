@@ -252,9 +252,9 @@ def make_orchestrator_node(
         ):
             log.error("orchestrator_invalid_target", target=action.target_node)
             return _fail(
-                "orchestrator",
-                "INVALID_TARGET_NODE",
-                f"Orchestrator routed to unknown node: {action.target_node}",
+                node="orchestrator",
+                code="INVALID_TARGET_NODE",
+                message=f"Orchestrator routed to unknown node: {action.target_node}",
             )
 
         log.info(
@@ -841,12 +841,16 @@ def make_deep_research_node(
         plan = state.get("plan", [])
         current_step = state.get("current_step", 0)
 
-        research_steps = [
-            step for step in plan[current_step:] if step.action == PlanActionType.SEARCH_PRECEDENTS
+        indexed_research_steps = [
+            (index, step)
+            for index, step in enumerate(plan[current_step:], start=current_step)
+            if step.action == PlanActionType.SEARCH_PRECEDENTS
         ]
 
-        if not research_steps:
+        if not indexed_research_steps:
             return {}
+
+        research_steps = [step for _, step in indexed_research_steps]
 
         log.info(
             "deep_research_started",
@@ -876,7 +880,7 @@ def make_deep_research_node(
 
         return {
             "deep_research_results": concatenated,
-            "current_step": len(plan),
+            "current_step": indexed_research_steps[-1][0] + 1,
         }
 
     return deep_research_node

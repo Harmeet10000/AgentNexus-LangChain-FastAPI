@@ -1,16 +1,23 @@
 """Transactional outbox relay using PostgreSQL NOTIFY/LISTEN."""
 
-from typing import Any, Final, cast
+from __future__ import annotations
+
+import asyncio
+from typing import TYPE_CHECKING, cast
 
 import asyncpg
 import asyncpg_listen
 from asyncpg.exceptions import PostgresError
 from celery.exceptions import CeleryError
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.connections.celery import CeleryTaskRegistry
 from app.utils import logger
+
+if TYPE_CHECKING:
+    from typing import Final
+
+    from celery import Celery
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 _MAX_RETRIES: Final[int] = 5
 
@@ -25,7 +32,7 @@ class OutboxRelay:
     def __init__(
         self,
         database_url: str,
-        celery_app: Any,
+        celery_app: Celery,
         *,
         session_factory: async_sessionmaker[AsyncSession],
     ) -> None:
@@ -42,6 +49,10 @@ class OutboxRelay:
         self._database_url = database_url
         self._celery_app = celery_app
         self._session_factory = session_factory
+        self._accepting_notifications = True
+        self._in_flight = 0
+        self._drained = asyncio.Event()
+        self._drained.set()
 
     async def run_startup_scan(self) -> None:
         """One-time scan for unpublished events created while relay was offline."""
@@ -96,33 +107,54 @@ class OutboxRelay:
     ) -> None:
         if isinstance(notification, asyncpg_listen.Timeout):
             return
+        if not self._accepting_notifications:
+            return
         event_id = notification.payload
         if not event_id:
             return
 
-        async with self._session_factory() as session:
-            result = (
-                (
-                    await session.execute(
-                        text(
+        self._in_flight += 1
+        self._drained.clear()
+        try:
+            async with self._session_factory() as session:
+                result = (
+                    (
+                        await session.execute(
+                            text(
+                                """
+                            SELECT id, event_type, payload, publish_attempts
+                            FROM outbox_events
+                            WHERE id = :event_id
+                              AND published_at IS NULL
+                              AND publish_attempts < :max_retries
+                            FOR UPDATE SKIP LOCKED
                             """
-                        SELECT id, event_type, payload, publish_attempts
-                        FROM outbox_events
-                        WHERE id = :event_id
-                          AND published_at IS NULL
-                          AND publish_attempts < :max_retries
-                        FOR UPDATE SKIP LOCKED
-                        """
-                        ),
-                        {"event_id": event_id, "max_retries": _MAX_RETRIES},
+                            ),
+                            {"event_id": event_id, "max_retries": _MAX_RETRIES},
+                        )
                     )
+                    .mappings()
+                    .one_or_none()
                 )
-                .mappings()
-                .one_or_none()
+                if result is None:
+                    return
+                await self._publish(dict(result), session=session)
+        finally:
+            self._in_flight -= 1
+            if self._in_flight == 0:
+                self._drained.set()
+
+    async def drain(self, *, timeout_seconds: float = 5.0) -> bool:
+        """Stop accepting notifications and wait for active publishes to finish."""
+        self._accepting_notifications = False
+        try:
+            await asyncio.wait_for(self._drained.wait(), timeout=timeout_seconds)
+        except TimeoutError:
+            logger.bind(in_flight=self._in_flight, timeout_seconds=timeout_seconds).warning(
+                "outbox_drain_timed_out"
             )
-            if result is None:
-                return
-            await self._publish(dict(result), session=session)
+            return False
+        return True
 
     async def _publish(
         self,
@@ -133,7 +165,7 @@ class OutboxRelay:
         event_type = str(row["event_type"])
         payload = row["payload"]
         try:
-            CeleryTaskRegistry.typed_send(event_type, kwargs=cast("dict[str, object]", payload))
+            self._celery_app.send_task(event_type, kwargs=cast("dict[str, object]", payload))
             await self._mark_published(event_id, session=session)
             logger.bind(event_id=event_id, event_type=event_type).info("outbox_published")
         except (CeleryError, PostgresError) as exc:

@@ -43,7 +43,7 @@ from .agents.middlewares.guardrails import (
     build_minimal_middleware_stack,
 )
 from .callback import LatencyCallbackHandler, TokenUsageCallbackHandler, configure_langsmith
-from .models import _build_chat_model, serialize_to_toon
+from .models import build_chat_model, serialize_to_toon
 from .prompts import render_prompt_sections
 
 __all__ = [
@@ -57,7 +57,7 @@ __all__ = [
     "SummarizationMiddleware",
     "TodoListMiddleware",
     "ToolRetryMiddleware",
-    "_build_chat_model",
+    "build_chat_model",
     "build_default_middleware_stack",
     "build_minimal_middleware_stack",
     "configure_langsmith",

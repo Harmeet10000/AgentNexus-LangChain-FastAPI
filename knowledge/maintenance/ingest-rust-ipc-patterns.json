@@ -1,0 +1,10 @@
+{
+  "id": "rust-ipc-patterns",
+  "acquired_at": "2026-09-14T11:17:56+05:30",
+  "source_name": "input.md.txt",
+  "source_path": "assets/ingest/rust-ipc-patterns/input.md.txt",
+  "bytes": 2445,
+  "sha256": "7d62361cc93dfdb214e77c506959f7ba43a0bde0292c6597b0253e568ff67e6d",
+  "topic": "Inter-Process Communication (IPC) Patterns in Rust",
+  "access_constraints": "unrestricted"
+}

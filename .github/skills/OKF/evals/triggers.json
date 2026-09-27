@@ -1,0 +1,42 @@
+[
+  {
+    "query": "turn my mixed notes into OKF v0.2 without deleting anything",
+    "should_trigger": true
+  },
+  {
+    "query": "Upgrade the generated and verified metadata in this knowledge bundle",
+    "should_trigger": true
+  },
+  {
+    "query": "Split my research and workflows into reusable linked playbooks",
+    "should_trigger": true
+  },
+  {
+    "query": "Check all OKF links and the preservation manifest",
+    "should_trigger": true
+  },
+  {
+    "query": "Make the validator portable for another agent",
+    "should_trigger": true
+  },
+  {
+    "query": "Convert this JSON object to YAML",
+    "should_trigger": false
+  },
+  {
+    "query": "Summarize one article in three bullets",
+    "should_trigger": false
+  },
+  {
+    "query": "Debug a FastAPI request timeout",
+    "should_trigger": false
+  },
+  {
+    "query": "Write a SQL migration for a knowledge table",
+    "should_trigger": false
+  },
+  {
+    "query": "Organize my photo folders by date",
+    "should_trigger": false
+  }
+]

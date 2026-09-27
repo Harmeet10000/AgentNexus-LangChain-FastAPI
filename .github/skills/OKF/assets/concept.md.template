@@ -1,0 +1,27 @@
+---
+type: Concept
+title: "Concrete decision or mechanism"
+description: "What the reader can understand or decide after reading."
+tags: [topic]
+generated:
+  by: "producer/version"
+  at: "2026-09-12T00:00:00+00:00"
+status: draft
+sources:
+  - id: primary
+    resource: "https://example.org/replace-with-consulted-primary-source"
+---
+
+# Concrete decision or mechanism
+
+Explain the mechanism and its assumptions. Replace every placeholder, including the generation event, before use.[^primary]
+
+## Consequence under failure
+
+Give a concrete trigger, the violated invariant, the observable symptom, and a recovery strategy. Distinguish your engineering deduction from the documented premise.
+
+## Decision and verification
+
+Compare meaningful alternatives when needed. Describe a discriminating experiment, its expected observable result, and what the experiment cannot establish. Do not invent measured outcomes.
+
+[^primary]: [Primary source title](https://example.org/replace-with-consulted-primary-source).

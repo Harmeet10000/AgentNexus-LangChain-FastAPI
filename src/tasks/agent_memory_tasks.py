@@ -55,7 +55,7 @@ class Neo4jCredentials(BaseModel):
 
 
 @celery_app.task(
-    name="tasks.agent_memory_consolidation",
+    name=AGENT_MEMORY_CONSOLIDATION,
     bind=True,
     max_retries=0,
 )

@@ -12,7 +12,9 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from app.features.health.dependencies import get_health_service
+from app.features.health.dto import ComponentCheck
 from app.features.health.health_check import check_cognee
+from app.shared.result import HealthStatus
 
 if TYPE_CHECKING:
     from typing import Any
@@ -86,8 +88,10 @@ async def test_features_surface_reports_graph_procedures_as_a_named_subfield() -
         neo4j_driver=_Driver(),
     )
     report = await service._check_agent_memory()
-    assert report["status"] != "unhealthy", "absent graph procedures must not fail the whole check"
-    assert report["graphProceduresAvailable"] is False
+    assert report.status != HealthStatus.UNHEALTHY, (
+        "absent graph procedures must not fail the whole check"
+    )
+    assert report.graph_procedures_available is False
 
 
 async def test_features_surface_reports_present_procedures() -> None:
@@ -100,8 +104,8 @@ async def test_features_surface_reports_present_procedures() -> None:
         neo4j_driver=_Driver(),
     )
     report = await service._check_agent_memory()
-    assert report["status"] == "healthy"
-    assert report["graphProceduresAvailable"] is True
+    assert report.status == HealthStatus.HEALTHY
+    assert report.graph_procedures_available is True
 
 
 async def test_health_keeps_its_own_200_status_when_optional_backends_are_absent() -> None:
@@ -110,14 +114,14 @@ async def test_health_keeps_its_own_200_status_when_optional_backends_are_absent
     assert result.status_code == 200
     assert result.data is not None
     assert result.data.status == "healthy"
-    assert result.data.checks.graphiti["state"] == "not_configured"
+    assert result.data.checks.graphiti.state == "not_configured"
 
 
 async def test_health_keeps_its_own_503_status_for_required_probe_failure() -> None:
     service = _service(cognee_config=None)
 
-    async def unhealthy() -> dict[str, str]:
-        return {"status": "unhealthy", "state": "disconnected"}
+    async def unhealthy() -> ComponentCheck:
+        return ComponentCheck.unhealthy("disconnected", state="disconnected")
 
     service._check_mongodb = unhealthy
     service.mongo_client = object()
@@ -160,7 +164,11 @@ async def test_both_surfaces_agree_for_the_same_state() -> None:
     # Configured with no driver at all: middleware fails; the features surface,
     # which cannot reach the graph either, reports unhealthy too.
     assert middleware_health.status.value in {"healthy", "unhealthy"}
-    assert service_report["status"] in {"healthy", "unhealthy", "degraded"}
+    assert service_report.status in {
+        HealthStatus.HEALTHY,
+        HealthStatus.UNHEALTHY,
+        HealthStatus.DEGRADED,
+    }
 
 
 def test_the_psutil_memory_field_is_not_collided_with() -> None:

@@ -8,7 +8,6 @@ from .agent_memory_service import (
     PartitionIdentityInvalidError,
     memory_partition,
 )
-from .cognee_client import setup_cognee
 from .memory_scope import (
     COMPLIANCE_SCOPE,
     GROUNDING_SCOPE,
@@ -39,5 +38,4 @@ __all__ = [
     "PartitionIdentityInvalidError",
     "memory_partition",
     "scope_from_router_decision",
-    "setup_cognee",
 ]

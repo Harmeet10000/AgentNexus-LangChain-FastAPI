@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
 
-from .graph import deep_researcher
+from .graph import get_deep_researcher
 
 if TYPE_CHECKING:
     from typing import Any
@@ -55,7 +55,7 @@ def make_deep_research_tool(
         max_researcher_iterations: int = 4,
     ) -> str:
         """Invoke the deep-research graph for one user question."""
-        result = await deep_researcher.ainvoke(
+        result = await get_deep_researcher().ainvoke(
             cast("Any", {"messages": [HumanMessage(content=question)]}),
             config={
                 "configurable": {

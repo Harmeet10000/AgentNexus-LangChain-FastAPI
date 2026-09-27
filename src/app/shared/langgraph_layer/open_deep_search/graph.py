@@ -20,7 +20,7 @@ from langchain_core.messages import (
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
-from app.shared.langchain_layer.models import _build_chat_model
+from app.shared.langchain_layer.models import build_chat_model
 from app.utils import ExternalServiceException, logger
 
 from .config import Configuration
@@ -64,7 +64,7 @@ if TYPE_CHECKING:
 
 def _build_model(model_name: str, max_tokens: int) -> Any:
     """Build a shared Gemini model for deep research nodes."""
-    return _build_chat_model(
+    return build_chat_model(
         model_name=model_name,
         max_tokens=max_tokens,
     ).with_config({"tags": ["langsmith:nostream"]})
@@ -206,7 +206,7 @@ async def supervisor_tools(
         try:
             tool_results = await gather_limited(
                 (
-                    lambda tool_call=tool_call: researcher_subgraph.ainvoke(
+                    lambda tool_call=tool_call: get_researcher_subgraph().ainvoke(
                         cast(
                             "Any",
                             {
@@ -269,14 +269,24 @@ async def supervisor_tools(
     return Command(goto="supervisor", update=update_payload)  # ty: ignore[invalid-return-type]
 
 
-state_graph_factory = cast("Any", StateGraph)
-supervisor_builder = state_graph_factory(
-    SupervisorState, output_schema=SupervisorOutputState, context_schema=Configuration
-)
-supervisor_builder.add_node("supervisor", supervisor)
-supervisor_builder.add_node("supervisor_tools", supervisor_tools)
-supervisor_builder.add_edge(START, "supervisor")
-supervisor_subgraph = supervisor_builder.compile()
+supervisor_subgraph: Any | None = None
+
+
+def get_supervisor_subgraph() -> Any:
+    """Build and cache the supervisor graph on first use in this process."""
+    global supervisor_subgraph  # noqa: PLW0603
+    if supervisor_subgraph is None:
+        state_graph_factory = cast("Any", StateGraph)
+        supervisor_builder = state_graph_factory(
+            SupervisorState,
+            output_schema=SupervisorOutputState,
+            context_schema=Configuration,
+        )
+        supervisor_builder.add_node("supervisor", supervisor)
+        supervisor_builder.add_node("supervisor_tools", supervisor_tools)
+        supervisor_builder.add_edge(START, "supervisor")
+        supervisor_subgraph = supervisor_builder.compile()
+    return supervisor_subgraph
 
 
 async def researcher(
@@ -430,18 +440,27 @@ async def compress_research(
     }
 
 
-researcher_builder = state_graph_factory(
-    ResearcherState,
-    output_schema=ResearcherOutputState,
-    context_schema=Configuration,
-)
-researcher_builder.add_edge(START, "researcher")
-researcher_builder.add_node("researcher", researcher)
-researcher_builder.add_node("researcher_tools", researcher_tools)
-researcher_builder.add_node("compress_research", compress_research)
-researcher_builder.add_conditional_edges("researcher", route_researcher)
-researcher_builder.add_edge("compress_research", END)
-researcher_subgraph = researcher_builder.compile()
+researcher_subgraph: Any | None = None
+
+
+def get_researcher_subgraph() -> Any:
+    """Build and cache the researcher graph on first use in this process."""
+    global researcher_subgraph  # noqa: PLW0603
+    if researcher_subgraph is None:
+        state_graph_factory = cast("Any", StateGraph)
+        researcher_builder = state_graph_factory(
+            ResearcherState,
+            output_schema=ResearcherOutputState,
+            context_schema=Configuration,
+        )
+        researcher_builder.add_edge(START, "researcher")
+        researcher_builder.add_node("researcher", researcher)
+        researcher_builder.add_node("researcher_tools", researcher_tools)
+        researcher_builder.add_node("compress_research", compress_research)
+        researcher_builder.add_conditional_edges("researcher", route_researcher)
+        researcher_builder.add_edge("compress_research", END)
+        researcher_subgraph = researcher_builder.compile()
+    return researcher_subgraph
 
 
 async def final_report_generation(
@@ -506,16 +525,27 @@ async def final_report_generation(
     }
 
 
-deep_researcher_builder = state_graph_factory(
-    AgentState,
-    input_schema=AgentInputState,
-    context_schema=Configuration,
-)
-deep_researcher_builder.add_node("clarify_with_user", clarify_with_user)
-deep_researcher_builder.add_node("write_research_brief", write_research_brief)
-deep_researcher_builder.add_node("research_supervisor", supervisor_subgraph)
-deep_researcher_builder.add_node("final_report_generation", final_report_generation)
-deep_researcher_builder.add_edge(START, "clarify_with_user")
-deep_researcher_builder.add_edge("research_supervisor", "final_report_generation")
-deep_researcher_builder.add_edge("final_report_generation", END)
-deep_researcher = deep_researcher_builder.compile()
+deep_researcher: Any | None = None
+
+
+def get_deep_researcher() -> Any:
+    """Build and cache the complete deep-research graph on first use."""
+    global deep_researcher  # noqa: PLW0603
+    if deep_researcher is None:
+        state_graph_factory = cast("Any", StateGraph)
+        deep_researcher_builder = state_graph_factory(
+            AgentState,
+            input_schema=AgentInputState,
+            context_schema=Configuration,
+        )
+        deep_researcher_builder.add_node("clarify_with_user", clarify_with_user)
+        deep_researcher_builder.add_node("write_research_brief", write_research_brief)
+        deep_researcher_builder.add_node(
+            "research_supervisor", get_supervisor_subgraph()
+        )
+        deep_researcher_builder.add_node("final_report_generation", final_report_generation)
+        deep_researcher_builder.add_edge(START, "clarify_with_user")
+        deep_researcher_builder.add_edge("research_supervisor", "final_report_generation")
+        deep_researcher_builder.add_edge("final_report_generation", END)
+        deep_researcher = deep_researcher_builder.compile()
+    return deep_researcher

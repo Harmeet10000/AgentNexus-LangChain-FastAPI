@@ -53,6 +53,12 @@ def test_console_format_output_survives_format_map_with_braces() -> None:
     assert "doc_id" in formatted
 
 
+def test_console_format_escapes_loguru_markup_in_library_messages() -> None:
+    out = console_format(_record("SQLAlchemy table=<documents>", {}))
+
+    assert r"\<documents>" in out
+
+
 def test_secret_keys_are_redacted() -> None:
     lines: list[str] = []
     handler_id = logger.add(lines.append, format="{message} | {extra}", level="DEBUG")

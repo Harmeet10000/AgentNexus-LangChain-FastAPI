@@ -11,7 +11,7 @@ from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel
 from returns.result import Failure, Success
 
-from app.shared.langchain_layer.models import _build_chat_model
+from app.shared.langchain_layer.models import build_chat_model
 
 from .errors import CrawlerProcessingResult, CrawlerProcessingValidationError
 
@@ -138,7 +138,7 @@ class GeminiProcessor:
     """Processor for Gemini-based content extraction and summarization."""
 
     def __init__(self, model: BaseChatModel | None = None):
-        self.model = model or _build_chat_model()
+        self.model = model or build_chat_model()
 
     async def summarize(
         self,
@@ -345,10 +345,12 @@ def _parse_extraction_json(response_text: str) -> CrawlerProcessingResult[dict[s
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError as exc:
+        exc.add_note("operation=parse_extraction_json, source=crawler_processor")
         return Failure(
             CrawlerProcessingValidationError(
                 message=f"Failed to parse JSON: {exc!s}",
                 source="crawler_processor",
+                details={"notes": list(getattr(exc, "__notes__", []))},
             )
         )
 

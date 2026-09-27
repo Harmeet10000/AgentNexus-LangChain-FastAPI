@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 from langchain.agents.middleware import (
     HumanInTheLoopMiddleware,
@@ -20,7 +20,7 @@ from app.shared.langchain_layer.chains import build_guardrail_chain
 from app.utils import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
     from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -42,13 +42,15 @@ class ModelRetryMiddleware(BaseModel):
     base_delay: float = 1.0
     retryable_exceptions: tuple[type[Exception], ...] = (Exception,)
 
-    @override
-    def model_post_init(self, __context: object) -> None:
-        @wrap_model_call  # ty: ignore[no-matching-overload]
-        async def _retry_wrapper(request: object, handler: object) -> Any:
+    def build(self) -> Any:
+        @wrap_model_call
+        async def _retry_wrapper(
+            request: Any,
+            handler: Callable[[Any], Awaitable[Any]],
+        ) -> Any:
             for attempt in range(self.max_retries + 1):
                 try:
-                    return await handler(request)  # ty: ignore[call-non-callable]
+                    return await handler(request)
                 except self.retryable_exceptions as exc:
                     if attempt == self.max_retries:
                         raise
@@ -62,10 +64,7 @@ class ModelRetryMiddleware(BaseModel):
                     await asyncio.sleep(delay)
             return None
 
-        self._middleware = _retry_wrapper
-
-    def __call__(self, *args, **kwargs):
-        return self._middleware(*args, **kwargs)
+        return _retry_wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +87,7 @@ class TodoListMiddleware(BaseModel):
     todo_header: str = "## Current To-Do List"
 
     def build(self) -> list[Any]:
-        @before_model  # ty: ignore[no-matching-overload]
+        @before_model
         def inject_todos(state, request) -> Any:
             todos = state.get("todo_list", [])
             if not todos:
@@ -108,7 +107,7 @@ class TodoListMiddleware(BaseModel):
 
             return request.override(messages=msgs)
 
-        @after_model  # ty: ignore[no-matching-overload]
+        @after_model
         def parse_todo_commands(state, response) -> Any:
             ai_msg = response.message
             if not isinstance(ai_msg.content, str):
@@ -153,7 +152,7 @@ class ContextEditingMiddleware(BaseModel):
         patterns = [re.compile(p) for p in self.redact_patterns]
         inject_fn = self.inject_context_fn
 
-        @wrap_model_call  # ty: ignore[no-matching-overload]
+        @wrap_model_call
         async def edit_context(request: object, handler: object) -> Any:
             msgs = list(request.messages)  # ty: ignore[unresolved-attribute]
 
@@ -209,7 +208,7 @@ class GuardrailMiddleware(BaseModel):
         fallback = self.fallback_message
         raise_on = self.raise_on_violation
 
-        @after_model  # ty: ignore[no-matching-overload]
+        @after_model
         async def check_safety(state: object, response: object) -> Any:
             ai_msg = response.message  # ty: ignore[unresolved-attribute]
             if not isinstance(ai_msg.content, str):
@@ -272,7 +271,7 @@ class DynamicSystemPromptMiddleware(BaseModel):
     def build(self) -> Any:
         fn = self.prompt_fn
 
-        @before_model  # ty: ignore[no-matching-overload]
+        @before_model
         def inject_dynamic_prompt(state, request) -> Any:
             ctx = request.runtime.context if request.runtime else None
             new_system = fn(state, ctx)
@@ -349,7 +348,7 @@ def build_default_middleware_stack(
     stack.extend(
         [
             ToolRetryMiddleware(max_retries=3, backoff_factor=1.5),
-            ModelRetryMiddleware(max_retries=2),
+            ModelRetryMiddleware(max_retries=2).build(),
         ]
     )
 

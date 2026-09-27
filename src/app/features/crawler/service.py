@@ -109,6 +109,22 @@ class CrawlerService:
 
         logger.bind(crawl_id=crawl_id, url=request.url).info("Starting crawl")
 
+        if self._crawler is None:
+            return Failure(
+                CrawlerCrawlError(
+                    message="CrawlerService requires an injected crawler",
+                    details={"crawl_id": crawl_id},
+                )
+            )
+        needs_processor = bool(request.extract_structured or request.summary)
+        if needs_processor and self._processor is None:
+            return Failure(
+                CrawlerCrawlError(
+                    message="CrawlerService requires an injected processor",
+                    details={"crawl_id": crawl_id},
+                )
+            )
+
         try:
             crawler_config = getattr(self.crawler, "config", None)
             configured_timeout = max(
@@ -133,8 +149,14 @@ class CrawlerService:
                         use_proxy=request.use_proxy,
                         bypass_cache=request.bypass_cache,
                     )
-        except TimeoutError:
-            return Failure(inner_value=CrawlerCrawlError(message="Crawl operation timed out"))
+        except TimeoutError as exc:
+            exc.add_note(f"crawl_id={crawl_id}, url={request.url}, operation=crawl")
+            return Failure(
+                inner_value=CrawlerCrawlError(
+                    message="Crawl operation timed out",
+                    details={"notes": list(getattr(exc, "__notes__", []))},
+                )
+            )
         if isinstance(crawl_result, Failure):
             error = crawl_result.failure()
             return Failure(CrawlerCrawlError(message=error.message, details=error.details))

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import (  # noqa: TC003 — Annotated, Any, Literal used at runtime by Pydantic/LangChain
     TYPE_CHECKING,
@@ -20,10 +19,14 @@ from langchain_core.runnables import (
     RunnableConfig,  # noqa: TC002 — RunnableConfig used at runtime by LangChain tool
 )
 from langchain_core.tools import InjectedToolArg, tool
+from pydantic import BaseModel, ConfigDict
 from returns.result import Failure
 
-from app.shared.langchain_layer import _build_chat_model
+from app.shared.langchain_layer import build_chat_model
 from app.shared.services import search
+from app.shared.services.tavily import (
+    SearchResponse,  # noqa: TC001 — resolved at runtime by Pydantic
+)
 from app.utils import ExternalServiceException, logger
 
 from .config import Configuration
@@ -35,25 +38,25 @@ if TYPE_CHECKING:
     from langchain_core.messages import MessageLikeRepresentation
     from langchain_core.tools import BaseTool
 
-    from app.shared.services.tavily import SearchResponse
-
 TAVILY_SEARCH_DESCRIPTION = (
     "Search the web with Tavily for current, source-backed research. "
     "Use focused queries and prefer multiple narrow searches over one broad query."
 )
 
 
-@dataclass(frozen=True, slots=True)
-class TavilySearchBatch:
+class TavilySearchBatch(BaseModel):
     """Search responses plus the requests that were not successfully executed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     responses: list[SearchResponse]
     failed_queries: list[str]
     omitted_queries: list[str]
 
 
-@dataclass(frozen=True, slots=True)
-class _SummaryOutcome:
+class _SummaryOutcome(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
     content: str | None
     label: str
 
@@ -105,7 +108,7 @@ async def tavily_search(
         )
 
     summarization_model = (
-        _build_chat_model(
+        build_chat_model(
             model_name=configurable.summarization_model,
             max_tokens=configurable.summarization_model_max_tokens,
         )
@@ -133,6 +136,7 @@ async def tavily_search(
                 label="SUMMARY",
             )
         except (ExternalServiceException, LangChainException, TimeoutError) as exc:
+            exc.add_note("operation=summarize_webpage")
             logger.bind(operation="summarize_webpage", error=str(exc)).warning(
                 "summarization_failed"
             )

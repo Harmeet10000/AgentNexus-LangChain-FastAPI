@@ -57,7 +57,7 @@ class GoldenSetNotFoundException(NotFoundException):
 class GoldenSetReadException(InfrastructureException):
     """The requested golden-set artifact exists but cannot be read."""
 
-    def __init__(self, path: Path, cause: OSError) -> None:
+    def __init__(self, path: Path, cause: OSError | UnicodeDecodeError) -> None:
         super().__init__(
             detail=f"Unable to read golden set: {path}",
             retryable=False,

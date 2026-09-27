@@ -13,21 +13,33 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from neo4j import AsyncDriver
 from neo4j.exceptions import ConfigurationError, ServiceUnavailable
 from playwright.async_api import Error as PlaywrightError
-from returns.result import Failure
 
 from app.config import get_settings
 from app.connections import (
+    CogneeDimensionMismatchError,
+    CogneeSetupError,
     celery_app,
     close_crawl4ai_crawler,
+    close_db_engine,
+    close_graphiti,
+    close_httpx_client,
+    close_mongo_client,
     close_neo4j_driver,
+    close_redis_client,
     close_tavily_http_client,
     create_crawl4ai_crawler,
     create_mongo_client,
+    create_object_store,
+    create_outbox_relay,
     create_redis_client,
     create_tavily_http_client,
     get_shared_httpx_client,
     init_db,
     init_neo4j,
+    setup_cognee,
+    setup_graphiti,
+    setup_graphiti_indices,
+    teardown_langgraph_checkpointer,
 )
 from app.features.auth import TokenAuditLog, User, build_websocket_security_service
 from app.features.auth.repository import RefreshTokenRepository
@@ -40,15 +52,7 @@ from app.lifecycle.graphs import (
     provide_saul_graph,
 )
 from app.middleware import initialize_fastapi_guard
-from app.shared.langchain_layer.agents.memory import setup_cognee
-from app.shared.langchain_layer.agents.memory.cognee_client import (
-    CogneeDimensionMismatchError,
-    CogneeSetupError,
-)
-from app.shared.langgraph_layer.checkpointer import teardown_langgraph_checkpointer
 from app.shared.otel import shutdown_otel
-from app.shared.rag.graphiti import close_graphiti, setup_graphiti, setup_graphiti_indices
-from app.shared.services.storage import StorageService
 from app.utils import DependencyHealth, ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
@@ -137,42 +141,16 @@ def setup_celery() -> Celery | None:
 
 
 async def _init_object_storage(app: FastAPI, settings: Any) -> None:
-    if settings.S3_BUCKET_NAME:
-        app.state.object_store = StorageService.from_settings(settings=settings)
-        result = await app.state.object_store.verify_access()
-        if isinstance(result, Failure):
-            error = result.failure()
-            logger.warning(
-                "Object storage access verification failed",
-                error=error.message,
-                details=error.details,
-            )
-            app.state.object_store = None
-            return
-        logger.bind(bucket=settings.S3_BUCKET_NAME).info("Object storage initialized")
-    else:
-        app.state.object_store = None
-        logger.info("Object storage not configured, skipping")
+    app.state.object_store = await create_object_store(settings)
 
 
 async def _init_outbox_relay(app: FastAPI, celery_app: Celery | None) -> None:
-    from app.connections.postgres import (
-        get_database_url,
+    relay = await create_outbox_relay(
+        celery_app or app.state.celery,
+        app.state.db_session_local,
     )
-    from app.shared.outbox import (
-        OutboxRelay,
-    )
-
-    dsn = get_database_url(flavour="plain")
-    relay = OutboxRelay(
-        database_url=dsn,
-        celery_app=celery_app or app.state.celery,
-        session_factory=app.state.db_session_local,
-    )
-    await relay.run_startup_scan()
     app.state.outbox_relay_task = asyncio.create_task(coro=relay.run_listener())
     app.state.outbox_relay = relay
-    logger.info("Outbox relay started")
 
 
 class StartupPolicy(NamedTuple):
@@ -461,7 +439,7 @@ async def _run_startup_policy(app: FastAPI, settings: Any, policy: StartupPolicy
         setattr(app.state, policy.state_attr, None)
 
 
-async def _shutdown_resources(app: FastAPI) -> None:  # noqa: PLR0912
+async def _shutdown_resources(app: FastAPI) -> None:
     """Close application resources while always flushing observability providers."""
     try:
         if hasattr(app.state, "langgraph_checkpointer"):
@@ -488,9 +466,7 @@ async def _shutdown_resources(app: FastAPI) -> None:  # noqa: PLR0912
             websocket_security.close()
             logger.info("WebSocket rate limiters closed")
 
-        httpx_client = getattr(app.state, "httpx_client", None)
-        if httpx_client is not None:
-            await httpx_client.aclose()
+        await close_httpx_client(getattr(app.state, "httpx_client", None))
 
         tavily_http_client = getattr(app.state, "tavily_http_client", None)
         if tavily_http_client is not None:
@@ -502,18 +478,12 @@ async def _shutdown_resources(app: FastAPI) -> None:  # noqa: PLR0912
         if hasattr(app.state, "crawl4ai_crawler"):
             await close_crawl4ai_crawler(app.state.crawl4ai_crawler)
 
-        mongo_client = getattr(app.state, "mongo_client", None)
-        if mongo_client is not None:
-            mongo_client.close()
+        close_mongo_client(getattr(app.state, "mongo_client", None))
 
         async with asyncio.TaskGroup() as tg:
-            redis_client = getattr(app.state, "redis", None)
-            if redis_client is not None:
-                tg.create_task(coro=redis_client.aclose(close_connection_pool=True))
+            tg.create_task(coro=close_redis_client(getattr(app.state, "redis", None)))
 
-            db_engine = getattr(app.state, "db_engine", None)
-            if db_engine is not None:
-                tg.create_task(coro=db_engine.dispose())
+            tg.create_task(coro=close_db_engine(getattr(app.state, "db_engine", None)))
 
             neo4j_driver = getattr(app.state, "neo4j_driver", None)
             if neo4j_driver is not None:

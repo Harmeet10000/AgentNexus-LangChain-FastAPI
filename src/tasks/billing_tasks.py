@@ -42,8 +42,6 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-settings = get_settings()
-
 type SessionFactory = async_sessionmaker[AsyncSession]
 type BillingOperation = Callable[[AsyncSession, SessionFactory], Awaitable[dict[str, int]]]
 
@@ -86,7 +84,8 @@ async def _run(operation: BillingOperation) -> dict[str, int]:
             try:
                 result = await operation(session, session_local)
                 await session.commit()
-            except Exception:
+            except Exception as exc:
+                exc.add_note("operation=billing.scheduled_run, stage=commit")
                 await session.rollback()
                 raise
             else:
@@ -146,6 +145,7 @@ async def _renewal_job(session: AsyncSession, session_factory: SessionFactory) -
                     continue
                 renewed += 1
         except Exception as exc:  # noqa: BLE001 — one bad subscription must not kill the run
+            exc.add_note("operation=billing.renewal, stage=reconcile_subscription")
             logger.bind(
                 operation="billing.renewal",
                 subscription_id=str(subscription.id),
@@ -186,9 +186,9 @@ async def _dunning_job(session: AsyncSession, session_factory: SessionFactory) -
         async with independent_session(session_factory) as item_session:
             item_service = DunningService(
                 item_session,
-                SubscriptionRepository(item_session),
-                PlanRepository(item_session),
-                AuditLogRepository(item_session),
+                subscriptions=SubscriptionRepository(item_session),
+                plans=PlanRepository(item_session),
+                audit=AuditLogRepository(item_session),
             )
             updated_result = await item_service.execute_retry(subscription)
             if isinstance(updated_result, Failure):
@@ -245,6 +245,7 @@ async def _invoice_backfill(
                 )
                 generated += 1
         except Exception as exc:  # noqa: BLE001 -- one bad payment must not kill the run
+            exc.add_note("operation=billing.invoice_backfill, stage=generate_for_payment")
             logger.bind(
                 operation="billing.invoice_backfill",
                 payment_id=str(payment.id),
@@ -291,6 +292,7 @@ async def _receipt_backfill(
                 )
                 generated += 1
         except Exception as exc:  # noqa: BLE001 -- one bad payment must not kill the run
+            exc.add_note("operation=billing.receipt_backfill, stage=generate_receipt")
             logger.bind(
                 operation="billing.receipt_backfill",
                 payment_id=str(payment.id),
@@ -345,8 +347,9 @@ async def _reconciliation_job(
     service = PaymentService(PaymentRepository(session), AuditLogRepository(session))
     subscriptions = _subscription_repo(session)
     razorpay = RazorpayClient()
+    lookback_days = get_settings().BILLING_RECONCILIATION_LOOKBACK_DAYS
 
-    since = _current_utc() - timedelta(days=settings.BILLING_RECONCILIATION_LOOKBACK_DAYS)
+    since = _current_utc() - timedelta(days=lookback_days)
     reconciled = 0
     missing = 0
     try:
@@ -358,6 +361,7 @@ async def _reconciliation_job(
             }
         )
     except Exception as exc:  # noqa: BLE001 -- upstream failure degrades this scheduled run
+        exc.add_note("operation=billing.reconciliation, stage=fetch_payments")
         logger.bind(operation="billing.reconciliation", error=str(exc)).exception(
             "Razorpay payment fetch failed"
         )

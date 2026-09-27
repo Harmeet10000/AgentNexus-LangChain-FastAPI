@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+from graphiti_core import Graphiti
+from langgraph.graph.state import CompiledStateGraph
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.features.documents.service import (
     _document_ingestion_lock_key,
@@ -212,12 +214,17 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
         async def invalidate(self) -> None:
             pytest.fail("A successful advisory unlock must not invalidate the connection")
 
-    engine = SimpleNamespace(connect=LockConnection, dispose=AsyncMock())
-    graphiti = object()
-    compiled_graph = Graph()
+    engine = MagicMock(spec=AsyncEngine)
+    engine.connect = LockConnection
+    engine.dispose = AsyncMock()
+    graphiti = MagicMock(spec=Graphiti)
+    graph_impl = Graph()
+    compiled_graph = MagicMock(spec=CompiledStateGraph)
+    compiled_graph.ainvoke = graph_impl.ainvoke
+    session_factory = MagicMock(spec=async_sessionmaker, side_effect=SessionContext)
 
     async def init_db() -> tuple[object, object]:
-        return engine, SessionContext
+        return engine, session_factory
 
     async def setup_graphiti(**_kwargs: object) -> object:
         return graphiti

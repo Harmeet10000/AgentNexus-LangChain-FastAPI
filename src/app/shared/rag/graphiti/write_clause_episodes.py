@@ -33,13 +33,13 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard, ToolResult
+from app.shared.rag.langextract.langextract_to_graph import GraphIngestionContext
 from app.utils import logger
 
 from .schemas import ClauseEpisodeMetadata, LegalEdgeInput
 
 if TYPE_CHECKING:
     from app.shared.langgraph_layer.agent_saul.state import ClauseSegment, LegalRelationship
-    from app.shared.rag.langextract.langextract_to_graph import GraphIngestionContext
 
 
 class GraphitiService(Protocol):
@@ -94,6 +94,7 @@ async def write_clause_episodes_to_graphiti(
     Returns (clause_results, relationship_results).
     Partial failures are recorded per-item — caller decides on retry.
     """
+    ctx = GraphIngestionContext.model_validate(ctx)
     log = logger.bind(
         doc_id=ctx.document_id,
         clause_count=len(segments),

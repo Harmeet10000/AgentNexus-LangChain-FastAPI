@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.connections import get_postgres_db, get_redis
 from app.features.auth import CurrentClaims
-from app.shared.langchain_layer import _build_chat_model
+from app.shared.langchain_layer import build_chat_model
 from app.shared.services.storage import StorageService
 
 from .repository import DocumentRepository
@@ -32,7 +32,7 @@ def _get_document_llm() -> BaseChatModel:
     # failure (missing package, bad key) surface as a 500 that masks the 401
     # the request had already earned — FastAPI resolves a path operation's
     # dependencies as a set and answers with whichever raised first.
-    return _build_chat_model(
+    return build_chat_model(
         model_name=None,
         temperature=0.1,
         implementation="generic",

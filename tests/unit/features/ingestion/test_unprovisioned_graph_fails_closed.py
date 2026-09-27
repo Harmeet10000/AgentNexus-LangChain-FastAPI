@@ -1,8 +1,8 @@
 """C10: the unprovisioned ingestion graph must fail closed, not fall over.
 
-C10 is a recorded **non-goal** plus the check that keeps it true. Nothing here provisions the shared
-graph, and nothing should: ingestion runs in the queue worker process, which never executes the
-application lifespan, so a per-process graph was never shared application state to begin with (D17).
+C10 remains the fail-closed check after ``graph-lifecycle`` superseded D17's wiring prohibition.
+Ingestion runs in a queue worker and is provisioned by child-process hooks because workers never run
+the application lifespan. The API lifespan independently provisions Agent Saul and its checkpointer.
 The router that would consume this dependency is mounted in neither `v1` nor `v2`, so no
 service-unavailable surface actually ships today. What is under test is the dependency's own
 behaviour if it is ever reached.

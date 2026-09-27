@@ -7,7 +7,7 @@ from .open_deep_search import (
     DeepResearchInput,
     DeepResearchOutput,
     build_open_deep_search_config,
-    deep_researcher,
+    get_deep_researcher,
     make_deep_research_tool,
 )
 
@@ -16,6 +16,6 @@ __all__ = [
     "DeepResearchInput",
     "DeepResearchOutput",
     "build_open_deep_search_config",
-    "deep_researcher",
+    "get_deep_researcher",
     "make_deep_research_tool",
 ]

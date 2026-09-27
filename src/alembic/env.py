@@ -65,12 +65,15 @@ def _is_memory_schema(schema: str | None) -> bool:
 def include_object(
     obj: object, name: str, type_: str, reflected: bool, compare_to: object | None
 ) -> bool:
-    """Alembic include_object — exclude cognee_memory and non-public schemas."""
+    """Exclude non-app schemas and reflected public tables the app does not own."""
     schema = getattr(obj, "schema", None)
     if _is_memory_schema(schema):
         return False
-    # reflected=True means object came from DB inspection; compare_to=None means new
-    # object in metadata not yet in DB — both should respect same filter.
+    # A reflected table with no metadata counterpart belongs to another system
+    # sharing the public schema (Cognee in the live environment). Including it
+    # makes autogenerate propose destructive DROP operations for that system.
+    if type_ == "table" and reflected and compare_to is None:
+        return False
     return not (schema is not None and schema != "public")
 
 

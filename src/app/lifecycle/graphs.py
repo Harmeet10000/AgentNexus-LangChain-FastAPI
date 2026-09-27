@@ -8,6 +8,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from app.connections.checkpointer import (
+    setup_langgraph_checkpointer,
+)
+from app.shared.langchain_layer.agents.memory import AgentMemoryService
+from app.shared.langchain_layer.agents.tools.idempotency import (
+    IdempotencyGuard,
+)
+from app.shared.langchain_layer.models import build_chat_model
+from app.shared.langgraph_layer.agent_saul import build_saul_graph
+from app.shared.rag.graphiti.registry import build_tool_bundle
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from typing import Any
@@ -20,7 +31,6 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from app.config.settings import Settings
-    from app.shared.langchain_layer.agents.memory import AgentMemoryService
     from app.shared.rag.graphiti.client import GraphitiService
     from app.shared.rag.langextract.service import AsyncExtractionService
     from app.shared.services.storage import StorageService
@@ -30,16 +40,12 @@ if TYPE_CHECKING:
 
 async def provide_langgraph_checkpointer(database_url: str) -> AsyncPostgresSaver:
     """Provision the checkpointer for the process that owns its pool."""
-    from app.shared.langgraph_layer.checkpointer import (  # noqa: PLC0415
-        setup_langgraph_checkpointer,
-    )
 
     return await setup_langgraph_checkpointer(database_url)
 
 
 def provide_agent_memory_service(settings: Settings) -> AgentMemoryService:
     """Construct Agent Saul's cheap, process-scoped memory collaborator."""
-    from app.shared.langchain_layer.agents.memory import AgentMemoryService  # noqa: PLC0415
 
     return AgentMemoryService(partition_prefix=settings.COGNEE_DATASET_PREFIX)
 
@@ -62,9 +68,8 @@ def provide_document_ingestion_graph(
     from app.features.documents.ingestion_graph import (  # noqa: PLC0415
         build_document_ingestion_graph,
     )
-    from app.shared.langchain_layer.models import _build_chat_model  # noqa: PLC0415
 
-    llm: BaseChatModel = _build_chat_model(
+    llm: BaseChatModel = build_chat_model(
         model_name=settings.GEMINI_FLASH_MODEL,
         temperature=0.1,
         implementation="generic",
@@ -89,12 +94,6 @@ def provide_saul_graph(
     graphiti: GraphitiService,
 ) -> CompiledStateGraph[Any]:
     """Compile Agent Saul once from already-provisioned process resources."""
-    from app.shared.langchain_layer.agents.tools.idempotency import (  # noqa: PLC0415
-        IdempotencyGuard,
-    )
-    from app.shared.langchain_layer.models import _build_chat_model  # noqa: PLC0415
-    from app.shared.langgraph_layer.agent_saul import build_saul_graph  # noqa: PLC0415
-    from app.shared.rag.graphiti.registry import build_tool_bundle  # noqa: PLC0415
 
     memory_service = provide_agent_memory_service(settings)
     idempotency = IdempotencyGuard(redis=redis, db_engine=db_engine)
@@ -103,8 +102,8 @@ def provide_saul_graph(
         db_engine=db_engine,
         idempotency=idempotency,
     )
-    pro_llm = _build_chat_model(model_name=settings.GEMINI_PRO_MODEL)
-    flash_llm = _build_chat_model(model_name=settings.GEMINI_FLASH_MODEL)
+    pro_llm = build_chat_model(model_name=settings.GEMINI_PRO_MODEL)
+    flash_llm = build_chat_model(model_name=settings.GEMINI_FLASH_MODEL)
     return build_saul_graph(
         checkpointer=checkpointer,
         pro_llm=pro_llm,

@@ -48,7 +48,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import get_settings
 
-from ..models import _build_chat_model
+from ..models import build_chat_model
 from ..prompts import AGENT_SYSTEM_PROMPT, SystemPromptParts
 from .middlewares import MiddlewareConfig, build_default_middleware_stack
 from .tools.registry import get_tool_registry
@@ -178,20 +178,21 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
         system_text = spec.system_prompt
 
     # Build LangChain model
-    model = _build_chat_model(
+    model = build_chat_model(
         model_name=spec.model_name,
         temperature=spec.temperature,
         max_tokens=spec.max_tokens,
     )
 
     # create_agent (LangChain 1.0)
-    compiled = create_agent(
+    agent_factory: Any = create_agent
+    compiled = agent_factory(
         model,
         tools=resolved_tools,
         system_prompt=system_text,
         middleware=middleware,
         response_format=spec.response_format,
-        context_schema=spec.context_schema,  # ty: ignore[invalid-argument-type]
+        context_schema=spec.context_schema,
         checkpointer=memory.checkpointer,
         debug=spec.debug,
         name=spec.name,

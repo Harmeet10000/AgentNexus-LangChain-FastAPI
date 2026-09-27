@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel, ConfigDict, Field
 from uvicorn.config import Config
 from uvicorn.server import Server
 
@@ -17,10 +17,13 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 
-@dataclass
-class MCPServerHandle:
+class MCPServerHandle(BaseModel):
+    """Running MCP HTTP server and its serve task."""
+
+    model_config = ConfigDict(extra="forbid", frozen=False, arbitrary_types_allowed=True)
+
     server: Server
-    task: asyncio.Task[None] = field(repr=False)
+    task: asyncio.Task[None] = Field(repr=False)
 
 
 def initialize_mcp_observability() -> None:

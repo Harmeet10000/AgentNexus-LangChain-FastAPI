@@ -1,0 +1,35 @@
+{
+  "skill_name": "okf",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Organize mixed Markdown and a PDF into knowledge/; leave originals in place and preserve every example.",
+      "expected_output": "A v0.2 bundle, topic splits, full original assets, and passing exact-reconstruction audit.",
+      "assertions": [
+        "Original file hashes unchanged",
+        "Every original has gap-free preserved coverage",
+        "Standalone concepts cite external primary sources"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Validate this OKF bundle with a custom Decision type and a verified mapping.",
+      "expected_output": "Accept valid extension metadata; distinguish minimal conformance from strict producer issues.",
+      "assertions": [
+        "Custom type accepted",
+        "Bare valid verified mapping accepted",
+        "No document mutated"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Improve my OKF skill and regenerate navigation after adding a note with a footnote and a broken original link.",
+      "expected_output": "Citation IDs checked; original broken link reported separately; manual index preserved; current final report.",
+      "assertions": [
+        "Footnote joins sources by ID",
+        "Manual index unchanged",
+        "Report generated after reindex"
+      ]
+    }
+  ]
+}

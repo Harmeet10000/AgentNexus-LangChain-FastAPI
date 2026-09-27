@@ -1,0 +1,51 @@
+{
+  "retrieved_at": "2026-09-12T19:34:05.229814+05:30",
+  "tool": "Firecrawl CLI 1.18.5 crawl; full response saved with CLI bundled SDK because its status renderer omits page data",
+  "job_id": "01a095eb-6fa8-72b9-b962-98688dc2ec5e",
+  "status": "completed",
+  "pages": [
+    {
+      "url": "https://agentskills.io/skill-creation/best-practices",
+      "markdown_bytes": 16951,
+      "markdown_sha256": "91c2033728cb0211e2d4c20efec06af67fb6f739b4678dda4f893c780da39ac0"
+    },
+    {
+      "url": "https://agentskills.io/skill-creation/optimizing-descriptions",
+      "markdown_bytes": 14712,
+      "markdown_sha256": "847ba2ea8a83016c1f90ef1883a970443a7ff8c7b99571f0b88a75c6b5d9cac7"
+    },
+    {
+      "url": "https://agentskills.io/skill-creation/using-scripts.md",
+      "markdown_bytes": 12252,
+      "markdown_sha256": "618801b46032955f6541188120953ed28607f7eada24126eba987a639af6bbea"
+    },
+    {
+      "url": "https://agentskills.io/skill-creation/optimizing-descriptions.md",
+      "markdown_bytes": 13487,
+      "markdown_sha256": "7b81e7b5b00672f71635ab699690ae04fad380f5d5eca81459839dc342f65061"
+    },
+    {
+      "url": "https://agentskills.io/specification.md",
+      "markdown_bytes": 8100,
+      "markdown_sha256": "4390e9ae10e915fa593f5d86280a6e8418b96552d375df0a041445036eddc80b"
+    },
+    {
+      "url": "https://agentskills.io/skill-creation/best-practices.md",
+      "markdown_bytes": 14863,
+      "markdown_sha256": "ed7d068cf3634d9ac8d3aca224476c894a31022ef1f31cafd80931d4a0c55e8e"
+    },
+    {
+      "url": "https://agentskills.io/skill-creation/evaluating-skills",
+      "markdown_bytes": 18196,
+      "markdown_sha256": "dff99dc331ec20d6987169b8860d98c44a0ba768c24984b05d57a8de57eba486"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "markdown_bytes": 8293,
+      "markdown_sha256": "b14324f5b2ecf90964d4c80c5be735ad20522224f74416184785b0c4953f3def"
+    }
+  ],
+  "unique_topics": 5,
+  "results_path": ".firecrawl/agentskills-final-crawl-content.json",
+  "earlier_failures": "Earlier HTTP401 and keyless refusal attempts retained separately; final authenticated search and crawl succeeded."
+}

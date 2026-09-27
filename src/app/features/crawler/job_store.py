@@ -81,8 +81,8 @@ class CrawlJobStore:
             "request": request_payload,
         }
         created = await self.redis.set(
-            self._meta_key(crawl_id),
-            json.dumps(payload, separators=(",", ":")),
+            name=self._meta_key(crawl_id),
+            value=json.dumps(payload, separators=(",", ":")),
             ex=self.ttl_seconds,
             nx=True,
         )
@@ -90,7 +90,9 @@ class CrawlJobStore:
             existing = await self.get(crawl_id, owner=owner)
             if existing is None:
                 message = "Crawler job creation raced with an expired record"
-                raise RuntimeError(message)
+                exc = RuntimeError(message)
+                exc.add_note(f"crawl_id={crawl_id}, owner={owner}, operation=job_create")
+                raise exc
             return existing, False
         if idempotency_key:
             idempotency_created = await self.redis.set(
@@ -138,8 +140,8 @@ class CrawlJobStore:
             raise KeyError(crawl_id)
         payload.update(changes)
         await self.redis.set(
-            self._meta_key(crawl_id),
-            json.dumps(payload, separators=(",", ":")),
+            name=self._meta_key(crawl_id),
+            value=json.dumps(payload, separators=(",", ":")),
             ex=self.ttl_seconds,
         )
         return self._public_job(payload)

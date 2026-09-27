@@ -1,0 +1,10 @@
+{
+  "id": "android-cert-pinning",
+  "acquired_at": "2026-09-14T09:58:11+05:30",
+  "source_name": "input.md.txt",
+  "source_path": "assets/ingest/android-cert-pinning/input.md.txt",
+  "bytes": 2689,
+  "sha256": "7145d8c172ebe1f923c82f87c9b83bd2f3a8ec2bc4f86e157a9f78ce626de90d",
+  "topic": "Certificate Pinning in Android Applications",
+  "access_constraints": "unrestricted"
+}

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
 import asyncer
 import langextract as lx
-from pydantic import SecretStr
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 
 class LangExtractSettings(Protocol):
@@ -15,9 +14,10 @@ class LangExtractSettings(Protocol):
     LANGEXTRACT_API_KEY: SecretStr
 
 
-@dataclass(frozen=True, slots=True)
-class ExtractionRequest:
+class ExtractionRequest(BaseModel):
     """One extraction operation derived from a parsed document."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     text: str
     prompt_description: str
@@ -35,16 +35,18 @@ class ExtractionFailureCode(StrEnum):
     GRAPH_WRITE_ERROR = "graph_write_error"
 
 
-@dataclass(frozen=True, slots=True)
-class ExtractionSucceeded:
+class ExtractionSucceeded(BaseModel):
     """A successful provider call, including a valid empty extraction."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     documents: tuple[lx.data.AnnotatedDocument, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class ExtractionFailed:
+class ExtractionFailed(BaseModel):
     """A visible, typed provider failure for the ingestion layer to handle."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     code: ExtractionFailureCode
     message: str

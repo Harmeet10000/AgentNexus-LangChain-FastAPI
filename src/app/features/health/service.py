@@ -4,7 +4,8 @@ import asyncio
 import os
 import platform
 import time
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from collections.abc import Awaitable, Callable
+from typing import Any, Protocol, cast
 
 import psutil
 from celery import Celery
@@ -19,13 +20,34 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
-from app.shared.langchain_layer.agents.memory.setup_types import CogneeSetupConfig
+from app.connections.cognee import CogneeSetupConfig
+from app.shared.result import HealthStatus
 from app.utils import logger, trace_layer
 
-from .dto import HealthChecksDTO, HealthDataDTO, HealthResultDTO, SelfInfoDTO
+from .dto import (
+    AgentMemoryCheck,
+    ComponentCheck,
+    HealthChecksDTO,
+    HealthDataDTO,
+    HealthResultDTO,
+    SelfInfoDTO,
+)
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
+type Probe = Callable[[], Awaitable[ComponentCheck]]
+
+type HealthProbeResults = tuple[
+    ComponentCheck,
+    ComponentCheck,
+    ComponentCheck,
+    ComponentCheck,
+    ComponentCheck,
+    AgentMemoryCheck,
+    ComponentCheck,
+    ComponentCheck,
+    ComponentCheck,
+    dict[str, Any],
+    dict[str, Any],
+]
 
 # The graph-memory probe is bounded: an unreachable graph backend must report,
 # not hang. A readiness probe that blocks is worse than one that answers degraded.
@@ -36,6 +58,33 @@ _HEALTH_CHECK_TIMEOUT_S = 3.0
 # never cleared, so a presence check alone cannot distinguish "initialised" from
 # "reachable" — the probe has to ask the backend something.
 _GRAPH_MEMORY_PROBE_QUERY = "RETURN 1 AS ok"
+
+# Shared default for absent optionals and empty registries — frozen, so safe
+# to reuse across checks without copying.
+_NULL_CHECK = ComponentCheck.not_configured()
+
+
+async def _null_probe() -> ComponentCheck:
+    """Null Object for an absent async dependency: answers, never fails."""
+    return _NULL_CHECK
+
+
+def _null_probe_sync() -> ComponentCheck:
+    """Null Object for an absent sync dependency: answers, never fails."""
+    return _NULL_CHECK
+
+
+def _require[T](client: T | None, component: str) -> T:
+    """Narrow an injected client; absent means the probe selector mis-wired.
+
+    Probe selection guarantees a configured client before a check runs, so
+    reaching here with ``None`` is a programming error that must fail fast
+    to the GEH — never silently report healthy.
+    """
+    if client is None:
+        message = f"unconfigured {component} client reached its check"
+        raise AssertionError(message)
+    return client
 
 
 class GraphQueryDriver(Protocol):
@@ -93,11 +142,20 @@ class HealthService:
             timestamp=time.time(),
         )
 
+    @staticmethod
+    def _wired(check: Probe, client: object | None) -> Probe:
+        """Select the real probe when its client is configured, else the null probe."""
+        return check if client is not None else _null_probe
+
     @trace_layer("service")
     async def get_health(self) -> HealthResultDTO:
         """Run all health checks and return aggregated status."""
+        # Absent clients resolve to the null probe here, once — check methods
+        # below therefore assume a configured client and never branch on None.
         # Health checks are independent. Running them concurrently keeps a slow
         # database from serialising the latency of every other dependency.
+        # The cast pins each gather position to its probe type — heterogeneous
+        # gather otherwise joins every element into a union.
         (
             database_check,
             redis_check,
@@ -110,22 +168,30 @@ class HealthService:
             disk_check,
             system_health,
             application_health,
-        ) = await asyncio.gather(
-            self._optional_async_check(
-                self._check_mongodb, self.mongo_client is not None, "mongodb"
+        ) = cast(
+            "HealthProbeResults",
+            await asyncio.gather(
+                self._run_async_check(
+                    self._wired(self._check_mongodb, self.mongo_client), "mongodb"
+                ),
+                self._run_async_check(self._wired(self._check_redis, self.redis_client), "redis"),
+                self._run_async_check(
+                    self._wired(self._check_postgres, self.postgres_session_factory), "postgres"
+                ),
+                self._run_async_check(self._wired(self._check_neo4j, self.neo4j_driver), "neo4j"),
+                self._run_async_check(
+                    self._wired(self._check_graphiti, self.graph_memory_client), "graphiti"
+                ),
+                self._guarded_agent_memory(),
+                self._run_sync_check(
+                    self._check_celery if self.celery_app is not None else _null_probe_sync,
+                    "celery",
+                ),
+                self._run_sync_check(self._check_memory, "memory"),
+                self._run_sync_check(self._check_disk, "disk"),
+                asyncio.to_thread(self._get_system_health),
+                asyncio.to_thread(self._get_application_health),
             ),
-            self._optional_async_check(self._check_redis, self.redis_client is not None, "redis"),
-            self._optional_async_check(
-                self._check_postgres, self.postgres_session_factory is not None, "postgres"
-            ),
-            self._optional_async_check(self._check_neo4j, self.neo4j_driver is not None, "neo4j"),
-            self._run_async_check(self._check_graphiti, "graphiti"),
-            self._run_async_check(self._check_agent_memory, "agent_memory"),
-            self._run_sync_check(self._check_celery, "celery"),
-            self._run_sync_check(self._check_memory, "memory"),
-            self._run_sync_check(self._check_disk, "disk"),
-            asyncio.to_thread(self._get_system_health),
-            asyncio.to_thread(self._get_application_health),
         )
 
         checks = HealthChecksDTO(
@@ -141,7 +207,7 @@ class HealthService:
         )
 
         overall_status = self._compute_overall_status(checks=checks)
-        status_code = 200 if overall_status == "healthy" else 503
+        status_code = 200 if overall_status == HealthStatus.HEALTHY else 503
 
         data = HealthDataDTO(
             status=overall_status,
@@ -158,100 +224,83 @@ class HealthService:
             data=data,
         )
 
-    async def _optional_async_check(
-        self,
-        check: Any,
-        configured: bool,
-        component: str,
-    ) -> dict[str, Any]:
-        if not configured:
-            return self._not_configured()
-        return await self._run_async_check(check, component)
-
     @staticmethod
-    async def _run_async_check(check: Any, component: str) -> dict[str, Any]:
+    async def _run_async_check(check: Probe, component: str) -> ComponentCheck:
         try:
             async with asyncio.timeout(_HEALTH_CHECK_TIMEOUT_S):
                 return await check()
-        except TimeoutError:
+        except TimeoutError as exc:
+            exc.add_note(f"component={component}, operation=health_check")
             logger.bind(component=component, timeout_seconds=_HEALTH_CHECK_TIMEOUT_S).warning(
                 "Health check timed out"
             )
-            return {"status": "unhealthy", "state": "timeout", "error": "timeout"}
+            return ComponentCheck.timeout(component, _HEALTH_CHECK_TIMEOUT_S)
         except Exception as exc:  # noqa: BLE001 — health endpoint must fail closed
+            exc.add_note(f"component={component}, operation=health_check")
             logger.bind(component=component, error_type=type(exc).__name__).exception(
                 "Health check failed unexpectedly"
             )
-            return {
-                "status": "unhealthy",
-                "state": "error",
-                "error": type(exc).__name__,
-            }
+            return ComponentCheck.unhealthy(type(exc).__name__, state="error")
 
     @staticmethod
-    async def _run_sync_check(check: Any, component: str) -> dict[str, Any]:
+    async def _run_sync_check(
+        check: Callable[[], ComponentCheck], component: str
+    ) -> ComponentCheck:
         try:
             return await asyncio.wait_for(asyncio.to_thread(check), timeout=_HEALTH_CHECK_TIMEOUT_S)
-        except TimeoutError:
+        except TimeoutError as exc:
+            exc.add_note(f"component={component}, operation=health_check")
             logger.bind(component=component, timeout_seconds=_HEALTH_CHECK_TIMEOUT_S).warning(
                 "Health check timed out"
             )
-            return {"status": "unhealthy", "state": "timeout", "error": "timeout"}
+            return ComponentCheck.timeout(component, _HEALTH_CHECK_TIMEOUT_S)
         except Exception as exc:  # noqa: BLE001 — health endpoint must fail closed
+            exc.add_note(f"component={component}, operation=health_check")
             logger.bind(component=component, error_type=type(exc).__name__).exception(
                 "Health check failed unexpectedly"
             )
-            return {
-                "status": "unhealthy",
-                "state": "error",
-                "error": type(exc).__name__,
-            }
+            return ComponentCheck.unhealthy(type(exc).__name__, state="error")
 
-    async def _check_mongodb(self) -> dict[str, Any]:
+    async def _check_mongodb(self) -> ComponentCheck:
         client = self.mongo_client
-        if client is None:
-            return self._not_configured()
+        client = _require(client, "mongodb")
         try:
             start = time.perf_counter()
             await client.admin.command("ping")
             response_time = (time.perf_counter() - start) * 1000
             server_info = await client.server_info()
-            return {
-                "status": "healthy",
-                "state": "connected",
-                "responseTime": f"{response_time:.2f}ms",
-                "version": server_info.get("version", "unknown"),
-            }
+            return ComponentCheck.healthy(
+                response_time_ms=round(response_time, 2),
+                version=server_info.get("version", "unknown"),
+            )
         except PyMongoError as exc:
+            exc.add_note("component=mongodb, operation=check_mongodb")
             logger.bind(error=str(exc), component="mongodb").exception(
                 "MongoDB health check failed"
             )
-            return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
+            return ComponentCheck.unhealthy(str(exc))
 
-    async def _check_redis(self) -> dict[str, Any]:
+    async def _check_redis(self) -> ComponentCheck:
         redis_client = self.redis_client
-        if redis_client is None:
-            return self._not_configured()
+        redis_client = _require(redis_client, "redis")
         try:
             start = time.perf_counter()
             await redis_client.ping()
             response_time = (time.perf_counter() - start) * 1000
             info = await redis_client.info()
-            return {
-                "status": "healthy",
-                "state": "connected",
-                "responseTime": f"{response_time:.2f}ms",
-                "version": info.get("redis_version", "unknown"),
-                "connectedClients": info.get("connected_clients", 0),
-            }
+            return ComponentCheck.healthy(
+                response_time_ms=round(response_time, 2),
+                version=info.get("redis_version", "unknown"),
+                connected_clients=info.get("connected_clients", 0),
+            )
         except RedisError as exc:
+            exc.add_note("component=redis, operation=check_redis")
             logger.bind(error=str(exc), component="redis").exception("Redis health check failed")
-            return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
+            return ComponentCheck.unhealthy(str(exc))
 
-    async def _check_postgres(self) -> dict[str, Any]:
+    async def _check_postgres(self) -> ComponentCheck:
         session_factory = self.postgres_session_factory
-        if session_factory is None:
-            return self._not_configured()
+        session_factory = _require(session_factory, "postgres")
         start = time.perf_counter()
         try:
             async with session_factory() as session:
@@ -267,71 +316,54 @@ class HealthService:
                 operation="check_postgres",
                 query="SELECT 1",
             ).exception("Postgres health check failed")
-            return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
+            return ComponentCheck.unhealthy(str(exc))
         response_time = (time.perf_counter() - start) * 1000
-        return {
-            "status": "healthy",
-            "state": "connected",
-            "responseTime": f"{response_time:.2f}ms",
-            "version": str(version),
-        }
+        return ComponentCheck.healthy(
+            response_time_ms=round(response_time, 2), version=str(version)
+        )
 
-    async def _check_neo4j(self) -> dict[str, Any]:
+    async def _check_neo4j(self) -> ComponentCheck:
         driver = self.neo4j_driver
-        if driver is None:
-            return self._not_configured()
+        driver = _require(driver, "neo4j")
         try:
             start = time.perf_counter()
             async with driver.session() as session:
                 result = await session.run("RETURN 1 AS ok")
                 record = await result.single()
             response_time = (time.perf_counter() - start) * 1000
-            return {
-                "status": "healthy",
-                "state": "connected",
-                "responseTime": f"{response_time:.2f}ms",
-                "ok": bool(record and record.get("ok") == 1),
-            }
+            return ComponentCheck.healthy(
+                response_time_ms=round(response_time, 2),
+                ok=bool(record and record.get("ok") == 1),
+            )
         except Neo4jError as exc:
+            exc.add_note("component=neo4j, operation=check_neo4j")
             logger.bind(error=str(exc), component="neo4j").exception("Neo4j health check failed")
-            return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
+            return ComponentCheck.unhealthy(str(exc))
 
-    async def _check_graphiti(self) -> dict[str, Any]:
+    async def _check_graphiti(self) -> ComponentCheck:
         """Probe the graph-memory layer with a bounded, read-only query.
 
-        Absence reports ``not_configured`` and deliberately leaves the overall
-        status — and therefore the HTTP status code — untouched, mirroring how the
-        graph database itself is already treated. Graph memory is optional, and a
-        deployment without it must not begin answering 503 from a mounted endpoint.
-
-        Failures report the exception *type*, never its message: the underlying
-        driver interpolates its connection URI into error text, so ``str(exc)``
+        Absence resolves to the null probe before this runs. Failures report
+        the exception *type*, never its message: the underlying driver
+        interpolates its connection URI into error text, so ``str(exc)``
         would put a DSN into the response body and the log line.
         """
         client = self.graph_memory_client
-        if client is None:
-            return self._not_configured()
+        client = _require(client, "graphiti")
         start = time.perf_counter()
         try:
             async with asyncio.timeout(_GRAPH_MEMORY_PROBE_TIMEOUT_S):
                 await client.driver.execute_query(_GRAPH_MEMORY_PROBE_QUERY)
         except (Neo4jError, DriverError, OSError, TimeoutError) as exc:
+            exc.add_note("component=graphiti, operation=check_graphiti")
             logger.bind(error_type=type(exc).__name__, component="graphiti").exception(
                 "Graphiti health check failed"
             )
-            return {
-                "status": "unhealthy",
-                "state": "disconnected",
-                "error": type(exc).__name__,
-            }
+            return ComponentCheck.unhealthy(type(exc).__name__)
         response_time = (time.perf_counter() - start) * 1000
-        return {
-            "status": "healthy",
-            "state": "connected",
-            "responseTime": f"{response_time:.2f}ms",
-        }
+        return ComponentCheck.healthy(response_time_ms=round(response_time, 2))
 
-    async def _check_agent_memory(self) -> dict[str, Any]:
+    async def _check_agent_memory(self) -> AgentMemoryCheck:
         """Probe agent memory (cognee), mirroring the middleware probe's three states.
 
         The graph-procedure precondition (APOC/GDS) is reported as a **named sub-field**
@@ -340,7 +372,7 @@ class HealthService:
         run — not that the subsystem is down.
         """
         if self.cognee_config is None:
-            return {"status": "degraded", "state": "not_configured"}
+            return AgentMemoryCheck(status=HealthStatus.DEGRADED, state="not_configured")
 
         graph_procedures_available = False
         graph_reachable = False
@@ -360,102 +392,130 @@ class HealthService:
                 )
                 graph_procedures_available = bool(records and count > 0)
             except (Neo4jError, DriverError, OSError, TimeoutError) as exc:
+                exc.add_note("component=agent_memory, operation=check_agent_memory")
                 logger.bind(error_type=type(exc).__name__, component="agent_memory").exception(
                     "Agent memory health check failed"
                 )
-                return {
-                    "status": "unhealthy",
-                    "state": "disconnected",
-                    "error": type(exc).__name__,
-                    "graphProceduresAvailable": graph_procedures_available,
-                }
+                return AgentMemoryCheck(
+                    status=HealthStatus.UNHEALTHY,
+                    state="disconnected",
+                    error=type(exc).__name__,
+                    graph_procedures_available=graph_procedures_available,
+                )
 
-        return {
-            "status": "healthy",
-            "state": "configured",
-            "graphReachable": graph_reachable,
+        return AgentMemoryCheck(
+            status=HealthStatus.HEALTHY,
+            state="configured",
+            graph_reachable=graph_reachable,
             # Absent procedures mean consolidation will refuse to run; they do NOT
             # mean this check should fail.
-            "graphProceduresAvailable": graph_procedures_available,
-            "embeddingDimension": self.cognee_config.embedding_dimension,
-        }
+            graph_procedures_available=graph_procedures_available,
+            embedding_dimension=self.cognee_config.embedding_dimension,
+        )
 
-    def _check_celery(self) -> dict[str, Any]:
-        if self.celery_app is None:
-            return self._not_configured()
+    async def _guarded_agent_memory(self) -> AgentMemoryCheck:
+        """Run the agent-memory probe, preserving its typed shape.
+
+        The shared runner answers timeouts/crashes with a plain
+        ``ComponentCheck``; this guard re-roots that fallback into an
+        ``AgentMemoryCheck`` so the DTO below always receives the subtype
+        its field declares.
+        """
+        result = await self._run_async_check(self._check_agent_memory, "agent_memory")
+        if isinstance(result, AgentMemoryCheck):
+            return result
+        return AgentMemoryCheck.unhealthy(
+            result.error or "agent_memory probe failed", state="error"
+        )
+
+    def _check_celery(self) -> ComponentCheck:
+        app = self.celery_app
+        app = _require(app, "celery")
         try:
             start = time.perf_counter()
-            conn = self.celery_app.connection()
+            conn = app.connection()
             try:
                 conn.ensure_connection(max_retries=1, timeout=2)
             finally:
                 conn.release()
             response_time = (time.perf_counter() - start) * 1000
         except (ConnectionRefusedError, TimeoutError, OSError) as exc:
+            exc.add_note("component=celery, operation=check_celery")
             logger.bind(error=str(exc), component="celery").exception("Celery health check failed")
-            return {"status": "unhealthy", "state": "disconnected", "error": str(exc)}
+            return ComponentCheck.unhealthy(str(exc))
         else:
-            return {
-                "status": "healthy",
-                "state": "connected",
-                "responseTime": f"{response_time:.2f}ms",
-            }
+            return ComponentCheck.healthy(response_time_ms=round(response_time, 2))
 
     @staticmethod
-    def _check_memory() -> dict[str, Any]:
+    def _check_memory() -> ComponentCheck:
         memory = psutil.virtual_memory()
         process_memory = psutil.Process().memory_info()
-        return {
-            "status": "healthy" if memory.percent < 90 else "warning",
+        details = {
             "system": {
-                "total": f"{memory.total / 1024 / 1024:.2f} MB",
-                "available": f"{memory.available / 1024 / 1024:.2f} MB",
-                "used": f"{memory.used / 1024 / 1024:.2f} MB",
-                "percent": f"{memory.percent:.1f}%",
+                "total_mb": round(memory.total / 1024 / 1024, 2),
+                "available_mb": round(memory.available / 1024 / 1024, 2),
+                "used_mb": round(memory.used / 1024 / 1024, 2),
+                "percent": round(memory.percent, 1),
             },
             "process": {
-                "rss": f"{process_memory.rss / 1024 / 1024:.2f} MB",
-                "vms": f"{process_memory.vms / 1024 / 1024:.2f} MB",
+                "rss_mb": round(process_memory.rss / 1024 / 1024, 2),
+                "vms_mb": round(process_memory.vms / 1024 / 1024, 2),
             },
         }
+        if memory.percent >= 90:
+            return ComponentCheck.warning(state="high_usage", **details)
+        return ComponentCheck.healthy(state="sampled", **details)
 
     @staticmethod
-    def _check_disk() -> dict[str, Any]:
+    def _check_disk() -> ComponentCheck:
         try:
             disk = psutil.disk_usage(".")
-            return {
-                "status": "healthy" if disk.percent < 90 else "warning",
-                "accessible": True,
-                "total": f"{disk.total / 1024 / 1024 / 1024:.2f} GB",
-                "used": f"{disk.used / 1024 / 1024 / 1024:.2f} GB",
-                "free": f"{disk.free / 1024 / 1024 / 1024:.2f} GB",
-                "percent": f"{disk.percent:.1f}%",
+            details = {
+                "total_gb": round(disk.total / 1024 / 1024 / 1024, 2),
+                "used_gb": round(disk.used / 1024 / 1024 / 1024, 2),
+                "free_gb": round(disk.free / 1024 / 1024 / 1024, 2),
+                "percent": round(disk.percent, 1),
             }
         except (FileNotFoundError, PermissionError, OSError) as exc:
+            exc.add_note("component=disk, operation=check_disk")
             logger.bind(error=str(exc), component="disk").exception("Disk health check failed")
-            return {"status": "unhealthy", "accessible": False, "error": str(exc)}
+            return ComponentCheck.unhealthy(str(exc), state="inaccessible")
+        if disk.percent >= 90:
+            return ComponentCheck.warning(state="high_usage", **details)
+        return ComponentCheck.healthy(state="accessible", **details)
 
     @staticmethod
-    def _not_configured() -> dict[str, Any]:
-        return {"status": "unknown", "state": "not_configured"}
+    def _severity(status: HealthStatus) -> int:
+        """Rank a component status for overall aggregation (Pattern 2)."""
+        match status:
+            case HealthStatus.UNHEALTHY:
+                return 2
+            case HealthStatus.WARNING:
+                return 1
+            case _:
+                return 0
 
-    @staticmethod
-    def _compute_overall_status(checks: HealthChecksDTO) -> str:
-        all_checks = [
-            checks.database,
-            checks.redis,
-            checks.postgres,
-            checks.neo4j,
-            checks.graphiti,
-            checks.celery,
-            checks.memory,
-            checks.disk,
+    @classmethod
+    def _compute_overall_status(cls, checks: HealthChecksDTO) -> HealthStatus:
+        severities = [
+            cls._severity(check.status)
+            for check in (
+                checks.database,
+                checks.redis,
+                checks.postgres,
+                checks.neo4j,
+                checks.graphiti,
+                checks.celery,
+                checks.memory,
+                checks.disk,
+            )
         ]
-        if any(check.get("status") == "unhealthy" for check in all_checks):
-            return "unhealthy"
-        if any(check.get("status") == "warning" for check in all_checks):
-            return "degraded"
-        return "healthy"
+        worst = max(severities, default=0)
+        if worst >= 2:
+            return HealthStatus.UNHEALTHY
+        if worst >= 1:
+            return HealthStatus.DEGRADED
+        return HealthStatus.HEALTHY
 
     def _get_application_health(self) -> dict[str, Any]:
         process = psutil.Process()
@@ -484,8 +544,9 @@ class HealthService:
                 psutil.__dict__["getloadavg"],
             )
             load_avg = list(get_load_average())
-        except (AttributeError, OSError):
-            logger.warning("System load average unavailable")
+        except (AttributeError, OSError) as exc:
+            exc.add_note("component=system, operation=system_health")
+            logger.bind(operation="system_health").warning("System load average unavailable")
             load_avg = [0.0, 0.0, 0.0]
         return {
             "cpuUsage": load_avg,

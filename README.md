@@ -177,7 +177,7 @@ The architecture notes that drive this repo live in [tests/performance/Saul_agen
 - Graph extraction and retrieval: Graphiti
 - Cache and idempotency: Redis
 - Background execution: Celery
-- Document processing: Docling, LangExtract, PageIndex
+- Document processing: Docling, LangExtract
 - Crawling and search: Crawl4AI, Tavily
 - MCP integration: FastMCP
 
@@ -357,6 +357,8 @@ ingestion whenever every slot is busy.
 ├── pyproject.toml
 └── uv.lock
 ```
+
+[![Greptile: The War on Bugs](https://www.greptile.com/badge.svg)](https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source)
 
 ## Notes
 

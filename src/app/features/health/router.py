@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 router = APIRouter(prefix="/health", tags=["health"])
 deep_health_router = APIRouter(tags=["Monitoring"])
-_DEEP_PROBE_TIMEOUT_S = 3.0
+_DEEP_PROBE_TIMEOUT_S = 9.0
 _DEEP_PROBE_NAMES = ("postgres", "redis", "mongodb", "neo4j", "neo4j-plugins", "graphiti", "cognee")
 
 
@@ -40,9 +40,11 @@ async def _run_probe(
     try:
         async with asyncio.timeout(_DEEP_PROBE_TIMEOUT_S):
             return await probe(app)
-    except TimeoutError:
+    except TimeoutError as exc:
+        exc.add_note(f"component={component}, operation=deep_probe")
         return DependencyHealth.fail(component, "probe timed out")
     except Exception as exc:  # noqa: BLE001 — readiness must fail closed
+        exc.add_note(f"component={component}, operation=deep_probe")
         return DependencyHealth.fail(component, type(exc).__name__)
 
 

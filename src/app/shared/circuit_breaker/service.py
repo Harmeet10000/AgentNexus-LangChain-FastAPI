@@ -81,7 +81,8 @@ class CircuitBreakerService:
 
         try:
             yield
-        except Exception:
+        except Exception as exc:
+            exc.add_note(f"service_name={service_name}, operation=circuit_breaker_protect")
             await self._record_failure(settings, keys)
             raise
         else:

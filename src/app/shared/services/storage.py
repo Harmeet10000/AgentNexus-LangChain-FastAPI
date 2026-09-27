@@ -280,11 +280,16 @@ class StorageService(BaseModel):
                 metadata=metadata,
             )
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(f"bucket={self.bucket}, key={key}, operation=put_object")
             logger.bind(bucket=self.bucket, key=key, error=str(exc)).exception("s3_put_failed")
             return Failure(
                 StorageUnavailableError(
                     message="Object storage upload failed",
-                    details={"bucket": self.bucket, "key": key},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="put_object",
                 )
             )
@@ -294,11 +299,16 @@ class StorageService(BaseModel):
         try:
             value = await asyncer.asyncify(self._wrapper.get_object)(key=key)
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(f"bucket={self.bucket}, key={key}, operation=get_object")
             logger.bind(bucket=self.bucket, key=key, error=str(exc)).exception("s3_get_failed")
             return Failure(
                 StorageUnavailableError(
                     message="Object storage download failed",
-                    details={"bucket": self.bucket, "key": key},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="get_object",
                 )
             )
@@ -311,20 +321,30 @@ class StorageService(BaseModel):
             error_code = exc.response.get("Error", {}).get("Code", "")
             if error_code in {"404", "NotFound", "NoSuchKey"}:
                 return Success(None)
+            exc.add_note(f"bucket={self.bucket}, key={key}, operation=delete_object")
             logger.bind(bucket=self.bucket, key=key, error=str(exc)).exception("s3_delete_failed")
             return Failure(
                 StorageUnavailableError(
                     message="Object storage delete failed",
-                    details={"bucket": self.bucket, "key": key},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="delete_object",
                 )
             )
         except BotoCoreError as exc:
+            exc.add_note(f"bucket={self.bucket}, key={key}, operation=delete_object")
             logger.bind(bucket=self.bucket, key=key, error=str(exc)).exception("s3_delete_failed")
             return Failure(
                 StorageUnavailableError(
                     message="Object storage delete failed",
-                    details={"bucket": self.bucket, "key": key},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="delete_object",
                 )
             )
@@ -346,11 +366,15 @@ class StorageService(BaseModel):
         try:
             await asyncer.asyncify(self._wrapper.head_bucket)()
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(f"bucket={self.bucket}, operation=verify_access")
             logger.bind(bucket=self.bucket, error=str(exc)).exception("s3_verify_access_failed")
             return Failure(
                 StorageUnavailableError(
                     message="Object storage bucket access failed",
-                    details={"bucket": self.bucket},
+                    details={
+                        "bucket": self.bucket,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="verify_access",
                 )
             )
@@ -363,20 +387,30 @@ class StorageService(BaseModel):
             error_code = exc.response.get("Error", {}).get("Code")
             if error_code in {"404", "NotFound", "NoSuchKey"}:
                 return Success(False)
+            exc.add_note(f"bucket={self.bucket}, key={key}, operation=object_exists")
             logger.bind(bucket=self.bucket, key=key, error=str(exc)).exception("s3_head_failed")
             return Failure(
                 StorageUnavailableError(
                     message="Object existence check failed",
-                    details={"bucket": self.bucket, "key": key},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="object_exists",
                 )
             )
         except BotoCoreError as exc:
+            exc.add_note(f"bucket={self.bucket}, key={key}, operation=object_exists")
             logger.bind(bucket=self.bucket, key=key, error=str(exc)).exception("s3_head_failed")
             return Failure(
                 StorageUnavailableError(
                     message="Object existence check failed",
-                    details={"bucket": self.bucket, "key": key},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="object_exists",
                 )
             )
@@ -393,13 +427,18 @@ class StorageService(BaseModel):
                 prefix=prefix, max_keys=max_keys
             )
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(f"bucket={self.bucket}, prefix={prefix}, operation=list_objects")
             logger.bind(bucket=self.bucket, prefix=prefix, error=str(exc)).exception(
                 "s3_list_failed"
             )
             return Failure(
                 StorageUnavailableError(
                     message="Object listing failed",
-                    details={"bucket": self.bucket, "prefix": prefix},
+                    details={
+                        "bucket": self.bucket,
+                        "prefix": prefix,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="list_objects",
                 )
             )
@@ -421,6 +460,10 @@ class StorageService(BaseModel):
                 destination_key=destination_key,
             )
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(
+                f"bucket={self.bucket}, source_key={source_key}, "
+                f"destination_key={destination_key}, operation=copy_object"
+            )
             logger.bind(
                 bucket=self.bucket,
                 source_key=source_key,
@@ -434,6 +477,7 @@ class StorageService(BaseModel):
                         "bucket": self.bucket,
                         "source_key": source_key,
                         "destination_key": destination_key,
+                        "notes": list(getattr(exc, "__notes__", [])),
                     },
                     operation="copy_object",
                 )
@@ -454,13 +498,18 @@ class StorageService(BaseModel):
                 metadata=metadata or {},
             )
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(f"bucket={self.bucket}, key={key}, operation=create_multipart_upload")
             logger.bind(bucket=self.bucket, key=key, error=str(exc)).exception(
                 "s3_multipart_create_failed"
             )
             return Failure(
                 StorageUnavailableError(
                     message="Multipart upload initialization failed",
-                    details={"bucket": self.bucket, "key": key},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="create_multipart_upload",
                 )
             )
@@ -482,6 +531,10 @@ class StorageService(BaseModel):
                 body=body,
             )
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(
+                f"bucket={self.bucket}, key={key}, upload_id={upload_id}, "
+                f"part_number={part_number}, operation=upload_part"
+            )
             logger.bind(
                 bucket=self.bucket,
                 key=key,
@@ -497,6 +550,7 @@ class StorageService(BaseModel):
                         "key": key,
                         "upload_id": upload_id,
                         "part_number": part_number,
+                        "notes": list(getattr(exc, "__notes__", [])),
                     },
                     operation="upload_part",
                 )
@@ -517,13 +571,22 @@ class StorageService(BaseModel):
                 parts=parts,
             )
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(
+                f"bucket={self.bucket}, key={key}, upload_id={upload_id}, "
+                "operation=complete_multipart_upload"
+            )
             logger.bind(bucket=self.bucket, key=key, upload_id=upload_id, error=str(exc)).exception(
                 "s3_multipart_complete_failed"
             )
             return Failure(
                 StorageUnavailableError(
                     message="Multipart upload completion failed",
-                    details={"bucket": self.bucket, "key": key, "upload_id": upload_id},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "upload_id": upload_id,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="complete_multipart_upload",
                 )
             )
@@ -545,24 +608,42 @@ class StorageService(BaseModel):
             error_code = exc.response.get("Error", {}).get("Code", "")
             if error_code in {"404", "NoSuchUpload"}:
                 return Success(None)
+            exc.add_note(
+                f"bucket={self.bucket}, key={key}, upload_id={upload_id}, "
+                "operation=abort_multipart_upload"
+            )
             logger.bind(bucket=self.bucket, key=key, upload_id=upload_id, error=str(exc)).exception(
                 "s3_multipart_abort_failed"
             )
             return Failure(
                 StorageUnavailableError(
                     message="Multipart upload abort failed",
-                    details={"bucket": self.bucket, "key": key, "upload_id": upload_id},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "upload_id": upload_id,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="abort_multipart_upload",
                 )
             )
         except BotoCoreError as exc:
+            exc.add_note(
+                f"bucket={self.bucket}, key={key}, upload_id={upload_id}, "
+                "operation=abort_multipart_upload"
+            )
             logger.bind(bucket=self.bucket, key=key, upload_id=upload_id, error=str(exc)).exception(
                 "s3_multipart_abort_failed"
             )
             return Failure(
                 StorageUnavailableError(
                     message="Multipart upload abort failed",
-                    details={"bucket": self.bucket, "key": key, "upload_id": upload_id},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "upload_id": upload_id,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="abort_multipart_upload",
                 )
             )
@@ -579,13 +660,22 @@ class StorageService(BaseModel):
                 key=key, upload_id=upload_id
             )
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(
+                f"bucket={self.bucket}, key={key}, upload_id={upload_id}, "
+                "operation=list_multipart_upload_parts"
+            )
             logger.bind(bucket=self.bucket, key=key, upload_id=upload_id, error=str(exc)).exception(
                 "s3_multipart_list_parts_failed"
             )
             return Failure(
                 StorageUnavailableError(
                     message="Multipart upload part listing failed",
-                    details={"bucket": self.bucket, "key": key, "upload_id": upload_id},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "upload_id": upload_id,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="list_multipart_upload_parts",
                 )
             )
@@ -613,13 +703,18 @@ class StorageService(BaseModel):
                 expires_in=expires_in,
             )
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(f"bucket={self.bucket}, key={key}, operation=get_signed_get_url")
             logger.bind(bucket=self.bucket, key=key, error=str(exc)).exception(
                 "s3_signed_get_url_failed"
             )
             return Failure(
                 StorageUnavailableError(
                     message="Signed download URL generation failed",
-                    details={"bucket": self.bucket, "key": key},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="get_signed_get_url",
                 )
             )
@@ -641,13 +736,18 @@ class StorageService(BaseModel):
                 expires_in=expires_in,
             )
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(f"bucket={self.bucket}, key={key}, operation=get_signed_put_url")
             logger.bind(bucket=self.bucket, key=key, error=str(exc)).exception(
                 "s3_signed_put_url_failed"
             )
             return Failure(
                 StorageUnavailableError(
                     message="Signed upload URL generation failed",
-                    details={"bucket": self.bucket, "key": key},
+                    details={
+                        "bucket": self.bucket,
+                        "key": key,
+                        "notes": list(getattr(exc, "__notes__", [])),
+                    },
                     operation="get_signed_put_url",
                 )
             )
@@ -757,6 +857,10 @@ class StorageService(BaseModel):
                 expires_in=expires_in,
             )
         except (BotoCoreError, ClientError) as exc:
+            exc.add_note(
+                f"bucket={self.bucket}, key={key}, upload_id={upload_id}, "
+                f"part_number={part_number}, operation=get_signed_multipart_part_url"
+            )
             logger.bind(
                 bucket=self.bucket,
                 key=key,
@@ -772,6 +876,7 @@ class StorageService(BaseModel):
                         "key": key,
                         "upload_id": upload_id,
                         "part_number": part_number,
+                        "notes": list(getattr(exc, "__notes__", [])),
                     },
                     operation="get_signed_multipart_part_url",
                 )

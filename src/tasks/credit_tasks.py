@@ -32,7 +32,8 @@ async def _expire_credits_job() -> dict[str, int]:
             try:
                 count = await service.expire_credits()
                 await session.commit()
-            except Exception:
+            except Exception as exc:
+                exc.add_note("operation=credits.expire, stage=commit")
                 await session.rollback()
                 raise
             return {"expired": count}
@@ -98,7 +99,8 @@ async def _reconcile_credits_job() -> dict[str, int]:
 
             try:
                 await session.commit()
-            except Exception:
+            except Exception as exc:
+                exc.add_note("operation=credits.reconcile, stage=commit")
                 await session.rollback()
                 raise
 

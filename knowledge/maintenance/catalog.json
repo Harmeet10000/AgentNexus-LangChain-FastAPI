@@ -1,0 +1,245 @@
+{
+  "concepts/android-certificate-pinning.md": {
+    "type": "Concept",
+    "title": "Public Key Certificate Pinning in Android",
+    "description": "Architectural mechanics and threat model of pinning Subject Public Key Info (SPKI) hashes to mitigate Certificate Authority compromise and MITM attacks.",
+    "tags": [
+      "android",
+      "security",
+      "tls",
+      "certificate-pinning",
+      "ca",
+      "mitm",
+      "spki"
+    ],
+    "generated": {
+      "by": "antigravity/1.0",
+      "at": "2026-09-14T09:58:11+05:30"
+    },
+    "status": "stable",
+    "sources": [
+      {
+        "id": "video-guide",
+        "resource": "Technical Guide: Certificate Pinning in Android Applications"
+      },
+      {
+        "id": "deep-internals-notes",
+        "resource": "Engineering Notes: Deep Internals in Security and Compilers"
+      }
+    ]
+  },
+  "concepts/compiler-code-generation.md": {
+    "type": "Concept",
+    "title": "Compiler Code Generation Pipeline",
+    "description": "Architectural stages of compiler backend lowering: instruction selection via tree tiling, pipeline instruction scheduling, ABI calling conventions, and peephole rewrites.",
+    "tags": [
+      "compilers",
+      "code-generation",
+      "instruction-selection",
+      "instruction-scheduling",
+      "abi",
+      "peephole"
+    ],
+    "generated": {
+      "by": "antigravity/1.0",
+      "at": "2026-09-14T10:27:55+05:30"
+    },
+    "status": "stable",
+    "sources": [
+      {
+        "id": "compiler-guide",
+        "resource": "Technical Guide: Compiler Code Generation Pipeline"
+      },
+      {
+        "id": "deep-internals-notes",
+        "resource": "Engineering Notes: Deep Internals in Security and Compilers"
+      }
+    ]
+  },
+  "concepts/register-allocation-graph-coloring.md": {
+    "type": "Concept",
+    "title": "Register Allocation via Graph Coloring and Linear Scan",
+    "description": "Theoretical intractability, liveness analysis, Chaitin-Briggs graph coloring heuristics, spilling trade-offs, and JIT linear scan allocation.",
+    "tags": [
+      "compilers",
+      "register-allocation",
+      "graph-coloring",
+      "linear-scan",
+      "np-complete",
+      "liveness-analysis"
+    ],
+    "generated": {
+      "by": "antigravity/1.0",
+      "at": "2026-09-14T10:27:55+05:30"
+    },
+    "status": "stable",
+    "sources": [
+      {
+        "id": "compiler-guide",
+        "resource": "Technical Guide: Compiler Code Generation Pipeline"
+      }
+    ]
+  },
+  "concepts/rust-ipc-protocols.md": {
+    "type": "Concept",
+    "title": "Inter-Process Communication Architectures in Rust",
+    "description": "Taxonomy, kernel mechanisms, and implementation patterns for remote (HTTP, SSE, WebSockets, QUIC, TCP) and local (Unix Domain Sockets, Pipes, STDIO) IPC in asynchronous Rust.",
+    "tags": [
+      "rust",
+      "ipc",
+      "tokio",
+      "axum",
+      "networking",
+      "quic",
+      "unix-sockets",
+      "websockets",
+      "framing"
+    ],
+    "generated": {
+      "by": "antigravity/1.0",
+      "at": "2026-09-14T11:17:56+05:30"
+    },
+    "status": "stable",
+    "sources": [
+      {
+        "id": "rust-ipc-guide",
+        "resource": "Technical Guide: Inter-Process Communication (IPC) Patterns in Rust"
+      },
+      {
+        "id": "rust-ipc-internals",
+        "resource": "Engineering Notes: Rust IPC Patterns and Systems Internals"
+      }
+    ]
+  },
+  "playbooks/android-network-security-config.md": {
+    "type": "Playbook",
+    "title": "Configuring Android Network Security Config for Certificate Pinning",
+    "description": "Declarative implementation of public key pinning in Android using network_security_config.xml, pin-set definitions, and backup/expiration policies.",
+    "tags": [
+      "android",
+      "security",
+      "network-security-config",
+      "xml",
+      "pin-set",
+      "playbook"
+    ],
+    "generated": {
+      "by": "antigravity/1.0",
+      "at": "2026-09-14T09:58:11+05:30"
+    },
+    "status": "stable",
+    "sources": [
+      {
+        "id": "video-guide",
+        "resource": "Technical Guide: Certificate Pinning in Android Applications"
+      }
+    ]
+  },
+  "references/android-certificate-pinning-guide.md": {
+    "type": "Reference",
+    "title": "Technical Guide: Certificate Pinning in Android Applications",
+    "description": "Reference capture of technical video summary detailing certificate authorities, public key pinning mechanics, and Android Network Security Config.",
+    "tags": [
+      "android",
+      "security",
+      "tls",
+      "certificate-pinning",
+      "reference"
+    ],
+    "generated": {
+      "by": "antigravity/1.0",
+      "at": "2026-09-14T09:58:11+05:30"
+    },
+    "status": "stable",
+    "sources": [
+      {
+        "id": "video-guide",
+        "resource": "Technical Guide: Certificate Pinning in Android Applications"
+      }
+    ]
+  },
+  "references/compiler-code-generation-guide.md": {
+    "type": "Reference",
+    "title": "Technical Guide: Compiler Code Generation Pipeline",
+    "description": "Reference notes covering compiler backend stages: instruction selection, register allocation, instruction ordering, stack frames, and peephole optimization.",
+    "tags": [
+      "compilers",
+      "code-generation",
+      "instruction-selection",
+      "register-allocation",
+      "peephole",
+      "reference"
+    ],
+    "generated": {
+      "by": "antigravity/1.0",
+      "at": "2026-09-14T10:27:55+05:30"
+    },
+    "status": "stable",
+    "sources": [
+      {
+        "id": "compiler-guide",
+        "resource": "Technical Guide: Compiler Code Generation Pipeline"
+      }
+    ]
+  },
+  "references/engineering-deep-internals.md": {
+    "type": "Reference",
+    "title": "Engineering Notes: Deep Internals in Security, Compilers, and Rust IPC",
+    "description": "Advanced engineering nuances covering ASN.1 SPKI byte offsets, TLS path building precedence, device clock dependencies, RAT zero-latency renaming, ABI red zones, scheduler phase ordering, and Rust IPC protocol invariants.",
+    "tags": [
+      "android",
+      "security",
+      "tls",
+      "compilers",
+      "code-generation",
+      "x86-64",
+      "abi",
+      "rust",
+      "ipc",
+      "unix-sockets",
+      "deep-internals",
+      "reference"
+    ],
+    "generated": {
+      "by": "antigravity/1.0",
+      "at": "2026-09-14T11:22:17+05:30"
+    },
+    "status": "stable",
+    "sources": [
+      {
+        "id": "deep-internals-notes",
+        "resource": "Engineering Notes: Deep Internals in Security and Compilers"
+      },
+      {
+        "id": "rust-ipc-internals",
+        "resource": "Engineering Notes: Rust IPC Patterns and Systems Internals"
+      }
+    ]
+  },
+  "references/rust-ipc-patterns-guide.md": {
+    "type": "Reference",
+    "title": "Technical Guide: Inter-Process Communication (IPC) Patterns in Rust",
+    "description": "Reference notes categorizing Rust remote (HTTP, SSE, WebSockets, QUIC, TCP) and local (Unix domain sockets, STDIO, pipes) communication architectures.",
+    "tags": [
+      "rust",
+      "ipc",
+      "networking",
+      "tokio",
+      "unix-sockets",
+      "quic",
+      "websockets",
+      "reference"
+    ],
+    "generated": {
+      "by": "antigravity/1.0",
+      "at": "2026-09-14T11:17:56+05:30"
+    },
+    "status": "stable",
+    "sources": [
+      {
+        "id": "rust-ipc-guide",
+        "resource": "Technical Guide: Inter-Process Communication (IPC) Patterns in Rust"
+      }
+    ]
+  }
+}

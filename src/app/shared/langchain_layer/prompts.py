@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence  # noqa: TC003 — runtime parameter in build_assembled_prompt
-from dataclasses import dataclass
 from enum import StrEnum
 from string import Template
-from typing import Any  # noqa: TC003 — Any resolved at runtime by Pydantic models
+from typing import Any, override  # noqa: TC003 — Any resolved at runtime by Pydantic models
 
 from langchain_core.prompts import (
     ChatPromptTemplate,
@@ -328,8 +327,7 @@ def assemble_kinded_sections(sections: list[PromptSection]) -> str:
     return "\n\n".join(rendered)
 
 
-@dataclass(frozen=True)
-class AssembledPrompt:
+class AssembledPrompt(BaseModel):
     """Cacheable preamble separated from per-turn content.
 
     Retrieved evidence NEVER enters the preamble: the prefix stays
@@ -338,12 +336,17 @@ class AssembledPrompt:
     only joined at render time, after the preamble and before the task.
     """
 
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
     preamble: str
     task: str
     evidence: tuple[str, ...] = ()
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "evidence", tuple(item.strip() for item in self.evidence))
+    @override
+    def model_post_init(self, __context: object) -> None:
+        object.__setattr__(  # noqa: PLC2801 — frozen model requires bypass for normalization
+            self, "evidence", tuple(item.strip() for item in self.evidence)
+        )
 
     @property
     def evidence_block(self) -> str:

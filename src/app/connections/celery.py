@@ -360,7 +360,8 @@ def run_with_circuit_breaker[T](
         raise CircuitBreakerOpenError(msg)
     try:
         result = operation()
-    except Exception:
+    except Exception as exc:
+        exc.add_note(f"circuit_breaker={name}")
         record_circuit_breaker_failure(
             redis_client,
             name,
@@ -499,6 +500,7 @@ async def idempotency_manager(
             task_id=task_id,
         )
     except Exception as exc:
+        exc.add_note(f"idempotency_key={idempotency_key}, operation=idempotency_manager")
         is_retryable = isinstance(exc, retryable_exceptions) if retryable_exceptions else False
         if is_retryable:
             release_idempotency_processing_lock(redis_client, idempotency_key)
@@ -653,28 +655,12 @@ class RateLimiter:
 # Back-compat shims for removed datamodels — keep importable for one release
 def __getattr__(name: str) -> type:
     if name == "CircuitBreakerState":
-        from dataclasses import dataclass as _dc  # noqa: PLC0415
+        from pydantic import BaseModel as _BM  # noqa: PLC0415, N814
 
-        @_dc(frozen=True)
-        class _CBS:  # type: ignore[no-redef]
+        class _CBS(_BM, frozen=True):  # type: ignore[no-redef]
             state: str = "closed"
             failures: int = 0
             opened_at: float | None = None
-
-            def model_dump_json(self) -> str:
-                return to_json_str(
-                    {"state": self.state, "failures": self.failures, "opened_at": self.opened_at}
-                )
-
-            @classmethod
-            def model_validate_json(cls, payload: str) -> _CBS:
-                d = cast("dict[str, object]", from_json(payload))
-                failures_raw = d.get("failures", 0)
-                return cls(
-                    state=str(d.get("state", "closed")),
-                    failures=failures_raw if isinstance(failures_raw, int) else 0,
-                    opened_at=cast("float | None", d.get("opened_at")),
-                )
 
         return _CBS  # type: ignore[return-value]
     if name == "IdempotencyRecord":
@@ -1094,12 +1080,14 @@ def log_task_prerun(
     context_token = otel_context.attach(parent_context)
     execution_token = execution_path.set([f"celery:{task_name}"])
     log_context = ExitStack()
-    log_context.enter_context(logger.contextualize(
-        task=task_name,
-        task_id=task_id,
-        layer="task",
-        flow=f"celery:{task_name}",
-    ))
+    log_context.enter_context(
+        logger.contextualize(
+            task=task_name,
+            task_id=task_id,
+            layer="task",
+            flow=f"celery:{task_name}",
+        )
+    )
     _task_observability_contexts[key] = (context_token, execution_token, log_context)
 
     span_ctx = otel_trace.get_current_span().get_span_context()

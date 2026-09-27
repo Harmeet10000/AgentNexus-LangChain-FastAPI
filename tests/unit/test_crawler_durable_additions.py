@@ -2,8 +2,10 @@
 
 import sys
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
+from crawl4ai import AsyncWebCrawler
 from fakeredis.aioredis import FakeRedis
 
 from app.features.crawler.dto import CrawlChunk, CrawlResponse, CrawlResultItem
@@ -76,17 +78,19 @@ async def test_worker_browser_is_reused(monkeypatch: pytest.MonkeyPatch) -> None
 
     calls = {"count": 0}
 
-    async def fake_create() -> object:
+    async def fake_create() -> AsyncWebCrawler:
         calls["count"] += 1
-        return SimpleNamespace()
+        return MagicMock(spec=AsyncWebCrawler)
 
     monkeypatch.setattr(worker_tasks, "create_crawl4ai_crawler", fake_create)
-    monkeypatch.setattr(worker_tasks, "_WORKER_BROWSER", None)
-    first = await worker_tasks._get_shared_browser()
-    second = await worker_tasks._get_shared_browser()
+    monkeypatch.setattr(worker_tasks, "_WORKER_RESOURCES", None)
+    first = await worker_tasks._provision_crawler_worker()
+    monkeypatch.setattr(worker_tasks, "_WORKER_RESOURCES", first)
+    second = worker_tasks.get_crawler_worker_resources()
     assert first is second
+    assert first.browser is second.browser
     assert calls["count"] == 1
-    monkeypatch.setattr(worker_tasks, "_WORKER_BROWSER", None)
+    monkeypatch.setattr(worker_tasks, "_WORKER_RESOURCES", None)
 
 
 @pytest.mark.asyncio
