@@ -155,6 +155,18 @@ class IdempotencyGuard:
         result_json = result.model_dump_json()
         expires_at = datetime.now(tz=UTC) + timedelta(days=_POSTGRES_TTL_DAYS)
 
+        # Durable state is authoritative. Never publish a cache hit that is not
+        # backed by the PostgreSQL record required to survive Redis expiry.
+        await self._set_in_postgres(
+            key=key,
+            result_json=result_json,
+            tool_name=tool_name,
+            user_id=user_id,
+            thread_id=thread_id,
+            step_id=step_id,
+            expires_at=expires_at,
+        )
+
         if self._redis is not None:
             try:
                 await self._redis.set(
@@ -165,18 +177,8 @@ class IdempotencyGuard:
             except RedisError as exc:
                 exc.add_note(f"key={key[:16]}, tool={tool_name}")
                 self._log.bind(error=str(exc), tool_name=tool_name).warning(
-                    "Idempotency Redis write failed; continuing with Postgres."
+                    "Idempotency Redis write failed; durable PostgreSQL state is available."
                 )
-
-        await self._set_in_postgres(
-            key=key,
-            result_json=result_json,
-            tool_name=tool_name,
-            user_id=user_id,
-            thread_id=thread_id,
-            step_id=step_id,
-            expires_at=expires_at,
-        )
         self._log.bind(tool_name=tool_name, key_prefix=key[:16]).debug("Idempotency state written.")
 
     async def _warm_redis_cache(self, key: str, result: ToolResult) -> None:

@@ -102,8 +102,9 @@ async def test_required_durable_idempotency_fails_closed_on_postgres_write() -> 
             message = "database unavailable"
             raise RuntimeError(message)
 
+    redis_set = AsyncMock()
     guard = IdempotencyGuard(
-        redis=None,
+        redis=type("Redis", (), {"set": redis_set})(),  # type: ignore[arg-type]
         db_engine=FailingEngine(),  # type: ignore[arg-type]
         require_durable=True,
     )
@@ -117,3 +118,5 @@ async def test_required_durable_idempotency_fails_closed_on_postgres_write() -> 
             thread_id="thread-1",
             step_id="step-1",
         )
+
+    redis_set.assert_not_awaited()

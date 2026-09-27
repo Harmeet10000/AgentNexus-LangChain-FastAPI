@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
+from uuid import NAMESPACE_URL, uuid5
 
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
@@ -284,6 +285,7 @@ async def write_clause_episode(
     """
     source_description = metadata.model_dump_json()
     episode_name = f"clause:{metadata.doc_id}:{metadata.clause_id}"
+    episode_uuid = str(uuid5(NAMESPACE_URL, f"agentnexus:{episode_name}"))
 
     logger.bind(
         service="graphiti",
@@ -292,18 +294,19 @@ async def write_clause_episode(
     ).info("Writing clause episode to Graphiti")
 
     try:
-        result = await graphiti.add_episode(
+        await graphiti.add_episode(
             name=episode_name,
             episode_body=clause_text,
             source=EpisodeType.text,
             source_description=source_description,
             reference_time=datetime.now(tz=UTC),
             group_id=metadata.doc_id,
+            uuid=episode_uuid,
         )
-        return str(result.uuid) if hasattr(result, "uuid") else episode_name  # ty: ignore[unresolved-attribute]
     except Exception:
         logger.bind(service="graphiti").exception("Failed to write clause episode")
         raise
+    return episode_uuid
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +331,7 @@ async def write_relationship_edge(
         Exception: If write fails.
     """
     episode_name = f"edge:{edge.doc_id}:{edge.clause_id}:{edge.from_entity}:{edge.relationship}:{edge.to_entity}"
+    episode_uuid = str(uuid5(NAMESPACE_URL, f"agentnexus:{episode_name}"))
     source_description = json.dumps(
         {
             "type": "relationship_edge",
@@ -346,18 +350,19 @@ async def write_relationship_edge(
     ).info("Writing relationship edge to Graphiti")
 
     try:
-        result = await graphiti.add_episode(
+        await graphiti.add_episode(
             name=episode_name,
             episode_body=edge.to_episode_body(),
             source=EpisodeType.text,
             source_description=source_description,
             reference_time=datetime.now(tz=UTC),
             group_id=edge.doc_id,
+            uuid=episode_uuid,
         )
-        return str(result.uuid) if hasattr(result, "uuid") else episode_name  # ty: ignore[unresolved-attribute]
     except Exception:
         logger.bind(service="graphiti").exception("Failed to write relationship edge")
         raise
+    return episode_uuid
 
 
 # ---------------------------------------------------------------------------
