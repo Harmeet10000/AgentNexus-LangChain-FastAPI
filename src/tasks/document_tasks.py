@@ -65,6 +65,7 @@ def ingest_document(
                 content_type=content_type,
                 object_uri=object_uri,
                 graph=resources.ingestion_graph,
+                engine=resources.engine,
                 session_local=resources.session_local,
             )
         )

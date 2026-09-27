@@ -121,7 +121,11 @@ async def _provision_document_worker() -> DocumentWorkerResources:
             ingest_document_fn=process_document_ingestion,
             extraction=AsyncExtractionService.from_settings(settings),
             graph_writer=graphiti_service(graphiti),
-            idempotency=IdempotencyGuard(redis=redis, db_engine=engine),
+            idempotency=IdempotencyGuard(
+                redis=redis,
+                db_engine=engine,
+                require_durable=True,
+            ),
         )
         return DocumentWorkerResources(
             engine=engine,
