@@ -83,7 +83,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langgraph.graph.state import CompiledStateGraph
     from redis.asyncio import Redis
-    from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, async_sessionmaker
     from ty_extensions import Unknown
 
     from app.config.settings import Settings
@@ -1097,6 +1097,7 @@ async def run_document_ingestion_task(
         await lock_connection.commit()
         if not acquired:
             return {"status": "skipped", "document_id": document_id}
+        primary_error: BaseException | None = None
         try:
             # Reuse the checked-out connection that owns the session-level lock.
             # Opening a second connection here deadlocks against a supported
@@ -1119,12 +1120,47 @@ async def run_document_ingestion_task(
                         }
                     },
                 )
+        except BaseException as exc:
+            primary_error = exc
+            raise
         finally:
-            await lock_connection.execute(
-                text("SELECT pg_advisory_unlock(:lock_key)"),
-                {"lock_key": lock_key},
+            await _release_document_ingestion_lock(
+                connection=lock_connection,
+                lock_key=lock_key,
+                primary_error=primary_error,
             )
-            await lock_connection.commit()
+
+
+async def _release_document_ingestion_lock(
+    *,
+    connection: AsyncConnection,
+    lock_key: int,
+    primary_error: BaseException | None,
+) -> None:
+    """Release a session lock or discard its connection without masking failures."""
+    try:
+        released = await connection.scalar(
+            text("SELECT pg_advisory_unlock(:lock_key)"),
+            {"lock_key": lock_key},
+        )
+        await connection.commit()
+        if not released:
+            message = "Document ingestion advisory lock release failed"
+            raise RuntimeError(message)  # noqa: TRY301 — handled by the invalidation path below
+    except BaseException as cleanup_error:
+        try:
+            await connection.invalidate()
+        except BaseException as invalidation_error:  # noqa: BLE001 — cleanup must not mask primary
+            cleanup_error.add_note(
+                f"Advisory-lock connection invalidation also failed: {invalidation_error!r}"
+            )
+        if primary_error is None:
+            raise
+        primary_error.add_note(f"Advisory-lock cleanup failed: {cleanup_error!r}")
+        logger.bind(
+            error_type=type(cleanup_error).__name__,
+            lock_key=lock_key,
+        ).exception("Document ingestion advisory-lock cleanup failed")
 
 
 def _document_ingestion_lock_key(user_id: str, document_id: str) -> int:
