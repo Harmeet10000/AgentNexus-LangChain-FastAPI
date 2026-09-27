@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable  # noqa: TC003 — resolved by Pydantic
 from typing import Literal  # noqa: TC003 — resolved at runtime by Pydantic
 
 from graphiti_core.graphiti import Graphiti  # noqa: TC002 — resolved at runtime by Pydantic
@@ -181,3 +182,4 @@ class IngestionRuntime(BaseModel):
     extraction: AsyncExtractionService | None = None
     graph_writer: object | None = None
     idempotency: object | None = None
+    transaction_checkpoint: Callable[[], Awaitable[None]] | None = None

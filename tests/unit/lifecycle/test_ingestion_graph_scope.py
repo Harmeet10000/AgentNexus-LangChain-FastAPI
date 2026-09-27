@@ -54,6 +54,8 @@ async def test_ingestion_node_prefers_job_scoped_idempotency() -> None:
     ingest = AsyncMock(return_value=Success({"status": "completed"}))
     default_idempotency = object()
     job_idempotency = object()
+    repo = MagicMock(spec=DocumentRepository)
+    repo.session = MagicMock(spec=AsyncSession)
     node = _make_ingest_document_node(
         object_store=MagicMock(spec=StorageService),
         graphiti=None,
@@ -72,7 +74,7 @@ async def test_ingestion_node_prefers_job_scoped_idempotency() -> None:
         },
         {
             "configurable": {
-                "document_repository": MagicMock(spec=DocumentRepository),
+                "document_repository": repo,
                 "document_idempotency": job_idempotency,
             }
         },  # type: ignore[arg-type]
@@ -80,3 +82,4 @@ async def test_ingestion_node_prefers_job_scoped_idempotency() -> None:
 
     runtime = ingest.await_args.kwargs["runtime"]
     assert runtime.idempotency is job_idempotency
+    assert runtime.transaction_checkpoint == repo.session.commit

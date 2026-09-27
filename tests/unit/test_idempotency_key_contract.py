@@ -142,7 +142,12 @@ async def test_job_scoped_idempotency_reuses_existing_database_session() -> None
         def begin(self) -> object:
             pytest.fail("A bound idempotency guard must not check out another connection")
 
-    session = cast("AsyncSession", SimpleNamespace(execute=execute))
+    commit = AsyncMock()
+    rollback = AsyncMock()
+    session = cast(
+        "AsyncSession",
+        SimpleNamespace(execute=execute, commit=commit, rollback=rollback),
+    )
     guard = IdempotencyGuard(
         redis=None,
         db_engine=UnexpectedEngine(),  # type: ignore[arg-type]
@@ -160,3 +165,37 @@ async def test_job_scoped_idempotency_reuses_existing_database_session() -> None
     )
 
     assert execute.await_count == 2
+    assert commit.await_count == 2
+    rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_job_scoped_cache_waits_for_transaction_commit() -> None:
+    commit_error = RuntimeError("commit failed")
+    session = cast(
+        "AsyncSession",
+        SimpleNamespace(
+            execute=AsyncMock(),
+            commit=AsyncMock(side_effect=commit_error),
+            rollback=AsyncMock(),
+        ),
+    )
+    redis_set = AsyncMock()
+    guard = IdempotencyGuard(
+        redis=type("Redis", (), {"set": redis_set})(),  # type: ignore[arg-type]
+        db_engine=object(),  # type: ignore[arg-type]
+        require_durable=True,
+    ).for_session(session)
+
+    with pytest.raises(IdempotencyPersistenceError, match="write failed"):
+        await guard.set(
+            "key-1",
+            ToolResult.ok({"episode_id": "episode-1"}),
+            tool_name="write_clause_episode",
+            user_id="user-1",
+            thread_id="thread-1",
+            step_id="step-1",
+        )
+
+    session.rollback.assert_awaited_once()
+    redis_set.assert_not_awaited()

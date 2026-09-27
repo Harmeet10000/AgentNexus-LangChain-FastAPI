@@ -36,6 +36,7 @@ class _Repo:
     def __init__(self, trees: list[dict[str, Any]] | None = None) -> None:
         self.status_calls: list[dict[str, Any]] = []
         self.trees = trees or []
+        self.transaction_checkpoints = 0
 
     async def update_document_status(self, **kwargs: Any) -> Success[None]:
         self.status_calls.append(kwargs)
@@ -67,6 +68,9 @@ async def _run_ingestion(
 ) -> tuple[list[str], _Repo, object]:
     events: list[str] = []
     repo = _Repo()
+
+    async def checkpoint() -> None:
+        repo.transaction_checkpoints += 1
 
     async def parse_document(**_kwargs: object) -> ParsedDocument:
         return ParsedDocument(
@@ -106,6 +110,7 @@ async def _run_ingestion(
         extraction=AsyncExtractionService(RecordingProvider()),
         graph_writer=graph_writer,
         idempotency=idempotency,
+        transaction_checkpoint=checkpoint,
     )
     result = await process_document_ingestion(job=_job(), runtime=cast("Any", runtime))
     return events, repo, result
@@ -118,6 +123,7 @@ async def test_extraction_runs_once_before_chunking_and_empty_success_is_complet
 
     assert result.unwrap()["status"] == "completed"
     assert events == ["extract", "chunk"]
+    assert repo.transaction_checkpoints == 2
     assert repo.status_calls[0]["extraction_incomplete"] is False
     assert repo.status_calls[0]["structural_tree"]["name"] == "Fixture"
 
@@ -132,6 +138,7 @@ async def test_extraction_failure_is_visible_but_ingestion_completes(monkeypatch
     assert result.unwrap()["status"] == "completed"
     assert events == ["extract", "chunk"]
     assert repo.status_calls[0]["extraction_incomplete"] is True
+    assert repo.transaction_checkpoints == 2
 
 
 async def test_graph_write_failure_marks_document_failed_before_chunk_storage(
@@ -172,6 +179,7 @@ async def test_graph_write_failure_marks_document_failed_before_chunk_storage(
     assert events == ["extract"]
     assert repo.status_calls[0]["status"] == "failed"
     assert repo.status_calls[0]["extraction_incomplete"] is True
+    assert repo.transaction_checkpoints == 0
 
 
 async def test_structural_branch_uses_repository_and_pure_navigator() -> None:

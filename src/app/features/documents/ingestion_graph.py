@@ -129,6 +129,7 @@ def _make_ingest_document_node(
                 extraction=extraction,
                 graph_writer=graph_writer,
                 idempotency=job_idempotency,
+                transaction_checkpoint=repo.session.commit,
             ),
         )
         if isinstance(result, Failure):
