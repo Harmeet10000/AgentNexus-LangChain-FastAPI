@@ -1,0 +1,81 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "agentrouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Agent Router",
+      "options": {
+        "baseURL": "http://127.0.0.1:8972/v1",
+        "apiKey": "sk-oZc5Jj3knstDXflrUYGwEELBV3nVYkWFyxoojHwuGTFq62CE"
+      },
+      "models": {
+        "deepseek-v4-flash": {
+          "id": "deepseek-v4-flash",
+          "name": "DeepSeek V4 Flash"
+        },
+        "glm-5.3": {
+          "id": "glm-5.3",
+          "name": "GLM 5.3"
+        },
+        "glm-5.3-flash-search:free": {
+          "id": "glm-5.3-flash-search:free",
+          "name": "GLM 5.3 Flash Search (Free)",
+          "tool_call": true
+        },
+        "glm-5.3-flash-thinking:free": {
+          "id": "glm-5.3-flash-thinking:free",
+          "name": "GLM 5.3 Flash Thinking (Free)",
+          "reasoning": true,
+          "tool_call": true
+        },
+        "glm-5.3-flash-think-search:free": {
+          "id": "glm-5.3-flash-think-search:free",
+          "name": "GLM 5.3 Flash Think+Search (Free)",
+          "reasoning": true,
+          "tool_call": true
+        },
+        "gpt-6-astra": {
+          "id": "gpt-6-astra",
+          "name": "GPT 6 Astra",
+          "family": "gpt-6",
+          "release_date": "2026-09-03",
+          "reasoning": true,
+          "tool_call": true,
+          "attachment": true,
+          "temperature": false,
+          "limit": {
+            "context": 1050000,
+            "input": 922000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "mcp": {
+    "firecrawl": {
+      "type": "remote",
+      "url": "https://mcp.firecrawl.dev/v2/mcp",
+      "headers": {
+        "Authorization": "Bearer fc-570742b35331455090455a4c015a2761"
+      },
+      "enabled": true
+    }
+  },
+  "websearch": {
+    "provider": "random"
+  },
+  "plugins": [
+    "@openchamber/opencode-claude@1.3.4",
+    "@openchamber/opencode-cursor@2.5.1"
+  ]
+}

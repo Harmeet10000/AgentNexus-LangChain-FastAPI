@@ -135,10 +135,10 @@ it never invoked production retrieval. Consequently the before and after zeros m
 path. Tasks 1.3, 5.3, and the aggregate gate in 5.1 are reopened until the real
 `DocumentQueryService` integration test produces a valid baseline and post-change report.
 
-The `No local framework is required` scenario is also only provisionally satisfied: this change keeps
-`sentence_transformers` as required by task 2.4, and `reranker.py` imports it eagerly. The scenario
-becomes true only when `ingestion-chunking` removes the local implementation and dependency; verify an
-import and hosted rerank after that removal before closing 5.1.
+The `No local framework is required` scenario is now fully satisfied: `ingestion-chunking`
+removed the local cross-encoder (`reranker.py` no longer imports `sentence_transformers`,
+`RERANKER_PROVIDER` admits only `hosted`, and `test_reranker_singleton.py` asserts the
+absence). The provisional note below is retained as history.
 
 Re-ran `uv run pytest -m requires_db tests/integration/evaluation/test_live_retrieval.py -q`
 (1 passed, 30.45s). Report rewritten to `evals/reports/baseline.json`.
