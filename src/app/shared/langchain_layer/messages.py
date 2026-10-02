@@ -9,7 +9,9 @@ Strategies:
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from langchain_core.messages import (
     AIMessage,
@@ -31,6 +33,35 @@ if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
 settings = get_settings()
+
+# ---------------------------------------------------------------------------
+# Delegation pairs (agent-message-standard)
+# ---------------------------------------------------------------------------
+
+
+def make_delegation_pair(role: str, reason: str) -> tuple[AIMessage, ToolMessage]:
+    """Construct one inter-agent delegation as a linked message pair.
+
+    The assistant message carries the reason as content plus exactly one
+    ``transfer_to_<role>`` tool call; the tool message carries the same reason
+    with the matching call id. Fresh ids per invocation so retries replace
+    rather than duplicate under the ``add_messages`` reducer.
+    """
+    call_id = f"delegation_{uuid4().hex}"
+    tool_name = f"transfer_to_{role}"
+    request = AIMessage(
+        content=reason,
+        tool_calls=[
+            {"name": tool_name, "args": {"reason": reason}, "id": call_id, "type": "tool_call"}
+        ],
+    )
+    answer = ToolMessage(
+        content=json.dumps({"transfer_to": role, "reason": reason}),
+        tool_call_id=call_id,
+        name=tool_name,
+    )
+    return request, answer
+
 
 # ---------------------------------------------------------------------------
 # Trim
@@ -85,15 +116,39 @@ def delete_by_predicate(
     return [m for m in messages if not predicate(m)]
 
 
+def is_delegation_request(message: BaseMessage) -> bool:
+    """True for the assistant half of a delegation pair (agent-message-standard)."""
+    return (
+        isinstance(message, AIMessage)
+        and len(message.tool_calls) == 1
+        and str(message.tool_calls[0].get("name", "")).startswith("transfer_to_")
+    )
+
+
+def is_delegation_answer(message: BaseMessage) -> bool:
+    """True for the tool half of a delegation pair (agent-message-standard)."""
+    return isinstance(message, ToolMessage) and (message.name or "").startswith("transfer_to_")
+
+
 def delete_tool_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
-    """Strip all ToolMessages and their paired AI tool-call messages."""
-    # Remove ToolMessages
+    """Strip all ToolMessages and their paired AI tool-call messages.
+
+    Delegation pairs are removed atomically: dropping the tool half always
+    drops the linked assistant half in the same pass, so no orphaned
+    delegation request survives without its answer.
+    """
+    # Remove ToolMessages (both ordinary results and delegation answers)
     without_tools = [m for m in messages if not isinstance(m, ToolMessage)]
-    # Remove AIMessages that only contain tool_calls (no text content)
+    # Remove AIMessages that only contain tool_calls (no text content) AND
+    # delegation requests (which carry reason text but must not survive
+    # without their linked answer)
     return [
         m
         for m in without_tools
-        if not (isinstance(m, AIMessage) and m.tool_calls and not m.content)
+        if not (
+            (isinstance(m, AIMessage) and m.tool_calls and not m.content)
+            or is_delegation_request(m)
+        )
     ]
 
 
@@ -220,16 +275,22 @@ def filter_tool_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
     tool_summaries = [
         f"[Tool {msg.name or 'unknown'}: {str(msg.content)[:200]}]"
         for msg in messages
-        if isinstance(msg, ToolMessage)
+        if isinstance(msg, ToolMessage) and not is_delegation_answer(msg)
+    ]
+    delegations = [
+        f"[Delegation to {(msg.name or '').removeprefix('transfer_to_')}: {str(msg.content)[:200]}]"
+        for msg in messages
+        if is_delegation_answer(msg)
     ]
     filtered = [
         m
         for m in messages
         if not isinstance(m, ToolMessage)
         and not (isinstance(m, AIMessage) and not m.content and m.tool_calls)
+        and not is_delegation_request(m)
     ]
-    if tool_summaries:
-        summary_text = "Tool results summary:\n" + "\n".join(tool_summaries[:10])
+    if tool_summaries or delegations:
+        summary_text = "Tool results summary:\n" + "\n".join([*delegations, *tool_summaries][:10])
         filtered = [*filtered, HumanMessage(content=summary_text)]
     return filtered
 
