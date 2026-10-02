@@ -305,7 +305,7 @@ def compose(*functions: Composable) -> Composable:
 
     return lambda data: reduce(apply, functions, data)
 
-64. No eval framework. Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.
+64. No eval framework. Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.  DONE  [rag-eval-harness]
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
 
@@ -350,12 +350,12 @@ To solve these problems, the creator shifted to a **production-grade database ar
 155. complete the ingestion pipeline to working condition and see where reconciliation comes init. i want to remove reconciliation and replace it with agent memory made with cognee entirely.
 todos:-
     1. toons reusable , point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
-    a. docling - Legal docs need hierarchical chunking, convert dataclass to pydantic models, use embedders(batch, chunks, etc) to reusable function in langchain_layer, remove Grapgiti initilisation from here
+    a. docling - Legal docs need hierarchical chunking, convert dataclass to pydantic models, use embedders(batch, chunks, etc) to reusable function in langchain_layer, remove Grapgiti initilisation from here  DONE  [ingestion-chunking]
     b. langextract and pageindex(leave this for now if not currently implemented)
-    c. graphiti refactor
-    d. postgres RAG should be agentic
+    c. graphiti refactor  DONE  [knowledge-stack]
+    d. postgres RAG should be agentic  DONE  [agentic-retrieval]
     e. celery for off loading to a queue
-    f. insert the langgraph in app.state in lifespan
+    f. insert the langgraph in app.state in lifespan  DONE  [graph-lifecycle]
     g. pass default and metadata for particular config in pydantic models for agents
     h. research for RAG pipeline with Gemini
     i. use MessagesState to standardise the moving of data between Agent A and Agent 
@@ -363,20 +363,19 @@ todos:-
 190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
 136. use LangExtract outputs to build rich graph knowledge from your legal documents.  in document processing
 
-235. need to have all graph such as ingestion graph in the lifespan rather than in service
+235. need to have all graph such as ingestion graph in the lifespan rather than in service  DONE  [graph-lifecycle]
 221. fix the files tht are scrambled in utils,shared, combine celery, and other places
-240. document processing and crawler needs db instance injection and docling processong needs improvement as well. need to think of a suitable chunking strategy for legal docs, and everything that is considered best practice for docling
+240. document processing and crawler needs db instance injection and docling processong needs improvement as well. need to think of a suitable chunking strategy for legal docs, and everything that is considered best practice for docling  DONE  [ingestion-chunking]
 163. refactor vectorStore code        TSVECTOR,
 164. refactor RAG code
 185. remove ts_vector(think if it is required here or other extension can do the job here) from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
 162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
 165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384     
 195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
-176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package
-
+176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package  DONE  [agentic-retrieval+ingestion-chunking]
 116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
 234. learn about classVars, policy, strEnum, namedTuple, final, mapping, list, set, learn crawler/processor.py policy  and check if UUIDv7 is available in ORM
-240. remove build chat model from documents/ and review chunking strategy used here and in crawler and find out from where to add them 
+240. remove build chat model from documents/ and review chunking strategy used here and in crawler and find out from where to add them  DONE  [ingestion-chunking]
 241. add post on dev.to with a scheduled task
 242. fix agent tools
 
