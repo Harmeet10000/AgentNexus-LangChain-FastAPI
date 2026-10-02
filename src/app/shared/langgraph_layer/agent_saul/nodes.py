@@ -12,6 +12,7 @@ from langgraph.graph import END
 from langgraph.types import Send, interrupt
 from pydantic import BaseModel, Field
 
+from app.shared.langchain_layer.messages import make_delegation_pair
 from app.utils import logger
 
 from .prompts import (
@@ -532,6 +533,26 @@ def make_relationship_mapping_node(
     return relationship_mapping_node
 
 
+def delegation_pairs_from(messages: list[Any]) -> list[tuple[Any, Any]]:
+    """Extract delegation pairs from a sub-agent result's message list.
+
+    Scans for assistant messages invoking ``transfer_to_*`` tools and rebuilds
+    each as a linked pair via the shared constructor. The sub-agent's internal
+    loop stays private; only the delegation becomes visible in shared state.
+    """
+    pairs: list[tuple[Any, Any]] = []
+    for message in messages:
+        tool_calls = getattr(message, "tool_calls", None) or []
+        for call in tool_calls:
+            name = call.get("name", "") if isinstance(call, dict) else ""
+            if not name.startswith("transfer_to_"):
+                continue
+            args = call.get("args", {}) if isinstance(call, dict) else {}
+            reason = args.get("reason", "") if isinstance(args, dict) else ""
+            pairs.append(make_delegation_pair(name.removeprefix("transfer_to_"), str(reason)))
+    return pairs
+
+
 def make_risk_analysis_node(risk_agent: Any) -> StateNode:
     async def risk_analysis_node(state: LegalAgentState) -> dict[str, Any]:
         log = logger.bind(
@@ -557,10 +578,14 @@ def make_risk_analysis_node(risk_agent: Any) -> StateNode:
             finding_count=len(risk_output.findings),
             overall_label=risk_output.overall_label,
         )
+        delegation_messages = [
+            message for pair in delegation_pairs_from(result["messages"]) for message in pair
+        ]
 
         return {
             "risk_analysis": risk_output,
             "status": WorkflowStatus.CHECKING_COMPLIANCE,
+            "messages": delegation_messages,
         }
 
     return risk_analysis_node
@@ -611,10 +636,14 @@ def make_compliance_node(compliance_agent: Any) -> StateNode:
             finding_count=len(compliance_output.findings),
             overall_compliant=compliance_output.overall_compliant,
         )
+        delegation_messages = [
+            message for pair in delegation_pairs_from(result["messages"]) for message in pair
+        ]
 
         return {
             "compliance_result": compliance_output,
             "status": WorkflowStatus.VERIFYING_GROUNDING,
+            "messages": delegation_messages,
         }
 
     return compliance_node

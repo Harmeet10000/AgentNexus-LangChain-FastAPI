@@ -381,7 +381,13 @@ todos:-
 
 247. One-line improvement: Add error.add_note(traceback.format_exc()) when wrapping errors to preserve full context for debugging
 248. should i use neo4j and postgres in cognee or let cognee use it own thing?
+249. use native redis-fastAPI package      and upgrade fastAPI versions                                                                                                                                                                                   
 ```
+
+10:00 AM Beijing Time = 07:30 AM IST
+
+7:00 PM Beijing Time = 04:30 PM IST
+
 summarise these chapters in great detail and depth and take video's transcript as reference for outputing verbatim
 
 summarise this video in great detail and depth by dividing it into 5 minute chunk and take video's transcript as reference for  outputing verbatim
