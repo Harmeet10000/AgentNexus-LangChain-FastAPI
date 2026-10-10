@@ -10,7 +10,7 @@ _EXAMPLE = (
 
 
 def test_docling_specific_embedder_module_is_retired() -> None:
-    assert find_spec("app.shared.rag.docling.embedder") is None
+    assert find_spec("app.extraction.docling.embedder") is None
 
 
 def test_example_query_calls_use_the_shared_embedding_entry_point() -> None:
@@ -24,5 +24,5 @@ def test_example_query_calls_use_the_shared_embedding_entry_point() -> None:
         and node.func.id == "embed_text"
     ]
 
-    assert "app.shared.rag.docling.embedder" not in source
+    assert "app.extraction.docling.embedder" not in source
     assert len(calls) == 5

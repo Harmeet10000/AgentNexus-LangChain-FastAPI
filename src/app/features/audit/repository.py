@@ -16,10 +16,10 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
-from .errors import AuditInfrastructureError
-from .model import AuditLog
+from .exceptions import AuditInfrastructureError
+from .models import AuditLog
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from .errors import AuditResult
+    from .exceptions import AuditResult
 
 
 class AuditLogRepository:

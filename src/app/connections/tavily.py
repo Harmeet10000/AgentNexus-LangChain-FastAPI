@@ -23,7 +23,7 @@ from app.shared.services.errors import (
     TavilyInvalidResponseError,
     TavilyValidationError,
 )
-from app.utils import logger
+from app.observability.logging import logger
 
 
 @cache

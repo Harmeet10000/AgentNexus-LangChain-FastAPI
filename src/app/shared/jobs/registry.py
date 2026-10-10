@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from celery.exceptions import CeleryError
 from pydantic import ValidationError
 
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from typing import Any, ClassVar

@@ -20,8 +20,9 @@ from langchain_core.messages import (
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
-from app.shared.langchain_layer.models import build_chat_model
-from app.utils import ExternalServiceException, logger
+from app.ai.llm import build_chat_model
+from app.observability.logging import logger
+from app.utils import ExternalServiceException
 
 from .config import Configuration
 from .execution import gather_limited
@@ -46,15 +47,7 @@ from .state import (
     SupervisorOutputState,
     SupervisorState,
 )
-from .utils import (
-    get_all_tools,
-    get_model_token_limit,
-    get_notes_from_tool_calls,
-    get_today_str,
-    is_token_limit_exceeded,
-    remove_up_to_last_ai_message,
-    think_tool,
-)
+from .utils import get_all_tools, get_model_token_limit, get_notes_from_tool_calls, get_today_str, is_token_limit_exceeded, remove_up_to_last_ai_message, think_tool
 
 if TYPE_CHECKING:
     from typing import Any

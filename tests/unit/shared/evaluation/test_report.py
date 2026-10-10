@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 from pydantic import TypeAdapter
 
-from app.shared.evaluation.report import EvaluationReport, write_report
-from app.shared.evaluation.runner import RetrievalEvaluation, RetrievalMetrics
+from app.ai.evaluation.report import EvaluationReport, write_report
+from app.ai.evaluation.runner import RetrievalEvaluation, RetrievalMetrics
 
 
 def _report() -> EvaluationReport:

@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app.shared.langchain_layer.agents.memory.agent_memory_service import (
+from app.ai.memory.agent_memory_service import (
     AgentMemoryError,
     AgentMemoryService,
 )
-from app.shared.langchain_layer.agents.memory.prefetch import (
+from app.ai.memory.prefetch import (
     deeper_retrieval,
     eligible_for_supplement,
     make_prefetch_memory_node,

@@ -13,7 +13,7 @@ from langchain_core.prompts import (
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .models import serialize_to_toon
+from app.ai.llm import serialize_to_toon
 
 # ---------------------------------------------------------------------------
 # System prompt templates

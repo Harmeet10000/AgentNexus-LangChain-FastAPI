@@ -13,10 +13,11 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from returns.result import Failure
 
 from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
-from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text
-from app.shared.langgraph_layer.kb_retry import TransientExternalError, retry_immediate
+from app.ai.embeddings import EmbeddingTaskType, embed_text
+from app.ai.graph.retry import TransientExternalError, retry_immediate
 from app.shared.result import log_expected_failure
-from app.utils import InfrastructureException, logger
+from app.observability.logging import logger
+from app.utils import InfrastructureException
 
 from .reranker import get_configured_reranker
 from .state import (  # noqa: TC001 — RetrievalState resolves at runtime for branch schemas

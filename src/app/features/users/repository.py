@@ -4,7 +4,7 @@ from beanie.operators import Or, RegEx
 from pymongo.errors import PyMongoError
 from returns.result import Failure, Success
 
-from app.features.auth.errors import (
+from app.features.auth.exceptions import (
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthConflictError,
@@ -19,10 +19,10 @@ from app.features.auth.identity import (
     set_user_active,
     set_user_role,
 )
-from app.features.auth.model import User, UserRole
-from app.utils import logger, trace_layer
+from app.features.auth.models import User, UserRole
+from app.observability.logging import logger, trace_layer
 
-from .errors import (
+from .exceptions import (
     UsersAuthorizationError,
     UsersConflictError,
     UsersError,

@@ -92,5 +92,5 @@ def test_every_declared_task_name_is_bound_on_the_task_application(all_declaring
 
 def test_the_typed_email_reference_module_is_not_listed(real_celery):
     """The duplicate email module was reconciled to one; listing is single."""
-    assert "app.features.auth.tasks_typed" not in real_celery.app.conf.include
-    assert list(real_celery.app.conf.include).count("app.features.auth.tasks") == 1
+    assert "app.worker.tasks.auth_typed" not in real_celery.app.conf.include
+    assert list(real_celery.app.conf.include).count("app.worker.tasks.auth") == 1

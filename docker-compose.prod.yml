@@ -28,7 +28,7 @@ services:
   celery-worker:
     image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:?IMAGE_TAG must be set}
     container_name: celery-worker
-    command: celery -A app.worker.celery_app:celery_app worker --loglevel=info -Q default --concurrency=8
+    command: celery -A app.worker.app:celery_app worker --loglevel=info -Q default --concurrency=8
     environment:
       ENVIRONMENT: production
     env_file:
@@ -45,7 +45,7 @@ services:
   celery-worker-ingestion:
     image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:?IMAGE_TAG must be set}
     container_name: celery-worker-ingestion
-    command: celery -A app.worker.celery_app:celery_app worker --loglevel=info -Q ingestion --concurrency=2
+    command: celery -A app.worker.app:celery_app worker --loglevel=info -Q ingestion --concurrency=2
     environment:
       ENVIRONMENT: production
     env_file:
@@ -62,7 +62,7 @@ services:
   celery-worker-crawler:
     image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:?IMAGE_TAG must be set}
     container_name: celery-worker-crawler
-    command: celery -A app.worker.celery_app:celery_app worker --loglevel=info -Q crawler --concurrency=2
+    command: celery -A app.worker.app:celery_app worker --loglevel=info -Q crawler --concurrency=2
     environment:
       ENVIRONMENT: production
     env_file:
@@ -77,7 +77,7 @@ services:
   celery-beat:
     image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:?IMAGE_TAG must be set}
     container_name: celery-beat
-    command: celery -A app.worker.celery_app:celery_app beat --loglevel=info
+    command: celery -A app.worker.app:celery_app beat --loglevel=info
     environment:
       ENVIRONMENT: production
     env_file:

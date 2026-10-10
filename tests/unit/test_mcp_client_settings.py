@@ -12,15 +12,15 @@ from app.utils import ValidationException
 # Remove those stubs here because this test deliberately exercises the real
 # configuration boundary.
 for _module_name in tuple(sys.modules):
-    if _module_name == "mcp_core" or _module_name.startswith("mcp_core."):
+    if _module_name == "app.mcp" or _module_name.startswith("app.mcp."):
         del sys.modules[_module_name]
 
-from mcp_core.client.settings import load_mcp_client_server_configs
+from app.mcp.client.settings import load_mcp_client_server_configs
 
 
 def test_load_mcp_client_server_configs_returns_empty_for_blank_setting() -> None:
     with patch(
-        "mcp_core.client.settings.get_settings",
+        "app.mcp.client.settings.get_settings",
         return_value=type("Settings", (), {"MCP_CLIENT_SERVER_CONFIGS": "  "})(),
     ):
         assert load_mcp_client_server_configs() == []
@@ -38,7 +38,7 @@ def test_load_mcp_client_server_configs_validates_json_array() -> None:
     )
 
     with patch(
-        "mcp_core.client.settings.get_settings",
+        "app.mcp.client.settings.get_settings",
         return_value=type("Settings", (), {"MCP_CLIENT_SERVER_CONFIGS": raw})(),
     ):
         configs = load_mcp_client_server_configs()
@@ -52,7 +52,7 @@ def test_load_mcp_client_server_configs_validates_json_array() -> None:
 def test_load_mcp_client_server_configs_rejects_invalid_json_shape(raw: str) -> None:
     with (
         patch(
-            "mcp_core.client.settings.get_settings",
+            "app.mcp.client.settings.get_settings",
             return_value=type("Settings", (), {"MCP_CLIENT_SERVER_CONFIGS": raw})(),
         ),
         pytest.raises(
@@ -68,7 +68,7 @@ def test_load_mcp_client_server_configs_reports_model_errors() -> None:
 
     with (
         patch(
-            "mcp_core.client.settings.get_settings",
+            "app.mcp.client.settings.get_settings",
             return_value=type("Settings", (), {"MCP_CLIENT_SERVER_CONFIGS": raw})(),
         ),
         pytest.raises(ValidationException) as raised,

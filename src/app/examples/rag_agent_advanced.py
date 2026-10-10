@@ -18,8 +18,8 @@ from dotenv import load_dotenv
 from google.api_core.exceptions import GoogleAPIError
 from openai import OpenAIError
 
-from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text
-from app.utils.logger import logger
+from app.ai.embeddings import EmbeddingTaskType, embed_text
+from app.observability.logging import logger
 
 # Load environment variables
 load_dotenv(".env")

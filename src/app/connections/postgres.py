@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import (
 
 from app.config import get_settings
 from app.config.settings import Settings
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from typing import Any

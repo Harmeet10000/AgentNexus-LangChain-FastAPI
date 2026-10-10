@@ -9,11 +9,11 @@ from returns.result import Failure, Success
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.observability.logging import trace_layer
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import trace_layer
 
-from .errors import InvoiceConflictError, InvoiceInfrastructureError, InvoiceNotFoundError
-from .model import Invoice
+from .exceptions import InvoiceConflictError, InvoiceInfrastructureError, InvoiceNotFoundError
+from .models import Invoice
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from .errors import InvoiceResult
+    from .exceptions import InvoiceResult
 
 
 class InvoiceRepository:

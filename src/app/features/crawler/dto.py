@@ -8,7 +8,7 @@ from typing import Any, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.features.crawler.constants import CrawlMode, SchemaType
-from app.shared.crawler.validator import sanitize_url, validate_url
+from app.features.crawler.validator import sanitize_url, validate_url
 
 
 class CrawlRequest(BaseModel):

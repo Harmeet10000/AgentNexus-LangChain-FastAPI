@@ -33,8 +33,8 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
-from app.shared.rag.langextract.langextract_to_graph import GraphIngestionContext
-from app.utils import logger
+from app.extraction.langextract.langextract_to_graph import GraphIngestionContext
+from app.observability.logging import logger
 
 from .schemas import ClauseEpisodeMetadata, LegalEdgeInput
 

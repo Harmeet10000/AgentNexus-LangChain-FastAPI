@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from ...utils import DependencyHealth, logger
+from app.observability.logging import logger
+from ...utils import DependencyHealth
 
 if TYPE_CHECKING:
     from fastapi import FastAPI

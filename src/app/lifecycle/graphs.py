@@ -16,8 +16,8 @@ from app.features.documents.tools.bundle import build_tool_bundle
 from app.resilience.idempotency import (
     IdempotencyGuard,
 )
-from app.shared.langchain_layer.agents.memory import AgentMemoryService
-from app.shared.langchain_layer.models import build_chat_model
+from app.ai.memory import AgentMemoryService
+from app.ai.llm import build_chat_model
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from app.config.settings import Settings
     from app.shared.rag.graphiti.client import GraphitiService
-    from app.shared.rag.langextract.service import AsyncExtractionService
+    from app.extraction.langextract.service import AsyncExtractionService
     from app.connections.object_storage import StorageService
 
     type IngestDocumentFn = Callable[..., Awaitable[Any]]

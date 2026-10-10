@@ -24,8 +24,8 @@ from typing import TYPE_CHECKING
 from opentelemetry.trace import StatusCode
 from returns.result import Failure
 
-from app.utils import logger
-from app.utils.logger import _InterceptHandler, console_format, trace_layer
+from app.observability.logging import logger
+from app.observability.logging import _InterceptHandler, console_format, trace_layer
 
 if TYPE_CHECKING:
     from typing import Any

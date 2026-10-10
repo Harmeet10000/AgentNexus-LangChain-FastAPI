@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import SecretStr
 
-from app.shared.rag.langextract.service import (
+from app.extraction.langextract.service import (
     AsyncExtractionService,
     ExtractionFailed,
     ExtractionFailureCode,
@@ -18,7 +18,7 @@ from app.shared.rag.langextract.service import (
 if TYPE_CHECKING:
     import langextract as lx
 
-    from app.shared.rag.langextract.service import SyncExtractionProvider
+    from app.extraction.langextract.service import SyncExtractionProvider
 
 
 def _settings(api_key: str) -> SimpleNamespace:

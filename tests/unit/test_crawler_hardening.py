@@ -7,11 +7,11 @@ from pydantic import ValidationError
 
 from app.features.crawler.dto import CrawlRequest
 from app.features.crawler.service import CrawlerService
-from app.shared.crawler.chunker import clean_markdown, smart_chunk_markdown, truncate_content
-from app.shared.crawler.config import CrawlerConfig
-from app.shared.crawler.crawler import CrawlResult, WebCrawler
-from app.shared.crawler.processor import GeminiProcessor
-from app.shared.crawler.validator import sanitize_url, validate_url, validate_url_for_fetch
+from app.features.crawler.chunker import clean_markdown, smart_chunk_markdown, truncate_content
+from app.features.crawler.config import CrawlerConfig
+from app.features.crawler.crawler import CrawlResult, WebCrawler
+from app.features.crawler.processor import GeminiProcessor
+from app.features.crawler.validator import sanitize_url, validate_url, validate_url_for_fetch
 
 
 class _FakeCrawler:

@@ -21,10 +21,10 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
 
-    from app.shared.rag.langextract.service import AsyncExtractionService
+    from app.extraction.langextract.service import AsyncExtractionService
     from app.connections.object_storage import StorageService
 
-    from .errors import DocumentResult
+    from .exceptions import DocumentResult
     from .repository import DocumentRepository
 
 type IngestDocumentFn = Callable[..., Awaitable[DocumentResult[dict[str, object]]]]

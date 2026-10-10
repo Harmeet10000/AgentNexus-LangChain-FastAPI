@@ -1,7 +1,7 @@
 # Celery runtime and feature tasks
 
 The API publishes through `app.connections.celery_producer:celery_app`. Workers and beat load
-`app.worker.celery_app:celery_app`. Both use the same RabbitMQ topology, but only the
+`app.worker.app:celery_app`. Both use the same RabbitMQ topology, but only the
 worker application includes task implementations, schedules and execution signals.
 Importing the producer or validating a payload must never load `app.worker` or a
 feature's `tasks.py`.
@@ -15,7 +15,7 @@ feature's `tasks.py`.
 | `app.shared.jobs.registry` | Static payload registry and dispatch validation |
 | `app.shared.jobs.topology` | Shared RabbitMQ exchanges and explicit queue routes |
 | `app.connections.celery_producer` | Producer application and transport factory |
-| `app.worker.celery_app` | Worker application and explicit runtime configuration |
+| `app.worker.app` | Worker application and explicit runtime configuration |
 | `app.worker.task_modules` | All feature consumer modules and name-to-module mapping |
 | `app.worker.schedules` | Beat schedule with arguments matching consumer signatures |
 | `app.worker.runtime` | Persistent loop for sequential prefork/solo async execution |
@@ -34,8 +34,8 @@ make celery-command      # print deployment commands
 uv run worker --loglevel=info -Q default --concurrency=8
 uv run beat --loglevel=info
 uv run replay-outbox --help
-uv run celery -A app.worker.celery_app:celery_app inspect registered
-uv run celery -A app.worker.celery_app:celery_app inspect active_queues
+uv run celery -A app.worker.app:celery_app inspect registered
+uv run celery -A app.worker.app:celery_app inspect active_queues
 ```
 
 RabbitMQ remains the broker, with quorum queues and publisher confirms. Redis serves
@@ -57,7 +57,7 @@ together. No queue or database migration is needed.
 2. Put the payload schema in `app.shared.jobs.payloads` and add its model to the static
    registry. Models have no imports from features, connections or worker code.
 3. Add a thin entry point in the owning feature's `tasks.py`. Import `celery_app` from
-   `app.worker.celery_app`, and `ResilientTask` from `app.worker.task`.
+   `app.worker.app`, and `ResilientTask` from `app.worker.task`.
 4. Add the task name and module to `TASK_DECLARING_MODULES`, and the module to
    `TASK_MODULES`. Add an explicit route and any beat entry with keyword arguments.
 5. Run `make check-imports` and `uv run pytest tests/unit/celery`.

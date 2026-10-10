@@ -9,17 +9,17 @@ from pymongo.errors import PyMongoError
 from returns.result import Failure
 
 from app.features.auth.dependencies import get_current_user, get_current_user_result
-from app.features.auth.errors import (
+from app.features.auth.exceptions import (
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthInfrastructureError,
     AuthNotFoundError,
     AuthResult,
 )
-from app.features.auth.model import User
+from app.features.auth.models import User
 from app.features.auth.repository import UserRepository
 from app.security.tokens import TokenClaims
-from app.features.documents.errors import DocumentDatabaseError, DocumentNotFoundError
+from app.features.documents.exceptions import DocumentDatabaseError, DocumentNotFoundError
 from app.kernel.errors import ErrorKind
 from app.shared.result import render_result
 from app.utils import UnauthorizedException

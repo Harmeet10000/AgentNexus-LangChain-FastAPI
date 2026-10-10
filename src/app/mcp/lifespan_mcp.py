@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+import asyncio
+import contextlib
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict, Field
+from uvicorn.config import Config
+from uvicorn.server import Server
+
+from app.config import get_settings
+from app.observability import setup_otel, shutdown_otel
+from app.observability.logging import setup_logging
+from app.mcp.server.http import get_mcp_http_app
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+
+class MCPServerHandle(BaseModel):
+    """Running MCP HTTP server and its serve task."""
+
+    model_config = ConfigDict(extra="forbid", frozen=False, arbitrary_types_allowed=True)
+
+    server: Server
+    task: asyncio.Task[None] = Field(repr=False)
+
+
+def initialize_mcp_observability() -> None:
+    """Configure logging and telemetry for a standalone MCP process."""
+    settings = get_settings()
+    setup_logging()
+    if settings.OTEL_ENABLED:
+        setup_otel(service_name=settings.OTEL_SERVICE_NAME)
+
+
+def shutdown_mcp_observability() -> None:
+    """Flush telemetry for a standalone MCP process."""
+    shutdown_otel()
+
+
+async def serve_mcp(parent_app: FastAPI) -> MCPServerHandle | None:
+    settings = get_settings()
+    if not settings.MCP_ENABLE_HTTP:
+        return None
+
+    mcp_app = get_mcp_http_app(parent_app=parent_app)
+    config = Config(
+        app=mcp_app,
+        host=settings.MCP_HOST,
+        port=settings.MCP_PORT,
+        log_level=settings.MCP_LOG_LEVEL.lower(),
+    )
+    server = Server(config=config)
+    task = asyncio.create_task(server.serve())
+    return MCPServerHandle(server=server, task=task)
+
+
+async def stop_mcp(handle: MCPServerHandle | None) -> None:
+    if handle is None:
+        return
+    handle.server.should_exit = True
+    handle.task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await handle.task

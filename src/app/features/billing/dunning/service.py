@@ -11,13 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
-from app.features.audit.model import AuditLog
+from app.features.audit.models import AuditLog
 from app.features.billing.payments.clients.razorpay_client import RazorpayClient
-from app.features.billing.subscriptions.model import Subscription, SubscriptionStatus
+from app.features.billing.subscriptions.models import Subscription, SubscriptionStatus
+from app.observability.logging import logger, trace_layer
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import logger, trace_layer
 
-from .errors import DunningExternalServiceError, DunningInfrastructureError
+from .exceptions import DunningExternalServiceError, DunningInfrastructureError
 
 if TYPE_CHECKING:
     from typing import Any
@@ -26,10 +26,10 @@ if TYPE_CHECKING:
 
     from app.features.audit.repository import AuditLogRepository
     from app.features.billing.plans.repository import PlanRepository
-    from app.features.billing.subscriptions.model import Subscription as SubscriptionModel
+    from app.features.billing.subscriptions.models import Subscription as SubscriptionModel
     from app.features.billing.subscriptions.repository import SubscriptionRepository
 
-    from .errors import DunningResult
+    from .exceptions import DunningResult
 
 
 class DunningService:

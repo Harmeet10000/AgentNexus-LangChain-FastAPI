@@ -10,17 +10,17 @@ from typing import TYPE_CHECKING, cast
 from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.features.audit.model import AuditAction, AuditLog
+from app.features.audit.models import AuditAction, AuditLog
 from app.features.billing.payments.dto import PaymentRecordDTO
-from app.features.billing.subscriptions.model import SubscriptionStatus
-from app.features.billing.webhooks.model import (
+from app.features.billing.subscriptions.models import SubscriptionStatus
+from app.features.billing.webhooks.models import (
     WebhookEvent,
     WebhookEventStatus,
     WebhookEventType,
 )
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
-from .errors import (
+from .exceptions import (
     WebhookCollaboratorError,
     WebhookValidationError,
     WebhookVerificationError,
@@ -33,12 +33,12 @@ if TYPE_CHECKING:
     from app.features.billing.invoices.service import InvoiceService
     from app.features.billing.payments.service import PaymentService
     from app.features.billing.plans.repository import PlanRepository
-    from app.features.billing.subscriptions.model import Subscription
+    from app.features.billing.subscriptions.models import Subscription
     from app.features.billing.subscriptions.repository import SubscriptionRepository
     from app.features.billing.webhooks.repository import WebhookEventRepository
     from app.kernel.errors import FeatureError
 
-    from .errors import WebhookResult
+    from .exceptions import WebhookResult
 
 _IGNORED_EVENTS = frozenset(
     {

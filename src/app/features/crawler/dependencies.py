@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING
 from fastapi import Request
 
 from app.features.crawler.service import CrawlerService
-from app.shared.crawler import GeminiProcessor, WebCrawler
+from app.features.crawler.crawler import WebCrawler
+from app.features.crawler.processor import GeminiProcessor
 from app.resilience.rate_limit import RateLimiter
 from app.utils import ServiceUnavailableException
 

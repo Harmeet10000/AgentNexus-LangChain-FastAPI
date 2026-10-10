@@ -8,7 +8,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.features.billing.payments.currency import CurrencyCode
-from app.features.billing.payments.model import PaymentMethod
+from app.features.billing.payments.models import PaymentMethod
 
 
 class PaymentRecordDTO(BaseModel):

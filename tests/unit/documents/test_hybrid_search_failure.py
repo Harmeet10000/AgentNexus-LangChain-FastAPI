@@ -18,7 +18,7 @@ import pytest
 from returns.result import Failure, Success
 
 from app.features.documents.dto import UnifiedSearchRequest
-from app.features.documents.errors import (
+from app.features.documents.exceptions import (
     DocumentDatabaseError,
     DocumentValidationError,
 )
@@ -32,7 +32,7 @@ from app.features.documents.service import _SEARCH_BRANCHES, DocumentQueryServic
 if TYPE_CHECKING:
     from typing import Any
 
-    from app.features.documents.errors import DocumentResult
+    from app.features.documents.exceptions import DocumentResult
 
 _EMPTY: Success[list[dict[str, Any]]] = Success([])
 

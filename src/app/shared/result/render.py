@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Failure
 
 from app.config import get_settings
-from app.utils.logger import request_state
+from app.observability.logging import request_state
 
 from .errors import http_status_for_kind
 

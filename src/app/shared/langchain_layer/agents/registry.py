@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from ..prompts import SystemPromptParts
 from .factory import AgentSpec, create_production_agent
-from .tools.base import build_validation_error_handler
+from app.ai.tools.base import build_validation_error_handler
 
 if TYPE_CHECKING:
     from typing import Any

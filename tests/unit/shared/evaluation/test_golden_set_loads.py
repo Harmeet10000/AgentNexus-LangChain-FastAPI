@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from returns.result import Success
 
-from app.shared.evaluation.schema import load_golden_set
+from app.ai.evaluation.schema import load_golden_set
 
 
 @pytest.mark.asyncio

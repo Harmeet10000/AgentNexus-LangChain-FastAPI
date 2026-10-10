@@ -20,7 +20,7 @@ from app.shared.services.errors import (
     MailerResult,
     MailerUnavailableError,
 )
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from httpx._models import Response

@@ -9,20 +9,20 @@ from fakeredis.aioredis import FakeRedis
 # A MagicMock has no __path__ (dunders are not auto-created), so every
 # `from <stubbed root>.<sub> import ...` in src/ needs its own entry — otherwise
 # the import machinery reports "'<root>' is not a package". Regenerate with:
-#   rg -o 'from (mcp_core|tasks|app\.shared\.langgraph_layer)(\.[\w.]+)? import' src/
+#   rg -o 'from (app.mcp|tasks|app\.shared\.langgraph_layer)(\.[\w.]+)? import' src/
 sys.modules["app.connections.mcp"] = MagicMock()
-sys.modules["mcp_core"] = MagicMock()
-sys.modules["mcp_core.client.auth"] = MagicMock()
-sys.modules["mcp_core.client.manager"] = MagicMock()
-sys.modules["mcp_core.client.settings"] = MagicMock()
-sys.modules["mcp_core.common.errors"] = MagicMock()
-sys.modules["mcp_core.common.models"] = MagicMock()
-sys.modules["mcp_core.lifespan_mcp"] = MagicMock()
-sys.modules["mcp_core.mcp"] = MagicMock()
-sys.modules["mcp_core.server.factory"] = MagicMock()
-sys.modules["mcp_core.server.http"] = MagicMock()
-sys.modules["mcp_core.server.middleware"] = MagicMock()
-sys.modules["mcp_core.server.tools"] = MagicMock()
+sys.modules["app.mcp"] = MagicMock()
+sys.modules["app.mcp.client.auth"] = MagicMock()
+sys.modules["app.mcp.client.manager"] = MagicMock()
+sys.modules["app.mcp.client.settings"] = MagicMock()
+sys.modules["app.mcp.common.errors"] = MagicMock()
+sys.modules["app.mcp.common.models"] = MagicMock()
+sys.modules["app.mcp.lifespan_mcp"] = MagicMock()
+sys.modules["app.mcp.mcp"] = MagicMock()
+sys.modules["app.mcp.server.factory"] = MagicMock()
+sys.modules["app.mcp.server.http"] = MagicMock()
+sys.modules["app.mcp.server.middleware"] = MagicMock()
+sys.modules["app.mcp.server.tools"] = MagicMock()
 
 # The twenty-one `app.features.search.*` imports that used to sit below this block were **dead**:
 # nothing in this file referenced a single one of them, and no test imports symbols from a conftest.
@@ -83,7 +83,7 @@ def auth_service(refresh_token_repo) -> AuthService:
 
 
 def make_mock_user(**kwargs) -> MagicMock:
-    from app.features.auth.model import User  # local import to avoid import-order side effects
+    from app.features.auth.models import User  # local import to avoid import-order side effects
 
     user = MagicMock(spec=User)
     user.id = kwargs.get("id", "507f1f77bcf86cd799439011")

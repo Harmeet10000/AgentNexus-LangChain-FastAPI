@@ -24,7 +24,7 @@ from langchain_core.messages import (
 
 from app.config import get_settings
 
-from .models import ainvoke_text
+from app.ai.llm import ainvoke_text
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence

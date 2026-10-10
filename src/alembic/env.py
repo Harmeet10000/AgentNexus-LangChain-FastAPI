@@ -5,7 +5,7 @@ from sqlalchemy.engine import Connection
 
 from alembic import context
 from app.connections import init_db
-from app.utils import logger
+from app.observability.logging import logger
 from database import Base
 
 # ---------------------------------------------------------------------------

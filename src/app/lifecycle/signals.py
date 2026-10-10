@@ -1,6 +1,6 @@
 """Signal handling guidance for the application process lifecycle."""
 
-from app.utils import logger
+from app.observability.logging import logger
 
 
 def setup_signal_handlers() -> None:

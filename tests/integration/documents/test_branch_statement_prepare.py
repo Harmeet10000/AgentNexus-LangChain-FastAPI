@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import get_settings
 from app.connections.postgres import get_database_url
-from app.features.documents.model import UnifiedChunk, UnifiedDocument
+from app.features.documents.models import UnifiedChunk, UnifiedDocument
 from app.features.documents.repository import (
     DocumentRepository,
     build_search_filter_params,

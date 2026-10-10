@@ -4,13 +4,13 @@ from collections.abc import Callable
 
 import pytest
 
-from app.features.agent_saul.errors import (
+from app.features.agent_saul.exceptions import (
     AgentSaulInfrastructureError,
     AgentSaulValidationError,
     agent_saul_error_to_http_status,
 )
-from app.features.audit.errors import AuditInfrastructureError, audit_error_to_http_status
-from app.features.auth.errors import (
+from app.features.audit.exceptions import AuditInfrastructureError, audit_error_to_http_status
+from app.features.auth.exceptions import (
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthConflictError,
@@ -19,19 +19,19 @@ from app.features.auth.errors import (
     AuthValidationError,
     auth_error_to_http_status,
 )
-from app.features.billing.dunning.errors import (
+from app.features.billing.dunning.exceptions import (
     DunningExternalServiceError,
     DunningInfrastructureError,
     dunning_error_to_http_status,
 )
-from app.features.billing.plans.errors import (
+from app.features.billing.plans.exceptions import (
     PlanConflictError,
     PlanInfrastructureError,
     PlanNotFoundError,
     PlanValidationError,
     plan_error_to_http_status,
 )
-from app.features.billing.subscriptions.errors import (
+from app.features.billing.subscriptions.exceptions import (
     SubscriptionDuplicateError,
     SubscriptionInfrastructureError,
     SubscriptionInvalidTransitionError,
@@ -42,12 +42,12 @@ from app.features.billing.subscriptions.errors import (
     SubscriptionVersionConflictError,
     subscription_error_to_http_status,
 )
-from app.features.crawler.errors import (
+from app.features.crawler.exceptions import (
     CrawlerSearchError,
     CrawlerValidationError,
     crawler_error_to_http_status,
 )
-from app.features.documents.errors import (
+from app.features.documents.exceptions import (
     DocumentChunkConflictError,
     DocumentConflictError,
     DocumentDatabaseError,
@@ -59,20 +59,20 @@ from app.features.documents.errors import (
     DocumentValidationError,
     document_error_to_http_status,
 )
-from app.features.ingestion.errors import (
+from app.features.ingestion.exceptions import (
     IngestionGraphError,
     IngestionInternalError,
     IngestionPipelineError,
     ingestion_error_to_http_status,
 )
-from app.features.profile.errors import (
+from app.features.profile.exceptions import (
     ProfileAuthenticationError,
     ProfileConflictError,
     ProfileInfrastructureError,
     ProfileStorageError,
     profile_error_to_http_status,
 )
-from app.features.users.errors import (
+from app.features.users.exceptions import (
     UsersAuthorizationError,
     UsersConflictError,
     UsersInfrastructureError,

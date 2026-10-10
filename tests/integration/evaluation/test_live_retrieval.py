@@ -24,18 +24,18 @@ from app.features.documents.evaluation import (
     stored_document_kind,
     stored_jurisdiction,
 )
-from app.features.documents.model import UnifiedChunk, UnifiedDocument
+from app.features.documents.models import UnifiedChunk, UnifiedDocument
 from app.features.documents.repository import DocumentRepository
 from app.features.documents.service import DocumentQueryService
-from app.shared.evaluation.report import EvaluationReport, write_report
-from app.shared.evaluation.schema import load_golden_set
+from app.ai.evaluation.report import EvaluationReport, write_report
+from app.ai.evaluation.schema import load_golden_set
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from langchain_core.language_models import BaseChatModel
 
-    from app.shared.evaluation.schema import GoldenQuery
+    from app.ai.evaluation.schema import GoldenQuery
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 

@@ -76,7 +76,7 @@ migrate-history:
 # path, so both spellings resolve — to two *different* module objects, each with its own task
 # registry, because Python keys sys.modules by the import string. The task modules are listed
 # as `tasks.*`, which is the same rooting, so `app.` is the identity the registry already uses.
-CELERY_APP := app.worker.celery_app:celery_app
+CELERY_APP := app.worker.app:celery_app
 CELERY_WORKER_CMD := uv run celery -A $(CELERY_APP) worker --loglevel=info
 
 # The three commands the deployment actually runs, all derived from the one above so

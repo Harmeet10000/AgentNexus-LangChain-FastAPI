@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 import httpx
 
 from app.config import get_settings
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from .state import RetrievedChunk

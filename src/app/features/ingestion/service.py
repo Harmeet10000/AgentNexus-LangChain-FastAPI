@@ -15,10 +15,10 @@ from langgraph.graph.state import CompiledStateGraph
 from returns.result import Failure, Success
 
 from app.kernel.errors import FeatureError
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
 from .dto import DocumentUploadResponse
-from .errors import (
+from .exceptions import (
     IngestionGraphError,
     IngestionInternalError,
     IngestionPipelineError,
@@ -27,7 +27,7 @@ from .errors import (
 if TYPE_CHECKING:
     from typing import Any
 
-    from .errors import IngestionResult
+    from .exceptions import IngestionResult
 
 
 class IngestionService:

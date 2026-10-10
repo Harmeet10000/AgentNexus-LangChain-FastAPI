@@ -11,7 +11,9 @@ from guard import IPInfoManager, SecurityMiddleware
 from guard.models import SecurityConfig
 from nanoid import generate
 
-from app.utils import RedisGuardAdapter, execution_path, logger, request_state
+from app.observability.logging import logger
+from app.observability.logging import execution_path, request_state
+from app.utils import RedisGuardAdapter
 
 if TYPE_CHECKING:
     from app.config import Settings
@@ -279,7 +281,7 @@ def build_fastapi_guard_config(settings: "Settings") -> SecurityConfig:
 
 def get_metrics() -> tuple[bytes, str]:
     """Get Prometheus metrics via OTel PrometheusMetricReader."""
-    from app.shared.otel.integrations import (
+    from app.observability.integrations import (
         get_prometheus_metrics,
     )
 

@@ -21,7 +21,7 @@ def test_correlation_id_rejects_control_characters_and_oversized_values() -> Non
 
 
 def test_request_actor_updates_context_used_by_downstream_logs() -> None:
-    from app.utils import set_request_actor
+    from app.observability.logging import set_request_actor
 
     token = request_state.set({"request_id": "request-1", "user_id": None})
     try:

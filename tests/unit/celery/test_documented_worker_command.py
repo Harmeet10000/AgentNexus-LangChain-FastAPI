@@ -302,7 +302,7 @@ def test_the_named_application_module_resolves(real_celery) -> None:
     assert module_path != _PHANTOM_MODULE
     assert real_celery.app.__class__ is Celery
     # The fixture imported this exact path; reaching it here confirms the command names it.
-    assert module_path == "app.worker.celery_app"
+    assert module_path == "app.worker.app"
 
 
 def test_the_named_attribute_is_the_task_application(real_celery) -> None:
@@ -327,8 +327,8 @@ def test_the_named_attribute_is_the_task_application(real_celery) -> None:
 def test_the_application_is_named_by_its_installed_identity_not_its_source_path() -> None:
     """Pins the prefix, because both spellings import and they are not the same object.
 
-    `src/` is on the import path through the editable install, so `app.worker.celery_app` resolves
-    from **any** working directory. `src.app.worker.celery_app` resolves only when the working
+    `src/` is on the import path through the editable install, so `app.worker.app` resolves
+    from **any** working directory. `src.app.worker.app` resolves only when the working
     directory happens to be the repository root, since that is what puts the root on the path —
     measured directly: from `/tmp`, the installed spelling imports and the source-path spelling
     raises. A container whose working directory is not the repository root would therefore fail to

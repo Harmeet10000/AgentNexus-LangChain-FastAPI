@@ -1,0 +1,440 @@
+"""
+Document ingestion pipeline for processing documents into vector DB.
+
+Function-based architecture with factory functions for dependency injection.
+"""
+
+import json
+from collections.abc import Callable
+from datetime import UTC, datetime
+from os.path import relpath
+from pathlib import Path
+from typing import Any
+
+from app.ai.embeddings import EmbeddingTaskType, embed_texts
+from app.observability.logging import logger
+
+from .chunker import chunk_document, chunk_document_simple, create_hybrid_chunker, get_tokenizer
+from .docling_enhanced import create_document_converter
+from .models import Chunk, ChunkRequest, IngestionConfig, IngestionResult
+
+
+async def embed_document_chunks(chunks: list[Chunk]) -> list[Chunk]:
+    """Attach document vectors through the application's single embedding path."""
+    vectors = await embed_texts(
+        [chunk.search_text for chunk in chunks],
+        task_type=EmbeddingTaskType.DOCUMENT,
+    )
+    return [
+        chunk.model_copy(update={"embedding": vector})
+        for chunk, vector in zip(chunks, vectors, strict=True)
+    ]
+
+
+def find_document_files(documents_folder: str) -> list[str]:
+    """Find all supported document files in the documents folder."""
+    if not Path(documents_folder).exists():
+        logger.bind(documents_folder=documents_folder).error("Documents folder not found")
+        return []
+
+    # Supported file patterns - Docling + text formats + audio
+    patterns = [
+        "*.md",
+        "*.markdown",
+        "*.txt",
+        "*.pdf",
+        "*.docx",
+        "*.doc",
+        "*.pptx",
+        "*.ppt",
+        "*.xlsx",
+        "*.xls",
+        "*.html",
+        "*.htm",
+        "*.mp3",
+        "*.wav",
+        "*.m4a",
+        "*.flac",
+    ]
+    files = []
+
+    for pattern in patterns:
+        files.extend(str(p) for p in Path(documents_folder).glob(f"**/{pattern}"))
+
+    return sorted(files)
+
+
+def extract_title(content: str, file_path: str) -> str:
+    """Extract title from document content or filename."""
+    lines = content.split("\n")
+    for line in lines[:10]:
+        stripped_line = line.strip()
+        if stripped_line.startswith("# "):
+            return line[2:].strip()
+
+    return Path(file_path).stem
+
+
+def extract_document_metadata(content: str, file_path: str) -> dict[str, Any]:
+    """Extract metadata from document content."""
+    metadata = {
+        "file_path": file_path,
+        "file_size": len(content),
+        "ingestion_date": datetime.now(tz=UTC).isoformat(),
+    }
+
+    # Try to extract YAML frontmatter
+    if content.startswith("---"):
+        try:
+            import yaml
+
+            end_marker = content.find("\n---\n", 4)
+            if end_marker != -1:
+                frontmatter = content[4:end_marker]
+                yaml_metadata = yaml.safe_load(frontmatter)
+                if isinstance(yaml_metadata, dict):
+                    metadata.update(yaml_metadata)
+        except ImportError:
+            logger.warning("PyYAML not installed, skipping frontmatter extraction")
+        except yaml.YAMLError as e:
+            e.add_note(f"file={file_path}, operation=parse_frontmatter")
+            logger.bind(file=file_path, operation="parse_frontmatter", error=str(e)).warning(
+                "Failed to parse frontmatter"
+            )
+
+    lines = content.split("\n")
+    metadata["line_count"] = len(lines)
+    metadata["word_count"] = len(content.split())
+
+    return metadata
+
+
+async def read_document(file_path: str) -> tuple[str, Any | None]:
+    """
+    Read document content from file - supports multiple formats via Docling.
+
+    Returns:
+        Tuple of (markdown_content, docling_document)
+    """
+    file_ext = Path(file_path).suffix.lower()
+
+    # Audio formats need a separately provisioned transcription service.
+    audio_formats = [".mp3", ".wav", ".m4a", ".flac"]
+    if file_ext in audio_formats:
+        msg = "Audio transcription is not configured for document ingestion"
+        raise ValueError(msg)
+
+    # Docling-supported formats
+    docling_formats = [".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".html", ".htm"]
+
+    if file_ext in docling_formats:
+        try:
+            logger.bind(file_ext=file_ext, file=Path(file_path).name).info(
+                "Converting file using Docling"
+            )
+
+            converter = create_document_converter(gpu_available=False)
+            result = converter.convert(file_path)
+
+            markdown_content = result.document.export_to_markdown()
+            logger.bind(file=Path(file_path).name).info("Successfully converted to markdown")
+
+        except Exception as e:  # noqa: BLE001 — Docling conversion, fallback to raw text
+            e.add_note(f"file={file_path}, operation=docling_conversion")
+            logger.bind(file=file_path, operation="docling_conversion").exception(
+                "Failed to convert document with Docling"
+            )
+            try:
+                with Path(file_path).open(encoding="utf-8") as f:  # noqa: ASYNC230
+                    return (f.read(), None)
+            except Exception:  # noqa: BLE001 — raw text fallback, must not crash
+                return (f"[Error: Could not read file {Path(file_path).name}]", None)
+        else:
+            return (markdown_content, result.document)
+
+    # Text-based formats
+    else:
+        try:
+            with Path(file_path).open(encoding="utf-8") as f:  # noqa: ASYNC230
+                return (f.read(), None)
+        except UnicodeDecodeError:
+            with Path(file_path).open(encoding="latin-1") as f:  # noqa: ASYNC230
+                return (f.read(), None)
+
+
+async def ingest_single_document(
+    file_path: str,
+    config: IngestionConfig,
+    db_pool: Any = None,
+    tokenizer: Any = None,
+    hybrid_chunker: Any = None,
+) -> IngestionResult:
+    """
+    Ingest a single document.
+
+    Args:
+        file_path: Path to the document file
+        config: Ingestion configuration
+        db_pool: Database connection pool
+        tokenizer: Initialized tokenizer
+        hybrid_chunker: Initialized HybridChunker
+
+    Returns:
+        Ingestion result
+    """
+    start_time = datetime.now(tz=UTC)
+
+    document_content, docling_doc = await read_document(file_path)
+    document_title = extract_title(document_content, file_path)
+    document_source = relpath(file_path, "documents")  # noqa: ASYNC240
+    document_metadata = extract_document_metadata(document_content, file_path)
+
+    logger.bind(document_title=document_title).info("Processing document")
+
+    # Chunk the document
+    if config.use_semantic_chunking:
+        if tokenizer is None:
+            tokenizer = get_tokenizer()
+        if hybrid_chunker is None:
+            hybrid_chunker = create_hybrid_chunker(tokenizer, config)
+
+        chunks = await chunk_document(
+            ChunkRequest(
+                content=document_content,
+                title=document_title,
+                source=document_source,
+                config=config,
+                metadata=document_metadata,
+            ),
+            tokenizer,
+            hybrid_chunker=hybrid_chunker,
+            docling_doc=docling_doc,
+        )
+    else:
+        chunks = await chunk_document_simple(
+            content=document_content,
+            title=document_title,
+            source=document_source,
+            config=config,
+            metadata=document_metadata,
+        )
+
+    if not chunks:
+        logger.bind(document_title=document_title).warning("No chunks created")
+        return IngestionResult(
+            document_id="",
+            title=document_title,
+            chunks_created=0,
+            processing_time_ms=(datetime.now(tz=UTC) - start_time).total_seconds() * 1000,
+            errors=["No chunks created"],
+        )
+
+    logger.bind(chunk_count=len(chunks)).info("Created chunks")
+
+    # Generate embeddings
+    embedded_chunks = await embed_document_chunks(chunks)
+    logger.bind(chunk_count=len(embedded_chunks)).info("Generated embeddings for chunks")
+
+    # Save to database (if pool provided)
+    document_id = ""
+    if db_pool:
+        document_id = await save_to_postgres(
+            db_pool,
+            document_title,
+            document_source,
+            document_content,
+            chunks=embedded_chunks,
+            metadata=document_metadata,
+        )
+        logger.bind(document_id=document_id).info("Saved document to PostgreSQL")
+
+    processing_time = (datetime.now(tz=UTC) - start_time).total_seconds() * 1000
+
+    return IngestionResult(
+        document_id=document_id,
+        title=document_title,
+        chunks_created=len(chunks),
+        processing_time_ms=processing_time,
+    )
+
+
+async def save_to_postgres(
+    db_pool: Any,
+    title: str,
+    source: str,
+    content: str,
+    *,
+    chunks: list[Chunk],
+    metadata: dict[str, Any],
+) -> str:
+    """Save document and chunks to PostgreSQL."""
+    async with db_pool.acquire() as conn, conn.transaction():
+        # Insert document
+        document_result = await conn.fetchrow(
+            """
+            INSERT INTO documents (title, source, content, metadata)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id::text
+            """,
+            title,
+            source,
+            content,
+            json.dumps(metadata),
+        )
+
+        document_id = document_result["id"]
+
+        # Insert chunks
+        for chunk in chunks:
+            embedding_data = None
+            if hasattr(chunk, "embedding") and chunk.embedding:
+                embedding_data = "[" + ",".join(map(str, chunk.embedding)) + "]"
+
+            await conn.execute(
+                """
+                INSERT INTO chunks (document_id, content, embedding, chunk_index, metadata, token_count)
+                VALUES ($1::uuid, $2, $3::vector, $4, $5, $6)
+                """,
+                document_id,
+                chunk.content,
+                embedding_data,
+                chunk.chunk_index,
+                json.dumps(chunk.metadata),
+                chunk.token_count,
+            )
+
+        return document_id
+
+
+async def ingest_documents(
+    config: IngestionConfig,
+    documents_folder: str = "documents",
+    db_pool: Any = None,
+    clean_before_ingest: bool = True,
+    progress_callback: Callable[..., None] | None = None,
+) -> list[IngestionResult]:
+    """
+    Ingest all documents from the documents folder.
+
+    Args:
+        config: Ingestion configuration
+        documents_folder: Folder containing markdown documents
+        db_pool: Optional database connection pool
+        clean_before_ingest: Whether to clean existing data before ingestion
+        progress_callback: Optional callback for progress updates
+
+    Returns:
+        List of ingestion results
+    """
+    # Clean existing data if requested
+    if clean_before_ingest and db_pool:
+        await clean_databases(db_pool)
+
+    # Find all supported document files
+    document_files = find_document_files(documents_folder)
+
+    if not document_files:
+        logger.bind(documents_folder=documents_folder).warning("No supported document files found")
+        return []
+
+    logger.bind(document_count=len(document_files)).info("Found document files to process")
+
+    results = []
+
+    # Initialize shared resources if needed
+    tokenizer = None
+    hybrid_chunker = None
+    if config.use_semantic_chunking:
+        tokenizer = get_tokenizer()
+        hybrid_chunker = create_hybrid_chunker(tokenizer, config)
+
+    for i, file_path in enumerate(document_files):
+        try:
+            logger.bind(file_index=i + 1, file_count=len(document_files), file=file_path).info(
+                "Processing file"
+            )
+
+            result = await ingest_single_document(
+                file_path,
+                config,
+                db_pool=db_pool,
+                tokenizer=tokenizer,
+                hybrid_chunker=hybrid_chunker,
+            )
+            results.append(result)
+
+            if progress_callback:
+                progress_callback(i + 1, len(document_files))
+
+        except Exception as e:  # noqa: BLE001 — per-file processing, varied failure modes
+            e.add_note(f"file={file_path}, operation=process_document")
+            logger.bind(file=file_path, operation="process_document").exception(
+                "Failed to process document"
+            )
+            results.append(
+                IngestionResult(
+                    document_id="",
+                    title=Path(file_path).name,
+                    chunks_created=0,
+                    processing_time_ms=0,
+                    errors=[str(e)],
+                )
+            )
+
+    # Log summary
+    total_chunks = sum(r.chunks_created for r in results)
+    total_errors = sum(len(r.errors) for r in results)
+
+    logger.bind(
+        document_count=len(results), chunk_count=total_chunks, error_count=total_errors
+    ).info("Ingestion complete")
+
+    return results
+
+
+async def clean_databases(db_pool: Any) -> None:
+    """Clean existing data from databases."""
+    logger.warning("Cleaning existing data from databases...")
+
+    async with db_pool.acquire() as conn, conn.transaction():
+        await conn.execute("DELETE FROM chunks")
+        await conn.execute("DELETE FROM documents")
+
+    logger.info("Cleaned PostgreSQL database")
+
+
+def create_ingestion_pipeline(
+    config: IngestionConfig,
+    documents_folder: str = "documents",
+    db_pool: Any = None,
+) -> tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
+    """
+    Factory function to create ingestion pipeline functions.
+
+    Args:
+        config: Ingestion configuration
+        documents_folder: Folder containing documents
+        db_pool: Database connection pool
+
+    Returns:
+        Tuple of (ingest_all, ingest_one, clean) functions
+    """
+
+    async def ingest_all(
+        progress_callback: Callable[..., None] | None = None,
+    ) -> list[IngestionResult]:
+        return await ingest_documents(
+            config,
+            documents_folder=documents_folder,
+            db_pool=db_pool,
+            progress_callback=progress_callback,
+        )
+
+    async def ingest_one(file_path: str) -> IngestionResult:
+        return await ingest_single_document(file_path, config, db_pool=db_pool)
+
+    async def clean() -> None:
+        if db_pool:
+            await clean_databases(db_pool)
+
+    return ingest_all, ingest_one, clean

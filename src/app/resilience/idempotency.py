@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis

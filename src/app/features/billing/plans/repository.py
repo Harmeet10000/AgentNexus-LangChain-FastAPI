@@ -9,11 +9,11 @@ from returns.result import Failure, Success
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.observability.logging import logger, trace_layer
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import logger, trace_layer
 
-from .errors import PlanConflictError, PlanInfrastructureError, PlanNotFoundError
-from .model import Plan
+from .exceptions import PlanConflictError, PlanInfrastructureError, PlanNotFoundError
+from .models import Plan
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from .errors import PlanResult
+    from .exceptions import PlanResult
 
 
 class PlanRepository:

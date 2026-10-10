@@ -30,7 +30,7 @@ import cognee
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.connections.postgres import get_database_fields as _database_fields
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from app.config import Settings

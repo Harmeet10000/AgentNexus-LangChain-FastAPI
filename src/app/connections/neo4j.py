@@ -7,7 +7,7 @@ from fastapi.requests import HTTPConnection
 from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession, basic_auth
 
 from app.config import Settings, get_settings
-from app.utils import logger
+from app.observability.logging import logger
 
 settings: Settings = get_settings()
 

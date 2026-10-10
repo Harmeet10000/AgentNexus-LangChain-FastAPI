@@ -8,18 +8,18 @@ from typing import TYPE_CHECKING
 from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.features.audit.model import AuditAction, AuditLog
+from app.features.audit.models import AuditAction, AuditLog
 from app.features.billing.payments.clients.razorpay_client import RazorpayClient
 from app.features.billing.payments.dto import RefundRequestDTO
-from app.features.billing.payments.model import PaymentStatus
+from app.features.billing.payments.models import PaymentStatus
 from app.kernel.errors import ErrorKind
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
 from .dto import (
     SubscriptionListResponse,
     SubscriptionResponse,
 )
-from .errors import (
+from .exceptions import (
     SubscriptionInfrastructureError,
     SubscriptionInvalidTransitionError,
     SubscriptionNotFoundError,
@@ -27,7 +27,7 @@ from .errors import (
     SubscriptionTransientInfrastructureError,
     SubscriptionValidationError,
 )
-from .model import Subscription, SubscriptionStatus
+from .models import Subscription, SubscriptionStatus
 from .proration import calculate_plan_change_proration
 from .trial_extension import TrialExtension
 
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from app.features.audit.repository import AuditLogRepository
     from app.features.billing.payments.repository import PaymentRepository
     from app.features.billing.payments.service import PaymentService
-    from app.features.billing.plans.model import Plan
+    from app.features.billing.plans.models import Plan
     from app.features.billing.plans.repository import PlanRepository
     from app.features.billing.subscriptions.repository import SubscriptionRepository
     from app.kernel.errors import FeatureError
@@ -51,7 +51,7 @@ if TYPE_CHECKING:
         SubscriptionCreateDTO,
         SubscriptionPauseDTO,
     )
-    from .errors import SubscriptionError, SubscriptionResult
+    from .exceptions import SubscriptionError, SubscriptionResult
 
 
 def _subscription_to_response(

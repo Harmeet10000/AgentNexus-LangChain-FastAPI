@@ -19,22 +19,22 @@ from returns.result import Failure
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_texts
-from app.shared.langchain_layer.models import serialize_to_toon
-from app.shared.langgraph_layer.kb_retry import (
+from app.ai.embeddings import EmbeddingTaskType, embed_texts
+from app.ai.llm import serialize_to_toon
+from app.ai.graph.retry import (
     TRANSIENT_EXTERNAL_TYPES,
     TransientExternalError,
     describe_failure,
     retry_immediate,
 )
-from app.shared.rag.docling.docling_enhanced import create_document_converter, table_markdown
+from app.extraction.docling.docling_enhanced import create_document_converter, table_markdown
 from app.shared.rag.graphiti.schemas import (
     GRAPHITI_EDGE_TYPE_MAP,
     GRAPHITI_EDGE_TYPES,
     GRAPHITI_ENTITY_TYPES,
 )
 from app.shared.result import log_expected_failure
-from app.utils import logger
+from app.observability.logging import logger
 
 from .canonicalize import canonicalize_entities
 from .prompts import (

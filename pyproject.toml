@@ -407,7 +407,7 @@ exempt-modules = ["pydantic", "fastapi", "langchain", "langgraph", "docling"]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "pydantic.Field"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "database", "mcp_core"]
+known-first-party = ["app", "database"]
 known-third-party = ["fastapi", "pydantic", "sqlalchemy", "langchain"]
 section-order = [
     "future",
@@ -518,7 +518,7 @@ section-order = [
 "src/app/features/billing/payments/dto.py" = ["TC001", "TC002", "TC003"]
 "src/app/features/billing/subscriptions/dto.py" = ["TC001", "TC002", "TC003"]
 "src/app/features/billing/plans/dto.py" = ["TC001", "TC002", "TC003"]
-"src/app/shared/langchain_layer/agents/tools/*.py" = ["TC001", "TC002", "TC003"]
+"src/app/ai/tools/*.py" = ["TC001", "TC002", "TC003"]
 # Same @tool get_type_hints constraint holds at the tools' owning features.
 "src/app/features/documents/tools/*.py" = ["TC001", "TC002", "TC003"]
 "src/app/features/crawler/tools/*.py" = ["TC001", "TC002", "TC003"]
@@ -532,37 +532,37 @@ section-order = [
     "F821",
     "PLC0415",
 ]
-"src/app/shared/rag/docling/ingest_v2.py" = [
+"src/app/extraction/docling/ingest_v2.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/shared/rag/docling/docling_enhanced.py" = [
+"src/app/extraction/docling/docling_enhanced.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/shared/rag/docling/chunker.py" = [
+"src/app/extraction/docling/chunker.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/shared/rag/docling/entity_extractor.py" = [
+"src/app/extraction/docling/entity_extractor.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/shared/otel/instrument.py" = [
+"src/app/observability/instrument.py" = [
     "PLC0415", # Late imports conditional on instrumentation availability
 ]
-"src/app/shared/otel/__init__.py" = [
+"src/app/observability/__init__.py" = [
     "PLC0415", # Late imports conditional on instrumentation availability
 ]
-"src/app/shared/langchain_layer/callback.py" = [
+"src/app/ai/callbacks.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
 "src/app/shared/langchain_layer/chains.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/shared/langchain_layer/agents/middlewares/guardrails.py" = [
+"src/app/ai/guardrails.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
 "src/app/lifecycle/lifespan.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/features/documents/service.py" = [
+"src/app/features/documents/service/*.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
 "src/app/middleware/server_middleware.py" = [
@@ -571,10 +571,10 @@ section-order = [
 "src/app/connections/crawl4ai.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/mcp_core/testing.py" = [
+"src/app/mcp/testing.py" = [
     "PLC0415", # Late imports to avoid startup overhead
 ]
-"src/app/shared/langchain_layer/agents/tools/shell.py" = [
+"src/app/ai/tools/shell.py" = [
     "ASYNC240", # Blocking path methods in async — uses os.path intentionally
     "PLC0415",  # Local import re to avoid name collision
 ]
@@ -589,8 +589,8 @@ section-order = [
     "S106",
 ]
 "src/app/features/crawler/dependencies.py" = ["PLC0415"]
-"src/mcp_core/server/*.py" = ["PLC0415"]
-"src/mcp_core/__init__.py" = ["F822", "PLC0415"] # lazy __getattr__ exports; imports inside __getattr__
+"src/app/mcp/server/*.py" = ["PLC0415"]
+"src/app/mcp/__init__.py" = ["F822", "PLC0415"] # lazy __getattr__ exports; imports inside __getattr__
 
 
 [tool.ruff.format]
@@ -900,7 +900,7 @@ forbidden_modules = ["app.features", "app.worker"]
 name = "Web and producers do not load worker execution"
 type = "forbidden"
 source_modules = ["app.api", "app.main", "app.lifecycle", "app.connections", "app.shared", "app.config", "app.middleware"]
-forbidden_modules = ["app.worker", "app.features.*.tasks", "app.features.billing.credits.tasks"]
+forbidden_modules = ["app.worker"]
 
 [[tool.importlinter.contracts]]
 name = "Wire schemas are independent of feature implementations"
@@ -912,4 +912,4 @@ forbidden_modules = ["app.features", "app.worker", "app.connections"]
 name = "Domain use cases do not import task entry points"
 type = "forbidden"
 source_modules = ["app.features.*.service", "app.features.billing.jobs", "app.features.billing.credits.jobs"]
-forbidden_modules = ["app.worker", "app.features.*.tasks", "app.features.billing.credits.tasks"]
+forbidden_modules = ["app.worker"]

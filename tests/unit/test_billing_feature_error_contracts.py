@@ -2,10 +2,10 @@ from fastapi import Response
 from pydantic import ValidationError
 from returns.result import Failure
 
-from app.features.billing.credits.errors import CreditInfrastructureError
-from app.features.billing.invoices.errors import InvoiceNotFoundError
-from app.features.billing.payments.errors import PaymentProviderUnavailableError
-from app.features.billing.webhooks.errors import WebhookVerificationError
+from app.features.billing.credits.exceptions import CreditInfrastructureError
+from app.features.billing.invoices.exceptions import InvoiceNotFoundError
+from app.features.billing.payments.exceptions import PaymentProviderUnavailableError
+from app.features.billing.webhooks.exceptions import WebhookVerificationError
 from app.shared.result import render_result
 
 

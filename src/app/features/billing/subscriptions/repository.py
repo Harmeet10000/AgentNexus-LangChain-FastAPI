@@ -10,16 +10,16 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import trace_layer
+from app.observability.logging import trace_layer
 
-from .errors import (
+from .exceptions import (
     SubscriptionDuplicateError,
     SubscriptionInvalidTransitionError,
     SubscriptionNotFoundError,
     SubscriptionTransientInfrastructureError,
     SubscriptionVersionConflictError,
 )
-from .model import Subscription, SubscriptionStatus
+from .models import Subscription, SubscriptionStatus
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from .errors import SubscriptionResult
+    from .exceptions import SubscriptionResult
 
 
 # Requirement 4.1-4.6: allowed state transitions.

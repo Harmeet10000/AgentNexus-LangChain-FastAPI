@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 from opentelemetry import propagate
 
-from app.utils import logger
+from app.observability.logging import logger
 
 
 def _inject_trace_context(carrier: dict[str, Any], *, context: Any = None) -> None:

@@ -25,7 +25,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine

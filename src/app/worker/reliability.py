@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from app.utils import logger
+from app.observability.logging import logger
 from app.utils.cache import Redis
 from app.utils.json_serializer import from_json, to_json_str
 

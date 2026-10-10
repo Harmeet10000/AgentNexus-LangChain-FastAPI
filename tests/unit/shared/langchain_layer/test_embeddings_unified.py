@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
 from app.config import get_settings
 from app.shared.langchain_layer import embeddings as embeddings_module
-from app.shared.langchain_layer.embeddings import (
+from app.ai.embeddings import (
     DOCUMENT_BATCH_SIZE,
     EmbeddingTaskType,
     _cache_key,

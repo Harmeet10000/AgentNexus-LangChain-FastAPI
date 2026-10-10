@@ -19,7 +19,8 @@ from opentelemetry import context as otel_context
 from opentelemetry import metrics, propagate
 
 from app.config import get_settings
-from app.utils import execution_path, logger, setup_logging
+from app.observability.logging import logger, setup_logging
+from app.observability.logging import execution_path
 
 if TYPE_CHECKING:
     from typing import Any
@@ -32,14 +33,14 @@ def initialize_celery_observability(**_: Any) -> None:
     settings = get_settings()
     setup_logging()
     if settings.OTEL_ENABLED:
-        from app.shared.otel import setup_otel  # noqa: PLC0415
+        from app.observability import setup_otel  # noqa: PLC0415
 
         setup_otel(service_name=settings.OTEL_SERVICE_NAME)
 
 
 def shutdown_celery_observability(**_: Any) -> None:
     """Flush worker telemetry when Celery is shutting down."""
-    from app.shared.otel import shutdown_otel  # noqa: PLC0415
+    from app.observability import shutdown_otel  # noqa: PLC0415
 
     shutdown_otel()
 

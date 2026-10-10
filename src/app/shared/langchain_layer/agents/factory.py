@@ -48,10 +48,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import get_settings
 
-from ..models import build_chat_model
+from app.ai.llm import build_chat_model
 from ..prompts import AGENT_SYSTEM_PROMPT, SystemPromptParts
-from .middlewares import MiddlewareConfig, build_default_middleware_stack
-from .tools.registry import get_tool_registry
+from app.ai.guardrails import MiddlewareConfig, build_default_middleware_stack
+from app.ai.tools.registry import get_tool_registry
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

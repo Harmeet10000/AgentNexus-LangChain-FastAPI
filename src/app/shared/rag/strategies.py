@@ -13,13 +13,13 @@
 # from pydantic import BaseModel, ConfigDict, PrivateAttr
 # from sqlalchemy import bindparam, text
 
-# from app.shared.langchain_layer.models import (
+# from app.ai.llm import (
 #     ainvoke_text,
 #     build_chat_model,
 #     build_embedding_model,
 #     build_fast_model,
 # )
-# from app.utils import logger
+# from app.observability.logging import logger
 
 # if TYPE_CHECKING:
 #     from collections.abc import Mapping

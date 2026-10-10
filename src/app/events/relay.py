@@ -11,7 +11,7 @@ from asyncpg.exceptions import PostgresError
 from celery.exceptions import CeleryError
 from sqlalchemy import text
 
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from typing import Final

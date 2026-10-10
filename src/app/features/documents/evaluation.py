@@ -4,8 +4,8 @@ from collections.abc import Awaitable, Callable
 
 from returns.result import Failure
 
-from app.shared.evaluation.runner import RetrievalEvaluation, run_retrieval_eval
-from app.shared.evaluation.schema import GoldenDocumentKind, GoldenQuery
+from app.ai.evaluation.runner import RetrievalEvaluation, run_retrieval_eval
+from app.ai.evaluation.schema import GoldenDocumentKind, GoldenQuery
 from app.utils.exceptions import InfrastructureException
 
 from .dto import SearchMetadataFilter, UnifiedSearchRequest

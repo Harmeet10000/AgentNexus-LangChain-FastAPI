@@ -2,7 +2,7 @@
 
 `ChatMessage` / `ChatSession` / `DocumentVector` are re-exported here for one
 release so `from database import ChatMessage` keeps working after the move to
-`app.features.chat.model`. New code must import from the feature directly.
+`app.features.agent_saul.models`. New code must import from the feature directly.
 """
 
 from .base import Base, PublicIdMixin, TimestampMixin
@@ -18,15 +18,15 @@ __all__ = [
 
 
 def __getattr__(name: str) -> type:
-    """Lazy shim — avoids import cycle when app.features.chat.model imports Base.
+    """Lazy shim — avoids import cycle when app.features.agent_saul.modelss imports Base.
 
-    `from app.features.chat.model import ...` triggers `database` package load.
-    If __init__.py eagerly imported ChatMessage, it would import chat.model
+    `from app.features.agent_saul.modelss import ...` triggers `database` package load.
+    If __init__.py eagerly imported ChatMessage, it would import agent_saul.models
     before its classes are defined. Lazy getattr breaks the cycle.
     """
     if name in {"ChatMessage", "ChatSession"}:
-        from app.features.chat.model import ChatMessage as _CM  # noqa: N814
-        from app.features.chat.model import ChatSession as _CS  # noqa: N814
+        from app.features.agent_saul.modelss import ChatMessage as _CM  # noqa: N814
+        from app.features.agent_saul.modelss import ChatSession as _CS  # noqa: N814
 
         return _CM if name == "ChatMessage" else _CS
     if name == "DocumentVector":

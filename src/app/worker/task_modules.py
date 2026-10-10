@@ -19,17 +19,17 @@ from app.shared.jobs.names import (
     SEND_VERIFICATION_EMAIL,
 )
 
-_AGENT_MEMORY_TASKS: Final = "app.features.agent_saul.tasks"
-_AUTH_EMAIL_TASKS: Final = "app.features.auth.tasks"
-_BILLING_TASKS: Final = "app.features.billing.tasks"
-_CREDIT_TASKS: Final = "app.features.billing.credits.tasks"
-_DOCUMENT_TASKS: Final = "app.features.documents.tasks"
+_AGENT_MEMORY_TASKS: Final = "app.worker.tasks.agent_saul"
+_AUTH_EMAIL_TASKS: Final = "app.worker.tasks.auth"
+_BILLING_TASKS: Final = "app.worker.tasks.billing"
+_CREDIT_TASKS: Final = "app.worker.tasks.credits"
+_DOCUMENT_TASKS: Final = "app.worker.tasks.documents"
 
 
 TASK_DECLARING_MODULES: Final[Mapping[str, str]] = {
     AGENT_MEMORY_CONSOLIDATION: _AGENT_MEMORY_TASKS,
     DOCUMENTS_INGEST: _DOCUMENT_TASKS,
-    CRAWLER_CRAWL: "app.features.crawler.tasks",
+    CRAWLER_CRAWL: "app.worker.tasks.crawler",
     SEND_VERIFICATION_EMAIL: _AUTH_EMAIL_TASKS,
     SEND_PASSWORD_RESET_EMAIL: _AUTH_EMAIL_TASKS,
     BILLING_RENEWAL: _BILLING_TASKS,
@@ -44,10 +44,10 @@ TASK_DECLARING_MODULES: Final[Mapping[str, str]] = {
 
 
 TASK_MODULES: Final = (
-    "app.features.agent_saul.tasks",
-    "app.features.auth.tasks",
-    "app.features.billing.tasks",
-    "app.features.billing.credits.tasks",
-    "app.features.documents.tasks",
-    "app.features.crawler.tasks",
+    "app.worker.tasks.agent_saul",
+    "app.worker.tasks.auth",
+    "app.worker.tasks.billing",
+    "app.worker.tasks.credits",
+    "app.worker.tasks.documents",
+    "app.worker.tasks.crawler",
 )

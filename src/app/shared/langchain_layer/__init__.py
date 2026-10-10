@@ -32,7 +32,7 @@ from langchain.agents.middleware import (
     ToolRetryMiddleware,
 )
 
-from .agents.middlewares.guardrails import (
+from app.ai.guardrails import (
     ContextEditingMiddleware,
     DynamicSystemPromptMiddleware,
     GuardrailMiddleware,
@@ -42,8 +42,8 @@ from .agents.middlewares.guardrails import (
     build_default_middleware_stack,
     build_minimal_middleware_stack,
 )
-from .callback import LatencyCallbackHandler, TokenUsageCallbackHandler, configure_langsmith
-from .models import build_chat_model, serialize_to_toon
+from app.ai.callbacks import LatencyCallbackHandler, TokenUsageCallbackHandler, configure_langsmith
+from app.ai.llm import build_chat_model, serialize_to_toon
 from .prompts import render_prompt_sections
 
 __all__ = [

@@ -21,7 +21,8 @@ from tenacity import (
 )
 
 from app.config import get_settings
-from app.utils import ExternalServiceException, logger
+from app.observability.logging import logger
+from app.utils import ExternalServiceException
 
 type _JsonObject = dict[str, Any]
 

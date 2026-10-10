@@ -9,19 +9,19 @@ from returns.result import Failure, Success
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
-from app.features.audit.model import AuditAction, AuditLog
+from app.features.audit.models import AuditAction, AuditLog
 from app.features.billing.money import (
     paisa_to_rupees,
     split_tax_for_gst,
     split_tax_inclusive,
     state_code_from_gstin,
 )
-from app.shared.result.diagnostics import add_database_error_note
 from app.kernel.errors import ErrorKind
-from app.utils import trace_layer
+from app.observability.logging import trace_layer
+from app.shared.result.diagnostics import add_database_error_note
 
 from .dto import InvoiceLineItemDTO, InvoiceResponse
-from .errors import (
+from .exceptions import (
     InvoiceCollaboratorError,
     InvoiceConflictError,
     InvoiceInfrastructureError,
@@ -30,7 +30,7 @@ from .errors import (
     InvoiceValidationError,
 )
 from .invoice_void import InvoiceVoid
-from .model import (
+from .models import (
     Invoice,
     InvoiceLineItem,
     InvoiceStatus,
@@ -43,19 +43,19 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from app.connections.object_storage import StorageService
     from app.features.audit.repository import AuditLogRepository
     from app.features.billing.invoices.repository import InvoiceRepository
-    from app.features.billing.payments.model import Payment
+    from app.features.billing.payments.models import Payment
     from app.features.billing.payments.repository import PaymentRepository
-    from app.features.billing.plans.model import Plan
+    from app.features.billing.plans.models import Plan
     from app.features.billing.plans.repository import PlanRepository
-    from app.features.billing.subscriptions.model import Subscription
+    from app.features.billing.subscriptions.models import Subscription
     from app.features.billing.subscriptions.repository import SubscriptionRepository
     from app.kernel.errors import FeatureError
-    from app.connections.object_storage import StorageService
 
     from .dto import VoidInvoiceDTO
-    from .errors import InvoiceError, InvoiceResult
+    from .exceptions import InvoiceError, InvoiceResult
 
 _DEFAULT_SAC_CODE = "998314"
 

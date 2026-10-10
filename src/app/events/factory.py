@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from app.connections.postgres import get_database_url
 from app.events import OutboxRelay
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from celery import Celery

@@ -41,7 +41,7 @@ from app.shared.langgraph_layer.ingestion_kb.nodes import (
 from app.shared.langgraph_layer.ingestion_kb.state import (
     ClauseSegment,
 )
-from app.shared.langgraph_layer.kb_retry import TransientExternalError, retry_immediate
+from app.ai.graph.retry import TransientExternalError, retry_immediate
 
 if TYPE_CHECKING:
     from typing import Any

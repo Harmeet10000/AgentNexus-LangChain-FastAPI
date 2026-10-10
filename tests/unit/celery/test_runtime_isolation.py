@@ -49,7 +49,7 @@ import socket
 def no_connection(*args, **kwargs):
     raise AssertionError("Worker import attempted network I/O")
 socket.socket.connect = no_connection
-from app.worker.celery_app import celery_app
+from app.worker.app import celery_app
 from app.worker.task_modules import TASK_DECLARING_MODULES
 from app.shared.jobs.registry import CeleryTaskRegistry
 celery_app.loader.import_default_modules()

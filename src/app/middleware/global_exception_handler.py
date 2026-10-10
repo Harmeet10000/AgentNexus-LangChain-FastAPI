@@ -8,7 +8,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import get_settings
 from app.shared.jobs.errors import CircuitBreakerOpenError, IdempotencyLockError
 from app.shared.result import render_exception
-from app.utils import APIException, ErrorCode, execution_path, logger
+from app.observability.logging import logger
+from app.observability.logging import execution_path
+from app.utils import APIException, ErrorCode
 
 
 async def global_exception_handler(_request: Request, exc: Exception) -> Response:

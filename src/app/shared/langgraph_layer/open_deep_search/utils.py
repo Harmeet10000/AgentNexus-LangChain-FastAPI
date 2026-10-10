@@ -27,7 +27,8 @@ from app.connections.tavily import search
 from app.connections.tavily import (
     SearchResponse,  # noqa: TC001 — resolved at runtime by Pydantic
 )
-from app.utils import ExternalServiceException, logger
+from app.observability.logging import logger
+from app.utils import ExternalServiceException
 
 from .config import Configuration
 from .execution import gather_limited, get_research_execution_gate

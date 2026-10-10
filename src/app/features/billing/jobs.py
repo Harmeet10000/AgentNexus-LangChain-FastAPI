@@ -10,22 +10,22 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.connections.postgres import independent_session, init_db
-from app.features.audit.model import AuditAction, AuditLog
+from app.features.audit.models import AuditAction, AuditLog
 from app.features.audit.repository import AuditLogRepository
 from app.features.billing.dunning.service import DunningService
-from app.features.billing.invoices.model import Invoice
+from app.features.billing.invoices.models import Invoice
 from app.features.billing.invoices.receipt import PaymentReceipt
 from app.features.billing.invoices.repository import InvoiceRepository
 from app.features.billing.invoices.service import InvoiceService
 from app.features.billing.payments.clients.razorpay_client import RazorpayClient
 from app.features.billing.payments.dto import PaymentRecordDTO
-from app.features.billing.payments.model import Payment
+from app.features.billing.payments.models import Payment
 from app.features.billing.payments.repository import PaymentRepository
 from app.features.billing.payments.service import PaymentService
 from app.features.billing.plans.repository import PlanRepository
-from app.features.billing.subscriptions.model import Subscription, SubscriptionStatus
+from app.features.billing.subscriptions.models import Subscription, SubscriptionStatus
 from app.features.billing.subscriptions.repository import SubscriptionRepository
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable

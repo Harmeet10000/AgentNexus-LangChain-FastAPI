@@ -10,17 +10,17 @@ from returns.result import Failure, Success
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.observability.logging import trace_layer
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import trace_layer
 
-from .errors import WebhookConflictError, WebhookInfrastructureError, WebhookNotFoundError
-from .model import WebhookEvent
+from .exceptions import WebhookConflictError, WebhookInfrastructureError, WebhookNotFoundError
+from .models import WebhookEvent
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from .errors import WebhookResult
+    from .exceptions import WebhookResult
 
 
 class WebhookEventRepository:
@@ -39,7 +39,7 @@ class WebhookEventRepository:
             add_database_error_note(exc, table="webhook_events")
             await self.session.rollback()
             return Failure(
-                WebhookConflictError(
+                inner_value=WebhookConflictError(
                     message="Webhook event already processed",
                     details={"razorpay_event_id": event.razorpay_event_id, "error": str(exc)},
                     source="webhook_event_repository",
@@ -49,7 +49,7 @@ class WebhookEventRepository:
             add_database_error_note(exc, table="webhook_events")
             await self.session.rollback()
             return Failure(
-                WebhookInfrastructureError(
+                inner_value=WebhookInfrastructureError(
                     message="Database error while creating webhook event",
                     details={"error": str(exc)},
                     source="webhook_event_repository",

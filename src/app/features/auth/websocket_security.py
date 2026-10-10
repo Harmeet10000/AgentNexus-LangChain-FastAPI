@@ -17,7 +17,7 @@ from pyrate_limiter.buckets import InMemoryBucket, RedisBucket
 from returns.result import Failure
 
 from app.security.tokens import TokenClaims
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis

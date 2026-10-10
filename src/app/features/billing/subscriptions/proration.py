@@ -11,14 +11,14 @@ from returns.result import Failure, Success
 from app.features.billing.money import split_tax_inclusive
 
 from .dto import ProrationCalculation, ProrationDirection
-from .errors import SubscriptionValidationError
-from .model import SubscriptionStatus
+from .exceptions import SubscriptionValidationError
+from .models import SubscriptionStatus
 
 if TYPE_CHECKING:
-    from app.features.billing.plans.model import Plan
-    from app.features.billing.subscriptions.model import Subscription
+    from app.features.billing.plans.models import Plan
+    from app.features.billing.subscriptions.models import Subscription
 
-    from .errors import SubscriptionResult
+    from .exceptions import SubscriptionResult
 
 
 def calculate_proration_fraction(

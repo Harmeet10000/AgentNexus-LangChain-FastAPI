@@ -8,9 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.connections import get_postgres_db
 from app.features.audit.repository import AuditLogRepository
 
-from .repositories.consumption_repository import ConsumptionRepository
-from .repositories.credit_repository import CreditRepository
-from .services.credit_service import CreditService
+from .repository import ConsumptionRepository
+from .repository import CreditRepository
+from .service import CreditService
 
 
 async def get_credit_service(

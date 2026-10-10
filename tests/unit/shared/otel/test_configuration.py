@@ -2,8 +2,8 @@
 
 import pytest
 
-from app.shared.otel.configuration import exporter_enabled
-from app.shared.otel.logs import normalize_otel_attributes
+from app.observability.configuration import exporter_enabled
+from app.observability.logs import normalize_otel_attributes
 
 
 def test_exporter_policy_disables_none_and_empty_values() -> None:
@@ -20,7 +20,7 @@ def test_exporter_policy_enables_configured_exporters() -> None:
 def test_observability_policy_is_derived_from_settings() -> None:
     from types import SimpleNamespace
 
-    from app.shared.otel.configuration import ObservabilityPolicy
+    from app.observability.configuration import ObservabilityPolicy
 
     policy = ObservabilityPolicy.from_settings(
         SimpleNamespace(
@@ -62,7 +62,7 @@ def test_otel_attributes_are_normalized_to_exportable_values() -> None:
 def test_shutdown_otel_clears_provider_references() -> None:
     import importlib
 
-    otel_module = importlib.import_module("app.shared.otel")
+    otel_module = importlib.import_module("app.observability")
 
     class Provider:
         def force_flush(self, *, timeout_millis: int) -> None:
@@ -87,7 +87,7 @@ def test_shutdown_otel_clears_provider_references() -> None:
 def test_shutdown_otel_continues_after_provider_flush_failure() -> None:
     import importlib
 
-    otel_module = importlib.import_module("app.shared.otel")
+    otel_module = importlib.import_module("app.observability")
     shutdowns: list[str] = []
 
     class BrokenProvider:

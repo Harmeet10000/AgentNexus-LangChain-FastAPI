@@ -35,12 +35,12 @@ from app.lifecycle.lifespan import (
     StartupPolicy,
     _run_startup_policy,
 )
-from app.shared.rag.docling.docling_enhanced import (
+from app.extraction.docling.docling_enhanced import (
     EXTRACTION_STAGES,
     ExtractionStage,
 )
-from app.shared.rag.docling.models import DoclingEnhancementConfig
-from app.utils import logger
+from app.extraction.docling.models import DoclingEnhancementConfig
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from typing import Any
