@@ -38,7 +38,8 @@ from typing import ClassVar  # noqa: TC003 — resolved at runtime by Pydantic
 
 from returns.result import Failure, Result, Success
 
-from app.shared.result import ErrorKind, FeatureError, log_expected_failure
+from app.kernel.errors import ErrorKind, FeatureError
+from app.shared.result import log_expected_failure
 from app.utils import logger, trace_layer
 
 

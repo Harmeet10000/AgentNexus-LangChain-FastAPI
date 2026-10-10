@@ -62,7 +62,7 @@ from langchain_google_genai import (
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.connections.httpx_client import get_shared_httpx_client
+from app.connections.http import get_shared_httpx_client
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable

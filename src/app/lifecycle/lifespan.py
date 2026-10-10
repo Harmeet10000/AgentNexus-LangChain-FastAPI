@@ -238,7 +238,7 @@ async def _setup_ingestion_graph_state(app: FastAPI, settings: Any) -> None:
     if object_store is None:
         message = "Object storage is unavailable for ingestion graph"
         raise ServiceUnavailableException(message)
-    from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+    from app.resilience.idempotency import IdempotencyGuard
     from app.shared.rag.langextract.service import AsyncExtractionService
 
     extraction = AsyncExtractionService.from_settings(settings)

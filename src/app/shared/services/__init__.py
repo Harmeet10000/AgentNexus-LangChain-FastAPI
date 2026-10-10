@@ -1,13 +1,13 @@
 """Shared services module."""
 
-from app.shared.services.mailer import MailerConfig, send_template
-from app.shared.services.rate_limiter import (
+from app.connections.mailer import MailerConfig, send_template
+from app.resilience.rate_limit import (
     RateLimitConfig,
     RateLimiter,
     RateLimitScope,
-    get_rate_limiter,
+    build_rate_limiter,
 )
-from app.shared.services.tavily import (
+from app.connections.tavily import (
     SearchResponse,
     SearchResult,
     get_context,
@@ -22,8 +22,8 @@ __all__ = [
     "RateLimiter",
     "SearchResponse",
     "SearchResult",
+    "build_rate_limiter",
     "get_context",
-    "get_rate_limiter",
     "get_tavily_client",
     "search",
     "send_template",

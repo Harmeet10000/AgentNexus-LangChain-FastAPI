@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
 
     from app.shared.rag.langextract.service import AsyncExtractionService
-    from app.shared.services.storage import StorageService
+    from app.connections.object_storage import StorageService
 
     from .errors import DocumentResult
     from .repository import DocumentRepository

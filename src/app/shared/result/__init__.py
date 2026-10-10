@@ -3,10 +3,10 @@
 # render imports app.utils.logger; keep it ahead of logging to avoid package-init recursion.
 # ruff: noqa: I001
 
+from app.kernel.errors import ErrorKind, FeatureError
+
 from .errors import (
     STATUS_BY_KIND,
-    ErrorKind,
-    FeatureError,
     NotFoundError,
     http_status_for_kind,
 )

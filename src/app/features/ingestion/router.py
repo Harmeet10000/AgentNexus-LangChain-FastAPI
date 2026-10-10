@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Response, UploadFile, status
 
 from app.shared.result import render_result
 from app.utils import APIResponse, logger
-from app.utils.rate_limit.dependencies import get_rate_limiter
+from app.resilience.rate_limit import get_rate_limiter
 
 from .dependencies import IngestionGraphDep, UserIdDep
 from .dto import DocumentUploadResponse

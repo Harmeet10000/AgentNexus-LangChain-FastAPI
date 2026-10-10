@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.shared.langchain_layer.agents.tools.idempotency import (
+from app.resilience.idempotency import (
     IdempotencyGuard,
     IdempotencyPersistenceError,
     ToolResult,

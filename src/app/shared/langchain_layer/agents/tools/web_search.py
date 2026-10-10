@@ -6,7 +6,7 @@ from typing import override
 from langchain_core.tools import BaseTool
 from returns.result import Failure
 
-from app.shared.services import get_tavily_client
+from app.connections.tavily import get_tavily_client
 from app.utils import ExternalServiceException
 
 

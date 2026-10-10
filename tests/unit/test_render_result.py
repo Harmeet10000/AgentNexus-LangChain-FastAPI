@@ -6,7 +6,7 @@ from typing import ClassVar
 from fastapi import Response
 from returns.result import Failure, Success
 
-from app.shared.result.errors import ErrorKind, FeatureError
+from app.kernel.errors import ErrorKind, FeatureError
 from app.shared.result.render import render_result
 
 

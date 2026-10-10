@@ -15,14 +15,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Failure, Success
 
 from app.config import get_settings
+from app.shared.services.errors import (
+    MailerDeliveryError,
+    MailerResult,
+    MailerUnavailableError,
+)
 from app.utils import logger
-
-from .errors import MailerDeliveryError, MailerUnavailableError
 
 if TYPE_CHECKING:
     from httpx._models import Response
-
-    from .errors import MailerResult
 
 settings = get_settings()
 

@@ -16,7 +16,7 @@ from app.features.documents.service import (
     _release_document_ingestion_lock,
     run_document_ingestion_task,
 )
-from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+from app.resilience.idempotency import IdempotencyGuard
 from app.worker import documents as document_worker
 
 if TYPE_CHECKING:

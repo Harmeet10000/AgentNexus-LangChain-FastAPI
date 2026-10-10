@@ -12,7 +12,7 @@ from app.features.audit.model import AuditAction, AuditLog
 from app.features.billing.payments.clients.razorpay_client import RazorpayClient
 from app.features.billing.payments.dto import RefundRequestDTO
 from app.features.billing.payments.model import PaymentStatus
-from app.shared.result.errors import ErrorKind
+from app.kernel.errors import ErrorKind
 from app.utils import logger, trace_layer
 
 from .dto import (
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from app.features.billing.plans.model import Plan
     from app.features.billing.plans.repository import PlanRepository
     from app.features.billing.subscriptions.repository import SubscriptionRepository
-    from app.shared.result import FeatureError
+    from app.kernel.errors import FeatureError
 
     from .dto import (
         PlanChangeDTO,

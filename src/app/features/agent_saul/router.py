@@ -20,7 +20,7 @@ from app.features.auth.dependencies import CurrentClaims
 from app.features.auth.websocket_security import WebSocketSecurityViolation
 from app.shared.result import render_result
 from app.utils import APIResponse, ErrorCode, ValidationException, logger
-from app.utils.rate_limit.dependencies import get_rate_limiter
+from app.resilience.rate_limit import get_rate_limiter
 
 from .dependencies import (
     AgentSaulDepsAnnotated,

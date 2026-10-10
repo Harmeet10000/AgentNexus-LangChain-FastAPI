@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from app.shared.result import ErrorKind, FeatureError
+from app.kernel.errors import ErrorKind, FeatureError
 
 if TYPE_CHECKING:
     from typing import ClassVar

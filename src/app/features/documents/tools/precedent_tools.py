@@ -20,7 +20,7 @@ from langchain_core.tools import tool
 from langchain_core.tools.base import BaseTool
 
 from app.shared.langchain_layer.agents.memory.memory_scope import PRECEDENT_SCOPE
-from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard, ToolResult
+from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.utils import logger
 
 if TYPE_CHECKING:

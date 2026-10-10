@@ -44,7 +44,7 @@ from types import SimpleNamespace
 import pytest
 
 _LIFTED_TREES = (
-    "app.connections.celery",
+    "app.connections.celery_producer",
     "app.worker.celery_app",
     "app.shared.jobs.registry",
     "app.features.auth.tasks",
@@ -74,7 +74,7 @@ def real_celery():
     try:
         yield SimpleNamespace(
             app=importlib.import_module("app.worker.celery_app").celery_app,
-            producer=importlib.import_module("app.connections.celery").celery_app,
+            producer=importlib.import_module("app.connections.celery_producer").celery_app,
             registry=importlib.import_module("app.shared.jobs.registry"),
         )
     finally:

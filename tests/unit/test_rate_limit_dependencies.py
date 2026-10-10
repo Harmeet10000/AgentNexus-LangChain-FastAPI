@@ -13,8 +13,8 @@ import pytest
 
 from app.security.tokens import TokenClaims
 from app.utils.exceptions import UnauthorizedException
-from app.utils.rate_limit import dependencies as rate_limit_deps
-from app.utils.rate_limit.dependencies import get_rate_limiter
+from app.resilience.rate_limit import dependencies as rate_limit_deps
+from app.resilience.rate_limit import get_rate_limiter
 
 
 class _StubRequest:

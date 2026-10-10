@@ -10,7 +10,7 @@ from app.features.audit.repository import AuditLogRepository
 from app.features.billing.payments.repository import PaymentRepository
 from app.features.billing.plans.repository import PlanRepository
 from app.features.billing.subscriptions.repository import SubscriptionRepository
-from app.shared.services.storage import StorageService
+from app.connections.object_storage import StorageService
 
 from .repository import InvoiceRepository
 from .service import InvoiceService

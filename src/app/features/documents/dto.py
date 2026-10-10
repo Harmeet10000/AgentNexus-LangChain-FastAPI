@@ -12,7 +12,7 @@ from langchain_core.language_models import (
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.shared.rag.langextract.service import AsyncExtractionService  # noqa: TC001
-from app.shared.services.storage import (
+from app.connections.object_storage import (
     StorageService,  # noqa: TC001 — resolved at runtime by Pydantic
 )
 

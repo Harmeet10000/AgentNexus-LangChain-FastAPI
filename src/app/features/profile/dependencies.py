@@ -10,7 +10,7 @@ from app.utils import ServiceUnavailableException
 from .service import ProfileService
 
 if TYPE_CHECKING:
-    from app.shared.services.storage import StorageService
+    from app.connections.object_storage import StorageService
 
 
 async def get_profile_service(request: Request) -> ProfileService:

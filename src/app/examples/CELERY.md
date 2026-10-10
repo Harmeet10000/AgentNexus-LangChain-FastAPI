@@ -1,6 +1,6 @@
 # Celery runtime and feature tasks
 
-The API publishes through `app.connections.celery:celery_app`. Workers and beat load
+The API publishes through `app.connections.celery_producer:celery_app`. Workers and beat load
 `app.worker.celery_app:celery_app`. Both use the same RabbitMQ topology, but only the
 worker application includes task implementations, schedules and execution signals.
 Importing the producer or validating a payload must never load `app.worker` or a
@@ -14,7 +14,7 @@ feature's `tasks.py`.
 | `app.shared.jobs.payloads` | Pure Pydantic message schemas |
 | `app.shared.jobs.registry` | Static payload registry and dispatch validation |
 | `app.shared.jobs.topology` | Shared RabbitMQ exchanges and explicit queue routes |
-| `app.connections.celery` | Producer application and transport factory |
+| `app.connections.celery_producer` | Producer application and transport factory |
 | `app.worker.celery_app` | Worker application and explicit runtime configuration |
 | `app.worker.task_modules` | All feature consumer modules and name-to-module mapping |
 | `app.worker.schedules` | Beat schedule with arguments matching consumer signatures |

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 # ponytail: single source is tests/conftest.py; this list must mirror it minus langgraph (retired in 319c698/6525c6f)
 _STUBBED_MODULES = [
     "app.connections.mcp",
-    "app.connections.celery",
+    "app.connections.celery_producer",
     "mcp_core",
     "mcp_core.client.auth",
     "mcp_core.client.manager",

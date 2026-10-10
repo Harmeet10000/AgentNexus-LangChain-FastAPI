@@ -37,7 +37,7 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from app.shared.langchain_layer.agents.tools.idempotency import ToolResult
+from app.resilience.idempotency import ToolResult
 
 
 class TransientBackendError(Exception):

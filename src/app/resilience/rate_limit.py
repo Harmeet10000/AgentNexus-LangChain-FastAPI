@@ -1,13 +1,29 @@
-"""Rate limiting using fastapi-limiter and Redis."""
+"""Resilience: rate limiting (throttle + quota), in one module.
 
+Two semantics, one home — they are not interchangeable:
+- `RateLimitService` + `get_rate_limiter()`: GCRA leaky-bucket HTTP throttle,
+  keyed `rl:gcra:*`, fail-open, used as a FastAPI dependency.
+- `RateLimiter` + `build_rate_limiter()`: fixed-window provider quota,
+  keys `rate:*:min/hour`, used by the crawler and search paths.
+"""
+
+import math
+import time
+from collections.abc import Awaitable, Callable
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel
+from fastapi import Request
+from pydantic import BaseModel, ValidationError
+from redis import RedisError
 from redis.asyncio import Redis
 
 from app.config import get_settings
+from app.security import tokens
+from app.utils import logger
+from app.utils.exceptions import TooManyRequestsException, UnauthorizedException
 
+# ── Quota (fixed-window provider limits) ──
 
 class RateLimitScope(StrEnum):
     """Rate limit scope types."""
@@ -187,7 +203,7 @@ class RateLimiter:
 _rate_limiter: RateLimiter | None = None
 
 
-def get_rate_limiter(redis_client: Redis | None = None) -> RateLimiter:
+def build_rate_limiter(redis_client: Redis | None = None) -> RateLimiter:
     """Get rate limiter instance."""
     global _rate_limiter  # noqa: PLW0603
     if _rate_limiter is None:
@@ -195,3 +211,153 @@ def get_rate_limiter(redis_client: Redis | None = None) -> RateLimiter:
     elif redis_client is not None:
         _rate_limiter.redis_client = redis_client
     return _rate_limiter
+
+# ── Throttle (GCRA leaky bucket) ──
+
+# GCRA Leaky Bucket Algorithm (O(1) Memory, Atomic)
+# Returns: { 1: allowed, 0: rejected }, { retry_after_ms }
+GCRA_LUA_SCRIPT = """
+local key = KEYS[1]
+local now_ms = tonumber(ARGV[1])
+local burst = tonumber(ARGV[2])
+local rate = tonumber(ARGV[3])
+local period_ms = tonumber(ARGV[4])
+
+local emission_interval_ms = period_ms / rate
+local burst_tolerance_ms = emission_interval_ms * burst
+
+local tat = redis.call("GET", key)
+if not tat then
+    tat = now_ms
+else
+    tat = tonumber(tat)
+end
+
+local new_tat = math.max(tat, now_ms) + emission_interval_ms
+local allow_at = new_tat - burst_tolerance_ms
+
+if now_ms < allow_at then
+    local retry_after_ms = math.ceil(allow_at - now_ms)
+    return {0, retry_after_ms}
+end
+
+-- Set TTL to clean up the key once the bucket is fully empty
+local ttl_ms = math.ceil(new_tat - now_ms)
+redis.call("SET", key, new_tat, "PX", ttl_ms)
+
+return {1, 0}
+"""
+
+
+def _raise_rate_limit_exceeded(retry_seconds: int) -> None:
+    raise TooManyRequestsException(
+        detail="Rate limit exceeded. Please slow down.",
+        headers={"Retry-After": str(retry_seconds)},
+    )
+
+
+class RateLimitService:
+    def __init__(self, redis: Redis) -> None:
+        self.redis = redis
+        # Pre-load the script into Redis memory for fast SHA execution
+        self._script = self.redis.register_script(GCRA_LUA_SCRIPT)
+
+    async def check_limit(
+        self, identifier: str, burst: int, rate: int, period_seconds: int
+    ) -> None:
+        """
+        Evaluates the rate limit using GCRA. Raises TooManyRequestsException if exceeded.
+        """
+        now_ms = int(time.time() * 1000)
+        period_ms = period_seconds * 1000
+        redis_key = f"rl:gcra:{identifier}"
+
+        try:
+            allowed, retry_after_ms = await self._script(
+                keys=[redis_key], args=[now_ms, burst, rate, period_ms]
+            )
+
+            if not allowed:
+                retry_seconds = math.ceil(retry_after_ms / 1000)
+                logger.bind(identifier=identifier, retry_in=retry_seconds).warning(
+                    "Rate limit exceeded"
+                )
+                _raise_rate_limit_exceeded(retry_seconds)
+
+        except TooManyRequestsException:
+            raise
+        except (RedisError, ConnectionError, TimeoutError) as e:
+            # Fail open to prevent a Redis outage from taking down the API
+            logger.bind(error=str(e)).exception("Redis rate limiting failed, bypassing")
+_ACCESS_TOKEN_TYPE = "access"  # noqa: S105 — token type constant, not a password
+
+
+def _extract_presented_token(request: Request) -> str | None:
+    """Bearer header first, access-token cookie second; None when neither is present."""
+    authorization = request.headers.get("authorization")
+    if authorization:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() == "bearer" and token:
+            return token
+    cookie_token: str | None = request.cookies.get("access_token")
+    return cookie_token or None
+
+
+def _resolve_user_identifier(request: Request) -> str | None:
+    """Subject of a valid access token, namespaced, or None when the request carries none.
+
+    Identity comes from validated token claims, never from per-request state.
+    Fail-open: an absent, expired, or malformed token — or a token of the wrong
+    type — yields None so the caller falls back to IP keying instead of
+    rejecting the request. A rate limiter must not become an auth gate,
+    especially on the unauthenticated endpoints that use it.
+    """
+    raw_token = _extract_presented_token(request)
+    if raw_token is None:
+        return None
+    try:
+        claims = tokens.decode_token(raw_token)
+    except (UnauthorizedException, ValidationError, KeyError):
+        return None
+    if claims.token_type != _ACCESS_TOKEN_TYPE:
+        return None
+    return f"user:{claims.sub}"
+
+
+def get_rate_limiter(
+    burst: int = 10,
+    rate: int = 5,
+    period: int = 60,
+    *,
+    scope: str | None = None,
+) -> Callable[[Request], Awaitable[None]]:
+    """
+    Build a FastAPI dependency that enforces a Redis-backed rate limit.
+
+    Identity is per-user when the request carries a valid access token
+    (keyed ``user:<subject>``) and per-IP otherwise, so the limiter works
+    unchanged on unauthenticated endpoints.
+
+    Args:
+        burst: Maximum burst capacity before requests are throttled.
+        rate: Number of tokens refilled per period.
+        period: Refill period in seconds.
+        scope: Optional independent quota namespace shared by endpoints using it.
+    """
+
+    async def rate_limit_dependency(request: Request) -> None:
+        redis_client = request.app.state.redis
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        client_ip = request.client.host if request.client else "unknown"
+        if forwarded_for:
+            client_ip = forwarded_for.split(",")[0].strip() or client_ip
+
+        identifier = _resolve_user_identifier(request) or client_ip
+        if scope is not None:
+            identifier = f"{scope}:{identifier}"
+        service = RateLimitService(redis_client)
+        await service.check_limit(
+            identifier=identifier, burst=burst, rate=rate, period_seconds=period
+        )
+
+    return rate_limit_dependency

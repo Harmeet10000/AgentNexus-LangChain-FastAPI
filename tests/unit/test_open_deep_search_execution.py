@@ -20,7 +20,7 @@ from app.shared.langgraph_layer.open_deep_search.graph import (
     route_researcher,
 )
 from app.shared.services.errors import TavilyExternalError
-from app.shared.services.tavily import SearchResponse
+from app.connections.tavily import SearchResponse
 from app.utils import ExternalServiceException
 
 

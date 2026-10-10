@@ -17,7 +17,7 @@ from app.features.billing.money import (
     state_code_from_gstin,
 )
 from app.shared.result.diagnostics import add_database_error_note
-from app.shared.result.errors import ErrorKind
+from app.kernel.errors import ErrorKind
 from app.utils import trace_layer
 
 from .dto import InvoiceLineItemDTO, InvoiceResponse
@@ -51,8 +51,8 @@ if TYPE_CHECKING:
     from app.features.billing.plans.repository import PlanRepository
     from app.features.billing.subscriptions.model import Subscription
     from app.features.billing.subscriptions.repository import SubscriptionRepository
-    from app.shared.result.errors import FeatureError
-    from app.shared.services.storage import StorageService
+    from app.kernel.errors import FeatureError
+    from app.connections.object_storage import StorageService
 
     from .dto import VoidInvoiceDTO
     from .errors import InvoiceError, InvoiceResult

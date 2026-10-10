@@ -35,7 +35,7 @@ from app.shared.rag.langextract.service import (
 from app.shared.rag.structural_navigator import navigate_tree
 from app.shared.rag.token_counter import count_tokens as default_count_tokens
 from app.shared.result import log_expected_failure
-from app.shared.services.storage import build_s3_key, key_from_s3_uri
+from app.connections.object_storage import build_s3_key, key_from_s3_uri
 from app.utils import logger, to_sorted_key_bytes, trace_layer
 
 from .classification import classify_document, segment_chunks
@@ -89,9 +89,9 @@ if TYPE_CHECKING:
 
     from app.config.settings import Settings
     from app.features.documents.rag import ContextSection
-    from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+    from app.resilience.idempotency import IdempotencyGuard
     from app.shared.rag.graphiti.client import GraphitiService
-    from app.shared.services.storage import StorageService
+    from app.connections.object_storage import StorageService
 
     from . import dto as documents_dto
     from .classification import ClassifiedDocument, ParsedDocument, PreparedChunk, QualityWarning
@@ -422,7 +422,7 @@ class DocumentCommandService:
             return Failure(create_result.failure())
         document = create_result.unwrap()
 
-        from app.shared.outbox import (
+        from app.events import (
             with_outbox,
         )
 
