@@ -656,7 +656,7 @@ class AuthService:
         event_type: str,
         payload: dict[str, object],
     ) -> None:
-        from app.shared.outbox import (
+        from app.events import (
             with_outbox,
         )
 

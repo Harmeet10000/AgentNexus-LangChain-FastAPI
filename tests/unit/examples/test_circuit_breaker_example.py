@@ -3,7 +3,7 @@ import asyncio
 import pytest
 from fakeredis.aioredis import FakeRedis
 
-from app.examples.circuit_breaker import (
+from app.resilience.circuit_breaker import (
     CircuitBreakerOpenError,
     CircuitBreakerService,
     CircuitBreakerSettings,

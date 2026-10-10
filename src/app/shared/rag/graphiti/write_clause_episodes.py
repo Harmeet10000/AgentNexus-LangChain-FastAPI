@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard, ToolResult
+from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.shared.rag.langextract.langextract_to_graph import GraphIngestionContext
 from app.utils import logger
 

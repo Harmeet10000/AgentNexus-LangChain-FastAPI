@@ -14,7 +14,7 @@ from uuid import uuid4
 from langgraph.graph.state import CompiledStateGraph
 from returns.result import Failure, Success
 
-from app.shared.result import FeatureError
+from app.kernel.errors import FeatureError
 from app.utils import logger, trace_layer
 
 from .dto import DocumentUploadResponse

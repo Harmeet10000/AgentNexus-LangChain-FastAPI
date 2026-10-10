@@ -9,7 +9,7 @@ from starlette.middleware import Middleware
 from app.config import get_settings
 from app.security.tokens import decode_token
 from app.utils import UnauthorizedException
-from app.utils.rate_limit.service import RateLimitService
+from app.resilience.rate_limit import RateLimitService
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable

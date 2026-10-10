@@ -1,6 +1,6 @@
 """Worker application, explicitly loaded by CLI, Compose and beat."""
 
-from app.connections.celery import create_celery_app
+from app.connections.celery_producer import create_celery_app
 from app.worker.schedules import BEAT_SCHEDULE
 from app.worker.task import ResilientTask
 from app.worker.task_modules import TASK_MODULES

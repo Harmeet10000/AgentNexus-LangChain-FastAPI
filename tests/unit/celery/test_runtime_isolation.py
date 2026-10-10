@@ -21,7 +21,7 @@ import sys
 def no_connection(*args, **kwargs):
     raise AssertionError("Producer import attempted network I/O")
 socket.socket.connect = no_connection
-from app.connections.celery import celery_app
+from app.connections.celery_producer import celery_app
 from app.shared.jobs.names import DOCUMENTS_INGEST
 from app.shared.jobs.registry import CeleryTaskRegistry, TaskPayloadValidationError
 assert len(CeleryTaskRegistry.registered_names()) == 13

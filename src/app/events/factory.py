@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.connections.postgres import get_database_url
-from app.shared.outbox import OutboxRelay
+from app.events import OutboxRelay
 from app.utils import logger
 
 if TYPE_CHECKING:

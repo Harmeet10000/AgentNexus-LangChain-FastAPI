@@ -66,16 +66,7 @@ from .json_serializer import (
     to_json_str,
     to_sorted_key_bytes,
 )
-from app.shared.result import (
-    APIResponse,
-    DependencyHealth,
-    ErrorDetail,
-    HealthResponse,
-    HealthStatus,
-    RequestMeta,
-    http_error,
-    http_response,
-)
+from app.shared.result import APIResponse, DependencyHealth, ErrorDetail, HealthResponse, HealthStatus, RequestMeta, http_error, http_response
 
 __all__ = [  # noqa: RUF022
     "APIException",

@@ -13,10 +13,10 @@ from app.connections.checkpointer import (
 )
 from app.features.agent_saul.graph import build_saul_graph
 from app.features.documents.tools.bundle import build_tool_bundle
-from app.shared.langchain_layer.agents.memory import AgentMemoryService
-from app.shared.langchain_layer.agents.tools.idempotency import (
+from app.resilience.idempotency import (
     IdempotencyGuard,
 )
+from app.shared.langchain_layer.agents.memory import AgentMemoryService
 from app.shared.langchain_layer.models import build_chat_model
 
 if TYPE_CHECKING:
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from app.config.settings import Settings
     from app.shared.rag.graphiti.client import GraphitiService
     from app.shared.rag.langextract.service import AsyncExtractionService
-    from app.shared.services.storage import StorageService
+    from app.connections.object_storage import StorageService
 
     type IngestDocumentFn = Callable[..., Awaitable[Any]]
 

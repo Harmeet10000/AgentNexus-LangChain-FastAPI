@@ -3,7 +3,7 @@
 from enum import StrEnum
 from typing import ClassVar
 
-from app.shared.result import ErrorKind, FeatureError
+from app.kernel.errors import ErrorKind, FeatureError
 
 
 class IngestionGraphCode(StrEnum):

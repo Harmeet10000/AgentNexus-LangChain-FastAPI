@@ -9,7 +9,7 @@ unrelated tool-registry in agents/tools/base.py and is retired.
 
 Lifespan wiring (in src/app/lifecycle/graphs.py):
     from app.features.documents.tools.bundle import AgentToolBundle, build_tool_bundle
-    from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+    from app.resilience.idempotency import IdempotencyGuard
 
     idempotency_guard = IdempotencyGuard(
         redis=app.state.redis,
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from langchain_core.tools.base import BaseTool
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+    from app.resilience.idempotency import IdempotencyGuard
     from app.shared.rag.graphiti.client import GraphitiService
 
 

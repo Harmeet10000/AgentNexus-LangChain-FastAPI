@@ -10,7 +10,7 @@ from app.connections.redis import get_redis
 from app.security.tokens import OAUTH_STATE_COOKIE
 from app.shared.result import render_result
 from app.utils import APIResponse, http_response
-from app.utils.rate_limit.dependencies import get_rate_limiter
+from app.resilience.rate_limit import get_rate_limiter
 
 from .dependencies import (
     AuthServiceDep,

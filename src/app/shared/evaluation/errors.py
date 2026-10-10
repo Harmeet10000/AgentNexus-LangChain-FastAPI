@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import ClassVar  # noqa: TC003 -- Pydantic resolves ClassVar at runtime
 
-from app.shared.result import ErrorKind, FeatureError
+from app.kernel.errors import ErrorKind, FeatureError
 
 
 class EvaluationCode(StrEnum):

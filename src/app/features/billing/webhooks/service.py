@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from app.features.billing.subscriptions.model import Subscription
     from app.features.billing.subscriptions.repository import SubscriptionRepository
     from app.features.billing.webhooks.repository import WebhookEventRepository
-    from app.shared.result.errors import FeatureError
+    from app.kernel.errors import FeatureError
 
     from .errors import WebhookResult
 

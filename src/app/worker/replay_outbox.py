@@ -9,7 +9,7 @@ from celery.exceptions import CeleryError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.connections.celery import celery_app
+from app.connections.celery_producer import celery_app
 from app.connections.postgres import get_database_url
 from app.utils import logger
 

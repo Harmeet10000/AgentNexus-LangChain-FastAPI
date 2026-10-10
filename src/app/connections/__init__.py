@@ -7,7 +7,7 @@ from app.connections.graphiti import (
     setup_graphiti_indices,
 )
 
-from .celery import celery_app, create_celery_app
+from .celery_producer import celery_app, create_celery_app
 from .cognee import (
     CogneeDimensionMismatchError,
     CogneeSetupConfig,
@@ -20,7 +20,7 @@ from .crawl4ai import (
     get_crawl4ai_crawler,
     get_crawler,
 )
-from .httpx_client import (
+from .http import (
     close_httpx_client,
     create_httpx_client,
     get_httpx_client,
@@ -34,7 +34,7 @@ from .neo4j import (
     init_neo4j,
 )
 from .object_storage import create_object_store
-from .outbox import create_outbox_relay
+from app.events.factory import create_outbox_relay
 from .postgres import close_db_engine, get_postgres_db, init_db
 from .redis import close_redis_client, create_redis_client, get_redis
 from .tavily import (

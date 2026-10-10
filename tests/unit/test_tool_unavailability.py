@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+from app.resilience.idempotency import IdempotencyGuard
 
 if TYPE_CHECKING:
     from typing import Any

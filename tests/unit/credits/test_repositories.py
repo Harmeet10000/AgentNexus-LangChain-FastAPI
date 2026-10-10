@@ -20,9 +20,9 @@ if _PKG not in sys.modules:
     sys.modules[_PKG] = _pkg_mod
 
 for _mod in (
-    "app.connections.celery",
+    "app.connections.celery_producer",
     "app.connections.crawl4ai",
-    "app.connections.httpx_client",
+    "app.connections.http",
     "app.connections.mongodb",
     "app.connections.neo4j",
     "app.connections.postgres",

@@ -32,7 +32,7 @@ from app.features.documents.constants import (
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
 from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
-from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard, ToolResult
+from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.shared.result.diagnostics import add_database_error_note
 from app.utils import logger
 

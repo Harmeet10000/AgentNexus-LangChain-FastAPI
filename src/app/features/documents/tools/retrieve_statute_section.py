@@ -23,7 +23,7 @@ from langchain_core.tools.base import BaseTool
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard, ToolResult
+from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.shared.result.diagnostics import add_database_error_note
 from app.utils import logger
 

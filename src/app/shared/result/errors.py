@@ -1,38 +1,13 @@
-"""Typed payloads for expected internal failures."""
+"""Shared failure conveniences: generic leaf + kind-to-HTTP-status mapping.
+
+The pure spine (`ErrorDetails`, `ErrorKind`, `FeatureError`) lives in
+`app.kernel.errors`. This module holds what the render path needs on top.
+"""
 
 from enum import StrEnum
 from typing import ClassVar
 
-from pydantic import BaseModel, ConfigDict
-
-type ErrorDetails = dict[str, object]
-
-
-class ErrorKind(StrEnum):
-    """Shared classification vocabulary — the only cross-feature error vocabulary."""
-
-    VALIDATION = "validation"
-    NOT_FOUND = "not_found"
-    CONFLICT = "conflict"
-    AUTHENTICATION = "authentication"
-    AUTHORIZATION = "authorization"
-    INFRASTRUCTURE = "infrastructure"
-    EXTERNAL_SERVICE = "external_service"
-
-
-class FeatureError(BaseModel):
-    """Base for per-feature typed errors — classification is a ClassVar, never a field."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    message: str
-    details: ErrorDetails | None = None
-    source: str | None = None
-
-    kind: ClassVar[ErrorKind]
-    code: ClassVar[StrEnum]
-    retryable: ClassVar[bool] = False
-
+from app.kernel.errors import ErrorKind, FeatureError
 
 class NotFoundCode(StrEnum):
     """Owned code vocabulary for the generic not-found failure."""

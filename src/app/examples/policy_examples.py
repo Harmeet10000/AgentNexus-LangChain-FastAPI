@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
     from returns.result import Result
 
-    from app.shared.result import FeatureError
+    from app.kernel.errors import FeatureError
 
     type DocumentResult[T] = Result[T, FeatureError]
 

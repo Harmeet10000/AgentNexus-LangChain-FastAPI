@@ -20,7 +20,8 @@ from app.features.auth.model import User
 from app.features.auth.repository import UserRepository
 from app.security.tokens import TokenClaims
 from app.features.documents.errors import DocumentDatabaseError, DocumentNotFoundError
-from app.shared.result import ErrorKind, render_result
+from app.kernel.errors import ErrorKind
+from app.shared.result import render_result
 from app.utils import UnauthorizedException
 
 _AUTH_REPOSITORY = Path("src/app/features/auth/repository.py")

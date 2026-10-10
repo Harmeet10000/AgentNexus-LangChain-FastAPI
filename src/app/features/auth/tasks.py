@@ -19,7 +19,7 @@ from returns.result import Failure
 from app.config import get_settings
 from app.shared.jobs.names import SEND_PASSWORD_RESET_EMAIL, SEND_VERIFICATION_EMAIL
 from app.shared.jobs.payloads import PasswordResetEmailPayload, VerificationEmailPayload
-from app.shared.services.mailer import config_from_settings, send_template
+from app.connections.mailer import config_from_settings, send_template
 from app.utils import ExternalServiceException, logger
 from app.worker.celery_app import celery_app
 from app.worker.reliability import CircuitBreakerOpenError, IdempotencyLockError

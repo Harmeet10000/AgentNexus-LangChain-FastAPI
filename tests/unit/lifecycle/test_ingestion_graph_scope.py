@@ -17,7 +17,7 @@ from app.features.documents.ingestion_graph import (
     build_document_ingestion_graph,
 )
 from app.features.documents.repository import DocumentRepository
-from app.shared.services.storage import StorageService
+from app.connections.object_storage import StorageService
 
 pytestmark = pytest.mark.unit
 

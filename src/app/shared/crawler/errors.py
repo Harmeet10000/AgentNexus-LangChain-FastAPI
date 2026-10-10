@@ -5,7 +5,7 @@ from typing import ClassVar
 
 from returns.result import Result
 
-from app.shared.result import ErrorKind, FeatureError
+from app.kernel.errors import ErrorKind, FeatureError
 
 
 class CrawlerProcessingCode(StrEnum):

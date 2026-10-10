@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 from fastapi import APIRouter, Depends, Request
 
-from app.examples.circuit_breaker import (
+from app.resilience.circuit_breaker import (
     CircuitBreakerBackendError,
     CircuitBreakerOpenError,
     CircuitBreakerService,

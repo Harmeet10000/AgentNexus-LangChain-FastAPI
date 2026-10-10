@@ -80,7 +80,7 @@ from app.features.users.errors import (
     UsersValidationError,
     users_error_to_http_status,
 )
-from app.shared.result import FeatureError
+from app.kernel.errors import FeatureError
 
 type Classifier = Callable[[object], int]
 _USER_OPERATION_ERRORS = {UsersConflictError, UsersAuthorizationError, UsersInfrastructureError}

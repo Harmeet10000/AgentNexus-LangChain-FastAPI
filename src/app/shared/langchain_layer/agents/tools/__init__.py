@@ -6,7 +6,7 @@ Domain tools live with their data owners (`features/documents/tools`,
 """
 
 from .base import ToolRegistry
-from .idempotency import IdempotencyGuard, ToolResult
+from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from .registry import (
     get_all_tools,
     get_tool_registry,

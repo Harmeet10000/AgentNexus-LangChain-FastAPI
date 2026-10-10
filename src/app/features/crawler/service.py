@@ -17,7 +17,8 @@ from app.shared.crawler import (
     truncate_content,
 )
 from app.shared.crawler import SchemaType as ProcessorSchemaType
-from app.shared.services import RateLimiter, RateLimitScope, search
+from app.connections.tavily import search
+from app.resilience.rate_limit import RateLimiter, RateLimitScope
 from app.shared.services.errors import TavilyValidationError
 from app.utils import logger, trace_layer
 

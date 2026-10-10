@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import asyncpg_listen
 
-from app.shared.outbox.relay import OutboxRelay
+from app.events.relay import OutboxRelay
 
 if TYPE_CHECKING:
     from typing import Any

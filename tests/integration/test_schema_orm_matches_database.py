@@ -40,7 +40,7 @@ _MODEL_MODULES = (
     "app.features.billing.subscriptions.trial_extension",
     "app.features.billing.webhooks.email_template",
     "app.features.billing.webhooks.model",
-    "app.shared.outbox.model",
+    "app.events.model",
 )
 
 

@@ -26,9 +26,9 @@ from app.connections.graphiti import (
 from app.connections.redis import create_redis_client
 from app.features.documents.service import process_document_ingestion
 from app.lifecycle.graphs import graphiti_service, provide_document_ingestion_graph
-from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+from app.resilience.idempotency import IdempotencyGuard
 from app.shared.rag.langextract.service import AsyncExtractionService
-from app.shared.services.storage import StorageService
+from app.connections.object_storage import StorageService
 from app.utils import ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
