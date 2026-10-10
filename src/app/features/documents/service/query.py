@@ -61,13 +61,12 @@ if TYPE_CHECKING:
 
     from app.config.settings import Settings
     from app.features.documents import dto as documents_dto
-    from app.features.documents.rag import ContextSection
-
     from app.features.documents.classification import QualityWarning
     from app.features.documents.exceptions import DocumentResult
     from app.features.documents.legal_metadata import (
         LegalMetadataExtraction,
     )
+    from app.features.documents.rag import ContextSection
 _GENERATOR_SYSTEM_PROMPT = (
     "You are a grounded answer generator. Use only the provided chunks. "
     "Every factual claim must cite exact chunk_id and clause_type in the citations list. "

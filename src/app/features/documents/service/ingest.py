@@ -57,15 +57,19 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, async_sessionmaker
 
     from app.connections.object_storage import StorageService
+    from app.features.documents.classification import (
+        ClassifiedDocument,
+        ParsedDocument,
+        PreparedChunk,
+        QualityWarning,
+    )
     from app.features.documents.dto import IngestionJob, IngestionRuntime
-    from app.resilience.idempotency import IdempotencyGuard
-    from app.shared.rag.graphiti.client import GraphitiService
-
-    from app.features.documents.classification import ClassifiedDocument, ParsedDocument, PreparedChunk, QualityWarning
     from app.features.documents.exceptions import DocumentResult
     from app.features.documents.legal_metadata import (
         LegalMetadataExtraction,
     )
+    from app.resilience.idempotency import IdempotencyGuard
+    from app.shared.rag.graphiti.client import GraphitiService
 
 from app.features.documents.service.query import (
     _KNOWLEDGE_EXTRACTION_PROMPT,

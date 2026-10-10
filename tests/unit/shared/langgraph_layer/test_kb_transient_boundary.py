@@ -31,12 +31,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.exceptions import LangChainException, OutputParserException
 
+from app.ai.graph import retry as kb_retry
 from app.ai.graph.retry import (
     TransientExternalError,
     describe_failure,
     retry_immediate,
 )
-from app.ai.graph import retry as kb_retry
 from app.shared.langgraph_layer.ingestion_kb import nodes as nodes_module
 from app.shared.langgraph_layer.ingestion_kb.nodes import (
     make_classify_extract_node,

@@ -12,11 +12,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.ai.tools import register_default_tools
 from app.features.agent_saul.graph.state import (
     ComplianceOutput,
     RiskAnalysisOutput,
 )
-from app.ai.tools import register_default_tools
 
 if TYPE_CHECKING:
     from typing import Any

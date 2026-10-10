@@ -101,7 +101,8 @@ async def _run_ingestion(
 
     monkeypatch.setattr(document_service.ingest, "parse_document", parse_document)
     monkeypatch.setattr(
-        document_service.ingest, "classify_document",
+        document_service.ingest,
+        "classify_document",
         lambda **_kwargs: ClassifiedDocument(document_kind="generic"),
     )
     monkeypatch.setattr(document_service.ingest, "segment_chunks", segment_chunks)
