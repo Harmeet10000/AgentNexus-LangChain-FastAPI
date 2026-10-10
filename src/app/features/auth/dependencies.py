@@ -8,8 +8,8 @@ from starlette.requests import HTTPConnection
 
 from app.connections.mongodb import get_mongodb
 from app.connections.redis import get_redis
-from app.security.tokens import TokenClaims, decode_token
 from app.observability.logging import set_request_actor
+from app.security.tokens import TokenClaims, decode_token
 from app.utils import (
     ConflictException,
     ForbiddenException,

@@ -32,6 +32,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.exceptions import LangChainException, OutputParserException
 
+from app.ai.graph.retry import TransientExternalError, retry_immediate
 from app.shared.langgraph_layer.ingestion_kb import nodes as nodes_module
 from app.shared.langgraph_layer.ingestion_kb.nodes import (
     dispatch_contextualize_chunks,
@@ -41,7 +42,6 @@ from app.shared.langgraph_layer.ingestion_kb.nodes import (
 from app.shared.langgraph_layer.ingestion_kb.state import (
     ClauseSegment,
 )
-from app.ai.graph.retry import TransientExternalError, retry_immediate
 
 if TYPE_CHECKING:
     from typing import Any

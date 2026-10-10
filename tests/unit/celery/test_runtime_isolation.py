@@ -75,7 +75,8 @@ def test_every_feature_task_module_is_explicitly_registered() -> None:
     src = Path(__file__).resolve().parents[3] / "src"
     discovered = {
         ".".join(path.relative_to(src).with_suffix("").parts)
-        for path in (src / "app/features").rglob("tasks.py")
+        for path in (src / "app/worker/tasks").glob("*.py")
+        if path.name != "__init__.py"
     }
     assert discovered == set(TASK_MODULES)
     assert len(TASK_MODULES) == len(set(TASK_MODULES))

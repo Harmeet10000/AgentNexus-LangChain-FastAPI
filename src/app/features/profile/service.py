@@ -3,8 +3,8 @@ from returns.result import Failure, Success
 from app.connections.object_storage import StorageService
 from app.features.auth.models import User
 from app.features.auth.repository import RefreshTokenRepository, UserRepository
-from app.security.passwords import hash_password, verify_password
 from app.observability.logging import logger, trace_layer
+from app.security.passwords import hash_password, verify_password
 
 from .dto import AvatarResponse, UpdateProfileRequest
 from .exceptions import (

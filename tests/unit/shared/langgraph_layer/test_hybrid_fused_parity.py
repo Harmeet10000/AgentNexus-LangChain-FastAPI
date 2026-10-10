@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, cast
 
 from app.features.documents.constants import RRF_WEIGHT_TRIGRAM
 from app.features.documents.dto import UnifiedSearchRequest
-from app.features.documents.service import DocumentQueryService, retrieve_fused
 from app.features.documents.retrieval_graph import nodes as retrieval_nodes
 from app.features.documents.retrieval_graph.nodes import make_hybrid_retrieval_node
 from app.features.documents.retrieval_graph.state import QueryPlan
+from app.features.documents.service import DocumentQueryService, retrieve_fused
 
 if TYPE_CHECKING:
     from typing import Any

@@ -23,9 +23,9 @@ from langchain_core.tools.base import BaseTool
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.shared.result.diagnostics import add_database_error_note
-from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine

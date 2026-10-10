@@ -16,6 +16,9 @@ from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
 from redis_fastapi import FastAPIRedis
 from returns.result import Failure, Success
 
+from app.observability import setup_otel
+from app.observability.logging import logger, setup_logging
+
 from .api import v1_router, v2_router
 from .config import get_settings
 from .features.health.router import deep_health_router
@@ -29,11 +32,7 @@ from .middleware import (
     register_exception_handlers,
 )
 from .shared.langchain_layer import configure_langsmith
-from app.observability import setup_otel
 from .shared.result import APIResponse, NotFoundError, render_result
-from app.observability.logging import logger, setup_logging
-
-from .utils import APIFeatures
 
 if TYPE_CHECKING:
     from guard.models import SecurityConfig

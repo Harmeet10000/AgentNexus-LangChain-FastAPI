@@ -12,11 +12,11 @@ from fastmcp.client.auth import BearerAuth
 from opentelemetry import metrics
 
 from app.config import get_settings
+from app.mcp.client.settings import load_mcp_client_server_configs
+from app.mcp.common.errors import McpErrorCode
+from app.mcp.common.models import MCPClientCircuitState
 from app.observability.logging import logger
 from app.utils import ExternalServiceException, ServiceUnavailableException
-from app.mcp.client.settings import load_mcp_client_server_configs
-from app.mcp.common.exceptions import McpErrorCode
-from app.mcp.common.models import MCPClientCircuitState
 
 _tracer = otel_trace.get_tracer(__name__)
 _meter = metrics.get_meter(__name__)

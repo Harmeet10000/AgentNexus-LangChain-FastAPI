@@ -13,9 +13,10 @@ from typing import TYPE_CHECKING
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import build_validation_error_handler
+
 from ..prompts import SystemPromptParts
 from .factory import AgentSpec, create_production_agent
-from app.ai.tools.base import build_validation_error_handler
 
 if TYPE_CHECKING:
     from typing import Any

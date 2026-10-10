@@ -2,63 +2,30 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from returns.result import Failure, Success
 from sqlalchemy import text
 
-from app.config import get_settings
-from app.features.documents.retrieval_graph import (
-    ContextGrade,
-    GeneratedAnswer,
-    QueryPlan,
-    RetrievedChunk,
-    _extract_postgres_chunk_ids,
-    build_retrieval_graph,
-    get_shared_reranker,
-)
-from app.retrieval.fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
-from app.shared.jobs.names import DOCUMENTS_INGEST
-from app.shared.langchain_layer import serialize_to_toon
-from app.ai.embeddings import EmbeddingTaskType, embed_text, embed_texts
-from app.ai.graph.retry import retry_immediate
+from app.ai.embeddings import EmbeddingTaskType, embed_texts
+from app.connections.object_storage import build_s3_key, key_from_s3_uri
 from app.extraction.langextract.service import (
     ExtractionFailed,
     ExtractionFailureCode,
     ExtractionRequest,
     ExtractionSucceeded,
 )
-from app.shared.rag.structural_navigator import navigate_tree
-from app.shared.rag.token_counter import count_tokens as default_count_tokens
-from app.shared.result import log_expected_failure
-from app.connections.object_storage import build_s3_key, key_from_s3_uri
-from app.observability.logging import logger, trace_layer
-from app.utils import to_sorted_key_bytes
-
 from app.features.documents.classification import classify_document, segment_chunks
 from app.features.documents.constants import (
     ANALYZE_THRESHOLD_CHUNKS,
-    DEFAULT_SEARCH_CACHE_TTL_SECONDS,
-    HYBRID_CANDIDATE_LIMIT,
     INGEST_EMBEDDING_BATCH_SIZE,
-    RRF_K,
-    RRF_WEIGHT_TRIGRAM,
 )
 from app.features.documents.dto import (
-    DocumentSearchResultItem,
     DocumentStatusResponse,
     DocumentUploadResponse,
-    LegalCitationResponse,
     QualityWarningDTO,
-    RagContextSectionResponse,
-    UnifiedAskResponse,
-    UnifiedRagResponse,
-    UnifiedSearchRequest,
-    UnifiedSearchResponse,
 )
 from app.features.documents.exceptions import (
     DocumentGraphWriteError,
@@ -74,35 +41,40 @@ from app.features.documents.legal_metadata import (
     extract_legal_metadata,
 )
 from app.features.documents.parser import parse_document
-from app.features.documents.rag import SearchChunkRecord, assemble_rag_context
-from app.features.documents.repository import DocumentRepository, build_chunk_rows, build_search_filter_params
+from app.features.documents.repository import (
+    DocumentRepository,
+    build_chunk_rows,
+)
+from app.observability.logging import logger, trace_layer
+from app.shared.jobs.names import DOCUMENTS_INGEST
+from app.shared.result import log_expected_failure
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
     from typing import Any, Literal
 
     from graphiti_core.graphiti import Graphiti
-    from langchain_core.language_models import BaseChatModel
     from langgraph.graph.state import CompiledStateGraph
-    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, async_sessionmaker
-    from ty_extensions import Unknown
 
-    from app.config.settings import Settings
-    from app.features.documents.rag import ContextSection
+    from app.connections.object_storage import StorageService
+    from app.features.documents.dto import IngestionJob, IngestionRuntime
     from app.resilience.idempotency import IdempotencyGuard
     from app.shared.rag.graphiti.client import GraphitiService
-    from app.connections.object_storage import StorageService
 
-    from app.features.documents import dto as documents_dto
-    from .classification import ClassifiedDocument, ParsedDocument, PreparedChunk, QualityWarning
-    from app.features.documents.dto import IngestionJob, IngestionRuntime
-    from .exceptions import DocumentResult
-    from .legal_metadata import (
+    from app.features.documents.classification import ClassifiedDocument, ParsedDocument, PreparedChunk, QualityWarning
+    from app.features.documents.exceptions import DocumentResult
+    from app.features.documents.legal_metadata import (
         LegalMetadataExtraction,
     )
 
-from app.features.documents.service.query import _LegalPreparation, _batched
+from app.features.documents.service.query import (
+    _KNOWLEDGE_EXTRACTION_PROMPT,
+    _batched,
+    _flatten_warnings,
+    _LegalPreparation,
+)
+
+
 class DocumentCommandService:
     """Create, queue, and inspect document ingestion jobs."""
 
@@ -693,9 +665,9 @@ async def _write_extracted_clause_episodes(
     document_type: str,
 ) -> bool:
     """Map grounded clause extractions into the existing canonical writer."""
+    from app.extraction.langextract.langextract_to_graph import GraphIngestionContext
     from app.features.agent_saul.graph.state import ClauseSegment, ClauseType
     from app.shared.rag.graphiti.write_clause_episodes import write_clause_episodes_to_graphiti
-    from app.extraction.langextract.langextract_to_graph import GraphIngestionContext
 
     segments: list[ClauseSegment] = []
     valid_types = {member.value: member for member in ClauseType}
@@ -781,5 +753,3 @@ async def _verify_legal_chunks(
         log_expected_failure(upsert_result.failure(), operation="verify_legal_chunks")
         return Failure(upsert_result.failure())
     return Success(verified_count)
-
-

@@ -8,8 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.connections import get_postgres_db
 from app.features.audit.repository import AuditLogRepository
 
-from .repository import ConsumptionRepository
-from .repository import CreditRepository
+from .repository import ConsumptionRepository, CreditRepository
 from .service import CreditService
 
 

@@ -4,7 +4,7 @@ from opentelemetry import propagate, trace
 from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, TraceState
 
 from app.shared.jobs.telemetry import _inject_trace_context
-from app.utils import execution_path
+from app.observability.logging import execution_path
 from app.worker.observability import log_task_postrun, log_task_prerun
 
 

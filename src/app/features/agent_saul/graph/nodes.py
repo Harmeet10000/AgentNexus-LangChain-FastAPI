@@ -12,8 +12,8 @@ from langgraph.graph import END
 from langgraph.types import Send, interrupt
 from pydantic import BaseModel, Field
 
-from app.shared.langchain_layer.messages import make_delegation_pair
 from app.observability.logging import logger
+from app.shared.langchain_layer.messages import make_delegation_pair
 
 from .prompts import (
     _COMPLIANCE_SYSTEM_PROMPT,

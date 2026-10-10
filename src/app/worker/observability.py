@@ -19,8 +19,7 @@ from opentelemetry import context as otel_context
 from opentelemetry import metrics, propagate
 
 from app.config import get_settings
-from app.observability.logging import logger, setup_logging
-from app.observability.logging import execution_path
+from app.observability.logging import execution_path, logger, setup_logging
 
 if TYPE_CHECKING:
     from typing import Any

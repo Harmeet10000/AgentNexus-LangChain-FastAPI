@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from app.utils.exceptions import InfrastructureException
 from app.observability.logging import logger
+from app.utils.exceptions import InfrastructureException
 
 # Imported from the leaf module rather than `app.utils`, matching 319c698: this
 # module is itself imported from `app/utils/__init__.py:35`, so a package-level

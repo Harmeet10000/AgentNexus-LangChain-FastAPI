@@ -108,7 +108,9 @@ class CeleryTaskRegistry:
     def typed_send(
         cls, task_name: str, kwargs: dict[str, object], **send_task_opts: object
     ) -> object:
-        from app.connections.celery_producer import celery_app  # noqa: PLC0415 — load only for publication
+        from app.connections.celery_producer import (  # noqa: PLC0415 — load only for publication
+            celery_app,
+        )
 
         cls.validate(task_name, kwargs)
         return celery_app.send_task(task_name, kwargs=kwargs, **send_task_opts)

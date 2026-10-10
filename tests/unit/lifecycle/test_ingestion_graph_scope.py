@@ -11,13 +11,13 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from returns.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.connections.object_storage import StorageService
 from app.features.documents.ingestion_graph import (
     DocumentIngestionState,
     _make_ingest_document_node,
     build_document_ingestion_graph,
 )
 from app.features.documents.repository import DocumentRepository
-from app.connections.object_storage import StorageService
 
 pytestmark = pytest.mark.unit
 

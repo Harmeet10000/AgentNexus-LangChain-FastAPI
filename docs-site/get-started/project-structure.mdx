@@ -8,29 +8,35 @@ description: "Tour of the repository layout and what each directory owns."
 <FileTree>
 - src/
   - app/
-    - api/                  # APIRouter aggregation under /api/v1
+    - api/                  # v1/ + v2/ router composition, envelope
     - config/               # Pydantic Settings — every env-driven field
-    - connections/          # Clients: postgres, mongodb, redis, neo4j, celery
+    - connections/          # One adapter per external system (postgres, redis, tavily, ...)
+    - kernel/               # Pure spine: errors, Result, clock/ids/enums (no I/O)
+    - resilience/           # rate_limit.py, idempotency.py, circuit_breaker.py
+    - events/               # Outbox model, writer, relay
+    - security/             # Token claims/JWT, password hashing — no domain imports
+    - retrieval/            # Shared retrieval primitives: fusion, chunk policy, embedding dimension
+    - extraction/           # docling/ + langextract/ document engines
+    - ai/                   # Generic agent runtime: llm, embeddings, tools, memory, graph, evaluation
+    - observability/        # OpenTelemetry, logging, request context
+    - mcp/                  # MCP server integration
     - features/             # Feature modules — the heart of the codebase
-      - agent_saul/         #   Orchestrator: sessions, WebSocket, HITL, graph/
-      - documents/          #   Ingestion, hybrid search, legal Q&A, retrieval_graph/, tools/
+      - agent_saul/         #   Orchestrator: sessions, WebSocket, HITL, graph/, chat models
+      - documents/          #   Ingestion, hybrid search, legal Q&A, service/, retrieval_graph/, tools/
       - auth/ users/ profile/ audit/
-      - crawler/            #   Crawl4AI + Tavily web research, tools/
+      - crawler/            #   Engine, tools/, job store
       - ingestion/          #   Durable upload pipeline trigger
-      - billing/            #   v2 suite: plans/subscriptions/payments/invoices/credits/dunning/webhooks, money.py
+      - billing/            #   money.py + flat slices: plans/subscriptions/payments/invoices/credits/dunning/webhooks
     - lifecycle/            # FastAPI lifespan wiring (clients → app.state)
     - middleware/           # Versioning, guard, global exception handler, OTel
-    - retrieval/            # Shared retrieval primitives: fusion, chunk policy, embedding dimension
-    - security/             # Token claims/JWT, password hashing — no domain imports
     - shared/               # Cross-feature infrastructure
-      - langgraph_layer/    #   ingestion KB, open deep search, shared retry helpers
-      - langchain_layer/    #   LLM wrappers, domain-free tools (registry, web, shell, handoff)
-      - rag/                #   Graphiti setup, document processing, vectorstore
-      - outbox/             #   Transactional outbox helper, model, NOTIFY relay
-      - result/             #   AppError hierarchy, Result mappers
-      - services/           #   Rate limiter and friends
-      - otel/ circuit_breaker/ crawler/
-    - worker/               # Celery app, task entry points per feature, schedules, runtime
+      - langgraph_layer/    #   ingestion KB, open deep search graphs
+      - langchain_layer/    #   Agent factories, chains, prompts, messages
+      - rag/                #   Graphiti setup, structural navigation, token counting
+      - result/             #   Renderers + shared failure conveniences (spine lives in kernel/)
+      - services/           #   Shared service error unions (classifiers only)
+      - jobs/               #   Celery wire names, payloads, dispatch registry
+    - worker/               # app.py, tasks/ per feature, schedules, runtime
     - utils/                # Exceptions, response envelope, cache helpers
     - examples/             # Reference snippets (logger, Celery usage)
     - main.py               # App factory and middleware stack
@@ -38,7 +44,6 @@ description: "Tour of the repository layout and what each directory owns."
   - alembic/                # PostgreSQL migrations
   - database/               # SQLAlchemy base, registry, seeders (models live in features)
   - tools/lynk/             # Go .docx contract linter (standalone module)
-  - mcp_core/               # MCP server integration
 - docs/
   - diagrams/               # Architecture SVGs (mirrored into docs-site/images)
 - tests/                    # unit/, integration/, e2e/, performance/
@@ -57,9 +62,11 @@ Everything user-facing lives in `src/app/features/<name>/` with the same interna
 | `router.py` | Thin HTTP layer: routing, status codes, response envelope |
 | `dto.py` | Pydantic request/response models |
 | `dependencies.py` | DI wiring: repositories → services → guards |
-| `service.py` | Business logic, structured logging, error mapping |
+| `service.py` or `service/` | Business logic (split by use case where large: ingest, query, delete) |
 | `repository.py` | Persistence only — no HTTP concerns |
-| `model.py` / `constants.py` | Domain models and shared constants |
+| `models.py` / `constants.py` | Domain models and shared constants |
+| `gateway.py` / `events.py` | Outgoing integrations / emitted domain events (reserved until needed) |
+| `exceptions.py` | Closed per-feature error union |
 
 Adding a feature means adding a directory with this shape and registering its router in `src/app/api/` — nothing else.
 
@@ -70,6 +77,6 @@ Adding a feature means adding a directory with this shape and registering its ro
 | Agent orchestration graphs | `src/app/features/agent_saul/graph/` | [LangGraph orchestration](/architecture/langgraph-orchestration) |
 | Retrieval & fusion | `src/app/features/documents/retrieval_graph/` + shared `src/app/retrieval/` | [RAG pipeline](/architecture/rag-pipeline) |
 | Knowledge-graph memory | `src/app/shared/rag/graphiti/`, Cognee settings | [Graph memory](/architecture/graph-memory) |
-| Reliable side effects | `src/app/shared/outbox/` | [Outbox pattern](/architecture/outbox-pattern) |
-| Error handling model | `src/app/utils/exceptions.py`, `src/app/shared/result/` | [Error & Result pattern](/architecture/error-and-result-pattern) |
+| Reliable side effects | `src/app/events/` (outbox model, writer, relay) | [Outbox pattern](/architecture/outbox-pattern) |
+| Error handling model | `src/app/kernel/errors.py`, `src/app/utils/exceptions.py`, `src/app/shared/result/` | [Error & Result pattern](/architecture/error-and-result-pattern) |
 | Auth, RBAC, guard | `src/app/features/auth/`, `src/app/middleware/` | [Security architecture](/architecture/security-architecture) |

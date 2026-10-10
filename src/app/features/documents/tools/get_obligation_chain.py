@@ -26,8 +26,8 @@ from typing import TYPE_CHECKING
 
 from langchain_core.tools import tool
 
-from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.observability.logging import logger
+from app.resilience.idempotency import IdempotencyGuard, ToolResult
 
 if TYPE_CHECKING:
     from langchain_core.tools.base import BaseTool

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app.shared.langchain_layer.agents.tools import (
+from app.ai.tools import (
     get_tool_registry,
     register_default_tools,
 )

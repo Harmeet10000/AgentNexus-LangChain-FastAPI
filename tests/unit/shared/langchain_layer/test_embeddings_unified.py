@@ -36,8 +36,6 @@ from fakeredis.aioredis import FakeRedis
 if TYPE_CHECKING:
     from typing import ClassVar
 
-from app.config import get_settings
-from app.shared.langchain_layer import embeddings as embeddings_module
 from app.ai.embeddings import (
     DOCUMENT_BATCH_SIZE,
     EmbeddingTaskType,
@@ -46,6 +44,8 @@ from app.ai.embeddings import (
     embed_texts,
     get_embedding_client,
 )
+from app.config import get_settings
+import app.ai.embeddings as embeddings_module
 from app.utils.exceptions import InfrastructureException, ValidationException
 from app.utils.json_serializer import from_json_float_list
 

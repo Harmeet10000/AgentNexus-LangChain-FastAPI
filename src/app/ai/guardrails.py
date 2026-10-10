@@ -16,8 +16,8 @@ from langchain_core.exceptions import LangChainException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.shared.langchain_layer.chains import build_guardrail_chain
 from app.observability.logging import logger
+from app.shared.langchain_layer.chains import build_guardrail_chain
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable

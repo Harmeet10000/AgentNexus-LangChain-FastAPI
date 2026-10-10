@@ -8,7 +8,13 @@ from fastapi import APIRouter, Depends, FastAPI, Request, Response, status
 from returns.result import Success
 
 from app.config import get_settings
-from app.shared.result import APIResponse, DependencyHealth, HealthResponse, HealthStatus, render_result
+from app.shared.result import (
+    APIResponse,
+    DependencyHealth,
+    HealthResponse,
+    HealthStatus,
+    render_result,
+)
 from app.utils import http_response
 
 from .dependencies import get_health_service

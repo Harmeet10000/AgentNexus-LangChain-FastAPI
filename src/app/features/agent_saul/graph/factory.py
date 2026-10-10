@@ -8,11 +8,11 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict
 
-from app.features.documents.tools.bundle import AgentToolBundle
 from app.ai.tools.registry import (
     get_tool_registry,
     register_default_tools,
 )
+from app.features.documents.tools.bundle import AgentToolBundle
 
 from .nodes import (
     ClauseSegmentationOutput,

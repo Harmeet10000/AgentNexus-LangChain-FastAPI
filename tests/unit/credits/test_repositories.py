@@ -39,8 +39,8 @@ from returns.result import Success
 from app.features.billing.credits.models import CreditStatus
 from app.features.billing.credits.repository import (
     ConsumptionRepository,
+    CreditRepository,
 )
-from app.features.billing.credits.repository import CreditRepository
 
 
 def _mock_session():

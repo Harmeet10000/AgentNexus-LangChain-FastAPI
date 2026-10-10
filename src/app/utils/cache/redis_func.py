@@ -13,8 +13,8 @@ from redis.exceptions import RedisError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from returns.result import Failure, Success
 
-from app.utils.json_serializer import from_json, to_json_str
 from app.observability.logging import logger
+from app.utils.json_serializer import from_json, to_json_str
 
 from .errors import CacheError
 

@@ -24,8 +24,7 @@ from typing import TYPE_CHECKING
 from opentelemetry.trace import StatusCode
 from returns.result import Failure
 
-from app.observability.logging import logger
-from app.observability.logging import _InterceptHandler, console_format, trace_layer
+from app.observability.logging import _InterceptHandler, console_format, logger, trace_layer
 
 if TYPE_CHECKING:
     from typing import Any
@@ -108,7 +107,7 @@ def test_stdlib_records_are_forwarded_to_loguru() -> None:
 def test_setup_logging_reads_level_from_settings(monkeypatch: Any) -> None:
     import importlib
 
-    logger_module = importlib.import_module("app.utils.logger")
+    logger_module = importlib.import_module("app.observability.logging")
 
     class Settings:
         LOG_LEVEL = "WARNING"
@@ -134,7 +133,7 @@ def test_setup_logging_reads_level_from_settings(monkeypatch: Any) -> None:
 def test_setup_logging_uses_structured_stdout_for_json_format(monkeypatch: Any) -> None:
     import importlib
 
-    logger_module = importlib.import_module("app.utils.logger")
+    logger_module = importlib.import_module("app.observability.logging")
 
     class Settings:
         LOG_LEVEL = "INFO"
@@ -202,7 +201,7 @@ def test_exception_attaches_traceback() -> None:
 async def test_trace_layer_marks_raised_exceptions_as_span_errors() -> None:
     import importlib
 
-    logger_module = importlib.import_module("app.utils.logger")
+    logger_module = importlib.import_module("app.observability.logging")
 
     class FakeSpan:
         def __init__(self) -> None:
@@ -256,7 +255,7 @@ async def test_trace_layer_marks_raised_exceptions_as_span_errors() -> None:
 async def test_trace_layer_marks_typed_failure_as_business_outcome() -> None:
     import importlib
 
-    logger_module = importlib.import_module("app.utils.logger")
+    logger_module = importlib.import_module("app.observability.logging")
 
     class FakeSpan:
         def __init__(self) -> None:

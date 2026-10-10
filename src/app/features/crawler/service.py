@@ -9,14 +9,14 @@ from uuid import uuid4
 from redis.asyncio import Redis
 from returns.result import Failure, Success
 
+from app.connections.tavily import search
 from app.features.crawler.chunker import smart_chunk_markdown, truncate_content
 from app.features.crawler.crawler import CrawlResult, WebCrawler
 from app.features.crawler.processor import GeminiProcessor
 from app.features.crawler.processor import SchemaType as ProcessorSchemaType
-from app.connections.tavily import search
+from app.observability.logging import logger, trace_layer
 from app.resilience.rate_limit import RateLimiter, RateLimitScope
 from app.shared.services.errors import TavilyValidationError
-from app.observability.logging import logger, trace_layer
 
 from .constants import CrawlMode
 from .dto import (

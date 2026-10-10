@@ -1,24 +1,29 @@
 # ── from credit_admin_router.py ──
 """Admin/Portal credit endpoints."""
 
+from decimal import Decimal
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Response, status
 from returns.result import Failure
 
-from app.features.auth.dependencies import CurrentClaims, require_role
+from app.connections import get_postgres_db
+from app.features.auth.dependencies import CurrentClaims, CurrentVerifiedUser, require_role
 from app.features.auth.models import UserRole
+from app.features.billing.invoices.dependencies import InvoiceServiceDep
 from app.shared.result import render_result
 from app.utils import APIResponse
 
 from .dependencies import CreditServiceDep
 from .dto import (
     CreditBalanceResponse,
+    CreditConsumptionResult,
     CreditGrantDTO,
     CreditGrantResponse,
     CreditHistoryResponse,
 )
-from .exceptions import CreditAuthorizationError, CreditMetadataError
+from .exceptions import CreditAuthorizationError, CreditCollaboratorError, CreditMetadataError
 
 admin_router = APIRouter(prefix="/credits", tags=["credits"])
 
@@ -84,25 +89,10 @@ async def get_credit_history(
     result = await service.get_credit_history(user_id, limit=limit, offset=offset)
     return render_result(result, response, message="Credit history")
 
+
 # ── from credit_internal_router.py ──
 """System-internal credit endpoints (called by InvoiceService)."""
 
-from decimal import Decimal
-from typing import Annotated
-from uuid import UUID
-
-from fastapi import APIRouter, Depends, Query, Response
-from returns.result import Failure
-
-from app.connections import get_postgres_db
-from app.features.auth.dependencies import CurrentVerifiedUser
-from app.features.billing.invoices.dependencies import InvoiceServiceDep
-from app.shared.result import render_result
-from app.utils import APIResponse
-
-from .dependencies import CreditServiceDep
-from .dto import CreditConsumptionResult
-from .exceptions import CreditCollaboratorError
 
 internal_router = APIRouter(prefix="/credits", tags=["credits-internal"])
 

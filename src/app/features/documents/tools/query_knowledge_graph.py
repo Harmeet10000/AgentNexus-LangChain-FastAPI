@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.tools import tool
 from langchain_core.tools.base import BaseTool
 
-from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.observability.logging import logger
+from app.resilience.idempotency import IdempotencyGuard, ToolResult
 
 if TYPE_CHECKING:
     from app.shared.rag.graphiti.client import GraphitiService

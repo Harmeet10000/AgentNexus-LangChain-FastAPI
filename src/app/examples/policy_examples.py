@@ -21,6 +21,11 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 from returns.result import Failure, Success
 
+from app.extraction.docling.docling_enhanced import (
+    EXTRACTION_STAGES,
+    ExtractionStage,
+)
+from app.extraction.docling.models import DoclingEnhancementConfig
 from app.features.documents.constants import RRF_WEIGHT_TRIGRAM
 from app.features.documents.repository import build_search_filter_params
 from app.features.documents.service import (
@@ -35,11 +40,6 @@ from app.lifecycle.lifespan import (
     StartupPolicy,
     _run_startup_policy,
 )
-from app.extraction.docling.docling_enhanced import (
-    EXTRACTION_STAGES,
-    ExtractionStage,
-)
-from app.extraction.docling.models import DoclingEnhancementConfig
 from app.observability.logging import logger
 
 if TYPE_CHECKING:

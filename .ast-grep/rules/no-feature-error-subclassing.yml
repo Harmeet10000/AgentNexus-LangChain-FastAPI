@@ -10,7 +10,9 @@ rule:
   kind: class_definition
   regex: '\(FeatureError'
 ignores:
-  - src/app/features/*/errors.py
+  - src/app/features/*/exceptions.py
+  - src/app/features/crawler/engine_errors.py
+  - src/app/ai/**/exceptions.py
   - src/app/shared/**/errors.py
   - src/app/utils/**/errors.py
   - .ast-grep/fixtures/no-feature-error-subclassing/permit.py

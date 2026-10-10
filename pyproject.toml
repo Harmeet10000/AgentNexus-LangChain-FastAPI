@@ -519,6 +519,9 @@ section-order = [
 "src/app/features/billing/subscriptions/dto.py" = ["TC001", "TC002", "TC003"]
 "src/app/features/billing/plans/dto.py" = ["TC001", "TC002", "TC003"]
 "src/app/ai/tools/*.py" = ["TC001", "TC002", "TC003"]
+# Same Pydantic get_type_hints constraint: ToolResult is built by @tool
+# functions, so typing.Any must stay a runtime import here.
+"src/app/resilience/idempotency.py" = ["TC001", "TC002", "TC003"]
 # Same @tool get_type_hints constraint holds at the tools' owning features.
 "src/app/features/documents/tools/*.py" = ["TC001", "TC002", "TC003"]
 "src/app/features/crawler/tools/*.py" = ["TC001", "TC002", "TC003"]
@@ -564,6 +567,7 @@ section-order = [
 ]
 "src/app/features/documents/service/*.py" = [
     "PLC0415", # Late imports to break circular deps
+    "TC001", # Service signatures reference DTO/repository types; resolved at runtime
 ]
 "src/app/middleware/server_middleware.py" = [
     "PLC0415", # Late imports to break circular deps
@@ -884,7 +888,11 @@ forbidden_modules = ["app.features"]
 # exemption: 4.3 moves the domain legal tool, 5.2 splits the source chunking
 # engines (policy already moved).
 ignore_imports = [
-    "app.shared.rag.docling.chunker -> app.features.documents.classification",
+    "app.extraction.docling.chunker -> app.features.documents.classification",
+    # The crawl4ai adapter constructs the engine it adapts; config stays
+    # engine-owned because WebCrawler itself takes it.
+    "app.connections.crawl4ai -> app.features.crawler.config",
+    "app.connections.crawl4ai -> app.features.crawler.crawler",
     # Pre-existing edge preserved through the 4.1 graph move (clause-episode
     # writer protocol references clause types); consolidation is section 5 work.
     "app.shared.rag.graphiti.write_clause_episodes -> app.features.agent_saul.graph.state",

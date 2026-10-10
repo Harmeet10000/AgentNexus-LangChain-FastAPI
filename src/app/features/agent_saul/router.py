@@ -18,9 +18,9 @@ from fastapi import APIRouter, Depends, Request, Response, WebSocket, WebSocketD
 from app.config import get_settings
 from app.features.auth.dependencies import CurrentClaims
 from app.features.auth.websocket_security import WebSocketSecurityViolation
+from app.observability.logging import logger
 from app.resilience.rate_limit import get_rate_limiter
 from app.shared.result import render_result
-from app.observability.logging import logger
 from app.utils import APIResponse, ErrorCode, ValidationException
 
 from .dependencies import (

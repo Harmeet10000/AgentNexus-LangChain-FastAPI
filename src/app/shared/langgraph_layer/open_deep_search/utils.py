@@ -22,12 +22,12 @@ from langchain_core.tools import InjectedToolArg, tool
 from pydantic import BaseModel, ConfigDict
 from returns.result import Failure
 
-from app.shared.langchain_layer import build_chat_model
-from app.connections.tavily import search
 from app.connections.tavily import (
     SearchResponse,  # noqa: TC001 — resolved at runtime by Pydantic
+    search,
 )
 from app.observability.logging import logger
+from app.shared.langchain_layer import build_chat_model
 from app.utils import ExternalServiceException
 
 from .config import Configuration

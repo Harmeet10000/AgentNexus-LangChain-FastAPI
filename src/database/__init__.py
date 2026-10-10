@@ -18,15 +18,15 @@ __all__ = [
 
 
 def __getattr__(name: str) -> type:
-    """Lazy shim — avoids import cycle when app.features.agent_saul.modelss imports Base.
+    """Lazy shim — avoids import cycle when app.features.agent_saul.models imports Base.
 
-    `from app.features.agent_saul.modelss import ...` triggers `database` package load.
+    `from app.features.agent_saul.models import ...` triggers `database` package load.
     If __init__.py eagerly imported ChatMessage, it would import agent_saul.models
     before its classes are defined. Lazy getattr breaks the cycle.
     """
     if name in {"ChatMessage", "ChatSession"}:
-        from app.features.agent_saul.modelss import ChatMessage as _CM  # noqa: N814
-        from app.features.agent_saul.modelss import ChatSession as _CS  # noqa: N814
+        from app.features.agent_saul.models import ChatMessage as _CM  # noqa: N814
+        from app.features.agent_saul.models import ChatSession as _CS  # noqa: N814
 
         return _CM if name == "ChatMessage" else _CS
     if name == "DocumentVector":

@@ -2,6 +2,7 @@
 """CreditConsumption SQLAlchemy model."""
 
 from datetime import UTC, datetime
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -64,26 +66,9 @@ class CreditConsumption(Base):
         nullable=False,
     )
 
+
 # ── from credit.py ──
 """UserCredit SQLAlchemy model and enums."""
-
-from datetime import UTC, datetime
-from enum import StrEnum
-from uuid import UUID, uuid4
-
-import sqlalchemy as sa
-from sqlalchemy import (
-    BigInteger,
-    DateTime,
-    Index,
-    String,
-    text,
-)
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column
-
-from database.base import Base
 
 
 class CreditType(StrEnum):

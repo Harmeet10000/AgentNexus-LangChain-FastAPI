@@ -6,10 +6,9 @@ from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
+from app.observability.logging import execution_path, logger
 from app.shared.jobs.errors import CircuitBreakerOpenError, IdempotencyLockError
 from app.shared.result import render_exception
-from app.observability.logging import logger
-from app.observability.logging import execution_path
 from app.utils import APIException, ErrorCode
 
 

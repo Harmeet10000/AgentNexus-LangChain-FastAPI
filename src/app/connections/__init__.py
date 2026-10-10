@@ -6,6 +6,7 @@ from app.connections.graphiti import (
     setup_graphiti,
     setup_graphiti_indices,
 )
+from app.events.factory import create_outbox_relay
 
 from .celery_producer import celery_app, create_celery_app
 from .cognee import (
@@ -34,7 +35,6 @@ from .neo4j import (
     init_neo4j,
 )
 from .object_storage import create_object_store
-from app.events.factory import create_outbox_relay
 from .postgres import close_db_engine, get_postgres_db, init_db
 from .redis import close_redis_client, create_redis_client, get_redis
 from .tavily import (

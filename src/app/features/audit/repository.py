@@ -15,8 +15,8 @@ from returns.result import Failure, Success
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.shared.result.diagnostics import add_database_error_note
 from app.observability.logging import logger, trace_layer
+from app.shared.result.diagnostics import add_database_error_note
 
 from .exceptions import AuditInfrastructureError
 from .models import AuditLog

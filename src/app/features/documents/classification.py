@@ -10,13 +10,13 @@ from docling_core.types.doc.document import DoclingDocument
 from docling_core.types.doc.labels import DocItemLabel
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.retrieval.chunk_policy import resolve_chunk_policy
 from app.extraction.docling import IngestionConfig
 from app.extraction.docling.chunker import (
     DEFAULT_TOKENIZER_MODEL_ID,
     create_hybrid_chunker,
     get_tokenizer,
 )
+from app.retrieval.chunk_policy import resolve_chunk_policy
 
 
 class QualityWarning(BaseModel):

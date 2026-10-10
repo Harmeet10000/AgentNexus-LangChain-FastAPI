@@ -9,9 +9,9 @@ from uvicorn.config import Config
 from uvicorn.server import Server
 
 from app.config import get_settings
+from app.mcp.server.http import get_mcp_http_app
 from app.observability import setup_otel, shutdown_otel
 from app.observability.logging import setup_logging
-from app.mcp.server.http import get_mcp_http_app
 
 if TYPE_CHECKING:
     from fastapi import FastAPI

@@ -12,11 +12,11 @@ from langchain_core.exceptions import LangChainException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from returns.result import Failure
 
-from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
 from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.ai.graph.retry import TransientExternalError, retry_immediate
-from app.shared.result import log_expected_failure
 from app.observability.logging import logger
+from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
+from app.shared.result import log_expected_failure
 from app.utils import InfrastructureException
 
 from .reranker import get_configured_reranker

@@ -7,26 +7,32 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from returns.result import Failure, Success, Result
+from returns.result import Failure, Success
 
 from app.features.audit.models import AuditLog
-from .dto import ConsumedCredit, CreditConsumptionResult
-from .dto import (
-    ConsumptionRecord,
-    CreditBalanceResponse,
-    CreditGrantDTO,
-    CreditGrantResponse,
-    CreditHistoryResponse,
-    CreditRecord,
-)
 from app.features.billing.credits.exceptions import (
     CreditAmountError,
     CreditCollaboratorError,
     CreditMetadataError,
     CreditValidationError,
 )
-from app.features.billing.credits.models import CreditConsumption
-from app.features.billing.credits.models import CreditStatus, CreditType, UserCredit
+from app.features.billing.credits.models import (
+    CreditConsumption,
+    CreditStatus,
+    CreditType,
+    UserCredit,
+)
+
+from .dto import (
+    ConsumedCredit,
+    ConsumptionRecord,
+    CreditBalanceResponse,
+    CreditConsumptionResult,
+    CreditGrantDTO,
+    CreditGrantResponse,
+    CreditHistoryResponse,
+    CreditRecord,
+)
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -36,8 +42,8 @@ if TYPE_CHECKING:
     from app.features.audit.repository import AuditLogRepository
     from app.features.billing.credits.repository import (
         ConsumptionRepository,
+        CreditRepository,
     )
-    from app.features.billing.credits.repository import CreditRepository
 
     from .exceptions import CreditResult
 

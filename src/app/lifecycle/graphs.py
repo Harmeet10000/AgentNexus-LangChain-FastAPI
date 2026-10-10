@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from app.ai.llm import build_chat_model
+from app.ai.memory import AgentMemoryService
 from app.connections.checkpointer import (
     setup_langgraph_checkpointer,
 )
@@ -16,8 +18,6 @@ from app.features.documents.tools.bundle import build_tool_bundle
 from app.resilience.idempotency import (
     IdempotencyGuard,
 )
-from app.ai.memory import AgentMemoryService
-from app.ai.llm import build_chat_model
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -31,9 +31,9 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from app.config.settings import Settings
-    from app.shared.rag.graphiti.client import GraphitiService
-    from app.extraction.langextract.service import AsyncExtractionService
     from app.connections.object_storage import StorageService
+    from app.extraction.langextract.service import AsyncExtractionService
+    from app.shared.rag.graphiti.client import GraphitiService
 
     type IngestDocumentFn = Callable[..., Awaitable[Any]]
 

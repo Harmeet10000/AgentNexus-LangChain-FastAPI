@@ -11,8 +11,7 @@ from guard import IPInfoManager, SecurityMiddleware
 from guard.models import SecurityConfig
 from nanoid import generate
 
-from app.observability.logging import logger
-from app.observability.logging import execution_path, request_state
+from app.observability.logging import execution_path, logger, request_state
 from app.utils import RedisGuardAdapter
 
 if TYPE_CHECKING:

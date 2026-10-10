@@ -5,13 +5,34 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from typing import TYPE_CHECKING, NamedTuple, cast
-from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from returns.result import Failure, Success
-from sqlalchemy import text
 
+from app.ai.embeddings import EmbeddingTaskType, embed_text
+from app.ai.graph.retry import retry_immediate
 from app.config import get_settings
+from app.features.documents.constants import (
+    DEFAULT_SEARCH_CACHE_TTL_SECONDS,
+    HYBRID_CANDIDATE_LIMIT,
+    RRF_K,
+    RRF_WEIGHT_TRIGRAM,
+)
+from app.features.documents.dto import (
+    DocumentSearchResultItem,
+    LegalCitationResponse,
+    QualityWarningDTO,
+    RagContextSectionResponse,
+    UnifiedAskResponse,
+    UnifiedRagResponse,
+    UnifiedSearchRequest,
+    UnifiedSearchResponse,
+)
+from app.features.documents.rag import SearchChunkRecord, assemble_rag_context
+from app.features.documents.repository import (
+    DocumentRepository,
+    build_search_filter_params,
+)
 from app.features.documents.retrieval_graph import (
     ContextGrade,
     GeneratedAnswer,
@@ -21,84 +42,30 @@ from app.features.documents.retrieval_graph import (
     build_retrieval_graph,
     get_shared_reranker,
 )
+from app.observability.logging import trace_layer
 from app.retrieval.fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
-from app.shared.jobs.names import DOCUMENTS_INGEST
 from app.shared.langchain_layer import serialize_to_toon
-from app.ai.embeddings import EmbeddingTaskType, embed_text, embed_texts
-from app.ai.graph.retry import retry_immediate
-from app.extraction.langextract.service import (
-    ExtractionFailed,
-    ExtractionFailureCode,
-    ExtractionRequest,
-    ExtractionSucceeded,
-)
 from app.shared.rag.structural_navigator import navigate_tree
 from app.shared.rag.token_counter import count_tokens as default_count_tokens
 from app.shared.result import log_expected_failure
-from app.connections.object_storage import build_s3_key, key_from_s3_uri
-from app.observability.logging import logger, trace_layer
 from app.utils import to_sorted_key_bytes
-
-from app.features.documents.classification import classify_document, segment_chunks
-from app.features.documents.constants import (
-    ANALYZE_THRESHOLD_CHUNKS,
-    DEFAULT_SEARCH_CACHE_TTL_SECONDS,
-    HYBRID_CANDIDATE_LIMIT,
-    INGEST_EMBEDDING_BATCH_SIZE,
-    RRF_K,
-    RRF_WEIGHT_TRIGRAM,
-)
-from app.features.documents.dto import (
-    DocumentSearchResultItem,
-    DocumentStatusResponse,
-    DocumentUploadResponse,
-    LegalCitationResponse,
-    QualityWarningDTO,
-    RagContextSectionResponse,
-    UnifiedAskResponse,
-    UnifiedRagResponse,
-    UnifiedSearchRequest,
-    UnifiedSearchResponse,
-)
-from app.features.documents.exceptions import (
-    DocumentGraphWriteError,
-    DocumentIngestionCheckpointError,
-    DocumentNotFoundError,
-    DocumentStorageError,
-    DocumentValidationError,
-)
-from app.features.documents.graphiti_verifier import write_and_verify_chunk
-from app.features.documents.legal_metadata import (
-    contract_event_dates,
-    enrich_legal_chunks,
-    extract_legal_metadata,
-)
-from app.features.documents.parser import parse_document
-from app.features.documents.rag import SearchChunkRecord, assemble_rag_context
-from app.features.documents.repository import DocumentRepository, build_chunk_rows, build_search_filter_params
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
-    from typing import Any, Literal
+    from typing import Any
 
     from graphiti_core.graphiti import Graphiti
     from langchain_core.language_models import BaseChatModel
-    from langgraph.graph.state import CompiledStateGraph
     from redis.asyncio import Redis
-    from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, async_sessionmaker
     from ty_extensions import Unknown
 
     from app.config.settings import Settings
-    from app.features.documents.rag import ContextSection
-    from app.resilience.idempotency import IdempotencyGuard
-    from app.shared.rag.graphiti.client import GraphitiService
-    from app.connections.object_storage import StorageService
-
     from app.features.documents import dto as documents_dto
-    from .classification import ClassifiedDocument, ParsedDocument, PreparedChunk, QualityWarning
-    from app.features.documents.dto import IngestionJob, IngestionRuntime
-    from .exceptions import DocumentResult
-    from .legal_metadata import (
+    from app.features.documents.rag import ContextSection
+
+    from app.features.documents.classification import QualityWarning
+    from app.features.documents.exceptions import DocumentResult
+    from app.features.documents.legal_metadata import (
         LegalMetadataExtraction,
     )
 _GENERATOR_SYSTEM_PROMPT = (
