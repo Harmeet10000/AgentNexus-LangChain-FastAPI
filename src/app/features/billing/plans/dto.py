@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003
+from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.features.billing.plans.model import BillingInterval  # noqa: TC001
+from app.features.billing.plans.model import BillingInterval
 
 
 class PlanCreateDTO(BaseModel):

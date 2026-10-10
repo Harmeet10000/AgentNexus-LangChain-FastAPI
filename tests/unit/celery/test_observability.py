@@ -3,12 +3,9 @@ from types import SimpleNamespace
 from opentelemetry import propagate, trace
 from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, TraceState
 
-from app.connections.celery import (
-    _inject_trace_context,
-    log_task_postrun,
-    log_task_prerun,
-)
+from app.shared.jobs.telemetry import _inject_trace_context
 from app.utils import execution_path
+from app.worker.observability import log_task_postrun, log_task_prerun
 
 
 def _span_context() -> SpanContext:
@@ -59,7 +56,7 @@ def test_task_signals_scope_trace_and_logging_context() -> None:
 def test_celery_process_bootstrap_owns_logging_and_otel_lifecycle(monkeypatch) -> None:
     import importlib
 
-    celery_module = importlib.import_module("app.connections.celery")
+    celery_module = importlib.import_module("app.worker.observability")
     calls: list[tuple[str, str | None]] = []
     settings = SimpleNamespace(OTEL_ENABLED=True, OTEL_SERVICE_NAME="celery-worker")
 

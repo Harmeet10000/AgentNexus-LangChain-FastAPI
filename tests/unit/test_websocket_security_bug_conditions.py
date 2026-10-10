@@ -26,7 +26,7 @@ from returns.result import Success
 
 from app.config import get_settings
 from app.features.auth.repository import RefreshTokenRepository, SessionData
-from app.features.auth.security import TokenClaims
+from app.security.tokens import TokenClaims
 from app.features.auth.websocket_security import (
     WebSocketRateLimitExceededError,
     WebSocketSecurityContext,

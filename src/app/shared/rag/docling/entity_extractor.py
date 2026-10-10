@@ -78,16 +78,19 @@ async def _do_extract_graph_entities(
     neo4j_user: str | None,
     neo4j_password: str | None,
 ) -> ExtractionResult:
-    from graphiti_graph import Graphiti
+    from graphiti_core import Graphiti
 
     client = Graphiti(
-        neo4j_uri=neo4j_uri,
-        neo4j_auth=(neo4j_user, neo4j_password),
+        uri=neo4j_uri,
+        user=neo4j_user,
+        password=neo4j_password,
     )
     logger.info("Graphiti client initialized")
     episode = await client.add_episode(
         name=f"document_{document_id}",
-        text=text,
+        episode_body=text,
+        source_description=f"document_{document_id}",
+        reference_time=datetime.now(UTC),
     )
     entities = []
     relationships = []
@@ -204,6 +207,8 @@ def _extract_relationships_simple(text: str, entities: list[Entity]) -> list[Rel
         if entity.entity_type == "PERSON" and (" works at " in text or " employed by " in text):
             for org in entities:
                 if org.entity_type == "ORGANIZATION":
+                    if entity.id is None or org.id is None:
+                        continue
                     relationships.append(
                         Relationship(
                             id=f"rel_{rel_id}",
@@ -219,6 +224,8 @@ def _extract_relationships_simple(text: str, entities: list[Entity]) -> list[Rel
         if entity.entity_type == "TECHNOLOGY" and (" uses " in text or " built with " in text):
             for org in entities:
                 if org.entity_type == "ORGANIZATION":
+                    if entity.id is None or org.id is None:
+                        continue
                     relationships.append(
                         Relationship(
                             id=f"rel_{rel_id}",
@@ -314,6 +321,8 @@ def _infer_relationships(entities: list[Entity]) -> list[Relationship]:
 
     for person in persons:
         for org in orgs:
+            if person.id is None or org.id is None:
+                continue
             relationships.append(
                 Relationship(
                     id=f"rel_{rel_id}",
@@ -361,7 +370,7 @@ async def extract(
 def create_extractor(
     use_graphiti: bool = True,
     neo4j_config: dict[str, Any] | None = None,
-) -> callable:
+) -> Callable[..., Any]:
     """
     Factory function to create entity extractor.
 

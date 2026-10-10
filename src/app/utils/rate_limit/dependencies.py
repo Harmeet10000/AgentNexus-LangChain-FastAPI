@@ -3,6 +3,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import Request
 from pydantic import ValidationError
 
+from app.security import tokens
 from app.utils.exceptions import UnauthorizedException
 
 from .service import RateLimitService
@@ -33,12 +34,8 @@ def _resolve_user_identifier(request: Request) -> str | None:
     raw_token = _extract_presented_token(request)
     if raw_token is None:
         return None
-    # Deferred import: features/auth already imports this module for its
-    # routers, so a top-level import would tie the two packages together.
-    from app.features.auth.security import decode_token  # noqa: PLC0415
-
     try:
-        claims = decode_token(raw_token)
+        claims = tokens.decode_token(raw_token)
     except (UnauthorizedException, ValidationError, KeyError):
         return None
     if claims.token_type != _ACCESS_TOKEN_TYPE:
@@ -47,7 +44,11 @@ def _resolve_user_identifier(request: Request) -> str | None:
 
 
 def get_rate_limiter(
-    burst: int = 10, rate: int = 5, period: int = 60
+    burst: int = 10,
+    rate: int = 5,
+    period: int = 60,
+    *,
+    scope: str | None = None,
 ) -> Callable[[Request], Awaitable[None]]:
     """
     Build a FastAPI dependency that enforces a Redis-backed rate limit.
@@ -60,6 +61,7 @@ def get_rate_limiter(
         burst: Maximum burst capacity before requests are throttled.
         rate: Number of tokens refilled per period.
         period: Refill period in seconds.
+        scope: Optional independent quota namespace shared by endpoints using it.
     """
 
     async def rate_limit_dependency(request: Request) -> None:
@@ -70,6 +72,8 @@ def get_rate_limiter(
             client_ip = forwarded_for.split(",")[0].strip() or client_ip
 
         identifier = _resolve_user_identifier(request) or client_ip
+        if scope is not None:
+            identifier = f"{scope}:{identifier}"
         service = RateLimitService(redis_client)
         await service.check_limit(
             identifier=identifier, burst=burst, rate=rate, period_seconds=period

@@ -9,7 +9,7 @@ from celery.exceptions import CeleryError
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 
 from app.config import get_settings
-from app.connections.celery_task_names import CRAWLER_CRAWL
+from app.shared.jobs.names import CRAWLER_CRAWL
 from app.shared.result import http_response, render_result
 from app.shared.services import RateLimitScope
 from app.shared.services.rate_limiter import RateLimiter

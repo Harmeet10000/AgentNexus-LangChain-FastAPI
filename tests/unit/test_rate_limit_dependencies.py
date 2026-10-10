@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.features.auth.security import TokenClaims
+from app.security.tokens import TokenClaims
 from app.utils.exceptions import UnauthorizedException
 from app.utils.rate_limit import dependencies as rate_limit_deps
 from app.utils.rate_limit.dependencies import get_rate_limiter
@@ -66,7 +66,7 @@ def _access_claims(sub="user-123") -> TokenClaims:
 
 async def test_authenticated_request_is_keyed_by_user(capture_identifiers, monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.features.auth.security.decode_token",
+        "app.security.tokens.decode_token",
         lambda _token: _access_claims(),
     )
     limiter = get_rate_limiter()
@@ -75,9 +75,22 @@ async def test_authenticated_request_is_keyed_by_user(capture_identifiers, monke
     assert capture_identifiers == ["user:user-123"]
 
 
+async def test_scoped_quota_namespaces_the_authenticated_user(
+    capture_identifiers, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "app.security.tokens.decode_token",
+        lambda _token: _access_claims(),
+    )
+    limiter = get_rate_limiter(scope="document-qa")
+    await limiter(_StubRequest(headers={"authorization": "Bearer test-token"}))
+
+    assert capture_identifiers == ["document-qa:user:user-123"]
+
+
 async def test_cookie_token_is_keyed_by_user(capture_identifiers, monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.features.auth.security.decode_token",
+        "app.security.tokens.decode_token",
         lambda _token: _access_claims(sub="cookie-user"),
     )
     limiter = get_rate_limiter()
@@ -111,7 +124,7 @@ async def test_invalid_token_falls_back_to_ip_without_raising(
         msg = "Invalid token"
         raise UnauthorizedException(msg)
 
-    monkeypatch.setattr("app.features.auth.security.decode_token", _boom)
+    monkeypatch.setattr("app.security.tokens.decode_token", _boom)
     limiter = get_rate_limiter()
     await limiter(_StubRequest(headers={"authorization": "Bearer garbage"}))
 
@@ -120,7 +133,7 @@ async def test_invalid_token_falls_back_to_ip_without_raising(
 
 async def test_wrong_token_type_falls_back_to_ip(capture_identifiers, monkeypatch) -> None:
     refresh = _access_claims().model_copy(update={"token_type": "refresh"})
-    monkeypatch.setattr("app.features.auth.security.decode_token", lambda _token: refresh)
+    monkeypatch.setattr("app.security.tokens.decode_token", lambda _token: refresh)
     limiter = get_rate_limiter()
     await limiter(_StubRequest(headers={"authorization": "Bearer refresh-token"}))
 
@@ -130,7 +143,7 @@ async def test_wrong_token_type_falls_back_to_ip(capture_identifiers, monkeypatc
 async def test_request_state_identity_is_never_consulted(capture_identifiers, monkeypatch) -> None:
     """Even a populated per-request identity attribute must not affect the key."""
     monkeypatch.setattr(
-        "app.features.auth.security.decode_token",
+        "app.security.tokens.decode_token",
         lambda _token: _access_claims(),
     )
     limiter = get_rate_limiter()

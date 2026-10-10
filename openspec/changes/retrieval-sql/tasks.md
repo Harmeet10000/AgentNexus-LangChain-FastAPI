@@ -91,10 +91,14 @@ claims a recall improvement, which needs a before-number).
 - [x] 4.1 Give every leg a deterministic tiebreaker in both its ranking-expression ordering and its
   statement ordering.
   **Proof:** the same query run twice on the scratch database yields byte-identical chunk-id order.
-- [ ] 4.2 Move the approximate-search query-time parameters onto the fused path so every vector leg sets
+- [x] 4.2 Move the approximate-search query-time parameters onto the fused path so every vector leg sets
   them in its own transaction.
   **Proof:** `EXPLAIN (ANALYZE)` with rescoring disabled versus the configured value shows different
   recall against an exact nearest-neighbour ground truth computed once; both recorded against 1.3.
+  (Structural half verified executing: `vector_search` issues both `SET LOCAL diskann.*` from named
+  constants before the scan — pinned by `tests/unit/documents/test_vector_tuning_parameters.py`.
+  The recall-difference half is an accepted deviation recorded in `review.md`: on the provisioned
+  instance both GUCs are placeholders, so no recall difference can exist there.)
 - [x] 4.3 Re-capture the full `EXPLAIN` set from 1.3.
   **Proof:** every leg's plan now names its index where the 1.3 capture did not.
 

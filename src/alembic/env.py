@@ -1,5 +1,4 @@
 import asyncio
-import importlib
 from logging.config import fileConfig
 
 from sqlalchemy.engine import Connection
@@ -16,34 +15,12 @@ from database import Base
 # ---------------------------------------------------------------------------
 # ponytail: data-driven import so the list is one source of truth, order is
 # still load-bearing (payments before subscriptions due to cycle via
-# subscriptions.dependencies). Adding a new model = one string here.
-_MODEL_MODULE_NAMES: tuple[str, ...] = (
-    "app.features.audit.model",
-    "app.features.chat.model",
-    "app.features.billing.credits.models.consumption",
-    "app.features.billing.credits.models.credit",
-    "app.features.documents.model",
-    "app.features.billing.invoices.invoice_batch",
-    "app.features.billing.invoices.invoice_void",
-    "app.features.billing.invoices.model",
-    "app.features.billing.invoices.receipt",
-    "app.features.billing.invoices.report",
-    "app.features.billing.payments.currency",
-    "app.features.billing.payments.model",
-    "app.features.billing.plans.model",
-    "app.features.billing.subscriptions.model",
-    "app.features.billing.subscriptions.trial_extension",
-    "app.features.billing.webhooks.email_template",
-    "app.features.billing.webhooks.model",
-    "app.shared.outbox.model",
-    # legacy shim — keeps chat_messages/document_vectors on Base.metadata
-    # until 0014-repaired tables are confirmed on all envs; remove after drop.
-    "database.schemas.document_vectors",
-)
+# subscriptions.dependencies). Adding a new model = one string in
+# database.registry.MODEL_MODULE_NAMES.
+from database.registry import MODEL_MODULE_NAMES, register_models
 
 # Side-effect imports — each executes its module body and registers tables.
-# Ty sees these as used via _MODEL_MODULES, so F401 fix does not delete them.
-_MODEL_MODULES = tuple(importlib.import_module(name) for name in _MODEL_MODULE_NAMES)
+_MODEL_MODULES = register_models()
 
 # Alembic Config object
 config = context.config

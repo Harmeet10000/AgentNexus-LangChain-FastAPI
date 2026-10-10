@@ -7,10 +7,11 @@ Passes uploaded bytes to IngestionGraph; the graph performs Docling parsing.
 Dependencies read from app.state — same pattern as agent_saul.
 """
 
-from fastapi import APIRouter, Response, UploadFile, status
+from fastapi import APIRouter, Depends, Response, UploadFile, status
 
 from app.shared.result import render_result
 from app.utils import APIResponse, logger
+from app.utils.rate_limit.dependencies import get_rate_limiter
 
 from .dependencies import IngestionGraphDep, UserIdDep
 from .dto import DocumentUploadResponse
@@ -26,6 +27,8 @@ router = APIRouter(
     tags=["ingestion"],
 )
 
+limit_document_upload = get_rate_limiter(3, 3, 300, scope="document-upload")
+
 
 # ---------------------------------------------------------------------------
 # Endpoint
@@ -35,6 +38,7 @@ router = APIRouter(
 @router.post(
     "/documents/upload",
     summary="Upload a legal document for ingestion. Returns doc_id for use with the Agent Saul WS.",
+    dependencies=[Depends(limit_document_upload)],
 )
 async def upload_document(
     file: UploadFile,

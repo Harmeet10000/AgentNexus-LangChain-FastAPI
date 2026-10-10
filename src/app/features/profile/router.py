@@ -3,7 +3,9 @@ from typing import Annotated
 from fastapi import APIRouter, File, Request, Response, UploadFile
 from returns.result import Failure
 
-from app.features.auth import CurrentVerifiedUser, TokenClaims, UserResponse
+from app.features.auth.dependencies import CurrentVerifiedUser
+from app.features.auth.dto import UserResponse
+from app.security.tokens import TokenClaims
 from app.shared.result import render_result
 from app.utils import APIResponse, http_response
 

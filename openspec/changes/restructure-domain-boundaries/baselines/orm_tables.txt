@@ -1,0 +1,17 @@
+audit_logs
+chat_messages
+chat_sessions
+chunks
+dead_letter_events
+document_vectors
+documents
+invoice_line_items
+invoice_voids
+invoices
+outbox_events
+payment_receipts
+payments
+plans
+reports
+subscriptions
+webhook_events

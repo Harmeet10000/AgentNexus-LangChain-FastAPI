@@ -37,9 +37,7 @@ def console_format(record: dict[str, Any]) -> str:
     message = record["message"]
     # Escape braces so loguru's format_map pass does not interpret
     # user content as format fields (KeyError -> lost record).
-    message_escaped = (
-        message.replace("{", "{{").replace("}", "}}").replace("<", r"\<")
-    )
+    message_escaped = message.replace("{", "{{").replace("}", "}}").replace("<", r"\<")
 
     colors: dict[str, str] = {
         "DEBUG": "<cyan>",

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from app.shared.langgraph_layer.retrieval_kb.nodes import make_post_process_node
-from app.shared.langgraph_layer.retrieval_kb.state import RetrievedChunk
+from app.features.documents.retrieval_graph.nodes import make_post_process_node
+from app.features.documents.retrieval_graph.state import RetrievedChunk
 
 
 def _chunk(chunk_id: str, doc: str, index: int, score: float) -> RetrievedChunk:

@@ -96,7 +96,9 @@ def test_stdlib_records_are_forwarded_to_loguru() -> None:
     lines: list[str] = []
     handler_id = logger.add(lines.append, format="{message}", level="DEBUG")
     try:
-        _InterceptHandler().emit(logging.LogRecord("uvicorn", logging.INFO, "", 0, "server ready", (), None))
+        _InterceptHandler().emit(
+            logging.LogRecord("uvicorn", logging.INFO, "", 0, "server ready", (), None)
+        )
     finally:
         logger.remove(handler_id)
 

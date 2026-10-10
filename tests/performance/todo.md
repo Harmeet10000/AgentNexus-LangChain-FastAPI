@@ -284,6 +284,33 @@ Do you want me to:
 227. agentState should be typedDict and not a baseModel  DONE
 159. discover RAGFlow, OpenRAG if or if not to use it  DONE
 196.  need to check this asyncio.gather part in  → fans out to researcher_subgraph via asyncio.gather → inside the subgraph, route_researcher conditional edge diverts crawl_webpage calls to a dedicated crawl_executor node   DONE
+235. need to have all graph such as ingestion graph in the lifespan rather than in service  DONE  [graph-lifecycle]
+240. document processing and crawler needs db instance injection and docling processong needs improvement as well. need to think of a suitable chunking strategy for legal docs, and everything that is considered best practice for docling  DONE  [ingestion-chunking]
+176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package  DONE  [agentic-retrieval+ingestion-chunking]
+240. remove build chat model from documents/ and review chunking strategy used here and in crawler and find out from where to add them  DONE  [ingestion-chunking]
+155. complete the ingestion pipeline to working condition and see where reconciliation comes init. i want to remove reconciliation and replace it with agent memory made with cognee entirely.
+todos:-
+    1. toons reusable , point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
+    a. docling - Legal docs need hierarchical chunking, convert dataclass to pydantic models, use embedders(batch, chunks, etc) to reusable function in langchain_layer, remove Grapgiti initilisation from here  DONE  [ingestion-chunking]
+    b. langextract and pageindex(leave this for now if not currently implemented)
+    c. graphiti refactor  DONE  [knowledge-stack]
+    d. postgres RAG should be agentic  DONE  [agentic-retrieval]
+    e. celery for off loading to a queue
+    f. insert the langgraph in app.state in lifespan  DONE  [graph-lifecycle]
+    g. pass default and metadata for particular config in pydantic models for agents
+    h. research for RAG pipeline with Gemini
+    i. use MessagesState to standardise the moving of data between Agent A and Agent 
+    j. use tenacity for retries, new capabilities, output format from chatpromptparts,
+57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage DONE
+164. refactor RAG code  DONE
+163. refactor vectorStore code      remove TSVECTOR and instead use pgvector, pg-textsearch,  DONE
+185. remove ts_vector(think if it is required here or other extension can do the job here) from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale   DONE
+64. No eval framework. Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.  DONE  [rag-eval-harness]
+165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384    DONE  
+195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/   DONE
+247. One-line improvement: Add error.add_note(traceback.format_exc()) when wrapping errors to preserve full context for debugging  DONE
+249. use native redis-fastAPI package and upgrade fastAPI versions  DONE
+116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written or should it be written like that and also check the circuit breaker redis client should be sync or async. i just want circuit breaker code in examples/ directory and dont want to use it in my codebase for now as i have built already a complex enough application DONE
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses can be used to make the lynk linter     DELAYED    
@@ -291,6 +318,7 @@ Do you want me to:
 156. check the page https://docs.langchain.com/langsmith/deployments#
 153. set up performance tests  DELAYED
 157. make a proper terraform plan for all 3 major cloud providers with dev, staging and prod env and check all useful terraform    DELAYED
+241. add post on dev.to with a scheduled task  DELAYED
 194. add headroom-ai for **comrpression**   ABANDONED
 53. add voice support by using gemini 3 for TTS and STT  with websockets   ABANDONED
 170. write cron job for memory decay and then send to celery for off loading for cognee   ABANDONED
@@ -305,13 +333,19 @@ def compose(*functions: Composable) -> Composable:
 
     return lambda data: reduce(apply, functions, data)
 
-64. No eval framework. Theres no way to measure whether changes to prompts or middleware actually improve agent quality. Should have a LangSmith dataset + evaluator setup for golden-set regression testing before deploys.  DONE  [rag-eval-harness]
+
 67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
 
 218. add a small gloassary of the project from the screenshot, we are open at the core, we share about are roadmap, how we think about things, and of course we share all our code and should strive to be in that way. its important to maintian the things they live and iterate over the product. 
 219.  add in the system prompt to add a search, implementation, verifier, reviewer, check if i can give specific system propmts, skills, tools, MCP servers to subagents, defining models for subagents, permissions, need to have taht matt pocock line to have agents give me non verbose answers(see his short)
-always write why Use Block-Level HTML Comments: Since Claude Code strips HTML comments from the context it reads, you can include detailed notes for human maintainers without increasing token usage (3:02-3:12).  need to have a proper git branch/worktrees workflow along with specs, adr, design
+use a tasks.md file for using subagents with long running tasks
+after every run finish with 3 headings - blocked on me, changed, done
+when a step doesnt need my input keep going. stop and only ask me when you cant continue without me or before doing something desturctive
+add a done goal and what not to do in that done goal.
+always write why Use Block-Level HTML Comments: Since Claude Code 
+add serial number in which specs are made
+strips HTML comments from the context it reads, you can include detailed notes for human maintainers without increasing token usage (3:02-3:12).  need to have a proper git branch/worktrees workflow along with specs, adr, design
 The "Incident-Why-Outcome" Framework: The host recommends structuring your comments to record three specific pieces of information for every rule (3:14-3:43):
 The Failure/Incident: Describe the specific event or bug that necessitated the rule (e.g., citing a specific incident number or date).
 Why the Rule Helps: Explain how the specific instruction prevents that failure from reoccurring.
@@ -345,43 +379,18 @@ To solve these problems, the creator shifted to a **production-grade database ar
 172. use prebuilt and custom middlewares in langchain 
 179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
 
-57. No agent-to-agent message passing format standard and make a standardized AIMessage for passing in-between agents and tools and also make a ToolMessage
 
-155. complete the ingestion pipeline to working condition and see where reconciliation comes init. i want to remove reconciliation and replace it with agent memory made with cognee entirely.
-todos:-
-    1. toons reusable , point 138,  break the code for reconcilliation inside langgraph_layer/ and features/,check the use from string import Template to write prompts or chatpromptTemplate with toons, use SystemPromptParts to write systemPrompt also check it, use init_embedding and googleEmbeddings
-    a. docling - Legal docs need hierarchical chunking, convert dataclass to pydantic models, use embedders(batch, chunks, etc) to reusable function in langchain_layer, remove Grapgiti initilisation from here  DONE  [ingestion-chunking]
-    b. langextract and pageindex(leave this for now if not currently implemented)
-    c. graphiti refactor  DONE  [knowledge-stack]
-    d. postgres RAG should be agentic  DONE  [agentic-retrieval]
-    e. celery for off loading to a queue
-    f. insert the langgraph in app.state in lifespan  DONE  [graph-lifecycle]
-    g. pass default and metadata for particular config in pydantic models for agents
-    h. research for RAG pipeline with Gemini
-    i. use MessagesState to standardise the moving of data between Agent A and Agent 
-    j. use tenacity for retries, new capabilities, output format from chatpromptparts,
+
 190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
 136. use LangExtract outputs to build rich graph knowledge from your legal documents.  in document processing
-
-235. need to have all graph such as ingestion graph in the lifespan rather than in service  DONE  [graph-lifecycle]
-221. fix the files tht are scrambled in utils,shared, combine celery, and other places
-240. document processing and crawler needs db instance injection and docling processong needs improvement as well. need to think of a suitable chunking strategy for legal docs, and everything that is considered best practice for docling  DONE  [ingestion-chunking]
-163. refactor vectorStore code        TSVECTOR,
-164. refactor RAG code
-185. remove ts_vector(think if it is required here or other extension can do the job here) from search/document and write correct SQL query for documents/ taking skills for pgvector/pgvectorscale 
+221. fix the files tht are scrambled in utils,shared, combine celery, and other places by improving the feature based sliced folder structure to an advanced level.
 162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
-165. implement RAG by getting inspired from this https://www.uber.com/en-IN/blog/enhanced-agentic-rag/?uclick_id=9529bd64-1d38-40a6-bc23-88ce151b1384     
-195. in ingestion pipeline postgres + extensions for vector + BM25 + RRF and more, graphiti for what we already did, need to have langextract before these as well, and a pageindex parallel to postgres graphiti and learn from https://towardsdatascience.com/hybrid-search-and-re-ranking-in-production-rag/
-176. check sentence_transformers, AutoTokenizer from transformer package do i need it or can it be replaced by a langchain package  DONE  [agentic-retrieval+ingestion-chunking]
-116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written and also check the circuit breaker redis client should be sync or async 
 234. learn about classVars, policy, strEnum, namedTuple, final, mapping, list, set, learn crawler/processor.py policy  and check if UUIDv7 is available in ORM
-240. remove build chat model from documents/ and review chunking strategy used here and in crawler and find out from where to add them  DONE  [ingestion-chunking]
-241. add post on dev.to with a scheduled task
 242. fix agent tools
 
-247. One-line improvement: Add error.add_note(traceback.format_exc()) when wrapping errors to preserve full context for debugging
 248. should i use neo4j and postgres in cognee or let cognee use it own thing?
-249. use native redis-fastAPI package      and upgrade fastAPI versions                                                                                                                                                                                   
+250. instal pdb debugger and others, flamegraph, skip list DS, swiss tables
+251. the repository has more than one ingestion flow. The documents-service path uses LangExtract; the separate ingestion graph has its own extraction/segmentation stages.                                                             
 ```
 
 10:00 AM Beijing Time = 07:30 AM IST
@@ -392,7 +401,123 @@ summarise these chapters in great detail and depth and take video's transcript a
 
 summarise this video in great detail and depth by dividing it into 5 minute chunk and take video's transcript as reference for  outputing verbatim
 
-
+src/app/
+├── api/                                  # composition/root transport registration
+│   └── v1/
+│       ├── router.py
+│       └── dependencies.py               # only API-wide dependencies
+├── config/
+├── connections/                          # client construction/access, no feature policy
+├── lifecycle/
+├── middleware/
+├── features/
+│   ├── auth/
+│   │   ├── api/
+│   │   │   ├── http/
+│   │   │   │   ├── router.py
+│   │   │   │   ├── dependencies.py
+│   │   │   │   └── dto.py
+│   │   │   └── websocket/
+│   │   │       └── security.py
+│   │   ├── application/
+│   │   │   ├── commands/                  # register, login, revoke, reset
+│   │   │   ├── queries/                   # current user, sessions
+│   │   │   └── ports/                     # only real substitution seams
+│   │   ├── domain/
+│   │   │   ├── errors.py
+│   │   │   ├── user.py
+│   │   │   ├── session.py
+│   │   │   └── policies.py
+│   │   └── adapters/
+│   │       ├── persistence/
+│   │       │   └── mongodb/
+│   │       │       ├── user_repository.py
+│   │       │       └── refresh_token_repository.py
+│   │       └── identity/
+│   │           └── jwt/
+│   │               ├── codec.py
+│   │               └── password_hashing.py
+│   ├── documents/
+│   │   ├── api/
+│   │   │   └── http/
+│   │   │       ├── router.py
+│   │   │       ├── dependencies.py
+│   │   │       └── dto.py
+│   │   ├── application/
+│   │   │   ├── commands/
+│   │   │   │   ├── upload_document.py
+│   │   │   │   └── reindex_document.py
+│   │   │   ├── queries/
+│   │   │   │   ├── search_documents.py
+│   │   │   │   └── answer_from_documents.py
+│   │   │   └── ports/
+│   │   ├── domain/
+│   │   │   ├── errors.py
+│   │   │   ├── document.py
+│   │   │   ├── chunk.py
+│   │   │   └── retrieval_policy.py
+│   │   ├── ingestion/
+│   │   │   ├── workflow.py
+│   │   │   ├── parsing/
+│   │   │   ├── extraction/
+│   │   │   ├── chunking/
+│   │   │   ├── enrichment/
+│   │   │   └── adapters/
+│   │   │       ├── docling/
+│   │   │       ├── langextract/
+│   │   │       └── graphiti/
+│   │   ├── retrieval/
+│   │   │   ├── workflow.py
+│   │   │   ├── candidates/
+│   │   │   │   ├── vector.py
+│   │   │   │   ├── bm25.py
+│   │   │   │   └── trigram.py
+│   │   │   ├── fusion/
+│   │   │   │   └── reciprocal_rank_fusion.py
+│   │   │   ├── reranking/
+│   │   │   └── adapters/
+│   │   │       ├── postgres/
+│   │   │       │   ├── vector_search.py
+│   │   │       │   └── bm25_search.py
+│   │   │       └── embeddings/
+│   │   └── persistence/
+│   │       └── postgres/
+│   │           ├── document_repository.py
+│   │           └── chunk_repository.py
+│   ├── ingestion/                         # only if independently owned after audit
+│   │   └── ...                            # otherwise fold workflow into documents/
+│   ├── agent_saul/
+│   │   ├── api/
+│   │   │   ├── http/
+│   │   │   └── websocket/
+│   │   ├── application/
+│   │   │   ├── sessions/
+│   │   │   └── runs/
+│   │   ├── domain/
+│   │   └── adapters/
+│   └── billing/
+│       ├── credits/
+│       ├── invoices/
+│       ├── payments/
+│       └── subscriptions/
+├── shared/
+│   ├── result/
+│   ├── observability/
+│   └── rate_limit/
+│       ├── application/
+│       └── adapters/
+│           └── redis/
+└── examples/
+tests/
+├── unit/features/documents/
+│   ├── ingestion/
+│   └── retrieval/
+├── integration/features/documents/
+│   ├── adapters/postgres/
+│   └── workflows/
+├── integration/workflows/                # cross-feature flows
+├── contract/adapters/                     # shared adapter contracts, if needed
+└── lifecycle/
 
 
 8/10 security person who knows 10/10 shit about browsers is more danerous than a 10/10 security person who knows 6/10 about browsers
@@ -685,4 +810,163 @@ In the final segment, the focus shifts to **Pruning** (16:48). This involves mai
 * **Eliminating "no-ops":** Removing instructions that do not actually change agent behavior (18:26).
 |
 
+
+## I. Python 3.15: New Features Overview (0:00 - 5:00)
+
+The video introduces key features in **Python 3.15**, starting with a demonstration of flattening a list of lists using new syntax. Major updates discussed include:
+
+* **Lazy Imports (1:00):** This feature allows developers to keep import statements at the top of the file for visibility while deferring the actual loading of modules until they are first used. This optimizes startup time for large applications but carries a trade-off where import errors or side effects are delayed until execution.
+* **Frozendict (2:34):** A built-in, immutable dictionary type that does not require external imports. It is hashable if its contents are hashable, making it suitable for use as a dictionary key or in configuration management. Note that it is not a subclass of `dict`, so type-checking should use `Mapping` from `collections.abc`.
+* **Built-in Sentinel (4:15):** A standardized way to define sentinel values. Unlike using a generic `object()`, the new `sentinel` type provides a useful representation, preserves identity upon copying, supports pickling, and integrates with type expressions.
+
+## II. Comprehensions, Profiling, and Encoding (5:00 - 10:00)
+
+This segment covers syntax improvements and performance observability tools:
+
+* **Unpacking in Comprehensions (5:37):** Python 3.15 allows for cleaner flattening of collections within comprehensions, working for both lists and dictionaries.
+* **Sampling Profiler (6:22):** The new `profiling` package introduces `profiling.sampling` (Tachyon), a tool that periodically captures stack traces rather than tracing every call. This significantly lowers overhead and is ideal for scripts where one operation is repeated frequently. It can also attach to running processes via their ID.
+* **UTF-8 as Default (8:09):** The default encoding for text IO is now UTF-8, independent of the system locale. While this improves cross-platform consistency, the creator still recommends being explicit with `encoding='utf-8'` when opening files to document assumptions.
+* **Typing for Extensible Data (9:18):** `TypedDict` now supports defining the types of extra items, allowing for more precise API response modeling.
+
+## III. JIT, Free-Threading, and Final Thoughts (10:00 - 12:49)
+
+The video concludes with architectural updates and minor improvements:
+
+* **JIT Compiler (10:34):** The experimental JIT compiler has been substantially improved with a new tracing front-end, better register allocation, and a wider range of optimized Python operations.
+* **Free-Threading (11:18):** Development continues with the introduction of `AI3T`, a stable ABI target designed to lower the barrier for C extensions to support free-threading.
+* **Smaller Improvements (11:48):** 
+    * Enhanced error messages for common cross-language syntax mistakes.
+    * CPython now enables frame pointers by default, which facilitates better profiling, debugging, and crash analysis.
+
+
+
+
+# CLAUDE.md
+
+## Ask before you assume
+
+Never guess at intent. If a task leaves anything open — which screen, which endpoint, what happens on failure, whether it needs a migration, whether this is user-facing — stop and ask. One question up front is cheaper than half a day of work in the wrong direction.
+
+- Ask when the request could reasonably mean two different things.
+- Ask before changing a public API shape, a DB schema, or anything in `packages/contracts/`.
+- Do not invent product decisions, copy, or acceptance criteria.
+- Do not widen scope past what was asked. Note the adjacent thing you spotted; don't fix it unprompted.
+- If you had to assume something you couldn't resolve, list it explicitly at the top of your summary.
+
+
+Rules for the loop:
+
+- Write the failing test first. Watch it fail for the right reason, then make it pass.
+- Run `npm run check && npm test` after every meaningful edit, not once at the end.
+- Never report success on a red loop. Never disable, skip, or `.only` a test to get to green.
+- If a test is wrong, say so and explain why before changing it.
+- Do not start long-running processes (`npm run dev`, `expo start`) to "verify" — they never exit. Use the commands above.
+Code is cheap; maintenance isn't. Prefer a well-established package over rolling your own, and prefer the platform over a package.
+
+Every endpoint has a p95 budget of 200ms. Anything slower is a bug, not a tuning opportunity for later.
+
+- Filter, sort, aggregate, and paginate in SQL. Never pull rows into Node to filter them there.
+- Every list endpoint is paginated: `limit` defaults to 25, hard maximum 100. No unbounded `SELECT`.
+- Select the columns you need. `select *` is not acceptable in a repo function.
+- No N+1. Join or batch — one query per request path, not one per row.
+- New query patterns come with an index in the same migration. Run `EXPLAIN ANALYZE` and include the plan in your summary if a query touches more than 10k rows.
+- Do a performance pass at the end of any feature that reads data, and say what you checked.
+
+## Keeping this file current
+
+This file is a failure log, not a wishlist. Every line below exists because it went wrong at least once.
+
+When you make a mistake, get corrected, or discover something about this codebase that wasn't written down:
+
+1. Add one line to the failure log below, in the imperative, describing the correct behaviour.
+2. Keep it specific to this repo. General advice belongs nowhere.
+3. If the fix is a workflow rather than a rule, put it in `.claude/skills/` and link it from here.
+4. Include the change in the same commit and mention it in your summary.
+
+Keep this file under 500 lines. It is loaded into every session, and long context makes you less reliable, not more. If a section outgrows its usefulness, move it to `api/CLAUDE.md`, `ios/CLAUDE.md`, or a skill.
+
+## Failure log
+
+- Do not run `npm run dev` to verify a change; it never exits. Use `npm run check && npm test`.
+- Run migrations against the test database before `npm run test:api`, or every test fails on a missing column.
+- `xcodebuild` needs `xcodegen` run first — the `.xcodeproj` is generated and gitignored.
+- Do not edit `packages/contracts/dist/`; it is generated by `npm run contracts:build`.
+- Do not add `@MainActor` to `HikeStore` methods that already run on the main actor — SwiftLint flags it and it hides real concurrency bugs.
+- Waypoint ordering comes from `sequence`, not `created_at`. Offline waypoints arrive out of order.
+- Never call `deleteHike` without checking for queued mutations against that hike first.
+Keep it under 500 lines
+Rule 1: Auto self-improvement
+Rule 2: A solid testing loop
+Rule 3: Always ask clarifying questions
+Rule 4: Strict type checking
+ Rule 5: Only well-maintained packages
+ Rule 6: Naming conventions
+ Rule 7: Project structure
+ Rule 8: End-to-end testing
+ Rule 9: UI testing
+ Rule 10: Performance
+ Rule 11: Error handling
+ Rule 12: Architecture and system design
+behaviour based integrating test
+add defination of done and self check
+
+
+This video breaks down 19 common mistakes when using *Claude Code*. Here is a detailed summary of the chapters provided in the transcript:
+
+**1. The Persona Mistake (0:00 - 2:05):**
+Stop using elaborate personas (e.g., "You are a senior copywriter..."). Research shows they do not improve performance. Instead, follow Anthropic’s guidance: specify where to look for info, define the "done" criteria, and include a verification step ("before you finish, verify your answer against...").
+
+**2. Don't use negative prompts (2:05 - 2:21):**
+Stop saying "do not do X" (e.g., "do not return markdown"). This confuses the model. Instead, tell it explicitly what to do (e.g., "write as smooth flowing text").
+
+**3. Routine tool access (2:21 - 2:58):**
+New routines often have full tool access by default, which is unsafe and costly. Go into your routines and remove unnecessary connector access.
+
+**4. Overloading connectors (2:58 - 3:32):**
+Avoid loading all tools upfront. Go to the chat mode -> plus icon -> connectors and set tool access to "load tools when needed" to save tokens.
+
+**5. MCPs and Context (3:32 - 4:18):**
+Adding *MCP* servers now has minimal impact on the context window because only tool names load initially; schemas are pulled on-demand. Use `/context` to verify token usage.
+
+**6. Skills coexistence (4:18 - 5:26):**
+Skills created in the terminal (under `dola/skills`) don't automatically sync with the desktop app’s *Claude Co-work*. You must manually add them in the customization window.
+
+**7. Subagent costs (5:26 - 6:39):**
+Agent teams can cost ~7x more tokens than standard sessions because each agent maintains its own context window. Use them for broad research, but keep task-specific delegation in the main session.
+
+**8. Fast mode risks (6:39 - 7:53):**
+Fast mode is expensive and uses API credits, not your subscription. Furthermore, enabling it mid-conversation forces Claude to pay for the full input price of existing context that was previously cached.
+
+**9. Editing Claude.md (7:53 - 8:51):**
+Edits to your *Claude.md* are only read at session start. To apply changes mid-session, you must restart or compact the session.
+
+**10. Long Claude.md files (8:51 - 10:37):**
+Keep *Claude.md* under 300–350 words. Long files cause the model to lose instructions. Use `/doctor` to get automated trimming suggestions.
+
+**11. Subagent limitations (10:37 - 11:57):**
+Subagents (especially built-in explore/plan agents) may skip your *Claude.md*. Restate critical constraints in the subagent's prompt if necessary.
+
+**12. Stop manual compacting (11:57 - 13:08):**
+Stop relying on default percentages. Use the `autocompact` setting to define a fixed token limit (e.g., 100k) to prevent performance degradation.
+
+**13. Context window size (13:08 - 14:05):**
+Larger context windows (e.g., 1 million tokens) show lower retrieval accuracy (~76%) compared to smaller windows (256k tokens at ~93% accuracy). Don't overstuff your session.
+
+**14. Selective compaction (14:05 - 14:48):**
+Use "rewind mode" (escape twice) to perform selective summarization ("summarize up to here") instead of treating compaction as an all-or-nothing action.
+
+**15. Edit plans with shortcuts (14:48 - 15:42):**
+Use `Ctrl + G` to edit the current plan directly in the browser rather than asking Claude to rework it via chat.
+
+**16. Cheaper model traps (15:42 - 16:30):**
+Switching to cheaper models (like *Haiku*) mid-conversation can be more expensive because it forces the system to rebuild the prompt cache from scratch.
+
+**17. Stop acting as a verification loop (16:30 - 17:56):**
+Use verification layers. Leverage stop hooks or an adversarial review agent so Claude verifies its own work before presenting it to you.
+
+**18. History deletion (17:56 - 18:52):**
+*Claude Code* clears history after 30 days. Change this in `settings.json` using the `cleanup_period_days` key to retain data longer.
+
+**19. Hidden commands (18:52 - 20:12):**
+Use `/doctor` for health checks, `/insights` for usage reports, `/btw` for side questions, and `/branch` to spawn a new conversation without losing existing context.
 ```

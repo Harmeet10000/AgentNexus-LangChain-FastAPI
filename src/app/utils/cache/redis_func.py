@@ -48,7 +48,16 @@ def _error(operation: str, exc: BaseException) -> CacheError:
 async def _run[T](operation: str, action: Any) -> CacheResult[T]:
     try:
         return Success(await action())
-    except (RedisError, RedisTimeoutError, OSError, TimeoutError, TypeError, ValueError, KeyError, IndexError) as exc:
+    except (
+        RedisError,
+        RedisTimeoutError,
+        OSError,
+        TimeoutError,
+        TypeError,
+        ValueError,
+        KeyError,
+        IndexError,
+    ) as exc:
         return Failure(_error(operation, exc))
 
 

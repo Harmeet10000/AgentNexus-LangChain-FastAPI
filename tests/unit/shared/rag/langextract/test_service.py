@@ -58,10 +58,11 @@ async def test_synchronous_provider_runs_outside_the_event_loop_thread() -> None
 
 
 async def test_provider_exception_becomes_a_typed_failure() -> None:
+    provider_error = RuntimeError("provider unavailable")
+
     class FailingProvider:
         def extract(self, _request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]:
-            msg = "provider unavailable"
-            raise RuntimeError(msg)
+            raise provider_error
 
     service = AsyncExtractionService(FailingProvider())
 
@@ -70,3 +71,7 @@ async def test_provider_exception_becomes_a_typed_failure() -> None:
     assert isinstance(outcome, ExtractionFailed)
     assert outcome.code is ExtractionFailureCode.PROVIDER_ERROR
     assert "provider unavailable" not in outcome.message
+    assert any(
+        "Traceback (most recent call last)" in note and "RuntimeError: provider unavailable" in note
+        for note in provider_error.__notes__
+    )

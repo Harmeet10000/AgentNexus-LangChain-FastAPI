@@ -17,9 +17,10 @@ Set `ENVIRONMENT=production`. This flips several safety defaults automatically:
 | Process | Command | Notes |
 | --- | --- | --- |
 | API | `uvicorn src.app.main:app --host 0.0.0.0 --port 5000 --workers $WORKERS` | Behind a TLS proxy |
-| Default worker | `celery -A app.connections.celery:celery_app worker -Q default` | Billing, email, short tasks |
-| Ingestion worker | `celery -A app.connections.celery:celery_app worker -Q ingestion --concurrency=2` | Minutes-long model work, isolated queue |
-| Beat scheduler | `celery -A app.connections.celery:celery_app beat` | Credit expiration/reconciliation crons |
+| Default worker | `celery -A app.worker.celery_app:celery_app worker -Q default --loglevel=info --concurrency=8` | Billing, email, short tasks |
+| Ingestion worker | `celery -A app.worker.celery_app:celery_app worker -Q ingestion --loglevel=info --concurrency=2` | Minutes-long model work, isolated queue |
+| Crawler worker | `celery -A app.worker.celery_app:celery_app worker -Q crawler --loglevel=info --concurrency=2` | Crawl/fetch work, isolated queue |
+| Beat scheduler | `celery -A app.worker.celery_app:celery_app beat --loglevel=info` | Credit expiration/reconciliation crons |
 
 The ingestion queue exists because document ingestion occupies a worker slot for minutes; sharing a queue with sub-second billing tasks caused head-of-line blocking.
 

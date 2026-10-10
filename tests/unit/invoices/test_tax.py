@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from app.features.billing.invoices.tax import (
+from app.features.billing.money import (
     GST_STATE_CODES,
     paisa_to_rupees,
     rupees_to_paisa,

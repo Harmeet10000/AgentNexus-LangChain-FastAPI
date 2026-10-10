@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.shared.langchain_layer.agents.tools import register_default_tools
-from app.shared.langgraph_layer.agent_saul.state import (
+from app.features.agent_saul.graph.state import (
     ComplianceOutput,
     RiskAnalysisOutput,
 )
@@ -32,7 +32,7 @@ class _StubLLM:
 
 
 def _build_with_captured_create_agent(monkeypatch: Any) -> dict[str, Any]:
-    from app.shared.langgraph_layer.agent_saul import factory as saul_factory
+    from app.features.agent_saul.graph import factory as saul_factory
 
     captured: dict[str, Any] = {}
 
@@ -47,7 +47,7 @@ def _build_with_captured_create_agent(monkeypatch: Any) -> dict[str, Any]:
 
 
 def test_risk_agent_declares_its_output_schema(monkeypatch: Any) -> None:
-    from app.shared.langgraph_layer.agent_saul.prompts import (
+    from app.features.agent_saul.graph.prompts import (
         _RISK_ANALYSIS_SYSTEM_PROMPT,
     )
 
@@ -59,7 +59,7 @@ def test_risk_agent_declares_its_output_schema(monkeypatch: Any) -> None:
 
 
 def test_compliance_agent_declares_its_output_schema(monkeypatch: Any) -> None:
-    from app.shared.langgraph_layer.agent_saul.prompts import (
+    from app.features.agent_saul.graph.prompts import (
         _COMPLIANCE_SYSTEM_PROMPT,
     )
 

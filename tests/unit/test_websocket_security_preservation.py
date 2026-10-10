@@ -13,7 +13,7 @@ import pytest
 from fastapi import WebSocketException
 
 from app.config import get_settings
-from app.features.auth.security import TokenClaims
+from app.security.tokens import TokenClaims
 from app.features.auth.websocket_security import (
     WebSocketSecurityContext,
     build_websocket_security_service,

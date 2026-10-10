@@ -1,48 +1,92 @@
-from datetime import UTC, datetime
+from typing import assert_never
 
-from beanie import PydanticObjectId
-from beanie.operators import Or, RegEx, Set
+from beanie.operators import Or, RegEx
 from pymongo.errors import PyMongoError
 from returns.result import Failure, Success
 
-from app.features.auth import User, UserRole
+from app.features.auth.errors import (
+    AuthAuthenticationError,
+    AuthAuthorizationError,
+    AuthConflictError,
+    AuthError,
+    AuthInfrastructureError,
+    AuthNotFoundError,
+    AuthValidationError,
+)
+from app.features.auth.identity import (
+    delete_user_document,
+    get_user_document,
+    set_user_active,
+    set_user_role,
+)
+from app.features.auth.model import User, UserRole
 from app.utils import logger, trace_layer
 
-from .errors import UsersInfrastructureError, UsersResult, UsersValidationError
+from .errors import (
+    UsersAuthorizationError,
+    UsersConflictError,
+    UsersError,
+    UsersInfrastructureError,
+    UsersNotFoundError,
+    UsersResult,
+    UsersValidationError,
+)
+
+
+def _translate_identity_error(error: AuthError, *, operation: str, user_id: str) -> UsersError:
+    """Map an auth-identity failure into the users error union (closed with assert_never)."""
+    details = {"user_id": user_id, **(error.details or {})}
+    match error:
+        case AuthValidationError():
+            return UsersValidationError(
+                message=error.message, details=details, source="users_repository"
+            )
+        case AuthNotFoundError():
+            return UsersNotFoundError(
+                message=error.message, details=details, source="users_repository", user_id=user_id
+            )
+        case AuthConflictError():
+            return UsersConflictError(
+                message=error.message,
+                details=details,
+                source="users_repository",
+                operation=operation,
+            )
+        case AuthAuthenticationError() | AuthAuthorizationError():
+            return UsersAuthorizationError(
+                message=error.message,
+                details=details,
+                source="users_repository",
+                operation=operation,
+            )
+        case AuthInfrastructureError():
+            return UsersInfrastructureError(
+                message=error.message,
+                details={**details, "error": error.message},
+                source="users_repository",
+                operation=operation,
+            )
+        case _:
+            assert_never(error)
 
 
 class UserAdminRepository:
     """Admin-scoped user queries.
 
-    Directly uses the Beanie User document. No Motor db instance needed —
-    Beanie manages the connection at the document class level after init.
+    Raw document reads/writes go through auth's identity contract
+    (`app.features.auth.identity`); failures are translated into the users
+    error union here. The admin listing query stays local to this use case.
     """
 
     @staticmethod
     @trace_layer("repository")
     async def find_by_id(user_id: str) -> UsersResult[User | None]:
-        if not PydanticObjectId.is_valid(user_id):
+        result = await get_user_document(user_id)
+        if isinstance(result, Failure):
             return Failure(
-                UsersValidationError(
-                    message="Invalid user identifier",
-                    details={"user_id": user_id},
-                    source="users_repository",
-                )
+                _translate_identity_error(result.failure(), operation="find_by_id", user_id=user_id)
             )
-        try:
-            return Success(await User.get(PydanticObjectId(user_id)))
-        except PyMongoError as exc:
-            logger.bind(operation="find_by_id", user_id=user_id, error=str(exc)).exception(
-                "users_repository_failed"
-            )
-            return Failure(
-                UsersInfrastructureError(
-                    message="User lookup failed",
-                    details={"user_id": user_id, "error": str(exc)},
-                    source="users_repository",
-                    operation="find_by_id",
-                )
-            )
+        return Success(result.unwrap())
 
     @staticmethod
     @trace_layer("repository")
@@ -88,58 +132,35 @@ class UserAdminRepository:
     @staticmethod
     @trace_layer("repository")
     async def update_role(user: User, role: UserRole) -> UsersResult[User]:
-        try:
-            await user.update(Set({User.role: role, User.updated_at: datetime.now(UTC)}))
-            user.role = role
-            return Success(user)
-        except PyMongoError as exc:
-            logger.bind(operation="update_role", user_id=str(user.id), error=str(exc)).exception(
-                "users_repository_failed"
-            )
+        result = await set_user_role(user, role)
+        if isinstance(result, Failure):
             return Failure(
-                UsersInfrastructureError(
-                    message="User role update failed",
-                    details={"user_id": str(user.id), "error": str(exc)},
-                    source="users_repository",
-                    operation="update_role",
+                _translate_identity_error(
+                    result.failure(), operation="update_role", user_id=str(user.id)
                 )
             )
+        return Success(result.unwrap())
 
     @staticmethod
     @trace_layer("repository")
     async def set_active(user: User, *, is_active: bool) -> UsersResult[User]:
-        try:
-            await user.update(Set({User.is_active: is_active, User.updated_at: datetime.now(UTC)}))
-            user.is_active = is_active
-            return Success(user)
-        except PyMongoError as exc:
-            logger.bind(operation="set_active", user_id=str(user.id), error=str(exc)).exception(
-                "users_repository_failed"
-            )
+        result = await set_user_active(user, is_active=is_active)
+        if isinstance(result, Failure):
             return Failure(
-                inner_value=UsersInfrastructureError(
-                    message="User active state update failed",
-                    details={"user_id": str(user.id), "error": str(exc)},
-                    source="users_repository",
-                    operation="set_active",
+                _translate_identity_error(
+                    result.failure(), operation="set_active", user_id=str(user.id)
                 )
             )
+        return Success(result.unwrap())
 
     @staticmethod
     @trace_layer("repository")
     async def hard_delete(user: User) -> UsersResult[None]:
-        try:
-            await user.delete()
-            return Success(None)
-        except PyMongoError as exc:
-            logger.bind(operation="hard_delete", user_id=str(user.id), error=str(exc)).exception(
-                "users_repository_failed"
-            )
+        result = await delete_user_document(user)
+        if isinstance(result, Failure):
             return Failure(
-                UsersInfrastructureError(
-                    message="User deletion failed",
-                    details={"user_id": str(user.id), "error": str(exc)},
-                    source="users_repository",
-                    operation="hard_delete",
+                _translate_identity_error(
+                    result.failure(), operation="hard_delete", user_id=str(user.id)
                 )
             )
+        return Success(None)

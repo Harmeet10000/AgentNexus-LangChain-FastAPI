@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from returns.result import Failure
 
 from app.connections import get_postgres_db
-from app.features.auth import CurrentVerifiedUser
+from app.features.auth.dependencies import CurrentVerifiedUser
 from app.features.billing.invoices.dependencies import InvoiceServiceDep
 from app.shared.result import render_result
 from app.utils import APIResponse

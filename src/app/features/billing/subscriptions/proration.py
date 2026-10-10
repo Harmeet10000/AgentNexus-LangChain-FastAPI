@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from returns.result import Failure, Success
 
-from app.features.billing.invoices.tax import split_tax_inclusive
+from app.features.billing.money import split_tax_inclusive
 
 from .dto import ProrationCalculation, ProrationDirection
 from .errors import SubscriptionValidationError

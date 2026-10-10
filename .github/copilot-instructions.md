@@ -28,3 +28,12 @@ Full project rules live in `.opencode/instructions/`. Open this directory and re
 | `RESULT-PATTERN.md` | returns.Result when/not-to-use, dual-method pattern |
 | `EXCEPTION-RULES.md` | raise vs catch, APIException hierarchy, e.add_note(), GEH dispatch |
 | `REFERENCE-MAP.md` | Key source files, Context7 |
+
+### Exception traceback preservation
+
+When an adapter converts a caught exception into a typed failure and discards
+the original, capture `traceback.format_exc()` inside the `except` block with
+`exc.add_note(...)` and send the note to internal diagnostics only. Do not put
+formatted tracebacks in API-facing error details. When raising a replacement
+exception, use `raise NewError(...) from exc`; the exception chain already
+preserves the traceback, so do not duplicate it in a note.

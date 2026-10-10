@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import Request
 
-from app.features.auth import get_refresh_token_repository, get_user_repository
+from app.features.auth.dependencies import get_refresh_token_repository, get_user_repository
 from app.utils import ServiceUnavailableException
 
 from .service import ProfileService

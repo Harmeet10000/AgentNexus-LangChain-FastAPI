@@ -16,7 +16,7 @@ from pyrate_limiter import BucketFullException, Limiter, Rate
 from pyrate_limiter.buckets import InMemoryBucket, RedisBucket
 from returns.result import Failure
 
-from app.features.auth.security import TokenClaims
+from app.security.tokens import TokenClaims
 from app.utils import logger
 
 if TYPE_CHECKING:

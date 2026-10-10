@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from app.features.documents.chunking import resolve_chunk_policy
 from app.features.documents.classification import (
     PreparedChunk,
     recover_clause_numbering,
 )
+from app.retrieval.chunk_policy import resolve_chunk_policy
 
 
 def test_four_legal_families_resolve_distinct_policies() -> None:

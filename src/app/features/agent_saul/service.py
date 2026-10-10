@@ -48,19 +48,19 @@ from app.features.agent_saul.dto import (
     WSTokenFrame,
     ws_inbound_adapter,
 )
-from app.features.auth.websocket_security import (
-    WebSocketIdleTimeout,
-    WebSocketSecurityContext,
-    WebSocketSecurityService,
-    WebSocketSecurityViolation,
-)
-from app.shared.langgraph_layer.agent_saul.state import (
+from app.features.agent_saul.graph.state import (
     GRAPH_NODE_NAMES,
     STATE_SCHEMA_VERSION,
     HITLInterruptType,
     StateSchemaVersionError,
     WorkflowStatus,
     hydrate_state,
+)
+from app.features.auth.websocket_security import (
+    WebSocketIdleTimeout,
+    WebSocketSecurityContext,
+    WebSocketSecurityService,
+    WebSocketSecurityViolation,
 )
 from app.utils import logger, trace_layer
 

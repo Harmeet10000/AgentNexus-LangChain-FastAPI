@@ -21,7 +21,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 
-from app.shared.langgraph_layer.agent_saul.graph import (
+from app.features.agent_saul.graph.graph import (
     SAUL_STEP_BUDGET,
     saul_runtime_config,
 )

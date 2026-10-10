@@ -23,9 +23,7 @@ _BRANCH_METHODS = ("bm25_search", "vector_search", "trigram_search")
 def test_every_branch_embeds_the_shared_filter_block() -> None:
     for method_name in _BRANCH_METHODS:
         source = inspect.getsource(getattr(_Repository, method_name))
-        assert "_FILTER_SQL" in source, (
-            f"{method_name} no longer embeds the shared filter block"
-        )
+        assert "_FILTER_SQL" in source, f"{method_name} no longer embeds the shared filter block"
 
 
 def test_every_filter_key_is_consumed_by_the_shared_block() -> None:

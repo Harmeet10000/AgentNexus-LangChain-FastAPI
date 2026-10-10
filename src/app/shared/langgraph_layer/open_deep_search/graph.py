@@ -540,9 +540,7 @@ def get_deep_researcher() -> Any:
         )
         deep_researcher_builder.add_node("clarify_with_user", clarify_with_user)
         deep_researcher_builder.add_node("write_research_brief", write_research_brief)
-        deep_researcher_builder.add_node(
-            "research_supervisor", get_supervisor_subgraph()
-        )
+        deep_researcher_builder.add_node("research_supervisor", get_supervisor_subgraph())
         deep_researcher_builder.add_node("final_report_generation", final_report_generation)
         deep_researcher_builder.add_edge(START, "clarify_with_user")
         deep_researcher_builder.add_edge("research_supervisor", "final_report_generation")

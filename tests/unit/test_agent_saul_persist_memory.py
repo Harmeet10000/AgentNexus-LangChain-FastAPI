@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app.shared.langgraph_layer.agent_saul.nodes import make_persist_memory_node
+from app.features.agent_saul.graph.nodes import make_persist_memory_node
 
 if TYPE_CHECKING:
     from typing import Any

@@ -1,7 +1,7 @@
 """The documents feature exposes only policy-driven structural chunking."""
 
-from app.features.documents.chunking import resolve_chunk_policy
 from app.features.documents.classification import ClassifiedDocument, ParsedDocument, segment_chunks
+from app.retrieval.chunk_policy import resolve_chunk_policy
 
 
 async def test_generic_ingestion_reaches_structure_aware_chunking() -> None:

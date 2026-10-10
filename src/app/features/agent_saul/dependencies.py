@@ -21,12 +21,9 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 
-from app.features.auth import (
-    RefreshTokenRepository,
-    WebSocketSecurityContext,
-    WebSocketSecurityService,
-)
 from app.features.auth.dependencies import WebSocketClaims, get_refresh_token_repository
+from app.features.auth.repository import RefreshTokenRepository
+from app.features.auth.websocket_security import WebSocketSecurityContext, WebSocketSecurityService
 from app.utils import ServiceUnavailableException
 
 # ---------------------------------------------------------------------------

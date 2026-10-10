@@ -8,9 +8,12 @@ the pinned sets below in the same commit.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
-from app.shared.langgraph_layer.retrieval_kb.graph import build_retrieval_graph
+if TYPE_CHECKING:
+    from typing import Any
+
+from app.features.documents.retrieval_graph.graph import build_retrieval_graph
 
 
 class _StubLlm:
@@ -19,9 +22,7 @@ class _StubLlm:
 
 
 def _shape() -> tuple[set[str], set[tuple[str, str]]]:
-    graph = build_retrieval_graph(
-        llm=_StubLlm(), repo=object(), redis=None, graphiti=object()
-    )
+    graph = build_retrieval_graph(llm=_StubLlm(), repo=object(), redis=None, graphiti=object())
     drawable = graph.get_graph()
     return (
         set(drawable.nodes.keys()),

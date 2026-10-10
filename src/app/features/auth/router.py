@@ -7,6 +7,7 @@ from returns.result import Failure
 from app.config import get_settings
 from app.connections.mongodb import get_mongodb
 from app.connections.redis import get_redis
+from app.security.tokens import OAUTH_STATE_COOKIE
 from app.shared.result import render_result
 from app.utils import APIResponse, http_response
 from app.utils.rate_limit.dependencies import get_rate_limiter
@@ -15,7 +16,6 @@ from .dependencies import (
     AuthServiceDep,
     CurrentClaims,
     CurrentVerifiedUser,
-    raise_auth_error,
 )
 from .dto import (
     ForgotPasswordRequest,
@@ -33,7 +33,6 @@ from .dto import (
 )
 from .errors import AuthAuthenticationError, AuthValidationError
 from .repository import RefreshTokenRepository, UserRepository
-from .security import OAUTH_STATE_COOKIE
 from .service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -244,10 +243,10 @@ async def oauth_authorize(
     provider: Annotated[str, Path()],
     response: Response,
     service: AuthServiceDep,
-) -> APIResponse[OAuthAuthorizeResponse]:
+) -> APIResponse[OAuthAuthorizeResponse] | APIResponse[tuple[str, str]]:
     result = await service.oauth_get_authorization_url(provider)
     if isinstance(result, Failure):
-        raise_auth_error(result.failure())
+        return render_result(result, response, message="Authorization URL generation failed")
     url, signed_state = result.unwrap()
     # samesite="lax" is intentional — "strict" blocks cookies on cross-site redirects,
     # which is exactly the OAuth callback redirect from the provider.

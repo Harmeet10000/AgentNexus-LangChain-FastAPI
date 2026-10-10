@@ -1,0 +1,7 @@
+/
+/api-docs
+/api-redoc
+/docs/oauth2-redirect
+/metrics
+/swagger.json
+/{path_name:path}

@@ -59,9 +59,9 @@ def test_distinct_parties_do_not_collide() -> None:
     assert acme_key != canonical_identity_key(entity_type="ORG", name="Acmebet Inc")
     # Same stem under different entity types stays apart: a person and the
     # company they are named after are not one node.
-    assert canonical_identity_key(
-        entity_type="ORG", name="Acme"
-    ) != canonical_identity_key(entity_type="PERSON", name="Acme")
+    assert canonical_identity_key(entity_type="ORG", name="Acme") != canonical_identity_key(
+        entity_type="PERSON", name="Acme"
+    )
 
 
 def test_canonicalisation_is_deterministic() -> None:
@@ -222,9 +222,7 @@ async def test_graphiti_upsert_skips_when_upstream_failed() -> None:
     node = make_graphiti_upsert_node(_Graphiti())
     state: IngestionState = {
         "doc_id": "doc-1",
-        "failure": IngestionGraphValidationError(
-            message="upstream refused", source="test"
-        ),
+        "failure": IngestionGraphValidationError(message="upstream refused", source="test"),
     }
     result = await node(state)
     assert result["graphiti_episode_ids"] == []

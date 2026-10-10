@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.features.auth import require_role
+from app.features.auth.dependencies import require_role
 from app.features.auth.model import UserRole
 from app.shared.result import render_result
 from app.utils import APIResponse, http_response

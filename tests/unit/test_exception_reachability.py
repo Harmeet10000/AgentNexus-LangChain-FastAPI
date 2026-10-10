@@ -56,7 +56,7 @@ def test_reachability_over_ancestors():
         "CeleryError should be caught (covers TaskDispatchError family)"
     )
     assert "TaskDispatchError" not in raises, "TaskDispatchError base should not be raised directly"
-    from app.connections.celery import (
+    from app.shared.jobs.registry import (
         TaskDispatchError,
         TaskPayloadValidationError,
         UnregisteredTaskError,
@@ -89,7 +89,7 @@ def test_abstract_base_not_reported_as_unreachable():
         raises |= _collect_raises(p)
         excepts |= _collect_excepts(p)
     assert "TaskDispatchError" not in raises
-    from app.connections.celery import (
+    from app.shared.jobs.registry import (
         TaskDispatchError,
         TaskPayloadValidationError,
         UnregisteredTaskError,

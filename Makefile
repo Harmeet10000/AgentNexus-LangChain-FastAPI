@@ -1,4 +1,4 @@
-.PHONY: help lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery celery-ingestion celery-crawler celery-beat celery-command image-build image-build-prod image-push image-tag
+.PHONY: help check-imports lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery celery-ingestion celery-crawler celery-beat celery-command image-build image-build-prod image-push image-tag
 
 help:
 	@echo "Available commands:"
@@ -22,6 +22,9 @@ help:
 	@echo "  make image-push     - Push prod image to GHCR (requires IMAGE_TAG)"
 
 # Code Quality
+check-imports:
+	uv run lint-imports
+
 lint:
 	uv run ruff check --fix .
 
@@ -73,7 +76,7 @@ migrate-history:
 # path, so both spellings resolve — to two *different* module objects, each with its own task
 # registry, because Python keys sys.modules by the import string. The task modules are listed
 # as `tasks.*`, which is the same rooting, so `app.` is the identity the registry already uses.
-CELERY_APP := app.connections.celery:celery_app
+CELERY_APP := app.worker.celery_app:celery_app
 CELERY_WORKER_CMD := uv run celery -A $(CELERY_APP) worker --loglevel=info
 
 # The three commands the deployment actually runs, all derived from the one above so

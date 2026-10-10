@@ -4,7 +4,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.shared.langgraph_layer.agent_saul.nodes import (
+from app.features.agent_saul.graph.nodes import (
     delegation_pairs_from,
     make_compliance_node,
     make_risk_analysis_node,

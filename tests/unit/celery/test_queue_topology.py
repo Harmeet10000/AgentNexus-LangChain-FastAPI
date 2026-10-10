@@ -34,13 +34,13 @@ import pytest
 from celery.exceptions import QueueNotFound
 
 from app.config import get_settings
-from app.connections.celery_task_names import (
+from app.shared.jobs.names import (
     CRAWLER_CRAWL,
     DOCUMENTS_INGEST,
     INGESTION_TASK_NAMES,
     SEND_PASSWORD_RESET_EMAIL,
-    TASK_DECLARING_MODULES,
 )
+from app.worker.task_modules import TASK_DECLARING_MODULES
 
 pytestmark = pytest.mark.unit
 

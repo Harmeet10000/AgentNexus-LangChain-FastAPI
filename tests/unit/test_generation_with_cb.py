@@ -3,31 +3,28 @@ project defects propagate unwrapped and never count toward the threshold."""
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 
-import app.api.generation_with_cb as gen_mod
+import app.examples.generation_with_cb as gen_mod
 from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
     from typing import Any
 
 
 class _RecordingBreaker:
-    """Mimics CircuitBreakerService.protect semantics: any exception escaping
-    the guarded block counts as a downstream failure."""
+    """Mimics circuit-breaker call semantics for isolated endpoint tests."""
 
     def __init__(self) -> None:
         self.failures = 0
 
-    @asynccontextmanager
-    async def protect(self, *args: Any, **kwargs: Any) -> AsyncIterator[None]:
+    async def call(self, name: str, operation: Any) -> Any:
+        _ = name
         try:
-            yield
+            return await operation()
         except Exception:
             self.failures += 1
             raise
@@ -68,38 +65,42 @@ class _FakeClient:
 
 async def test_provider_failure_trips_breaker() -> None:
     breaker = _RecordingBreaker()
-    original = gen_mod.AsyncClient
-    gen_mod.AsyncClient = lambda: _FakeClient(error=httpx.ConnectError("down"))  # type: ignore[assignment]
+    original = gen_mod.httpx.AsyncClient
+    gen_mod.httpx.AsyncClient = lambda: _FakeClient(  # type: ignore[assignment]
+        error=httpx.ConnectError("down")
+    )
     try:
         with pytest.raises(ServiceUnavailableException):
             await gen_mod.generate_text(breaker)  # type: ignore[arg-type]
     finally:
-        gen_mod.AsyncClient = original
+        gen_mod.httpx.AsyncClient = original
     assert breaker.failures == 1
 
 
 async def test_type_error_does_not_trip_breaker() -> None:
     """A TypeError in project code is not relabeled and trips nothing."""
     breaker = _RecordingBreaker()
-    original = gen_mod.AsyncClient
-    gen_mod.AsyncClient = lambda: _FakeClient(  # type: ignore[assignment]
+    original = gen_mod.httpx.AsyncClient
+    gen_mod.httpx.AsyncClient = lambda: _FakeClient(  # type: ignore[assignment]
         response=_FakeResponse(TypeError("project bug"))
     )
     try:
         with pytest.raises(TypeError, match="project bug"):
             await gen_mod.generate_text(breaker)  # type: ignore[arg-type]
     finally:
-        gen_mod.AsyncClient = original
+        gen_mod.httpx.AsyncClient = original
     assert breaker.failures == 0
 
 
 async def test_success_returns_generated_text() -> None:
     breaker = _RecordingBreaker()
-    original = gen_mod.AsyncClient
-    gen_mod.AsyncClient = lambda: _FakeClient(response=_FakeResponse({"text": "hi"}))  # type: ignore[assignment]
+    original = gen_mod.httpx.AsyncClient
+    gen_mod.httpx.AsyncClient = lambda: _FakeClient(  # type: ignore[assignment]
+        response=_FakeResponse({"text": "hi"})
+    )
     try:
         result = await gen_mod.generate_text(breaker)  # type: ignore[arg-type]
     finally:
-        gen_mod.AsyncClient = original
+        gen_mod.httpx.AsyncClient = original
     assert result == {"generated_text": "hi"}
     assert breaker.failures == 0

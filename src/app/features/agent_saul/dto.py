@@ -15,7 +15,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
 
-from app.shared.langgraph_layer.agent_saul.state import (
+from app.features.agent_saul.graph.state import (
     HITLInterruptType,
     PlanStep,
     WorkflowStatus,

@@ -46,7 +46,7 @@ jobs:
           --health-retries 5
 
       redis:
-        image: redis:alpine
+        image: redis:7.4-alpine
         ports:
           - 6379:6379
         options: >-
@@ -82,6 +82,9 @@ jobs:
 
       - name: Lint code with ruff
         run: uv run ruff check src/ tests/
+
+      - name: Enforce import boundaries
+        run: uv run lint-imports
 
       - name: Format check with ruff
         run: uv run ruff format --check src/ tests/

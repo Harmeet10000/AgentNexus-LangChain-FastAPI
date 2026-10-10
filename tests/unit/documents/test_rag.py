@@ -1,5 +1,5 @@
-from app.features.documents.fusion import RankedChunk
 from app.features.documents.rag import SearchChunkRecord, assemble_rag_context
+from app.retrieval.fusion import RankedChunk
 
 
 def test_assemble_rag_context_groups_by_document_and_merges_adjacent_chunks() -> None:
@@ -45,8 +45,8 @@ def test_assemble_rag_context_groups_by_document_and_merges_adjacent_chunks() ->
 
 
 def test_assemble_rag_context_drops_sections_at_the_token_boundary() -> None:
-    from app.features.documents.fusion import RankedChunk
     from app.features.documents.rag import SearchChunkRecord, assemble_rag_context
+    from app.retrieval.fusion import RankedChunk
 
     def ten_words(index: int) -> str:
         return " ".join(f"w{i}" for i in range(index * 10, index * 10 + 10))

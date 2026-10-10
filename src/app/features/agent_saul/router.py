@@ -13,12 +13,14 @@ validation of the first inbound frame, and structured error emission.
 from contextlib import suppress
 from uuid import uuid4
 
-from fastapi import APIRouter, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Request, Response, WebSocket, WebSocketDisconnect
 
 from app.config import get_settings
-from app.features.auth import CurrentClaims, WebSocketSecurityViolation
+from app.features.auth.dependencies import CurrentClaims
+from app.features.auth.websocket_security import WebSocketSecurityViolation
 from app.shared.result import render_result
 from app.utils import APIResponse, ErrorCode, ValidationException, logger
+from app.utils.rate_limit.dependencies import get_rate_limiter
 
 from .dependencies import (
     AgentSaulDepsAnnotated,
@@ -37,6 +39,8 @@ router = APIRouter(
     prefix="/agent-saul",
     tags=["agent-saul"],
 )
+
+limit_agent_session_creation = get_rate_limiter(10, 10, 60, scope="agent-sessions")
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +76,7 @@ def get_websocket_url(request: Request, path: str) -> str:
 @router.post(
     "/sessions",
     summary="Create a new Agent Saul session and receive a thread_id + WS URL",
+    dependencies=[Depends(limit_agent_session_creation)],
 )
 async def create_session(
     body: CreateSessionRequest,

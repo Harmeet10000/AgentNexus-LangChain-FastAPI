@@ -52,9 +52,9 @@ def create_redis_client(url: str) -> Redis:
 
 
 async def close_redis_client(client: Redis | None) -> None:
-    """Close the process-wide Redis client and its connection pool."""
+    """Close Redis clients and any connection pools they own."""
     if client is not None:
-        await client.aclose(close_connection_pool=True)
+        await client.aclose()
 
 
 async def get_redis(connection: HTTPConnection) -> Redis:

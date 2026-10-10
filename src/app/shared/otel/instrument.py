@@ -21,9 +21,7 @@ def _instrument(component: str, factory: Callable[[], Any]) -> None:
     try:
         factory().instrument()
     except Exception as exc:  # noqa: BLE001 — optional instrumentation must not crash app
-        _diagnostics.append(
-            {"component": component, "status": "failed", "error": str(exc)}
-        )
+        _diagnostics.append({"component": component, "status": "failed", "error": str(exc)})
         logger.bind(component=component, error=str(exc)).exception(
             "OTel auto-instrumentation failed, continuing"
         )

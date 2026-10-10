@@ -13,6 +13,9 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from neo4j import AsyncDriver
 from neo4j.exceptions import ConfigurationError, ServiceUnavailable
 from playwright.async_api import Error as PlaywrightError
+from redis.asyncio import Redis
+from redis_fastapi import get_async_redis
+from starlette.requests import Request
 
 from app.config import get_settings
 from app.connections import (
@@ -31,7 +34,6 @@ from app.connections import (
     create_mongo_client,
     create_object_store,
     create_outbox_relay,
-    create_redis_client,
     create_tavily_http_client,
     get_shared_httpx_client,
     init_db,
@@ -41,8 +43,10 @@ from app.connections import (
     setup_graphiti_indices,
     teardown_langgraph_checkpointer,
 )
-from app.features.auth import TokenAuditLog, User, build_websocket_security_service
+from app.features.auth.model import User
 from app.features.auth.repository import RefreshTokenRepository
+from app.features.auth.token_audit_log import TokenAuditLog
+from app.features.auth.websocket_security import build_websocket_security_service
 from app.features.documents.service import process_document_ingestion
 from app.features.health.health_check import ALL_PROBES, check_cognee, check_graphiti
 from app.lifecycle.graphs import (
@@ -57,13 +61,15 @@ from app.utils import DependencyHealth, ServiceUnavailableException, logger
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
-    from redis.asyncio.client import Redis
 
 
-async def setup_redis(url: str) -> redis.asyncio.Redis | None:
-    """Initialize Redis with health check."""
+async def setup_redis(app: FastAPI) -> Redis | None:
+    """Get the SDK-managed Redis client and verify its connection."""
     try:
-        client: Redis = create_redis_client(url)
+        client = await get_async_redis(Request({"type": "http", "app": app}))
+        if not isinstance(client, Redis):
+            msg = "Redis Cluster mode is not supported by the application Redis adapter"
+            raise TypeError(msg)
         await client.ping()
     except (ConnectionError, TimeoutError, OSError, redis.exceptions.RedisError) as exc:
         logger.bind(component="redis", error=str(exc)).warning(
@@ -523,7 +529,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
                     document_models=[User, TokenAuditLog],
                 )
             )
-            redis_task = tg.create_task(coro=setup_redis(url=settings.REDIS_URL))
+            redis_task = tg.create_task(coro=setup_redis(app=app))
             neo_task = tg.create_task(coro=setup_neo4j())
     except ExceptionGroup as exc_group:
         logger.bind(error=str(exc_group)).warning(

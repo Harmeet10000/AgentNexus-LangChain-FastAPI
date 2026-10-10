@@ -91,9 +91,7 @@ def build_otel_log_record(record: Any) -> OTelLogRecord:
         trace_id=trace_id,
         span_id=span_id,
         trace_flags=trace_flags,  # ty: ignore[invalid-argument-type]
-        severity_number=_SEVERITY_MAP.get(
-            record["level"].name.upper(), SeverityNumber.INFO
-        ),
+        severity_number=_SEVERITY_MAP.get(record["level"].name.upper(), SeverityNumber.INFO),
         severity_text=record["level"].name,
         body=record["message"],
         attributes=attributes,

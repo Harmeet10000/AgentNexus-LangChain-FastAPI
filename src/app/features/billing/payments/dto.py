@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003
+from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.features.billing.payments.currency import CurrencyCode  # noqa: TC001
-from app.features.billing.payments.model import PaymentMethod  # noqa: TC001
+from app.features.billing.payments.currency import CurrencyCode
+from app.features.billing.payments.model import PaymentMethod
 
 
 class PaymentRecordDTO(BaseModel):
