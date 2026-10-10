@@ -12,8 +12,8 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.shared.result.diagnostics import add_database_error_note
 from app.observability.logging import trace_layer
+from app.shared.result.diagnostics import add_database_error_note
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 
 from .constants import (

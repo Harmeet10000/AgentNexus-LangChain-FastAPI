@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.observability.logging import logger
+
 from ...utils import DependencyHealth
 
 if TYPE_CHECKING:

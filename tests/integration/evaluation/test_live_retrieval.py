@@ -16,6 +16,8 @@ import pytest
 from returns.result import Success
 from sqlalchemy import select
 
+from app.ai.evaluation.report import EvaluationReport, write_report
+from app.ai.evaluation.schema import load_golden_set
 from app.config import get_settings
 from app.connections import init_db
 from app.features.documents import service as document_service
@@ -27,8 +29,6 @@ from app.features.documents.evaluation import (
 from app.features.documents.models import UnifiedChunk, UnifiedDocument
 from app.features.documents.repository import DocumentRepository
 from app.features.documents.service import DocumentQueryService
-from app.ai.evaluation.report import EvaluationReport, write_report
-from app.ai.evaluation.schema import load_golden_set
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -9,10 +9,10 @@ from fastapi import FastAPI
 from opentelemetry import metrics
 
 from app.config import get_settings
-from app.observability.logging import logger
-from app.utils import NotFoundException
 from app.mcp.client.manager import get_mcp_client_manager
 from app.mcp.common.models import MCPToolCatalogEntry, MCPToolResponse
+from app.observability.logging import logger
+from app.utils import NotFoundException
 
 _tracer = otel_trace.get_tracer(__name__)
 _meter = metrics.get_meter(__name__)

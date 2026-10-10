@@ -1,5 +1,9 @@
 """Document services split by use case: ingest, query, delete."""
 
+from app.ai.embeddings import embed_text, embed_texts
+
+from app.features.documents.classification import classify_document, segment_chunks
+from app.features.documents.parser import parse_document
 from .ingest import (
     DocumentCommandService,
     _checkpoint_ingestion_transaction,
@@ -18,13 +22,12 @@ from .ingest import (
     run_document_ingestion_task,
 )
 from .query import (
+    _SEARCH_BRANCHES,
     RETRIEVAL_BRANCHES,
     DocumentQueryService,
     RetrievalBranchPolicy,
-    _BranchInput,
-    _LegalPreparation,
-    _SEARCH_BRANCHES,
     _batched,
+    _BranchInput,
     _build_answer_cache_key,
     _build_cache_key,
     _build_query_plan,
@@ -33,6 +36,7 @@ from .query import (
     _generate_answer,
     _grade_context,
     _graphiti_filter_chunk_ids,
+    _LegalPreparation,
     _merge_warning_lists,
     _row_to_chunk,
     _run_bm25_branch,
@@ -47,12 +51,12 @@ from .query import (
 
 __all__ = [
     "RETRIEVAL_BRANCHES",
+    "_SEARCH_BRANCHES",
     "DocumentCommandService",
     "DocumentQueryService",
     "RetrievalBranchPolicy",
     "_BranchInput",
     "_LegalPreparation",
-    "_SEARCH_BRANCHES",
     "_batched",
     "_build_answer_cache_key",
     "_build_cache_key",
@@ -82,8 +86,13 @@ __all__ = [
     "_warnings_from_rows",
     "_write_contract_events",
     "_write_extracted_clause_episodes",
+    "classify_document",
+    "embed_text",
+    "embed_texts",
     "lookup_to_rows",
+    "parse_document",
     "process_document_ingestion",
     "retrieve_fused",
     "run_document_ingestion_task",
+    "segment_chunks",
 ]

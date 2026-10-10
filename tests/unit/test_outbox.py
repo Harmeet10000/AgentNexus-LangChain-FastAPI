@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.events.helper import OUTBOX_CHANNEL, with_outbox
+from app.events.writer import OUTBOX_CHANNEL, with_outbox
 
 
 class TestWithOutbox:

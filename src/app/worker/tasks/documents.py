@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 from app.config import get_settings
 from app.features.documents.service import run_document_ingestion_task
-from app.shared.jobs.names import DOCUMENTS_INGEST
 from app.observability.logging import logger
+from app.shared.jobs.names import DOCUMENTS_INGEST
 from app.utils import InfrastructureException
 from app.worker.app import celery_app
 from app.worker.documents import (

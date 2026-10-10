@@ -105,7 +105,7 @@ async def test_the_structured_output_strategy_is_explicit_and_pinned() -> None:
     pin moves, so a future model change surfaces as a diff rather than an
     invisible upgrade.
     """
-    from app.shared.langchain_layer import models as lc_models
+    from app.ai import llm as lc_models
 
     captured: dict[str, Any] = {}
 
@@ -131,7 +131,7 @@ async def test_the_structured_output_strategy_is_explicit_and_pinned() -> None:
 
 
 def test_handoff_tools_are_registered_and_tagged() -> None:
-    from app.shared.langchain_layer.agents.tools import register_default_tools
+    from app.ai.tools import register_default_tools
 
     registry = register_default_tools()
     names = {t.name for t in registry.by_tags("handoff")}
@@ -139,7 +139,7 @@ def test_handoff_tools_are_registered_and_tagged() -> None:
 
 
 async def test_a_transfer_tool_returns_a_routing_payload() -> None:
-    from app.shared.langchain_layer.agents.tools import get_tool_registry, register_default_tools
+    from app.ai.tools import get_tool_registry, register_default_tools
 
     register_default_tools()
     tool = get_tool_registry().get("transfer_to_risk")
@@ -154,17 +154,13 @@ async def test_a_transfer_tool_returns_a_routing_payload() -> None:
 def test_saul_agents_have_zero_empty_tool_lists() -> None:
     from pathlib import Path
 
-    source = Path("src/app/features/agent_saul/graph/factory.py").read_text(
-        encoding="utf-8"
-    )
+    source = Path("src/app/features/agent_saul/graph/factory.py").read_text(encoding="utf-8")
     assert "tools=[]" not in source, "agents must bind their tools explicitly"
 
 
 def test_saul_factory_installs_the_retry_middleware() -> None:
     from pathlib import Path
 
-    source = Path("src/app/features/agent_saul/graph/factory.py").read_text(
-        encoding="utf-8"
-    )
+    source = Path("src/app/features/agent_saul/graph/factory.py").read_text(encoding="utf-8")
     assert "ToolRetryMiddleware" in source
     assert "handle_tool_errors" not in source

@@ -17,10 +17,10 @@ from functools import partial
 from returns.result import Failure
 
 from app.config import get_settings
-from app.shared.jobs.names import SEND_PASSWORD_RESET_EMAIL, SEND_VERIFICATION_EMAIL
-from app.shared.jobs.payloads import PasswordResetEmailPayload, VerificationEmailPayload
 from app.connections.mailer import config_from_settings, send_template
 from app.observability.logging import logger
+from app.shared.jobs.names import SEND_PASSWORD_RESET_EMAIL, SEND_VERIFICATION_EMAIL
+from app.shared.jobs.payloads import PasswordResetEmailPayload, VerificationEmailPayload
 from app.utils import ExternalServiceException
 from app.worker.app import celery_app
 from app.worker.reliability import CircuitBreakerOpenError, IdempotencyLockError

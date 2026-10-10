@@ -47,10 +47,10 @@ from typing import TYPE_CHECKING
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from app.config import get_settings
+from app.observability.logging import logger
 from app.utils.embedding import normalize_embedding
 from app.utils.exceptions import InfrastructureException, ValidationException
 from app.utils.json_serializer import from_json_float_list, to_float_list_str
-from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis

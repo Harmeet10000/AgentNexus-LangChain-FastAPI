@@ -1,30 +1,15 @@
-"""Shared services module."""
+"""Shared service classifiers (error unions only).
 
-from app.connections.mailer import MailerConfig, send_template
-from app.resilience.rate_limit import (
-    RateLimitConfig,
-    RateLimiter,
-    RateLimitScope,
-    build_rate_limiter,
-)
-from app.connections.tavily import (
-    SearchResponse,
-    SearchResult,
-    get_context,
-    get_tavily_client,
-    search,
+Implementations moved to their owners: mail/Tavily/storage adapters live in
+`app.connections`, rate limiting in `app.resilience`. The `errors.py` unions
+stay here — the classifier rule permits shared error modules, and
+`app.connections` adapters own no error files of their own.
+"""
+
+from .errors import (
+    MailerError,
+    StorageError,
+    TavilyError,
 )
 
-__all__ = [
-    "MailerConfig",
-    "RateLimitConfig",
-    "RateLimitScope",
-    "RateLimiter",
-    "SearchResponse",
-    "SearchResult",
-    "build_rate_limiter",
-    "get_context",
-    "get_tavily_client",
-    "search",
-    "send_template",
-]
+__all__ = ["MailerError", "StorageError", "TavilyError"]

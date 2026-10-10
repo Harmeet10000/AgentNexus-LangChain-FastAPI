@@ -3,16 +3,22 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from returns.result import Failure, Success
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.features.billing.credits.models import CreditConsumption
+from app.features.billing.credits.models import CreditConsumption, CreditStatus, UserCredit
 from app.shared.result.diagnostics import add_database_error_note
 
-from .exceptions import CreditConsumptionConflictError, CreditInfrastructureError
+from .exceptions import (
+    CreditConflictError,
+    CreditConsumptionConflictError,
+    CreditInfrastructureError,
+    CreditNotFoundError,
+)
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -149,24 +155,10 @@ class ConsumptionRepository:
                 )
             )
 
+
 # ── from credit_repository.py ──
 """UserCredit repository with dual-method pattern."""
 
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING
-
-from returns.result import Failure, Success
-from sqlalchemy import func, select, update
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-
-from app.features.billing.credits.models import CreditStatus, UserCredit
-from app.shared.result.diagnostics import add_database_error_note
-
-from .exceptions import (
-    CreditConflictError,
-    CreditInfrastructureError,
-    CreditNotFoundError,
-)
 
 if TYPE_CHECKING:
     from uuid import UUID

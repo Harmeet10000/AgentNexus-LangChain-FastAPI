@@ -17,8 +17,8 @@ from app.features.crawler.config import get_crawler_config
 if TYPE_CHECKING:
     from redis.asyncio import Redis
 
-    from app.features.crawler.crawler import WebCrawler
     from app.features.crawler.config import CrawlerConfig
+    from app.features.crawler.crawler import WebCrawler
 
 
 def _ensure_playwright_platform_override() -> None:

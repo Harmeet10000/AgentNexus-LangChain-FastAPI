@@ -31,10 +31,10 @@ from app.features.documents.constants import (
     RRF_K,
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
-from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
-from app.resilience.idempotency import IdempotencyGuard, ToolResult
-from app.shared.result.diagnostics import add_database_error_note
 from app.observability.logging import logger
+from app.resilience.idempotency import IdempotencyGuard, ToolResult
+from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
+from app.shared.result.diagnostics import add_database_error_note
 
 _MIN_SOURCE_THRESHOLD: int = 2
 _STATUTE_SEARCH_LIMIT: int = 5

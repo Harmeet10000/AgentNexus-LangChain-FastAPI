@@ -9,8 +9,8 @@ from returns.result import Failure, Success
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.shared.result.diagnostics import add_database_error_note
 from app.observability.logging import trace_layer
+from app.shared.result.diagnostics import add_database_error_note
 
 from .exceptions import (
     SubscriptionDuplicateError,

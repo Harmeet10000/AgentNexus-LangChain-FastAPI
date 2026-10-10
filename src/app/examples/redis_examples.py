@@ -26,8 +26,8 @@ from redis.asyncio import Redis  # noqa: TC002
 from returns.result import Failure, Success
 
 from app.connections.redis import get_redis
-from app.shared.result import APIResponse, render_result  # noqa: TC001
 from app.observability.logging import logger
+from app.shared.result import APIResponse, render_result  # noqa: TC001
 from app.utils.cache import (
     delete_cache,
     delete_list,

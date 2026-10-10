@@ -7,11 +7,11 @@ import pytest
 from crawl4ai import AsyncWebCrawler
 from fakeredis.aioredis import FakeRedis
 
+from app.features.crawler.crawler import WebCrawler
 from app.features.crawler.dto import CrawlChunk, CrawlResponse, CrawlResultItem
 from app.features.crawler.job_store import CrawlJobStore
-from app.features.crawler import WebCrawler
-from app.features.crawler.validator import validate_browser_result_urls
 from app.features.crawler.tools.crawl_jobs import get_crawl_job_tools
+from app.features.crawler.validator import validate_browser_result_urls
 
 
 def test_browser_result_urls_reject_non_http_schemes() -> None:
@@ -27,7 +27,7 @@ def test_browser_result_urls_reject_non_http_schemes() -> None:
 def test_cache_key_is_isolated_by_crawler_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.shared.crawler.crawler as crawler_module
+    import app.features.crawler.crawler as crawler_module
 
     monkeypatch.setattr(crawler_module, "_crawl4ai_version", lambda: "1.0.0")
     first = WebCrawler()._get_cache_key("https://example.com")
@@ -47,7 +47,7 @@ async def test_finish_single_result_rejects_private_redirect(
             return False, "Hostname resolves to a private address: 10.0.0.5"
         return True, ""
 
-    monkeypatch.setattr("app.shared.crawler.crawler.validate_navigation_destination", deny)
+    monkeypatch.setattr("app.features.crawler.crawler.validate_navigation_destination", deny)
     raw = SimpleNamespace(
         success=True,
         url="https://evil-rebind.example/admin",

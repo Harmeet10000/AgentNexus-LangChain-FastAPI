@@ -43,9 +43,9 @@ for _mod in (
 import pytest
 from returns.result import Success
 
-from app.features.billing.credits.dto import CreditConsumptionResult
 from app.features.billing.credits.dto import (
     CreditBalanceResponse,
+    CreditConsumptionResult,
     CreditGrantDTO,
     CreditGrantResponse,
     CreditHistoryResponse,

@@ -3,8 +3,8 @@ from __future__ import annotations
 from pydantic import TypeAdapter, ValidationError
 
 from app.config import get_settings
-from app.utils import ValidationException
 from app.mcp.common.models import MCPClientServerConfig
+from app.utils import ValidationException
 
 _MCP_CONFIG_ADAPTER = TypeAdapter(list[MCPClientServerConfig])
 

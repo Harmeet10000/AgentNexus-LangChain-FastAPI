@@ -20,8 +20,8 @@ from langchain_core.tools import tool
 from langchain_core.tools.base import BaseTool
 
 from app.ai.memory.memory_scope import PRECEDENT_SCOPE
-from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.observability.logging import logger
+from app.resilience.idempotency import IdempotencyGuard, ToolResult
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine

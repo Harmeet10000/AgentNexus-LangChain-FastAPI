@@ -9,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.connections import get_postgres_db, get_redis
+from app.connections.object_storage import StorageService
 from app.features.auth.dependencies import CurrentClaims
 from app.shared.langchain_layer import build_chat_model
-from app.connections.object_storage import StorageService
 
 from .repository import DocumentRepository
 from .service import DocumentCommandService, DocumentQueryService

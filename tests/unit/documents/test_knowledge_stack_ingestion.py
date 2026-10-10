@@ -6,6 +6,10 @@ from typing import TYPE_CHECKING, cast
 import langextract as lx
 from returns.result import Failure, Success
 
+from app.extraction.langextract.service import (
+    AsyncExtractionService,
+    ExtractionSucceeded,
+)
 from app.features.documents import service as document_service
 from app.features.documents.classification import ClassifiedDocument, ParsedDocument, PreparedChunk
 from app.features.documents.dto import IngestionJob
@@ -17,10 +21,6 @@ from app.features.documents.service import (
     DocumentQueryService,
     _write_extracted_clause_episodes,
     process_document_ingestion,
-)
-from app.extraction.langextract.service import (
-    AsyncExtractionService,
-    ExtractionSucceeded,
 )
 
 if TYPE_CHECKING:
@@ -99,14 +99,13 @@ async def _run_ingestion(
             extract = cast("Any", provider)
             return extract(request)
 
-    monkeypatch.setattr(document_service, "parse_document", parse_document)
+    monkeypatch.setattr(document_service.ingest, "parse_document", parse_document)
     monkeypatch.setattr(
-        document_service,
-        "classify_document",
+        document_service.ingest, "classify_document",
         lambda **_kwargs: ClassifiedDocument(document_kind="generic"),
     )
-    monkeypatch.setattr(document_service, "segment_chunks", segment_chunks)
-    monkeypatch.setattr(document_service, "_embed_chunks", embed_chunks)
+    monkeypatch.setattr(document_service.ingest, "segment_chunks", segment_chunks)
+    monkeypatch.setattr(document_service.ingest, "_embed_chunks", embed_chunks)
 
     runtime = SimpleNamespace(
         object_store=_ObjectStore(),

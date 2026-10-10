@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.middleware.server_middleware import RequestStateLoggingMiddleware
-from app.utils import request_state
+from app.observability.logging import request_state
 
 
 def test_correlation_id_accepts_bounded_safe_values() -> None:

@@ -4,14 +4,14 @@ import sys
 
 def test_logger_module_imports_with_contextvars() -> None:
     for module_name in [
-        "app.utils.logger",
+        "app.observability.logging",
         "app.utils",
         "app.utils.cache",
         "app.utils.cache.redis_func",
     ]:
         sys.modules.pop(module_name, None)
 
-    module = importlib.import_module("app.utils.logger")
+    module = importlib.import_module("app.observability.logging")
 
     assert module.request_state is not None
     assert module.execution_path is not None

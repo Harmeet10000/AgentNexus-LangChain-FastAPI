@@ -9,8 +9,7 @@ from app.connections.postgres import init_db
 from app.features.audit.models import AuditLog
 from app.features.audit.repository import AuditLogRepository
 from app.features.billing.credits.models import UserCredit
-from app.features.billing.credits.repository import ConsumptionRepository
-from app.features.billing.credits.repository import CreditRepository
+from app.features.billing.credits.repository import ConsumptionRepository, CreditRepository
 from app.features.billing.credits.service import CreditService
 from app.observability.logging import logger
 

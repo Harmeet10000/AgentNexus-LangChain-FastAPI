@@ -6,13 +6,13 @@ from returns.result import Failure
 
 from app.config import get_settings
 from app.connections.redis import create_redis_client
+from app.features.crawler.crawler import WebCrawler
 from app.features.crawler.dto import CrawlRequest
 from app.features.crawler.job_store import CrawlJobStore
-from app.features.crawler.service import CrawlerService
-from app.features.crawler.crawler import WebCrawler
 from app.features.crawler.processor import get_processor
-from app.shared.jobs.names import CRAWLER_CRAWL
+from app.features.crawler.service import CrawlerService
 from app.observability.logging import logger
+from app.shared.jobs.names import CRAWLER_CRAWL
 from app.worker.app import celery_app
 from app.worker.crawler import get_crawler_worker_resources, run_on_crawler_worker_loop
 from app.worker.task import ResilientTask

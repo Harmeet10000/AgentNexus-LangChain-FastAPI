@@ -1,7 +1,13 @@
 # ── from consumption_dto.py ──
 """DTOs for credit consumption operations."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from datetime import datetime
+from typing import Any, TypeVar
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.shared.result import APIResponse
+from app.utils.exceptions import ValidationException
 
 
 class CreditConsumptionResult(BaseModel):
@@ -47,15 +53,9 @@ class ConsumedCredit(BaseModel):
         description="New remaining balance in paisa",
     )
 
+
 # ── from credit_dto.py ──
 """DTOs for credit grant operations."""
-
-from datetime import datetime
-from typing import Any
-
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-from app.utils.exceptions import ValidationException
 
 
 class CreditGrantDTO(BaseModel):
@@ -198,12 +198,10 @@ class ConsumptionRecord(BaseModel):
     razorpay_payment_id: str | None = Field(default=None, serialization_alias="razorpayPaymentId")
     created_at: datetime = Field(serialization_alias="createdAt")
 
+
 # ── from response.py ──
 """Response envelope for credit API endpoints."""
 
-from typing import TypeVar
-
-from app.shared.result import APIResponse
 
 # Type variable for generic API responses
 T = TypeVar("T")

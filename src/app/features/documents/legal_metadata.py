@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Protocol, cast
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.ai.llm import serialize_to_toon
 from app.ai.graph.retry import retry_immediate
+from app.ai.llm import serialize_to_toon
 
 from .classification import QualityWarning
 

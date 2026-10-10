@@ -13,13 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from returns.result import Failure, Success
 
 from app.observability.logging import logger
-
-import asyncer
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-from returns.result import Success
-
 from app.shared.services.errors import StorageUnavailableError, StorageValidationError
 
 if TYPE_CHECKING:
@@ -55,7 +48,9 @@ async def create_object_store(settings: Settings) -> StorageService | None:
     logger.bind(bucket=settings.S3_BUCKET_NAME).info("Object storage initialized")
     return object_store
 
+
 # ── Storage operations (merged from shared/services/storage.py) ──
+
 
 class S3ObjectLocation(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)

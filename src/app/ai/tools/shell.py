@@ -16,8 +16,9 @@ from typing import TYPE_CHECKING
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from .base import register_tool
 from app.resilience.idempotency import ToolResult
+
+from .base import register_tool
 
 if TYPE_CHECKING:
     from typing import Any

@@ -13,17 +13,18 @@ from app.config import get_settings
 
 if TYPE_CHECKING:
     from app.config.settings import Settings
+    from app.shared.services.errors import TavilyResult
 
 
 from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
 
+from app.observability.logging import logger
 from app.shared.services.errors import (
     TavilyExternalError,
     TavilyInvalidResponseError,
     TavilyValidationError,
 )
-from app.observability.logging import logger
 
 
 @cache
@@ -62,7 +63,9 @@ async def close_tavily_http_client(client: httpx.AsyncClient) -> None:
     """Close the Tavily HTTP client during lifespan shutdown."""
     await client.aclose()
 
+
 # ── Service adaptation (merged from shared/services/tavily.py) ──
+
 
 class SearchResult(BaseModel):
     """Normalized Tavily search result."""

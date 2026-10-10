@@ -11,10 +11,10 @@ from langchain_core.language_models import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.extraction.langextract.service import AsyncExtractionService  # noqa: TC001
 from app.connections.object_storage import (
     StorageService,  # noqa: TC001 — resolved at runtime by Pydantic
 )
+from app.extraction.langextract.service import AsyncExtractionService  # noqa: TC001
 
 from .constants import DEFAULT_PAGE_SIZE, DEFAULT_RAG_TOKEN_BUDGET, MAX_PAGE_SIZE
 from .repository import DocumentRepository  # noqa: TC001 — resolved at runtime by Pydantic

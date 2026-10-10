@@ -26,13 +26,13 @@ from returns.result import Success
 
 from app.config import get_settings
 from app.features.auth.repository import RefreshTokenRepository, SessionData
-from app.security.tokens import TokenClaims
 from app.features.auth.websocket_security import (
     WebSocketRateLimitExceededError,
     WebSocketSecurityContext,
     WebSocketSessionRevokedError,
     build_websocket_security_service,
 )
+from app.security.tokens import TokenClaims
 
 pytestmark = pytest.mark.unit
 

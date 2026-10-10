@@ -5,12 +5,12 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from app.features.crawler.dto import CrawlRequest
-from app.features.crawler.service import CrawlerService
 from app.features.crawler.chunker import clean_markdown, smart_chunk_markdown, truncate_content
 from app.features.crawler.config import CrawlerConfig
 from app.features.crawler.crawler import CrawlResult, WebCrawler
+from app.features.crawler.dto import CrawlRequest
 from app.features.crawler.processor import GeminiProcessor
+from app.features.crawler.service import CrawlerService
 from app.features.crawler.validator import sanitize_url, validate_url, validate_url_for_fetch
 
 
@@ -184,7 +184,7 @@ async def test_recursive_crawl_preserves_partial_page_results(
     async def allow_url(_url: str) -> tuple[bool, str]:
         return True, ""
 
-    monkeypatch.setattr("app.shared.crawler.crawler.validate_url_for_fetch", allow_url)
+    monkeypatch.setattr("app.features.crawler.crawler.validate_url_for_fetch", allow_url)
     crawler = WebCrawler(config=CrawlerConfig(), browser=_Browser())  # type: ignore[arg-type]
 
     result = await crawler.crawl_recursive(["https://example.com"])
@@ -265,7 +265,7 @@ async def test_fetch_validation_rejects_private_dns_resolution(
     ) -> list[tuple[object, object, object, object, tuple[str, int]]]:
         return [(0, 0, 0, "", ("10.0.0.5", 443))]
 
-    monkeypatch.setattr("app.shared.crawler.validator.socket.getaddrinfo", resolve)
+    monkeypatch.setattr("app.features.crawler.validator.socket.getaddrinfo", resolve)
 
     valid, message = await validate_url_for_fetch("https://public.example")
 

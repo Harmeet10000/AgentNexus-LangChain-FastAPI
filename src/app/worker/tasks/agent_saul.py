@@ -22,8 +22,8 @@ from app.ai.memory.agent_memory_service import (
     memory_partition,
 )
 from app.config import get_settings
-from app.shared.jobs.names import AGENT_MEMORY_CONSOLIDATION
 from app.observability.logging import logger
+from app.shared.jobs.names import AGENT_MEMORY_CONSOLIDATION
 from app.worker.app import celery_app
 from app.worker.runtime import run
 

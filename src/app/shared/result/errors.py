@@ -9,6 +9,7 @@ from typing import ClassVar
 
 from app.kernel.errors import ErrorKind, FeatureError
 
+
 class NotFoundCode(StrEnum):
     """Owned code vocabulary for the generic not-found failure."""
 

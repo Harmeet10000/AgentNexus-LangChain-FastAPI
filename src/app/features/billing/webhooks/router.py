@@ -8,8 +8,8 @@ from returns.result import Failure, Success
 
 from app.features.auth.dependencies import require_role
 from app.features.auth.models import UserRole
-from app.shared.result import render_result
 from app.observability.logging import logger
+from app.shared.result import render_result
 from app.utils import APIResponse
 
 from .dependencies import WebhookServiceDep

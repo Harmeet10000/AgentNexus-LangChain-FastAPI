@@ -7,8 +7,7 @@ from pathlib import Path
 
 _REPOSITORIES = (
     "audit/repository.py",
-    "billing/credits/repositories/credit_repository.py",
-    "billing/credits/repositories/consumption_repository.py",
+    "billing/credits/repository.py",
     "documents/repository.py",
     "billing/invoices/repository.py",
     "billing/payments/repository.py",
