@@ -20,12 +20,12 @@ from redis.asyncio import Redis
 
 from app.config import get_settings
 from app.security import tokens
-from app.utils import logger
+from app.observability.logging import logger
 from app.utils.exceptions import TooManyRequestsException, UnauthorizedException
 
 # ── Quota (fixed-window provider limits) ──
 
-class RateLimitScope(StrEnum):
+class RateLimitScope(StrEnum):  # noqa: E302
     """Rate limit scope types."""
 
     CRAWL = "crawl"
@@ -246,7 +246,7 @@ local ttl_ms = math.ceil(new_tat - now_ms)
 redis.call("SET", key, new_tat, "PX", ttl_ms)
 
 return {1, 0}
-"""
+"""  # noqa: E305
 
 
 def _raise_rate_limit_exceeded(retry_seconds: int) -> None:
@@ -289,7 +289,7 @@ class RateLimitService:
         except (RedisError, ConnectionError, TimeoutError) as e:
             # Fail open to prevent a Redis outage from taking down the API
             logger.bind(error=str(e)).exception("Redis rate limiting failed, bypassing")
-_ACCESS_TOKEN_TYPE = "access"  # noqa: S105 — token type constant, not a password
+_ACCESS_TOKEN_TYPE = "access"  # noqa: E305, S105
 
 
 def _extract_presented_token(request: Request) -> str | None:

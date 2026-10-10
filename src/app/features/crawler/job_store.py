@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
 
 from app.config import get_settings
-from app.utils import logger
+from app.observability.logging import logger
 
 from .dto import (
     CrawlJob,

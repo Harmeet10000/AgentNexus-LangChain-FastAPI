@@ -15,7 +15,7 @@ from .dto import (
     ChangePasswordRequest,
     UpdateProfileRequest,
 )
-from .errors import ProfileValidationError
+from .exceptions import ProfileValidationError
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 

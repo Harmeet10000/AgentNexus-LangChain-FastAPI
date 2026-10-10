@@ -10,7 +10,7 @@ from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.shared.result import log_expected_failure
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
     from .dto import LoginRequest, RegisterRequest
-    from .errors import AuthResult
+    from .exceptions import AuthResult
     from .repository import RefreshTokenRepository, UserRepository
 
 from app.security.passwords import (
@@ -37,13 +37,13 @@ from app.security.tokens import (
 )
 
 from .dto import SessionResponse, TokenResponse, UserResponse
-from .errors import (
+from .exceptions import (
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthConflictError,
     AuthNotFoundError,
 )
-from .model import User
+from .models import User
 from .oauth import fetch_oauth_userinfo, get_oauth_config
 from .repository import SessionData
 

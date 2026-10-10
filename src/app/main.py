@@ -29,9 +29,11 @@ from .middleware import (
     register_exception_handlers,
 )
 from .shared.langchain_layer import configure_langsmith
-from .shared.otel import setup_otel
+from app.observability import setup_otel
 from .shared.result import APIResponse, NotFoundError, render_result
-from .utils import logger, setup_logging
+from app.observability.logging import logger, setup_logging
+
+from .utils import APIFeatures
 
 if TYPE_CHECKING:
     from guard.models import SecurityConfig

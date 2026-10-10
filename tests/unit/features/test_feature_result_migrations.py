@@ -11,18 +11,18 @@ from fastapi import Response
 from pydantic import ValidationError
 from returns.result import Failure, Success
 
-from app.features.agent_saul.errors import AgentSaulError
+from app.features.agent_saul.exceptions import AgentSaulError
 from app.features.agent_saul.service import AgentSaulService
-from app.features.audit.errors import AuditCode, AuditInfrastructureError
-from app.features.billing.dunning.errors import DunningInfrastructureError
+from app.features.audit.exceptions import AuditCode, AuditInfrastructureError
+from app.features.billing.dunning.exceptions import DunningInfrastructureError
 from app.features.billing.dunning.service import DunningService
-from app.features.billing.plans.errors import PlanConflictError
+from app.features.billing.plans.exceptions import PlanConflictError
 from app.features.billing.plans.service import PlanService
-from app.features.ingestion.errors import IngestionGraphError, IngestionPipelineError
+from app.features.ingestion.exceptions import IngestionGraphError, IngestionPipelineError
 from app.features.ingestion.service import IngestionService
-from app.features.profile.errors import ProfileAuthenticationError
+from app.features.profile.exceptions import ProfileAuthenticationError
 from app.features.profile.service import ProfileService
-from app.features.users.errors import UsersConflictError, UsersInfrastructureError
+from app.features.users.exceptions import UsersConflictError, UsersInfrastructureError
 from app.features.users.service import UserAdminService
 from app.shared.result import render_result
 

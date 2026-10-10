@@ -20,9 +20,9 @@ if TYPE_CHECKING:
 
 MODEL_MODULE_NAMES: tuple[str, ...] = (
     "app.features.audit.model",
-    "app.features.chat.model",
-    "app.features.billing.credits.models.consumption",
-    "app.features.billing.credits.models.credit",
+    "app.features.agent_saul.models",
+    "app.features.billing.credits.models",
+    "app.features.billing.credits.models",
     "app.features.documents.model",
     "app.features.billing.invoices.invoice_batch",
     "app.features.billing.invoices.invoice_void",

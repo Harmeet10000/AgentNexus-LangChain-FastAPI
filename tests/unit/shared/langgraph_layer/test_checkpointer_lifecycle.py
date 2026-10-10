@@ -30,7 +30,7 @@ from app.connections.checkpointer import (
     setup_langgraph_checkpointer,
     teardown_langgraph_checkpointer,
 )
-from app.utils.logger import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

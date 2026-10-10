@@ -20,7 +20,7 @@ from .dto import (
     UnifiedSearchRequest,
     UnifiedSearchResponse,
 )
-from .errors import DocumentValidationError
+from .exceptions import DocumentValidationError
 
 router = APIRouter(tags=["documents"])
 

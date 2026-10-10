@@ -11,7 +11,8 @@ from crawl4ai import AsyncWebCrawler  # noqa: TC002 — resolved at runtime by P
 from pydantic import BaseModel, ConfigDict
 
 from app.connections.crawl4ai import close_crawl4ai_crawler, create_crawl4ai_crawler
-from app.utils import ServiceUnavailableException, logger
+from app.observability.logging import logger
+from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine

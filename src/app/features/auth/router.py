@@ -31,7 +31,7 @@ from .dto import (
     UserResponse,
     VerifyEmailRequest,
 )
-from .errors import AuthAuthenticationError, AuthValidationError
+from .exceptions import AuthAuthenticationError, AuthValidationError
 from .repository import RefreshTokenRepository, UserRepository
 from .service import AuthService
 

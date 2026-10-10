@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app.shared.langchain_layer.agents.memory.agent_memory_service import (
+from app.ai.memory.agent_memory_service import (
     AgentMemoryService,
     ConsolidationPreconditionError,
     ConversationIdentityRequiredError,
@@ -151,7 +151,7 @@ async def test_recall_passes_the_caller_partition_only() -> None:
 async def test_cognify_is_never_called_and_improve_has_one_caller() -> None:
     import inspect
 
-    import app.shared.langchain_layer.agents.memory.agent_memory_service as module
+    import app.ai.memory.agent_memory_service as module
 
     source = inspect.getsource(module)
     assert "cognify(" not in source, "the full-rebuild call must be unreachable"
@@ -197,7 +197,7 @@ async def test_a_store_failure_surfaces_as_the_chosen_idiom_not_an_empty_list() 
 def test_prune_does_not_exist_on_the_service_or_in_source() -> None:
     import inspect
 
-    from app.shared.langchain_layer.agents.memory.agent_memory_service import AgentMemoryService
+    from app.ai.memory.agent_memory_service import AgentMemoryService
 
     assert not hasattr(AgentMemoryService, "prune")
     assert "prune" not in inspect.getsource(AgentMemoryService)

@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import get_settings
-from app.features.billing.plans.model import Plan
-from app.utils import logger
+from app.features.billing.plans.models import Plan
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

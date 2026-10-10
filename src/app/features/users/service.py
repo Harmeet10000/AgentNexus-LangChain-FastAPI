@@ -2,17 +2,17 @@ import math
 
 from returns.result import Failure, Success
 
-from app.features.auth.model import User, UserRole
+from app.features.auth.models import User, UserRole
 from app.features.auth.repository import RefreshTokenRepository
 from app.security.tokens import create_impersonation_token
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
 from .dto import (
     ImpersonateResponse,
     PaginatedData,
     UserAdminResponse,
 )
-from .errors import (
+from .exceptions import (
     UsersAuthorizationError,
     UsersConflictError,
     UsersInfrastructureError,

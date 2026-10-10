@@ -9,19 +9,19 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
-from app.features.audit.model import AuditAction, AuditLog
+from app.features.audit.models import AuditAction, AuditLog
 from app.features.billing.payments.clients.razorpay_client import RazorpayClient
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
 from .dto import PlanResponse
-from .errors import (
+from .exceptions import (
     PlanConflictError,
     PlanInfrastructureError,
     PlanNotFoundError,
     PlanValidationError,
 )
-from .model import Plan
+from .models import Plan
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from app.features.billing.plans.repository import PlanRepository
 
     from .dto import PlanCreateDTO, PlanUpdateDTO
-    from .errors import PlanResult
+    from .exceptions import PlanResult
 
 
 def _plan_to_response(plan: Plan) -> PlanResponse:

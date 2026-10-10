@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.features.documents.classification import PreparedChunk
 from app.features.documents.constants import CHUNKS_UNIQUE_CONSTRAINT_NAME
-from app.features.documents.model import UnifiedChunk
+from app.features.documents.models import UnifiedChunk
 from app.features.documents.repository import build_chunk_rows
 
 

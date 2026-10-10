@@ -43,7 +43,7 @@ from app.shared.langgraph_layer.ingestion_kb.state import (
     ContractMetadata,
     ParsedDocument,
 )
-from app.shared.langgraph_layer.kb_retry import (
+from app.ai.graph.retry import (
     TransientExternalError,
     describe_failure,
     retry_immediate,

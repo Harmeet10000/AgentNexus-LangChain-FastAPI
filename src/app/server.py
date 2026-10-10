@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 import uvicorn
 
 from app.config import get_settings
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from app.config import Settings

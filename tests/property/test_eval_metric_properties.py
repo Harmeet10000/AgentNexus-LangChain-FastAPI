@@ -2,7 +2,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from app.shared.evaluation.metrics import (
+from app.ai.evaluation.metrics import (
     ndcg_at_k,
     precision_at_k,
     recall_at_k,

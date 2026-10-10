@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.shared.langchain_layer.embeddings import EmbeddingTaskType
-from app.shared.rag.docling import ingest_v2
-from app.shared.rag.docling.models import Chunk
+from app.ai.embeddings import EmbeddingTaskType
+from app.extraction.docling import ingest_v2
+from app.extraction.docling.models import Chunk
 
 
 def _chunks() -> list[Chunk]:

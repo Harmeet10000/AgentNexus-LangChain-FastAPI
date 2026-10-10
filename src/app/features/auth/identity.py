@@ -17,14 +17,14 @@ from beanie.operators import Set
 from pymongo.errors import PyMongoError
 from returns.result import Failure, Success
 
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
-from .errors import AuthInfrastructureError, AuthValidationError
-from .model import User
+from .exceptions import AuthInfrastructureError, AuthValidationError
+from .models import User
 
 if TYPE_CHECKING:
-    from .errors import AuthResult
-    from .model import UserRole
+    from .exceptions import AuthResult
+    from .models import UserRole
 
 
 @trace_layer("repository")

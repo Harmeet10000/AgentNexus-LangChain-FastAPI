@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 
 from returns.result import Failure, Success
 
-from app.features.audit.model import AuditAction, AuditLog
+from app.features.audit.models import AuditAction, AuditLog
 from app.features.billing.money import paisa_to_rupees
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
 from .clients.razorpay_client import (
     CircuitOpenError,
@@ -19,24 +19,24 @@ from .clients.razorpay_client import (
     RazorpayRetryableError,
 )
 from .dto import PaymentResponse, RefundResponse
-from .errors import (
+from .exceptions import (
     PaymentCollaboratorError,
     PaymentNotFoundError,
     PaymentProviderError,
     PaymentProviderUnavailableError,
     PaymentValidationError,
 )
-from .model import Payment, PaymentStatus
+from .models import Payment, PaymentStatus
 
 if TYPE_CHECKING:
     from uuid import UUID
 
     from app.features.audit.repository import AuditLogRepository
     from app.features.billing.payments.repository import PaymentRepository
-    from app.features.billing.subscriptions.model import Subscription
+    from app.features.billing.subscriptions.models import Subscription
 
     from .dto import PaymentRecordDTO, RefundRequestDTO
-    from .errors import PaymentResult
+    from .exceptions import PaymentResult
 
 
 def _payment_to_response(payment: Payment) -> PaymentResponse:

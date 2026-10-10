@@ -10,10 +10,10 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import trace_layer
+from app.observability.logging import trace_layer
 
-from .errors import PaymentConflictError, PaymentInfrastructureError, PaymentNotFoundError
-from .model import Payment
+from .exceptions import PaymentConflictError, PaymentInfrastructureError, PaymentNotFoundError
+from .models import Payment
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from .errors import PaymentResult
+    from .exceptions import PaymentResult
 
 
 class PaymentRepository:

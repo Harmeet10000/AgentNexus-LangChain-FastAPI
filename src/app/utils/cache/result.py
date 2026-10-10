@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from returns.result import Failure, Success
 
 from app.utils.exceptions import InfrastructureException
-from app.utils.logger import logger
+from app.observability.logging import logger
 
 from .errors import CacheError
 

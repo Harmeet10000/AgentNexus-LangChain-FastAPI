@@ -1,7 +1,7 @@
 import pytest
 
-from app.shared.evaluation.runner import run_retrieval_eval
-from app.shared.evaluation.schema import GoldenQuery
+from app.ai.evaluation.runner import run_retrieval_eval
+from app.ai.evaluation.schema import GoldenQuery
 
 
 def _query(*, text: str, expected: list[str]) -> GoldenQuery:

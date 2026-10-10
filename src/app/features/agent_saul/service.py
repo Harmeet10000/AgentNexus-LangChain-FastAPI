@@ -62,9 +62,9 @@ from app.features.auth.websocket_security import (
     WebSocketSecurityService,
     WebSocketSecurityViolation,
 )
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
-from .errors import AgentSaulResult
+from .exceptions import AgentSaulResult
 
 # Status emitted when a node starts — keeps WS client progress bar accurate.
 _NODE_STATUS_MAP: dict[str, WorkflowStatus] = {

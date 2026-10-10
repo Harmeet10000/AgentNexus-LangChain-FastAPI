@@ -49,10 +49,10 @@ uv run uvicorn src.app.main:app --reload --reload-dir src --host 0.0.0.0 --port 
 Background work runs in Celery workers on three queues, deliberately as three processes — ingestion is minutes of model work per message and crawling is network-bound; the default queue carries sub-second billing and email tasks that must not wait behind either:
 
 ```bash
-uv run celery -A app.worker.celery_app:celery_app worker -Q default --loglevel=info --concurrency=8
-uv run celery -A app.worker.celery_app:celery_app worker -Q ingestion --loglevel=info --concurrency=2
-uv run celery -A app.worker.celery_app:celery_app worker -Q crawler --loglevel=info --concurrency=2
-uv run celery -A app.worker.celery_app:celery_app beat --loglevel=info
+uv run celery -A app.worker.app:celery_app worker -Q default --loglevel=info --concurrency=8
+uv run celery -A app.worker.app:celery_app worker -Q ingestion --loglevel=info --concurrency=2
+uv run celery -A app.worker.app:celery_app worker -Q crawler --loglevel=info --concurrency=2
+uv run celery -A app.worker.app:celery_app beat --loglevel=info
 ```
 
 (`make celery`, `make celery-ingestion`, `make celery-crawler`, `make celery-beat` wrap these.)

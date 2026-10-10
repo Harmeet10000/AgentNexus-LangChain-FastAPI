@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, Response, status
 
 from app.features.auth.dependencies import require_permission, require_role
-from app.features.auth.model import Permission, UserRole
+from app.features.auth.models import Permission, UserRole
 from app.security.tokens import TokenClaims
 from app.shared.result import render_result
 from app.utils import APIResponse

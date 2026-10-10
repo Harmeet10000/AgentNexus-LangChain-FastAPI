@@ -1,0 +1,130 @@
+"""
+LangSmith observability bootstrap and custom callbacks.
+Must be imported before any LangChain/LangGraph objects are created.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import TYPE_CHECKING, override
+from uuid import UUID  # noqa: TC003 — UUID used at runtime in callback metadata
+
+from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
+
+from app.config import get_settings
+from app.observability.logging import logger
+
+try:
+    from langsmith import Client
+except Exception:  # noqa: BLE001 — pragma: no cover - optional dependency guard
+    Client = None  # ty: ignore[invalid-assignment]
+
+if TYPE_CHECKING:
+    from typing import Any
+
+
+def configure_langsmith() -> object | None:
+    """
+    Bootstrap LangSmith tracing by setting env vars.
+    Call this at application startup, before any agents are built.
+    """
+    if Client is None:
+        return None
+
+    settings = get_settings()
+    try:
+        return Client(
+            api_url=settings.LANGSMITH_ENDPOINT,
+            api_key=settings.LANGSMITH_API_KEY.get_secret_value(),
+        )
+    except Exception:  # noqa: BLE001 — pragma: no cover - optional dependency guard
+        return None
+
+
+class LatencyCallbackHandler(BaseCallbackHandler):
+    """Tracks per-run latency for structured logging."""
+
+    def __init__(self) -> None:
+        self._start: dict[UUID, float] = {}
+
+    @override
+    def on_llm_start(self, *args: Any, run_id: UUID, **kwargs: Any) -> None:
+        self._start[run_id] = time.perf_counter()
+
+    @override
+    def on_llm_end(self, *args: Any, run_id: UUID, **kwargs: Any) -> None:
+        elapsed = time.perf_counter() - self._start.pop(run_id, time.perf_counter())
+        logger.bind(latency_ms=round(elapsed * 1000, 1)).info("llm latency")
+
+    @override
+    def on_llm_error(self, *args: Any, run_id: UUID, **kwargs: Any) -> None:
+        self._start.pop(run_id, None)
+
+
+class TokenUsageCallbackHandler(BaseCallbackHandler):
+    """Accumulates token usage across an entire request for billing/monitoring."""
+
+    def __init__(self) -> None:
+        self.prompt_tokens: int = 0
+        self.completion_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+    @override
+    def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+        for gen in response.generations:
+            for g in gen:
+                usage = getattr(g.message, "usage_metadata", None)
+                if usage:
+                    self.prompt_tokens += usage.get("input_tokens", 0)
+                    self.completion_tokens += usage.get("output_tokens", 0)
+
+
+class AsyncStreamingCallbackHandler(AsyncCallbackHandler):
+    """
+    Async callback that forwards tokens to an asyncio.Queue.
+    Use in FastAPI SSE endpoints.
+
+    Usage:
+        handler = AsyncStreamingCallbackHandler()
+        # pass handler to agent invoke config
+        async for token in handler:
+            yield token
+    """
+
+    def __init__(self) -> None:
+        import asyncio
+
+        self._queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    @override
+    async def on_llm_new_token(
+        self,
+        token: str | list[str | dict[str, Any]],
+        **kwargs: Any,
+    ) -> None:
+        rendered = (
+            token
+            if isinstance(token, str)
+            else "".join(item if isinstance(item, str) else str(item) for item in token)
+        )
+        await self._queue.put(rendered)
+
+    @override
+    async def on_llm_end(self, *args: Any, **kwargs: Any) -> None:
+        await self._queue.put(None)  # sentinel
+
+    @override
+    async def on_llm_error(self, *args: Any, **kwargs: Any) -> None:
+        await self._queue.put(None)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> str:
+        token = await self._queue.get()
+        if token is None:
+            raise StopAsyncIteration
+        return token

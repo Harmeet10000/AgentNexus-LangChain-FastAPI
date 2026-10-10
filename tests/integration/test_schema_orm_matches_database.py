@@ -25,8 +25,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 # the side-effect import block in src/alembic/env.py.
 _MODEL_MODULES = (
     "app.features.audit.model",
-    "app.features.billing.credits.models.consumption",
-    "app.features.billing.credits.models.credit",
+    "app.features.billing.credits.models",
+    "app.features.billing.credits.models",
     "app.features.documents.model",
     "app.features.billing.invoices.invoice_batch",
     "app.features.billing.invoices.invoice_void",

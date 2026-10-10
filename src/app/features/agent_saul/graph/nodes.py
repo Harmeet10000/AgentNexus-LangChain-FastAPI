@@ -13,7 +13,7 @@ from langgraph.types import Send, interrupt
 from pydantic import BaseModel, Field
 
 from app.shared.langchain_layer.messages import make_delegation_pair
-from app.utils import logger
+from app.observability.logging import logger
 
 from .prompts import (
     _COMPLIANCE_SYSTEM_PROMPT,

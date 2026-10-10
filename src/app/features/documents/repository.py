@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import trace_layer
+from app.observability.logging import trace_layer
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 
 from .constants import (
@@ -22,7 +22,7 @@ from .constants import (
     PHRASE_OVERFETCH_MULTIPLE,
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
-from .errors import (
+from .exceptions import (
     DocumentChunkConflictError,
     DocumentConflictError,
     DocumentDatabaseError,
@@ -30,7 +30,7 @@ from .errors import (
     DocumentNotFoundError,
     DocumentStatusNotFoundError,
 )
-from .model import CHUNK_EMBEDDING_DIM, UnifiedChunk, UnifiedDocument
+from .models import CHUNK_EMBEDDING_DIM, UnifiedChunk, UnifiedDocument
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from sqlalchemy.sql.elements import TextClause
     from sqlalchemy.sql.selectable import Select
 
-    from .errors import DocumentResult
+    from .exceptions import DocumentResult
 
 _FILTER_SQL = """
   AND (

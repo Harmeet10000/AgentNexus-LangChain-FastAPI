@@ -14,7 +14,7 @@ import pytest
 from returns.result import Failure
 from sqlalchemy.exc import IntegrityError, PendingRollbackError
 
-from app.features.audit.model import AuditLog
+from app.features.audit.models import AuditLog
 from app.features.audit.repository import AuditLogRepository
 
 

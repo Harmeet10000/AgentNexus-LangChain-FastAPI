@@ -9,7 +9,7 @@ from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict
 
 from app.features.documents.tools.bundle import AgentToolBundle
-from app.shared.langchain_layer.agents.tools.registry import (
+from app.ai.tools.registry import (
     get_tool_registry,
     register_default_tools,
 )

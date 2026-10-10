@@ -1,13 +1,13 @@
 from returns.result import Failure, Success
 
-from app.features.auth.model import User
+from app.connections.object_storage import StorageService
+from app.features.auth.models import User
 from app.features.auth.repository import RefreshTokenRepository, UserRepository
 from app.security.passwords import hash_password, verify_password
-from app.connections.object_storage import StorageService
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
 from .dto import AvatarResponse, UpdateProfileRequest
-from .errors import (
+from .exceptions import (
     ProfileAuthenticationError,
     ProfileConflictError,
     ProfileInfrastructureError,
@@ -23,9 +23,9 @@ class ProfileService:
         token_repo: RefreshTokenRepository,
         storage: StorageService | None,
     ) -> None:
-        self._user_repo = user_repo
-        self._token_repo = token_repo
-        self._storage = storage
+        self._user_repo: UserRepository = user_repo
+        self._token_repo: RefreshTokenRepository = token_repo
+        self._storage: StorageService | None = storage
 
     @trace_layer(layer_name="service")
     async def update_profile(

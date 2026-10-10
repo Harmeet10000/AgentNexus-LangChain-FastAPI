@@ -9,7 +9,7 @@ from returns.result import Failure, Success
 from app.features.documents import service as document_service
 from app.features.documents.classification import ClassifiedDocument, ParsedDocument, PreparedChunk
 from app.features.documents.dto import IngestionJob
-from app.features.documents.errors import (
+from app.features.documents.exceptions import (
     DocumentGraphWriteError,
     DocumentIngestionCheckpointError,
 )
@@ -18,7 +18,7 @@ from app.features.documents.service import (
     _write_extracted_clause_episodes,
     process_document_ingestion,
 )
-from app.shared.rag.langextract.service import (
+from app.extraction.langextract.service import (
     AsyncExtractionService,
     ExtractionSucceeded,
 )
@@ -26,7 +26,7 @@ from app.shared.rag.langextract.service import (
 if TYPE_CHECKING:
     from typing import Any
 
-    from app.shared.rag.langextract.service import ExtractionRequest
+    from app.extraction.langextract.service import ExtractionRequest
 
 
 class _ObjectStore:

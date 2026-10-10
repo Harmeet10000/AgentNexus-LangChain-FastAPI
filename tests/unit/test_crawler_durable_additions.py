@@ -9,8 +9,8 @@ from fakeredis.aioredis import FakeRedis
 
 from app.features.crawler.dto import CrawlChunk, CrawlResponse, CrawlResultItem
 from app.features.crawler.job_store import CrawlJobStore
-from app.shared.crawler import WebCrawler
-from app.shared.crawler.validator import validate_browser_result_urls
+from app.features.crawler import WebCrawler
+from app.features.crawler.validator import validate_browser_result_urls
 from app.features.crawler.tools.crawl_jobs import get_crawl_job_tools
 
 

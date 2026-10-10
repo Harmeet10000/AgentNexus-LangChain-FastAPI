@@ -19,9 +19,9 @@ async def get_dunning_service(
 ) -> DunningService:
     return DunningService(
         session,
-        SubscriptionRepository(session),
-        PlanRepository(session),
-        AuditLogRepository(session),
+        subscriptions=SubscriptionRepository(session),
+        plans=PlanRepository(session),
+        audit=AuditLogRepository(session),
         razorpay=RazorpayClient(),
     )
 

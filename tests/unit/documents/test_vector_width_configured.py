@@ -22,7 +22,7 @@ import pytest
 from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.features.documents.model import UnifiedChunk
+from app.features.documents.models import UnifiedChunk
 from app.features.documents.repository import DocumentRepository
 from app.retrieval.embeddings import CHUNK_EMBEDDING_DIM
 from app.utils.embedding import (

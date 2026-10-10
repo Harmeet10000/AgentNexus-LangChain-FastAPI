@@ -39,7 +39,7 @@ from langgraph.errors import GraphBubbleUp, GraphInterrupt, ParentCommand
 from langgraph.types import Command
 
 from app.shared.langgraph_layer import kb_retry
-from app.shared.langgraph_layer.kb_retry import TransientExternalError, retry_immediate
+from app.ai.graph.retry import TransientExternalError, retry_immediate
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

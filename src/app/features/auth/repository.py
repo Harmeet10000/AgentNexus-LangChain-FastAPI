@@ -10,16 +10,16 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
-from app.utils import trace_layer
+from app.observability.logging import trace_layer
 
-from .errors import (
+from .exceptions import (
     AuthConflictError,
     AuthInfrastructureError,
     AuthNotFoundError,
     AuthResult,
     AuthValidationError,
 )
-from .model import OAuthAccount, User
+from .models import OAuthAccount, User
 from .token_audit_log import TokenAuditLog
 
 if TYPE_CHECKING:

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.connections.celery_producer import celery_app
 from app.connections.postgres import get_database_url
-from app.utils import logger
+from app.observability.logging import logger
 
 
 async def _fetch_dead_letters(

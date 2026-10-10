@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app.shared.langgraph_layer.kb_retry import TransientExternalError
+from app.ai.graph.retry import TransientExternalError
 from app.features.documents.retrieval_graph import nodes as retrieval_nodes
 from app.features.documents.retrieval_graph.nodes import (
     make_graph_retrieval_node,

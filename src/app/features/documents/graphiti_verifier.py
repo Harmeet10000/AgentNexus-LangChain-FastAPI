@@ -10,7 +10,7 @@ from graphiti_core.errors import GraphitiError
 from graphiti_core.nodes import EpisodeType
 from pydantic import BaseModel, ConfigDict
 
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from graphiti_core.edges import EntityEdge

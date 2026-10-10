@@ -3,7 +3,7 @@
 import sys
 
 from app.config import get_settings
-from app.worker.celery_app import celery_app
+from app.worker.app import celery_app
 
 
 def main() -> None:

@@ -7,13 +7,14 @@ from pydantic import ValidationError
 from returns.result import Failure, Success
 
 from app.features.auth.dependencies import require_role
-from app.features.auth.model import UserRole
+from app.features.auth.models import UserRole
 from app.shared.result import render_result
-from app.utils import APIResponse, logger
+from app.observability.logging import logger
+from app.utils import APIResponse
 
 from .dependencies import WebhookServiceDep
 from .dto import WebhookPayload
-from .errors import WebhookValidationError, WebhookVerificationError
+from .exceptions import WebhookValidationError, WebhookVerificationError
 
 router = APIRouter(tags=["billing-webhooks"])
 

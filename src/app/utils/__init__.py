@@ -3,14 +3,6 @@
 # Keep shared.result below logger exports to avoid package-init recursion.
 # ruff: noqa: I001
 
-from .logger import (
-    execution_path,
-    logger,
-    request_state,
-    set_request_actor,
-    setup_logging,
-    trace_layer,
-)
 from .api_features import APIFeatures
 from .exceptions import (
     APIException,

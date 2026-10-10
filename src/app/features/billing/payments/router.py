@@ -12,7 +12,7 @@ from app.utils import APIResponse
 
 from .dependencies import PaymentServiceDep
 from .dto import PaymentResponse, RefundRequestDTO, RefundResponse
-from .errors import PaymentCollaboratorError
+from .exceptions import PaymentCollaboratorError
 
 router = APIRouter(tags=["billing-payments"])
 

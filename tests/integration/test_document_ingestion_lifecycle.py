@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.connections import init_db
 from app.features.documents import service as document_service
 from app.features.documents.ingestion_graph import build_document_ingestion_graph
-from app.features.documents.model import UnifiedChunk, UnifiedDocument
+from app.features.documents.models import UnifiedChunk, UnifiedDocument
 from app.features.documents.repository import DocumentRepository
 from app.features.documents.service import process_document_ingestion, run_document_ingestion_task
 from app.resilience.idempotency import IdempotencyGuard

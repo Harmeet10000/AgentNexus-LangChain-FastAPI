@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.features.billing.plans.model import BillingInterval
+from app.features.billing.plans.models import BillingInterval
 
 
 class PlanCreateDTO(BaseModel):

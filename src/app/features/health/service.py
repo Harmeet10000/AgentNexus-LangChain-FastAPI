@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import get_settings
 from app.connections.cognee import CogneeSetupConfig
 from app.shared.result import HealthStatus
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
 from .dto import (
     AgentMemoryCheck,

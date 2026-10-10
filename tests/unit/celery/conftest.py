@@ -45,14 +45,14 @@ import pytest
 
 _LIFTED_TREES = (
     "app.connections.celery_producer",
-    "app.worker.celery_app",
+    "app.worker.app",
     "app.shared.jobs.registry",
-    "app.features.auth.tasks",
-    "app.features.agent_saul.tasks",
-    "app.features.documents.tasks",
-    "app.features.crawler.tasks",
-    "app.features.billing.tasks",
-    "app.features.billing.credits.tasks",
+    "app.worker.tasks.auth",
+    "app.worker.tasks.agent_saul",
+    "app.worker.tasks.documents",
+    "app.worker.tasks.crawler",
+    "app.worker.tasks.billing",
+    "app.worker.tasks.credits",
 )
 
 _LIFTED_NAMES = ("app.utils",)
@@ -73,7 +73,7 @@ def real_celery():
 
     try:
         yield SimpleNamespace(
-            app=importlib.import_module("app.worker.celery_app").celery_app,
+            app=importlib.import_module("app.worker.app").celery_app,
             producer=importlib.import_module("app.connections.celery_producer").celery_app,
             registry=importlib.import_module("app.shared.jobs.registry"),
         )

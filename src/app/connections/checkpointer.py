@@ -29,7 +29,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from app.connections.postgres import get_database_url
-from app.utils.logger import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     # Type-only under `from __future__ import annotations`: every annotation below is a

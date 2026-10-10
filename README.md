@@ -286,10 +286,10 @@ uv run alembic history --verbose
 uv run ruff check --fix
 uv run ruff format
 uv run pytest -x
-uv run celery -A app.worker.celery_app:celery_app worker --loglevel=info -Q default --concurrency=8
-uv run celery -A app.worker.celery_app:celery_app worker --loglevel=info -Q ingestion --concurrency=2
-uv run celery -A app.worker.celery_app:celery_app worker --loglevel=info -Q crawler --concurrency=2
-uv run celery -A app.worker.celery_app:celery_app beat --loglevel=info
+uv run celery -A app.worker.app:celery_app worker --loglevel=info -Q default --concurrency=8
+uv run celery -A app.worker.app:celery_app worker --loglevel=info -Q ingestion --concurrency=2
+uv run celery -A app.worker.app:celery_app worker --loglevel=info -Q crawler --concurrency=2
+uv run celery -A app.worker.app:celery_app beat --loglevel=info
 ```
 
 Those four commands are defined once in the `Makefile` — `make celery`, `make celery-ingestion`,

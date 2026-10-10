@@ -12,7 +12,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from returns.result import Failure, Success
 
-from app.utils import logger
+from app.observability.logging import logger
 
 import asyncer
 import boto3

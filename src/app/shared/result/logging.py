@@ -1,6 +1,7 @@
 """Structured logging helpers for expected internal failures."""
 
-from app.utils import execution_path, logger
+from app.observability.logging import logger
+from app.observability.logging import execution_path
 
 from .errors import FeatureError
 

@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict
 if TYPE_CHECKING:
     from app.config import Settings
 
-    from .model import Invoice
+    from .models import Invoice
     from .receipt import PaymentReceipt
 
 _NAVY: tuple[int, int, int] = (23, 58, 94)

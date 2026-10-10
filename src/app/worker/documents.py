@@ -27,9 +27,10 @@ from app.connections.redis import create_redis_client
 from app.features.documents.service import process_document_ingestion
 from app.lifecycle.graphs import graphiti_service, provide_document_ingestion_graph
 from app.resilience.idempotency import IdempotencyGuard
-from app.shared.rag.langextract.service import AsyncExtractionService
+from app.extraction.langextract.service import AsyncExtractionService
 from app.connections.object_storage import StorageService
-from app.utils import ServiceUnavailableException, logger
+from app.observability.logging import logger
+from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine

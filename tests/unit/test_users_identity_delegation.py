@@ -17,14 +17,14 @@ from returns.result import Failure, Success
 if TYPE_CHECKING:
     from typing import Any
 
-from app.features.auth.errors import (
+from app.features.auth.exceptions import (
     AuthInfrastructureError,
     AuthNotFoundError,
     AuthValidationError,
 )
-from app.features.auth.model import UserRole
+from app.features.auth.models import UserRole
 from app.features.users import repository as users_repository
-from app.features.users.errors import (
+from app.features.users.exceptions import (
     UsersInfrastructureError,
     UsersNotFoundError,
     UsersValidationError,

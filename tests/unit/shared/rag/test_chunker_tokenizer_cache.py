@@ -30,14 +30,14 @@ from unittest.mock import MagicMock
 import pytest
 from transformers import PreTrainedTokenizerBase
 
-from app.shared.rag.docling import chunker as chunker_module
-from app.shared.rag.docling.chunker import (
+from app.extraction.docling import chunker as chunker_module
+from app.extraction.docling.chunker import (
     DEFAULT_TOKENIZER_MODEL_ID,
     chunk_document,
     get_tokenizer,
     initialize_chunking,
 )
-from app.shared.rag.docling.models import IngestionConfig
+from app.extraction.docling.models import IngestionConfig
 
 _OTHER_MODEL_ID = "sentence-transformers/all-mpnet-base-v2"
 _CONTENT = "Alpha beta gamma. Delta epsilon zeta."

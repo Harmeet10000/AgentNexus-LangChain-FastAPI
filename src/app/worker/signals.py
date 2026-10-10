@@ -2,7 +2,7 @@
 
 from celery.signals import worker_process_init, worker_process_shutdown, worker_shutdown
 
-from app.utils import logger
+from app.observability.logging import logger
 from app.worker import runtime
 from app.worker.task import ResilientTask
 

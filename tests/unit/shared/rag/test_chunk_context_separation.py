@@ -7,13 +7,13 @@ from types import SimpleNamespace
 from docling_core.types.doc import DocItemLabel, DoclingDocument
 from transformers import PreTrainedTokenizerBase
 
-from app.shared.rag.docling.chunker import (
+from app.extraction.docling.chunker import (
     _hybrid_chunk_documents,
     _simple_fallback_chunk,
     chunk_document,
     create_hybrid_chunker,
 )
-from app.shared.rag.docling.models import ChunkRequest, IngestionConfig
+from app.extraction.docling.models import ChunkRequest, IngestionConfig
 
 
 class _Tokenizer:

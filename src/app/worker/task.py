@@ -9,7 +9,7 @@ from celery import Task
 
 from app.config import get_settings
 from app.connections.redis import create_redis_client
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from typing import Any, ClassVar

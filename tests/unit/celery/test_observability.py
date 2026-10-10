@@ -63,10 +63,10 @@ def test_celery_process_bootstrap_owns_logging_and_otel_lifecycle(monkeypatch) -
     monkeypatch.setattr(celery_module, "get_settings", lambda: settings)
     monkeypatch.setattr(celery_module, "setup_logging", lambda: calls.append(("logging", None)))
     monkeypatch.setattr(
-        "app.shared.otel.setup_otel",
+        "app.observability.setup_otel",
         lambda service_name: calls.append(("otel", service_name)),
     )
-    monkeypatch.setattr("app.shared.otel.shutdown_otel", lambda: calls.append(("shutdown", None)))
+    monkeypatch.setattr("app.observability.shutdown_otel", lambda: calls.append(("shutdown", None)))
 
     celery_module.initialize_celery_observability()
     celery_module.shutdown_celery_observability()

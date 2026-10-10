@@ -6,7 +6,7 @@ Canonical locations:
 Kept for one release so `from database.schemas import ...` keeps working.
 """
 
-from app.features.chat.model import ChatMessage, ChatSession
+from app.features.chat.models import ChatMessage, ChatSession
 
 from .document_vectors import DocumentVector
 

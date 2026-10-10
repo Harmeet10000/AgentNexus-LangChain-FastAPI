@@ -9,6 +9,7 @@ from starlette.requests import HTTPConnection
 from app.connections.mongodb import get_mongodb
 from app.connections.redis import get_redis
 from app.security.tokens import TokenClaims, decode_token
+from app.observability.logging import set_request_actor
 from app.utils import (
     ConflictException,
     ForbiddenException,
@@ -16,10 +17,9 @@ from app.utils import (
     NotFoundException,
     UnauthorizedException,
     ValidationException,
-    set_request_actor,
 )
 
-from .errors import (
+from .exceptions import (
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthConflictError,
@@ -28,7 +28,7 @@ from .errors import (
     AuthResult,
     AuthValidationError,
 )
-from .model import Permission, User, UserRole
+from .models import Permission, User, UserRole
 from .repository import RefreshTokenRepository, UserRepository
 from .service import AuthService
 

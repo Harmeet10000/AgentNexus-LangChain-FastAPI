@@ -5,7 +5,7 @@ happy path plus two handled failures; exits 0).
 
 The standard, in five rules:
 
-1. Import once per module: ``from app.utils import logger``. Never
+1. Import once per module: ``from app.observability.logging import logger``. Never
    ``from loguru import logger`` (misses the redaction patch) and never
    stdlib ``logging`` (misses every sink). Never pass a logger as an
    argument — loguru is a process-global registry; per-request scoping
@@ -40,7 +40,7 @@ from returns.result import Failure, Result, Success
 
 from app.kernel.errors import ErrorKind, FeatureError
 from app.shared.result import log_expected_failure
-from app.utils import logger, trace_layer
+from app.observability.logging import logger, trace_layer
 
 
 class PaymentCode(StrEnum):

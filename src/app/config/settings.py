@@ -502,7 +502,7 @@ class Settings(BaseSettings):
 
         if self.ENVIRONMENT != "production" and bad_fields:
             # Deferred import: app.utils pulls app.config (cycle at module top).
-            from app.utils import logger  # noqa: PLC0415
+            from app.observability.logging import logger  # noqa: PLC0415
 
             logger.bind(environment=self.ENVIRONMENT, fields=", ".join(bad_fields)).warning(
                 "Secret fields have default values"

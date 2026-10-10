@@ -27,7 +27,7 @@ from graphiti_core.llm_client.gemini_client import GeminiClient, LLMConfig
 from graphiti_core.nodes import EpisodeType
 
 from app.config import get_settings
-from app.utils import logger
+from app.observability.logging import logger
 
 from .schemas import GraphitiSearchResult
 

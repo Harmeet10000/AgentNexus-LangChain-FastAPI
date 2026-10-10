@@ -34,7 +34,7 @@ from app.features.documents.constants import (
 from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.shared.result.diagnostics import add_database_error_note
-from app.utils import logger
+from app.observability.logging import logger
 
 _MIN_SOURCE_THRESHOLD: int = 2
 _STATUTE_SEARCH_LIMIT: int = 5

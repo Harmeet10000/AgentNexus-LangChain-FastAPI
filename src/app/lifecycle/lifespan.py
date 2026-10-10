@@ -43,7 +43,7 @@ from app.connections import (
     setup_graphiti_indices,
     teardown_langgraph_checkpointer,
 )
-from app.features.auth.model import User
+from app.features.auth.models import User
 from app.features.auth.repository import RefreshTokenRepository
 from app.features.auth.token_audit_log import TokenAuditLog
 from app.features.auth.websocket_security import build_websocket_security_service
@@ -56,8 +56,9 @@ from app.lifecycle.graphs import (
     provide_saul_graph,
 )
 from app.middleware import initialize_fastapi_guard
-from app.shared.otel import shutdown_otel
-from app.utils import DependencyHealth, ServiceUnavailableException, logger
+from app.observability import shutdown_otel
+from app.observability.logging import logger
+from app.utils import DependencyHealth, ServiceUnavailableException
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
@@ -199,7 +200,7 @@ async def _setup_graphiti_state(app: FastAPI, settings: Any) -> None:
 
 async def _setup_crawl4ai_state(app: FastAPI, _settings: Any) -> None:
     """Initialise the Crawl4AI browser."""
-    from app.shared.crawler.processor import get_processor
+    from app.features.crawler.processor import get_processor
 
     app.state.crawl4ai_crawler = await create_crawl4ai_crawler()
     app.state.crawler_processor = await get_processor()
@@ -239,7 +240,7 @@ async def _setup_ingestion_graph_state(app: FastAPI, settings: Any) -> None:
         message = "Object storage is unavailable for ingestion graph"
         raise ServiceUnavailableException(message)
     from app.resilience.idempotency import IdempotencyGuard
-    from app.shared.rag.langextract.service import AsyncExtractionService
+    from app.extraction.langextract.service import AsyncExtractionService
 
     extraction = AsyncExtractionService.from_settings(settings)
     app.state.langextract_service = extraction

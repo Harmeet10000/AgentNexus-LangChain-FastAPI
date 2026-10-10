@@ -12,13 +12,13 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig
 from fastapi.requests import HTTPConnection
 
 from app.config import get_settings
-from app.shared.crawler import get_crawler_config
+from app.features.crawler.config import get_crawler_config
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
 
-    from app.shared.crawler import WebCrawler
-    from app.shared.crawler.config import CrawlerConfig
+    from app.features.crawler.crawler import WebCrawler
+    from app.features.crawler.config import CrawlerConfig
 
 
 def _ensure_playwright_platform_override() -> None:
@@ -86,8 +86,6 @@ async def get_crawler(
     Callers outside a FastAPI lifespan may omit ``browser`` and receive the
     isolated per-operation fallback.
     """
-    from app.shared.crawler import (
-        WebCrawler,
-    )
+    from app.features.crawler.crawler import WebCrawler
 
     return WebCrawler(redis_client=redis_client, browser=browser)
