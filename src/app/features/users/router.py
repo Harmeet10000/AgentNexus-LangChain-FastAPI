@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, Path, Query, Response, status
 
 from app.features.auth.dependencies import require_permission, require_role
 from app.features.auth.models import Permission, UserRole
+from app.kernel.result import render_result
 from app.security.tokens import TokenClaims
-from app.shared.result import render_result
 from app.utils import APIResponse
 
 from .dependencies import UserAdminServiceDep

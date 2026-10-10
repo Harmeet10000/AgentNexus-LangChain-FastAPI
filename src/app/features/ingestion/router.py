@@ -9,9 +9,9 @@ Dependencies read from app.state — same pattern as agent_saul.
 
 from fastapi import APIRouter, Depends, Response, UploadFile, status
 
+from app.kernel.result import render_result
 from app.observability.logging import logger
 from app.resilience.rate_limit import get_rate_limiter
-from app.shared.result import render_result
 from app.utils import APIResponse
 
 from .dependencies import IngestionGraphDep, UserIdDep

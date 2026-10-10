@@ -9,8 +9,8 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client
 from returns.result import Failure, Success
 
 from app.config import get_settings
+from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
-from app.shared.result import log_expected_failure
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis

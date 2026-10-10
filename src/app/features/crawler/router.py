@@ -9,9 +9,9 @@ from celery.exceptions import CeleryError
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 
 from app.config import get_settings
+from app.kernel.result import http_response, render_result
 from app.resilience.rate_limit import RateLimiter, RateLimitScope
 from app.shared.jobs.names import CRAWLER_CRAWL
-from app.shared.result import http_response, render_result
 from app.utils import (
     APIResponse,
     NotFoundException,

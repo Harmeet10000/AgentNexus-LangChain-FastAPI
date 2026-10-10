@@ -13,7 +13,6 @@ import re
 from typing import (
     TYPE_CHECKING,
     Any,  # noqa: TC003 — used in method bodies at runtime
-    Protocol,
 )
 
 import cognee
@@ -22,9 +21,7 @@ from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
-    from typing import LiteralString
 
-    from neo4j import Query
 
 #: Tenant and kind identifiers may only contain these characters. The separator
 #: below cannot therefore appear inside either component, which is what makes
@@ -88,19 +85,8 @@ def _origin_of(dumped: dict[str, Any]) -> str | None:
     return None
 
 
-class ProceduresQueryDriver(Protocol):
-    """Minimal query surface the consolidation precondition probe needs.
-
-    Declared structurally so this module never imports the driver package at
-    runtime: the probe needs exactly one method, with the driver's own
-    parameter shape so a real driver satisfies the protocol.
-    """
-
-    async def execute_query(self, query_: LiteralString | Query, **kwargs: Any) -> Any: ...
-
-
 def make_neo4j_procedures_probe(
-    driver: ProceduresQueryDriver | None,
+    driver: object | None,
 ) -> Callable[[], Awaitable[bool]]:
     """Build the consolidation precondition probe over a Neo4j driver.
 

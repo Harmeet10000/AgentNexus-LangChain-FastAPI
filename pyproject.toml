@@ -578,6 +578,13 @@ section-order = [
 "src/app/mcp/testing.py" = [
     "PLC0415", # Late imports to avoid startup overhead
 ]
+# Adapter-owned error unions: Pydantic evaluates ClassVar at model build,
+# so typing imports stay runtime even under `from __future__ import annotations`.
+"src/app/connections/object_storage.py" = ["TC003"]
+"src/app/connections/tavily.py" = ["TC003"]
+"src/app/connections/mailer.py" = ["TC003"]
+# kernel/result.py carries Pydantic models: ClassVar must stay runtime.
+"src/app/kernel/result.py" = ["TC003"]
 "src/app/ai/tools/shell.py" = [
     "ASYNC240", # Blocking path methods in async — uses os.path intentionally
     "PLC0415",  # Local import re to avoid name collision

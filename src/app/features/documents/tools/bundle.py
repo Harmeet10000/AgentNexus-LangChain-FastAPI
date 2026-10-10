@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from app.resilience.idempotency import IdempotencyGuard
-    from app.shared.rag.graphiti.client import GraphitiService
+    from app.shared.rag.graphiti.client import BoundGraphitiService as GraphitiService
 
 
 class AgentToolBundle(BaseModel):

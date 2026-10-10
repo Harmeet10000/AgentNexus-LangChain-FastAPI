@@ -6,7 +6,7 @@ own the process lifecycle and pass already-created infrastructure handles.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from app.ai.llm import build_chat_model
 from app.ai.memory import AgentMemoryService
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from app.config.settings import Settings
     from app.connections.object_storage import StorageService
     from app.extraction.langextract.service import AsyncExtractionService
-    from app.shared.rag.graphiti.client import GraphitiService
+    from app.shared.rag.graphiti.client import BoundGraphitiService as GraphitiService
 
     type IngestDocumentFn = Callable[..., Awaitable[Any]]
 
@@ -117,4 +117,4 @@ def graphiti_service(graphiti: Graphiti) -> GraphitiService:
     """Bind a raw Graphiti client to the application's canonical operations."""
     from app.shared.rag.graphiti.client import BoundGraphitiService  # noqa: PLC0415
 
-    return cast("GraphitiService", BoundGraphitiService(graphiti))
+    return BoundGraphitiService(graphiti)

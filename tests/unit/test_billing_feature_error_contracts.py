@@ -6,7 +6,7 @@ from app.features.billing.credits.exceptions import CreditInfrastructureError
 from app.features.billing.invoices.exceptions import InvoiceNotFoundError
 from app.features.billing.payments.exceptions import PaymentProviderUnavailableError
 from app.features.billing.webhooks.exceptions import WebhookVerificationError
-from app.shared.result import render_result
+from app.kernel.result import render_result
 
 
 def test_feature_classification_is_constant_and_not_serialized() -> None:

@@ -5,8 +5,8 @@ from returns.result import Failure
 
 from app.features.auth.dependencies import CurrentVerifiedUser
 from app.features.auth.dto import UserResponse
+from app.kernel.result import render_result
 from app.security.tokens import TokenClaims
-from app.shared.result import render_result
 from app.utils import APIResponse, http_response
 
 from .dependencies import get_profile_service

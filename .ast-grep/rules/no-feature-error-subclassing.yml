@@ -15,4 +15,8 @@ ignores:
   - src/app/ai/**/exceptions.py
   - src/app/shared/**/errors.py
   - src/app/utils/**/errors.py
+  # Adapter-owned unions: each classifies its own third-party boundary.
+  - src/app/connections/object_storage.py
+  - src/app/connections/tavily.py
+  - src/app/connections/mailer.py
   - .ast-grep/fixtures/no-feature-error-subclassing/permit.py

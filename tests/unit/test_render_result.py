@@ -7,7 +7,7 @@ from fastapi import Response
 from returns.result import Failure, Success
 
 from app.kernel.errors import ErrorKind, FeatureError
-from app.shared.result.render import render_result
+from app.kernel.result import render_result
 
 
 class DummyCode(StrEnum):

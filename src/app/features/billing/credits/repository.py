@@ -11,7 +11,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.features.billing.credits.models import CreditConsumption, CreditStatus, UserCredit
-from app.shared.result.diagnostics import add_database_error_note
+from app.kernel.result import add_database_error_note
 
 from .exceptions import (
     CreditConflictError,

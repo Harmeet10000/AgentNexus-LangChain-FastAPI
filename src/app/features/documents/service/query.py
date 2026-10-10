@@ -42,12 +42,12 @@ from app.features.documents.retrieval_graph import (
     build_retrieval_graph,
     get_shared_reranker,
 )
+from app.kernel.result import log_expected_failure
 from app.observability.logging import trace_layer
 from app.retrieval.fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
 from app.shared.langchain_layer import serialize_to_toon
 from app.shared.rag.structural_navigator import navigate_tree
 from app.shared.rag.token_counter import count_tokens as default_count_tokens
-from app.shared.result import log_expected_failure
 from app.utils import to_sorted_key_bytes
 
 if TYPE_CHECKING:

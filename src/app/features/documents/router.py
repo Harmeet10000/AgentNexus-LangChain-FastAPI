@@ -5,8 +5,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Path, Response, UploadFile, status
 from returns.result import Failure
 
+from app.kernel.result import render_result
 from app.resilience.rate_limit import get_rate_limiter
-from app.shared.result import render_result
 from app.utils import APIResponse
 
 from .dependencies import DocumentCommandServiceDep, DocumentQueryServiceDep, UserIdDep

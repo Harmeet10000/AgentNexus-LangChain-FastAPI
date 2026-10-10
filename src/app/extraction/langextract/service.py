@@ -2,19 +2,12 @@ from __future__ import annotations
 
 import traceback
 from enum import StrEnum
-from typing import Protocol
 
 import asyncer
 import langextract as lx
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 from app.observability.logging import logger
-
-
-class LangExtractSettings(Protocol):
-    """Settings surface needed to construct the extraction client."""
-
-    LANGEXTRACT_API_KEY: SecretStr
 
 
 class ExtractionRequest(BaseModel):
@@ -58,12 +51,6 @@ class ExtractionFailed(BaseModel):
 type ExtractionOutcome = ExtractionSucceeded | ExtractionFailed
 
 
-class SyncExtractionProvider(Protocol):
-    """Blocking provider contract kept behind the async service boundary."""
-
-    def extract(self, request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]: ...
-
-
 class LangExtractClient:
     """Synchronous adapter around LangExtract's functional provider API."""
 
@@ -97,11 +84,11 @@ class AsyncExtractionService:
 
     __slots__ = ("_provider",)
 
-    def __init__(self, provider: SyncExtractionProvider | None) -> None:
+    def __init__(self, provider: object | None) -> None:
         self._provider = provider
 
     @classmethod
-    def from_settings(cls, settings: LangExtractSettings) -> AsyncExtractionService:
+    def from_settings(cls, settings: object) -> AsyncExtractionService:
         secret = getattr(settings, "LANGEXTRACT_API_KEY", SecretStr(""))
         api_key = secret.get_secret_value().strip()
         if not api_key or api_key == "empty-langextract-api-key":

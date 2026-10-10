@@ -31,10 +31,10 @@ from app.features.documents.constants import (
     RRF_K,
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
+from app.kernel.result import add_database_error_note
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
-from app.shared.result.diagnostics import add_database_error_note
 
 _MIN_SOURCE_THRESHOLD: int = 2
 _STATUTE_SEARCH_LIMIT: int = 5
@@ -42,7 +42,7 @@ _STATUTE_SEARCH_LIMIT: int = 5
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from app.shared.rag.graphiti.client import GraphitiService
+    from app.shared.rag.graphiti.client import BoundGraphitiService as GraphitiService
 
 
 def make_search_legal_precedents_tool(

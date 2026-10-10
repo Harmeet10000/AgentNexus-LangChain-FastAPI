@@ -631,7 +631,7 @@ def __getattr__(name: str) -> type:
 
         return _IR  # type: ignore[return-value]
     if name == "RedisClientProtocol":
-        # ponytail: shim — old code did `from celery_reliability import RedisClientProtocol`; now use `Redis`
+        # Back-compat shim: older imports expected a redis client alias; current runtime uses `Redis`.
         return cast("type", Redis)
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)

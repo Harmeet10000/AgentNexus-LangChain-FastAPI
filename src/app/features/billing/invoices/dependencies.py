@@ -26,11 +26,11 @@ async def get_invoice_service(
 ) -> InvoiceService:
     return InvoiceService(
         session,
-        InvoiceRepository(session),
-        SubscriptionRepository(session),
-        PlanRepository(session),
-        PaymentRepository(session),
-        AuditLogRepository(session),
+        invoices=InvoiceRepository(session),
+        subscriptions=SubscriptionRepository(session),
+        plans=PlanRepository(session),
+        payments=PaymentRepository(session),
+        audit=AuditLogRepository(session),
         storage=storage,
     )
 

@@ -8,7 +8,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from returns.result import Failure, Success
 
-from app.connections.tavily import SearchResponse
+from app.connections.tavily import SearchResponse, TavilyExternalError
 from app.shared.langgraph_layer.open_deep_search import graph as open_deep_search_graph
 from app.shared.langgraph_layer.open_deep_search import utils as open_deep_search_utils
 from app.shared.langgraph_layer.open_deep_search.execution import (
@@ -20,7 +20,6 @@ from app.shared.langgraph_layer.open_deep_search.graph import (
     researcher_tools,
     route_researcher,
 )
-from app.shared.services.errors import TavilyExternalError
 from app.utils import ExternalServiceException
 
 

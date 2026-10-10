@@ -311,6 +311,9 @@ todos:-
 247. One-line improvement: Add error.add_note(traceback.format_exc()) when wrapping errors to preserve full context for debugging  DONE
 249. use native redis-fastAPI package and upgrade fastAPI versions  DONE
 116. check the logic in rate_limit and circuit breaker if a more clean implementation with design patterns and dependecy inversion can be written or should it be written like that and also check the circuit breaker redis client should be sync or async. i just want circuit breaker code in examples/ directory and dont want to use it in my codebase for now as i have built already a complex enough application DONE
+221. fix the files tht are scrambled in utils,shared, combine celery, and other places by improving the feature based sliced folder structure to an advanced level.  DONE
+162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain  DONE
+248. should i use neo4j and postgres in cognee or let cognee use it own thing?  DONE
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses can be used to make the lynk linter     DELAYED    
@@ -381,16 +384,15 @@ To solve these problems, the creator shifted to a **production-grade database ar
 
 
 
-190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
-136. use LangExtract outputs to build rich graph knowledge from your legal documents.  in document processing
-221. fix the files tht are scrambled in utils,shared, combine celery, and other places by improving the feature based sliced folder structure to an advanced level.
-162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain
+
 234. learn about classVars, policy, strEnum, namedTuple, final, mapping, list, set, learn crawler/processor.py policy  and check if UUIDv7 is available in ORM
 242. fix agent tools
 
-248. should i use neo4j and postgres in cognee or let cognee use it own thing?
 250. instal pdb debugger and others, flamegraph, skip list DS, swiss tables
-251. the repository has more than one ingestion flow. The documents-service path uses LangExtract; the separate ingestion graph has its own extraction/segmentation stages.                                                             
+251. the repository has more than one ingestion flow. The documents-service path uses LangExtract; the separate ingestion graph has its own extraction/segmentation stages. 
+190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
+136. use LangExtract outputs to build rich graph knowledge from your legal documents.  in document processing
+252. remove retrival graph if present and 
 ```
 
 10:00 AM Beijing Time = 07:30 AM IST

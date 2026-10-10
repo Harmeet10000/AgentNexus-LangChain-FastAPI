@@ -6,9 +6,9 @@ from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
+from app.kernel.result import render_exception
 from app.observability.logging import execution_path, logger
 from app.shared.jobs.errors import CircuitBreakerOpenError, IdempotencyLockError
-from app.shared.result import render_exception
 from app.utils import APIException, ErrorCode
 
 
@@ -25,7 +25,7 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
     # handler `ServerErrorMiddleware` called to render the error. Starlette does not catch
     # that, so the client received a bodiless 500: the catch-all branch was registered but
     # could never emit its envelope. Same reasoning covers `request_state` in
-    # `app.shared.result.render._build_request_meta`.
+    # `app.kernel.result._build_request_meta`.
     current_flow = " -> ".join(execution_path.get([]))
 
     # ────────────────────────────────────────────────

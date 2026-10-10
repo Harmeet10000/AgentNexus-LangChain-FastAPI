@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 from uuid import uuid4
 
 import asyncer
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-from returns.result import Failure, Success
+from returns.result import Failure, Result, Success
 
+from app.kernel.errors import ErrorKind, FeatureError
 from app.observability.logging import logger
-from app.shared.services.errors import StorageUnavailableError, StorageValidationError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -23,7 +24,27 @@ if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
 
     from app.config import Settings
-    from app.shared.services.errors import StorageResult
+
+
+class StorageCode(StrEnum):
+    INVALID_INPUT = "STORAGE_INVALID_INPUT"
+    UNAVAILABLE = "STORAGE_UNAVAILABLE"
+
+
+class StorageValidationError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.VALIDATION
+    code: ClassVar[StorageCode] = StorageCode.INVALID_INPUT
+
+
+class StorageUnavailableError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.INFRASTRUCTURE
+    code: ClassVar[StorageCode] = StorageCode.UNAVAILABLE
+    retryable: ClassVar[bool] = True
+    operation: str
+
+
+type StorageError = StorageValidationError | StorageUnavailableError
+type StorageResult[T] = Result[T, StorageError]
 
 
 async def create_object_store(settings: Settings) -> StorageService | None:
