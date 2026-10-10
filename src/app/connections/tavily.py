@@ -13,18 +13,16 @@ from app.config import get_settings
 
 if TYPE_CHECKING:
     from app.config.settings import Settings
-    from app.shared.services.errors import TavilyResult
 
+
+from enum import StrEnum
+from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict
-from returns.result import Failure, Success
+from returns.result import Failure, Result, Success
 
+from app.kernel.errors import ErrorKind, FeatureError
 from app.observability.logging import logger
-from app.shared.services.errors import (
-    TavilyExternalError,
-    TavilyInvalidResponseError,
-    TavilyValidationError,
-)
 
 
 @cache
@@ -152,6 +150,32 @@ def _build_search_result(result: Mapping[str, object]) -> SearchResult:
         published_date=_read_optional_string(result, "published_date"),
         raw_content=_read_optional_string(result, "raw_content"),
     )
+
+
+class TavilyCode(StrEnum):
+    INVALID_INPUT = "TAVILY_INVALID_INPUT"
+    REQUEST_FAILED = "TAVILY_REQUEST_FAILED"
+    INVALID_RESPONSE = "TAVILY_INVALID_RESPONSE"
+
+
+class TavilyValidationError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.VALIDATION
+    code: ClassVar[TavilyCode] = TavilyCode.INVALID_INPUT
+
+
+class TavilyExternalError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.EXTERNAL_SERVICE
+    code: ClassVar[TavilyCode] = TavilyCode.REQUEST_FAILED
+    retryable: ClassVar[bool] = True
+
+
+class TavilyInvalidResponseError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.EXTERNAL_SERVICE
+    code: ClassVar[TavilyCode] = TavilyCode.INVALID_RESPONSE
+
+
+type TavilyError = TavilyValidationError | TavilyExternalError | TavilyInvalidResponseError
+type TavilyResult[T] = Result[T, TavilyError]
 
 
 async def search(

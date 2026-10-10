@@ -24,7 +24,7 @@ from app.features.profile.exceptions import ProfileAuthenticationError
 from app.features.profile.service import ProfileService
 from app.features.users.exceptions import UsersConflictError, UsersInfrastructureError
 from app.features.users.service import UserAdminService
-from app.shared.result import render_result
+from app.kernel.result import render_result
 
 
 def test_error_classification_is_not_constructible_or_serialized() -> None:

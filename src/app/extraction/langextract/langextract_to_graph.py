@@ -1,7 +1,7 @@
 # src/app/shared/rag/langextract/langextract_to_graph.py
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
@@ -14,13 +14,6 @@ if TYPE_CHECKING:
     from app.shared.rag.errors import RagResult
 
 
-@runtime_checkable
-class Neo4jClient(Protocol):
-    """Minimal protocol for Neo4j operations."""
-
-    async def merge_node(self, label: str, props: dict[str, object]) -> None: ...
-
-
 class GraphIngestionContext(BaseModel):
     """Narrow context for graph mapping (langextract + clause-episode writers)."""
 
@@ -28,7 +21,7 @@ class GraphIngestionContext(BaseModel):
 
     document_id: str
     source_url: str = ""
-    neo4j_client: Neo4jClient | None = None
+    neo4j_client: object | None = None
     user_id: str
     thread_id: str
     jurisdiction: str = "unspecified"

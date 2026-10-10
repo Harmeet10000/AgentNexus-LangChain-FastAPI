@@ -39,8 +39,8 @@ from typing import ClassVar  # noqa: TC003 — resolved at runtime by Pydantic
 from returns.result import Failure, Result, Success
 
 from app.kernel.errors import ErrorKind, FeatureError
+from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
-from app.shared.result import log_expected_failure
 
 
 class PaymentCode(StrEnum):

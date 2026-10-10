@@ -12,7 +12,7 @@ from app.connections import get_postgres_db
 from app.features.auth.dependencies import CurrentClaims, CurrentVerifiedUser, require_role
 from app.features.auth.models import UserRole
 from app.features.billing.invoices.dependencies import InvoiceServiceDep
-from app.shared.result import render_result
+from app.kernel.result import render_result
 from app.utils import APIResponse
 
 from .dependencies import CreditServiceDep

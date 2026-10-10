@@ -1,7 +1,7 @@
 """Pure error spine: the only cross-feature failure vocabulary.
 
 No I/O, no FastAPI, no SQLAlchemy. Feature slices subclass `FeatureError`
-directly; HTTP status mapping lives in `app.shared.result` (render path).
+directly; HTTP status mapping lives in `app.kernel.result`.
 """
 
 from enum import StrEnum

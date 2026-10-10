@@ -7,9 +7,9 @@ from returns.result import Failure
 from app.config import get_settings
 from app.connections.mongodb import get_mongodb
 from app.connections.redis import get_redis
+from app.kernel.result import render_result
 from app.resilience.rate_limit import get_rate_limiter
 from app.security.tokens import OAUTH_STATE_COOKIE
-from app.shared.result import render_result
 from app.utils import APIResponse, http_response
 
 from .dependencies import (

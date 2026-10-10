@@ -4,7 +4,7 @@ from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.shared.result import HealthStatus
+from app.kernel.result import HealthStatus
 
 
 class SelfInfoDTO(BaseModel):

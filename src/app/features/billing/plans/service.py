@@ -11,8 +11,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.config import get_settings
 from app.features.audit.models import AuditAction, AuditLog
 from app.features.billing.payments.clients.razorpay_client import RazorpayClient
+from app.kernel.result import add_database_error_note
 from app.observability.logging import logger, trace_layer
-from app.shared.result.diagnostics import add_database_error_note
 
 from .dto import PlanResponse
 from .exceptions import (

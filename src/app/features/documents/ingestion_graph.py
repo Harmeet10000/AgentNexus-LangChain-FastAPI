@@ -9,7 +9,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from returns.result import Failure
 
-from app.shared.result import log_expected_failure
+from app.kernel.result import log_expected_failure
 from app.utils import ServiceUnavailableException
 
 from .dto import IngestionJob, IngestionRuntime

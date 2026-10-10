@@ -14,8 +14,8 @@ from app.config import get_settings
 from app.features.audit.models import AuditLog
 from app.features.billing.payments.clients.razorpay_client import RazorpayClient
 from app.features.billing.subscriptions.models import Subscription, SubscriptionStatus
+from app.kernel.result import add_database_error_note
 from app.observability.logging import logger, trace_layer
-from app.shared.result.diagnostics import add_database_error_note
 
 from .exceptions import DunningExternalServiceError, DunningInfrastructureError
 

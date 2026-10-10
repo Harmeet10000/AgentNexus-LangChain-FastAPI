@@ -1,6 +1,6 @@
 """Utility modules for the application."""
 
-# Keep shared.result below logger exports to avoid package-init recursion.
+# Keep kernel.result below logger exports to avoid package-init recursion.
 # ruff: noqa: I001
 
 from .api_features import APIFeatures
@@ -58,7 +58,7 @@ from .json_serializer import (
     to_json_str,
     to_sorted_key_bytes,
 )
-from app.shared.result import (
+from app.kernel.result import (
     APIResponse,
     DependencyHealth,
     ErrorDetail,

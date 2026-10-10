@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from app.features.health.dependencies import get_health_service
 from app.features.health.dto import ComponentCheck
 from app.features.health.health_check import check_cognee
-from app.shared.result import HealthStatus
+from app.kernel.result import HealthStatus
 
 if TYPE_CHECKING:
     from typing import Any

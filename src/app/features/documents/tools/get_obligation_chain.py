@@ -32,7 +32,7 @@ from app.resilience.idempotency import IdempotencyGuard, ToolResult
 if TYPE_CHECKING:
     from langchain_core.tools.base import BaseTool
 
-    from app.shared.rag.graphiti.client import GraphitiService
+    from app.shared.rag.graphiti.client import BoundGraphitiService as GraphitiService
     from app.shared.rag.graphiti.schemas import GraphitiSearchResult
 
 

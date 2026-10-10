@@ -8,25 +8,41 @@ Sync httpx is the right tool here.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from enum import StrEnum
+from typing import TYPE_CHECKING, ClassVar
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
-from returns.result import Failure, Success
+from returns.result import Failure, Result, Success
 
 from app.config import get_settings
+from app.kernel.errors import ErrorKind, FeatureError
 from app.observability.logging import logger
-from app.shared.services.errors import (
-    MailerDeliveryError,
-    MailerUnavailableError,
-)
 
 if TYPE_CHECKING:
     from httpx._models import Response
 
-    from app.shared.services.errors import MailerResult
-
 settings = get_settings()
+
+
+class MailerCode(StrEnum):
+    DELIVERY_FAILED = "MAILER_DELIVERY_FAILED"
+    UNREACHABLE = "MAILER_UNREACHABLE"
+
+
+class MailerDeliveryError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.EXTERNAL_SERVICE
+    code: ClassVar[MailerCode] = MailerCode.DELIVERY_FAILED
+
+
+class MailerUnavailableError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.EXTERNAL_SERVICE
+    code: ClassVar[MailerCode] = MailerCode.UNREACHABLE
+    retryable: ClassVar[bool] = True
+
+
+type MailerError = MailerDeliveryError | MailerUnavailableError
+type MailerResult[T] = Result[T, MailerError]
 
 
 class MailerConfig(BaseModel):

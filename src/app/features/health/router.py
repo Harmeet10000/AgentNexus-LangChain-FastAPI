@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request, Response, status
 from returns.result import Success
 
 from app.config import get_settings
-from app.shared.result import (
+from app.kernel.result import (
     APIResponse,
     DependencyHealth,
     HealthResponse,

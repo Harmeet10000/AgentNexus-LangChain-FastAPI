@@ -17,8 +17,8 @@ from app.features.billing.money import (
     state_code_from_gstin,
 )
 from app.kernel.errors import ErrorKind
+from app.kernel.result import add_database_error_note
 from app.observability.logging import trace_layer
-from app.shared.result.diagnostics import add_database_error_note
 
 from .dto import InvoiceLineItemDTO, InvoiceResponse
 from .exceptions import (

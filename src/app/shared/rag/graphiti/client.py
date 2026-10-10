@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 from uuid import NAMESPACE_URL, uuid5
 
 from graphiti_core import Graphiti
@@ -38,42 +38,6 @@ if TYPE_CHECKING:
         ClauseEpisodeMetadata,
         LegalEdgeInput,
     )
-
-
-class GraphitiService(Protocol):
-    """Behavior contract for Graphiti memory operations used by agents/tools."""
-
-    async def write_clause_episode(
-        self,
-        clause_text: str,
-        metadata: ClauseEpisodeMetadata,
-    ) -> str: ...
-
-    async def write_relationship_edge(self, edge: LegalEdgeInput) -> str: ...
-
-    async def search_for_risk_context(
-        self,
-        query: str,
-        user_id: str,
-        doc_id: str | None = None,
-        num_results: int = 10,
-    ) -> list[GraphitiSearchResult]: ...
-
-    async def search_for_precedent_chains(
-        self,
-        query: str,
-        user_id: str,
-        jurisdiction: str = "India",
-        num_results: int = 10,
-    ) -> list[GraphitiSearchResult]: ...
-
-    async def get_obligation_chain(
-        self,
-        entity_name: str,
-        user_id: str,
-        doc_id: str | None = None,
-        depth: int = 3,
-    ) -> list[GraphitiSearchResult]: ...
 
 
 class BoundGraphitiService:

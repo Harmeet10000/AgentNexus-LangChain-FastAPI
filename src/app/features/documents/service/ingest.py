@@ -45,9 +45,9 @@ from app.features.documents.repository import (
     DocumentRepository,
     build_chunk_rows,
 )
+from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
 from app.shared.jobs.names import DOCUMENTS_INGEST
-from app.shared.result import log_expected_failure
 
 if TYPE_CHECKING:
     from typing import Any, Literal
@@ -69,7 +69,9 @@ if TYPE_CHECKING:
         LegalMetadataExtraction,
     )
     from app.resilience.idempotency import IdempotencyGuard
-    from app.shared.rag.graphiti.client import GraphitiService
+    from app.shared.rag.graphiti.write_clause_episodes import (
+        GraphitiService as ClauseWriterService,
+    )
 
 from app.features.documents.service.query import (
     _KNOWLEDGE_EXTRACTION_PROMPT,
@@ -721,7 +723,7 @@ async def _write_extracted_clause_episodes(
             jurisdiction=jurisdiction or "unspecified",
             document_type=document_type,
         ),
-        graphiti_service=cast("GraphitiService", graph_writer),
+        graphiti_service=cast("ClauseWriterService", graph_writer),
         idempotency=cast("IdempotencyGuard", idempotency),
     )
     return all(result.success for result in [*clause_results, *relationship_results])
