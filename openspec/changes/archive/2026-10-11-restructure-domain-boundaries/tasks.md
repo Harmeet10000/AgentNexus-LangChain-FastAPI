@@ -45,5 +45,5 @@
 
 ## 7. Final verification and rollout
 
-- [ ] 7.1 Run Ruff, ty, pytest, import-linter, ast-grep with rule fixtures, Go tests and installed-package smoke checks; compare all compatibility baselines.
-- [ ] 7.2 Update module ownership/developer/operator docs and coordinated rollout/rollback instructions; verify no stale active import paths remain.
+- [x] 7.1 Run Ruff, ty, pytest, import-linter, ast-grep with rule fixtures, Go tests and installed-package smoke checks; compare all compatibility baselines. (Done on completion: ruff + format clean, ty 1 pre-existing warning, pytest 774 passed / 3 pre-existing failures, lint-imports 5/5, ast-grep 3 pre-existing errors, Go tests + lynk CLI fixture green, 315-module import probe clean. Baselines — OpenAPI 121/121, 13 wire names, 17 Saul nodes / 29 state keys, 8 retrieval nodes, 24-table ORM set — all identical.)
+- [x] 7.2 Update module ownership/developer/operator docs and coordinated rollout/rollback instructions; verify no stale active import paths remain. (Project-structure docs rewritten to the new layout; worker operator commands follow the `worker/app.py` rename; stale-path grep clean except immutable migration prose. Rollout: single coordinated revision, no schema/queue changes — wire names pinned, rollback is code/image revert together.)
