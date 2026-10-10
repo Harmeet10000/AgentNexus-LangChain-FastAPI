@@ -1,9 +1,9 @@
 """Document services split by use case: ingest, query, delete."""
 
 from app.ai.embeddings import embed_text, embed_texts
-
 from app.features.documents.classification import classify_document, segment_chunks
 from app.features.documents.parser import parse_document
+
 from .ingest import (
     DocumentCommandService,
     _checkpoint_ingestion_transaction,

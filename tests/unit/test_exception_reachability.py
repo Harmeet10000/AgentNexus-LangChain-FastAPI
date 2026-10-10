@@ -220,9 +220,7 @@ def test_breaker_and_idempotency_render_deliberate_status():
 
 def test_agent_memory_narrow_before_broad():
     """Prefetch degrades on the named family before the fail-open catch-all."""
-    text = pathlib.Path("src/app/ai/memory/prefetch.py").read_text(
-        encoding="utf-8"
-    )
+    text = pathlib.Path("src/app/ai/memory/prefetch.py").read_text(encoding="utf-8")
     assert text.find("except AgentMemoryError") < text.find(
         "except Exception as exc:  # noqa: BLE001 — fail-open read path (8.3)"
     )
