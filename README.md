@@ -286,14 +286,14 @@ uv run alembic history --verbose
 uv run ruff check --fix
 uv run ruff format
 uv run pytest -x
-uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q default --concurrency=8
-uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q ingestion --concurrency=2
-uv run celery -A app.connections.celery:celery_app worker --loglevel=info -Q crawler --concurrency=2
-uv run celery -A app.connections.celery:celery_app beat --loglevel=info
+uv run celery -A app.worker.celery_app:celery_app worker --loglevel=info -Q default --concurrency=8
+uv run celery -A app.worker.celery_app:celery_app worker --loglevel=info -Q ingestion --concurrency=2
+uv run celery -A app.worker.celery_app:celery_app worker --loglevel=info -Q crawler --concurrency=2
+uv run celery -A app.worker.celery_app:celery_app beat --loglevel=info
 ```
 
-Those three commands are defined once in the `Makefile` — `make celery`, `make celery-ingestion` and
-`make celery-beat` run exactly them, and `make celery-command` prints all three. A unit test asserts
+Those four commands are defined once in the `Makefile` — `make celery`, `make celery-ingestion`,
+`make celery-crawler` and `make celery-beat` run exactly them, and `make celery-command` prints all four. A unit test asserts
 the block above, the `Makefile` and the compose services are the same strings, so they cannot drift
 apart: the previous version named a Celery configuration module that has never existed in this
 repository, and nothing caught it.

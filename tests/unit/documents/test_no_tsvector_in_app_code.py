@@ -43,6 +43,4 @@ def test_no_full_text_vector_machinery_in_app_code() -> None:
         hits = sorted({token for token in FORBIDDEN_TOKENS if token in lowered})
         if hits:
             offenders.append(f"{path}: {', '.join(hits)}")
-    assert not offenders, (
-        "full-text vector machinery in application code:\n" + "\n".join(offenders)
-    )
+    assert not offenders, "full-text vector machinery in application code:\n" + "\n".join(offenders)

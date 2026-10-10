@@ -2,11 +2,12 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, File, Path, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Path, Response, UploadFile, status
 from returns.result import Failure
 
 from app.shared.result import render_result
 from app.utils import APIResponse
+from app.utils.rate_limit.dependencies import get_rate_limiter
 
 from .dependencies import DocumentCommandServiceDep, DocumentQueryServiceDep, UserIdDep
 from .dto import (
@@ -23,10 +24,15 @@ from .errors import DocumentValidationError
 
 router = APIRouter(tags=["documents"])
 
+limit_document_upload = get_rate_limiter(3, 3, 300, scope="document-upload")
+limit_document_search = get_rate_limiter(20, 20, 60, scope="document-search")
+limit_document_qa = get_rate_limiter(5, 5, 60, scope="document-qa")
+
 
 @router.post(
     path="/documents/upload",
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(limit_document_upload)],
 )
 async def upload_document(
     file: Annotated[UploadFile, File()],
@@ -74,6 +80,7 @@ async def get_document_status(
 
 @router.post(
     "/search",
+    dependencies=[Depends(limit_document_search)],
 )
 async def unified_search(
     payload: UnifiedSearchRequest,
@@ -87,6 +94,7 @@ async def unified_search(
 
 @router.post(
     path="/search/rag",
+    dependencies=[Depends(limit_document_qa)],
 )
 async def unified_rag(
     payload: UnifiedRagRequest,
@@ -100,6 +108,7 @@ async def unified_rag(
 
 @router.post(
     path="/search/ask",
+    dependencies=[Depends(limit_document_qa)],
 )
 async def ask_corpus(
     payload: UnifiedAskRequest,
@@ -113,6 +122,7 @@ async def ask_corpus(
 
 @router.post(
     path="/legal/ask",
+    dependencies=[Depends(limit_document_qa)],
 )
 async def ask_legal(
     payload: UnifiedAskRequest,

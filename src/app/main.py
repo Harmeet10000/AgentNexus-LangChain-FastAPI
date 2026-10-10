@@ -13,6 +13,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
 from guard import SecurityMiddleware
 from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
+from redis_fastapi import FastAPIRedis
 from returns.result import Failure, Success
 
 from .api import v1_router, v2_router
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
         redoc_url="/api-redoc",
         openapi_url="/swagger.json",
     )
+    FastAPIRedis(app).lifespan()
 
     # ============================================================================
     # Add middlewares in REVERSE order of execution

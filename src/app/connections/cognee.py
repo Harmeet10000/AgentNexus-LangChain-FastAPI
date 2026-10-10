@@ -120,7 +120,7 @@ async def setup_cognee(settings: Settings) -> CogneeSetupConfig:
     """
     # Imported lazily: a module-level import edges this connection module into
     # app.features' package init, which connections must never depend on.
-    from app.features.documents.model import CHUNK_EMBEDDING_DIM  # noqa: PLC0415
+    from app.retrieval.embeddings import CHUNK_EMBEDDING_DIM  # noqa: PLC0415
 
     logger.bind(service="cognee").info("Configuring Cognee")
 

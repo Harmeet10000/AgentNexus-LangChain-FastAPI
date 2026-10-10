@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any
 
 from app.features.health.health_check import check_neo4j_plugins
 
@@ -58,14 +61,16 @@ async def test_bare_neo4j_without_apoc_fails() -> None:
     app = _FakeApp(_FakeState(neo4j_driver=_FakeDriver({"apoc.": 0, "gds.": 0})))
     health = await check_neo4j_plugins(app)
     assert health.status.value == "unhealthy"
-    assert health.message is not None and "APOC" in health.message
+    assert health.message is not None
+    assert "APOC" in health.message
 
 
 async def test_missing_gds_only_degrades() -> None:
     app = _FakeApp(_FakeState(neo4j_driver=_FakeDriver({"apoc.": 162, "gds.": 0})))
     health = await check_neo4j_plugins(app)
     assert health.status.value == "degraded"
-    assert health.message is not None and "GDS" in health.message
+    assert health.message is not None
+    assert "GDS" in health.message
 
 
 async def test_fully_provisioned_neo4j_is_ok() -> None:

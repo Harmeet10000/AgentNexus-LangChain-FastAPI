@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app.shared.langgraph_layer.retrieval_kb.reranker import HostedReranker
+from app.features.documents.retrieval_graph.reranker import HostedReranker
 
 if TYPE_CHECKING:
     from typing import Any
-from app.shared.langgraph_layer.retrieval_kb.state import RetrievedChunk
+from app.features.documents.retrieval_graph.state import RetrievedChunk
 
 
 def _chunk(chunk_id: str) -> RetrievedChunk:

@@ -21,6 +21,21 @@ if TYPE_CHECKING:
     from .errors import AuthResult
     from .repository import RefreshTokenRepository, UserRepository
 
+from app.security.passwords import (
+    generate_token,
+    hash_password,
+    hash_token,
+    needs_rehash,
+    verify_password,
+)
+from app.security.tokens import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    sign_oauth_state,
+    verify_oauth_state,
+)
+
 from .dto import SessionResponse, TokenResponse, UserResponse
 from .errors import (
     AuthAuthenticationError,
@@ -29,21 +44,8 @@ from .errors import (
     AuthNotFoundError,
 )
 from .model import User
+from .oauth import fetch_oauth_userinfo, get_oauth_config
 from .repository import SessionData
-from .security import (
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-    fetch_oauth_userinfo,
-    generate_token,
-    get_oauth_config,
-    hash_password,
-    hash_token,
-    needs_rehash,
-    sign_oauth_state,
-    verify_oauth_state,
-    verify_password,
-)
 
 # Dummy hash used in the constant-time negative path during login.
 # Prevents timing attacks that would reveal whether an email is registered.
@@ -239,8 +241,8 @@ class AuthService:
         access_token, expires_in = create_access_token(
             user_id=str(resolved_user.id),
             session_id=claims.jti,
-            role=resolved_user.role,
-            permissions=resolved_user.get_permissions(),
+            role=resolved_user.role.value,
+            permissions=frozenset(p.value for p in resolved_user.get_permissions()),
         )
         return Success(
             TokenResponse(
@@ -579,7 +581,8 @@ class AuthService:
                 0,
                 -1,
             )
-            for conn_id in connections:
+            for member in connections:
+                conn_id = member.decode() if isinstance(member, bytes) else str(member)
                 # Close the WebSocket connection
                 await ws_security_service.close_connection(conn_id, reason=reason)
                 closed_connection_ids.append(conn_id)
@@ -613,8 +616,8 @@ class AuthService:
         access_token, expires_in = create_access_token(
             user_id=str(user.id),
             session_id=session_id,
-            role=user.role,
-            permissions=user.get_permissions(),
+            role=user.role.value,
+            permissions=frozenset(p.value for p in user.get_permissions()),
         )
         refresh_token, refresh_ttl = create_refresh_token(
             user_id=str(user.id),

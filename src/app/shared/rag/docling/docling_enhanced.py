@@ -140,14 +140,11 @@ def extract_code_blocks(doc: DoclingDocument) -> list[ExtractedCodeBlock]:
         if not isinstance(doc, DoclingDocument):
             return code_blocks
 
-        for idx, item in enumerate(doc._iterate_nodes()):
+        for idx, (item, _level) in enumerate(doc.iterate_items()):
             try:
-                if (
-                    hasattr(item, "meta")
-                    and hasattr(item.meta, "text_type")
-                    and item.meta.text_type == "code"
-                ):
-                    code_text = item.text or ""
+                meta = getattr(item, "meta", None)
+                if getattr(meta, "text_type", None) == "code":
+                    code_text = getattr(item, "text", None) or ""
                     language = _detect_language(item, code_text)
 
                     code_blocks.append(
@@ -236,29 +233,39 @@ async def extract_images(
         if not isinstance(doc, DoclingDocument):
             return images
 
-        for idx, (key, item) in enumerate(doc._iterate_artifacts()):
+        for idx, (item, _level) in enumerate(doc.iterate_items(traverse_pictures=True)):
             try:
-                if hasattr(item, "image"):
-                    image_data = item.image
+                image_data = getattr(item, "image", None)
+                if image_data is None:
+                    continue
 
-                    caption = None
-                    if hasattr(doc, "figures") and idx < len(doc.figures):
-                        fig = doc.figures[idx]
-                        caption = getattr(fig, "caption", None)
+                # Caption RefItems carry references, not text, and this
+                # docling version exposes no public text resolver; prior
+                # runtime behavior therefore had caption=None here as well
+                # (no `figures` attribute exists), with VLM as the only source.
+                caption = None
+                if use_vlm_captioning:
+                    caption = await _generate_vlm_caption(image_data)
 
-                    if use_vlm_captioning and not caption:
-                        caption = await _generate_vlm_caption(image_data)
+                page_number = 1
+                prov = getattr(item, "prov", None) or []
+                if prov:
+                    page_number = getattr(prov[0], "page_no", None) or 1
 
-                    images.append(
-                        ExtractedImage(
-                            image_index=idx,
-                            image_path=key,
-                            base64_data=_encode_base64(image_data),
-                            caption=caption,
-                            page_number=getattr(item, "page", 1),
-                            metadata={"source_image": idx},
-                        )
+                raw_bytes = image_data if isinstance(image_data, bytes) else None
+                images.append(
+                    ExtractedImage(
+                        image_index=idx,
+                        image_path=getattr(item, "self_ref", None) or f"picture_{idx}",
+                        base64_data=_encode_base64(raw_bytes) if raw_bytes is not None else None,
+                        caption=caption,
+                        page_number=page_number,
+                        metadata={
+                            "source_image": idx,
+                            "image_uri": getattr(image_data, "uri", None),
+                        },
                     )
+                )
             except DoclingError as e:
                 e.add_note(f"image_index={idx}, operation=extract_image")
                 logger.bind(image_index=idx, operation="extract_image", error=str(e)).opt(
@@ -364,7 +371,7 @@ async def _run_doctags_stage(
 ) -> str | None:
     """DocTags export; a failed export degrades to None, never to a failed convert."""
     try:
-        return doc.export_to_doc_tags()
+        return doc.export_to_doctags()
     except DoclingError as e:
         e.add_note(f"document={source}, operation=export_doctags")
         logger.bind(document=source, operation="export_doctags", error=str(e)).opt(
@@ -507,9 +514,11 @@ async def process_documents_batch(
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    valid_results = []
+    valid_results: list[DoclingExtractionResult] = []
     for idx, result in enumerate(results):
-        if isinstance(result, Exception):
+        if isinstance(result, BaseException):
+            if isinstance(result, asyncio.CancelledError | KeyboardInterrupt):
+                raise result
             logger.bind(source=sources[idx], error=str(result)).error("Failed to process document")
             valid_results.append(
                 DoclingExtractionResult(

@@ -16,7 +16,8 @@ records every send, which is indistinguishable from the defect being tested for.
 import celery.exceptions
 import pytest
 
-from app.connections.celery_task_names import DOCUMENTS_INGEST, TASK_DECLARING_MODULES
+from app.shared.jobs.names import DOCUMENTS_INGEST
+from app.worker.task_modules import TASK_DECLARING_MODULES
 
 _VALID_INGEST_PAYLOAD = {
     "document_id": "doc-1",
@@ -36,7 +37,7 @@ def sends(real_celery, monkeypatch):
         recorded.append((task_name, kwargs))
         return object()
 
-    monkeypatch.setattr(real_celery.app, "send_task", _record)
+    monkeypatch.setattr(real_celery.producer, "send_task", _record)
     return recorded
 
 
@@ -120,51 +121,17 @@ def test_the_original_validation_detail_is_preserved(real_celery, sends):
     assert sends == []
 
 
-def test_the_helper_imports_the_declaring_module_before_deciding(
-    real_celery, tmp_path, monkeypatch, sends
-):
-    """The fix for the reason this contract validated nothing in production.
+def test_dispatch_does_not_import_declaring_modules(real_celery, monkeypatch, sends):
+    import importlib
 
-    Registration is a side effect of importing the declaring module, and a process
-    that only dispatches has no reason to have imported it — nothing under ``src/``
-    imports the task package at all, so the API process that runs the relay held an
-    empty registry and every payload was checked against a permissive model.
+    def refuse_import(name, *args, **kwargs):
+        pytest.fail(f"Dispatch must not load consumer module {name}")
 
-    A synthetic module stands in for a real task module here so the assertion is
-    about the mechanism rather than about whichever real module a previous test
-    happened to import: the probe name is unregistered until the helper is called,
-    and the failure that comes back is a payload failure, which can only mean the
-    module was imported and its model was the thing that rejected the payload.
-    """
-    registry = real_celery.registry.CeleryTaskRegistry
-    probe_name = "tests.lazy_import_probe"
-    probe_module = "c9_lazy_import_probe"
-    (tmp_path / f"{probe_module}.py").write_text(
-        "from app.connections.celery import CeleryTaskPayload, CeleryTaskRegistry\n"
-        "\n"
-        "\n"
-        "class ProbePayload(CeleryTaskPayload):\n"
-        "    required_field: str\n"
-        "\n"
-        "\n"
-        f'CeleryTaskRegistry.register("{probe_name}", ProbePayload)\n',
-        encoding="utf-8",
+    monkeypatch.setattr(importlib, "import_module", refuse_import)
+    real_celery.registry.CeleryTaskRegistry.typed_send(
+        DOCUMENTS_INGEST, dict(_VALID_INGEST_PAYLOAD)
     )
-    monkeypatch.syspath_prepend(str(tmp_path))
-    monkeypatch.setitem(TASK_DECLARING_MODULES, probe_name, probe_module)
-    monkeypatch.delitem(registry._registry, probe_name, raising=False)
-
-    assert probe_name not in registry.registered_names()
-
-    try:
-        with pytest.raises(real_celery.registry.TaskPayloadValidationError) as excinfo:
-            registry.typed_send(probe_name, {"wrong_field": "x"})
-
-        assert excinfo.value.task_name == probe_name
-        assert probe_name in registry.registered_names()
-        assert sends == []
-    finally:
-        registry._registry.pop(probe_name, None)
+    assert len(sends) == 1
 
 
 def test_a_name_with_no_declaring_module_is_refused_rather_than_searched_for(real_celery, sends):

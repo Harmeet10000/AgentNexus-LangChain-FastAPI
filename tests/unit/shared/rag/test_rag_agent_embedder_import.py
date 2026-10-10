@@ -4,7 +4,9 @@ import ast
 from importlib.util import find_spec
 from pathlib import Path
 
-_EXAMPLE = Path(__file__).resolve().parents[4] / "src" / "app" / "examples" / "rag_agent_advanced.py"
+_EXAMPLE = (
+    Path(__file__).resolve().parents[4] / "src" / "app" / "examples" / "rag_agent_advanced.py"
+)
 
 
 def test_docling_specific_embedder_module_is_retired() -> None:

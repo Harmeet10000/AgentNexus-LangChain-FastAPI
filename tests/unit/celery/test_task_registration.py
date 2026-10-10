@@ -14,10 +14,8 @@ conftest replaces it, and this file's whole subject is what the real one holds.
 
 import pytest
 
-from app.connections.celery_task_names import (
-    DOCUMENTS_INGEST,
-    TASK_DECLARING_MODULES,
-)
+from app.shared.jobs.names import DOCUMENTS_INGEST
+from app.worker.task_modules import TASK_DECLARING_MODULES
 
 
 @pytest.fixture(scope="module")
@@ -30,9 +28,7 @@ def all_declaring_modules_imported(real_celery):
     the one module that declares the name it was handed — but a test asking
     whether *every* declared name is backed has no cheaper way to find out.
     """
-    registry = real_celery.registry.CeleryTaskRegistry
-    for task_name in TASK_DECLARING_MODULES:
-        registry.ensure_declared_module_imported(task_name)
+    real_celery.app.loader.import_default_modules()
     return real_celery
 
 
@@ -96,5 +92,5 @@ def test_every_declared_task_name_is_bound_on_the_task_application(all_declaring
 
 def test_the_typed_email_reference_module_is_not_listed(real_celery):
     """The duplicate email module was reconciled to one; listing is single."""
-    assert "tasks.auth_email_tasks_typed" not in real_celery.app.conf.include
-    assert list(real_celery.app.conf.include).count("tasks.auth_email_tasks") == 1
+    assert "app.features.auth.tasks_typed" not in real_celery.app.conf.include
+    assert list(real_celery.app.conf.include).count("app.features.auth.tasks") == 1

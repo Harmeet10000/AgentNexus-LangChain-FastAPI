@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from app.shared.langgraph_layer.agent_saul import state as state_module
-from app.shared.langgraph_layer.agent_saul.state import (
+from app.features.agent_saul.graph import state as state_module
+from app.features.agent_saul.graph.state import (
     STATE_SCHEMA_VERSION,
     StateSchemaVersionError,
     hydrate_state,
@@ -96,7 +96,7 @@ def test_service_layer_imports_the_constant_instead_of_a_literal() -> None:
 
 
 async def test_hydration_node_passes_through_current_version() -> None:
-    from app.shared.langgraph_layer.agent_saul.nodes import make_state_hydration_node
+    from app.features.agent_saul.graph.nodes import make_state_hydration_node
 
     node = make_state_hydration_node()
     state = {"schema_version": STATE_SCHEMA_VERSION, "user_query": "q"}
@@ -104,7 +104,7 @@ async def test_hydration_node_passes_through_current_version() -> None:
 
 
 async def test_hydration_node_upgrades_legacy_shape() -> None:
-    from app.shared.langgraph_layer.agent_saul.nodes import make_state_hydration_node
+    from app.features.agent_saul.graph.nodes import make_state_hydration_node
 
     node = make_state_hydration_node()
     updated = await node({"user_id": "u1"})  # type: ignore[arg-type]
@@ -117,7 +117,7 @@ async def test_hydration_node_upgrades_legacy_shape() -> None:
 
 
 async def test_hydration_node_refuses_unknown_version() -> None:
-    from app.shared.langgraph_layer.agent_saul.nodes import make_state_hydration_node
+    from app.features.agent_saul.graph.nodes import make_state_hydration_node
 
     node = make_state_hydration_node()
     with pytest.raises(StateSchemaVersionError):
@@ -127,9 +127,9 @@ async def test_hydration_node_refuses_unknown_version() -> None:
 def test_hydration_node_is_entry_point_not_a_routing_target() -> None:
     from types import SimpleNamespace
 
-    from app.shared.langgraph_layer.agent_saul.graph import _wire_graph
-    from app.shared.langgraph_layer.agent_saul.nodes import _VALID_WORKER_NODES
-    from app.shared.langgraph_layer.agent_saul.state import GRAPH_NODE_NAMES
+    from app.features.agent_saul.graph.graph import _wire_graph
+    from app.features.agent_saul.graph.nodes import _VALID_WORKER_NODES
+    from app.features.agent_saul.graph.state import GRAPH_NODE_NAMES
 
     calls: list[tuple[str, object]] = []
 

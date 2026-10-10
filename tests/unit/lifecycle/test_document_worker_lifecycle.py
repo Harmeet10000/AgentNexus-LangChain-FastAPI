@@ -16,8 +16,8 @@ from app.features.documents.service import (
     _release_document_ingestion_lock,
     run_document_ingestion_task,
 )
-from app.lifecycle import document_worker
 from app.shared.langchain_layer.agents.tools.idempotency import IdempotencyGuard
+from app.worker import documents as document_worker
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -68,6 +68,7 @@ def test_worker_hooks_construct_once_across_two_invocations_and_release_once(
     monkeypatch.setattr(document_worker, "_release_document_worker", release)
 
     document_worker.initialize_document_worker()
+    assert counts["construct"] == 0
     assert document_worker.get_document_worker_resources() is resources
     assert document_worker.run_on_document_worker_loop(invoke) == 1
     assert document_worker.run_on_document_worker_loop(invoke) == 2
@@ -101,6 +102,10 @@ def test_failed_initialization_does_not_leave_a_runner_or_resources(
     monkeypatch.setattr(document_worker, "_provision_document_worker", fail)
 
     document_worker.initialize_document_worker()
+    from app.utils import ServiceUnavailableException
+
+    with pytest.raises(ServiceUnavailableException, match="provisioning failed"):
+        document_worker.get_document_worker_resources()
 
     assert document_worker._WORKER_RESOURCES is None
     assert document_worker._WORKER_RUNNER is None
@@ -111,7 +116,6 @@ def test_non_ingestion_worker_skips_document_resources(
 ) -> None:
     provision = AsyncMock()
     monkeypatch.setattr(document_worker, "_provision_document_worker", provision)
-    monkeypatch.setattr(document_worker.sys, "argv", ["celery", "worker", "-Q", "default"])
     monkeypatch.setattr(
         document_worker,
         "get_settings",

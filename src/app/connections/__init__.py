@@ -7,26 +7,7 @@ from app.connections.graphiti import (
     setup_graphiti_indices,
 )
 
-from .celery import (
-    CircuitBreakerOpenError,
-    ResilientTask,
-    acquire_idempotency_lock,
-    build_circuit_breaker_key,
-    build_idempotency_key,
-    celery_app,
-    create_celery_app,
-    get_circuit_breaker_state,
-    get_idempotency_status,
-    is_circuit_breaker_open,
-    mark_idempotency_completed,
-    mark_idempotency_failed_permanently,
-    record_circuit_breaker_failure,
-    record_circuit_breaker_success,
-    release_idempotency_processing_lock,
-    run_redis_call,
-    run_with_circuit_breaker,
-    set_circuit_breaker_state,
-)
+from .celery import celery_app, create_celery_app
 from .cognee import (
     CogneeDimensionMismatchError,
     CogneeSetupConfig,
@@ -67,11 +48,10 @@ __all__ = [
     "CogneeDimensionMismatchError",
     "CogneeSetupConfig",
     "CogneeSetupError",
-    "ResilientTask",
     "celery_app",
     "close_crawl4ai_crawler",
     "close_db_engine",
-    "    close_graphiti",
+    "close_graphiti",
     "close_httpx_client",
     "close_mongo_client",
     "close_neo4j_driver",
@@ -101,5 +81,5 @@ __all__ = [
     "setup_cognee",
     "setup_graphiti",
     "setup_graphiti_indices",
-    "teardown_langgraph_checkpointer"
+    "teardown_langgraph_checkpointer",
 ]

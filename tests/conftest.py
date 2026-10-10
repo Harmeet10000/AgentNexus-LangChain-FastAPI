@@ -23,8 +23,6 @@ sys.modules["mcp_core.server.factory"] = MagicMock()
 sys.modules["mcp_core.server.http"] = MagicMock()
 sys.modules["mcp_core.server.middleware"] = MagicMock()
 sys.modules["mcp_core.server.tools"] = MagicMock()
-sys.modules["tasks"] = MagicMock()
-sys.modules["tasks.auth_email_tasks"] = MagicMock()
 
 # The twenty-one `app.features.search.*` imports that used to sit below this block were **dead**:
 # nothing in this file referenced a single one of them, and no test imports symbols from a conftest.

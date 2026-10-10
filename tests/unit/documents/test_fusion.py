@@ -1,4 +1,4 @@
-from app.features.documents.fusion import RankedResultRow, reciprocal_rank_fusion
+from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
 
 
 def test_reciprocal_rank_fusion_merges_duplicate_results() -> None:

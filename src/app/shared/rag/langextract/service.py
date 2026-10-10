@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import traceback
 from enum import StrEnum
 from typing import Protocol
 
 import asyncer
 import langextract as lx
 from pydantic import BaseModel, ConfigDict, SecretStr
+
+from app.utils import logger
 
 
 class LangExtractSettings(Protocol):
@@ -119,7 +122,12 @@ class AsyncExtractionService:
 
         try:
             documents = await asyncer.asyncify(function=provider.extract)(request)
-        except Exception:  # noqa: BLE001 -- third-party provider boundary
+        except Exception as exc:  # noqa: BLE001 -- third-party provider boundary
+            exc.add_note(traceback.format_exc())
+            logger.bind(
+                operation="langextract_extract",
+                diagnostic_notes=list(getattr(exc, "__notes__", [])),
+            ).error("LangExtract provider failed")
             return ExtractionFailed(
                 code=ExtractionFailureCode.PROVIDER_ERROR,
                 message="LangExtract provider failed",

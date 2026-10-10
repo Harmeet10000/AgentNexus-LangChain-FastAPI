@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from returns.result import Failure, Success
 
 from app.features.audit.model import AuditAction, AuditLog
-from app.features.billing.invoices.tax import paisa_to_rupees
+from app.features.billing.money import paisa_to_rupees
 from app.utils import logger, trace_layer
 
 from .clients.razorpay_client import (

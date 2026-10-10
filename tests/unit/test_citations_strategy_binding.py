@@ -14,14 +14,14 @@ if TYPE_CHECKING:
 
 
 def test_citation_fields_pre_exist_and_are_not_redefined() -> None:
-    from app.shared.langgraph_layer.agent_saul.state import Citation
+    from app.features.agent_saul.graph.state import Citation
 
     fields = set(Citation.model_fields)
     assert {"claim", "source", "confidence"} <= fields, sorted(fields)
 
 
 def test_a_report_with_no_citations_fails_validation() -> None:
-    from app.shared.langgraph_layer.agent_saul.state import (
+    from app.features.agent_saul.graph.state import (
         Citation,
         FinalReport,
     )
@@ -42,7 +42,7 @@ def test_a_report_with_no_citations_fails_validation() -> None:
 
 
 def test_a_risk_finding_with_no_citations_fails_validation() -> None:
-    from app.shared.langgraph_layer.agent_saul.state import (
+    from app.features.agent_saul.graph.state import (
         Citation,
         RiskFinding,
         RiskLabel,
@@ -61,7 +61,7 @@ def test_a_risk_finding_with_no_citations_fails_validation() -> None:
 
 
 def test_a_compliance_finding_with_no_citations_fails_validation() -> None:
-    from app.shared.langgraph_layer.agent_saul.state import Citation, ComplianceFinding
+    from app.features.agent_saul.graph.state import Citation, ComplianceFinding
 
     kwargs: dict[str, Any] = {
         "finding_id": "f-1",
@@ -70,15 +70,13 @@ def test_a_compliance_finding_with_no_citations_fails_validation() -> None:
         "is_compliant": False,
         "explanation": "e",
     }
-    ComplianceFinding(
-        **kwargs, citations=[Citation(claim="c", source="s", confidence=0.5)]
-    )
+    ComplianceFinding(**kwargs, citations=[Citation(claim="c", source="s", confidence=0.5)])
     with pytest.raises(ValidationError, match="citation"):
         ComplianceFinding(**kwargs, citations=[])
 
 
 def test_a_grounding_verification_with_no_citations_fails_validation() -> None:
-    from app.shared.langgraph_layer.agent_saul.state import (
+    from app.features.agent_saul.graph.state import (
         Citation,
         GroundingVerificationOutput,
     )
@@ -156,7 +154,7 @@ async def test_a_transfer_tool_returns_a_routing_payload() -> None:
 def test_saul_agents_have_zero_empty_tool_lists() -> None:
     from pathlib import Path
 
-    source = Path("src/app/shared/langgraph_layer/agent_saul/factory.py").read_text(
+    source = Path("src/app/features/agent_saul/graph/factory.py").read_text(
         encoding="utf-8"
     )
     assert "tools=[]" not in source, "agents must bind their tools explicitly"
@@ -165,7 +163,7 @@ def test_saul_agents_have_zero_empty_tool_lists() -> None:
 def test_saul_factory_installs_the_retry_middleware() -> None:
     from pathlib import Path
 
-    source = Path("src/app/shared/langgraph_layer/agent_saul/factory.py").read_text(
+    source = Path("src/app/features/agent_saul/graph/factory.py").read_text(
         encoding="utf-8"
     )
     assert "ToolRetryMiddleware" in source

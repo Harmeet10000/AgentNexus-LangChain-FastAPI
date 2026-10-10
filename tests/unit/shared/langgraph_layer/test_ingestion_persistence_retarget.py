@@ -87,9 +87,7 @@ class _FakeSession:
         self.params: list[dict[str, Any]] = []
         self._row = row
 
-    async def execute(
-        self, query: Any, params: dict[str, Any] | None = None
-    ) -> _FakeResult:
+    async def execute(self, query: Any, params: dict[str, Any] | None = None) -> _FakeResult:
         self.statements.append(str(query))
         self.params.append(dict(params or {}))
         return _FakeResult(self._row)
@@ -252,9 +250,7 @@ async def test_entities_and_relationships_issue_no_sql() -> None:
             ExtractedEntity(
                 id="e1", type=EntityType.ORG, name="Acme Inc.", normalized_name="Acme Inc"
             ),
-            ExtractedEntity(
-                id="e2", type=EntityType.ORG, name="Beta", normalized_name="Beta"
-            ),
+            ExtractedEntity(id="e2", type=EntityType.ORG, name="Beta", normalized_name="Beta"),
         ],
         extracted_relationships=[
             ExtractedRelationship(

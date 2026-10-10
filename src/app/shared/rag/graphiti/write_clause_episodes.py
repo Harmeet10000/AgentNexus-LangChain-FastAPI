@@ -39,7 +39,7 @@ from app.utils import logger
 from .schemas import ClauseEpisodeMetadata, LegalEdgeInput
 
 if TYPE_CHECKING:
-    from app.shared.langgraph_layer.agent_saul.state import ClauseSegment, LegalRelationship
+    from app.features.agent_saul.graph.state import ClauseSegment, LegalRelationship
 
 
 class GraphitiService(Protocol):

@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING, cast
 from app.connections.checkpointer import (
     setup_langgraph_checkpointer,
 )
+from app.features.agent_saul.graph import build_saul_graph
+from app.features.documents.tools.bundle import build_tool_bundle
 from app.shared.langchain_layer.agents.memory import AgentMemoryService
 from app.shared.langchain_layer.agents.tools.idempotency import (
     IdempotencyGuard,
 )
 from app.shared.langchain_layer.models import build_chat_model
-from app.shared.langgraph_layer.agent_saul import build_saul_graph
-from app.shared.rag.graphiti.registry import build_tool_bundle
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable

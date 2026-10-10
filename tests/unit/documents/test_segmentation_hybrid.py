@@ -34,9 +34,7 @@ async def test_legal_chunks_carry_their_heading_path() -> None:
         "## Termination\n\n"
         "Either party may terminate with thirty days notice.\n"
     )
-    chunks, _warnings = await segment_chunks(
-        parsed=_parsed(markdown), classified=_classified()
-    )
+    chunks, _warnings = await segment_chunks(parsed=_parsed(markdown), classified=_classified())
     assert chunks, "a two-section document must produce chunks"
     paths = [" / ".join(chunk.metadata_["heading_path"]) for chunk in chunks]
     assert any("Indemnity" in path for path in paths)
@@ -46,8 +44,7 @@ async def test_legal_chunks_carry_their_heading_path() -> None:
 
 async def test_long_document_is_covered_in_full_not_truncated() -> None:
     sections = "".join(
-        f"## Section {index}\n\nBody of section {index} marker-{index}.\n\n"
-        for index in range(250)
+        f"## Section {index}\n\nBody of section {index} marker-{index}.\n\n" for index in range(250)
     )
     chunks, _warnings = await segment_chunks(
         parsed=_parsed(f"# Contract\n\n{sections}"), classified=_classified()
@@ -59,9 +56,7 @@ async def test_long_document_is_covered_in_full_not_truncated() -> None:
 
 async def test_peer_sections_merge_within_the_bound() -> None:
     markdown = "# Doc\n\n" + "".join(f"Tiny peer sentence {index}.\n\n" for index in range(6))
-    chunks, _warnings = await segment_chunks(
-        parsed=_parsed(markdown), classified=_classified()
-    )
+    chunks, _warnings = await segment_chunks(parsed=_parsed(markdown), classified=_classified())
     assert 0 < len(chunks) < 6
 
 
@@ -71,9 +66,7 @@ async def test_clause_fitting_the_bound_is_not_split_mid_clause() -> None:
         "the Customer against all losses arising from breach of this agreement."
     )
     markdown = f"# Contract\n\n{clause}\n\nUnrelated closing paragraph here.\n"
-    chunks, _warnings = await segment_chunks(
-        parsed=_parsed(markdown), classified=_classified()
-    )
+    chunks, _warnings = await segment_chunks(parsed=_parsed(markdown), classified=_classified())
     holders = [chunk for chunk in chunks if "hold harmless" in chunk.content]
     assert len(holders) == 1
     assert "Section 12" in holders[0].content
@@ -81,9 +74,7 @@ async def test_clause_fitting_the_bound_is_not_split_mid_clause() -> None:
 
 
 async def test_degenerate_parse_is_reported_not_silent() -> None:
-    chunks, warnings = await segment_chunks(
-        parsed=_parsed(""), classified=_classified()
-    )
+    chunks, warnings = await segment_chunks(parsed=_parsed(""), classified=_classified())
     assert chunks == []
     assert [warning.code for warning in warnings] == ["DEGENERATE_PARSE"]
 
@@ -101,6 +92,5 @@ async def test_generic_documents_use_the_same_structure_aware_path() -> None:
 def test_classifier_still_routes_legal_documents() -> None:
     markdown = "This agreement between parties covers termination and governing law."
     assert (
-        classify_document(markdown=markdown, filename="msa.pdf").document_kind
-        == "legal_contract"
+        classify_document(markdown=markdown, filename="msa.pdf").document_kind == "legal_contract"
     )

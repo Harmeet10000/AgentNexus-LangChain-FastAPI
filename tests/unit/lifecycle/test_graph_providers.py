@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.features.documents import ingestion_graph
+from app.lifecycle import graphs
 from app.lifecycle.graphs import provide_document_ingestion_graph
-from app.shared.langchain_layer import models
 
 pytestmark = pytest.mark.unit
 
@@ -21,7 +21,7 @@ def test_document_graph_provider_uses_the_canonical_model_factory(
     compiled_graph = object()
     model_factory = MagicMock(return_value=llm)
     graph_factory = MagicMock(return_value=compiled_graph)
-    monkeypatch.setattr(models, "_build_chat_model", model_factory)
+    monkeypatch.setattr(graphs, "build_chat_model", model_factory)
     monkeypatch.setattr(ingestion_graph, "build_document_ingestion_graph", graph_factory)
     settings = SimpleNamespace(GEMINI_FLASH_MODEL="gemini-flash")
 

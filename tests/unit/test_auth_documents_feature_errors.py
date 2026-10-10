@@ -8,16 +8,20 @@ from pydantic import ValidationError
 from pymongo.errors import PyMongoError
 from returns.result import Failure
 
-from app.features.auth.dependencies import raise_auth_error
+from app.features.auth.dependencies import get_current_user, get_current_user_result
 from app.features.auth.errors import (
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthInfrastructureError,
+    AuthNotFoundError,
+    AuthResult,
 )
+from app.features.auth.model import User
 from app.features.auth.repository import UserRepository
+from app.security.tokens import TokenClaims
 from app.features.documents.errors import DocumentDatabaseError, DocumentNotFoundError
 from app.shared.result import ErrorKind, render_result
-from app.utils import ForbiddenException, UnauthorizedException
+from app.utils import UnauthorizedException
 
 _AUTH_REPOSITORY = Path("src/app/features/auth/repository.py")
 
@@ -51,14 +55,33 @@ def test_render_result_preserves_security_and_store_statuses(
     assert response.status_code == expected_status
 
 
-def test_auth_dependency_translates_authentication_and_authorization() -> None:
+async def test_auth_user_result_translates_missing_user_to_typed_authentication_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def find_by_id(_user_id: str) -> AuthResult[User | None]:
+        return Failure(AuthNotFoundError(message="User not found"))
+
+    monkeypatch.setattr(UserRepository, "find_by_id", staticmethod(find_by_id))
+    claims = TokenClaims(
+        sub="user-id",
+        jti="jti",
+        sid=None,
+        role="user",
+        permissions=[],
+        token_type="access",
+    )
+
+    result = await get_current_user_result(claims, UserRepository.__new__(UserRepository))
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), AuthAuthenticationError)
+
+
+async def test_auth_dependency_translates_typed_result_at_fastapi_boundary() -> None:
     with pytest.raises(UnauthorizedException) as authentication:
-        raise_auth_error(AuthAuthenticationError(message="bad token"))
-    with pytest.raises(ForbiddenException) as authorization:
-        raise_auth_error(AuthAuthorizationError(message="denied"))
+        await get_current_user(Failure(AuthAuthenticationError(message="bad token")))
 
     assert authentication.value.status_code == 401
-    assert authorization.value.status_code == 403
 
 
 async def test_mongo_failure_is_retryable_without_rollback(monkeypatch: pytest.MonkeyPatch) -> None:

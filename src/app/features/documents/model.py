@@ -26,11 +26,13 @@ from sqlalchemy.orm import (  # noqa: TC002 — Mapped resolved at runtime by SQ
     relationship,
 )
 
-from app.config import get_settings
+from app.retrieval.embeddings import CHUNK_EMBEDDING_DIM
 from database.base import Base
 
 # The width `chunks.embedding` is created with, captured once when this module is
-# imported. Two reasons it is a named constant rather than an inline call:
+# imported. The single definition lives in `app.retrieval.embeddings` and is
+# re-exported here so existing `from .model import CHUNK_EMBEDDING_DIM` readers
+# keep working. Two reasons it is a named constant rather than an inline call:
 #
 # 1. It is the *stored* width. `get_settings()` is re-read on every call, but a
 #    SQLAlchemy column type is concrete for the life of the process — so the
@@ -45,7 +47,8 @@ from database.base import Base
 # a string that is never evaluated, so the import would be typing-only and `TC003`
 # would ask for a type-checking block. The module-level SCREAMING_SNAKE name is
 # how this codebase already spells a constant.
-CHUNK_EMBEDDING_DIM = get_settings().EMBEDDING_DIMENSION
+# (Value assigned in `app.retrieval.embeddings`; re-exported here for readers
+# of this module — `Vector(CHUNK_EMBEDDING_DIM)` below is unchanged.)
 
 
 class UnifiedDocument(Base):

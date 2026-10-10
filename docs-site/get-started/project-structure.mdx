@@ -12,30 +12,32 @@ description: "Tour of the repository layout and what each directory owns."
     - config/               # Pydantic Settings — every env-driven field
     - connections/          # Clients: postgres, mongodb, redis, neo4j, celery
     - features/             # Feature modules — the heart of the codebase
-      - agent_saul/         #   Orchestrator: sessions, WebSocket, HITL
-      - documents/          #   Ingestion, hybrid search, legal Q&A
+      - agent_saul/         #   Orchestrator: sessions, WebSocket, HITL, graph/
+      - documents/          #   Ingestion, hybrid search, legal Q&A, retrieval_graph/, tools/
       - auth/ users/ profile/ audit/
-      - crawler/            #   Crawl4AI + Tavily web research
-      - ingestion/ search/  #   Pipeline triggers and retrieval
-      - plans/ subscriptions/ payments/ invoices/ credits/ dunning/ webhooks/  # v2 billing suite
+      - crawler/            #   Crawl4AI + Tavily web research, tools/
+      - ingestion/          #   Durable upload pipeline trigger
+      - billing/            #   v2 suite: plans/subscriptions/payments/invoices/credits/dunning/webhooks, money.py
     - lifecycle/            # FastAPI lifespan wiring (clients → app.state)
     - middleware/           # Versioning, guard, global exception handler, OTel
+    - retrieval/            # Shared retrieval primitives: fusion, chunk policy, embedding dimension
+    - security/             # Token claims/JWT, password hashing — no domain imports
     - shared/               # Cross-feature infrastructure
-      - agents/             #   Agent factories and registries
-      - langgraph_layer/    #   Agent Saul graph, ingestion KB graph, nodes, state
-      - langchain_layer/    #   LLM/tool wrappers
+      - langgraph_layer/    #   ingestion KB, open deep search, shared retry helpers
+      - langchain_layer/    #   LLM wrappers, domain-free tools (registry, web, shell, handoff)
       - rag/                #   Graphiti setup, document processing, vectorstore
       - outbox/             #   Transactional outbox helper, model, NOTIFY relay
       - result/             #   AppError hierarchy, Result mappers
       - services/           #   Rate limiter and friends
       - otel/ circuit_breaker/ crawler/
+    - worker/               # Celery app, task entry points per feature, schedules, runtime
     - utils/                # Exceptions, response envelope, cache helpers
     - examples/             # Reference snippets (logger, Celery usage)
     - main.py               # App factory and middleware stack
     - server.py             # Uvicorn entrypoint
   - alembic/                # PostgreSQL migrations
-  - database/               # SQLAlchemy base, schemas, seeders
-  - tasks/                  # Celery task definitions per domain
+  - database/               # SQLAlchemy base, registry, seeders (models live in features)
+  - tools/lynk/             # Go .docx contract linter (standalone module)
   - mcp_core/               # MCP server integration
 - docs/
   - diagrams/               # Architecture SVGs (mirrored into docs-site/images)
@@ -65,8 +67,8 @@ Adding a feature means adding a directory with this shape and registering its ro
 
 | Concern | Location | Read more |
 | --- | --- | --- |
-| Agent orchestration graphs | `src/app/shared/langgraph_layer/agent_saul/` | [LangGraph orchestration](/architecture/langgraph-orchestration) |
-| Retrieval & fusion | `src/app/features/documents/` (`fusion.py`, `rag.py`) | [RAG pipeline](/architecture/rag-pipeline) |
+| Agent orchestration graphs | `src/app/features/agent_saul/graph/` | [LangGraph orchestration](/architecture/langgraph-orchestration) |
+| Retrieval & fusion | `src/app/features/documents/retrieval_graph/` + shared `src/app/retrieval/` | [RAG pipeline](/architecture/rag-pipeline) |
 | Knowledge-graph memory | `src/app/shared/rag/graphiti/`, Cognee settings | [Graph memory](/architecture/graph-memory) |
 | Reliable side effects | `src/app/shared/outbox/` | [Outbox pattern](/architecture/outbox-pattern) |
 | Error handling model | `src/app/utils/exceptions.py`, `src/app/shared/result/` | [Error & Result pattern](/architecture/error-and-result-pattern) |

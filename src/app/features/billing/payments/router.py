@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Path, Query, Response, status
 from returns.result import Failure
 
-from app.features.auth import CurrentClaims, CurrentVerifiedUser
+from app.features.auth.dependencies import CurrentClaims, CurrentVerifiedUser
 from app.features.billing.subscriptions.dependencies import SubscriptionServiceDep
 from app.shared.result import render_result
 from app.utils import APIResponse

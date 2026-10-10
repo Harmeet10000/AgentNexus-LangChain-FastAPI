@@ -2,7 +2,9 @@ import math
 
 from returns.result import Failure, Success
 
-from app.features.auth import RefreshTokenRepository, User, UserRole, create_impersonation_token
+from app.features.auth.model import User, UserRole
+from app.features.auth.repository import RefreshTokenRepository
+from app.security.tokens import create_impersonation_token
 from app.utils import logger, trace_layer
 
 from .dto import (
@@ -239,8 +241,8 @@ class UserAdminService:
 
         access_token, expires_in = create_impersonation_token(
             target_user_id=str(user.id),
-            target_role=user.role,
-            target_permissions=user.get_permissions(),
+            target_role=user.role.value,
+            target_permissions=frozenset(p.value for p in user.get_permissions()),
             admin_user_id=admin_user_id,
         )
         logger.bind(

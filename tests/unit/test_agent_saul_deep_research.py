@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, cast
 
 from langchain_core.tools import tool
 
-from app.shared.langgraph_layer.agent_saul.nodes import make_deep_research_node
-from app.shared.langgraph_layer.agent_saul.state import (
+from app.features.agent_saul.graph.nodes import make_deep_research_node
+from app.features.agent_saul.graph.state import (
     PlanActionType,
     PlanStep,
 )
@@ -13,7 +13,7 @@ from app.shared.langgraph_layer.agent_saul.state import (
 if TYPE_CHECKING:
     from typing import Any
 
-    from app.shared.langgraph_layer.agent_saul.state import LegalAgentState
+    from app.features.agent_saul.graph.state import LegalAgentState
 
 
 @tool

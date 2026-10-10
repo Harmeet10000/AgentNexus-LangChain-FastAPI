@@ -145,23 +145,25 @@ class _StubRepo:
         self, chunk_ids: list[str]
     ) -> DocumentResult[dict[str, dict[str, Any]]]:
         self.calls.append("fetch_chunks_by_ids")
-        return Success({
-            cid: {
-                "chunk_id": cid,
-                "document_id": "doc-1",
-                "title": "stub",
-                "content": "stub content",
-                "preamble": "",
-                "search_text": "stub content",
-                "chunk_index": 0,
-                "chunk_kind": "generic",
-                "clause_type": None,
-                "chunk_metadata": {},
-                "quality_warnings": [],
-                "graphiti_verified": False,
+        return Success(
+            {
+                cid: {
+                    "chunk_id": cid,
+                    "document_id": "doc-1",
+                    "title": "stub",
+                    "content": "stub content",
+                    "preamble": "",
+                    "search_text": "stub content",
+                    "chunk_index": 0,
+                    "chunk_kind": "generic",
+                    "clause_type": None,
+                    "chunk_metadata": {},
+                    "quality_warnings": [],
+                    "graphiti_verified": False,
+                }
+                for cid in chunk_ids
             }
-            for cid in chunk_ids
-        })
+        )
 
 
 async def _run_exact_phrase_branch(

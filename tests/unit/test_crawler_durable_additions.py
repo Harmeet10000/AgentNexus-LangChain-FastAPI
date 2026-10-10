@@ -1,6 +1,5 @@
 """Durable additions: browser network policy, worker reuse, job tools."""
 
-import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -12,7 +11,7 @@ from app.features.crawler.dto import CrawlChunk, CrawlResponse, CrawlResultItem
 from app.features.crawler.job_store import CrawlJobStore
 from app.shared.crawler import WebCrawler
 from app.shared.crawler.validator import validate_browser_result_urls
-from app.shared.langchain_layer.agents.tools.crawl_jobs import get_crawl_job_tools
+from app.features.crawler.tools.crawl_jobs import get_crawl_job_tools
 
 
 def test_browser_result_urls_reject_non_http_schemes() -> None:
@@ -65,16 +64,11 @@ async def test_finish_single_result_rejects_private_redirect(
 
 @pytest.mark.asyncio
 async def test_worker_browser_is_reused(monkeypatch: pytest.MonkeyPatch) -> None:
-    # tests/conftest.py intentionally masks `tasks` with a MagicMock (heavy
-    # Celery imports), so restore the real package for this import only.
-    real_tasks = sys.modules.pop("tasks", None)
-    try:
-        import tasks.crawler_tasks as worker_tasks
-    finally:
-        sys.modules.pop("tasks.crawler_tasks", None)
-        sys.modules.pop("tasks", None)
-        if real_tasks is not None:
-            sys.modules["tasks"] = real_tasks
+    import os
+
+    from app.worker import crawler as worker_tasks
+
+    monkeypatch.setattr(worker_tasks, "_WORKER_PID", os.getpid())
 
     calls = {"count": 0}
 

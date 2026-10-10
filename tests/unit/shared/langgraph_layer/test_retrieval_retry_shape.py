@@ -13,12 +13,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.shared.langgraph_layer.kb_retry import TransientExternalError
-from app.shared.langgraph_layer.retrieval_kb import nodes as retrieval_nodes
-from app.shared.langgraph_layer.retrieval_kb.nodes import (
+from app.features.documents.retrieval_graph import nodes as retrieval_nodes
+from app.features.documents.retrieval_graph.nodes import (
     make_graph_retrieval_node,
     make_query_analyzer_node,
 )
-from app.shared.langgraph_layer.retrieval_kb.state import QueryPlan
+from app.features.documents.retrieval_graph.state import QueryPlan
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,9 +38,7 @@ def _exhausted(label: str) -> Callable[..., Any]:
 async def test_query_analyzer_degrades_on_exhausted_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        retrieval_nodes, "retry_immediate", _exhausted("gemini_query_analyzer")
-    )
+    monkeypatch.setattr(retrieval_nodes, "retry_immediate", _exhausted("gemini_query_analyzer"))
 
     async def _llm(*args: Any, **kwargs: Any) -> Any:
         msg = "the boundary, not the model, is under test"
@@ -62,9 +60,7 @@ async def test_query_analyzer_degrades_on_exhausted_retry(
 async def test_graph_retrieval_degrades_on_exhausted_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        retrieval_nodes, "retry_immediate", _exhausted("graphiti_retrieval_search")
-    )
+    monkeypatch.setattr(retrieval_nodes, "retry_immediate", _exhausted("graphiti_retrieval_search"))
     node = make_graph_retrieval_node(object())
     result = await node(
         {

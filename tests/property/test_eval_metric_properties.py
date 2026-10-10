@@ -23,9 +23,7 @@ _identifiers = st.text(min_size=1, max_size=12)
 def test_recall_is_non_decreasing(
     ranked: list[str], expected: set[str], first_k: int, extra: int
 ) -> None:
-    assert recall_at_k(ranked, expected, first_k) <= recall_at_k(
-        ranked, expected, first_k + extra
-    )
+    assert recall_at_k(ranked, expected, first_k) <= recall_at_k(ranked, expected, first_k + extra)
 
 
 @given(

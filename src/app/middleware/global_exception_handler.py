@@ -6,7 +6,7 @@ from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
-from app.connections.celery import CircuitBreakerOpenError, IdempotencyLockError
+from app.shared.jobs.errors import CircuitBreakerOpenError, IdempotencyLockError
 from app.shared.result import render_exception
 from app.utils import APIException, ErrorCode, execution_path, logger
 

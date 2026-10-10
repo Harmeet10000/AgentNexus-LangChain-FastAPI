@@ -12,11 +12,7 @@ from returns.result import Failure, Success
 from sqlalchemy import text
 
 from app.config import get_settings
-from app.connections.celery_task_names import DOCUMENTS_INGEST
-from app.shared.langchain_layer import serialize_to_toon
-from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text, embed_texts
-from app.shared.langgraph_layer.kb_retry import retry_immediate
-from app.shared.langgraph_layer.retrieval_kb import (
+from app.features.documents.retrieval_graph import (
     ContextGrade,
     GeneratedAnswer,
     QueryPlan,
@@ -25,6 +21,11 @@ from app.shared.langgraph_layer.retrieval_kb import (
     build_retrieval_graph,
     get_shared_reranker,
 )
+from app.retrieval.fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
+from app.shared.jobs.names import DOCUMENTS_INGEST
+from app.shared.langchain_layer import serialize_to_toon
+from app.shared.langchain_layer.embeddings import EmbeddingTaskType, embed_text, embed_texts
+from app.shared.langgraph_layer.kb_retry import retry_immediate
 from app.shared.rag.langextract.service import (
     ExtractionFailed,
     ExtractionFailureCode,
@@ -65,7 +66,6 @@ from .errors import (
     DocumentStorageError,
     DocumentValidationError,
 )
-from .fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
 from .graphiti_verifier import write_and_verify_chunk
 from .legal_metadata import (
     contract_event_dates,
@@ -706,7 +706,7 @@ class DocumentQueryService:
 
         **Deliberately not exposed by any router**, and that is the whole point of it existing.
         `build_retrieval_graph` is change 1's foundation — the compiled plan/retrieve/grade/generate
-        machine in `shared/langgraph_layer/retrieval_kb/` — and its only caller in the tree was
+        machine in `features/documents/retrieval_graph/` — and its only caller in the tree was
         `features/search/service.py:ask_legal`, which this change deletes. Deleting the last caller
         would leave the graph builder, its nodes and the retarget at step 5 with nothing reaching
         them: type-checked, unit-tested, and unreferenced from the application. So the caller moves
@@ -1310,7 +1310,7 @@ async def _write_extracted_clause_episodes(
     document_type: str,
 ) -> bool:
     """Map grounded clause extractions into the existing canonical writer."""
-    from app.shared.langgraph_layer.agent_saul.state import ClauseSegment, ClauseType
+    from app.features.agent_saul.graph.state import ClauseSegment, ClauseType
     from app.shared.rag.graphiti.write_clause_episodes import write_clause_episodes_to_graphiti
     from app.shared.rag.langextract.langextract_to_graph import GraphIngestionContext
 

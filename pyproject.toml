@@ -24,7 +24,7 @@ keywords = ["fastapi", "langchain", "ai", "api", "async"]
 requires-python = ">=3.12,<3.14"
 dependencies = [
     # --- WEB FRAMEWORK ---
-    "fastapi[standard]>=0.140.0",
+    "fastapi[standard]>=0.143.0",
     "httptools>=0.7.1",
     "python-multipart>=0.0.20",
     "uvicorn[standard]>= 0.50.1",
@@ -60,7 +60,8 @@ dependencies = [
     "graphiti-core[google-genai]>=0.29.1",
     "neo4j>=6.0.3",
     # --- CACHE: REDIS ---
-    "redis[hiredis]>=5.1.0,<6.0.0",
+    "redis[hiredis]>=6.0.0",
+    "fastapi-redis-sdk>=0.8.1,<0.9.0",
     # --- MESSAGE QUEUE: CELERY + RABBITMQ ---
     "celery>=5.6.2",
     "faststream>=0.6.2",
@@ -90,7 +91,6 @@ dependencies = [
     # --- UTILITIES ---
     "aiofiles==24.1.0",
     "asyncer>=0.0.17",
-    "asyncio>=4.0.0",
     "async-timeout>=5.0.1",
     "nanoid==2.0.0",
     "psutil==7.1.0",
@@ -101,11 +101,11 @@ dependencies = [
     "fastapi-pagination==0.12.1",
     # --- MONITORING ---
     "opentelemetry-api>=1.39.1",
-    "opentelemetry-instrumentation-asgi==0.61b0",
-    "opentelemetry-instrumentation-celery==0.61b0",
-    "opentelemetry-instrumentation-httpx==0.61b0",
-    "opentelemetry-instrumentation-redis==0.61b0",
-    "opentelemetry-instrumentation-sqlalchemy==0.61b0",
+    "opentelemetry-instrumentation-asgi==0.66b1",
+    "opentelemetry-instrumentation-celery==0.66b1",
+    "opentelemetry-instrumentation-httpx==0.66b1",
+    "opentelemetry-instrumentation-redis==0.66b1",
+    "opentelemetry-instrumentation-sqlalchemy==0.66b1",
     "opentelemetry-exporter-prometheus>=0.60b0",
     "opentelemetry-sdk>=1.39.1",
     # --- MCP ---
@@ -115,20 +115,14 @@ dependencies = [
     "cognee>=1.1.0",
     "compact-middleware>=0.1.1",
     "dspy>=2.5.7",
-    "gepa>=0.1.1",
-    "honcho-ai>=2.0.1",
-    "openevals>=0.2.0",
     "returns>=0.26.0",
-    "schemathesis",
     # --- UTILITIES & OTHER ---
     "boto3>=1.42.68",
     "botocore>=1.42.68",
     "charset-normalizer>=3.0.0",
     "fpdf2>=2.8.7",
     "gepa>=0.1.1",
-    "icecream>=2.1.10",
     "pendulum>=3.2.0",
-    "perfect",
     # `binary` ships the libpq wrapper: without it `import psycopg` raises ImportError on this
     # machine (no psycopg_c, no system libpq). `pool` is imported directly by the LangGraph
     # checkpointer, which owns its own AsyncConnectionPool; it arrives transitively through
@@ -150,31 +144,31 @@ dependencies = [
     "headroom-ai>=0.25.0",
     "mypy-boto3-s3>=1.43.14",
     "opentelemetry-exporter-otlp-proto-grpc>=1.40.0",
-    "opentelemetry-instrumentation-asyncio==0.61b0",
-    "opentelemetry-instrumentation-dbapi==0.61b0",
-    "opentelemetry-instrumentation-logging==0.61b0",
-    "opentelemetry-instrumentation-sqlite3==0.61b0",
-    "opentelemetry-instrumentation-threading==0.61b0",
-    "opentelemetry-instrumentation-urllib==0.61b0",
-    "opentelemetry-instrumentation-wsgi==0.61b0",
+    "opentelemetry-instrumentation-asyncio==0.66b1",
+    "opentelemetry-instrumentation-dbapi==0.66b1",
+    "opentelemetry-instrumentation-logging==0.66b1",
+    "opentelemetry-instrumentation-sqlite3==0.66b1",
+    "opentelemetry-instrumentation-threading==0.66b1",
+    "opentelemetry-instrumentation-urllib==0.66b1",
+    "opentelemetry-instrumentation-wsgi==0.66b1",
     "opentelemetry-instrumentation-openai-v2>=2.4b0",
-    "opentelemetry-instrumentation-aiohttp-client==0.61b0",
-    "opentelemetry-instrumentation-aiohttp-server==0.61b0",
-    "opentelemetry-instrumentation-asyncpg==0.61b0",
-    "opentelemetry-instrumentation-boto3sqs==0.61b0",
-    "opentelemetry-instrumentation-botocore==0.61b0",
-    "opentelemetry-instrumentation-click==0.61b0",
-    "opentelemetry-instrumentation-fastapi==0.61b0",
-    "opentelemetry-instrumentation-grpc==0.61b0",
-    "opentelemetry-instrumentation-jinja2==0.61b0",
-    "opentelemetry-instrumentation-psycopg==0.61b0",
-    "opentelemetry-instrumentation-pymongo==0.61b0",
-    "opentelemetry-instrumentation-requests==0.61b0",
-    "opentelemetry-instrumentation-starlette==0.61b0",
-    "opentelemetry-instrumentation-system-metrics==0.61b0",
-    "opentelemetry-instrumentation-tornado==0.61b0",
-    "opentelemetry-instrumentation-tortoiseorm==0.61b0",
-    "opentelemetry-instrumentation-urllib3==0.61b0",
+    "opentelemetry-instrumentation-aiohttp-client==0.66b1",
+    "opentelemetry-instrumentation-aiohttp-server==0.66b1",
+    "opentelemetry-instrumentation-asyncpg==0.66b1",
+    "opentelemetry-instrumentation-boto3sqs==0.66b1",
+    "opentelemetry-instrumentation-botocore==0.66b1",
+    "opentelemetry-instrumentation-click==0.66b1",
+    "opentelemetry-instrumentation-fastapi==0.66b1",
+    "opentelemetry-instrumentation-grpc==0.66b1",
+    "opentelemetry-instrumentation-jinja2==0.66b1",
+    "opentelemetry-instrumentation-psycopg==0.66b1",
+    "opentelemetry-instrumentation-pymongo==0.66b1",
+    "opentelemetry-instrumentation-requests==0.66b1",
+    "opentelemetry-instrumentation-starlette==0.66b1",
+    "opentelemetry-instrumentation-system-metrics==0.66b1",
+    "opentelemetry-instrumentation-tornado==0.66b1",
+    "opentelemetry-instrumentation-tortoiseorm==0.66b1",
+    "opentelemetry-instrumentation-urllib3==0.66b1",
     "llvmlite>=0.48.0",
     "numba>=0.66.0",
     "msgspec>=0.21.1",
@@ -183,20 +177,17 @@ dependencies = [
     "dishka>=1.10.1",
     "geopy>=2.5.0",
     "pint>=0.25.3",
-    "faker>=40.11.0",
     "zensical>=0.0.54",
     "transformers>=5.12.0",
 ]
 
 [project.scripts]
 dev = "app.server:main"
-lint = "ruff:check"
-format = "ruff:format"
-type-check = "ty:check"
+worker = "app.worker.cli:main"
+beat = "app.worker.cli:beat"
 # precommit = "pre-commit:run"
-migrate = "alembic:upgrade"
 test = "pytest:main"
-replay-outbox = "scripts.replay_outbox:main"
+replay-outbox = "app.worker.replay_outbox:main"
 seed = "database.seeders.run_seeders:main"
 
 
@@ -244,13 +235,16 @@ constraint-dependencies = ["torch==2.9.1+cpu", "torchvision==0.24.1+cpu"]
 
 # Your existing dependency-groups is perfect (modern replacement for old dev-dependencies)
 [dependency-groups]
+evaluation = ["honcho-ai>=2.0.1", "openevals>=0.2.0"]
 dev = [
+    "import-linter>=2.5,<3",
+    "icecream>=2.1.10",
     "hypothesis>=6.151.9",
     "pre-commit>=4.3.0",
   "ruff>=0.15.20",
   "ty>=0.0.56",
 ]
-test = ["pytest>=8.2.2,<9.0.0", "pytest-asyncio>=0.23.7,<1.0.0", "pytest-cov>=5.0.0,<6.0.0", "pytest-timeout>=2.4.0,<3.0.0", "httpx>=0.27.0,<1.0.0", "factory-boy>=3.3.0,<4.0.0", "fakeredis[lua]>=2.24.0,<3.0.0"]
+test = ["faker>=40.11.0", "schemathesis", "pytest>=8.2.2,<9.0.0", "pytest-asyncio>=0.23.7,<1.0.0", "pytest-cov>=5.0.0,<6.0.0", "pytest-timeout>=2.4.0,<3.0.0", "httpx>=0.27.0,<1.0.0", "factory-boy>=3.3.0,<4.0.0", "fakeredis[lua]>=2.24.0,<3.0.0"]
 
 # ────────────────────────────────────────
 # RUFF – Linting & Formatting
@@ -413,7 +407,7 @@ exempt-modules = ["pydantic", "fastapi", "langchain", "langgraph", "docling"]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "pydantic.Field"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["src"]
+known-first-party = ["app", "database", "mcp_core"]
 known-third-party = ["fastapi", "pydantic", "sqlalchemy", "langchain"]
 section-order = [
     "future",
@@ -520,11 +514,14 @@ section-order = [
 # registration — these names must be real imports even when ruff sees only
 # annotation usage.
 "src/app/features/agent_saul/dependencies.py" = ["TC001", "TC002", "TC003"]
-"src/app/features/invoices/dto.py" = ["TC001", "TC002", "TC003"]
-"src/app/features/payments/dto.py" = ["TC001", "TC002", "TC003"]
-"src/app/features/subscriptions/dto.py" = ["TC001", "TC002", "TC003"]
-"src/app/features/plans/dto.py" = ["TC001", "TC002", "TC003"]
+"src/app/features/billing/invoices/dto.py" = ["TC001", "TC002", "TC003"]
+"src/app/features/billing/payments/dto.py" = ["TC001", "TC002", "TC003"]
+"src/app/features/billing/subscriptions/dto.py" = ["TC001", "TC002", "TC003"]
+"src/app/features/billing/plans/dto.py" = ["TC001", "TC002", "TC003"]
 "src/app/shared/langchain_layer/agents/tools/*.py" = ["TC001", "TC002", "TC003"]
+# Same @tool get_type_hints constraint holds at the tools' owning features.
+"src/app/features/documents/tools/*.py" = ["TC001", "TC002", "TC003"]
+"src/app/features/crawler/tools/*.py" = ["TC001", "TC002", "TC003"]
 # Docs-site scripts are standalone tools, not package modules.
 "docs-site/scripts/*" = ["INP001", "TC003", "S101", "T201", "PLC0415", "PT018"]
 "src/app/examples/rag_agent_advanced.py" = [
@@ -536,9 +533,6 @@ section-order = [
     "PLC0415",
 ]
 "src/app/shared/rag/docling/ingest_v2.py" = [
-    "PLC0415", # Late imports to break circular deps
-]
-"src/app/shared/rag/docling/embedder.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
 "src/app/shared/rag/docling/docling_enhanced.py" = [
@@ -565,13 +559,7 @@ section-order = [
 "src/app/shared/langchain_layer/agents/middlewares/guardrails.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/shared/langchain_layer/agents/tools/crawl.py" = [
-    "PLC0415", # Late imports to break circular deps
-]
 "src/app/lifecycle/lifespan.py" = [
-    "PLC0415", # Late imports to break circular deps
-]
-"src/app/features/search/service.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
 "src/app/features/documents/service.py" = [
@@ -594,7 +582,7 @@ section-order = [
 "src/database/schemas/__init__.py" = ["F401"] # shim re-export
 "**/_*.py" = ["ANN201"] # Private modules
 "src/app/features/auth/router.py" = ["S105"]
-"src/app/features/auth/security.py" = ["S105", "S106"]
+"src/app/features/auth/oauth.py" = ["S105", "S106"]
 "src/app/features/auth/service.py" = [
     "PLC0415", # Late imports to break circular deps
     "S105",
@@ -797,7 +785,6 @@ exclude = [
     "node_modules",
     "src/alembic/versions",  # generated revisions — not hand-written
     "src/app/examples",
-    "src/app/shared/rag",  # ponytail: vendored LangChain internals, not our code
     "venv",
     "*.egg-info",
 ]
@@ -878,3 +865,51 @@ exclude_lines = [
 [tool.bandit]
 exclude_dirs = ["tests", "migrations"]
 skips = ["B101", "B601"]
+
+
+[tool.importlinter]
+root_package = "app"
+
+# Composition roots — router assembly (app.api), lifespan/graph wiring
+# (app.lifecycle), worker composition (app.worker), the database registry and
+# seeders — wire features by design and are therefore never source_modules
+# below. Their absence from a contract IS the exception.
+
+[[tool.importlinter.contracts]]
+name = "Reusable runtime does not import domain implementations"
+type = "forbidden"
+source_modules = ["app.shared", "app.utils", "app.connections", "app.retrieval", "app.security"]
+forbidden_modules = ["app.features"]
+# Each entry below is a scheduled move with its owning task, not a blanket
+# exemption: 4.3 moves the domain legal tool, 5.2 splits the source chunking
+# engines (policy already moved).
+ignore_imports = [
+    "app.shared.rag.docling.chunker -> app.features.documents.classification",
+    # Pre-existing edge preserved through the 4.1 graph move (clause-episode
+    # writer protocol references clause types); consolidation is section 5 work.
+    "app.shared.rag.graphiti.write_clause_episodes -> app.features.agent_saul.graph.state",
+]
+
+[[tool.importlinter.contracts]]
+name = "Pure contracts stay free of features and workers"
+type = "forbidden"
+source_modules = ["app.retrieval", "app.security"]
+forbidden_modules = ["app.features", "app.worker"]
+
+[[tool.importlinter.contracts]]
+name = "Web and producers do not load worker execution"
+type = "forbidden"
+source_modules = ["app.api", "app.main", "app.lifecycle", "app.connections", "app.shared", "app.config", "app.middleware"]
+forbidden_modules = ["app.worker", "app.features.*.tasks", "app.features.billing.credits.tasks"]
+
+[[tool.importlinter.contracts]]
+name = "Wire schemas are independent of feature implementations"
+type = "forbidden"
+source_modules = ["app.shared.jobs.names", "app.shared.jobs.payloads"]
+forbidden_modules = ["app.features", "app.worker", "app.connections"]
+
+[[tool.importlinter.contracts]]
+name = "Domain use cases do not import task entry points"
+type = "forbidden"
+source_modules = ["app.features.*.service", "app.features.billing.jobs", "app.features.billing.credits.jobs"]
+forbidden_modules = ["app.worker", "app.features.*.tasks", "app.features.billing.credits.tasks"]

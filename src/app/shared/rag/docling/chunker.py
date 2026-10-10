@@ -51,8 +51,10 @@ from typing import Any, overload
 
 from docling.chunking import HybridChunker
 from docling.exceptions import BaseError as DoclingError
+from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 from docling_core.types.doc import DoclingDocument
-from transformers import AutoTokenizer, PreTrainedTokenizerBase
+from transformers import PreTrainedTokenizerBase
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 
 from app.utils.logger import logger
 
@@ -84,7 +86,12 @@ def _load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:
     which is what it was before this became a cache.
     """
     logger.bind(model_id=model_id).info("Loading tokenizer (first use in this process)")
-    return AutoTokenizer.from_pretrained(model_id)
+    loaded = AutoTokenizer.from_pretrained(model_id)
+    if loaded is None:
+        error = DoclingError(f"Tokenizer load returned no tokenizer for model {model_id!r}")
+        error.add_note(f"model_id={model_id}")
+        raise error
+    return loaded
 
 
 def get_tokenizer(model_id: str = DEFAULT_TOKENIZER_MODEL_ID) -> PreTrainedTokenizerBase:
@@ -101,11 +108,16 @@ def get_tokenizer(model_id: str = DEFAULT_TOKENIZER_MODEL_ID) -> PreTrainedToken
 def create_hybrid_chunker(
     tokenizer: PreTrainedTokenizerBase, config: IngestionConfig
 ) -> HybridChunker:
-    """Create HybridChunker instance."""
+    """Create HybridChunker instance.
+
+    The transformers tokenizer is wrapped in docling's ``HuggingFaceTokenizer``
+    (which carries ``max_tokens``) because ``HybridChunker`` accepts only a
+    ``BaseTokenizer`` — passing either argument to ``HybridChunker`` directly
+    silently drops it.
+    """
     logger.bind(max_tokens=config.max_tokens).info("HybridChunker initialized")
     return HybridChunker(
-        tokenizer=tokenizer,
-        max_tokens=config.max_tokens,
+        tokenizer=HuggingFaceTokenizer(tokenizer=tokenizer, max_tokens=config.max_tokens),
         merge_peers=True,
     )
 
@@ -244,10 +256,10 @@ def _annotate_structure_aware_chunks(
     """Record policy identity and recovered locus after hybrid chunking (tasks 3.2, 4.2)."""
     # Local imports keep the shared rag package free of an import-time cycle
     # with features.documents while still satisfying the write-path wiring.
-    from app.features.documents.chunking import resolve_chunk_policy
     from app.features.documents.classification import (
         recover_locus_from_text,
     )
+    from app.retrieval.chunk_policy import resolve_chunk_policy
 
     kind = str(base_metadata.get("document_kind") or base_metadata.get("chunk_kind") or "generic")
     policy = resolve_chunk_policy(kind)

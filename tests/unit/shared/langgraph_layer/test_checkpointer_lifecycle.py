@@ -23,9 +23,9 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from app.connections import checkpointer as checkpointer_module
 from app.connections import postgres as postgres_module
-from app.shared.langgraph_layer import checkpointer as checkpointer_module
-from app.shared.langgraph_layer.checkpointer import (
+from app.connections.checkpointer import (
     CheckpointerTeardown,
     setup_langgraph_checkpointer,
     teardown_langgraph_checkpointer,

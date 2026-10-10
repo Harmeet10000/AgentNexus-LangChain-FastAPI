@@ -45,7 +45,14 @@ import pytest
 
 _LIFTED_TREES = (
     "app.connections.celery",
-    "tasks",
+    "app.worker.celery_app",
+    "app.shared.jobs.registry",
+    "app.features.auth.tasks",
+    "app.features.agent_saul.tasks",
+    "app.features.documents.tasks",
+    "app.features.crawler.tasks",
+    "app.features.billing.tasks",
+    "app.features.billing.credits.tasks",
 )
 
 _LIFTED_NAMES = ("app.utils",)
@@ -66,8 +73,9 @@ def real_celery():
 
     try:
         yield SimpleNamespace(
-            app=importlib.import_module("app.connections.celery").celery_app,
-            registry=importlib.import_module("app.connections.celery"),
+            app=importlib.import_module("app.worker.celery_app").celery_app,
+            producer=importlib.import_module("app.connections.celery").celery_app,
+            registry=importlib.import_module("app.shared.jobs.registry"),
         )
     finally:
         for name in [name for name in sys.modules if _is_lifted(name)]:
