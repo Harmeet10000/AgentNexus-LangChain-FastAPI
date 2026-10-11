@@ -8,7 +8,7 @@ from app.config import get_settings
 from app.features.documents.service import run_document_ingestion_task
 from app.observability.logging import logger
 from app.shared.jobs.names import DOCUMENTS_INGEST
-from app.utils import InfrastructureException
+from app.utils import InfrastructureException, ServiceUnavailableException
 from app.worker.app import celery_app
 from app.worker.documents import (
     get_document_worker_resources,
@@ -24,14 +24,20 @@ if TYPE_CHECKING:
 
 def _redis_task_lock_enabled() -> bool:
     """Return whether the optional Redis-backed outer task lock is configured."""
-    return bool(getattr(get_settings(), "REDIS_URL", ""))
+    return bool(get_settings().REDIS_URL)
 
 
 @celery_app.task(
     name=DOCUMENTS_INGEST,
     bind=True,
     base=ResilientTask,
-    autoretry_for=(*ResilientTask.autoretry_for, InfrastructureException),
+    autoretry_for=(
+        *ResilientTask.autoretry_for,
+        InfrastructureException,
+        ServiceUnavailableException,
+    ),
+    soft_time_limit=1500,
+    time_limit=1620,
 )
 def ingest_document(
     self: ResilientTask,
