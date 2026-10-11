@@ -12,6 +12,7 @@ from celery.exceptions import CeleryError
 from sqlalchemy import text
 
 from app.observability.logging import logger
+from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
     from typing import Final
@@ -163,12 +164,15 @@ class OutboxRelay:
     ) -> None:
         event_id = str(row["id"])
         event_type = str(row["event_type"])
-        payload = row["payload"]
+        payload = cast("dict[str, object]", row["payload"])
         try:
-            self._celery_app.send_task(event_type, kwargs=cast("dict[str, object]", payload))
+            # Local import: connections/__init__ reaches back into app.events.
+            from app.connections import celery_producer  # noqa: PLC0415
+
+            await celery_producer.dispatch(self._celery_app, event_type, payload)
             await self._mark_published(event_id, session=session)
             logger.bind(event_id=event_id, event_type=event_type).info("outbox_published")
-        except (CeleryError, PostgresError) as exc:
+        except (CeleryError, PostgresError, ServiceUnavailableException) as exc:
             exc.add_note(f"event_id={event_id}, event_type={event_type}")
             await self._mark_failed(event_id, str(exc), session=session)
             logger.bind(event_id=event_id, event_type=event_type, error=str(exc)).exception(

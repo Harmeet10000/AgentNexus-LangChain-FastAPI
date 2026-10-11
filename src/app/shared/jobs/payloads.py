@@ -17,6 +17,7 @@ class AgentMemoryConsolidationPayload(CeleryTaskPayload):
     """Tenant ids to consolidate; empty means the scheduler's default sweep."""
 
     tenant_ids: list[str] = Field(default_factory=list)
+    session_ids: list[str] | None = None
 
 
 class VerificationEmailPayload(CeleryTaskPayload):

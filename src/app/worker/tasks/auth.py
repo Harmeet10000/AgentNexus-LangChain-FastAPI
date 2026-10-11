@@ -13,11 +13,18 @@ that is what a dispatch for these names must carry.
 from __future__ import annotations
 
 from functools import partial
+from typing import TYPE_CHECKING, assert_never
 
+from celery.exceptions import Reject
 from returns.result import Failure
 
 from app.config import get_settings
-from app.connections.mailer import config_from_settings, send_template
+from app.connections.mailer import (
+    MailerDeliveryError,
+    MailerUnavailableError,
+    config_from_settings,
+    send_template,
+)
 from app.observability.logging import logger
 from app.shared.jobs.names import SEND_PASSWORD_RESET_EMAIL, SEND_VERIFICATION_EMAIL
 from app.shared.jobs.payloads import PasswordResetEmailPayload, VerificationEmailPayload
@@ -25,6 +32,40 @@ from app.utils import ExternalServiceException
 from app.worker.app import celery_app
 from app.worker.reliability import CircuitBreakerOpenError, IdempotencyLockError
 from app.worker.task import ResilientTask
+
+if TYPE_CHECKING:
+    from app.connections.mailer import MailerError
+
+_EMAIL_RETRYABLE: tuple[type[BaseException], ...] = (
+    *ResilientTask.autoretry_for,
+    ExternalServiceException,
+    CircuitBreakerOpenError,
+)
+
+# Resend statuses worth another attempt; every other 4xx is a rejection that
+# retrying cannot fix. Unknown shapes retry: attempts are bounded and the
+# lock is released on each one.
+_TRANSIENT_EMAIL_STATUS_CODES: frozenset[int] = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+
+class PermanentEmailError(ValueError):
+    """Resend rejected the message: retrying cannot succeed."""
+
+
+def _email_failure_error(*, email: str, error: MailerError) -> Exception:
+    """Map a typed mailer failure to a retryable or permanent task error."""
+    if isinstance(error, MailerUnavailableError):
+        return ExternalServiceException(
+            service="resend", detail=error.message, error_code=error.code.value
+        )
+    if isinstance(error, MailerDeliveryError):
+        status = (error.details or {}).get("status_code")
+        if not isinstance(status, int) or status in _TRANSIENT_EMAIL_STATUS_CODES:
+            return ExternalServiceException(
+                service="resend", detail=error.message, error_code=error.code.value
+            )
+        return PermanentEmailError(f"resend rejected email to {email}: {error.message}")
+    assert_never(error)
 
 
 def _send_verification_email(settings, email: str, token: str) -> dict[str, str]:
@@ -36,10 +77,7 @@ def _send_verification_email(settings, email: str, token: str) -> dict[str, str]
         variables={"verification_url": url, "email": email},
     )
     if isinstance(result, Failure):
-        error = result.failure()
-        raise ExternalServiceException(
-            service="resend", detail=error.message, error_code=error.code.value
-        )
+        raise _email_failure_error(email=email, error=result.failure())
     logger.bind(email=email).info("Verification email dispatched")
     return {"status": "sent", "email": email}
 
@@ -53,10 +91,7 @@ def _send_password_reset_email(settings, email: str, token: str) -> dict[str, st
         variables={"reset_url": url, "email": email},
     )
     if isinstance(result, Failure):
-        error = result.failure()
-        raise ExternalServiceException(
-            service="resend", detail=error.message, error_code=error.code.value
-        )
+        raise _email_failure_error(email=email, error=result.failure())
     logger.bind(email=email).info("Password reset email dispatched")
     return {"status": "sent", "email": email}
 
@@ -68,6 +103,7 @@ def _send_password_reset_email(settings, email: str, token: str) -> dict[str, st
     name=SEND_VERIFICATION_EMAIL,
     bind=True,
     base=ResilientTask,
+    autoretry_for=_EMAIL_RETRYABLE,
 )
 def send_verification_email(
     self: ResilientTask,
@@ -115,7 +151,7 @@ def send_verification_email(
             idempotency_key,
             metadata={"user_id": user_id},
         )
-        raise
+        raise Reject(exc, requeue=False) from exc
     except Exception as exc:
         exc.add_note("task=send_verification_email")
         logger.bind(user_id=user_id, error=str(exc)).warning("email_delivery_failed")
@@ -129,6 +165,7 @@ def send_verification_email(
     name=SEND_PASSWORD_RESET_EMAIL,
     bind=True,
     base=ResilientTask,
+    autoretry_for=_EMAIL_RETRYABLE,
 )
 def send_password_reset_email(
     self: ResilientTask,
@@ -175,7 +212,7 @@ def send_password_reset_email(
             idempotency_key,
             metadata={"user_id": user_id},
         )
-        raise
+        raise Reject(exc, requeue=False) from exc
     except Exception as exc:
         exc.add_note("task=send_password_reset_email")
         logger.bind(user_id=user_id, error=str(exc)).warning("email_delivery_failed")

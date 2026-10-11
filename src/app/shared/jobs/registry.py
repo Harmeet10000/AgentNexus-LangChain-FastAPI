@@ -108,12 +108,26 @@ class CeleryTaskRegistry:
     def typed_send(
         cls, task_name: str, kwargs: dict[str, object], **send_task_opts: object
     ) -> object:
+        """Validate and publish synchronously, mapping broker errors to 503.
+
+        Sync legacy path: async producers must use
+        ``app.connections.celery_producer.dispatch`` instead, which also
+        publishes off the event loop.
+        """
+        from kombu.exceptions import OperationalError  # noqa: PLC0415 — error mapping only
+
         from app.connections.celery_producer import (  # noqa: PLC0415 — load only for publication
             celery_app,
         )
+        from app.utils import ServiceUnavailableException  # noqa: PLC0415 — error mapping only
 
         cls.validate(task_name, kwargs)
-        return celery_app.send_task(task_name, kwargs=kwargs, **send_task_opts)
+        try:
+            return celery_app.send_task(task_name, kwargs=kwargs, **send_task_opts)
+        except (CeleryError, ConnectionError, OSError, TimeoutError, OperationalError) as exc:
+            exc.add_note(f"task={task_name}, operation=typed_send")
+            message = "Could not enqueue background work"
+            raise ServiceUnavailableException(message) from exc
 
     @classmethod
     def validate(cls, task_name: str, kwargs: dict[str, Any]) -> CeleryTaskPayload:

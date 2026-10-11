@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import asyncpg_listen
@@ -17,8 +18,9 @@ class _CeleryRecorder:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
-    def send_task(self, name: str, *, kwargs: dict[str, object]) -> None:
+    def send_task(self, name: str, kwargs: dict[str, object], **_: object) -> SimpleNamespace:
         self.calls.append((name, kwargs))
+        return SimpleNamespace(id="task-1")
 
 
 class _MappingResult:
@@ -46,7 +48,13 @@ class _Session:
                 {
                     "id": "event-1",
                     "event_type": "tasks.documents_ingest",
-                    "payload": {"doc_id": "doc-1"},
+                    "payload": {
+                        "document_id": "doc-1",
+                        "user_id": "user-1",
+                        "filename": "contract.pdf",
+                        "content_type": "application/pdf",
+                        "object_uri": "s3://documents/contract.pdf",
+                    },
                     "publish_attempts": 0,
                 }
             )
@@ -95,13 +103,47 @@ async def test_publish_uses_the_injected_celery_application() -> None:
         {
             "id": "event-1",
             "event_type": "tasks.documents_ingest",
+            "payload": {
+                "document_id": "doc-1",
+                "user_id": "user-1",
+                "filename": "contract.pdf",
+                "content_type": "application/pdf",
+                "object_uri": "s3://documents/contract.pdf",
+            },
+        },
+        session=session,
+    )
+
+    assert celery.calls == [
+        (
+            "tasks.documents_ingest",
+            {
+                "document_id": "doc-1",
+                "user_id": "user-1",
+                "filename": "contract.pdf",
+                "content_type": "application/pdf",
+                "object_uri": "s3://documents/contract.pdf",
+            },
+        )
+    ]
+    assert session.commits == 1
+
+
+async def test_publish_refuses_a_payload_the_registry_rejects() -> None:
+    session = _Session()
+    celery = _CeleryRecorder()
+    relay = _relay(session, celery)
+
+    await relay._publish(
+        {
+            "id": "event-1",
+            "event_type": "tasks.documents_ingest",
             "payload": {"doc_id": "doc-1"},
         },
         session=session,
     )
 
-    assert celery.calls == [("tasks.documents_ingest", {"doc_id": "doc-1"})]
-    assert session.commits == 1
+    assert celery.calls == []
 
 
 async def test_drain_waits_for_an_in_flight_publish_and_rejects_new_work() -> None:
