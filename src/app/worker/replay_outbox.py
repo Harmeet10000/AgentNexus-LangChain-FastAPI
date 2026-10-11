@@ -6,11 +6,12 @@ from collections.abc import AsyncGenerator
 from typing import Any, cast
 
 from celery.exceptions import CeleryError
-from sqlalchemy import text
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.connections.celery_producer import celery_app, dispatch
 from app.connections.postgres import get_database_url
+from app.events.model import DeadLetterEvent
 from app.observability.logging import logger
 from app.utils import ServiceUnavailableException
 
@@ -23,15 +24,13 @@ async def _fetch_dead_letters(
         rows = (
             (
                 await session.execute(
-                    text(
-                        """
-                    SELECT original_event_id, event_type, payload
-                    FROM dead_letter_events
-                    ORDER BY dead_letter_at
-                    LIMIT :limit
-                    """
-                    ),
-                    {"limit": limit},
+                    select(
+                        DeadLetterEvent.original_event_id,
+                        DeadLetterEvent.event_type,
+                        DeadLetterEvent.payload,
+                    )
+                    .order_by(DeadLetterEvent.dead_letter_at)
+                    .limit(limit),
                 )
             )
             .mappings()
@@ -61,8 +60,9 @@ async def replay(limit: int = 50) -> int:
                 continue
             async with session_factory.begin() as session:
                 await session.execute(
-                    text("DELETE FROM dead_letter_events WHERE original_event_id = :id"),
-                    {"id": event["original_event_id"]},
+                    delete(DeadLetterEvent).where(
+                        DeadLetterEvent.original_event_id == event["original_event_id"]
+                    ),
                 )
             replayed += 1
 

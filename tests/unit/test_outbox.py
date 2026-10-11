@@ -2,8 +2,8 @@
 
 This module used to install a bare `types.ModuleType("app.utils")` into `sys.modules` to dodge the
 `app.utils.cache.redis_func -> app.utils` import cycle. Two things are now true and either one on
-its own retires the stub: the cycle was severed at source (`319c698`), and `app.shared.outbox.helper`
-imports nothing from `app` in the first place — only `sqlalchemy.text` and `uuid4`.
+its own retires the stub: the cycle was severed at source (`319c698`), and the writer
+imports nothing beyond `sqlalchemy`, `uuid4`, and its own table model.
 
 Removing it matters beyond tidiness. A bare `ModuleType` has no `__path__`, so while it sat in
 `sys.modules` *no* `app.utils.<submodule>` could be imported by any test collected after this one —
@@ -16,7 +16,10 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import Insert
+from sqlalchemy.dialects import postgresql
 
+from app.events.model import OutboxEvent
 from app.events.writer import OUTBOX_CHANNEL, with_outbox
 
 
@@ -45,14 +48,17 @@ class TestWithOutbox:
         assert event_id is not None
         assert len(calls) == 2
 
-        # First call: INSERT into outbox_events
-        insert_sql = calls[0][0][0].text
-        insert_params = calls[0][0][1]
-        assert "INSERT INTO outbox_events" in insert_sql
+        # First call: Core insert against the outbox table. Compared by name,
+        # not object identity: the suite imports this module identity twice.
+        insert_stmt = calls[0][0][0]
+        assert isinstance(insert_stmt, Insert)
+        assert insert_stmt.table.name == OutboxEvent.__tablename__
+        insert_params = insert_stmt.compile(dialect=postgresql.dialect()).params
         assert insert_params["aggregate_type"] == "unified_document"
         assert insert_params["aggregate_id"] == "doc-123"
         assert insert_params["event_type"] == "tasks.documents_ingest"
         assert insert_params["id"] == event_id
+        assert insert_params["payload"] == {"doc_id": "doc-123"}
 
         # Second call: pg_notify
         notify_sql = calls[1][0][0].text
