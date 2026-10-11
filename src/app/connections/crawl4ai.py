@@ -67,7 +67,7 @@ async def create_crawl4ai_crawler() -> AsyncWebCrawler:
 async def close_crawl4ai_crawler(crawler: AsyncWebCrawler | None) -> None:
     """Close the Crawl4AI browser during lifespan shutdown."""
     if crawler is not None:
-        with suppress(RuntimeError):
+        with suppress(Exception):
             await crawler.close()
 
 

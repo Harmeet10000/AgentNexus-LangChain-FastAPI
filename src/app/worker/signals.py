@@ -24,8 +24,8 @@ def shutdown_worker(**_kwargs: object) -> None:
     try:
         if client is not None:
             runtime.run(client.aclose())
-    except (OSError, RuntimeError) as exc:
+    except Exception as exc:  # noqa: BLE001 — shutdown must never raise
         exc.add_note("operation=shutdown_worker, resource=reliability_redis")
-        logger.exception("Could not close worker reliability Redis")
+        logger.bind(error_type=type(exc).__name__).warning("worker_reliability_redis_close_failed")
     finally:
         runtime.close()

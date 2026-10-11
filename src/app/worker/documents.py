@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from typing import TYPE_CHECKING, Any  # noqa: TC003 — Any resolved at runtime by Pydantic
 
@@ -90,7 +91,7 @@ async def _provision_document_worker() -> DocumentWorkerResources:
     graphiti: Graphiti | None = None
     redis: Redis | None = None
     try:
-        redis_url = getattr(settings, "REDIS_URL", "")
+        redis_url = settings.REDIS_URL
         if redis_url:
             redis = create_redis_client(redis_url)
             await redis.ping()
@@ -184,12 +185,25 @@ def get_document_worker_resources() -> DocumentWorkerResources:
 def run_on_document_worker_loop[T](
     coroutine_factory: Callable[[], Coroutine[Any, Any, T]],
 ) -> T:
-    """Run task I/O on the same loop that created the process resources."""
+    """Run task I/O on the same loop that created the process resources.
+
+    A soft time limit escapes ``run_until_complete`` without cancelling the
+    coroutine, which would otherwise resume on this loop alongside the next
+    task while still holding DB sessions. Cancel and drain it first.
+    """
     get_document_worker_resources()
     if _WORKER_RUNNER is None:
         message = "Worker resource guard returned without a runner"
         raise AssertionError(message)
-    return _WORKER_RUNNER.run(coroutine_factory())
+    loop = _WORKER_RUNNER.get_loop()
+    task = loop.create_task(coroutine_factory())
+    try:
+        return loop.run_until_complete(task)
+    except BaseException:
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
+        raise
 
 
 @worker_process_shutdown.connect
@@ -210,7 +224,16 @@ def shutdown_document_worker(**_kwargs: object) -> None:
         if runner is None:
             logger.error("Document ingestion worker loop absent during resource shutdown")
             return
-        runner.run(_release_document_worker(resources))
+
+        async def _release_with_deadline() -> None:
+            try:
+                async with asyncio.timeout(30):
+                    await _release_document_worker(resources)
+            except Exception as exc:  # noqa: BLE001 — shutdown must never raise
+                exc.add_note("operation=shutdown_document_worker")
+                logger.bind(error_type=type(exc).__name__).warning("document_worker_close_failed")
+
+        runner.run(_release_with_deadline())
         logger.info("Document ingestion worker resources closed")
     finally:
         if runner is not None:
