@@ -20,7 +20,13 @@ if TYPE_CHECKING:
 
 import os
 
-from app.shared.jobs.registry import CeleryTaskRegistry
+from celery.exceptions import Reject
+
+from app.shared.jobs.registry import (
+    CeleryTaskRegistry,
+    TaskPayloadValidationError,
+    UnregisteredTaskError,
+)
 from app.worker.observability import _celery_meters
 from app.worker.reliability import (
     acquire_idempotency_lock,
@@ -49,6 +55,29 @@ class ResilientTask(Task):
 
     _redis_client: ClassVar[Redis | None] = None
     _redis_pid: ClassVar[int | None] = None
+
+    @override
+    def before_start(self, task_id: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+        """Validate the wire payload before the task body runs.
+
+        A registered name with a mismatched payload is poison: it can never
+        succeed, so it is rejected to the dead-letter exchange instead of
+        failing (and acking) through every retry. Names the registry does not
+        know — broker-internal tasks such as chord callbacks — run unchecked.
+        """
+        _ = (task_id, args)
+        task_name = self.name or ""
+        try:
+            CeleryTaskRegistry.validate(task_name, dict(kwargs or {}))
+        except TaskPayloadValidationError as exc:
+            exc.add_note(f"task={task_name}, stage=payload_validation")
+            logger.bind(task=task_name, task_id=task_id).warning("task_payload_rejected")
+            raise Reject(exc, requeue=False) from exc
+        except UnregisteredTaskError:
+            logger.bind(task=task_name, task_id=task_id).debug("task_payload_unregistered")
+        # Celery never sets request.started; the duration metrics in
+        # on_success/on_failure would raise AttributeError without this.
+        self.request.started = time.time()
 
     @staticmethod
     def get_redis_client() -> Redis:
@@ -177,8 +206,13 @@ class ResilientTask(Task):
         ).info("Task completed successfully")
 
 
-class TypedCeleryTask(Task):
-    """Base Celery task that validates kwargs against a registered Pydantic model."""
+class TypedCeleryTask(ResilientTask):
+    """Base Celery task that validates kwargs against a registered Pydantic model.
+
+    Kept for back-compat: ``ResilientTask.before_start`` now validates every
+    registered name, so this only retains the ``validated_payload`` accessor.
+    New tasks should use ``ResilientTask`` directly.
+    """
 
     abstract = True
     _validated_payload: CeleryTaskPayload | None = None
@@ -194,7 +228,10 @@ class TypedCeleryTask(Task):
     def before_start(self, task_id: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
         super().before_start(task_id, args, kwargs)
         task_name = self.name or ""
-        self._validated_payload = CeleryTaskRegistry.validate(task_name, kwargs)
+        try:
+            self._validated_payload = CeleryTaskRegistry.validate(task_name, dict(kwargs or {}))
+        except UnregisteredTaskError:
+            self._validated_payload = None
 
     @override
     def on_success(

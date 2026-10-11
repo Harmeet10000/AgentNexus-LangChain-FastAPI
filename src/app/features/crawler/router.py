@@ -5,13 +5,14 @@ import ipaddress
 from typing import Annotated
 from uuid import uuid4
 
-from celery.exceptions import CeleryError
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 
 from app.config import get_settings
+from app.connections.celery_producer import dispatch
 from app.kernel.result import http_response, render_result
 from app.resilience.rate_limit import RateLimiter, RateLimitScope
 from app.shared.jobs.names import CRAWLER_CRAWL
+from app.shared.jobs.payloads import CrawlerJobPayload
 from app.utils import (
     APIResponse,
     NotFoundException,
@@ -111,15 +112,13 @@ async def crawl_url(  # noqa: PLR0917
             message = "Durable crawler workers are unavailable"
             raise ServiceUnavailableException(message)
         try:
-            task_result = await asyncio.to_thread(
-                celery.send_task,
+            task_id = await dispatch(
+                celery,
                 CRAWLER_CRAWL,
-                kwargs={"crawl_id": job.crawl_id, "request_payload": payload},
-                queue=get_settings().CELERY_CRAWLER_QUEUE,
-                routing_key=get_settings().CELERY_CRAWLER_ROUTING_KEY,
+                CrawlerJobPayload(crawl_id=job.crawl_id, request_payload=payload),
             )
-            await job_store.attach_task_id(job.crawl_id, task_result.id)
-        except (CeleryError, ConnectionError, OSError, TimeoutError) as exc:
+            await job_store.attach_task_id(job.crawl_id, task_id)
+        except ServiceUnavailableException as exc:
             message = "Could not enqueue crawler job"
             await job_store.mark_failed(job.crawl_id, message)
             raise ServiceUnavailableException(message) from exc
