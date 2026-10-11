@@ -9,8 +9,9 @@ import asyncpg
 import asyncpg_listen
 from asyncpg.exceptions import PostgresError
 from celery.exceptions import CeleryError
-from sqlalchemy import text
+from sqlalchemy import delete, func, select, text, update
 
+from app.events.model import OutboxEvent
 from app.observability.logging import logger
 from app.utils import ServiceUnavailableException
 
@@ -62,17 +63,19 @@ class OutboxRelay:
                 rows = (
                     (
                         await session.execute(
-                            text(
-                                """
-                            SELECT id, event_type, payload, publish_attempts
-                            FROM outbox_events
-                            WHERE published_at IS NULL AND publish_attempts < :max_retries
-                            ORDER BY created_at
-                            LIMIT 100
-                            FOR UPDATE SKIP LOCKED
-                            """
-                            ),
-                            {"max_retries": _MAX_RETRIES},
+                            select(
+                                OutboxEvent.id,
+                                OutboxEvent.event_type,
+                                OutboxEvent.payload,
+                                OutboxEvent.publish_attempts,
+                            )
+                            .where(
+                                OutboxEvent.published_at.is_(None),
+                                OutboxEvent.publish_attempts < _MAX_RETRIES,
+                            )
+                            .order_by(OutboxEvent.created_at)
+                            .limit(100)
+                            .with_for_update(skip_locked=True),
                         )
                     )
                     .mappings()
@@ -121,17 +124,18 @@ class OutboxRelay:
                 result = (
                     (
                         await session.execute(
-                            text(
-                                """
-                            SELECT id, event_type, payload, publish_attempts
-                            FROM outbox_events
-                            WHERE id = :event_id
-                              AND published_at IS NULL
-                              AND publish_attempts < :max_retries
-                            FOR UPDATE SKIP LOCKED
-                            """
-                            ),
-                            {"event_id": event_id, "max_retries": _MAX_RETRIES},
+                            select(
+                                OutboxEvent.id,
+                                OutboxEvent.event_type,
+                                OutboxEvent.payload,
+                                OutboxEvent.publish_attempts,
+                            )
+                            .where(
+                                OutboxEvent.id == event_id,
+                                OutboxEvent.published_at.is_(None),
+                                OutboxEvent.publish_attempts < _MAX_RETRIES,
+                            )
+                            .with_for_update(skip_locked=True),
                         )
                     )
                     .mappings()
@@ -185,8 +189,7 @@ class OutboxRelay:
         session: AsyncSession,
     ) -> None:
         await session.execute(
-            text("UPDATE outbox_events SET published_at = now() WHERE id = :id"),
-            {"id": event_id},
+            update(OutboxEvent).where(OutboxEvent.id == event_id).values(published_at=func.now()),
         )
         await session.commit()
 
@@ -199,8 +202,9 @@ class OutboxRelay:
         row = (
             (
                 await session.execute(
-                    text("SELECT publish_attempts FROM outbox_events WHERE id = :id FOR UPDATE"),
-                    {"id": event_id},
+                    select(OutboxEvent.publish_attempts)
+                    .where(OutboxEvent.id == event_id)
+                    .with_for_update(),
                 )
             )
             .mappings()
@@ -210,6 +214,8 @@ class OutboxRelay:
             return
         attempts = row["publish_attempts"] + 1
         if attempts >= _MAX_RETRIES:
+            # Kept as explicit SQL: INSERT ... SELECT across the two outbox
+            # tables with gen_random_uuid() is clearer spelled out than composed.
             await session.execute(
                 text(
                     """
@@ -224,14 +230,12 @@ class OutboxRelay:
                 {"id": event_id, "error": error},
             )
             await session.execute(
-                text("DELETE FROM outbox_events WHERE id = :id"),
-                {"id": event_id},
+                delete(OutboxEvent).where(OutboxEvent.id == event_id),
             )
         else:
             await session.execute(
-                text(
-                    "UPDATE outbox_events SET publish_attempts = :attempts, last_error = :error WHERE id = :id"
-                ),
-                {"id": event_id, "attempts": attempts, "error": error},
+                update(OutboxEvent)
+                .where(OutboxEvent.id == event_id)
+                .values(publish_attempts=attempts, last_error=error),
             )
         await session.commit()

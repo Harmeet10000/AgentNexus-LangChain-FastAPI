@@ -3,7 +3,9 @@
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import text
+from sqlalchemy import func, insert, text
+
+from app.events.model import OutboxEvent
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,19 +28,16 @@ async def with_outbox(
     """
     event_id = str(uuid4())
     await session.execute(
-        text(
-            """
-            INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload)
-            VALUES (:id, :aggregate_type, :aggregate_id, :event_type, :payload)
-            """
-        ),
-        {
-            "id": event_id,
-            "aggregate_type": aggregate_type,
-            "aggregate_id": aggregate_id,
-            "event_type": event_type,
-            "payload": payload,
-        },
+        insert(OutboxEvent).values(
+            id=event_id,
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+            event_type=event_type,
+            payload=payload,
+            # Database-generated: keeps relay ordering on one clock even when
+            # application hosts disagree about the time.
+            created_at=func.now(),
+        )
     )
     await session.execute(
         text("SELECT pg_notify(:channel, :event_id)"),

@@ -228,6 +228,9 @@ class IdempotencyGuard:
             )
 
     async def _get_from_postgres(self, key: str) -> ToolResult | None:
+        # NOTE: tool_executions has no mapped model or migration in this repo,
+        # so this stays as text(): declaring a Table here would invent schema
+        # ownership and drift from whatever creates the table.
         query = text(
             """
             SELECT result
@@ -274,6 +277,8 @@ class IdempotencyGuard:
         step_id: str,
         expires_at: datetime,
     ) -> None:
+        # Same as _get_from_postgres: no model owns tool_executions, so the
+        # ON CONFLICT upsert stays explicit rather than gaining a stray Table.
         query = text(
             """
             INSERT INTO tool_executions
