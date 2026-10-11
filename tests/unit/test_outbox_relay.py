@@ -41,9 +41,11 @@ class _Session:
         self.release_update = asyncio.Event()
         self.commits = 0
 
-    async def execute(self, statement: Any, _parameters: dict[str, object]) -> _MappingResult:
+    async def execute(
+        self, statement: Any, _parameters: dict[str, object] | None = None
+    ) -> _MappingResult:
         sql = str(statement)
-        if "SELECT id, event_type" in sql:
+        if "outbox_events" in sql and "FOR UPDATE" in sql:
             return _MappingResult(
                 {
                     "id": "event-1",
