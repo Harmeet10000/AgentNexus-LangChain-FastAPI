@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
+from typing import TYPE_CHECKING
+
 from celery import Celery
+from celery.exceptions import CeleryError
 from celery.signals import before_task_publish
 from kombu import Queue
+from kombu.exceptions import OperationalError
 
 from app.config import get_settings
+from app.shared.jobs.registry import CeleryTaskRegistry
 from app.shared.jobs.telemetry import log_task_published
 from app.shared.jobs.topology import TASK_DLX_EXCHANGE, TASK_EXCHANGE, task_routes
+from app.utils import ServiceUnavailableException
+
+if TYPE_CHECKING:
+    from app.shared.jobs.payloads import CeleryTaskPayload
 
 before_task_publish.connect(log_task_published)
 settings = get_settings()
@@ -102,3 +112,34 @@ def create_celery_app() -> Celery:
 
 
 celery_app = create_celery_app()
+
+
+async def dispatch(
+    celery: Celery,
+    task_name: str,
+    payload: CeleryTaskPayload | dict[str, object],
+    *,
+    expires: float | None = None,
+    countdown: float | None = None,
+) -> str:
+    """Validate a payload against the registry and publish off the event loop.
+
+    This is the single dispatch path: producers never publish directly, and
+    never pass ``queue=`` — routing lives in ``task_routes()`` alone.
+    Returns the broker task id.
+    """
+    kwargs = payload.model_dump(mode="json") if not isinstance(payload, dict) else payload
+    CeleryTaskRegistry.validate(task_name, kwargs)
+    try:
+        result = await asyncio.to_thread(
+            celery.send_task,
+            task_name,
+            kwargs=kwargs,
+            expires=expires,
+            countdown=countdown,
+        )
+    except (CeleryError, ConnectionError, OSError, TimeoutError, OperationalError) as exc:
+        exc.add_note(f"task={task_name}, operation=celery_dispatch")
+        message = "Could not enqueue background work"
+        raise ServiceUnavailableException(message) from exc
+    return result.id

@@ -3,15 +3,16 @@
 import argparse
 import asyncio
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, cast
 
 from celery.exceptions import CeleryError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.connections.celery_producer import celery_app
+from app.connections.celery_producer import celery_app, dispatch
 from app.connections.postgres import get_database_url
 from app.observability.logging import logger
+from app.utils import ServiceUnavailableException
 
 
 async def _fetch_dead_letters(
@@ -49,10 +50,12 @@ async def replay(limit: int = 50) -> int:
     try:
         async for event in _fetch_dead_letters(session_factory, limit=limit):
             try:
-                await asyncio.to_thread(
-                    celery_app.send_task, event["event_type"], kwargs=event["payload"]
+                await dispatch(
+                    celery_app,
+                    event["event_type"],
+                    cast("dict[str, object]", event["payload"]),
                 )
-            except CeleryError as exc:
+            except (CeleryError, ServiceUnavailableException) as exc:
                 exc.add_note(f"event_type={event['event_type']}")
                 logger.error("replay_failed", event_type=event["event_type"], error=str(exc))
                 continue

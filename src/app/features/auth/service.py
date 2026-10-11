@@ -122,11 +122,6 @@ class AuthService:
             return Failure(error)
         resolved = create_result.unwrap()
 
-        # send_verification_email.delay(
-        #     user_id=str(resolved.id),
-        #     email=resolved.email,
-        #     token=verification_token,
-        # )
         logger.bind(user_id=str(resolved.id)).info("User registered")
         return Success(_to_user_response(resolved))
 
@@ -301,7 +296,15 @@ class AuthService:
             aggregate_type="auth_email",
             aggregate_id=str(resolved.id),
             event_type="auth.send_verification_email",
-            payload={"user_id": str(resolved.id), "email": resolved.email, "token": new_token},
+            payload={
+                "user_id": str(resolved.id),
+                "email": resolved.email,
+                "token": new_token,
+                # Stable per-email key derived from the stored token hash, so
+                # retries and duplicate resends dedupe instead of re-sending.
+                # The raw token never lands in the key.
+                "idempotency_key": f"email-verify:{resolved.id}:{hash_token(new_token)}",
+            },
         )
         return Success(None)
 
@@ -330,7 +333,12 @@ class AuthService:
             aggregate_type="auth_email",
             aggregate_id=str(resolved.id),
             event_type="auth.send_password_reset_email",
-            payload={"user_id": str(resolved.id), "email": resolved.email, "token": reset_token},
+            payload={
+                "user_id": str(resolved.id),
+                "email": resolved.email,
+                "token": reset_token,
+                "idempotency_key": f"email-reset:{resolved.id}:{hash_token(reset_token)}",
+            },
         )
         return Success(None)
 

@@ -26,6 +26,7 @@ from app.observability.logging import logger
 from app.shared.jobs.names import AGENT_MEMORY_CONSOLIDATION
 from app.worker.app import celery_app
 from app.worker.runtime import run
+from app.worker.task import ResilientTask
 
 if TYPE_CHECKING:
     from typing import Any
@@ -48,10 +49,11 @@ class Neo4jCredentials(BaseModel):
 @celery_app.task(
     name=AGENT_MEMORY_CONSOLIDATION,
     bind=True,
+    base=ResilientTask,
     max_retries=0,
 )
 def agent_memory_consolidation(
-    _self: Any,
+    _self: ResilientTask,
     *,
     tenant_ids: list[str] | None = None,
     session_ids: list[str] | None = None,
