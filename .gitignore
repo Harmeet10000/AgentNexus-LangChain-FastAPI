@@ -234,3 +234,6 @@ docs-site/node_modules/
 .kiro/
 
 graphify-out/
+
+# personal local agent config, never track (contains credentials)
+/opencode.json
