@@ -118,7 +118,7 @@ async def create_session(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/sessions/{session_id}/export")
+@router.get("/sessions/{session_id}/export", response_model=None)
 async def export_session_transcript(
     session_id: Annotated[str, Path(min_length=1, max_length=100)],
     repo: Annotated[ChatTranscriptRepository, Depends(get_transcript_repository)],
