@@ -423,7 +423,7 @@ class ChatTranscriptRepository:
                             session_id=session_id,
                         )
                     )
-                turn_seq, _ = await _resolve_turn(
+                turn_seq, turn_opened = await _resolve_turn(
                     session, session_id, projection.query_source_key, session_row
                 )
                 recoverable = tuple(
@@ -440,12 +440,23 @@ class ChatTranscriptRepository:
                         checkpoint_id=row_checkpoint(projection),
                         tokens=None,
                     )
+                if turn_opened and inserted > 0:
+                    # §6 recovery reservation: a recovered query row OPENS the
+                    # turn it belongs to — persist turn_count (and nothing
+                    # else) so the next apply_projection cannot hand the same
+                    # slot to a later turn. Status and checkpoint timestamps
+                    # stay untouched; recovery never rewrites consensus.
+                    await session.execute(
+                        update(ChatSession)
+                        .where(ChatSession.id == session_row.id)
+                        .values(turn_count=session_row.turn_count + 1, updated_at=func.now())
+                    )
                 return Success(
                     ApplyOutcome(
                         applied=inserted > 0,
                         rows_inserted=inserted,
                         turn_seq=turn_seq,
-                        turn_opened=False,
+                        turn_opened=turn_opened and inserted > 0,
                     )
                 )
         except SQLAlchemyError as exc:

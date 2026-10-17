@@ -496,3 +496,71 @@ async def test_read_transcript_paging_completes_large_transcripts() -> None:
         assert page < 10  # safety bound — 605 rows need exactly 2 pages
     assert len(seen) == 605
     assert len(seen) == len(set(seen))
+
+
+async def test_turn_recovery_reserves_the_slot() -> None:
+    """§6: a recovered query row OPENS its turn — turn_count advances in the
+    same transaction, so the next real turn cannot reuse its turn_seq."""
+    factory = await _session_factory()
+    repo = ChatTranscriptRepository(factory)
+    session_id = str(uuid4())
+
+    # Established turn 1, then a crash-like situation for a NEW turn: the
+    # recovery path replays the historical projection carrying its query.
+    first = await repo.apply_projection(
+        _projection(
+            query_id=f"query:{session_id}", rows=(_row(0, f"query:{session_id}", "query"),)
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    recovered_key = f"query:{session_id}-2"
+    recovery = await repo.insert_rows_only(
+        _projection(query_id=recovered_key, rows=(_row(0, recovered_key, "query"),)),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(recovery, Success)
+    outcome = recovery.unwrap()
+    assert outcome.turn_opened is True
+    assert outcome.turn_seq == 2
+
+    # The slot was RESERVED: a later full projection of turn 3 must not
+    # collide with the recovered one.
+    third_key = f"query:{session_id}-3"
+    third = await repo.apply_projection(
+        _projection(
+            query_id=third_key,
+            rows=(_row(0, third_key, "query"),),
+            checkpoint_id="cp-third",
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(third, Success)
+    third_outcome = third.unwrap()
+    assert third_outcome.turn_seq == 3
+
+    async with factory() as session:
+        counts = (
+            await session.execute(
+                sa_text("SELECT turn_count FROM chat_sessions WHERE session_id = :sid"),
+                {"sid": session_id},
+            )
+        ).scalar_one()
+        assert counts == 3
+        seqs = [
+            int(t)
+            for t in (
+                await session.execute(
+                    sa_text(
+                        "SELECT turn_seq FROM chat_messages WHERE session_id = :sid "
+                        "AND source_key LIKE 'query:%' ORDER BY turn_seq"
+                    ),
+                    {"sid": session_id},
+                )
+            ).scalars()
+        ]
+        assert sorted(set(seqs)) == seqs  # no reused turn numbers
