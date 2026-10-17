@@ -1,15 +1,16 @@
-"""Scheduled agent-memory consolidation (band F group 9).
+"""Scheduled work for the Agent Saul feature.
 
-The consolidation refuses loudly when the target graph lacks its required
-procedures (:data:`ConsolidationPreconditionError`), which is the branch every
-environment without APOC/GDS takes. The service is constructed here with a
-live SHOW PROCEDURES probe over its own Neo4j driver, so an environment whose
-graph does expose the procedures can actually consolidate; a driver or probe
-failure still answers False and keeps the refusal branch.
+`agent_memory_consolidation` — nightly memory consolidation (band F).
+
+`chat_transcript_sweep` — transcript reconciliation sweep (doc §6 trigger 3)
+and checkpoint GC (§8): bounded batches, projector-only status changes, and
+the §6 [v3] Redis-outage guard (derive nothing when aliveness is unknowable).
 """
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from neo4j import AsyncGraphDatabase, basic_auth
@@ -22,8 +23,13 @@ from app.ai.memory.agent_memory_service import (
     memory_partition,
 )
 from app.config import get_settings
+from app.connections.checkpointer import setup_langgraph_checkpointer
+from app.connections.postgres import init_db
+from app.connections.redis import close_redis_client, create_redis_client
+from app.features.agent_saul.reconcile import build_saul_read_graph, sweep_transcripts
+from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
 from app.observability.logging import logger
-from app.shared.jobs.names import AGENT_MEMORY_CONSOLIDATION
+from app.shared.jobs.names import AGENT_MEMORY_CONSOLIDATION, AGENT_SAUL_TRANSCRIPT_SWEEP
 from app.worker.app import celery_app
 from app.worker.runtime import run
 from app.worker.task import ResilientTask
@@ -34,6 +40,7 @@ if TYPE_CHECKING:
     from neo4j import AsyncDriver
 
     from app.config import Settings
+    from app.features.agent_saul.reconcile import SweepReport
 
 
 class Neo4jCredentials(BaseModel):
@@ -155,3 +162,59 @@ async def _consolidate_async(
             except Exception as exc:  # noqa: BLE001 — best-effort cleanup after results are recorded
                 exc.add_note("task=agent_memory_consolidation, stage=probe_driver_close")
                 logger.bind(error=str(exc)).warning("agent_memory_probe_driver_close_failed")
+
+
+@celery_app.task(
+    name=AGENT_SAUL_TRANSCRIPT_SWEEP,
+    bind=True,
+    base=ResilientTask,
+    max_retries=0,
+)
+def chat_transcript_sweep(_self: ResilientTask) -> dict[str, Any]:
+    """Bounded transcript sweep + checkpoint GC (doc §6 trigger 3, §8).
+
+    Never raises: the sweep is a backstop, not a pipeline stage — the report
+    is the result, and the next beat retries after any partial outcome.
+    """
+    return run(_transcript_sweep_async())
+
+
+async def _transcript_sweep_async() -> dict[str, Any]:
+    """Provision the sweep's own resources, run one bounded pass, tear down."""
+    settings: Settings = get_settings()
+    engine, session_local = await init_db()
+    redis_client = create_redis_client(settings.REDIS_URL)
+    checkpointer = await setup_langgraph_checkpointer()
+    try:
+        graph = build_saul_read_graph(checkpointer)
+        repo = ChatTranscriptRepository(session_local)
+        report: SweepReport = await sweep_transcripts(
+            repo=repo,
+            graph=graph,
+            redis=redis_client,
+            checkpointer=checkpointer,
+        )
+        return asdict(report)
+    except Exception as exc:  # noqa: BLE001 — backstop task never raises into Celery retries
+        exc.add_note("task=chat_transcript_sweep")
+        logger.bind(error=str(exc)).error("transcript_sweep_task_failed")
+        return {"skipped": "sweep_task_error", "error": type(exc).__name__}
+    finally:
+        await asyncio.gather(
+            _aclose_checkpointer(checkpointer),
+            close_redis_client(redis_client),
+            _dispose_engine(engine),
+            return_exceptions=True,
+        )
+
+
+async def _aclose_checkpointer(checkpointer: object) -> None:
+    pool = getattr(checkpointer, "conn", None)
+    if pool is not None:
+        await pool.close()
+
+
+async def _dispose_engine(engine: object) -> None:
+    dispose = getattr(engine, "dispose", None)
+    if dispose is not None:
+        await dispose()
