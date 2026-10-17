@@ -54,6 +54,11 @@ MESSAGE_KINDS: tuple[str, ...] = (
     "final_summary",
     "turn_closed",
 )
+# §6 recovery vocabulary: keyed ROW FACTS vs derived VERDICT OUTCOMES. The
+# hole-fill replay may recover facts only; verdicts are the primary
+# projection's job (a historical pause judged at today's time plants a false
+# expired outcome otherwise).
+VERDICT_ROW_KINDS: frozenset[str] = frozenset({"turn_closed", "final_summary"})
 
 TRANSCRIPT_SCHEMA_VERSION = 1
 

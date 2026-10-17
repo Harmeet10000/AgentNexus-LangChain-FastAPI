@@ -28,6 +28,7 @@ from app.features.agent_saul.transcript.errors import (
     TranscriptInfrastructureError,
 )
 from app.features.agent_saul.transcript.projection import (
+    VERDICT_ROW_KINDS,
     TurnRows,
     project,
     snapshot_to_view,
@@ -221,10 +222,11 @@ class TurnRecorder:
         hole: the LATEST snapshot no longer contains the interrupt at all, so
         a flat ``reconcile`` cannot see the prompt — and a later plan decision
         row would lose its key entirely. Replay the bounded checkpoint
-        history oldest-first; every historical boundary is a real projection
-        (its rows re-candidate via the (session, source_key) dedupe), and the
-        primary latest projection rewrites the consensus watermark/status
-        afterwards.
+        history oldest-first; the dedupe keys make the replay idempotent, and
+        only keyed row FACTS recover (§9): verdict rows (turn_closed /
+        final_summary), the watermark and the cached status all stay the
+        primary latest projection's job, so an old pause can never plant a
+        false terminal outcome under today's clock.
         """
         try:
             history = [
@@ -234,7 +236,7 @@ class TurnRecorder:
         except Exception:  # noqa: BLE001 — history is a recovery path, never a gate (§10)
             self.log.warning("transcript_history_unavailable")
             return
-        for state in reversed(history):  # oldest → newest; watermark moves forward
+        for state in reversed(history):  # oldest → newest; watermark stays latest-first
             try:
                 view = snapshot_to_view(state)
                 projection = project(
@@ -247,15 +249,15 @@ class TurnRecorder:
             except Exception as exc:  # noqa: BLE001 — §9 boundary guard
                 self.log.bind(error=str(exc)).debug("transcript_history_state_skipped")
                 continue
-            if projection.is_no_op:
+            if projection.is_no_op or not projection.rows:
                 continue
-            if not any(row.kind.endswith("_prompt") for row in projection.rows):
-                # Hole-fill is narrow: only snapshots that carry an unpersisted
-                # prompt row; everything else is the primary projection's job.
+            if not any(row.kind not in VERDICT_ROW_KINDS for row in projection.rows):
                 continue
-            await self._repo.apply_projection(
+            applied = await self._repo.insert_rows_only(
                 projection, user_id=self._user_id, session_id=self._thread_id
             )
+            if isinstance(applied, Failure):
+                self.log.bind(operation="insert_rows_only").warning("transcript_hole_fill_failed")
 
     async def _existing_keys(self) -> frozenset[str]:
         context_result = await self._repo.get_turn_context(

@@ -166,6 +166,22 @@ async def sweep_transcripts(
     )
 
 
+@dataclass(frozen=True)
+class _ThreadReconcileOutcome:
+    """What one pass of the projector did to a thread (never a euphemism).
+
+    ``status``      — the freshly derived status value when a projection row
+                      actually landed (§3.1: the cache moves through it).
+    ``clean``       — the latest checkpoint was already fully persisted: the
+                      verified catch-up condition for §8 checkpoint GC.
+    ``failed``      — any repository/graph error; nothing may be concluded.
+    """
+
+    status: str | None = None
+    clean: bool = False
+    failed: bool = True
+
+
 async def _lock_alive(redis: Redis, thread_id: str) -> bool:
     """Aliveness input for sweep projections (§4.1 [v2]): heartbeat fresh only."""
     try:
@@ -174,15 +190,15 @@ async def _lock_alive(redis: Redis, thread_id: str) -> bool:
         return False
 
 
-async def _new_session_status(
+async def _reconcile_once(
     *,
     repo: ChatTranscriptRepository,
     graph: CompiledStateGraph[Any],
     redis: Redis,
     session_id: str,
     now: datetime,
-) -> str | None:
-    """Reconcile one thread through the projector; the derived status lands or None.
+) -> _ThreadReconcileOutcome:
+    """Reconcile one thread through the projector; the outcome is explicit.
 
     The sweep context is the projector's only extra privilege: the CALLER's
     turn context arrives owner-checked inside the repository, and the write
@@ -190,7 +206,7 @@ async def _new_session_status(
     """
     context_result = await repo.get_sweep_context(session_id=session_id)
     if isinstance(context_result, Failure):
-        return None
+        return _ThreadReconcileOutcome()
     owner_user_id, turn_context = context_result.unwrap()
     config: RunnableConfig = {"configurable": {"thread_id": session_id}}
     snapshot = await graph.aget_state(config)  # public LangGraph API (§1)
@@ -202,16 +218,20 @@ async def _new_session_status(
         now,
         aliveness=await _lock_alive(redis, session_id),
     )
-    if derived.is_no_op or derived.session_status is None:
-        return None
+    if derived.is_no_op:
+        # §8 verified catch-up: everything the checkpoint holds already sits
+        # in the transcript — the only state under which GC may act.
+        return _ThreadReconcileOutcome(clean=True, failed=False)
+    if derived.session_status is None:
+        return _ThreadReconcileOutcome(failed=True)
     applied = await repo.apply_projection(
         derived,
         user_id=owner_user_id,
         session_id=session_id,
     )
     if isinstance(applied, Failure):
-        return None
-    return derived.session_status.value
+        return _ThreadReconcileOutcome()
+    return _ThreadReconcileOutcome(status=derived.session_status.value, clean=False, failed=False)
 
 
 async def _reconcile_hinted_threads(
@@ -233,10 +253,10 @@ async def _reconcile_hinted_threads(
     hint_ids = [str(item) for item in popped]
     for thread_id in hint_ids:
         try:
-            status = await _new_session_status(
+            outcome = await _reconcile_once(
                 repo=repo, graph=graph, redis=redis, session_id=thread_id, now=now
             )
-            logger.bind(thread_id=thread_id, status=status).debug(
+            logger.bind(thread_id=thread_id, status=outcome.status, clean=outcome.clean).debug(
                 "transcript_sweep_hint_reconciled"
             )
         except Exception as exc:  # noqa: BLE001 — one hinted thread never stops the sweep
@@ -267,8 +287,12 @@ async def _reconcile_stale_sessions(
     for session_meta in stale.unwrap():
         scanned += 1
         try:
-            status = await _new_session_status(
-                repo=repo, graph=graph, redis=redis, session_id=session_meta.session_id, now=now
+            outcome = await _reconcile_once(
+                repo=repo,
+                graph=graph,
+                redis=redis,
+                session_id=session_meta.session_id,
+                now=now,
             )
         except Exception as exc:  # noqa: BLE001 — one session failing never stops the sweep
             exc.add_note(f"operation=transcript_sweep, session_id={session_meta.session_id}")
@@ -276,7 +300,7 @@ async def _reconcile_stale_sessions(
                 "transcript_sweep_reconcile_failed"
             )
             continue
-        if status in _TERMINAL_STATUS_VALUES:
+        if outcome.status in _TERMINAL_STATUS_VALUES:
             closed += 1
     return scanned, closed
 
@@ -305,10 +329,14 @@ async def _gc_checkpointed_threads(
     for session_meta in candidates.unwrap():
         session_id = session_meta.session_id
         try:
-            status = await _new_session_status(
+            outcome = await _reconcile_once(
                 repo=repo, graph=graph, redis=redis, session_id=session_id, now=now
             )
-            if status is None and session_meta.status not in _TERMINAL_STATUS_VALUES:
+            # §8 verified catch-up: GC acts ONLY when the projector itself
+            # proved the checkpoint is fully persisted (clean no-op) or the
+            # catch-up just landed a fresh terminal verdict. A repository or
+            # graph failure (outcome.failed) releases nothing.
+            if not (outcome.clean or outcome.status in _TERMINAL_STATUS_VALUES):
                 continue  # catch-up did not complete — keep the checkpoint (§8)
             await checkpointer.adelete_thread(session_id)  # public API only (§1)
             await repo.stamp_gc_audit(

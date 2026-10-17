@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any  # noqa: TC003 — pydantic field annotati
 
 from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Failure, Success
-from sqlalchemy import func, literal_column, select, update
+from sqlalchemy import func, literal_column, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -33,6 +33,7 @@ from app.features.agent_saul.transcript.errors import (
 from app.features.agent_saul.transcript.projection import (
     MESSAGE_KINDS,
     TRANSCRIPT_SCHEMA_VERSION,
+    VERDICT_ROW_KINDS,
     SessionStatus,
     TurnRow,
     TurnRows,
@@ -387,6 +388,80 @@ class ChatTranscriptRepository:
         result = await session.execute(stmt)
         return sum(1 for did_insert in result.scalars().all() if did_insert)
 
+    @trace_layer("repository")
+    async def insert_rows_only(
+        self,
+        projection: Projection,
+        *,
+        user_id: str,
+        session_id: str,
+    ) -> TranscriptResult[ApplyOutcome]:
+        """Message-row-only application — the §6 hole-fill vehicle (recovery).
+
+        Inserts any not-yet-persisted keyed rows and nothing else: no
+        watermark, no cached status, no verdict rows. A historical snapshot's
+        derived *outcomes* (turn_closed / final_summary) must never ride a
+        replay judged at today's time; only their row facts recover.
+        """
+        session_ctx = self._session_factory()
+        try:
+            async with session_ctx as session, session.begin():
+                session_row = (
+                    await session.execute(
+                        select(ChatSession)
+                        .where(
+                            ChatSession.session_id == session_id,
+                            ChatSession.user_id == user_id[:_USER_ID_LEN],
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if session_row is None:
+                    return Failure(
+                        TranscriptNotFoundError(
+                            message="transcript session not found",
+                            session_id=session_id,
+                        )
+                    )
+                turn_seq, _ = await _resolve_turn(
+                    session, session_id, projection.query_source_key, session_row
+                )
+                recoverable = tuple(
+                    row for row in projection.rows if row.kind not in VERDICT_ROW_KINDS
+                )
+                inserted = 0
+                for row in recoverable:
+                    inserted += await self._insert_row(
+                        session,
+                        row,
+                        user_id=user_id,
+                        session_id=session_id,
+                        turn_seq=turn_seq,
+                        checkpoint_id=row_checkpoint(projection),
+                        tokens=None,
+                    )
+                return Success(
+                    ApplyOutcome(
+                        applied=inserted > 0,
+                        rows_inserted=inserted,
+                        turn_seq=turn_seq,
+                        turn_opened=False,
+                    )
+                )
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chat_messages")
+            await session_ctx.rollback()
+            logger.bind(session_id=session_id, operation="insert_rows_only").warning(
+                "transcript_insert_rows_only_failed"
+            )
+            return Failure(
+                TranscriptInfrastructureError(
+                    message="hole-fill recovery could not be applied",
+                    source="chat_transcript_repository",
+                    operation="insert_rows_only",
+                )
+            )
+
     # ------------------------------------------------------------------
     # Sweep readers — trusted actor, still fail-closed (§6 trigger 3 / §8)
     # ------------------------------------------------------------------
@@ -462,7 +537,12 @@ class ChatTranscriptRepository:
         older_than: datetime,
         limit: int = 20,
     ) -> TranscriptResult[Sequence[SessionMeta]]:
-        """Terminal sessions past the retention horizon — GC input (§8)."""
+        """Terminal sessions past the retention horizon — GC input (§8).
+
+        Sessions already swept (``extra_metadata.gc_swept_at``) are excluded
+        in the query itself so the oldest batch cannot clog the candidate
+        list and starve newer deletions.
+        """
         terminal = frozenset(
             (
                 str(SessionStatus.COMPLETED.value),
@@ -480,6 +560,7 @@ class ChatTranscriptRepository:
                                 ChatSession.status.in_(terminal),
                                 ChatSession.last_checkpoint_ts.is_not(None),
                                 ChatSession.last_checkpoint_ts <= older_than,
+                                text("chat_sessions.extra_metadata ->> 'gc_swept_at' IS NULL"),
                             )
                             .order_by(ChatSession.last_checkpoint_ts)
                             .limit(limit)
