@@ -20,6 +20,7 @@ This service is instantiated ONCE per WebSocket session.  It holds no
 class-level mutable state across sessions — thread-safe.
 """
 
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
@@ -27,10 +28,12 @@ from fastapi import WebSocket
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Command
+from langgraph.types import Command, StateSnapshot
 from pydantic import ValidationError
 from redis.asyncio import Redis
-from returns.result import Success
+from redis.exceptions import RedisError
+from returns.result import Failure, Success
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.features.agent_saul.dto import (
     CreateSessionResponse,
@@ -56,6 +59,10 @@ from app.features.agent_saul.graph.state import (
     WorkflowStatus,
     hydrate_state,
 )
+from app.features.agent_saul.thread_lock import ThreadLock
+from app.features.agent_saul.transcript.projection import PAUSE_WINDOW
+from app.features.agent_saul.transcript.recorder import TurnRecorder
+from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
 from app.features.auth.websocket_security import (
     WebSocketIdleTimeout,
     WebSocketSecurityContext,
@@ -103,12 +110,15 @@ class AgentSaulService:
         correlation_id: str,
         ws_security: WebSocketSecurityService,
         ws_context: WebSocketSecurityContext,
+        *,
+        session_factory: async_sessionmaker[AsyncSession],
     ) -> None:
         self._graph = graph
         self._redis = redis
         self._correlation_id = correlation_id
         self._ws_security = ws_security
         self._ws_context = ws_context
+        self._session_factory = session_factory
         self._log = logger.bind(correlation_id=correlation_id)
 
     # ------------------------------------------------------------------
@@ -130,106 +140,98 @@ class AgentSaulService:
         thread_id: str,
         user_id: str,
     ) -> None:
-        """Main session loop.  Runs until graph completes or WS closes."""
-        config = self._build_config(thread_id)
-        initial_input = self._build_initial_state(start_msg, thread_id, user_id)
+        """Main session loop.  Runs until graph completes or WS closes.
 
-        # Checkpointed values may predate schema_version. Hydrate them before
-        # the first node sees state; the checkpointer itself stays generic.
-        persisted = await self._graph.aget_state(config)
-        try:
-            initial_input = (
-                hydrate_state(dict(persisted.values))
-                if persisted.values
-                else hydrate_state(initial_input)
-            )
-        except StateSchemaVersionError as exc:
-            # Persisted state this runtime refuses: fail the session loudly
-            # with a typed frame, never by crashing the loop or resuming on
-            # an unmigrated shape.
-            exc.add_note(f"thread_id={thread_id}")
-            self._log.bind(thread_id=thread_id, error=str(exc)).warning(
-                "saul_session_state_schema_refused"
-            )
-            await self._send_json(
-                ws,
-                WSErrorFrame(
-                    node=None,
-                    code="STATE_SCHEMA_INCOMPATIBLE",
-                    message="Saved session state is incompatible with this runtime; start a new session",
-                    retryable=False,
-                ).model_dump(),
-            )
+        Connection-lifetime discipline (doc §12.5): lock acquisition → hydrate
+        gate → reconcile → (paused-thread refusal / expiry) → run loop. Every
+        boundary update rides the recorder; ``finally`` runs T3 and releases
+        the lock — the TTL fence is only for process death.
+        """
+        config = self._build_config(thread_id)
+
+        lock = ThreadLock(self._redis, thread_id)
+        repo = ChatTranscriptRepository(self._session_factory)
+        recorder = TurnRecorder(
+            repo=repo,
+            graph=self._graph,
+            config=config,
+            thread_id=thread_id,
+            user_id=user_id,
+            redis=self._redis,
+            lock=lock,
+        )
+        config["callbacks"] = [recorder.usage_handler]
+
+        acquired = await lock.acquire()
+        if not acquired:
+            await self._refuse_thread(ws, thread_id)
             return
 
-        # current_input alternates between:
-        #   - dict (LegalAgentState subset) on first run
-        #   - Command(resume=...) on each HITL resume
-        current_input: Any = initial_input
-
-        step = 0
-        while True:
-            # --- Stream graph events → WS frames ----------------------------
-            async for event in self._graph.astream_events(
-                current_input,
-                config=config,
-                version="v2",
-            ):
-                frame = self._map_event_to_frame(event=event, current_step=step)
-                if frame is not None:
-                    await self._send_json(ws, frame.model_dump())
-
-            # --- Inspect post-stream graph state ----------------------------
-            state_snapshot = await self._graph.aget_state(config)
-            metadata = state_snapshot.metadata
-            if isinstance(metadata, dict):
-                step = int(metadata.get("step", step))
-
-            # Graph has no pending nodes → pipeline completed
-            if not state_snapshot.next:
-                final_state = state_snapshot.values
-                final_report = final_state.get("final_report")
-                summary = final_report.summary if final_report else None
-                await self._send_json(
-                    ws, WSDoneFrame(thread_id=thread_id, summary=summary).model_dump()
-                )
-                self._log.info("saul_session_completed", thread_id=thread_id)
-                break
-
-            # --- Detect pending interrupts ----------------------------------
-            pending_interrupts = [
-                task_interrupt
-                for task in state_snapshot.tasks
-                for task_interrupt in task.interrupts
-            ]
-
-            if not pending_interrupts:
-                # Graph paused without an interrupt — unexpected topology state
-                self._log.error(
-                    "saul_graph_paused_no_interrupt",
-                    thread_id=thread_id,
-                    next_nodes=state_snapshot.next,
-                )
-                await self._send_json(
-                    ws,
-                    WSErrorFrame(
-                        node=None,
-                        code="UNEXPECTED_PAUSE",
-                        message="Graph paused without a pending interrupt",
-                        retryable=False,
-                    ).model_dump(),
-                )
-                break
-
-            # --- HITL: emit interrupt frame, await resume -------------------
-            current_input = await self._handle_hitl(
+        try:
+            gated = await self._gate_and_reconcile(
                 ws=ws,
+                recorder=recorder,
+                config=config,
                 thread_id=thread_id,
-                interrupt_value=pending_interrupts[0].value,
             )
-            if current_input is None:
-                # Client sent an invalid resume or disconnected
-                break
+            if not gated:
+                return
+            initial_input = self._hydrate_or_refuse(
+                ws,
+                config,
+                self._build_initial_state(start_msg, thread_id, user_id),
+                thread_id,
+            )
+            if initial_input is None:
+                return
+
+            # current_input alternates between:
+            #   - dict (LegalAgentState subset) on first run
+            #   - Command(resume=...) on each HITL resume
+            current_input: Any = initial_input
+
+            step = 0
+            first_stream_done = False
+            while True:
+                # --- Stream graph events → WS frames ----------------------------
+                await self._stream_round(
+                    ws=ws, config=config, current_input=current_input, step=step
+                )
+                # T0/T1): register the boundary once the first stream round has
+                # produced durable checkpoints; no-op on later rounds (§5.2).
+                if not first_stream_done:
+                    recorder.on_first_checkpoint()
+                    first_stream_done = True
+
+                # --- Inspect post-stream graph state ----------------------------
+                outcome, state_snapshot = await self._assess_round(
+                    ws=ws, recorder=recorder, thread_id=thread_id, config=config
+                )
+                metadata = state_snapshot.metadata if state_snapshot else None
+                if isinstance(metadata, dict):
+                    step = int(metadata.get("step", step))
+                if outcome != "paused" or state_snapshot is None:
+                    break
+
+                # --- HITL: emit interrupt frame, await resume -------------------
+                current_input = await self._handle_hitl(
+                    ws=ws,
+                    thread_id=thread_id,
+                    interrupt_value=self._interrupts_of(state_snapshot)[0].value,
+                    recorder=recorder,
+                    state_snapshot=state_snapshot,
+                )
+                if current_input is None:
+                    # Client sent an invalid resume or disconnected
+                    break
+        finally:
+            # T3 — WS drop or exception: await T0, project fresh, nothing else
+            # (§5.2); the recorder is exception-native but the boundary is not.
+            try:
+                await recorder.on_abort()
+            except Exception:  # noqa: BLE001 — cleanup must not mask the session error
+                self._log.bind(thread_id=thread_id).warning("saul_t3_abort_failed")
+            await lock.release()
 
     # ------------------------------------------------------------------
     # Event mapping: astream_events v2 → WS frames
@@ -307,13 +309,181 @@ class AgentSaulService:
     # HITL handling
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _interrupts_of(snapshot: StateSnapshot) -> list[Any]:
+        """Pending interrupts across tasks (P5a over task objects)."""
+        return [interrupt for task in snapshot.tasks for interrupt in task.interrupts]
+
+    async def _stream_round(
+        self,
+        *,
+        ws: WebSocket,
+        config: RunnableConfig,
+        current_input: Any,
+        step: int,
+    ) -> None:
+        """Stream one graph round's events to the wire as WS frames."""
+        async for event in self._graph.astream_events(
+            current_input,
+            config=config,
+            version="v2",
+        ):
+            frame = self._map_event_to_frame(event=event, current_step=step)
+            if frame is not None:
+                await self._send_json(ws, frame.model_dump())
+
+    async def _hydrate_or_refuse(
+        self,
+        ws: WebSocket,
+        config: RunnableConfig,
+        initial_input: dict[str, Any],
+        thread_id: str,
+    ) -> dict[str, Any] | None:
+        """Hydrate checkpointed state; ``None`` means the session was refused.
+
+        Persisted values may predate schema_version. Hydrate them before the
+        first node sees state; shapes this runtime refuses fail the session
+        loudly with a typed frame — never by resuming unmigrated state (§9).
+        """
+        persisted = await self._graph.aget_state(config)
+        try:
+            return (
+                hydrate_state(dict(persisted.values))
+                if persisted.values
+                else hydrate_state(initial_input)
+            )
+        except StateSchemaVersionError as exc:
+            exc.add_note(f"thread_id={thread_id}")
+            self._log.bind(thread_id=thread_id, error=str(exc)).warning(
+                "saul_session_state_schema_refused"
+            )
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="STATE_SCHEMA_INCOMPATIBLE",
+                    message="Saved session state is incompatible with this runtime; start a new session",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return None
+
+    async def _assess_round(
+        self,
+        *,
+        ws: WebSocket,
+        recorder: TurnRecorder,
+        thread_id: str,
+        config: RunnableConfig,
+    ) -> tuple[str, StateSnapshot | None]:
+        """Post-stream decision point: done / unexpected-pause / paused-HITL.
+
+        Returns ``("paused", snapshot)`` for the HITL open; the other outcomes
+        carry ``None`` and have already put the terminal frame on the wire.
+        """
+        state_snapshot = await self._graph.aget_state(config)
+
+        # Graph has no pending nodes → pipeline completed
+        if not state_snapshot.next:
+            final_state = state_snapshot.values
+            final_report = final_state.get("final_report")
+            summary = final_report.summary if final_report else None
+            await self._send_json(
+                ws, WSDoneFrame(thread_id=thread_id, summary=summary).model_dump()
+            )
+            # T2 runs AFTER the DoneFrame is on the wire (§5.2).
+            await recorder.on_end()
+            self._log.info("saul_session_completed", thread_id=thread_id)
+            return "done", None
+
+        pause = self._interrupts_of(state_snapshot)
+        if not pause:
+            # Graph paused without an interrupt — unexpected topology state
+            self._log.error(
+                "saul_graph_paused_no_interrupt",
+                thread_id=thread_id,
+                next_nodes=state_snapshot.next,
+            )
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="UNEXPECTED_PAUSE",
+                    message="Graph paused without a pending interrupt",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return "unexpected_pause", None
+        return "paused", state_snapshot
+
+    async def _gate_and_reconcile(
+        self,
+        *,
+        ws: WebSocket,
+        recorder: TurnRecorder,
+        config: RunnableConfig,
+        thread_id: str,
+    ) -> bool:
+        """Connect-time discipline (doc §12.5 / §6): reconcile then expiry.
+
+        Reconcile projects whatever the checkpoint holds *before* anything new
+        runs, so a crash mid-turn heals via the lineage keys, not replay. A
+        paused turn within the 24 h window refuses the new start frame
+        (SESSION_PAUSED_AWAITING_RESUME — resumption reconnects keep the
+        thread); past the window the turn is closed abandoned_expired by the
+        projector and the new start proceeds (close-and-proceed, D2).
+        """
+        await recorder.reconcile()
+        snapshot = await self._graph.aget_state(config)
+        paused = [interrupt for task in snapshot.tasks for interrupt in task.interrupts]
+        if not paused:
+            return True
+        created_at = _coerce_ts(snapshot.created_at)
+        if created_at is not None and (datetime.now(tz=UTC) - created_at) > PAUSE_WINDOW:
+            self._log.bind(thread_id=thread_id).info("saul_paused_turn_expired")
+            return True  # turn_closed(abandoned_expired) already projected above
+        self._log.bind(thread_id=thread_id).info("saul_thread_paused_refusing_new_start")
+        await self._send_json(
+            ws,
+            WSErrorFrame(
+                node=None,
+                code="SESSION_PAUSED_AWAITING_RESUME",
+                message="This thread is paused awaiting HITL resume; a resume connection may claim it",
+                retryable=True,
+            ).model_dump(),
+        )
+        return False
+
+    async def _refuse_thread(self, ws: WebSocket, thread_id: str) -> None:
+        """THREAD_BUSY for a second connection; retryable refusal on outage."""
+        code = "THREAD_BUSY"
+        message = "Another connection is active on this thread"
+        try:
+            await self._redis.ping()
+        except RedisError:
+            code = "TRANSCRIPT_UNAVAILABLE"
+            message = "Persistence services are unavailable; retry shortly"
+        self._log.bind(thread_id=thread_id, code=code).warning("saul_thread_refused")
+        await self._send_json(
+            ws,
+            WSErrorFrame(node=None, code=code, message=message, retryable=True).model_dump(),
+        )
+
     async def _handle_hitl(
         self,
         ws: WebSocket,
         thread_id: str,
         interrupt_value: dict[str, Any],
+        recorder: TurnRecorder,
+        state_snapshot: object,
     ) -> Command[Any] | None:
-        """Emit HITL frame, wait for WSResumeMessage, return Command(resume=...)."""
+        """Emit HITL frame, wait for WSResumeMessage, return Command(resume=...).
+
+        T1 rides right after the frame is on the wire (never delaying the
+        client), and project-before-resume precedes ``Command(resume=...)``
+        with its single retry (§5.2). A paused turn past the 24 h window is
+        refused with SESSION_PAUSE_EXPIRED (§8) — the projector closed it.
+        """
         interrupt_type_raw = interrupt_value.get("type", HITLInterruptType.PLAN_APPROVAL)
         try:
             interrupt_type = HITLInterruptType(interrupt_type_raw)
@@ -329,6 +499,24 @@ class AgentSaulService:
                 message=interrupt_value.get("message", "Human input required"),
             ).model_dump(),
         )
+        # T1 after the frame (§5.2); the client is reading either way.
+        pause_result = await recorder.on_pause()
+        if isinstance(pause_result, Failure):
+            self._log.bind(thread_id=thread_id).warning("saul_t1_pause_project_failed")
+
+        created_at = _coerce_ts(getattr(state_snapshot, "created_at", None))
+        if created_at is not None and (datetime.now(tz=UTC) - created_at) > PAUSE_WINDOW:
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="SESSION_PAUSE_EXPIRED",
+                    message="Paused turn exceeded its 24 h window and was closed",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return None
+
         self._log.info(
             "saul_hitl_interrupt_sent",
             thread_id=thread_id,
@@ -405,6 +593,12 @@ class AgentSaulService:
                 "overrides": inbound.overrides,
                 "reviewer_role": inbound.reviewer_role,
             }
+            # T1' — project-before-resume (§5.2): retry once internally, then
+            # proceed fail-open with a reconcile hint; never block the resume
+            # on transcript health.
+            resume_projection = await recorder.prepare_resume()
+            if isinstance(resume_projection, Failure):
+                self._log.bind(thread_id=thread_id).warning("saul_t1p_before_resume_project_failed")
             return Command(resume=resume_payload)
 
     async def _receive_json(self, ws: WebSocket) -> object:
@@ -444,7 +638,17 @@ class AgentSaulService:
             "schema_version": STATE_SCHEMA_VERSION,
             "doc_id": start_msg.doc_id,
             "document_text": None,
-            "messages": [HumanMessage(content=start_msg.user_query)],
+            # D4: the explicit saul_kind tag is the turn-boundary contract —
+            # the projector derives turn existence purely from this tagged
+            # HumanMessage surviving checkpoint serialization (verified
+            # against the pinned JsonPlusSerializer).
+            "messages": [
+                HumanMessage(
+                    content=start_msg.user_query,
+                    additional_kwargs={"saul_kind": "query"},
+                    id=str(uuid4()),
+                )
+            ],
             "user_query": start_msg.user_query,
             "qna_confidence": 0.0,
             "plan": [],
@@ -467,3 +671,18 @@ class AgentSaulService:
             "retry_count": 0,
             "permissions": start_msg.permissions,
         }
+
+
+def _coerce_ts(raw: object) -> datetime | None:
+    """Checkpoint ``created_at`` arrives as an ISO string or None."""
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    return None

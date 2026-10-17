@@ -20,7 +20,9 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
 from app.features.auth.dependencies import WebSocketClaims, get_refresh_token_repository
 from app.features.auth.repository import RefreshTokenRepository
 from app.features.auth.websocket_security import WebSocketSecurityContext, WebSocketSecurityService
@@ -58,8 +60,27 @@ async def get_redis(request: Request) -> Redis:
     return redis
 
 
+async def get_db_session_local(
+    request: Request,
+) -> async_sessionmaker[AsyncSession]:
+    """Sync-side session maker for out-of-request-scope work (the transcript
+    projector runs at WS boundaries, not inside a request dependency)."""
+    session_local = getattr(request.app.state, "db_session_local", None)
+    if session_local is None:
+        message = "Database layer is unavailable"
+        raise ServiceUnavailableException(message)
+    return session_local
+
+
 async def get_websocket_security_service(websocket: WebSocket) -> WebSocketSecurityService:
     return websocket.app.state.websocket_security
+
+
+async def get_transcript_repository(
+    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_db_session_local)],
+) -> ChatTranscriptRepository:
+    """The transcript projector/repository singleton per request scope."""
+    return ChatTranscriptRepository(session_factory)
 
 
 # ---------------------------------------------------------------------------
@@ -79,14 +100,18 @@ class AgentSaulDeps(BaseModel):
     graph: CompiledStateGraph[Any]
     checkpointer: AsyncPostgresSaver
     redis: Redis
+    session_factory: async_sessionmaker[AsyncSession]
 
 
 async def get_agent_saul_deps(
     graph: Annotated[CompiledStateGraph[Any], Depends(get_saul_graph)],
     checkpointer: Annotated[AsyncPostgresSaver, Depends(get_saul_checkpointer)],
     redis: Annotated[Redis, Depends(get_redis)],
+    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_db_session_local)],
 ) -> AgentSaulDeps:
-    return AgentSaulDeps(graph=graph, checkpointer=checkpointer, redis=redis)
+    return AgentSaulDeps(
+        graph=graph, checkpointer=checkpointer, redis=redis, session_factory=session_factory
+    )
 
 
 async def get_agent_saul_ws_security_context(

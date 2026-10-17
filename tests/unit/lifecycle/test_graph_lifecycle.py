@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -97,12 +99,14 @@ def test_started_application_exposes_agent_saul_dependency_bundle() -> None:
     graph = MagicMock(spec=CompiledStateGraph)
     checkpointer = MagicMock(spec=AsyncPostgresSaver)
     redis = MagicMock(spec=Redis)
+    session_factory = MagicMock(spec=async_sessionmaker)
 
     @asynccontextmanager
     async def started(app: FastAPI) -> AsyncIterator[None]:
         app.state.saul_graph = graph
         app.state.langgraph_checkpointer = checkpointer
         app.state.redis = redis
+        app.state.db_session_local = session_factory
         yield
 
     app = FastAPI(lifespan=started)
@@ -115,10 +119,16 @@ def test_started_application_exposes_agent_saul_dependency_bundle() -> None:
             "graph": deps.graph is graph,
             "checkpointer": deps.checkpointer is checkpointer,
             "redis": deps.redis is redis,
+            "session_factory": deps.session_factory is session_factory,
         }
 
     with TestClient(app) as client:
         response = client.get("/saul-ready")
 
     assert response.status_code == 200
-    assert response.json() == {"graph": True, "checkpointer": True, "redis": True}
+    assert response.json() == {
+        "graph": True,
+        "checkpointer": True,
+        "redis": True,
+        "session_factory": True,
+    }

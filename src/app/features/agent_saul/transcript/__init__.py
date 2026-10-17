@@ -1,0 +1,51 @@
+"""Agent Saul chat transcript persistence (doc: agent-saul-chat-transcript-persistence.md)."""
+
+from app.features.agent_saul.transcript.projection import (
+    MESSAGE_KINDS,
+    ORPHAN_GRACE,
+    PAUSE_WINDOW,
+    TRANSCRIPT_SCHEMA_VERSION,
+    ContentRole,
+    InterruptView,
+    NoOp,
+    ProjectedRow,
+    Projection,
+    SessionStatus,
+    SnapshotView,
+    TurnRow,
+    TurnRows,
+    derive_status,
+    project,
+    snapshot_to_view,
+)
+from app.features.agent_saul.transcript.repository import (
+    ApplyOutcome,
+    ChatTranscriptRepository,
+    SessionMeta,
+    TranscriptMessage,
+    TranscriptTurnContext,
+)
+
+__all__ = [
+    "MESSAGE_KINDS",
+    "ORPHAN_GRACE",
+    "PAUSE_WINDOW",
+    "TRANSCRIPT_SCHEMA_VERSION",
+    "ApplyOutcome",
+    "ChatTranscriptRepository",
+    "ContentRole",
+    "InterruptView",
+    "NoOp",
+    "ProjectedRow",
+    "Projection",
+    "SessionMeta",
+    "SessionStatus",
+    "SnapshotView",
+    "TranscriptMessage",
+    "TranscriptTurnContext",
+    "TurnRow",
+    "TurnRows",
+    "derive_status",
+    "project",
+    "snapshot_to_view",
+]

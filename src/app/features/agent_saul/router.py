@@ -10,10 +10,15 @@ AgentSaulService.  Routers handle: WS lifecycle, dependency injection,
 validation of the first inbound frame, and structured error emission.
 """
 
+from collections.abc import AsyncIterator
 from contextlib import suppress
+from json import dumps
+from typing import Annotated, Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Path, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
+from returns.result import Failure
 
 from app.config import get_settings
 from app.features.auth.dependencies import CurrentClaims
@@ -26,6 +31,7 @@ from app.utils import APIResponse, ErrorCode, ValidationException
 from .dependencies import (
     AgentSaulDepsAnnotated,
     AgentSaulWebSocketSecurityContextAnnotated,
+    get_transcript_repository,
 )
 from .dto import (
     CreateSessionRequest,
@@ -35,6 +41,12 @@ from .dto import (
     ws_inbound_adapter,
 )
 from .service import AgentSaulService
+from .transcript.errors import (
+    TranscriptInfrastructureError,
+    TranscriptNotFoundError,
+    TranscriptSchemaError,
+)
+from .transcript.repository import ChatTranscriptRepository
 
 router = APIRouter(
     prefix="/agent-saul",
@@ -98,6 +110,69 @@ async def create_session(
         result,
         response,
         message="Session created",
+    )
+
+
+# ---------------------------------------------------------------------------
+# HTTP: chat transcript export (design §3.3/D3)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sessions/{session_id}/export")
+async def export_session_transcript(
+    session_id: Annotated[str, Path(min_length=1, max_length=100)],
+    repo: Annotated[ChatTranscriptRepository, Depends(get_transcript_repository)],
+    claims: CurrentClaims,
+    response: Response,
+) -> StreamingResponse | APIResponse[Any]:
+    """Stream one session's transcript in display order (turn_seq, ordinal).
+
+    NDJSON, one row per line, so a client can render large transcripts
+    incrementally. Redacted rows export AS redacted: ``content`` is null and
+    ``redacted`` is true — erasure is represented, never reconstructed (§3.2).
+    Reads are schema-version gated in the repository (§9 fail closed).
+    """
+    user_id = claims.sub
+    meta_result = await repo.get_session_meta(session_id=session_id, user_id=user_id)
+    if isinstance(meta_result, Failure):
+        error = meta_result.failure()
+        if isinstance(error, TranscriptNotFoundError):
+            return render_result(Failure(error), response)
+        if isinstance(error, TranscriptSchemaError):
+            return render_result(Failure(error), response)
+        if isinstance(error, TranscriptInfrastructureError):
+            return render_result(Failure(error), response)
+        # Closed union — a new variant MUST be rendered here, never leaked.
+        msg = f"unreachable transcript error variant: {error!r}"
+        raise AssertionError(msg)
+
+    async def rows() -> AsyncIterator[str]:
+        # One bounded read, streamed line by line: the generator keeps memory
+        # flat for the client while D3 order is preserved by the reader. The
+        # bound (500 rows) is the read ceiling, not an export truncation —
+        # clients paginate by re-requesting with a future offset parameter.
+        result = await repo.read_transcript(session_id=session_id, user_id=user_id, limit=500)
+        if isinstance(result, Failure):
+            # Surface the typed error as a terminal line, never a silent
+            # truncation; driver detail is already stripped (§10).
+            error_payload = result.failure()
+            yield (
+                dumps(
+                    {
+                        "error": str(error_payload.code),
+                        "message": error_payload.message,
+                    }
+                )
+                + "\n"
+            )
+            return
+        for item in result.unwrap():
+            yield dumps(item.model_dump(mode="json"), default=str) + "\n"
+
+    return StreamingResponse(
+        rows(),
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": f'attachment; filename="transcript-{session_id}.ndjson"'},
     )
 
 
@@ -170,6 +245,7 @@ async def saul_ws_endpoint(
             correlation_id=correlation_id,
             ws_security=security_service,
             ws_context=security_context,
+            session_factory=deps.session_factory,
         )
         await service.run_session(
             ws=websocket,
