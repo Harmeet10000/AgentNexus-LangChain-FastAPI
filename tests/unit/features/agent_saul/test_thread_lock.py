@@ -17,8 +17,7 @@ pytestmark = pytest.mark.unit
 
 
 async def make_lock(test_redis, thread_id: str = "t-1", **kwargs) -> ThreadLock:
-    lock = ThreadLock(test_redis, thread_id, **kwargs)
-    return lock
+    return ThreadLock(test_redis, thread_id, **kwargs)
 
 
 async def test_acquire_sets_key_and_marks_fresh(redis) -> None:
@@ -42,6 +41,11 @@ async def test_second_connection_refused_while_held(redis) -> None:
         rival = ThreadLock(redis, "t-1")
         try:
             assert await rival.acquire() is False
+            # A refused rival's release must never delete the holder's key
+            # (§5.5: ownership token guards DEL; TTL is the correctness fence).
+            await rival.release()
+            assert await redis.exists(lock_key("t-1")) == 1  # holder's key alive
+            assert first.is_held is True  # holder unaffected
         finally:
             await rival.release()
         # A different thread still acquires independently.

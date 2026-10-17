@@ -37,16 +37,14 @@ from .dto import (
     CreateSessionRequest,
     CreateSessionResponse,
     WSErrorFrame,
+    WSResumeMessage,
     WSStartMessage,
     ws_inbound_adapter,
 )
 from .service import AgentSaulService
-from .transcript.errors import (
-    TranscriptInfrastructureError,
-    TranscriptNotFoundError,
-    TranscriptSchemaError,
-)
 from .transcript.repository import ChatTranscriptRepository
+
+_EXPORT_PAGE_ROWS = 500  # §8 export: bounded read size; pages stream until short page
 
 router = APIRouter(
     prefix="/agent-saul",
@@ -135,39 +133,46 @@ async def export_session_transcript(
     user_id = claims.sub
     meta_result = await repo.get_session_meta(session_id=session_id, user_id=user_id)
     if isinstance(meta_result, Failure):
-        error = meta_result.failure()
-        if isinstance(error, TranscriptNotFoundError):
-            return render_result(Failure(error), response)
-        if isinstance(error, TranscriptSchemaError):
-            return render_result(Failure(error), response)
-        if isinstance(error, TranscriptInfrastructureError):
-            return render_result(Failure(error), response)
-        # Closed union — a new variant MUST be rendered here, never leaked.
-        msg = f"unreachable transcript error variant: {error!r}"
-        raise AssertionError(msg)
+        # Every transcript error variant is a FeatureError; render_result
+        # derives the transport status from error.kind — a future variant
+        # renders instead of raising (§10, router-renders-result).
+        return render_result(meta_result, response)
+
+    _ = meta_result.unwrap()  # fail-closed gate passed: owner + schema verified
 
     async def rows() -> AsyncIterator[str]:
-        # One bounded read, streamed line by line: the generator keeps memory
-        # flat for the client while D3 order is preserved by the reader. The
-        # bound (500 rows) is the read ceiling, not an export truncation —
-        # clients paginate by re-requesting with a future offset parameter.
-        result = await repo.read_transcript(session_id=session_id, user_id=user_id, limit=500)
-        if isinstance(result, Failure):
-            # Surface the typed error as a terminal line, never a silent
-            # truncation; driver detail is already stripped (§10).
-            error_payload = result.failure()
-            yield (
-                dumps(
-                    {
-                        "error": str(error_payload.code),
-                        "message": error_payload.message,
-                    }
-                )
-                + "\n"
+        # Bounded 500-row reads streamed page by page: memory stays flat while
+        # D3 order (turn_seq, ordinal) is preserved by the reader. Paging
+        # continues until a short page, so a long transcript never truncates
+        # silently (§8 export).
+        page = 0
+        while True:
+            result = await repo.read_transcript(
+                session_id=session_id,
+                user_id=user_id,
+                limit=_EXPORT_PAGE_ROWS,
+                offset=page * _EXPORT_PAGE_ROWS,
             )
-            return
-        for item in result.unwrap():
-            yield dumps(item.model_dump(mode="json"), default=str) + "\n"
+            if isinstance(result, Failure):
+                # Surface the typed error as a terminal line, never a silent
+                # truncation; driver detail is already stripped (§10).
+                error_payload = result.failure()
+                yield (
+                    dumps(
+                        {
+                            "error": str(error_payload.code),
+                            "message": error_payload.message,
+                        }
+                    )
+                    + "\n"
+                )
+                return
+            page_rows = list(result.unwrap())
+            for item in page_rows:
+                yield dumps(item.model_dump(mode="json"), default=str) + "\n"
+            if len(page_rows) < _EXPORT_PAGE_ROWS:
+                return
+            page += 1
 
     return StreamingResponse(
         rows(),
@@ -212,33 +217,61 @@ async def saul_ws_endpoint(
         await security_service.register_connection(security_context, websocket)
         raw = await security_service.receive_json(websocket, security_context)
         first_msg = ws_inbound_adapter.validate_python(raw)
-        if not isinstance(first_msg, WSStartMessage):
+
+        # First frame protocol: a ``start`` starts a turn (new or existing
+        # thread); a ``resume`` is the reconnect-resume claim (§6) for a
+        # thread paused in a HITL interrupt. Anything else is refused.
+        start_msg: WSStartMessage | None = None
+        first_resume: WSResumeMessage | None = None
+        if isinstance(first_msg, WSStartMessage):
+            if first_msg.thread_id and first_msg.thread_id != thread_id:
+                await security_service.send_json(
+                    websocket,
+                    WSErrorFrame(
+                        node=None,
+                        code="THREAD_ID_MISMATCH",
+                        message="thread_id in URL and message body do not match",
+                        retryable=False,
+                    ).model_dump(),
+                    security_context,
+                )
+                await websocket.close(code=4001)
+                return
+            start_msg = first_msg
+        elif isinstance(first_msg, WSResumeMessage):
+            if first_msg.thread_id != thread_id:
+                await security_service.send_json(
+                    websocket,
+                    WSErrorFrame(
+                        node=None,
+                        code="THREAD_ID_MISMATCH",
+                        message="thread_id in URL and message body do not match",
+                        retryable=False,
+                    ).model_dump(),
+                    security_context,
+                )
+                await websocket.close(code=4001)
+                return
+            first_resume = first_msg
+        else:
             await security_service.send_json(
                 websocket,
                 WSErrorFrame(
                     node=None,
                     code="INVALID_FIRST_FRAME",
-                    message=f"Expected 'start' message, got '{first_msg.type}'",
+                    message=f"Expected 'start' or 'resume' message, got '{first_msg.type}'",
                     retryable=False,
                 ).model_dump(),
                 security_context,
             )
             await websocket.close(code=4000)
             return
-        if first_msg.thread_id and first_msg.thread_id != thread_id:
-            await security_service.send_json(
-                websocket,
-                WSErrorFrame(
-                    node=None,
-                    code="THREAD_ID_MISMATCH",
-                    message="thread_id in URL and message body do not match",
-                    retryable=False,
-                ).model_dump(),
-                security_context,
-            )
-            await websocket.close(code=4001)
-            return
-        log.info("saul_ws_session_started", doc_id=first_msg.doc_id)
+
+        log.info(
+            "saul_ws_session_started",
+            doc_id=start_msg.doc_id if start_msg is not None else None,
+            reconnect_resume=first_resume is not None,
+        )
         service = AgentSaulService(
             graph=deps.graph,
             redis=deps.redis,
@@ -249,7 +282,8 @@ async def saul_ws_endpoint(
         )
         await service.run_session(
             ws=websocket,
-            start_msg=first_msg,
+            start_msg=start_msg,
+            first_resume=first_resume,
             thread_id=thread_id,
             user_id=security_context.user_id,
         )

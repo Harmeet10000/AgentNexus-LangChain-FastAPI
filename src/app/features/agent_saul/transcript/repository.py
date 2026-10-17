@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 
 _SESSION_ID_LEN = 100
 _USER_ID_LEN = 100
+_GC_STAMP_KEY = "gc_swept_at"  # §8 GC audit stamp (extra_metadata)
 
 
 class ApplyOutcome(BaseModel):
@@ -232,8 +233,9 @@ class ChatTranscriptRepository:
             )
 
         tokens_for = dict(usage or {})
+        session_ctx = self._session_factory()
         try:
-            async with self._session_factory() as session, session.begin():
+            async with session_ctx as session, session.begin():
                 # Session upsert — first time only; the row then carries state.
                 await session.execute(
                     pg_insert(ChatSession)
@@ -253,6 +255,18 @@ class ChatTranscriptRepository:
                     )
                 ).scalar_one()
 
+                # §9 ownership: the locked row must BELONG to the caller. A
+                # mismatched user_id never writes rows or moves the watermark —
+                # it answers not-found, sanitized, like any other wrong-owner read.
+                if session_row.user_id != user_id[:_USER_ID_LEN]:
+                    logger.bind(session_id=session_id).warning("transcript_owner_mismatch_refused")
+                    return Failure(
+                        TranscriptNotFoundError(
+                            message="transcript session not found",
+                            session_id=session_id,
+                        )
+                    )
+
                 checkpoint_id = projection.watermark_checkpoint_id
                 # Batch-level no-op (§4.3): the common replay is free. Rows are
                 # still allowed through (item level) when this projection has
@@ -269,7 +283,9 @@ class ChatTranscriptRepository:
                 )
 
                 inserted = 0
+                projected_keys: set[str] = set()
                 for row in projection.rows:
+                    projected_keys.add(row.source_key)
                     inserted += await self._insert_row(
                         session,
                         row,
@@ -278,6 +294,23 @@ class ChatTranscriptRepository:
                         turn_seq=turn_seq,
                         checkpoint_id=row_checkpoint(projection),
                         tokens=tokens_for.get(row.source_key),
+                    )
+
+                # §7 usage-only fill: segment totals whose target row already
+                # exists (the projector dedupes it away) still land once, via
+                # the same COALESCE fill-once rule. Existing NULLs fill;
+                # anything already billed never changes.
+                for source_key, tokens in tokens_for.items():
+                    if source_key in projected_keys or tokens is None:
+                        continue
+                    await session.execute(
+                        update(ChatMessage)
+                        .where(
+                            ChatMessage.session_id == session_id,
+                            ChatMessage.source_key == source_key,
+                            ChatMessage.tokens_used.is_(None),
+                        )
+                        .values(tokens_used=tokens)
                     )
 
                 set_values = _session_set_values(
@@ -300,6 +333,7 @@ class ChatTranscriptRepository:
                 )
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="chat_messages")
+            await session_ctx.rollback()
             logger.bind(
                 session_id=session_id,
                 checkpoint_id=projection.watermark_checkpoint_id,
@@ -352,6 +386,150 @@ class ChatTranscriptRepository:
         )
         result = await session.execute(stmt)
         return sum(1 for did_insert in result.scalars().all() if did_insert)
+
+    # ------------------------------------------------------------------
+    # Sweep readers — trusted actor, still fail-closed (§6 trigger 3 / §8)
+    # ------------------------------------------------------------------
+
+    @trace_layer("repository")
+    async def get_sweep_context(
+        self,
+        *,
+        session_id: str,
+    ) -> TranscriptResult[tuple[str, TranscriptTurnContext]]:
+        """Owner + turn context for the trusted beat sweep (no user gate).
+
+        The sweep is a platform actor, not a client view: it needs whose turn
+        it is so the write (apply_projection) can re-run the owner gate. All
+        other §9 guards — schema gate, unknown-kind, watermark sanity — stay
+        exactly as they are for connection-scoped reads.
+        """
+        try:
+            async with self._session_factory() as session:
+                session_row = (
+                    await session.execute(
+                        select(ChatSession)
+                        .where(ChatSession.session_id == session_id)
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+            if session_row is None:
+                return Failure(
+                    TranscriptNotFoundError(
+                        message="transcript session not found",
+                        session_id=session_id,
+                    )
+                )
+        except SQLAlchemyError as exc:
+            return _sanitize_db_error(exc, "get_sweep_context")
+        return await self.get_turn_context(session_id=session_id, user_id=session_row.user_id)
+
+    @trace_layer("repository")
+    async def list_stale_sessions(
+        self,
+        *,
+        older_than: datetime,
+        terminal_statuses: frozenset[str],
+        limit: int = 20,
+    ) -> TranscriptResult[Sequence[SessionMeta]]:
+        """Non-terminal sessions idle past their orphan-grace boundary (§5.3)."""
+        try:
+            async with self._session_factory() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(ChatSession)
+                            .where(
+                                ChatSession.status.not_in(terminal_statuses),
+                                ChatSession.last_checkpoint_ts.is_not(None),
+                                ChatSession.last_checkpoint_ts <= older_than,
+                            )
+                            .order_by(ChatSession.last_checkpoint_ts)
+                            .limit(limit)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                return Success(tuple(_session_meta_of(row) for row in rows))
+        except SQLAlchemyError as exc:
+            return _sanitize_db_error(exc, "list_stale_sessions")
+
+    @trace_layer("repository")
+    async def list_gc_candidates(
+        self,
+        *,
+        older_than: datetime,
+        limit: int = 20,
+    ) -> TranscriptResult[Sequence[SessionMeta]]:
+        """Terminal sessions past the retention horizon — GC input (§8)."""
+        terminal = frozenset(
+            (
+                str(SessionStatus.COMPLETED.value),
+                str(SessionStatus.FAILED.value),
+                str(SessionStatus.ABANDONED_EXPIRED.value),
+            )
+        )
+        try:
+            async with self._session_factory() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(ChatSession)
+                            .where(
+                                ChatSession.status.in_(terminal),
+                                ChatSession.last_checkpoint_ts.is_not(None),
+                                ChatSession.last_checkpoint_ts <= older_than,
+                            )
+                            .order_by(ChatSession.last_checkpoint_ts)
+                            .limit(limit)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                return Success(tuple(_session_meta_of(row) for row in rows))
+        except SQLAlchemyError as exc:
+            return _sanitize_db_error(exc, "list_gc_candidates")
+
+    @trace_layer("repository")
+    async def stamp_gc_audit(
+        self,
+        *,
+        session_id: str,
+        deleted_checkpoint_id: str | None,
+        swept_at: datetime,
+    ) -> TranscriptResult[bool]:
+        """§8 GC audit: the only proof that a catch-up verify preceded GC."""
+        try:
+            async with self._session_factory() as session, session.begin():
+                session_row = (
+                    await session.execute(
+                        select(ChatSession)
+                        .where(ChatSession.session_id == session_id)
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if session_row is None:
+                    return Failure(
+                        TranscriptNotFoundError(
+                            message="transcript session not found",
+                            session_id=session_id,
+                        )
+                    )
+                audit: dict[str, Any] = {
+                    _GC_STAMP_KEY: swept_at.isoformat(),
+                    "gc_deleted_checkpoint_id": deleted_checkpoint_id,
+                }
+                existing = dict(session_row.extra_metadata or {})
+                await session.execute(
+                    update(ChatSession)
+                    .where(ChatSession.id == session_row.id)
+                    .values(extra_metadata={**existing, **audit})
+                )
+                return Success(True)
+        except SQLAlchemyError as exc:
+            return _sanitize_db_error(exc, "stamp_gc_audit")
 
     # ------------------------------------------------------------------
     # Turn context for the projector
@@ -479,6 +657,7 @@ class ChatTranscriptRepository:
         session_id: str,
         user_id: str,
         limit: int = 500,
+        offset: int = 0,
     ) -> TranscriptResult[Sequence[TranscriptMessage]]:
         """Display order is (turn_seq, ordinal), NOT insert order (§4.2/D3)."""
         try:
@@ -501,6 +680,7 @@ class ChatTranscriptRepository:
                             .where(ChatMessage.session_id == session_id)
                             .order_by(ChatMessage.turn_seq, ChatMessage.ordinal, ChatMessage.id)
                             .limit(limit)
+                            .offset(max(offset, 0))
                         )
                     )
                     .scalars()

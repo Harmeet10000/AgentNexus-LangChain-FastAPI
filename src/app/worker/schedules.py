@@ -7,6 +7,7 @@ from celery.schedules import crontab
 from app.config import get_settings
 from app.shared.jobs.names import (
     AGENT_MEMORY_CONSOLIDATION,
+    AGENT_SAUL_TRANSCRIPT_SWEEP,
     BILLING_DUNNING,
     BILLING_INVOICE_GENERATION,
     BILLING_RECEIPT_GENERATION,
@@ -52,5 +53,12 @@ BEAT_SCHEDULE = {
         "task": AGENT_MEMORY_CONSOLIDATION,
         "schedule": crontab(hour=3, minute=30),
         "kwargs": {"tenant_ids": []},
+    },
+    "agent-saul-transcript-sweep-periodic": {
+        "task": AGENT_SAUL_TRANSCRIPT_SWEEP,
+        # §6 trigger 3: bounded beat sweep (hints + stale non-terminal + GC);
+        # [v3] a Redis outage skips derivation entirely on that beat.
+        "schedule": crontab(minute="*/15"),
+        "options": {"expires": 60},
     },
 }

@@ -1,0 +1,325 @@
+"""Transcript sweep + checkpoint GC (doc §6 trigger 3, §8 GC).
+
+Reconciliation triggers list a **beat sweep** over non-terminal sessions as
+the backstop for lost reconcile hints and missed boundaries: bounded batches
+of stale sessions are re-projected so an orphaned run reaches its derived
+fate without a WS connection. The sweep never invents facts — it runs the
+same pure projector over fresh ``aget_state`` reads, with:
+
+- **aliveness = False unless the thread-lock heartbeat key is fresh** (§4.1).
+  A stale-but-live turn derives nothing (the §5.3 NoOp row keeps the sweep
+  safe on live equipment); only *conclusively dead longer than grace* closes.
+- **[v3] Redis-outage guard**: when Redis is unavailable the sweep cannot
+  judge aliveness, so it derives NOTHING — no verdicts, no closes, statuses
+  freeze and unfreeze on the next beat after Redis returns.
+
+Checkpoint GC (§8, daily beat ``chat_transcript_gc``) deletes a thread only
+after a verified transcript catch-up reconcile, then stamps the audit
+(``extra_metadata.gc_swept_at`` + the deleted checkpoint id) — the only
+proof that the catch-up verification happened.
+
+Checkpoint reads go through public LangGraph APIs only (``aget_state``,
+``adelete_thread``) on a state-compatible read graph — never raw
+checkpointer tables. The read graph declares the same ``LegalAgentState``
+schema as the production graph, so persisted channel names resolve; a
+single self-ending stub node makes it compilable because state reads
+require no graph execution.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, cast
+
+from redis.exceptions import RedisError
+from returns.result import Failure
+
+from app.features.agent_saul.transcript.projection import (
+    ORPHAN_GRACE,
+    SessionStatus,
+    project,
+    snapshot_to_view,
+)
+from app.observability.logging import logger
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from langgraph.graph.state import CompiledStateGraph
+    from redis.asyncio import Redis
+
+    from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
+
+SAUL_RECONCILE_HINT_KEY = "saul:reconcile"
+TRANSCRIPT_RETENTION = timedelta(days=7)  # §8 (D5): proposed retention period
+DEFAULT_SWEEP_BATCH = 20
+_HINT_BOUND = 16
+
+_GC_STAMP_KEY = "gc_swept_at"
+_LIVE_LOCK_KEY_PREFIX = "saul:thread_lock:"
+_TERMINAL_STATUS_VALUES: frozenset[str] = frozenset(
+    (
+        SessionStatus.COMPLETED.value,
+        SessionStatus.FAILED.value,
+        SessionStatus.ABANDONED_EXPIRED.value,
+    )
+)
+
+
+def build_saul_read_graph(checkpointer: AsyncPostgresSaver) -> CompiledStateGraph[Any]:
+    """Compile a state-compatible read graph for sweep-only checkpoint reads.
+
+    Same state schema ⇒ same channel names ⇒ ``aget_state`` resolves the
+    production checkpoints. The stub node only satisfies the entrypoint
+    rule; the sweep never invokes the graph.
+    """
+    from langgraph.graph import START, StateGraph  # noqa: PLC0415 — cold path
+
+    from app.features.agent_saul.graph.state import (  # noqa: PLC0415 — cold path
+        LegalAgentInputState,
+        LegalAgentOutputState,
+        LegalAgentState,
+    )
+
+    # Same cast idiom as graph.build_saul_graph: langgraph's generics reject
+    # the plain TypedDict at type-check time though it compiles fine.
+    state_graph_factory = cast("Any", StateGraph)
+    state_graph: Any = state_graph_factory(
+        LegalAgentState,
+        input_schema=LegalAgentInputState,
+        output_schema=LegalAgentOutputState,
+    )
+
+    async def _stub_node(_state: dict[str, Any]) -> None:
+        return None
+
+    state_graph.add_node("sweep_read_stub", _stub_node)
+    state_graph.add_edge(START, "sweep_read_stub")
+    return state_graph.compile(checkpointer=checkpointer)
+
+
+@dataclass(frozen=True)
+class SweepReport:
+    """Machine-parseable outcome of one sweep invocation (structured logs, §10)."""
+
+    skipped: str | None
+    hints_reconciled: int = 0
+    stale_scanned: int = 0
+    closed: int = 0
+    gc_deleted: int = 0
+    failures: int = 0
+
+
+async def sweep_transcripts(
+    *,
+    repo: ChatTranscriptRepository,
+    graph: CompiledStateGraph[Any],
+    redis: Redis,
+    checkpointer: AsyncPostgresSaver,
+    now: datetime | None = None,
+    batch_size: int = DEFAULT_SWEEP_BATCH,
+) -> SweepReport:
+    """One bounded sweep pass: consume hints, heal stale sessions, then GC.
+
+    The status cache only moves THROUGH a projection (§3.1 [v2]) — every
+    diagonal of this sweep is the projector, never a direct UPDATE.
+    """
+    current = now or datetime.now(tz=UTC)
+    # [v3] Redis-outage guard: no aliveness ⇒ no verdicts, no closes.
+    try:
+        await redis.ping()
+    except RedisError:
+        logger.warning("transcript_sweep_redis_unavailable_skip_derivation")
+        return SweepReport(skipped="redis_unavailable")
+
+    hints_reconciled = await _reconcile_hinted_threads(
+        repo=repo, graph=graph, redis=redis, now=current, bound=_HINT_BOUND
+    )
+    stale_scanned, closed = await _reconcile_stale_sessions(
+        repo=repo, graph=graph, redis=redis, now=current, batch_size=batch_size
+    )
+    gc_deleted = await _gc_checkpointed_threads(
+        repo=repo,
+        graph=graph,
+        checkpointer=checkpointer,
+        redis=redis,
+        now=current,
+        older_than=current - TRANSCRIPT_RETENTION,
+        batch_size=batch_size,
+    )
+    logger.bind(
+        skipped=None,
+        hints_reconciled=hints_reconciled,
+        stale_scanned=stale_scanned,
+        closed=closed,
+        gc_deleted=gc_deleted,
+    ).info("transcript_sweep_finished")
+    return SweepReport(
+        skipped=None,
+        hints_reconciled=hints_reconciled,
+        stale_scanned=stale_scanned,
+        closed=closed,
+        gc_deleted=gc_deleted,
+    )
+
+
+async def _lock_alive(redis: Redis, thread_id: str) -> bool:
+    """Aliveness input for sweep projections (§4.1 [v2]): heartbeat fresh only."""
+    try:
+        return bool(await redis.exists(f"{_LIVE_LOCK_KEY_PREFIX}{thread_id}"))
+    except RedisError:
+        return False
+
+
+async def _new_session_status(
+    *,
+    repo: ChatTranscriptRepository,
+    graph: CompiledStateGraph[Any],
+    redis: Redis,
+    session_id: str,
+    now: datetime,
+) -> str | None:
+    """Reconcile one thread through the projector; the derived status lands or None.
+
+    The sweep context is the projector's only extra privilege: the CALLER's
+    turn context arrives owner-checked inside the repository, and the write
+    itself re-runs every §9 gate (unknown kinds, fail-closed versions).
+    """
+    context_result = await repo.get_sweep_context(session_id=session_id)
+    if isinstance(context_result, Failure):
+        return None
+    owner_user_id, turn_context = context_result.unwrap()
+    config: RunnableConfig = {"configurable": {"thread_id": session_id}}
+    snapshot = await graph.aget_state(config)  # public LangGraph API (§1)
+    view = snapshot_to_view(snapshot)
+    derived = project(
+        view,
+        turn_context.existing_keys,
+        turn_context.turn_rows,
+        now,
+        aliveness=await _lock_alive(redis, session_id),
+    )
+    if derived.is_no_op or derived.session_status is None:
+        return None
+    applied = await repo.apply_projection(
+        derived,
+        user_id=owner_user_id,
+        session_id=session_id,
+    )
+    if isinstance(applied, Failure):
+        return None
+    return derived.session_status.value
+
+
+async def _reconcile_hinted_threads(
+    *,
+    repo: ChatTranscriptRepository,
+    graph: CompiledStateGraph[Any],
+    redis: Redis,
+    now: datetime,
+    bound: int,
+) -> int:
+    """Consume up to ``bound`` best-effort reconcile hints (§6 trigger 4)."""
+    try:
+        popped = await redis.spop(SAUL_RECONCILE_HINT_KEY, bound)
+    except RedisError:
+        logger.warning("transcript_sweep_hint_consume_unavailable")
+        return 0
+    if not popped or not isinstance(popped, (list, tuple, set)):
+        return 0
+    hint_ids = [str(item) for item in popped]
+    for thread_id in hint_ids:
+        try:
+            status = await _new_session_status(
+                repo=repo, graph=graph, redis=redis, session_id=thread_id, now=now
+            )
+            logger.bind(thread_id=thread_id, status=status).debug(
+                "transcript_sweep_hint_reconciled"
+            )
+        except Exception as exc:  # noqa: BLE001 — one hinted thread never stops the sweep
+            exc.add_note(f"operation=transcript_sweep, thread_id={thread_id}")
+            logger.bind(thread_id=thread_id, error=str(exc)).warning(
+                "transcript_sweep_hint_reconcile_failed"
+            )
+    return len(hint_ids)
+
+
+async def _reconcile_stale_sessions(
+    *,
+    repo: ChatTranscriptRepository,
+    graph: CompiledStateGraph[Any],
+    redis: Redis,
+    now: datetime,
+    batch_size: int,
+) -> tuple[int, int]:
+    """Trigger 3 (§6): bounded batch of non-terminal sessions past orphan grace."""
+    stale = await repo.list_stale_sessions(
+        older_than=now - ORPHAN_GRACE,
+        terminal_statuses=_TERMINAL_STATUS_VALUES,
+        limit=batch_size,
+    )
+    if isinstance(stale, Failure):
+        return 0, 0
+    scanned = closed = 0
+    for session_meta in stale.unwrap():
+        scanned += 1
+        try:
+            status = await _new_session_status(
+                repo=repo, graph=graph, redis=redis, session_id=session_meta.session_id, now=now
+            )
+        except Exception as exc:  # noqa: BLE001 — one session failing never stops the sweep
+            exc.add_note(f"operation=transcript_sweep, session_id={session_meta.session_id}")
+            logger.bind(session_id=session_meta.session_id, error=str(exc)).warning(
+                "transcript_sweep_reconcile_failed"
+            )
+            continue
+        if status in _TERMINAL_STATUS_VALUES:
+            closed += 1
+    return scanned, closed
+
+
+async def _gc_checkpointed_threads(
+    *,
+    repo: ChatTranscriptRepository,
+    graph: CompiledStateGraph[Any],
+    checkpointer: AsyncPostgresSaver,
+    redis: Redis,
+    now: datetime,
+    older_than: datetime,
+    batch_size: int,
+) -> int:
+    """§8 checkpoint GC: terminal sessions past retention.
+
+    GC always follows a verified catch-up reconcile of the thread (doc §1/§8);
+    the audit stamp lands on the session row before the checkpoint disappears.
+    A session whose catch-up reconcile fails keeps its checkpoint (lossy GC is
+    never chosen over losing the last write, §8 "the only proof...").
+    """
+    candidates = await repo.list_gc_candidates(older_than=older_than, limit=batch_size)
+    if isinstance(candidates, Failure):
+        return 0
+    deleted = 0
+    for session_meta in candidates.unwrap():
+        session_id = session_meta.session_id
+        try:
+            status = await _new_session_status(
+                repo=repo, graph=graph, redis=redis, session_id=session_id, now=now
+            )
+            if status is None and session_meta.status not in _TERMINAL_STATUS_VALUES:
+                continue  # catch-up did not complete — keep the checkpoint (§8)
+            await checkpointer.adelete_thread(session_id)  # public API only (§1)
+            await repo.stamp_gc_audit(
+                session_id=session_id,
+                deleted_checkpoint_id=session_meta.last_checkpoint_id,
+                swept_at=now,
+            )
+            deleted += 1
+        except Exception as exc:  # noqa: BLE001 — a GC refusal never stops the sweep
+            exc.add_note(f"operation=transcript_gc, session_id={session_meta.session_id}")
+            logger.bind(session_id=session_meta.session_id, error=str(exc)).warning(
+                "transcript_gc_refused"
+            )
+    return deleted

@@ -14,6 +14,11 @@ One Redis key per thread does three jobs:
 
 Fail-closed (§9): if Redis is unavailable, acquisition fails and the caller
 refuses the connection — never proceed without the exclusion fence.
+
+Ownership (§5.5): every holder writes a random token as the key value, and
+renew/release act on the key only when the stored value still equals that
+token (`WATCH`/`MULTI` compare-and-act). An expired holder can therefore never
+delete or extend a successor's lease.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import asyncio
 import contextlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from redis.exceptions import RedisError
 
@@ -64,6 +70,7 @@ class ThreadLock:
         self._ttl = ttl_seconds
         self._renew_interval = renew_interval
         self._held = False
+        self._token: str | None = None
         self._renew_task: asyncio.Task[None] | None = None
         self.heartbeat = Heartbeat()
         self.log = logger.bind(thread_id=thread_id, component="thread_lock")
@@ -73,13 +80,21 @@ class ThreadLock:
         return self._held
 
     def is_alive(self) -> bool:
-        """Aliveness input for projections (§4.1): a fresh heartbeat only."""
+        """Aliveness input for projections (§4.1): a fresh heartbeat only.
+
+        False once the lease is lost or Redis is unavailable — the projector
+        must conclude nothing and the service must stop its run (§5.3, §6).
+        """
         return self._held and self.heartbeat.fresh
 
     async def acquire(self) -> bool:
-        """``SET NX`` — True when acquired; False means ``THREAD_BUSY`` or outage."""
+        """``SET NX`` with a random token — True when acquired; False means
+        ``THREAD_BUSY`` or outage."""
+        token = uuid4().hex
         try:
-            acquired = await self._redis.set(lock_key(self._thread_id), "1", nx=True, ex=self._ttl)
+            acquired = await self._redis.set(
+                lock_key(self._thread_id), token, nx=True, ex=self._ttl
+            )
         except RedisError:
             self.log.warning("thread_lock_redis_unavailable")
             self._held = False
@@ -87,14 +102,17 @@ class ThreadLock:
             return False
         self._held = bool(acquired)
         if self._held:
+            self._token = token
             self.heartbeat.fresh = True
             self._start_renew_loop()
         return self._held
 
     async def release(self) -> None:
-        """Best-effort; TTL expiry remains the correctness fence (§5.5)."""
+        """Best-effort owner-checked delete; TTL expiry remains the fence (§5.5)."""
         self._held = False
         self.heartbeat.fresh = False
+        token = self._token
+        self._token = None
         renew_task = self._renew_task
         self._renew_task = None
         if renew_task is not None and not renew_task.done():
@@ -102,7 +120,7 @@ class ThreadLock:
             with contextlib.suppress(asyncio.CancelledError):
                 await renew_task
         try:
-            await self._redis.delete(lock_key(self._thread_id))
+            await self._compare_and_act("release", delete=True, token=token)
         except RedisError:
             self.log.warning("thread_lock_release_lapsed")
 
@@ -130,7 +148,7 @@ class ThreadLock:
                 except RedisError:
                     self.log.warning("thread_lock_renew_failed")
                     self.heartbeat.fresh = False
-                    self._held = False  # stop renewing; TTL fence absorbs the rest
+                    self._held = False  # lease lost: stop renewing, stop aliveness
                     return
                 if renewed:
                     self.heartbeat.fresh = True
@@ -140,15 +158,39 @@ class ThreadLock:
                     self._held = False
                     return
         except asyncio.CancelledError:
-            # Best-effort release on cancellation; absence of the key is then
-            # the TTL's job, not ours (§5.5 disconnect release is a courtesy).
+            # Best-effort owner-checked release on cancellation; when the
+            # token no longer matches, the key belongs to someone else.
             if self._held:
+                token, self._token, self._held = self._token, None, False
                 with contextlib.suppress(RedisError):
-                    await self._redis.delete(lock_key(self._thread_id))
+                    await self._compare_and_act("release", delete=True, token=token)
             raise
 
     async def _renew_once(self) -> bool:
-        """Single renewal with an atomic check-and-expire; False when lost."""
+        """Single owner-checked expiry extension; False when the lease is gone."""
+        return await self._compare_and_act("renew", delete=False)
+
+    async def _compare_and_act(self, stage: str, *, delete: bool, token: str | None = None) -> bool:
+        """WATCH/MULTI compare-and-act: act only while the token still owns.
+
+        ``delete`` selects owner-checked DEL vs PEXPIRE. Runs atomically from
+        the WATCH point; a concurrent steal repoints or removes the key first
+        and our branch becomes a no-op returning False.
+        """
         key = lock_key(self._thread_id)
-        renewed = await self._redis.expire(key, int(self._ttl))
-        return bool(renewed)
+        owner = self._token if token is None else token
+        if owner is None:
+            return False
+        async with self._redis.pipeline() as pipe:
+            await pipe.watch(key)
+            if await pipe.get(key) != owner:
+                pipe.unwatch()  # sync: clears the WATCH locally, no round trip
+                self.log.bind(stage=stage).info("thread_lock_not_owner")
+                return False
+            pipe.multi()  # transaction marker — sync command in redis-py pipelines
+            if delete:
+                pipe.delete(key)
+            else:
+                pipe.pexpire(key, self._ttl * 1000)
+            await pipe.execute()
+            return True

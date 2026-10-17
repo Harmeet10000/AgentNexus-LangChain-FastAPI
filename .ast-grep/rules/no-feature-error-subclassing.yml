@@ -11,6 +11,7 @@ rule:
   regex: '\(FeatureError'
 ignores:
   - src/app/features/*/exceptions.py
+  - src/app/features/*/transcript/errors.py
   - src/app/features/crawler/engine_errors.py
   - src/app/ai/**/exceptions.py
   - src/app/shared/**/errors.py

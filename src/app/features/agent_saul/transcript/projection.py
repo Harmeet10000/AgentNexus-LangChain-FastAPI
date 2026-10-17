@@ -661,16 +661,24 @@ def project(
             )
         )
 
-    # 2-4: replies, pending prompts, plan decision — emitted in order, each
-    # keyed structurally (§4.2); the shared add_row keeps slot monotonicity.
+    # 2-4: replies, plan decision, pending prompts — each keyed structurally
+    # (§4.2); the shared add_row keeps slot monotonicity. The decision is
+    # resolved BEFORE the prompts it may share a projection with: its slot
+    # (last_prompt.ordinal + 1) must be reserved first, or a follow-up prompt
+    # would take that slot and exports would show it before the approval
+    # that preceded it.
     replies = _reply_rows(view, query=query, existing_keys=existing_keys, turn_rows=turn_rows)
-    occupied = [turn_rows.max_ordinal, *(row.ordinal for row in replies)]
+    decision = _decision_row(view, existing_keys=existing_keys, turn_rows=turn_rows)
+    occupied = [
+        turn_rows.max_ordinal,
+        *(row.ordinal for row in replies),
+        *((decision.ordinal,) if decision is not None else ()),
+    ]
     prompt_rows = _pending_prompt_rows(
         view,
         existing_keys=existing_keys,
         next_slot=max(occupied),
     )
-    decision = _decision_row(view, existing_keys=existing_keys, turn_rows=turn_rows)
     candidates = (*replies, *prompt_rows, *(() if decision is None else (decision,)))
     for row in candidates:
         add_row(row)
@@ -714,5 +722,11 @@ def project(
 
 
 def _prompt_text(payload: dict[str, Any]) -> str | None:
-    text = payload.get("message")
-    return text if isinstance(text, str) and text else None
+    # The clarification interrupt carries the actual question in ``question``
+    # while ``message`` stays a generic notice; export shows what the user's
+    # reply answers, so prefer the question text when the interrupt has one.
+    for key in ("question", "message"):
+        text = payload.get(key)
+        if isinstance(text, str) and text:
+            return text
+    return None

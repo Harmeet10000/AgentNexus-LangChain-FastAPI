@@ -368,3 +368,131 @@ async def test_checkpointer_gc_cannot_touch_the_transcript() -> None:
     rows = list(transcript.unwrap())
     assert len(rows) == 1
     assert rows[0].kind == "query"
+
+
+async def test_owner_mismatch_refused_before_writes() -> None:
+    """§9: a wrong-owner projection is a sanitized not-found, no rows, no move."""
+    factory = await _session_factory()
+    repo = ChatTranscriptRepository(factory)
+    session_id = str(uuid4())
+    rows = (
+        _row(0, f"query:{session_id}", "query"),
+        _row(1, "interrupt:int-owner", "clarification_prompt"),
+    )
+
+    first = await repo.apply_projection(
+        _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-owner"),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    attack = await repo.apply_projection(
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=(_row(2, "interrupt:int-stranger", "clarification_prompt"),),
+            checkpoint_id="cp-stranger",
+        ),
+        user_id="stranger-user",
+        session_id=session_id,
+    )
+    assert isinstance(attack, Failure)
+    assert isinstance(attack.failure(), TranscriptNotFoundError)
+
+    # Nothing about the real session moved: no stray rows, watermark intact.
+    async with factory() as session:
+        stranger_rows = await session.execute(
+            sa_text("SELECT count(*) FROM chat_messages WHERE user_id = 'stranger-user'"),
+        )
+        assert int(stranger_rows.scalar_one()) == 0
+        cp = await session.execute(
+            sa_text("SELECT last_checkpoint_id FROM chat_sessions WHERE session_id = :sid"),
+            {"sid": session_id},
+        )
+        assert (cp.scalar_one()) == "cp-owner"
+
+
+async def test_usage_only_fill_lands_on_existing_row() -> None:
+    """§7: segment totals land once even when the projector deduped the row."""
+    factory = await _session_factory()
+    repo = ChatTranscriptRepository(factory)
+    session_id = str(uuid4())
+    rows = (
+        _row(0, f"query:{session_id}", "query"),
+        _row(1, "interrupt:fill-target", "clarification_prompt"),
+    )
+
+    await repo.apply_projection(
+        _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-fill-1"),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+
+    # Follow-up boundary (new checkpoint) whose target row already exists: the
+    # projector drops it, so the usage rides as a usage-only fill.
+    fill = await repo.apply_projection(
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=(_row(2, "interrupt:fill-other", "clarification_prompt"),),
+            checkpoint_id="cp-fill-2",
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+        usage={"interrupt:fill-target": 77, "interrupt:never-inserted": 5},
+    )
+    assert isinstance(fill, Success)
+    async with factory() as session:
+        tokens = (
+            await session.execute(
+                sa_text(
+                    "SELECT tokens_used FROM chat_messages "
+                    "WHERE session_id = :sid AND source_key = 'interrupt:fill-target'"
+                ),
+                {"sid": session_id},
+            )
+        ).scalar_one()
+        assert tokens == 77
+
+
+async def test_read_transcript_paging_completes_large_transcripts() -> None:
+    """§8 export: offset paging returns every row in display order (D3)."""
+    factory = await _session_factory()
+    repo = ChatTranscriptRepository(factory)
+    session_id = str(uuid4())
+    big = tuple(
+        _row(
+            i, f"query:{session_id}" if i == 0 else f"row-{i}", "query" if i == 0 else "plan_prompt"
+        )
+        for i in range(605)
+    )
+    first = await repo.apply_projection(
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=big,
+            checkpoint_id="cp-paging",
+            status=SessionStatus.COMPLETED,
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    seen: list[str] = []
+    page = 0
+    while True:
+        result = await repo.read_transcript(
+            session_id=session_id,
+            user_id=USER_ID,
+            limit=500,
+            offset=page * 500,
+        )
+        assert isinstance(result, Success)
+        page_rows = list(result.unwrap())
+        if not page_rows:
+            break
+        seen.extend(r.ordinal for r in page_rows)
+        assert all(r.turn_seq == 1 for r in page_rows)
+        page += 1
+        assert page < 10  # safety bound — 605 rows need exactly 2 pages
+    assert len(seen) == 605
+    assert len(seen) == len(set(seen))

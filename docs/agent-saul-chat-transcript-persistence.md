@@ -284,7 +284,7 @@ The checkpoint contains `document_text`, so GC is also a data-minimization contr
 
 **Transcript retention.** Indefinite until the user deletes or an erasure request is processed.
 
-**Export.** `GET /agent-saul/sessions/{id}/export` reads the transcript only and streams via an async generator (`StreamingResponse`). Redacted rows export as redacted.
+**Export.** `GET /agent-saul/sessions/{id}/export` reads the transcript only and streams via an async generator (`StreamingResponse`). Redacted rows export as redacted. Reads are bounded (500 rows/page); the stream keeps paging (offset pagination, same display order) until a short page, so a long transcript never ends in silent truncation, and a mid-stream read failure yields a terminal `{error, message}` line rather than an incomplete file presented as complete.
 
 **Deletion and erasure** (designed for, **not a V1 build item**). One transaction:
 

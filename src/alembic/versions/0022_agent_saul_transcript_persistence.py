@@ -167,6 +167,10 @@ def downgrade() -> None:
         "ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS uq_chat_messages_session_source_key"
     )
     op.execute("ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS ck_chat_messages_kind")
+    # turn_closed rows carry content=None by design (§3.2); restore the 0014
+    # NOT NULL only after normalizing those closing rows — the projected facts
+    # are leaving with the deleted projection columns anyway.
+    op.execute("UPDATE chat_messages SET content = '' WHERE content IS NULL")
     op.execute("ALTER TABLE chat_messages ALTER COLUMN content SET NOT NULL")
     for column in (
         "redacted_at",

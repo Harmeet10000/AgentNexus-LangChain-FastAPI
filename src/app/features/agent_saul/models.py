@@ -17,7 +17,18 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003 — ORM mapper resolves at runtime
 from typing import Any  # noqa: TC003 — ORM mapper resolves at runtime
 
-from sqlalchemy import JSON, CheckConstraint, Enum, Index, Integer, String, Text, func, text
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Enum,
+    Index,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column  # noqa: TC002 — ORM mapper resolves at runtime
 
 from database.base import Base
@@ -74,7 +85,9 @@ class ChatSession(Base):
     # -- 0022: transcript projection cache (doc §3.1) -------------------------
     # status caches the latest turn's derived status; the truth is checkpoint
     # state read through the projector (§4.1), never written by the loop.
-    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    schema_version: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("1")
+    )
     status: Mapped[str] = mapped_column(
         Enum(*_SESSION_STATUS_VALUES, name="chat_session_status"),
         nullable=False,

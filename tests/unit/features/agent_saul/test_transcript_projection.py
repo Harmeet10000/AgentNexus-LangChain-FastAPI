@@ -9,6 +9,7 @@ every function under test is pure (§4.1).
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from itertools import product
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -37,7 +38,9 @@ CHECKPOINT = "checkpoint-0001"
 
 def interrupt_tasks(interrupts: tuple) -> tuple[CheckpointTask, ...]:
     """Build the task dict shape the projector reads interrupts off (§4.1 only reader)."""
-    return (CheckpointTask(id="t1", name="qna", error=None, interrupts=interrupts, state=None, path=()),)
+    return (
+        CheckpointTask(id="t1", name="qna", error=None, interrupts=interrupts, state=None, path=()),
+    )
 
 
 def snapshot(
@@ -53,9 +56,7 @@ def snapshot(
     return StateSnapshot(
         values=values,
         next=next_nodes,
-        config=RunnableConfig(
-            configurable={"thread_id": THREAD, "checkpoint_id": CHECKPOINT}
-        ),
+        config=RunnableConfig(configurable={"thread_id": THREAD, "checkpoint_id": CHECKPOINT}),
         metadata=metadata,
         created_at=ts.isoformat() if ts else None,
         parent_config=None,
@@ -65,12 +66,12 @@ def snapshot(
 
 
 def tagged_query(text: str = "Is this NDA mutual?") -> HumanMessage:
-    return HumanMessage(
-        content=text, additional_kwargs={"saul_kind": "query"}, id="msg-query-1"
-    )
+    return HumanMessage(content=text, additional_kwargs={"saul_kind": "query"}, id="msg-query-1")
 
 
-def untagged_reply(text: str = "Yes, and prefer it that way.", id_: str | None = None) -> HumanMessage:
+def untagged_reply(
+    text: str = "Yes, and prefer it that way.", id_: str | None = None
+) -> HumanMessage:
     return HumanMessage(content=text, id=id_ or "msg-reply-1")
 
 
@@ -173,9 +174,7 @@ def test_d4_saul_kind_survives_checkpoint_serializer() -> None:
 # ---------------------------------------------------------------------------
 
 _TURN_ROWS_EMPTY = TurnRows()
-_TURN_ROWS_WITH_REPLY = TurnRows(
-    rows=(TurnRow(kind="query", source_key="q1", ordinal=0),)
-)
+_TURN_ROWS_WITH_REPLY = TurnRows(rows=(TurnRow(kind="query", source_key="q1", ordinal=0),))
 
 
 def _sweep_view(
@@ -198,49 +197,66 @@ def _sweep_view(
     )
 
 
+def _expected_sweep_status(
+    *, interrupt_count: int, next_empty: bool, has_report: bool, age: str, aliveness: bool
+) -> SessionStatus | None:
+    """The closed §5.3 table, branch by branch (None ⇒ explicit NoOp row 4)."""
+    if interrupt_count:
+        if age == "past":
+            return SessionStatus.ABANDONED_EXPIRED
+        # fresh AND middle: within the 24 h pause window (§8).
+        return SessionStatus.CLARIFYING
+    if next_empty:
+        return SessionStatus.COMPLETED if has_report else SessionStatus.FAILED
+    if aliveness:
+        return SessionStatus.ACTIVE
+    if age == "fresh":
+        return None
+    return SessionStatus.FAILED  # orphaned beyond grace (D1)
+
+
+def _age_adjusted(view: SnapshotView, age: str) -> SnapshotView:
+    if age == "past":
+        return view.model_copy(
+            update={"checkpoint_ts": NOW - PAUSE_WINDOW - timedelta(minutes=5)}
+        )
+    if age == "middle":
+        # Past the orphan grace, inside the 24 h pause window — the bucket all
+        # normal long reviews live in (§5.3 vs §8).
+        return view.model_copy(update={"checkpoint_ts": NOW - timedelta(hours=1)})
+    return view
+
+
 def test_totality_sweep_derive_status_closed_over_cross_product() -> None:
     """Combinatorial totality: every fixture maps to exactly one status or NoOp (§5.3)."""
     checked = 0
-    for next_empty in (True, False):
-        for interrupt_count in (0, 1):
-            for has_report in (True, False):
-                for grace in ("within", "past"):
-                    for aliveness in (True, False):
-                        if interrupt_count == 0 and next_empty and not has_report:
-                            pass  # valid combination: failed terminal (row 6)
-                        view = _sweep_view(
-                            next_nodes=() if next_empty else ("ingestion",),
-                            interrupts=interrupt_count,
-                            has_report=has_report,
-                        )
-                        if grace == "past":
-                            view = view.model_copy(
-                                update={"checkpoint_ts": NOW - PAUSE_WINDOW - timedelta(minutes=5)}
-                            )
-                        result = derive_status(view, TurnRows(), NOW, aliveness)
-                        checked += 1
-                        # The closed table §5.3, branch by branch:
-                        if interrupt_count:
-                            expected = (
-                                SessionStatus.CLARIFYING
-                                if grace == "within"
-                                else SessionStatus.ABANDONED_EXPIRED
-                            )
-                        elif next_empty:
-                            expected = (
-                                SessionStatus.COMPLETED if has_report else SessionStatus.FAILED
-                            )
-                        elif aliveness:
-                            expected = SessionStatus.ACTIVE
-                        elif grace == "within":
-                            expected = None  # the explicit NoOp outcome
-                        else:
-                            expected = SessionStatus.FAILED  # orphaned (D1)
-                        if expected is None:
-                            assert isinstance(result, NoOp), f"expected NoOp: {view}"
-                        else:
-                            assert result == expected, f"expected {expected}: {view}"
-    assert checked == 2 * 2 * 2 * 2 * 2  # full cross product actually traversed
+    for next_empty, interrupt_count, has_report, age, aliveness in product(
+        (True, False), (0, 1), (True, False), ("fresh", "middle", "past"), (True, False)
+    ):
+        if interrupt_count == 0 and next_empty and not has_report:
+            pass  # valid combination: failed terminal (row 6)
+        view = _age_adjusted(
+            _sweep_view(
+                next_nodes=() if next_empty else ("ingestion",),
+                interrupts=interrupt_count,
+                has_report=has_report,
+            ),
+            age,
+        )
+        result = derive_status(view, TurnRows(), NOW, aliveness)
+        checked += 1
+        expected = _expected_sweep_status(
+            interrupt_count=interrupt_count,
+            next_empty=next_empty,
+            has_report=has_report,
+            age=age,
+            aliveness=aliveness,
+        )
+        if expected is None:
+            assert isinstance(result, NoOp), f"expected NoOp: {view}"
+        else:
+            assert result == expected, f"expected {expected}: {view}"
+    assert checked == 2 * 2 * 2 * 3 * 2  # full cross product actually traversed
 
 
 def test_orphan_within_grace_yields_noop() -> None:
@@ -269,9 +285,7 @@ def test_paused_turn_with_reply_row_derives_resumed() -> None:
     rows = TurnRows(
         rows=(
             TurnRow(kind="query", source_key="q1", ordinal=0),
-            TurnRow(
-                kind="clarification_prompt", source_key="interrupt:i1", ordinal=1
-            ),
+            TurnRow(kind="clarification_prompt", source_key="interrupt:i1", ordinal=1),
         )
     )
     result = derive_status(view, rows, NOW, aliveness=True)
@@ -297,14 +311,14 @@ def test_running_turn_with_reply_row_derives_resumed() -> None:
 def _view(
     **overrides: object,
 ) -> SnapshotView:
-    base = dict(
-        user_id="u1",
-        checkpoint_id=CHECKPOINT,
-        checkpoint_ts=NOW,
-        step=5,
-        next_nodes=("ingestion",),
-        messages=(tagged_query(),),
-    )
+    base = {
+        "user_id": "u1",
+        "checkpoint_id": CHECKPOINT,
+        "checkpoint_ts": NOW,
+        "step": 5,
+        "next_nodes": ("ingestion",),
+        "messages": (tagged_query(),),
+    }
     base.update(overrides)
     return SnapshotView(**base)
 
@@ -326,7 +340,13 @@ def test_project_first_checkpoint_inserts_query_row_active() -> None:
 
 def test_project_replay_is_no_rows() -> None:
     keys = frozenset({"msg-query-1"})
-    out = project(_view(), keys, TurnRows(rows=(TurnRow(kind="query", source_key="msg-query-1", ordinal=0),)), NOW, aliveness=True)
+    out = project(
+        _view(),
+        keys,
+        TurnRows(rows=(TurnRow(kind="query", source_key="msg-query-1", ordinal=0),)),
+        NOW,
+        aliveness=True,
+    )
     assert out.rows == ()
     assert out.session_status == SessionStatus.ACTIVE
 
@@ -335,7 +355,11 @@ def test_project_pause_writes_prompt_row() -> None:
     out = project(
         _view(
             next_nodes=("qna",),
-            interrupts=(InterruptView(id="i1", value={"type": "clarification_needed", "message": "Which doc type?"}),),
+            interrupts=(
+                InterruptView(
+                    id="i1", value={"type": "clarification_needed", "message": "Which doc type?"}
+                ),
+            ),
         ),
         EMPTY_KEYS,
         TurnRows(rows=(TurnRow(kind="query", source_key="msg-query-1", ordinal=0),)),
@@ -345,7 +369,7 @@ def test_project_pause_writes_prompt_row() -> None:
     statuses = [row.kind for row in out.rows]
     assert "clarification_prompt" in statuses
     prompt = next(r for r in out.rows if r.kind == "clarification_prompt")
-    assert prompt.ordinal == 1  # 2k−1 for k=1 (§4.2)
+    assert prompt.ordinal == 1  # 2k-1 for k=1 (§4.2)
     assert prompt.source_key == "interrupt:i1"
     assert prompt.content == "Which doc type?"
     assert prompt.extra_metadata["interrupt"]["id"] == "i1"
@@ -533,6 +557,7 @@ def test_project_missing_tagged_query_writes_nothing() -> None:
 def test_project_unknown_hostile_kind_fails_closed() -> None:
     """ContentRole.for_kind refuses unknown kinds — never persist them."""
     from app.features.agent_saul.transcript.projection import ContentRole
+
     with pytest.raises(Exception, match="unknown row kind"):
         ContentRole.for_kind("unmodeled_kind")
 
@@ -575,3 +600,63 @@ def test_project_reply_keys_to_chain_prompt_summary_in_metadata() -> None:
     reply = next(r for r in out.rows if r.kind == "clarification_reply")
     assert reply.ordinal == 2  # prompt ordinal + 1
     assert reply.extra_metadata["hitl"]["answers_prompt"] == "interrupt:i1"
+
+
+def test_prompt_text_prefers_question_over_message() -> None:
+    """A clarification interrupt's real question wins over the generic note (§4.1)."""
+    out = project(
+        _view(
+            next_nodes=("planner",),
+            interrupts=(
+                InterruptView(
+                    id="i9",
+                    value={
+                        "type": "clarification",
+                        "message": "Needs your input",
+                        "question": "Should the NDA be mutual?",
+                    },
+                ),
+            ),
+        ),
+        EMPTY_KEYS,
+        TurnRows(rows=(TurnRow(kind="query", source_key="msg-q", ordinal=0),)),
+        NOW,
+        aliveness=True,
+    )
+    prompt = next(r for r in out.rows if r.kind == "clarification_prompt")
+    assert prompt.content == "Should the NDA be mutual?"
+
+
+def test_decision_slot_reserved_before_followup_prompt() -> None:
+    """Approval + newly pending interrupt in ONE projection never share a slot.
+
+    The decision resolves first (slot = last prompt ordinal + 1) and the
+    follow-up prompt escalates past it — exports must not show the answer
+    before the approval it encodes (§4.2).
+    """
+    turn_rows = TurnRows(
+        rows=(
+            TurnRow(kind="query", source_key="msg-query-1", ordinal=0),
+            TurnRow(kind="plan_prompt", source_key="interrupt:i2", ordinal=1),
+        )
+    )
+    out = project(
+        _view(
+            next_nodes=("planner",),
+            plan_approved=True,
+            plan=({"step": "ingest", "ordinal": 1},),
+            interrupts=(
+                InterruptView(id="i3", value={"type": "human_review", "message": "Review"}),
+            ),
+        ),
+        EMPTY_KEYS,
+        turn_rows,
+        NOW,
+        aliveness=True,
+    )
+    decision = next(r for r in out.rows if r.kind == "plan_decision")
+    prompt = next(r for r in out.rows if r.kind == "clarification_prompt")
+    assert decision.ordinal == 2
+    assert prompt.ordinal == 3
+    ordinals = [r.ordinal for r in out.rows]
+    assert len(ordinals) == len(set(ordinals))

@@ -136,9 +136,10 @@ class AgentSaulService:
     async def run_session(
         self,
         ws: WebSocket,
-        start_msg: WSStartMessage,
+        start_msg: WSStartMessage | None,
         thread_id: str,
         user_id: str,
+        first_resume: WSResumeMessage | None = None,
     ) -> None:
         """Main session loop.  Runs until graph completes or WS closes.
 
@@ -146,6 +147,11 @@ class AgentSaulService:
         gate → reconcile → (paused-thread refusal / expiry) → run loop. Every
         boundary update rides the recorder; ``finally`` runs T3 and releases
         the lock — the TTL fence is only for process death.
+
+        ``first_resume`` carries a reconnect-resume (§6): the client's first
+        frame is a resume for a paused thread; the gate re-derives the saved
+        HITL prompt instead of starting a fresh turn (D2 governs start frames
+        only).
         """
         config = self._build_config(thread_id)
 
@@ -173,26 +179,46 @@ class AgentSaulService:
                 recorder=recorder,
                 config=config,
                 thread_id=thread_id,
+                user_id=user_id,
+                first_resume=first_resume,
             )
             if not gated:
                 return
-            initial_input = self._hydrate_or_refuse(
-                ws,
-                config,
-                self._build_initial_state(start_msg, thread_id, user_id),
-                thread_id,
+            # Reconnect-resume frames carry their own reply; start frames run
+            # the graph from hydrated state (§6 / D2 split).
+            setup = await self._session_first_input(
+                ws=ws,
+                start_msg=start_msg,
+                first_resume=first_resume,
+                recorder=recorder,
+                config=config,
+                thread_id=thread_id,
+                user_id=user_id,
             )
-            if initial_input is None:
+            if setup is None:
                 return
-
             # current_input alternates between:
             #   - dict (LegalAgentState subset) on first run
             #   - Command(resume=...) on each HITL resume
-            current_input: Any = initial_input
+            current_input, has_initial_stream = setup
 
             step = 0
-            first_stream_done = False
+            first_stream_done = has_initial_stream
             while True:
+                # Lease-loss guard (§5.5): a lost lock means another connection
+                # may own this thread — stop the run before any further writes.
+                if not lock.is_alive():
+                    await self._send_json(
+                        ws,
+                        WSErrorFrame(
+                            node=None,
+                            code="LOCK_LOST",
+                            message="Thread exclusion was lost; this run must stop",
+                            retryable=False,
+                        ).model_dump(),
+                    )
+                    self._log.bind(thread_id=thread_id).warning("saul_lock_lost_aborting")
+                    break
                 # --- Stream graph events → WS frames ----------------------------
                 await self._stream_round(
                     ws=ws, config=config, current_input=current_input, step=step
@@ -220,6 +246,7 @@ class AgentSaulService:
                     interrupt_value=self._interrupts_of(state_snapshot)[0].value,
                     recorder=recorder,
                     state_snapshot=state_snapshot,
+                    config=config,
                 )
                 if current_input is None:
                     # Client sent an invalid resume or disconnected
@@ -368,6 +395,111 @@ class AgentSaulService:
             )
             return None
 
+    async def _resume_after_reconnect(
+        self,
+        ws: WebSocket,
+        first_resume: WSResumeMessage,
+        *,
+        recorder: TurnRecorder,
+        config: RunnableConfig,
+        thread_id: str,
+    ) -> Command[Any] | None:
+        """§6 reconnect-resume: hydrate gate, re-emit the saved HITL frame,
+        then treat the client's first-frame resume as its reply.
+
+        Doc §6 248: connect, hydrate gate, identity check, reconcile, expiry
+        (all done in the gate), re-emit the HITL frame re-derived from
+        ``state.tasks`` — the reconnect client's ``resume`` frame IS the reply
+        to that re-emitted prompt. Returns the ``Command(resume=...)`` for the
+        loop, or ``None`` when the reconnect was refused.
+        """
+        snapshot = await self._graph.aget_state(config)
+        interrupts = self._interrupts_of(snapshot)
+        if not interrupts:
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="NOT_PAUSED",
+                    message="Thread has no pending interrupt to resume",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return None
+        if first_resume.thread_id != thread_id:
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="THREAD_ID_MISMATCH",
+                    message="Resume message thread_id does not match active session",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return None
+        # hydrate_state gate (§6 248): refuse incompatible persisted state
+        # before any resume payload is applied.
+        hydrated = await self._hydrate_or_refuse(ws, config, {}, thread_id)
+        if hydrated is None:
+            return None
+        await self._emit_hitl_prompt(ws, thread_id, interrupts[0].value, recorder, snapshot)
+        return await self._apply_resume(
+            first_resume, ws=ws, thread_id=thread_id, recorder=recorder, config=config
+        )
+
+    async def _session_first_input(
+        self,
+        *,
+        ws: WebSocket,
+        start_msg: WSStartMessage | None,
+        first_resume: WSResumeMessage | None,
+        recorder: TurnRecorder,
+        config: RunnableConfig,
+        thread_id: str,
+        user_id: str,
+    ) -> tuple[Any, bool] | None:
+        """First graph input for the session, plus whether output already streamed.
+
+        - reconnect-resume (§6): re-emit the saved HITL prompt and treat the
+          client's first-frame resume as its reply → ``Command(resume=...)``;
+          the checkpoint already holds this turn's prior output.
+        - fresh start (D2): hydrate-gate the initial state and run it.
+        ``None`` means the session was refused and the refusal is on the wire.
+        """
+        if first_resume is not None:
+            command = await self._resume_after_reconnect(
+                ws,
+                first_resume,
+                recorder=recorder,
+                config=config,
+                thread_id=thread_id,
+            )
+            if command is None:
+                return None
+            return command, True
+        if start_msg is None:
+            # Fresh turn without a start frame is a protocol violation — the
+            # router only delivers start here when no reconnect-resume exists.
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="INVALID_FIRST_FRAME",
+                    message="Fresh turn requires a 'start' frame",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return None
+        initial_input = await self._hydrate_or_refuse(
+            ws,
+            config,
+            self._build_initial_state(start_msg, thread_id, user_id),
+            thread_id,
+        )
+        if initial_input is None:
+            return None
+        return initial_input, False
+
     async def _assess_round(
         self,
         *,
@@ -423,36 +555,92 @@ class AgentSaulService:
         recorder: TurnRecorder,
         config: RunnableConfig,
         thread_id: str,
+        user_id: str,
+        first_resume: WSResumeMessage | None = None,
     ) -> bool:
         """Connect-time discipline (doc §12.5 / §6): reconcile then expiry.
 
         Reconcile projects whatever the checkpoint holds *before* anything new
-        runs, so a crash mid-turn heals via the lineage keys, not replay. A
-        paused turn within the 24 h window refuses the new start frame
-        (SESSION_PAUSED_AWAITING_RESUME — resumption reconnects keep the
-        thread); past the window the turn is closed abandoned_expired by the
-        projector and the new start proceeds (close-and-proceed, D2).
+        runs, so a crash mid-turn heals via the lineage keys, not replay. On a
+        paused thread:
+
+        - ``start`` frame within the 24 h window → refuse
+          SESSION_PAUSED_AWAITING_RESUME (D2 — a resume claim, not a new turn).
+        - ``start`` frame past the window → the turn is closed
+          abandoned_expired by the reconcile projection above and the new
+          start proceeds (close-and-proceed, D2).
+        - ``resume`` frame with a valid claim and a paused interrupt within
+          the window → proceed to the resume-reconnect path (§6).
+        - ``resume`` frame past the window → SESSION_PAUSE_EXPIRED: the turn
+          is already closed by the projector; nothing may resume (§8).
+        - anything else on a paused thread (mismatched identity) → refused.
         """
         await recorder.reconcile()
         snapshot = await self._graph.aget_state(config)
         paused = [interrupt for task in snapshot.tasks for interrupt in task.interrupts]
         if not paused:
+            if first_resume is not None:
+                await self._send_json(
+                    ws,
+                    WSErrorFrame(
+                        node=None,
+                        code="NOT_PAUSED",
+                        message="Thread has no pending interrupt to resume",
+                        retryable=False,
+                    ).model_dump(),
+                )
+                return False
             return True
+
         created_at = _coerce_ts(snapshot.created_at)
-        if created_at is not None and (datetime.now(tz=UTC) - created_at) > PAUSE_WINDOW:
-            self._log.bind(thread_id=thread_id).info("saul_paused_turn_expired")
-            return True  # turn_closed(abandoned_expired) already projected above
-        self._log.bind(thread_id=thread_id).info("saul_thread_paused_refusing_new_start")
-        await self._send_json(
-            ws,
-            WSErrorFrame(
-                node=None,
-                code="SESSION_PAUSED_AWAITING_RESUME",
-                message="This thread is paused awaiting HITL resume; a resume connection may claim it",
-                retryable=True,
-            ).model_dump(),
-        )
-        return False
+        past_window = created_at is not None and (datetime.now(tz=UTC) - created_at) > PAUSE_WINDOW
+
+        if first_resume is None:
+            if past_window:
+                self._log.bind(thread_id=thread_id).info("saul_paused_turn_expired")
+                return True  # turn_closed(abandoned_expired) already projected above
+            self._log.bind(thread_id=thread_id).info("saul_thread_paused_refusing_new_start")
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="SESSION_PAUSED_AWAITING_RESUME",
+                    message="This thread is paused awaiting HITL resume; a resume connection may claim it",
+                    retryable=True,
+                ).model_dump(),
+            )
+            return False
+
+        # Resume-reconnect: identity gate first (§8 — only the state's owner
+        # may resume), then the window.
+        state_user = snapshot.values.get("user_id") if snapshot.values else None
+        if state_user is not None and str(state_user) != user_id:
+            self._log.bind(thread_id=thread_id).warning("saul_resume_identity_refused")
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="THREAD_NOT_OWNED",
+                    message="This thread belongs to another user",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return False
+        if past_window:
+            self._log.bind(thread_id=thread_id).info("saul_paused_turn_expired_resume_refused")
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="SESSION_PAUSE_EXPIRED",
+                    message="Paused turn exceeded its 24 h window and was closed",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return False
+        # Inside the window: the normal loop resumes after re-derivation —
+        # the schema gate and HITL re-emit live in _resume_after_reconnect.
+        return True
 
     async def _refuse_thread(self, ws: WebSocket, thread_id: str) -> None:
         """THREAD_BUSY for a second connection; retryable refusal on outage."""
@@ -469,20 +657,19 @@ class AgentSaulService:
             WSErrorFrame(node=None, code=code, message=message, retryable=True).model_dump(),
         )
 
-    async def _handle_hitl(
+    async def _emit_hitl_prompt(
         self,
         ws: WebSocket,
         thread_id: str,
         interrupt_value: dict[str, Any],
         recorder: TurnRecorder,
         state_snapshot: object,
-    ) -> Command[Any] | None:
-        """Emit HITL frame, wait for WSResumeMessage, return Command(resume=...).
+    ) -> bool:
+        """Re-emit the saved HITL frame (live loop and reconnect-resume, §6).
 
         T1 rides right after the frame is on the wire (never delaying the
-        client), and project-before-resume precedes ``Command(resume=...)``
-        with its single retry (§5.2). A paused turn past the 24 h window is
-        refused with SESSION_PAUSE_EXPIRED (§8) — the projector closed it.
+        client). Returns False when the pre-wait expiry check already closed
+        the turn and put SESSION_PAUSE_EXPIRED on the wire (§8).
         """
         interrupt_type_raw = interrupt_value.get("type", HITLInterruptType.PLAN_APPROVAL)
         try:
@@ -515,13 +702,96 @@ class AgentSaulService:
                     retryable=False,
                 ).model_dump(),
             )
-            return None
+            return False
 
         self._log.info(
             "saul_hitl_interrupt_sent",
             thread_id=thread_id,
             interrupt_type=interrupt_type,
         )
+        return True
+
+    async def _apply_resume(
+        self,
+        inbound: WSResumeMessage,
+        *,
+        ws: WebSocket,
+        thread_id: str,
+        recorder: TurnRecorder,
+        config: RunnableConfig,
+    ) -> Command[Any] | None:
+        """Turn a validated resume frame into ``Command(resume=...)`` (§5.2).
+
+        Shared by the live receive loop and the reconnect-resume first frame.
+        A resume arriving past the 24 h window is refused with
+        SESSION_PAUSE_EXPIRED — the projector closed the turn (§8).
+        """
+        self._log.info(
+            "saul_hitl_resume_received",
+            thread_id=thread_id,
+            action=inbound.action,
+        )
+
+        # §8 expiry authority: the deadline is re-checked from the FRESH
+        # snapshot at the actual resume attempt — a reply that arrives
+        # after the 24 h window (the user walked away with the prompt on
+        # screen) still closes the turn instead of resuming it.
+        fresh_snapshot = await self._graph.aget_state(config)
+        fresh_created = _coerce_ts(getattr(fresh_snapshot, "created_at", None))
+        if fresh_created is not None and (datetime.now(tz=UTC) - fresh_created) > PAUSE_WINDOW:
+            await recorder.reconcile()  # appends turn_closed(abandoned_expired)
+            self._log.bind(thread_id=thread_id).info("saul_resume_after_expiry_refused")
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="SESSION_PAUSE_EXPIRED",
+                    message="Paused turn exceeded its 24 h window and was closed",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return None
+
+        # Build the resume payload the interrupted node's interrupt() call returns.
+        resume_payload: dict[str, Any] = {
+            "action": inbound.action,
+            "feedback": inbound.feedback,
+            "modified_plan": (
+                [step.model_dump() for step in inbound.modified_plan]
+                if inbound.modified_plan
+                else None
+            ),
+            "overrides": inbound.overrides,
+            "reviewer_role": inbound.reviewer_role,
+        }
+        # T1' — project-before-resume (§5.2): retry once internally, then
+        # proceed fail-open with a reconcile hint; never block the resume
+        # on transcript health.
+        resume_projection = await recorder.prepare_resume()
+        if isinstance(resume_projection, Failure):
+            self._log.bind(thread_id=thread_id).warning("saul_t1p_before_resume_project_failed")
+        return Command(resume=resume_payload)
+
+    async def _handle_hitl(
+        self,
+        ws: WebSocket,
+        thread_id: str,
+        interrupt_value: dict[str, Any],
+        recorder: TurnRecorder,
+        state_snapshot: object,
+        *,
+        config: RunnableConfig,
+    ) -> Command[Any] | None:
+        """Emit HITL frame, wait for WSResumeMessage, return Command(resume=...).
+
+        A paused turn past the 24 h window is refused with
+        SESSION_PAUSE_EXPIRED (§8) — the projector closed it.
+        """
+        delivered = await self._emit_hitl_prompt(
+            ws, thread_id, interrupt_value, recorder, state_snapshot
+        )
+        if not delivered:
+            return None
 
         # Wait for the client to respond — may take arbitrarily long (human reviewing)
         while True:
@@ -575,31 +845,9 @@ class AgentSaulService:
                 )
                 return None
 
-            self._log.info(
-                "saul_hitl_resume_received",
-                thread_id=thread_id,
-                action=inbound.action,
+            return await self._apply_resume(
+                inbound, ws=ws, thread_id=thread_id, recorder=recorder, config=config
             )
-
-            # Build the resume payload the interrupted node's interrupt() call returns.
-            resume_payload: dict[str, Any] = {
-                "action": inbound.action,
-                "feedback": inbound.feedback,
-                "modified_plan": (
-                    [step.model_dump() for step in inbound.modified_plan]
-                    if inbound.modified_plan
-                    else None
-                ),
-                "overrides": inbound.overrides,
-                "reviewer_role": inbound.reviewer_role,
-            }
-            # T1' — project-before-resume (§5.2): retry once internally, then
-            # proceed fail-open with a reconcile hint; never block the resume
-            # on transcript health.
-            resume_projection = await recorder.prepare_resume()
-            if isinstance(resume_projection, Failure):
-                self._log.bind(thread_id=thread_id).warning("saul_t1p_before_resume_project_failed")
-            return Command(resume=resume_payload)
 
     async def _receive_json(self, ws: WebSocket) -> object:
         return await self._ws_security.receive_json(ws, self._ws_context)
