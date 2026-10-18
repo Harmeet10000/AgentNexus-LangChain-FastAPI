@@ -52,7 +52,10 @@ type HealthProbeResults = tuple[
 # The graph-memory probe is bounded: an unreachable graph backend must report,
 # not hang. A readiness probe that blocks is worse than one that answers degraded.
 _GRAPH_MEMORY_PROBE_TIMEOUT_S = 2.0
-_HEALTH_CHECK_TIMEOUT_S = 3.0
+# Remote managed Postgres (TigerData/Timescale serverless) shows multi-second
+# cold-handshake RTTs from off-cloud environments; 3s flapped the deep probe
+# between healthy and unhealthy on the same live connections.
+_HEALTH_CHECK_TIMEOUT_S = 8.0
 
 # Read-only liveness query. The graph-memory client is *set once at startup* and
 # never cleared, so a presence check alone cannot distinguish "initialised" from
