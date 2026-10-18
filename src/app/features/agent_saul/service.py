@@ -374,32 +374,44 @@ class AgentSaulService:
         lost = asyncio.create_task(lock.lease_lost.wait())
         try:
             await asyncio.wait({stream_task, lost}, return_when=asyncio.FIRST_COMPLETED)
+            # The EVENT is the loss signal — the waiter task's done-ness is
+            # not: the cleanup below cancels (and so completes) it even when
+            # the stream just finished under a healthy lease.
+            if lock.lease_lost.is_set() or not lock.is_alive():
+                if not stream_task.done():
+                    # Stop an ACTIVE graph execution BEFORE the frame goes
+                    # out: once the fence is gone a successor may resume this
+                    # thread and produce checkpoints this run would trample.
+                    stream_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await stream_task
+                else:
+                    _ = stream_task.result()  # surface a failed round (§9)
+                await self._send_json(
+                    ws,
+                    WSErrorFrame(
+                        node=None,
+                        code="LOCK_LOST",
+                        message="Thread exclusion was lost; this run must stop",
+                        retryable=False,
+                    ).model_dump(),
+                )
+                self._log.bind(thread_id=thread_id).warning("saul_lock_lost_aborting")
+                return True
+            # Stream finished while the lease held: surface its failure (§9)
+            # — never mask a graph error as a successful round.
+            stream_task.result()
+            return False
         finally:
-            if not lost.done():
-                lost.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await lost
-        if lost.done() or not lock.is_alive():
-            if not stream_task.done():
-                stream_task.cancel()
+            # Cleanup on EVERY exit path — including the guard itself being
+            # cancelled (client disconnect): run_session's cleanup releases
+            # the lock, and a still-running stream would then write
+            # checkpoints on a thread whose fence is gone.
+            for task in (lost, stream_task):
+                if not task.done():
+                    task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
-                    await stream_task
-            else:
-                _ = stream_task.result()  # surface a failed round (§9)
-            await self._send_json(
-                ws,
-                WSErrorFrame(
-                    node=None,
-                    code="LOCK_LOST",
-                    message="Thread exclusion was lost; this run must stop",
-                    retryable=False,
-                ).model_dump(),
-            )
-            self._log.bind(thread_id=thread_id).warning("saul_lock_lost_aborting")
-            return True
-        # Stream finished while the lease held: re-raise its failure (§9).
-        stream_task.result()
-        return False
+                    await task
 
     async def _stream_round(
         self,

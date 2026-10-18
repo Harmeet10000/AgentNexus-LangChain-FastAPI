@@ -412,6 +412,38 @@ async def test_owner_mismatch_refused_before_writes() -> None:
         assert (cp.scalar_one()) == "cp-owner"
 
 
+async def test_sweep_context_returns_owner_with_context() -> None:
+    """§8: the sweep helper is (owner_user_id, turn_context) — never bare.
+
+    _reconcile_once unpacks the pair; a bare context here would TypeError
+    every sweep pass into its per-thread guard and silently disable
+    background reconciliation AND checkpoint GC.
+    """
+    factory = await _session_factory()
+    repo = ChatTranscriptRepository(factory)
+    session_id = str(uuid4())
+    first = await repo.apply_projection(
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=(_row(0, f"query:{session_id}", "query"),),
+            checkpoint_id="cp-sweep",
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    result = await repo.get_sweep_context(session_id=session_id)
+    assert isinstance(result, Success)
+    owner, context = result.unwrap()
+    assert owner == USER_ID
+    assert f"query:{session_id}" in context.existing_keys
+
+    unknown = await repo.get_sweep_context(session_id=str(uuid4()))
+    assert isinstance(unknown, Failure)
+    assert isinstance(unknown.failure(), TranscriptNotFoundError)
+
+
 async def test_usage_only_fill_lands_on_existing_row() -> None:
     """§7: segment totals land once even when the projector deduped the row."""
     factory = await _session_factory()

@@ -508,7 +508,12 @@ class ChatTranscriptRepository:
                 )
         except SQLAlchemyError as exc:
             return _sanitize_db_error(exc, "get_sweep_context")
-        return await self.get_turn_context(session_id=session_id, user_id=session_row.user_id)
+        context_result = await self.get_turn_context(
+            session_id=session_id, user_id=session_row.user_id
+        )
+        if isinstance(context_result, Failure):
+            return context_result
+        return Success((session_row.user_id, context_result.unwrap()))
 
     @trace_layer("repository")
     async def list_stale_sessions(
@@ -790,9 +795,9 @@ class ChatTranscriptRepository:
                 rows = (
                     (
                         await session.execute(
-                            statement
-                            .order_by(ChatMessage.turn_seq, ChatMessage.ordinal, ChatMessage.id)
-                            .limit(limit)
+                            statement.order_by(
+                                ChatMessage.turn_seq, ChatMessage.ordinal, ChatMessage.id
+                            ).limit(limit)
                         )
                     )
                     .scalars()
