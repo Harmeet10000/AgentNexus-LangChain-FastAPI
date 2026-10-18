@@ -222,6 +222,26 @@ class AgentSaulService:
                 # further writes. Mid-round loss is handled by the
                 # lease_lost race inside each round below.
                 # --- Stream graph events → WS frames ----------------------------
+                # T0 fires BEFORE the first round (§5.1): the session row
+                # must exist for any checkpoint to be discoverable — firing
+                # after the round leaves a crash window (dying during a
+                # later model call) in which checkpoints exist but no row
+                # references them. Fail-closed: a failed T0 refuses the run.
+                if not first_stream_done:
+                    t0 = await recorder.on_first_checkpoint()
+                    if not isinstance(t0, Success):
+                        await self._send_json(
+                            ws,
+                            WSErrorFrame(
+                                node=None,
+                                code="SESSION_BOOT_FAILED",
+                                message="Transcript could not be initialised; run refused",
+                                retryable=True,
+                            ).model_dump(),
+                        )
+                        self._log.bind(thread_id=thread_id).warning("saul_t0_refused_run")
+                        break
+                    first_stream_done = True
                 if await self._stream_round_guarded(
                     ws=ws,
                     lock=lock,
@@ -231,11 +251,8 @@ class AgentSaulService:
                     thread_id=thread_id,
                 ):
                     break
-                # T0/T1): register the boundary once the first stream round has
-                # produced durable checkpoints; no-op on later rounds (§5.2).
-                if not first_stream_done:
-                    recorder.on_first_checkpoint()
-                    first_stream_done = True
+                # (T0 fires before the first round above; later rounds need
+                # no boundary registration.)
 
                 # --- Inspect post-stream graph state ----------------------------
                 outcome, state_snapshot = await self._assess_round(

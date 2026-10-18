@@ -150,6 +150,10 @@ class SnapshotView(BaseModel):
     # LangChain messages stay unvalidated raw objects (mixed dynamic data,
     # P5a); ``snapshot_to_view`` filters HumanMessages at the boundary.
     messages: tuple[Any, ...] = ()
+    # Long-term memory refs the graph CONFIRMED writing (persist_memory_node
+    # appends only on a completed store): the terminal row copies a ref from
+    # here instead of fabricating one from doc_id.
+    long_term_refs: tuple[str, ...] = ()
     final_report_summary: str | None = None
     errors: tuple[ErrorMarker, ...] = ()
     # §§3.4: the plan_decision row is derived from post-resume state
@@ -296,6 +300,7 @@ def snapshot_to_view(snapshot: StateSnapshot) -> SnapshotView:
         interrupts=_interrupt_views_of(snapshot),
         messages=_messages_of(values),
         final_report_summary=_final_report_summary(values.get("final_report")),
+        long_term_refs=tuple(str(ref) for ref in values.get("long_term_refs") or () if ref),
         errors=_error_markers_of(values),
         plan=_plan_of(values),
         plan_approved=bool(values.get("plan_approved", False)),
@@ -452,26 +457,25 @@ _TERMINAL_STATUSES = frozenset((SessionStatus.FAILED, SessionStatus.ABANDONED_EX
 def _reply_rows(
     view: SnapshotView,
     *,
-    query: HumanMessage,
+    query_index: int,
     existing_keys: frozenset[str],
     turn_rows: TurnRows,
 ) -> tuple[ProjectedRow, ...]:
-    """Untagged HumanMessages after the query are HITL replies (§4.2).
+    """Untagged HumanMessages after the CURRENT query are HITL replies (§4.2).
 
-    The reply answers the j-th clarification prompt of this turn; §4.2
-    explanation: a missing prompt row leaves a detectable hole that
-    reconciliation fills by source_key, so the reply keys to its prompt when
-    it exists and falls back to the structural slot formula (2*j) when the
-    prompt row is still a hole. A later tagged query belongs to the next turn.
+    The scan starts AFTER the latest tagged query — earlier messages belong
+    to previous turns whose rows already carry their own keys; projecting
+    "everything after the oldest query" would re-attribute later turns to
+    the opener of turn one (each reply dedupes by id, but slot arithmetic
+    would drift). The reply answers the j-th clarification prompt of this
+    turn; a missing prompt row leaves a detectable hole that reconciliation
+    fills by source_key, so the reply keys to its prompt when it exists and
+    falls back to the structural slot formula (2*j) when the prompt row is
+    still a hole.
     """
     replies: list[ProjectedRow] = []
     reply_index = 0
-    seen_query = False
-    for message in view.messages:
-        if not seen_query:
-            if message is query or _saul_kind(message) == _SAUL_KIND_QUERY:
-                seen_query = True
-            continue
+    for message in view.messages[query_index + 1 :]:
         if _saul_kind(message) is not None:
             continue
         reply_index += 1
@@ -577,8 +581,13 @@ def _terminal_rows(
         final_key = f"final:{query_id}"
         if final_key not in existing_keys:
             extra_metadata: dict[str, Any] = {}
-            if view.doc_id:
-                extra_metadata["report_ref"] = f"legal::{view.user_id}::reports#{view.doc_id}"
+            # Chain-of-custody: the ref is COPIED from what the graph
+            # actually confirmed persisting (persist_memory_node appends to
+            # ``long_term_refs`` only after a completed store). A skipped or
+            # failed storage leaves no ref → the export claims nothing (§3.4:
+            # metadata must be facts, never identity-derived placeholders).
+            if view.long_term_refs:
+                extra_metadata["report_ref"] = view.long_term_refs[-1]
             rows.append(
                 ProjectedRow(
                     kind="final_summary",
@@ -632,15 +641,20 @@ def project(
     if view.step is not None and view.step < 0:
         return _no_op_projection(NoOp(reason="pre_first_super_step"))
 
-    query = next(
-        (message for message in view.messages if _saul_kind(message) == _SAUL_KIND_QUERY),
-        None,
-    )
-    if query is None:
+    # The LATEST tagged query is the current turn's opener: `messages`
+    # accumulates across turns (add_messages), and the OLDEST match would
+    # re-attach a later turn's rows to turn one's key.
+    query_index: int | None = None
+    for candidate in range(len(view.messages) - 1, -1, -1):
+        if _saul_kind(view.messages[candidate]) == _SAUL_KIND_QUERY:
+            query_index = candidate
+            break
+    if query_index is None:
         # Chain-of-custody: without the tagged opener this snapshot cannot
         # prove which turn it belongs to — no facts, no rows (fail-open for an
         # ingest anomaly, §1).
         return _no_op_projection(NoOp(reason="missing_tagged_query"))
+    query = view.messages[query_index]
     query_id = str(getattr(query, "id", "") or "")
     if not query_id:
         return _no_op_projection(NoOp(reason="missing_tagged_query"))
@@ -672,7 +686,9 @@ def project(
     # (last_prompt.ordinal + 1) must be reserved first, or a follow-up prompt
     # would take that slot and exports would show it before the approval
     # that preceded it.
-    replies = _reply_rows(view, query=query, existing_keys=existing_keys, turn_rows=turn_rows)
+    replies = _reply_rows(
+        view, query_index=query_index, existing_keys=existing_keys, turn_rows=turn_rows
+    )
     decision = _decision_row(view, existing_keys=existing_keys, turn_rows=turn_rows)
     occupied = [
         turn_rows.max_ordinal,

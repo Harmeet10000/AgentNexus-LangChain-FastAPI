@@ -180,12 +180,22 @@ def chat_transcript_sweep(_self: ResilientTask) -> dict[str, Any]:
 
 
 async def _transcript_sweep_async() -> dict[str, Any]:
-    """Provision the sweep's own resources, run one bounded pass, tear down."""
+    """Provision the sweep's own resources, run one bounded pass, tear down.
+
+    Setup runs INSIDE the protected block and the teardown closes every
+    resource that was successfully created: a ``setup_langgraph_checkpointer``
+    failure after ``init_db`` must not leak the already-open SQLAlchemy
+    engine — each scheduled attempt would otherwise grow this worker
+    process's pools without bound.
+    """
     settings: Settings = get_settings()
-    engine, session_local = await init_db()
-    redis_client = create_redis_client(settings.REDIS_URL)
-    checkpointer = await setup_langgraph_checkpointer()
+    engine: object | None = None
+    redis_client: object | None = None
+    checkpointer: object | None = None
     try:
+        engine, session_local = await init_db()
+        redis_client = create_redis_client(settings.REDIS_URL)
+        checkpointer = await setup_langgraph_checkpointer()
         graph = build_saul_read_graph(checkpointer)
         repo = ChatTranscriptRepository(session_local)
         report: SweepReport = await sweep_transcripts(

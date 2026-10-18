@@ -157,6 +157,7 @@ class TurnRecorder:
         self._timeout = timeout_ms / 1000
         self._usage = SegmentUsageCollector()
         self._t0_task: asyncio.Task[TranscriptResult[ApplyOutcome]] | None = None
+        self._t0_result: TranscriptResult[ApplyOutcome] | None = None
         self._paused_plan: tuple[dict[str, object], ...] = ()
         self.log = logger.bind(session_id=thread_id, component="turn_recorder")
 
@@ -169,13 +170,23 @@ class TurnRecorder:
     # Boundaries (§5.1)
     # ------------------------------------------------------------------
 
-    def on_first_checkpoint(self) -> None:
-        """T0 — tracked background task; awaited at the next boundary and T3 (§5.2)."""
+    async def on_first_checkpoint(self) -> TranscriptResult[ApplyOutcome] | None:
+        """T0 — the session row exists BEFORE the first checkpoint lands.
+
+        Previously this fired as a background task AFTER the first stream
+        round completed; a process death during a later model call left
+        durable checkpoints with no ``chat_sessions`` row — discovery scans
+        start from that table, so the turn stayed invisible. The caller now
+        awaits T0 BEFORE the first round starts (§5.1); the task bookkeeping
+        stays so every later boundary still joins on the same result.
+        """
         if self._t0_task is None or self._t0_task.done():
             self._t0_task = asyncio.create_task(
                 self._project(stage="t0_first_checkpoint"),
                 name=f"saul-recorder-t0-{self._thread_id}",
             )
+        await self._await_t0()
+        return self._t0_result
 
     async def on_pause(self) -> TranscriptResult[ApplyOutcome]:
         """T1 — paused on an interrupt; capture the plan the user was shown."""
@@ -329,6 +340,7 @@ class TurnRecorder:
         if self._t0_task is not None and not self._t0_task.done():
             self.log.debug("t0_awaited_at_later_boundary")
             await asyncio.wait({self._t0_task})
+        self._t0_result = self._t0_task.result() if self._t0_task is not None else None
 
     async def _capture_paused_plan(self) -> None:
         """Snapshot the plan shown at the CURRENT interrupt, after projecting.
@@ -420,6 +432,10 @@ class TurnRecorder:
             user_id=self._user_id,
             session_id=self._thread_id,
             usage=usage_map,
+            usage_metadata=(
+                {last_key: self._usage.as_metadata()} if last_key is not None else None
+            ),
+            expect_checkpoint_id=projection.watermark_checkpoint_id,
         )
 
         if isinstance(applied, Failure):

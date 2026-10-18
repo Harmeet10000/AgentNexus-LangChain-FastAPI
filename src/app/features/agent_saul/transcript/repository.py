@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, Any  # noqa: TC003 — pydantic field annotati
 
 from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Failure, Success
-from sqlalchemy import func, literal_column, select, text, tuple_, update
+from sqlalchemy import func, literal, literal_column, select, text, tuple_, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -64,6 +65,8 @@ if TYPE_CHECKING:
 _SESSION_ID_LEN = 100
 _USER_ID_LEN = 100
 _GC_STAMP_KEY = "gc_swept_at"  # §8 GC audit stamp (extra_metadata)
+_GC_PENDING_KEY = "gc_pending"  # true ⇒ deletion stamped but not yet confirmed
+_GC_PENDING_RETRY_MINS = 15  # a pending stamp older than this re-enters the list
 
 
 class ApplyOutcome(BaseModel):
@@ -128,6 +131,7 @@ class SessionMeta(BaseModel):
     turn_count: int = 0
     last_checkpoint_id: str | None = None
     last_checkpoint_ts: datetime | None = None
+    gc_pending: bool = False  # §8: deletion stamped but not yet confirmed
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -205,12 +209,19 @@ class ChatTranscriptRepository:
         user_id: str,
         session_id: str,
         usage: Mapping[str, int] | None = None,
+        usage_metadata: Mapping[str, Mapping[str, Any]] | None = None,
+        expect_checkpoint_id: str | None = None,
     ) -> TranscriptResult[ApplyOutcome]:
         """One boundary = one transaction: watermark + rows + status (§5.1).
 
         ``usage`` maps ``source_key -> tokens``; on conflict only the one-time
         fill ``tokens_used = COALESCE(chat_messages.tokens_used, EXCLUDED.tokens_used)``
         happens, so replay can never double-bill (§6).
+        ``expect_checkpoint_id`` makes the watermark move monotonic (§5.3):
+        when the projection was derived from a checkpoint that is NOT the
+        session row's locked latest, the apply answers as a no-op instead of
+        overwriting a newer writer's status/watermark with stale values —
+        row locking only orders writes, it doesn't reject them.
         """
         if projection.is_no_op:
             noop = projection.no_op
@@ -241,6 +252,7 @@ class ChatTranscriptRepository:
             )
 
         tokens_for = dict(usage or {})
+        metadata_for = {key: dict(value) for key, value in (usage_metadata or {}).items() if value}
         session_ctx = self._session_factory()
         try:
             async with session_ctx as session, session.begin():
@@ -276,6 +288,20 @@ class ChatTranscriptRepository:
                     )
 
                 checkpoint_id = projection.watermark_checkpoint_id
+                # Stale-projection guard (§5.3): the locked latest checkpoint
+                # must be the one this projection derived from; otherwise a
+                # newer writer landed between the snapshot and this apply.
+                if (
+                    expect_checkpoint_id is not None
+                    and session_row.last_checkpoint_id is not None
+                    and session_row.last_checkpoint_id != expect_checkpoint_id
+                ):
+                    logger.bind(
+                        session_id=session_id,
+                        expected=expect_checkpoint_id,
+                        current=session_row.last_checkpoint_id,
+                    ).debug("transcript_apply_stale_projection")
+                    return Success(ApplyOutcome(applied=False, reason="stale_projection"))
                 # Batch-level no-op (§4.3): the common replay is free. Rows are
                 # still allowed through (item level) when this projection has
                 # rows, so crash-healing replays of the same checkpoint heal.
@@ -294,6 +320,13 @@ class ChatTranscriptRepository:
                 projected_keys: set[str] = set()
                 for row in projection.rows:
                     projected_keys.add(row.source_key)
+                    attached_metadata = metadata_for.get(row.source_key)
+                    row_extra = dict(row.extra_metadata or {})
+                    if attached_metadata is not None:
+                        # §7: content-free usage/tool facts ride the segment's
+                        # assistant row — merged at insert so they never get
+                        # lost between the collector reset and a later pass.
+                        row_extra.update(attached_metadata)
                     inserted += await self._insert_row(
                         session,
                         row,
@@ -302,24 +335,21 @@ class ChatTranscriptRepository:
                         turn_seq=turn_seq,
                         checkpoint_id=row_checkpoint(projection),
                         tokens=tokens_for.get(row.source_key),
+                        extra_metadata=row_extra or None,
                     )
 
                 # §7 usage-only fill: segment totals whose target row already
                 # exists (the projector dedupes it away) still land once, via
                 # the same COALESCE fill-once rule. Existing NULLs fill;
-                # anything already billed never changes.
-                for source_key, tokens in tokens_for.items():
-                    if source_key in projected_keys or tokens is None:
-                        continue
-                    await session.execute(
-                        update(ChatMessage)
-                        .where(
-                            ChatMessage.session_id == session_id,
-                            ChatMessage.source_key == source_key,
-                            ChatMessage.tokens_used.is_(None),
-                        )
-                        .values(tokens_used=tokens)
-                    )
+                # anything already billed never changes. The metadata breakdown
+                # merge follows the same fill-once gate (usage not yet present).
+                await self._fill_usage_only(
+                    session,
+                    session_id=session_id,
+                    tokens_for=tokens_for,
+                    metadata_for=metadata_for,
+                    projected_keys=projected_keys,
+                )
 
                 set_values = _session_set_values(
                     session_row,
@@ -356,6 +386,42 @@ class ChatTranscriptRepository:
             )
 
     @staticmethod
+    async def _fill_usage_only(
+        session: AsyncSession,
+        *,
+        session_id: str,
+        tokens_for: Mapping[str, Any],
+        metadata_for: Mapping[str, Mapping[str, Any]],
+        projected_keys: set[str],
+    ) -> None:
+        """§7 usage-only fill — same-transaction, fill-once (target deduped).
+
+        The projector drops rows already keyed in the saved turn context, so
+        the segment's tokens land on the EXISTING assistant row instead.
+        ``tokens_used`` fills only NULLs (replay cannot double-bill); the
+        content-free metadata breakdown merges once behind the same gate.
+        """
+        for source_key, tokens in tokens_for.items():
+            if source_key in projected_keys or tokens is None:
+                continue
+            fill_values: dict[str, Any] = {"tokens_used": tokens}
+            attached = metadata_for.get(source_key)
+            if attached is not None:
+                fill_values["extra_metadata"] = func.coalesce(
+                    ChatMessage.extra_metadata,
+                    text("'{}'::jsonb"),
+                ).op("||")(literal(dict(attached), JSONB))
+            await session.execute(
+                update(ChatMessage)
+                .where(
+                    ChatMessage.session_id == session_id,
+                    ChatMessage.source_key == source_key,
+                    ChatMessage.tokens_used.is_(None),
+                )
+                .values(**fill_values)
+            )
+
+    @staticmethod
     async def _insert_row(
         session: AsyncSession,
         row: ProjectedRow,
@@ -365,8 +431,12 @@ class ChatTranscriptRepository:
         turn_seq: int,
         checkpoint_id: str,
         tokens: int | None,
+        extra_metadata: Mapping[str, Any] | None = None,
     ) -> int:
         tokens_used = tokens if tokens is not None else row.tokens_used
+        merged_metadata = dict(
+            extra_metadata if extra_metadata is not None else row.extra_metadata or {}
+        )
         base = pg_insert(ChatMessage).values(
             session_id=session_id[:_SESSION_ID_LEN],
             user_id=user_id[:_USER_ID_LEN],
@@ -374,7 +444,7 @@ class ChatTranscriptRepository:
             content=row.content,
             model=row.model,
             tokens_used=tokens_used,
-            extra_metadata=row.extra_metadata or None,
+            extra_metadata=merged_metadata or None,
             turn_seq=turn_seq,
             ordinal=row.ordinal,
             kind=row.kind,
@@ -590,12 +660,15 @@ class ChatTranscriptRepository:
     ) -> TranscriptResult[Sequence[SessionMeta]]:
         """Terminal sessions past the retention horizon — GC input (§8).
 
-        A session is excluded only while its sweep stamp is up to date with
-        its checkpoint: an ``gc_swept_at`` at-or-after ``last_checkpoint_ts``
-        means that checkpoint generation was already audited. A session with
-        no stamp, or with a stamp OLDER than its (later re-created)
-        checkpoint, is a fresh candidate — the oldest audited batch cannot
-        clog the list and starve newer deletions.
+        Exclusion is stamp-generation aware: a CONFIRMED ``gc_swept_at`` at
+        or after ``last_checkpoint_ts`` means that checkpoint generation was
+        already audited and survives. A session with no stamp, or with a
+        confirmed stamp OLDER than its (later re-created) checkpoint, is a
+        fresh candidate — the oldest audited batch cannot clog the list and
+        starve newer deletions. A PENDING stamp (pre-delete crash window)
+        is excluded only while FRESH — another sweep may legitimately be
+        inside its critical section — and re-enters the list once stale so
+        the idempotent delete + confirm retry can complete (§8).
         """
         terminal = frozenset(
             (
@@ -614,16 +687,24 @@ class ChatTranscriptRepository:
                                 ChatSession.status.in_(terminal),
                                 ChatSession.last_checkpoint_ts.is_not(None),
                                 ChatSession.last_checkpoint_ts <= older_than,
-                                # No stamp, or a stamp from a previous
-                                # checkpoint generation (§8; _GC_STAMP_KEY).
-                                # Parenthesized: TextClause renders verbatim —
+                                # Stamp-aware include predicate —
+                                # parenthesized: TextClause renders verbatim,
                                 # an ungrouped OR would leak past the AND
-                                # chain and bypass every filter above.
+                                # chain and bypass every filter above (§8).
                                 text(
                                     "(chat_sessions.extra_metadata ->> :stamp_key IS NULL "
-                                    "OR (chat_sessions.extra_metadata ->> :stamp_key)"
-                                    "::timestamptz < chat_sessions.last_checkpoint_ts)"
-                                ).params(stamp_key=_GC_STAMP_KEY),
+                                    "OR (chat_sessions.extra_metadata ->> :pending_key) = 'false' "
+                                    "AND (chat_sessions.extra_metadata ->> :stamp_key)"
+                                    "::timestamptz < chat_sessions.last_checkpoint_ts "
+                                    "OR (chat_sessions.extra_metadata ->> :pending_key) = 'true' "
+                                    "AND (chat_sessions.extra_metadata ->> :stamp_key)"
+                                    "::timestamptz < now() "
+                                    "- make_interval(mins => :retry_mins))"
+                                ).params(
+                                    stamp_key=_GC_STAMP_KEY,
+                                    pending_key=_GC_PENDING_KEY,
+                                    retry_mins=_GC_PENDING_RETRY_MINS,
+                                ),
                             )
                             .order_by(ChatSession.last_checkpoint_ts)
                             .limit(limit)
@@ -643,6 +724,7 @@ class ChatTranscriptRepository:
         session_id: str,
         deleted_checkpoint_id: str | None,
         swept_at: datetime,
+        pending: bool = True,
     ) -> TranscriptResult[bool]:
         """§8 GC audit: the only proof that a catch-up verify preceded GC."""
         try:
@@ -663,6 +745,7 @@ class ChatTranscriptRepository:
                     )
                 audit: dict[str, Any] = {
                     _GC_STAMP_KEY: swept_at.isoformat(),
+                    _GC_PENDING_KEY: pending,
                     "gc_deleted_checkpoint_id": deleted_checkpoint_id,
                 }
                 existing = dict(session_row.extra_metadata or {})
@@ -675,17 +758,19 @@ class ChatTranscriptRepository:
         except SQLAlchemyError as exc:
             return _sanitize_db_error(exc, "stamp_gc_audit")
 
-    async def clear_gc_audit(
+    async def confirm_gc_audit(
         self,
         *,
         session_id: str,
+        confirmed_at: datetime,
     ) -> TranscriptResult[bool]:
-        """Remove the GC stamp — the retry path after a failed delete (§8).
+        """Close the pending deletion record — deletion succeeded (§8).
 
-        The stamp is written BEFORE the checkpoint disappears so a crash mid
-        GC never strands the candidate; when the delete itself fails the
-        stamp must come off, or the audited checkpoint would never be
-        revisited.
+        The pre-delete stamp marked the generation PENDING so a worker that
+        died before ``adelete_thread`` would age back into the candidate
+        list; a confirmed delete simply clears the flag (stamps stay for the
+        audit trail). A confirm that never lands leaves pending-retry self-
+        healing in place.
         """
         try:
             async with self._session_factory() as session, session.begin():
@@ -704,16 +789,19 @@ class ChatTranscriptRepository:
                         )
                     )
                 existing = dict(session_row.extra_metadata or {})
-                _ = existing.pop(_GC_STAMP_KEY, None)
-                _ = existing.pop("gc_deleted_checkpoint_id", None)
+                updated = {
+                    **existing,
+                    _GC_PENDING_KEY: False,
+                    _GC_STAMP_KEY: confirmed_at.isoformat(),
+                }
                 await session.execute(
                     update(ChatSession)
                     .where(ChatSession.id == session_row.id)
-                    .values(extra_metadata=existing)
+                    .values(extra_metadata=updated)
                 )
                 return Success(True)
         except SQLAlchemyError as exc:
-            return _sanitize_db_error(exc, "clear_gc_audit")
+            return _sanitize_db_error(exc, "confirm_gc_audit")
 
     # ------------------------------------------------------------------
     # Turn context for the projector
@@ -739,6 +827,13 @@ class ChatTranscriptRepository:
                 ).scalar_one_or_none()
                 if session_row is None:
                     return Success(TranscriptTurnContext())
+                # §9 schema gate before ANY read the projector acts on: a
+                # mixed-version/rollback deployment must modify nothing it
+                # refuses to export, and the turn context is the projector's
+                # write-planning input.
+                gate = _schema_gate(session_row.schema_version)
+                if gate is not None:
+                    return Failure(gate)
                 latest_turn = (
                     await session.execute(
                         select(func.max(ChatMessage.turn_seq)).where(
@@ -951,6 +1046,7 @@ def _session_meta_of(row: ChatSession) -> SessionMeta:
         turn_count=row.turn_count,
         last_checkpoint_id=row.last_checkpoint_id,
         last_checkpoint_ts=row.last_checkpoint_ts,
+        gc_pending=(row.extra_metadata or {}).get(_GC_PENDING_KEY) is True,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

@@ -161,7 +161,7 @@ Both must hold. Batch level makes the common replay free; item level makes the u
 
 | Trigger | When | What is written |
 | --- | --- | --- |
-| **T0** | First durable checkpoint after start (observed after `gateway` ends) | Session upsert (first time only), `query` row. Status `active`. |
+| **T0** | Before the first stream round starts (after the gate acquires the lock) | Session upsert (first time only), `query` row. Status `active`. [v3] Fired BEFORE the first checkpoint exists, not after the round: a process death during the round would leave durable checkpoints no discovery scan can find (discovery reads `chat_sessions`). Fail-closed: a failed T0 refuses the run. |
 | **T1** | Interrupt detected via `aget_state` | Prompt row (`clarification_prompt` or `plan_prompt`). Status `clarifying`. Tokens for the segment. |
 | **T1′** | Resume received and applied | Reply/decision row on the next projection (status `resumed`), then T1 or T2 again. |
 | **T2** | Run reaches END | `final_summary` row, token totals, tool-call records. Status `completed`, or `failed` if `errors` is terminal. |
@@ -174,7 +174,7 @@ Each boundary is one transaction: session upsert/lock, row inserts (`ON CONFLICT
 ### 5.2 Not blocking the WS loop
 
 - T1, T2 and T3 run **after** the corresponding WS frame has been emitted, under a hard `asyncio.timeout` (default 750 ms, configurable). The user never waits on them.
-- T0 runs as a tracked background task whose reference is held by the recorder, and it is awaited at the next boundary so ordering is preserved and exceptions are absorbed there. [v2] It is also awaited in the finally block (T3), so a disconnect before T0 completes leaves no dangling task.
+- T0 is awaited by the caller BEFORE the first stream round (§5.1 [v3]). The recorder keeps it as a tracked task so later boundaries join on the same result; failures interrupt the run (fail-closed) instead of hiding an unowned checkpoint. [v2] It is also awaited in the finally block (T3), so a disconnect before T0 completes leaves no dangling task.
 - **Project-before-resume.** Before issuing `Command(resume=...)`, the recorder must have projected the pause. It retries once, and on continued failure proceeds (fail-open) and registers a reconcile hint. The pause is recoverable later from `aget_state_history` (public API).
 
 ### 5.3 State machine (derived, not stored by the loop)
@@ -278,7 +278,7 @@ The lock is acquired before reconcile and before any resume. **[v2] If Redis is 
 1. Non-terminal sessions past their window: reconcile; any closing row comes out of that projection.
 2. Terminal sessions whose last checkpoint is older than the retention period (proposed 7 days; D5): verify transcript catch-up, then `adelete_thread(thread_id)`.
 
-**[v2] GC audit.** When `adelete_thread` runs, stamp `extra_metadata.gc_swept_at` and the deleted checkpoint id on the session. It is the only proof that the catch-up verification happened.
+**[v2] GC audit.** Before `adelete_thread` runs, stamp `extra_metadata.gc_swept_at` (PENDING, `gc_pending: true`) and the deleted checkpoint id on the session. After the deletion completes, `gc_pending` flips to `false` (confirm). A worker that dies between stamp and delete is healed by the candidates query: the pending stamp excludes the session only while it is fresh (another sweep may be inside its lock-holding critical section); once stale (~15 min) the session re-enters the list and the idempotent `adelete_thread` + confirm retry closes the record. Only a CONFIRMED stamp blocks a re-audit of the same checkpoint generation. The GC critical section runs under the SAME thread lock a live connection uses (§5.5), so a reconnect can neither start a turn on a thread being deleted nor lose checkpoints it is writing, and the catch-up's retention/generation re-check runs under that lock.
 
 The checkpoint contains `document_text`, so GC is also a data-minimization control. After GC a thread is transcript-only. A later start on it begins a clean checkpoint lineage, and `turn_seq` continues from the transcript.
 

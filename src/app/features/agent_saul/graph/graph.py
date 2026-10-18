@@ -29,7 +29,6 @@ from .nodes import (
 )
 from .state import (
     GRAPH_NODE_NAMES,
-    LegalAgentInputState,
     LegalAgentOutputState,
     LegalAgentState,
 )
@@ -126,8 +125,14 @@ def build_saul_graph(
     )
 
     state_graph_factory = cast("Any", StateGraph)
+    # Input schema is the FULL state TypedDict — a state-compat input per
+    # turn. A narrower Pydantic FILTERED input was verified to silently drop
+    # keys outside it (probed: `messages` arrived as [], `status` absent),
+    # losing the tagged turn query that §4.2's projector keys on and
+    # crashing the qna router on a missing status. The WS layer's own DTOs
+    # stay the request-validation boundary.
     graph: Any = state_graph_factory(
-        LegalAgentState, input_schema=LegalAgentInputState, output_schema=LegalAgentOutputState
+        LegalAgentState, input_schema=LegalAgentState, output_schema=LegalAgentOutputState
     )
     _wire_graph(graph=graph, nodes=nodes)
 

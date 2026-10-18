@@ -445,13 +445,13 @@ async def test_sweep_context_returns_owner_with_context() -> None:
 
 
 async def test_gc_stamp_excludes_freshly_audited_session() -> None:
-    """§8: the stamp filter is stamp-at-or-after-checkpoint, not one-shot.
+    """§8: exclusion is stamp-generation AND pending-aware, not one-shot.
 
-    A terminal session past retention IS a candidate with no stamp; once the
-    audit stamp (swept_at >= last_checkpoint_ts) covers its checkpoint it is
-    excluded in SQL — and a session that later gains a NEWER checkpoint must
-    qualify again (the stamp predates the new work), which the SQL comparison
-    — not a boolean flag — guarantees.
+    A terminal session past retention IS a candidate with no stamp; a PENDING
+    pre-delete stamp excludes it only while fresh (another sweep's critical
+    section), re-enters once stale, and a CONFIRMED stamp excludes while it
+    covers the checkpoint generation — a later NEWER checkpoint must
+    qualify again, which the SQL comparison — not a boolean flag — guarantees.
     """
     factory = await _session_factory()
     repo = ChatTranscriptRepository(factory)
@@ -472,11 +472,40 @@ async def test_gc_stamp_excludes_freshly_audited_session() -> None:
     assert isinstance(fresh, Success)
     assert session_id in {m.session_id for m in fresh.unwrap()}
 
-    # The audit stamp now covers the (old) checkpoint generation — excluded.
+    # The PENDING pre-delete stamp excludes the candidate while fresh (§8) —
+    # another sweep may legitimately be inside its critical section.
     stamped = await repo.stamp_gc_audit(
-        session_id=session_id, deleted_checkpoint_id="cp-gc", swept_at=datetime.now(tz=UTC)
+        session_id=session_id,
+        deleted_checkpoint_id="cp-gc",
+        swept_at=datetime.now(tz=UTC),
+        pending=True,
     )
     assert isinstance(stamped, Success)
+    after_pending = await repo.list_gc_candidates(older_than=older_than, limit=1000)
+    assert isinstance(after_pending, Success)
+    assert session_id not in {m.session_id for m in after_pending.unwrap()}
+
+    # A worker death between stamp and delete surfaces the candidate again
+    # once the pending record goes STALE (§8 pending-retry).
+    stale_pending = await repo.stamp_gc_audit(
+        session_id=session_id,
+        deleted_checkpoint_id="cp-gc",
+        swept_at=datetime.now(tz=UTC) - timedelta(minutes=30),
+        pending=True,
+    )
+    assert isinstance(stale_pending, Success)
+    retry = await repo.list_gc_candidates(older_than=older_than, limit=1000)
+    assert isinstance(retry, Success)
+    assert session_id in {m.session_id for m in retry.unwrap()}
+
+    # A CONFIRMED stamp covers the (old) checkpoint generation — excluded.
+    confirmed = await repo.stamp_gc_audit(
+        session_id=session_id,
+        deleted_checkpoint_id="cp-gc",
+        swept_at=datetime.now(tz=UTC),
+        pending=False,
+    )
+    assert isinstance(confirmed, Success)
     after = await repo.list_gc_candidates(older_than=older_than, limit=1000)
     assert isinstance(after, Success)
     assert session_id not in {m.session_id for m in after.unwrap()}
@@ -516,7 +545,8 @@ async def test_usage_only_fill_lands_on_existing_row() -> None:
     )
 
     # Follow-up boundary (new checkpoint) whose target row already exists: the
-    # projector drops it, so the usage rides as a usage-only fill.
+    # projector drops it, so the usage rides as a usage-only fill. The
+    # content-free metadata breakdown merges into the same row (§7), fill-once.
     fill = await repo.apply_projection(
         _projection(
             query_id=f"query:{session_id}",
@@ -526,19 +556,48 @@ async def test_usage_only_fill_lands_on_existing_row() -> None:
         user_id=USER_ID,
         session_id=session_id,
         usage={"interrupt:fill-target": 77, "interrupt:never-inserted": 5},
+        usage_metadata={
+            "interrupt:fill-target": {"usage": {"input": 40, "output": 37}, "tool_calls": ()}
+        },
     )
     assert isinstance(fill, Success)
     async with factory() as session:
-        tokens = (
+        landed = (
             await session.execute(
                 sa_text(
-                    "SELECT tokens_used FROM chat_messages "
+                    "SELECT tokens_used, extra_metadata FROM chat_messages "
                     "WHERE session_id = :sid AND source_key = 'interrupt:fill-target'"
                 ),
                 {"sid": session_id},
             )
-        ).scalar_one()
-        assert tokens == 77
+        ).one()
+        assert landed.tokens_used == 77
+        assert landed.extra_metadata["usage"] == {"input": 40, "output": 37}
+        # Fill-once for the merge gate as well: a replayed boundary cannot
+        # rewrite it.
+        replay = await repo.apply_projection(
+            _projection(
+                query_id=f"query:{session_id}",
+                rows=(_row(2, "interrupt:fill-other", "clarification_prompt"),),
+                checkpoint_id="cp-fill-2",
+            ),
+            user_id=USER_ID,
+            session_id=session_id,
+            usage={"interrupt:fill-target": 77},
+            usage_metadata={"interrupt:fill-target": {"usage": {"input": 999, "output": 999}}},
+        )
+        assert isinstance(replay, Success)
+        unchanged = (
+            await session.execute(
+                sa_text(
+                    "SELECT tokens_used, extra_metadata FROM chat_messages "
+                    "WHERE session_id = :sid AND source_key = 'interrupt:fill-target'"
+                ),
+                {"sid": session_id},
+            )
+        ).one()
+        assert unchanged.tokens_used == 77
+        assert unchanged.extra_metadata["usage"] == {"input": 40, "output": 37}
 
 
 async def test_read_transcript_paging_completes_large_transcripts() -> None:

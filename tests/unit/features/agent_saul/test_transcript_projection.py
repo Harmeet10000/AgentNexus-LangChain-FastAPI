@@ -462,6 +462,7 @@ def test_project_completion_writes_final_summary_with_report_ref() -> None:
             next_nodes=(),
             final_report_summary="Report is ready.",
             doc_id="d-1",
+            long_term_refs=("legal::u1::reports#d-1",),
         ),
         EMPTY_KEYS,
         turn_rows,
@@ -472,10 +473,32 @@ def test_project_completion_writes_final_summary_with_report_ref() -> None:
     assert summary.source_key == "final:msg-query-1"
     assert summary.ordinal == 3
     assert summary.content == "Report is ready."
+    # The ref is COPIED from the graph's own confirmed write, never
+    # fabricated from doc_id alone (a skipped/failed storage claims nothing).
     assert summary.extra_metadata["report_ref"] == "legal::u1::reports#d-1"
     assert summary.role.value == "assistant"
     assert out.session_status == SessionStatus.COMPLETED
     assert not any(r.kind == "turn_closed" for r in out.rows)
+
+
+def test_project_completion_without_confirmed_ref_claims_nothing() -> None:
+    """/Greptile P2: `persist_memory_node` skipped or failed ⇒ long_term_refs
+    carries no new ref ⇒ the export must NOT claim a saved report."""
+    turn_rows = TurnRows(rows=(TurnRow(kind="query", source_key="msg-query-1", ordinal=0),))
+    out = project(
+        _view(
+            next_nodes=(),
+            final_report_summary="Report is ready.",
+            doc_id="d-1",
+            # storage skipped: empty refs
+        ),
+        EMPTY_KEYS,
+        turn_rows,
+        NOW,
+        aliveness=False,
+    )
+    summary = next(r for r in out.rows if r.kind == "final_summary")
+    assert "report_ref" not in summary.extra_metadata
 
 
 def test_project_orphaned_failed_appends_turn_closed() -> None:
@@ -658,3 +681,33 @@ def test_decision_slot_reserved_before_followup_prompt() -> None:
     assert prompt.ordinal == 3
     ordinals = [r.ordinal for r in out.rows]
     assert len(ordinals) == len(set(ordinals))
+
+
+def test_project_uses_latest_tagged_query_when_messages_accumulate() -> None:
+    """/Greptile P1: `messages` accumulates across turns (add_messages) — the
+    projector must attach a later turn to ITS OWN opener, never turn one's."""
+    q1 = HumanMessage(content="first", additional_kwargs={"saul_kind": "query"}, id="q1")
+    q2 = HumanMessage(content="second", additional_kwargs={"saul_kind": "query"}, id="q2")
+    out = project(
+        _view(messages=(q1, q2), next_nodes=(), step=5), EMPTY_KEYS, TurnRows(), NOW, aliveness=True
+    )
+    assert out.query_source_key == "q2"
+    assert any(r.kind == "query" and r.source_key == "q2" for r in out.rows)
+    assert not any(r.source_key == "q1" for r in out.rows)
+
+
+def test_project_reply_scopes_to_the_current_turn_only() -> None:
+    """/Greptile P1: HITL replies are those AFTER the latest query — an
+    earlier turn's reply was already projected (or belongs to its own rows)."""
+    q1 = HumanMessage(content="first", additional_kwargs={"saul_kind": "query"}, id="q1")
+    q2 = HumanMessage(content="second", additional_kwargs={"saul_kind": "query"}, id="q2")
+    reply2 = HumanMessage(content="reply to second", id="r2")
+    out = project(
+        _view(messages=(q1, q2, reply2), next_nodes=(), step=5),
+        EMPTY_KEYS,
+        TurnRows(),
+        NOW,
+        aliveness=True,
+    )
+    keys = {r.source_key for r in out.rows if r.kind == "clarification_reply"}
+    assert keys == {"r2"}
