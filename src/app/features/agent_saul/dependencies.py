@@ -44,8 +44,32 @@ async def get_saul_graph(request: Request) -> CompiledStateGraph[Any]:
     return graph
 
 
+async def get_saul_graph_ws(websocket: WebSocket) -> CompiledStateGraph[Any]:
+    """WS-scope sibling of `get_saul_graph`.
+
+    FastAPI cannot inject `Request` inside a websocket scope: the shared
+    state readers below must read the SAME app.state through `WebSocket`
+    or every Saul WS handshake dies with
+    ``get_saul_graph() missing 1 required positional argument 'request'``.
+    """
+    graph = getattr(websocket.app.state, "saul_graph", None)
+    if graph is None:
+        msg = "Saul graph is not wired"
+        raise ServiceUnavailableException(msg)
+    return graph
+
+
 async def get_saul_checkpointer(request: Request) -> AsyncPostgresSaver:
     checkpointer = getattr(request.app.state, "langgraph_checkpointer", None)
+    if checkpointer is None:
+        message = "Persistence layer is unavailable"
+        raise ServiceUnavailableException(message)
+    return checkpointer
+
+
+async def get_saul_checkpointer_ws(websocket: WebSocket) -> AsyncPostgresSaver:
+    """WS-scope sibling of `get_saul_checkpointer` (same `Request` limitation)."""
+    checkpointer = getattr(websocket.app.state, "langgraph_checkpointer", None)
     if checkpointer is None:
         message = "Persistence layer is unavailable"
         raise ServiceUnavailableException(message)
@@ -60,12 +84,32 @@ async def get_redis(request: Request) -> Redis:
     return redis
 
 
+async def get_redis_ws(websocket: WebSocket) -> Redis:
+    """WS-scope sibling of `get_redis` (same `Request` limitation)."""
+    redis = websocket.app.state.redis
+    if redis is None:
+        message = "Cache layer is unavailable"
+        raise ServiceUnavailableException(message)
+    return redis
+
+
 async def get_db_session_local(
     request: Request,
 ) -> async_sessionmaker[AsyncSession]:
     """Sync-side session maker for out-of-request-scope work (the transcript
     projector runs at WS boundaries, not inside a request dependency)."""
     session_local = getattr(request.app.state, "db_session_local", None)
+    if session_local is None:
+        message = "Database layer is unavailable"
+        raise ServiceUnavailableException(message)
+    return session_local
+
+
+async def get_db_session_local_ws(
+    websocket: WebSocket,
+) -> async_sessionmaker[AsyncSession]:
+    """WS-scope sibling of `get_db_session_local` (same `Request` limitation)."""
+    session_local = getattr(websocket.app.state, "db_session_local", None)
     if session_local is None:
         message = "Database layer is unavailable"
         raise ServiceUnavailableException(message)
@@ -114,6 +158,18 @@ async def get_agent_saul_deps(
     )
 
 
+async def get_agent_saul_deps_ws(
+    graph: Annotated[CompiledStateGraph[Any], Depends(get_saul_graph_ws)],
+    checkpointer: Annotated[AsyncPostgresSaver, Depends(get_saul_checkpointer_ws)],
+    redis: Annotated[Redis, Depends(get_redis_ws)],
+    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_db_session_local_ws)],
+) -> AgentSaulDeps:
+    """WS-scope composition of the same bundle — identical shape, WS readers."""
+    return AgentSaulDeps(
+        graph=graph, checkpointer=checkpointer, redis=redis, session_factory=session_factory
+    )
+
+
 async def get_agent_saul_ws_security_context(
     websocket: WebSocket,
     claims: WebSocketClaims,
@@ -144,6 +200,7 @@ async def get_agent_saul_ws_security_context(
 # ---------------------------------------------------------------------------
 
 AgentSaulDepsAnnotated = Annotated[AgentSaulDeps, Depends(get_agent_saul_deps)]
+AgentSaulDepsWsAnnotated = Annotated[AgentSaulDeps, Depends(get_agent_saul_deps_ws)]
 AgentSaulWebSocketSecurityContextAnnotated = Annotated[
     WebSocketSecurityContext,
     Depends(get_agent_saul_ws_security_context),

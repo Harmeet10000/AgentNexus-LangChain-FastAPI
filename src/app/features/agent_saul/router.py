@@ -30,6 +30,7 @@ from app.utils import APIResponse, ErrorCode, ValidationException
 
 from .dependencies import (
     AgentSaulDepsAnnotated,
+    AgentSaulDepsWsAnnotated,
     AgentSaulWebSocketSecurityContextAnnotated,
     get_transcript_repository,
 )
@@ -196,7 +197,7 @@ async def export_session_transcript(
 async def saul_ws_endpoint(
     websocket: WebSocket,
     thread_id: str,
-    deps: AgentSaulDepsAnnotated,
+    deps: AgentSaulDepsWsAnnotated,
     security_context: AgentSaulWebSocketSecurityContextAnnotated,
 ) -> None:
     """
