@@ -478,22 +478,18 @@ class LegalAgentState(TypedDict):
     permissions: dict[str, bool]
 
 
-# ---------------------------------------------------------------------------
-# Boundary schemas — Pydantic models at graph input/output edges
+# Boundary schemas — state-compat input, Pydantic output at the graph edge.
 # Interior state stays TypedDict per LangGraph best practice.
+#
+# NOTE: there is deliberately NO narrow Pydantic input schema. LangGraph
+# VALIDATES a Pydantic input schema and then applies only the keys it
+# declares — anything else is silently dropped before the first node
+# (verified by probe: a `messages` outside the schema arrived as [] and a
+# `status` outside it was absent at the first router). A state-compat
+# TypedDict input applies channel updates instead, which is what the
+# per-turn delta contract (§10) needs; request-shape validation belongs to
+# the WS/HTTP DTO layer.
 # ---------------------------------------------------------------------------
-
-
-class LegalAgentInputState(BaseModel, frozen=True):
-    """Minimal fields required to start a LegalAgent session."""
-
-    user_id: str
-    thread_id: str
-    correlation_id: str
-    schema_version: int = STATE_SCHEMA_VERSION
-    doc_id: str
-    user_query: str
-    permissions: dict[str, bool]
 
 
 class LegalAgentOutputState(BaseModel, frozen=True):

@@ -16,6 +16,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.features.agent_saul.dependencies import get_agent_saul_deps
 from app.lifecycle import graphs
@@ -97,12 +98,14 @@ def test_started_application_exposes_agent_saul_dependency_bundle() -> None:
     graph = MagicMock(spec=CompiledStateGraph)
     checkpointer = MagicMock(spec=AsyncPostgresSaver)
     redis = MagicMock(spec=Redis)
+    session_factory = MagicMock(spec=async_sessionmaker)
 
     @asynccontextmanager
     async def started(app: FastAPI) -> AsyncIterator[None]:
         app.state.saul_graph = graph
         app.state.langgraph_checkpointer = checkpointer
         app.state.redis = redis
+        app.state.db_session_local = session_factory
         yield
 
     app = FastAPI(lifespan=started)
@@ -115,10 +118,16 @@ def test_started_application_exposes_agent_saul_dependency_bundle() -> None:
             "graph": deps.graph is graph,
             "checkpointer": deps.checkpointer is checkpointer,
             "redis": deps.redis is redis,
+            "session_factory": deps.session_factory is session_factory,
         }
 
     with TestClient(app) as client:
         response = client.get("/saul-ready")
 
     assert response.status_code == 200
-    assert response.json() == {"graph": True, "checkpointer": True, "redis": True}
+    assert response.json() == {
+        "graph": True,
+        "checkpointer": True,
+        "redis": True,
+        "session_factory": True,
+    }

@@ -1,0 +1,837 @@
+"""ChatTranscriptRepository behaviour on a live Postgres (doc §13 DoD).
+
+Run explicitly: ``uv run pytest tests/integration/features/agent_saul -m integration``
+Requires migrations through 0022 applied (chat tables at the projected shape).
+The chain-of-custody properties pinned here: batch no-op replay, fill-once
+tokens, turn_seq stability across pause/resume, write-failure healing, the
+schema gate, and Graphiti/GC independence of the transcript.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, NamedTuple
+from uuid import uuid4
+
+import pytest
+from returns.result import Failure, Success
+from sqlalchemy import text as sa_text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from app.connections.postgres import get_database_url
+from app.features.agent_saul.transcript.errors import (
+    TranscriptInfrastructureError,
+    TranscriptNotFoundError,
+    TranscriptSchemaError,
+)
+from app.features.agent_saul.transcript.projection import (
+    ContentRole,
+    ProjectedRow,
+    Projection,
+    SessionStatus,
+    project,
+    snapshot_to_view,
+)
+from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from typing import Any
+
+pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
+
+USER_ID = "integration-user"
+
+
+class _Db(NamedTuple):
+    """One engine's sessionmaker and its repository, for a single test."""
+
+    factory: async_sessionmaker[Any]
+    repo: ChatTranscriptRepository
+
+
+@pytest.fixture
+async def db() -> AsyncIterator[_Db]:
+    """A fresh engine per test, disposed at teardown.
+
+    A shared module-level engine cannot work here: asyncpg connections are
+    bound to the event loop that created them and pytest-asyncio runs each
+    test on its own loop. Leaking one engine per test (no dispose) exhausts
+    the TigerData connection cap partway through this file, and the late
+    605-row apply then fails as an opaque write failure instead of the
+    behaviour under test.
+    """
+    engine = create_async_engine(get_database_url(flavour="async"), pool_pre_ping=True)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        yield _Db(factory=factory, repo=ChatTranscriptRepository(factory))
+    finally:
+        await engine.dispose()
+
+
+async def _apply(
+    repo: ChatTranscriptRepository,
+    projection: Projection,
+    *,
+    session_id: str,
+    **kwargs: Any,
+) -> Any:
+    """Apply the projection the way a boundary does (§5.3 guard).
+
+    The transcript watermark is read BEFORE the projection is handed to the
+    repository — the monotonicity guard requires that observation, and a test
+    helper that skipped it would silently disable the guard.
+    """
+    peek = await repo.peek_session_checkpoint(session_id=session_id)
+    prior = peek.unwrap()[0] if isinstance(peek, Success) else None
+    return await repo.apply_projection(
+        projection,
+        session_id=session_id,
+        prior_checkpoint_id=prior,
+        **kwargs,
+    )
+
+
+def _projection(
+    *,
+    query_id: str,
+    status: SessionStatus = SessionStatus.ACTIVE,
+    rows: tuple[ProjectedRow, ...] = (),
+    checkpoint_id: str | None = None,
+) -> Projection:
+    return Projection(
+        session_status=status,
+        no_op=None,
+        watermark_checkpoint_id=checkpoint_id or f"cp-{query_id}",
+        watermark_ts=datetime.now(tz=UTC),
+        query_source_key=query_id,
+        rows=rows,
+    )
+
+
+def _row(
+    ordinal: int, source_key: str, kind: str, *, role: ContentRole | None = None
+) -> ProjectedRow:
+    return ProjectedRow(
+        kind=kind,
+        role=role
+        or (
+            ContentRole.USER
+            if kind in {"query", "clarification_reply", "plan_decision"}
+            else ContentRole.ASSISTANT
+        ),
+        ordinal=ordinal,
+        source_key=source_key,
+        content="integration row",
+    )
+
+
+async def test_replay_is_batch_noop_and_item_deduped(db: _Db) -> None:
+    repo = db.repo
+    session_id = str(uuid4())
+    rows = (
+        _row(0, f"query:{session_id}", "query"),
+        _row(1, "interrupt:int-1", "clarification_prompt"),
+    )
+    first = await _apply(
+        repo,
+        _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-1"),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+    outcome = first.unwrap()
+    assert outcome.applied is True
+
+    # Same checkpoint, no rows → batch no-op.
+    replay = await _apply(
+        repo,
+        _projection(query_id=f"query:{session_id}", checkpoint_id="cp-1"),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(replay, Success)
+    replayed = replay.unwrap()
+    assert replayed.applied is False
+
+    # Same checkpoint, WITH rows (crash-heal form): no duplicate rows land.
+    heal = await _apply(
+        repo,
+        _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-1"),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(heal, Success)
+    assert heal.unwrap().rows_inserted == 0
+    async with db.factory() as session:
+        count = (
+            await session.execute(
+                sa_text("SELECT count(*) FROM chat_messages WHERE session_id = :sid"),
+                {"sid": session_id},
+            )
+        ).scalar_one()
+    assert int(count) == 2
+
+
+async def test_tokens_fill_once_under_replay(db: _Db) -> None:
+    repo = db.repo
+    session_id = str(uuid4())
+    rows = (_row(0, f"query:{session_id}", "query"),)
+
+    await _apply(
+        repo,
+        _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-a"),
+        user_id=USER_ID,
+        session_id=session_id,
+        usage={f"query:{session_id}": 420},
+    )
+    # A higher usage on replay must NOT overwrite (fill-once COALESCE).
+    replay = await _apply(
+        repo,
+        _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-a"),
+        user_id=USER_ID,
+        session_id=session_id,
+        usage={f"query:{session_id}": 999},
+    )
+    assert isinstance(replay, Success)  # batch no-op keeps tokens intact
+    async with db.factory() as session:
+        tokens = (
+            await session.execute(
+                sa_text("SELECT tokens_used FROM chat_messages WHERE session_id = :sid"),
+                {"sid": session_id},
+            )
+        ).scalar_one()
+    assert int(tokens) == 420
+
+
+async def test_turn_seq_stable_across_pause_and_resume(db: _Db) -> None:
+    repo = db.repo
+    session_id = str(uuid4())
+    q_key = f"query:{session_id}"
+
+    # First boundary: query lands inside a fresh turn.
+    r1 = await _apply(
+        repo,
+        _projection(query_id=q_key, rows=(_row(0, q_key, "query"),), checkpoint_id="cp-t1"),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(r1, Success)
+    assert r1.unwrap().turn_seq == 1
+    assert r1.unwrap().turn_opened is True
+
+    # Second boundary (same turn, post-resume): turn_seq MUST stay 1.
+    r2 = await _apply(
+        repo,
+        _projection(
+            query_id=q_key,
+            status=SessionStatus.CLARIFYING,
+            rows=(_row(1, "interrupt:int-r", "clarification_prompt"),),
+            checkpoint_id="cp-t2",
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(r2, Success)
+    assert r2.unwrap().turn_seq == 1
+    assert r2.unwrap().turn_opened is False
+    async with db.factory() as session:
+        session_row = (
+            await session.execute(
+                sa_text("SELECT turn_count, status FROM chat_sessions WHERE session_id = :sid"),
+                {"sid": session_id},
+            )
+        ).one()
+    assert int(session_row[0]) == 1
+    assert session_row[1] == "clarifying"
+
+
+async def test_write_failure_returns_typed_failure_not_raised(db: _Db) -> None:
+    repo = db.repo
+    # A NUL byte in any text parameter is rejected by Postgres at bind time —
+    # a deterministic driver failure to prove the edge sanitizes, not raises.
+    failure = await _apply(
+        repo,
+        _projection(
+            query_id="query:bad",
+            rows=(_row(0, "query:bad", "query"),),
+            checkpoint_id="cp-fail",
+        ),
+        user_id=USER_ID,
+        session_id="bad\x00session",
+    )
+    assert isinstance(failure, Failure)
+    error = failure.failure()
+    assert isinstance(error, TranscriptInfrastructureError)
+    # Driver detail never leaves the edge (§10).
+    assert "asyncpg" not in error.message
+    assert "0x00" not in error.message
+
+
+async def test_schema_gate_fails_closed_on_unknown_version(db: _Db) -> None:
+    repo = db.repo
+    session_id = str(uuid4())
+    await _apply(
+        repo,
+        _projection(
+            query_id=f"query:{session_id}", rows=(_row(0, f"query:{session_id}", "query"),)
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    async with db.factory() as session:
+        await session.execute(
+            sa_text("UPDATE chat_sessions SET schema_version = 0 WHERE session_id = :sid"),
+            {"sid": session_id},
+        )
+        await session.commit()
+    meta = await repo.get_session_meta(session_id=session_id, user_id=USER_ID)
+    assert isinstance(meta, Failure)
+    assert isinstance(meta.failure(), TranscriptSchemaError)
+    # Wrong owner → not found, never someone else's transcript.
+    other = await repo.get_session_meta(session_id=session_id, user_id="someone-else")
+    assert isinstance(other, Failure)
+    assert isinstance(other.failure(), TranscriptNotFoundError)
+
+
+async def test_turn_closed_flow_over_24h_pause_window(db: _Db) -> None:
+    repo = db.repo
+    session_id = str(uuid4())
+    # The D4 chain-of-custody key IS the HumanMessage id; the projector keys
+    # the query row by it. Use the raw id everywhere so the seeded turn and
+    # the projected turn resolve to the same turn_seq.
+    q_key = session_id
+
+    # Seed the paused turn: query + clarification prompt recorded at T1.
+    await _apply(
+        repo,
+        _projection(
+            query_id=q_key,
+            status=SessionStatus.CLARIFYING,
+            rows=(
+                _row(0, q_key, "query"),
+                _row(1, "interrupt:paused-clr", "clarification_prompt"),
+            ),
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+
+    # 26h later with an interrupt still pending and no heartbeat: the
+    # projector (not the repo) derives abandoned_expired and closes the turn.
+    now = datetime.now(tz=UTC)
+    view = snapshot_to_view(
+        _snapshot_with(
+            user_id=USER_ID,
+            query_id=q_key,
+            checkpoint_ts=(now - timedelta(hours=26)).isoformat(),
+            with_interrupt=True,
+        )
+    )
+    turn_context = await repo.get_turn_context(session_id=session_id, user_id=USER_ID)
+    assert isinstance(turn_context, Success)
+    derived = project(
+        view,
+        turn_context.unwrap().existing_keys,
+        turn_context.unwrap().turn_rows,
+        now,
+        aliveness=False,
+    )
+    assert derived.session_status == SessionStatus.ABANDONED_EXPIRED
+    applied = await _apply(repo, derived, user_id=USER_ID, session_id=session_id)
+    assert isinstance(applied, Success)
+    assert applied.unwrap().rows_inserted == 1  # the turn_closed row
+
+
+def _snapshot_with(
+    *, user_id: str, query_id: str, checkpoint_ts: str, with_interrupt: bool = False
+) -> Any:
+    """A minimal StateSnapshot stand-in running through snapshot_to_view.
+
+    The projector reads StateSnapshot duck-typed (attribute access), so a
+    SimpleNamespace mirrors exactly what ``aget_state`` yields. The query
+    must carry the D4 tag — that IS the chain-of-custody anchor.
+    """
+    from types import SimpleNamespace
+
+    from langchain_core.messages import HumanMessage
+
+    tasks: tuple[Any, ...] = ()
+    if with_interrupt:
+        tasks = (
+            SimpleNamespace(
+                interrupts=[
+                    SimpleNamespace(
+                        id="paused-clr",
+                        value={"type": "clarification_needed", "message": "still here"},
+                    ),
+                ],
+            ),
+        )
+    return SimpleNamespace(
+        values={
+            "schema_version": 1,
+            "user_id": user_id,
+            "messages": [
+                HumanMessage(
+                    content="integration query",
+                    additional_kwargs={"saul_kind": "query"},
+                    id=query_id,
+                ),
+            ],
+        },
+        config={"configurable": {"thread_id": "t", "checkpoint_id": "cp-dead"}},
+        parent_config=None,
+        tasks=tasks,
+        metadata={},
+        created_at=checkpoint_ts,
+        next=(),
+        step_metadata=None,
+    )
+
+
+async def test_checkpointer_gc_cannot_touch_the_transcript(db: _Db) -> None:
+    """Checkpointer lifecycle is namespace-orthogonal to chat rows (D-coverage)."""
+    repo = db.repo
+    session_id = str(uuid4())
+    q_key = session_id
+    persisted = await _apply(
+        repo,
+        _projection(query_id=q_key, rows=(_row(0, q_key, "query"),)),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(persisted, Success)
+    # Wipe the checkpointer's namespace for this thread id (same as graph GC),
+    # through the production-owned pool factory.
+    from app.connections.checkpointer import setup_langgraph_checkpointer
+
+    checkpointer = await setup_langgraph_checkpointer()
+    try:
+        await checkpointer.adelete_thread(f"gc-{session_id}")  # unknown thread → no-op
+    finally:
+        # The saver itself exposes no close(); the pool it owns does.
+        await checkpointer.conn.close()
+    transcript = await repo.read_transcript(session_id=session_id, user_id=USER_ID, limit=10)
+    assert isinstance(transcript, Success)
+    rows = list(transcript.unwrap())
+    assert len(rows) == 1
+    assert rows[0].kind == "query"
+
+
+async def test_owner_mismatch_refused_before_writes(db: _Db) -> None:
+    """§9: a wrong-owner projection is a sanitized not-found, no rows, no move."""
+    repo = db.repo
+    session_id = str(uuid4())
+    rows = (
+        _row(0, f"query:{session_id}", "query"),
+        _row(1, "interrupt:int-owner", "clarification_prompt"),
+    )
+
+    first = await _apply(
+        repo,
+        _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-owner"),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    attack = await _apply(
+        repo,
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=(_row(2, "interrupt:int-stranger", "clarification_prompt"),),
+            checkpoint_id="cp-stranger",
+        ),
+        user_id="stranger-user",
+        session_id=session_id,
+    )
+    assert isinstance(attack, Failure)
+    assert isinstance(attack.failure(), TranscriptNotFoundError)
+
+    # Nothing about the real session moved: no stray rows, watermark intact.
+    async with db.factory() as session:
+        stranger_rows = await session.execute(
+            sa_text("SELECT count(*) FROM chat_messages WHERE user_id = 'stranger-user'"),
+        )
+        assert int(stranger_rows.scalar_one()) == 0
+        cp = await session.execute(
+            sa_text("SELECT last_checkpoint_id FROM chat_sessions WHERE session_id = :sid"),
+            {"sid": session_id},
+        )
+        assert (cp.scalar_one()) == "cp-owner"
+
+
+async def test_sweep_context_returns_owner_with_context(db: _Db) -> None:
+    """§8: the sweep helper is (owner_user_id, turn_context) — never bare.
+
+    _reconcile_once unpacks the pair; a bare context here would TypeError
+    every sweep pass into its per-thread guard and silently disable
+    background reconciliation AND checkpoint GC.
+    """
+    repo = db.repo
+    session_id = str(uuid4())
+    first = await _apply(
+        repo,
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=(_row(0, f"query:{session_id}", "query"),),
+            checkpoint_id="cp-sweep",
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    result = await repo.get_sweep_context(session_id=session_id)
+    assert isinstance(result, Success)
+    owner, context = result.unwrap()
+    assert owner == USER_ID
+    assert f"query:{session_id}" in context.existing_keys
+
+    unknown = await repo.get_sweep_context(session_id=str(uuid4()))
+    assert isinstance(unknown, Failure)
+    assert isinstance(unknown.failure(), TranscriptNotFoundError)
+
+
+async def test_gc_stamp_excludes_freshly_audited_session(db: _Db) -> None:
+    """§8: exclusion is stamp-generation AND pending-aware, not one-shot.
+
+    A terminal session past retention IS a candidate with no stamp; a PENDING
+    pre-delete stamp excludes it only while fresh (another sweep's critical
+    section), re-enters once stale, and a CONFIRMED stamp excludes while it
+    covers the checkpoint generation — a later NEWER checkpoint must
+    qualify again, which the SQL comparison — not a boolean flag — guarantees.
+    """
+    repo = db.repo
+    session_id = str(uuid4())
+    first = await _apply(
+        repo,
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=(_row(0, f"query:{session_id}", "query"),),
+            checkpoint_id="cp-gc",
+            status=SessionStatus.COMPLETED,
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+    older_than = datetime.now(tz=UTC) + timedelta(days=9)  # far horizon: fresh rows qualify
+    fresh = await repo.list_gc_candidates(older_than=older_than, limit=1000)
+    assert isinstance(fresh, Success)
+    assert session_id in {m.session_id for m in fresh.unwrap()}
+
+    # The PENDING pre-delete stamp excludes the candidate while fresh (§8) —
+    # another sweep may legitimately be inside its critical section.
+    stamped = await repo.stamp_gc_audit(
+        session_id=session_id,
+        deleted_checkpoint_id="cp-gc",
+        swept_at=datetime.now(tz=UTC),
+        pending=True,
+    )
+    assert isinstance(stamped, Success)
+    after_pending = await repo.list_gc_candidates(older_than=older_than, limit=1000)
+    assert isinstance(after_pending, Success)
+    assert session_id not in {m.session_id for m in after_pending.unwrap()}
+
+    # A worker death between stamp and delete surfaces the candidate again
+    # once the pending record goes STALE (§8 pending-retry).
+    stale_pending = await repo.stamp_gc_audit(
+        session_id=session_id,
+        deleted_checkpoint_id="cp-gc",
+        swept_at=datetime.now(tz=UTC) - timedelta(minutes=30),
+        pending=True,
+    )
+    assert isinstance(stale_pending, Success)
+    retry = await repo.list_gc_candidates(older_than=older_than, limit=1000)
+    assert isinstance(retry, Success)
+    assert session_id in {m.session_id for m in retry.unwrap()}
+
+    # A CONFIRMED stamp covers the (old) checkpoint generation — excluded.
+    confirmed = await repo.stamp_gc_audit(
+        session_id=session_id,
+        deleted_checkpoint_id="cp-gc",
+        swept_at=datetime.now(tz=UTC),
+        pending=False,
+    )
+    assert isinstance(confirmed, Success)
+    after = await repo.list_gc_candidates(older_than=older_than, limit=1000)
+    assert isinstance(after, Success)
+    assert session_id not in {m.session_id for m in after.unwrap()}
+
+    # A NEWER checkpoint generation re-qualifies: its watermark postdates the
+    # stamp, so the stamp no longer covers the checkpoint (§8).
+    newer = await _apply(
+        repo,
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=(_row(1, "interrupt:gc2", "clarification_prompt"),),
+            checkpoint_id="cp-gc-2",
+            status=SessionStatus.COMPLETED,
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(newer, Success)
+    reopened = await repo.list_gc_candidates(older_than=older_than, limit=1000)
+    assert isinstance(reopened, Success)
+    assert session_id in {m.session_id for m in reopened.unwrap()}
+
+
+async def test_apply_rejects_a_stale_projection_under_the_row_lock(db: _Db) -> None:
+    """§5.3: a caller that read an OLD watermark must not move the cache.
+
+    Row locking only ORDERS writers — without the comparison, a sweep that
+    read checkpoint A and applies late would overwrite a newer writer's
+    status and watermark with A's (older) values. The comparison is against
+    the watermark the caller OBSERVED, so a legitimately newer projection
+    still lands while a stale one answers a no-op.
+    """
+    repo = db.repo
+    session_id = str(uuid4())
+    q = f"query:{session_id}"
+
+    first = await _apply(
+        repo,
+        _projection(
+            query_id=q,
+            rows=(_row(0, q, "query"),),
+            checkpoint_id="cp-a",
+            status=SessionStatus.ACTIVE,
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    # A boundary that observed "cp-a" and projects the NEXT checkpoint
+    # "cp-b": observed-prior is older by one step — must still land.
+    second = await _apply(
+        repo,
+        _projection(query_id=q, checkpoint_id="cp-b", status=SessionStatus.COMPLETED),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(second, Success)
+    assert second.unwrap().applied is True
+
+    # A stale sweep that read "cp-a" before that writer landed now applies a
+    # FAILED verdict derived from the OLD checkpoint → refused, nothing moves.
+    stale = await repo.apply_projection(
+        _projection(query_id=q, checkpoint_id="cp-a", status=SessionStatus.FAILED),
+        user_id=USER_ID,
+        session_id=session_id,
+        prior_checkpoint_id="cp-a",
+    )
+    assert isinstance(stale, Success)
+    assert stale.unwrap().applied is False
+    assert stale.unwrap().reason == "stale_projection"
+
+    async with db.factory() as session:
+        row = (
+            await session.execute(
+                sa_text(
+                    "SELECT status, last_checkpoint_id FROM chat_sessions WHERE session_id = :sid"
+                ),
+                {"sid": session_id},
+            )
+        ).one()
+        assert row.status == str(SessionStatus.COMPLETED.value)
+        assert row.last_checkpoint_id == "cp-b"
+
+
+async def test_usage_only_fill_lands_on_existing_row(db: _Db) -> None:
+    """§7: segment totals land once even when the projector deduped the row."""
+    repo = db.repo
+    session_id = str(uuid4())
+    rows = (
+        _row(0, f"query:{session_id}", "query"),
+        _row(1, "interrupt:fill-target", "clarification_prompt"),
+    )
+
+    await _apply(
+        repo,
+        _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-fill-1"),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+
+    # Follow-up boundary (new checkpoint) whose target row already exists: the
+    # projector drops it, so the usage rides as a usage-only fill. The
+    # content-free metadata breakdown merges into the same row (§7), fill-once.
+    fill = await _apply(
+        repo,
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=(_row(2, "interrupt:fill-other", "clarification_prompt"),),
+            checkpoint_id="cp-fill-2",
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+        usage={"interrupt:fill-target": 77, "interrupt:never-inserted": 5},
+        usage_metadata={
+            "interrupt:fill-target": {"usage": {"input": 40, "output": 37}, "tool_calls": ()}
+        },
+    )
+    assert isinstance(fill, Success)
+    async with db.factory() as session:
+        landed = (
+            await session.execute(
+                sa_text(
+                    "SELECT tokens_used, extra_metadata FROM chat_messages "
+                    "WHERE session_id = :sid AND source_key = 'interrupt:fill-target'"
+                ),
+                {"sid": session_id},
+            )
+        ).one()
+        assert landed.tokens_used == 77
+        assert landed.extra_metadata["usage"] == {"input": 40, "output": 37}
+        # Fill-once for the merge gate as well: a replayed boundary cannot
+        # rewrite it.
+        replay = await _apply(
+            repo,
+            _projection(
+                query_id=f"query:{session_id}",
+                rows=(_row(2, "interrupt:fill-other", "clarification_prompt"),),
+                checkpoint_id="cp-fill-2",
+            ),
+            user_id=USER_ID,
+            session_id=session_id,
+            usage={"interrupt:fill-target": 77},
+            usage_metadata={"interrupt:fill-target": {"usage": {"input": 999, "output": 999}}},
+        )
+        assert isinstance(replay, Success)
+        unchanged = (
+            await session.execute(
+                sa_text(
+                    "SELECT tokens_used, extra_metadata FROM chat_messages "
+                    "WHERE session_id = :sid AND source_key = 'interrupt:fill-target'"
+                ),
+                {"sid": session_id},
+            )
+        ).one()
+        assert unchanged.tokens_used == 77
+        assert unchanged.extra_metadata["usage"] == {"input": 40, "output": 37}
+
+
+async def test_read_transcript_paging_completes_large_transcripts(db: _Db) -> None:
+    """§8 export: offset paging returns every row in display order (D3)."""
+    repo = db.repo
+    session_id = str(uuid4())
+    big = tuple(
+        _row(
+            i, f"query:{session_id}" if i == 0 else f"row-{i}", "query" if i == 0 else "plan_prompt"
+        )
+        for i in range(605)
+    )
+    first = await _apply(
+        repo,
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=big,
+            checkpoint_id="cp-paging",
+            status=SessionStatus.COMPLETED,
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    seen: list[int] = []
+    page_guard = 0
+    cursor_seq: int | None = None
+    cursor_ord: int | None = None
+    cursor_id: int | None = None
+    while True:
+        result = await repo.read_transcript(
+            session_id=session_id,
+            user_id=USER_ID,
+            limit=500,
+            after_turn_seq=cursor_seq,
+            after_ordinal=cursor_ord,
+            after_id=cursor_id,
+        )
+        assert isinstance(result, Success)
+        page_rows = list(result.unwrap())
+        if not page_rows:
+            break
+        seen.extend(r.ordinal for r in page_rows)
+        assert all(r.turn_seq == 1 for r in page_rows)
+        if len(page_rows) < 500:
+            break
+        last = page_rows[-1]
+        cursor_seq, cursor_ord, cursor_id = last.turn_seq, last.ordinal, last.row_id
+        page_guard += 1
+        assert page_guard < 10  # safety bound — 605 rows need exactly 2 pages
+    assert len(seen) == 605
+    assert len(seen) == len(set(seen))
+
+
+async def test_turn_recovery_reserves_the_slot(db: _Db) -> None:
+    """§6: a recovered query row OPENS its turn — turn_count advances in the
+    same transaction, so the next real turn cannot reuse its turn_seq."""
+    repo = db.repo
+    session_id = str(uuid4())
+
+    # Established turn 1, then a crash-like situation for a NEW turn: the
+    # recovery path replays the historical projection carrying its query.
+    first = await _apply(
+        repo,
+        _projection(
+            query_id=f"query:{session_id}", rows=(_row(0, f"query:{session_id}", "query"),)
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    recovered_key = f"query:{session_id}-2"
+    recovery = await repo.insert_rows_only(
+        _projection(query_id=recovered_key, rows=(_row(0, recovered_key, "query"),)),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(recovery, Success)
+    outcome = recovery.unwrap()
+    assert outcome.turn_opened is True
+    assert outcome.turn_seq == 2
+
+    # The slot was RESERVED: a later full projection of turn 3 must not
+    # collide with the recovered one.
+    third_key = f"query:{session_id}-3"
+    third = await _apply(
+        repo,
+        _projection(
+            query_id=third_key,
+            rows=(_row(0, third_key, "query"),),
+            checkpoint_id="cp-third",
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(third, Success)
+    third_outcome = third.unwrap()
+    assert third_outcome.turn_seq == 3
+
+    async with db.factory() as session:
+        counts = (
+            await session.execute(
+                sa_text("SELECT turn_count FROM chat_sessions WHERE session_id = :sid"),
+                {"sid": session_id},
+            )
+        ).scalar_one()
+        assert counts == 3
+        seqs = [
+            int(t)
+            for t in (
+                await session.execute(
+                    sa_text(
+                        "SELECT turn_seq FROM chat_messages WHERE session_id = :sid "
+                        "AND source_key LIKE 'query:%' ORDER BY turn_seq"
+                    ),
+                    {"sid": session_id},
+                )
+            ).scalars()
+        ]
+        assert sorted(set(seqs)) == seqs  # no reused turn numbers

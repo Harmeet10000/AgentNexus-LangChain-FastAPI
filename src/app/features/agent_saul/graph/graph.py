@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 from langgraph.graph import END, StateGraph
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import Any, Final
 
     from langchain_core.language_models import BaseChatModel
@@ -28,7 +29,6 @@ from .nodes import (
 )
 from .state import (
     GRAPH_NODE_NAMES,
-    LegalAgentInputState,
     LegalAgentOutputState,
     LegalAgentState,
 )
@@ -50,14 +50,23 @@ def saul_runtime_config(thread_id: str) -> dict[str, Any]:
     }
 
 
-def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
+def wire_saul_topology(graph: Any, node_for: Callable[[str], Any]) -> None:
+    """The single source of Agent Saul's edge topology.
+
+    ``node_for(name)`` supplies the node callable — the real nodes for the
+    production graph, self-ending stubs for the sweep's read graph. Both
+    builders MUST go through this function: a topology edited here without
+    both graphs recompiling is a sweep that silently mis-reads checkpoints
+    (missing node names make Pregel drop their pending tasks, so paused
+    threads stop looking CLARIFYING).
+    """
     for name in GRAPH_NODE_NAMES:
-        graph.add_node(name, getattr(nodes, name))
+        graph.add_node(name, node_for(name))
 
     # Hydration runs before gateway on every run and is never a routing
     # target: it is wired explicitly so it stays out of GRAPH_NODE_NAMES,
     # _VALID_WORKER_NODES, and the orchestrator's dispatch table.
-    graph.add_node("state_hydration", make_state_hydration_node())
+    graph.add_node("state_hydration", node_for("state_hydration"))
     graph.set_entry_point("state_hydration")
     graph.add_edge("state_hydration", "gateway")
     graph.add_edge("gateway", "qna")
@@ -90,6 +99,15 @@ def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
     graph.add_edge("persist_memory", END)
 
 
+def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
+    wire_saul_topology(
+        graph,
+        lambda name: (
+            make_state_hydration_node() if name == "state_hydration" else getattr(nodes, name)
+        ),
+    )
+
+
 def build_saul_graph(
     checkpointer: AsyncPostgresSaver,
     pro_llm: BaseChatModel,
@@ -107,8 +125,14 @@ def build_saul_graph(
     )
 
     state_graph_factory = cast("Any", StateGraph)
+    # Input schema is the FULL state TypedDict — a state-compat input per
+    # turn. A narrower Pydantic FILTERED input was verified to silently drop
+    # keys outside it (probed: `messages` arrived as [], `status` absent),
+    # losing the tagged turn query that §4.2's projector keys on and
+    # crashing the qna router on a missing status. The WS layer's own DTOs
+    # stay the request-validation boundary.
     graph: Any = state_graph_factory(
-        LegalAgentState, input_schema=LegalAgentInputState, output_schema=LegalAgentOutputState
+        LegalAgentState, input_schema=LegalAgentState, output_schema=LegalAgentOutputState
     )
     _wire_graph(graph=graph, nodes=nodes)
 
