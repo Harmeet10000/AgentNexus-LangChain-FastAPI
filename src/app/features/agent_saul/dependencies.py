@@ -20,6 +20,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
+from returns.result import Failure
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
@@ -180,7 +181,14 @@ async def get_agent_saul_ws_security_context(
     security_service.ensure_origin_allowed(origin)
 
     if claims.sid is not None:
-        session = await token_repo.get_session(claims.sid)
+        session_result = await token_repo.get_session(claims.sid)
+        if isinstance(session_result, Failure):
+            # Fail closed: a Redis outage must not authenticate the handshake.
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Session expired or revoked",
+            )
+        session = session_result.unwrap()
         if session is None or session.user_id != claims.sub:
             raise WebSocketException(
                 code=status.WS_1008_POLICY_VIOLATION,
