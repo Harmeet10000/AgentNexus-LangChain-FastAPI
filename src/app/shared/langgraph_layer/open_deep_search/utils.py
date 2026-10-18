@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict
 from returns.result import Failure
 
 from app.connections.tavily import (
-    SearchResponse,  # noqa: TC001 — resolved at runtime by Pydantic
+    SearchResponse,
     search,
 )
 from app.observability.logging import logger

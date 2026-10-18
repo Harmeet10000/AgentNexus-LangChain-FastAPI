@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, cast
 
-from neo4j import Query
+from neo4j import AsyncDriver, Query
 from neo4j.exceptions import Neo4jError
 from pydantic import BaseModel, ConfigDict
 
@@ -24,8 +24,6 @@ from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from typing import Any, LiteralString
-
-    from neo4j import AsyncDriver
 
     from app.ai.memory.memory_scope import MemoryScope
 

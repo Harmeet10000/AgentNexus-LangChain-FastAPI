@@ -6,12 +6,9 @@ Use these in FastAPI route handlers for validated, documented APIs.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import Any
 
 from pydantic import BaseModel, Field
-
-if TYPE_CHECKING:
-    from typing import Any
 
 # ---------------------------------------------------------------------------
 # Agent input

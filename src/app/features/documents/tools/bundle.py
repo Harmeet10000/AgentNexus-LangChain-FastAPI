@@ -37,8 +37,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
 from langchain_core.tools.base import BaseTool
+from pydantic import BaseModel, ConfigDict
 
 from app.features.documents.tools.get_obligation_chain import make_get_obligation_chain_tool
 from app.features.documents.tools.query_knowledge_graph import make_query_knowledge_graph_tool

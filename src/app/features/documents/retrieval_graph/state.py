@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import (  # noqa: TC003 - Pydantic resolves Literal at model build time.
+from typing import (
     Literal,
 )
 

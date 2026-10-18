@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated
 
 import asyncer
 from pydantic import BaseModel, Field
@@ -10,9 +11,6 @@ from app.extraction.docling import create_document_converter
 from app.shared.rag.errors import RagValidationError
 
 if TYPE_CHECKING:
-    from pathlib import Path
-    from typing import Annotated
-
     from app.shared.rag.errors import RagResult
 
 

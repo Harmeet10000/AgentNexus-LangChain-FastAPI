@@ -7,7 +7,7 @@ import json
 import time
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
-from typing import TYPE_CHECKING, Any, Protocol, cast  # noqa: TC003
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import httpx
 from crawl4ai import (

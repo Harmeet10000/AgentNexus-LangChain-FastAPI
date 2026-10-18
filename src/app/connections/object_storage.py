@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
 
 import asyncer
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+from mypy_boto3_s3 import S3Client
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from returns.result import Failure, Result, Success
 
@@ -18,10 +20,6 @@ from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from datetime import datetime
-    from typing import Any
-
-    from mypy_boto3_s3 import S3Client
 
     from app.config import Settings
 

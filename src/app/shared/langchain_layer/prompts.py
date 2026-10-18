@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence  # noqa: TC003 — runtime parameter in build_assembled_prompt
 from enum import StrEnum
 from string import Template
-from typing import Any, override  # noqa: TC003 — Any resolved at runtime by Pydantic models
+from typing import Any, override
 
 from langchain_core.prompts import (
     ChatPromptTemplate,

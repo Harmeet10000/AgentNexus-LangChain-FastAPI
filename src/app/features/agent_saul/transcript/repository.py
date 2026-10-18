@@ -15,8 +15,8 @@ from __future__ import annotations
 
 # Runtime-required: pydantic field annotations resolve at class definition
 # (SessionMeta/TranscriptMessage) — do NOT move these to TYPE_CHECKING.
-from datetime import datetime  # noqa: TC003 — pydantic field annotation
-from typing import TYPE_CHECKING, Any  # noqa: TC003 — pydantic field annotation
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Failure, Success

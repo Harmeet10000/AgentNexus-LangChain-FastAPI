@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable  # noqa: TC003 — resolved by Pydantic
-from typing import Literal  # noqa: TC003 — resolved at runtime by Pydantic
+from collections.abc import Awaitable, Callable
+from typing import Literal
 
-from graphiti_core.graphiti import Graphiti  # noqa: TC002 — resolved at runtime by Pydantic
+from graphiti_core.graphiti import Graphiti
 from langchain_core.language_models import (
-    BaseChatModel,  # noqa: TC002 — resolved at runtime by Pydantic
+    BaseChatModel,
 )
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.connections.object_storage import (
-    StorageService,  # noqa: TC001 — resolved at runtime by Pydantic
+    StorageService,
 )
-from app.extraction.langextract.service import AsyncExtractionService  # noqa: TC001
+from app.extraction.langextract.service import AsyncExtractionService
 
 from .constants import DEFAULT_PAGE_SIZE, DEFAULT_RAG_TOKEN_BUDGET, MAX_PAGE_SIZE
-from .repository import DocumentRepository  # noqa: TC001 — resolved at runtime by Pydantic
+from .repository import DocumentRepository
 
 _STRICT_CONFIG = ConfigDict(extra="forbid")
 _READ_MODEL_CONFIG = ConfigDict(extra="forbid", frozen=True, from_attributes=True)

@@ -30,7 +30,7 @@ from enum import StrEnum
 
 # Runtime-required: pydantic resolves `dict[str, Any]` field annotations at
 # class-definition time — do NOT move to TYPE_CHECKING.
-from typing import Any  # noqa: TC003 — pydantic annotation resolution
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 from langgraph.types import StateSnapshot

@@ -8,7 +8,7 @@ Each agent is a module-level singleton, lazy-initialised on first use.
 from __future__ import annotations
 
 from functools import cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -19,8 +19,6 @@ from ..prompts import SystemPromptParts
 from .factory import AgentSpec, create_production_agent
 
 if TYPE_CHECKING:
-    from typing import Any
-
     from .factory import ProductionAgent
 
 # ---------------------------------------------------------------------------

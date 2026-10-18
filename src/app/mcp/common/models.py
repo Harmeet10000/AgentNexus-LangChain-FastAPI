@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.utils import ValidationException
-
-if TYPE_CHECKING:
-    from typing import Any
 
 
 class MCPToolCatalogEntry(BaseModel):

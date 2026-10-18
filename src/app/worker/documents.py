@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from typing import TYPE_CHECKING, Any  # noqa: TC003 — Any resolved at runtime by Pydantic
+from typing import TYPE_CHECKING, Any
 
 from celery.signals import worker_process_init, worker_process_shutdown, worker_shutdown
-from graphiti_core import Graphiti  # noqa: TC002 — resolved at runtime by Pydantic
+from graphiti_core import Graphiti
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
-from redis.asyncio import Redis  # noqa: TC002 — resolved at runtime by Pydantic
-from sqlalchemy.ext.asyncio import (  # noqa: TC002 — resolved at runtime by Pydantic
+from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_sessionmaker,
 )

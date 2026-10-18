@@ -8,7 +8,7 @@ import os
 from typing import TYPE_CHECKING
 
 from celery.signals import worker_process_init, worker_process_shutdown, worker_shutdown
-from crawl4ai import AsyncWebCrawler  # noqa: TC002 — resolved at runtime by Pydantic
+from crawl4ai import AsyncWebCrawler
 from pydantic import BaseModel, ConfigDict
 
 from app.connections.crawl4ai import close_crawl4ai_crawler, create_crawl4ai_crawler

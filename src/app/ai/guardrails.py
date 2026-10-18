@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from langchain.agents.middleware import (
     HumanInTheLoopMiddleware,
@@ -20,8 +21,7 @@ from app.observability.logging import logger
 from app.shared.langchain_layer.chains import build_guardrail_chain
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-    from typing import Any
+    from collections.abc import Awaitable
 
 # ---------------------------------------------------------------------------
 # Model retry middleware
