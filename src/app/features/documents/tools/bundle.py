@@ -38,6 +38,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
+from langchain_core.tools.base import BaseTool
 
 from app.features.documents.tools.get_obligation_chain import make_get_obligation_chain_tool
 from app.features.documents.tools.query_knowledge_graph import make_query_knowledge_graph_tool
@@ -45,7 +46,6 @@ from app.features.documents.tools.retrieve_statute_section import make_retrieve_
 from app.features.documents.tools.search_legal_precedents import make_search_legal_precedents_tool
 
 if TYPE_CHECKING:
-    from langchain_core.tools.base import BaseTool
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from app.resilience.idempotency import IdempotencyGuard

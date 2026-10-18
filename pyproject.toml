@@ -401,6 +401,11 @@ ignore = [
 
 [tool.ruff.lint.flake8-type-checking]
 strict = true
+# Pydantic builds its validator from these classes' annotations at DEFINITION
+# time, so annotations on BaseModel subclasses are runtime code, not types:
+# keeping their dependencies in TYPE_CHECKING leaves the field ref unresolved
+# (PydanticUserError: class not fully defined).
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 exempt-modules = ["pydantic", "fastapi", "langchain", "langgraph", "docling"]
 
 [tool.ruff.lint.flake8-bugbear]

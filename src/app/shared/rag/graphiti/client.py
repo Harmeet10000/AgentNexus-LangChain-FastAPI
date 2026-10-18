@@ -21,6 +21,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
+from graphiti_core.driver.neo4j_driver import Neo4jDriver
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
 from graphiti_core.errors import GraphitiError
 from graphiti_core.llm_client.gemini_client import GeminiClient, LLMConfig
@@ -30,6 +31,8 @@ from app.config import get_settings
 from app.observability.logging import logger
 
 from .schemas import GraphitiSearchResult
+
+DEFAULT_NEO4J_DATABASE = "neo4j"
 
 if TYPE_CHECKING:
     from typing import Any
@@ -120,6 +123,7 @@ async def setup_graphiti(
     neo4j_uri: str,
     neo4j_user: str,
     neo4j_password: str,
+    neo4j_database: str | None = None,
 ) -> Graphiti:
     """Create a Graphiti instance with its own Neo4j connection pool.
 
@@ -148,8 +152,16 @@ async def setup_graphiti(
             uri=neo4j_uri,
             user=neo4j_user,
             password=neo4j_password,
-            # Alternative: Pass a pre-configured driver (recommended for custom database name, auth, etc.)
-            graph_driver=None,  # Optional[Neo4jDriver | other driver]
+            # Pass the process-owned driver: Graphiti's own construction
+            # hard-codes database="neo4j", which breaks on Aura instances
+            # whose only user database is named after the instance id. The
+            # caller's configured database name (NEO4J_DATABASE) rules.
+            graph_driver=Neo4jDriver(
+                uri=neo4j_uri,
+                user=neo4j_user,
+                password=neo4j_password,
+                database=neo4j_database or DEFAULT_NEO4J_DATABASE,
+            ),
             # LLM Configuration (critical for entity extraction, summarization, etc.)
             llm_client=GeminiClient(
                 config=LLMConfig(

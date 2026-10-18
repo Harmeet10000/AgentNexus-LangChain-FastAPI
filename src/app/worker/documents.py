@@ -99,6 +99,7 @@ async def _provision_document_worker() -> DocumentWorkerResources:
             neo4j_uri=settings.NEO4J_URI,
             neo4j_user=settings.NEO4J_USERNAME,
             neo4j_password=settings.NEO4J_PASSWORD.get_secret_value(),
+            neo4j_database=settings.NEO4J_DATABASE,
         )
         await setup_graphiti_indices(graphiti)
         object_store = StorageService.from_settings(settings=settings)

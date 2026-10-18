@@ -62,7 +62,6 @@ from langchain_google_genai import (
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.connections.http import get_shared_httpx_client
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -121,7 +120,15 @@ def build_chat_model(
             **kwargs,
         )
 
+    # Provider must be explicit: bare `gemini-*` names infer `google_vertexai`
+    # (uninstalled here, and wrong for an AI-Studio key — GEMINI_API_KEY), and
+    # the silent inference also flips to `google_genai` in a future langchain
+    # release. Name it so behavior is pinned regardless of that table.
+    # No http_async_client here: ChatGoogleGenerativeAI rejects the argument
+    # (the google_genai implementation path above never passed it either), and
+    # the generic path previously never completed for bare `gemini-*` names.
     return init_chat_model(
+        model_provider="google_genai",
         model=resolved_model_name,
         thinking_level="medium",
         temperature=resolved_temperature,
@@ -132,7 +139,6 @@ def build_chat_model(
         streaming=streaming,
         cached_content=cached_content,
         **kwargs,
-        http_async_client=get_shared_httpx_client(),
     )
 
 

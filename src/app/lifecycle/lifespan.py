@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from kombu.exceptions import OperationalError
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from neo4j import AsyncDriver
-from neo4j.exceptions import ConfigurationError, ServiceUnavailable
+from neo4j.exceptions import ConfigurationError, GqlError, ServiceUnavailable
 from playwright.async_api import Error as PlaywrightError
 from redis.asyncio import Redis
 from redis_fastapi import get_async_redis
@@ -192,6 +192,7 @@ async def _setup_graphiti_state(app: FastAPI, settings: Any) -> None:
         neo4j_uri=settings.NEO4J_URI,
         neo4j_user=settings.NEO4J_USERNAME,
         neo4j_password=settings.NEO4J_PASSWORD.get_secret_value(),
+        neo4j_database=settings.NEO4J_DATABASE,
     )
     await setup_graphiti_indices(graphiti)
     app.state.graphiti = graphiti
@@ -365,7 +366,11 @@ STARTUP_POLICIES: tuple[StartupPolicy, ...] = (
         setup=_setup_graphiti_state,
         state_attr="graphiti",
         fatal_on=(),
-        degrade_on=(ConnectionError, TimeoutError, OSError, ServiceUnavailable),
+        # GqlError is the driver's GQL base: it covers ServiceUnavailable
+        # (DriverError) and ClientError/DatabaseError — e.g. queries against a
+        # missing database (DatabaseNotFound 22N51) answered successfully at the
+        # socket level, so the connection-shaped classes never see it.
+        degrade_on=(ConnectionError, TimeoutError, OSError, GqlError),
         report=_report_graphiti_degraded,
         probe=check_graphiti,
     ),
@@ -374,7 +379,11 @@ STARTUP_POLICIES: tuple[StartupPolicy, ...] = (
         setup=_setup_crawl4ai_state,
         state_attr="crawl4ai_crawler",
         fatal_on=(),
-        degrade_on=(ConnectionError, TimeoutError, OSError, PlaywrightError),
+        # An optional dep's missing integration package (ImportError —
+        # ModuleNotFoundError subclasses it) must degrade, not stop boot: the
+        # crawler package can be present while the LLM provider packages it
+        # composes at import time are not.
+        degrade_on=(ConnectionError, TimeoutError, OSError, PlaywrightError, ImportError),
         report=_report_crawl4ai_degraded,
     ),
     StartupPolicy(
@@ -511,8 +520,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     Neo4j (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError, ServiceUnavailable, ConfigurationError),
     Celery (ServiceUnavailableException, OperationalError, OSError),
     TaskGroup ExceptionGroup, PostgreSQL startup (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError),
-    CogneeDimensionMismatchError (hard-fail), Graphiti (ConnectionError, TimeoutError, OSError, ServiceUnavailable),
-    Crawl4AI (ConnectionError, TimeoutError, OSError, PlaywrightError),
+    CogneeDimensionMismatchError (hard-fail), Graphiti (ConnectionError, TimeoutError, OSError, GqlError),
+    Crawl4AI (ConnectionError, TimeoutError, OSError, PlaywrightError, ImportError),
     Object storage (ConnectionError, TimeoutError, OSError), Celery TimeoutError,
     Celery ServiceUnavailableException, Outbox (ConnectionError, TimeoutError, OSError, RuntimeError, ValueError).
     """
