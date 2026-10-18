@@ -20,8 +20,7 @@ from typing import TYPE_CHECKING, Any  # noqa: TC003 — pydantic field annotati
 
 from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Failure, Success
-from sqlalchemy import func, literal, literal_column, select, text, tuple_, update
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import func, literal_column, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -210,18 +209,20 @@ class ChatTranscriptRepository:
         session_id: str,
         usage: Mapping[str, int] | None = None,
         usage_metadata: Mapping[str, Mapping[str, Any]] | None = None,
-        expect_checkpoint_id: str | None = None,
+        prior_checkpoint_id: str | None,
     ) -> TranscriptResult[ApplyOutcome]:
         """One boundary = one transaction: watermark + rows + status (§5.1).
 
         ``usage`` maps ``source_key -> tokens``; on conflict only the one-time
         fill ``tokens_used = COALESCE(chat_messages.tokens_used, EXCLUDED.tokens_used)``
         happens, so replay can never double-bill (§6).
-        ``expect_checkpoint_id`` makes the watermark move monotonic (§5.3):
-        when the projection was derived from a checkpoint that is NOT the
-        session row's locked latest, the apply answers as a no-op instead of
-        overwriting a newer writer's status/watermark with stale values —
-        row locking only orders writes, it doesn't reject them.
+        ``prior_checkpoint_id`` is REQUIRED and is the transcript watermark
+        the caller read BEFORE projecting (``None`` when it observed no row).
+        When the locked row's watermark no longer equals it, a newer writer
+        landed between that read and this apply — the whole apply answers a
+        no-op so its status/watermark can never be overwritten backward (row
+        locking only orders writes, it doesn't reject them). Required, not
+        defaulted: an omitted argument must not silently disable the guard.
         """
         if projection.is_no_op:
             noop = projection.no_op
@@ -288,17 +289,17 @@ class ChatTranscriptRepository:
                     )
 
                 checkpoint_id = projection.watermark_checkpoint_id
-                # Stale-projection guard (§5.3): the locked latest checkpoint
-                # must be the one this projection derived from; otherwise a
-                # newer writer landed between the snapshot and this apply.
-                if (
-                    expect_checkpoint_id is not None
-                    and session_row.last_checkpoint_id is not None
-                    and session_row.last_checkpoint_id != expect_checkpoint_id
-                ):
+                # Stale-projection guard (§5.3): the locked row's watermark
+                # must still be the one this caller OBSERVED before
+                # projecting — a mismatch means a newer writer landed between
+                # the read and this apply. None==None means the row was
+                # freshly created and nobody else claimed it; a watermark
+                # appearing under a None observation is exactly the theft
+                # this guard rejects.
+                if session_row.last_checkpoint_id != prior_checkpoint_id:
                     logger.bind(
                         session_id=session_id,
-                        expected=expect_checkpoint_id,
+                        observed_prior=prior_checkpoint_id,
                         current=session_row.last_checkpoint_id,
                     ).debug("transcript_apply_stale_projection")
                     return Success(ApplyOutcome(applied=False, reason="stale_projection"))
@@ -398,28 +399,33 @@ class ChatTranscriptRepository:
 
         The projector drops rows already keyed in the saved turn context, so
         the segment's tokens land on the EXISTING assistant row instead.
-        ``tokens_used`` fills only NULLs (replay cannot double-bill); the
-        content-free metadata breakdown merges once behind the same gate.
+        Read-modify-write UNDER the session's row lock (the lock at the top
+        of this transaction serializes every writer for this session):
+        ``tokens_used`` fills only NULLs (replay cannot double-bill) and the
+        content-free metadata breakdown merges behind the same gate — this
+        also avoids json/jsonb operator mismatch (``extra_metadata`` is a
+        ``json`` column and ``||`` is jsonb-only).
         """
         for source_key, tokens in tokens_for.items():
             if source_key in projected_keys or tokens is None:
                 continue
-            fill_values: dict[str, Any] = {"tokens_used": tokens}
+            target_row = (
+                await session.execute(
+                    select(ChatMessage)
+                    .where(
+                        ChatMessage.session_id == session_id,
+                        ChatMessage.source_key == source_key,
+                        ChatMessage.tokens_used.is_(None),
+                    )
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if target_row is None:
+                continue  # already billed, or deleted under us — fill-once holds
+            target_row.tokens_used = tokens
             attached = metadata_for.get(source_key)
             if attached is not None:
-                fill_values["extra_metadata"] = func.coalesce(
-                    ChatMessage.extra_metadata,
-                    text("'{}'::jsonb"),
-                ).op("||")(literal(dict(attached), JSONB))
-            await session.execute(
-                update(ChatMessage)
-                .where(
-                    ChatMessage.session_id == session_id,
-                    ChatMessage.source_key == source_key,
-                    ChatMessage.tokens_used.is_(None),
-                )
-                .values(**fill_values)
-            )
+                target_row.extra_metadata = {**(target_row.extra_metadata or {}), **dict(attached)}
 
     @staticmethod
     async def _insert_row(

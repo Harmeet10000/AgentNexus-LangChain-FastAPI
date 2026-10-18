@@ -54,7 +54,10 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
     from redis.asyncio import Redis
 
-    from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
+    from app.features.agent_saul.transcript.repository import (
+        ChatTranscriptRepository,
+        SessionMeta,
+    )
 
 SAUL_RECONCILE_HINT_KEY = "saul:reconcile"
 TRANSCRIPT_RETENTION = timedelta(days=7)  # §8 (D5): proposed retention period
@@ -265,7 +268,7 @@ async def _reconcile_once(
         derived,
         user_id=owner_user_id,
         session_id=session_id,
-        expect_checkpoint_id=derived.watermark_checkpoint_id,
+        prior_checkpoint_id=turn_context.last_checkpoint_id,
     )
     if isinstance(applied, Failure):
         return _ThreadReconcileOutcome()
@@ -367,90 +370,32 @@ async def _gc_checkpointed_threads(
     GC always follows a verified catch-up reconcile of the thread (doc §1/§8);
     the audit stamp lands on the session row before the checkpoint disappears.
     A session whose catch-up reconcile fails keeps its checkpoint (lossy GC is
-    never chosen over losing the last write, §8 "the only proof...").
+    never chosen over losing the last write, §8 "the only proof..."). Each
+    candidate runs under the SAME thread lock a connection uses (§5.5) across
+    catch-up, checks, and delete — a reconnect can neither start a turn on a
+    thread being deleted nor lose checkpoints it is writing, and holding the
+    lock makes ``aliveness=False`` a fact, not a probe.
     """
     candidates = await repo.list_gc_candidates(older_than=older_than, limit=batch_size)
     if isinstance(candidates, Failure):
         return 0
     deleted = 0
     for session_meta in candidates.unwrap():
-        session_id = session_meta.session_id
-        # §5.5/§8: the catch-up and the deletion run UNDER the same thread
-        # exclusion a connection uses. While it is held, a reconnect can
-        # neither start a new turn on the thread nor lose checkpoints it is
-        # writing; conversely, holding it makes "no live connection" a FACT
-        # inside the section, so the verdict runs with aliveness=False
-        # instead of probing a key this very section holds.
-        lock = ThreadLock(redis, session_id)
+        lock = ThreadLock(redis, session_meta.session_id)
         acquired = await lock.acquire()
         if not acquired:
             continue  # owned by a live connection — never GC under it (§5.5)
         try:
-            outcome = await _reconcile_once(
+            if await _gc_one_session(
                 repo=repo,
                 graph=graph,
+                checkpointer=checkpointer,
                 redis=redis,
-                session_id=session_id,
+                session_meta=session_meta,
                 now=now,
-                aliveness=False,
-            )
-            # §8 verified catch-up: GC acts ONLY when the catch-up just
-            # derived a FRESH terminal verdict from the CURRENT checkpoint.
-            # A no-op (outcome.clean) is not proof for a FRESH candidate — it
-            # may equally be an observation gap — and a failure
-            # (outcome.failed) releases nothing.
-            pending = session_meta.gc_pending
-            if not (
-                not outcome.failed
-                and (outcome.status in _TERMINAL_STATUS_VALUES or (pending and outcome.clean))
+                older_than=older_than,
             ):
-                continue  # catch-up did not complete — keep the checkpoint (§8)
-            # Generation + retention recheck UNDER the lock (§8): the
-            # checkpoint the verdict came from must STILL be the session
-            # row's latest, and past the retention deadline as read now. A
-            # pending retry whose catch-up found NOTHING (already deleted or
-            # unprojectable) skips straight to the idempotent delete + confirm.
-            if not outcome.clean:
-                peek = await repo.peek_session_checkpoint(session_id=session_id)
-                if isinstance(peek, Failure):
-                    continue
-                current_id, current_ts = peek.unwrap()
-                if current_id != outcome.checkpoint_id:
-                    logger.bind(
-                        session_id=session_id,
-                        verdict_checkpoint=outcome.checkpoint_id,
-                        current_checkpoint=current_id,
-                    ).debug("transcript_gc_generation_moved_skip")
-                    continue
-                if current_ts is None or current_ts > older_than:
-                    continue  # a new turn (+its checkpoint) arrived — survive (§8)
-            # The PENDING stamp lands BEFORE the checkpoint disappears (§8):
-            # a worker that dies — or gets cancelled — between stamp and
-            # delete leaves a candidate that the recent-pending exclusion
-            # keeps quiet just long enough to not double-sweep, then surfaces
-            # again (stale pending) for an idempotent ``adelete_thread``
-            # retry. Only the CONFIRM closes the record.
-            stamped = await repo.stamp_gc_audit(
-                session_id=session_id,
-                deleted_checkpoint_id=session_meta.last_checkpoint_id,
-                swept_at=now,
-                pending=True,
-            )
-            if isinstance(stamped, Failure):
-                logger.bind(session_id=session_id, error=str(stamped.failure())).warning(
-                    "transcript_gc_stamp_failed"
-                )
-                continue
-            await checkpointer.adelete_thread(session_id)  # public API only (§1)
-            confirmed = await repo.confirm_gc_audit(session_id=session_id, confirmed_at=now)
-            if isinstance(confirmed, Failure):
-                # Deletion succeeded; confirm persisted? If the confirm
-                # failed the pending record ages into a retry, whose
-                # idempotent delete + confirm self-heals (§8).
-                logger.bind(session_id=session_id, error=str(confirmed.failure())).warning(
-                    "transcript_gc_confirm_failed"
-                )
-            deleted += 1
+                deleted += 1
         except Exception as exc:  # noqa: BLE001 — a GC refusal never stops the sweep
             exc.add_note(f"operation=transcript_gc, session_id={session_meta.session_id}")
             logger.bind(session_id=session_meta.session_id, error=str(exc)).warning(
@@ -462,3 +407,93 @@ async def _gc_checkpointed_threads(
         finally:
             await lock.release()
     return deleted
+
+
+async def _gc_one_session(
+    *,
+    repo: ChatTranscriptRepository,
+    graph: CompiledStateGraph[Any],
+    checkpointer: AsyncPostgresSaver,
+    redis: Redis,
+    session_meta: SessionMeta,
+    now: datetime,
+    older_than: datetime,
+) -> bool:
+    """One GC candidate's verified catch-up → delete → confirm cycle (§8).
+
+    Called WITH the thread lock held (§5.5). Returns whether the checkpoint
+    was deleted and the pending record confirmed. Any refusal answers False
+    and keeps the checkpoint — lossy GC is never chosen over losing the last
+    write (§8).
+    """
+    session_id = session_meta.session_id
+    outcome = await _reconcile_once(
+        repo=repo,
+        graph=graph,
+        redis=redis,
+        session_id=session_id,
+        now=now,
+        aliveness=False,
+    )
+    # §8 verified catch-up: GC acts ONLY on real proof. A fresh candidate
+    # needs a FRESH terminal verdict from the CURRENT checkpoint — a no-op
+    # (outcome.clean) is NOT proof, it may be an observation gap — and a
+    # failure (outcome.failed) releases nothing. A PENDING retry may also act
+    # on a no-op ONLY once the checkpoint's absence is confirmed (whole job
+    # of the retry is a delete that already happened); a no-op with a LIVE
+    # checkpoint (e.g. a young first super-step) never deletes.
+    pending = session_meta.gc_pending
+    if outcome.failed:
+        return False
+    if not (outcome.status in _TERMINAL_STATUS_VALUES or (pending and outcome.clean)):
+        return False  # catch-up did not complete — keep the checkpoint (§8)
+    # Generation + retention recheck UNDER the lock (§8): the checkpoint the
+    # verdict came from must STILL be the session row's latest, and past the
+    # retention deadline as read now.
+    peek = await repo.peek_session_checkpoint(session_id=session_id)
+    if isinstance(peek, Failure):
+        return False
+    current_id, current_ts = peek.unwrap()
+    if pending and outcome.clean:
+        if current_id is not None:
+            # A no-op on a LIVE checkpoint proves nothing about it — a young
+            # turn's pre-first-super-step view can look like a no-op; without
+            # a terminal verdict the checkpoint stays (§8). It re-enters the
+            # candidate list on a later pass.
+            return False
+        # CURRENT row watermark absent ⇒ nothing exists to keep: the idempotent
+        # delete below simply confirms the record's close.
+    elif current_id != outcome.checkpoint_id:
+        logger.bind(
+            session_id=session_id,
+            verdict_checkpoint=outcome.checkpoint_id,
+            current_checkpoint=current_id,
+        ).debug("transcript_gc_generation_moved_skip")
+        return False
+    elif current_ts is None or current_ts > older_than:
+        return False  # a new turn (+its checkpoint) arrived — survive (§8)
+    # The PENDING stamp lands BEFORE the checkpoint disappears (§8): a worker
+    # that dies — or gets cancelled — between stamp and delete leaves a
+    # candidate that the recent-pending exclusion keeps quiet just long
+    # enough to not double-sweep, then surfaces again (stale pending) for an
+    # idempotent ``adelete_thread`` retry. Only the CONFIRM closes the record.
+    stamped = await repo.stamp_gc_audit(
+        session_id=session_id,
+        deleted_checkpoint_id=session_meta.last_checkpoint_id,
+        swept_at=now,
+        pending=True,
+    )
+    if isinstance(stamped, Failure):
+        logger.bind(session_id=session_id, error=str(stamped.failure())).warning(
+            "transcript_gc_stamp_failed"
+        )
+        return False
+    await checkpointer.adelete_thread(session_id)  # public API only (§1)
+    confirmed = await repo.confirm_gc_audit(session_id=session_id, confirmed_at=now)
+    if isinstance(confirmed, Failure):
+        # Deletion succeeded but the confirm did not: the pending record ages
+        # into a retry, whose idempotent delete + confirm self-heals (§8).
+        logger.bind(session_id=session_id, error=str(confirmed.failure())).warning(
+            "transcript_gc_confirm_failed"
+        )
+    return True

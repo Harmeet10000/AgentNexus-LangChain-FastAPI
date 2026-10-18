@@ -10,7 +10,7 @@ schema gate, and Graphiti/GC independence of the transcript.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 from uuid import uuid4
 
 import pytest
@@ -35,6 +35,7 @@ from app.features.agent_saul.transcript.projection import (
 from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from typing import Any
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
@@ -42,9 +43,53 @@ pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 USER_ID = "integration-user"
 
 
-async def _session_factory() -> async_sessionmaker[Any]:
+class _Db(NamedTuple):
+    """One engine's sessionmaker and its repository, for a single test."""
+
+    factory: async_sessionmaker[Any]
+    repo: ChatTranscriptRepository
+
+
+@pytest.fixture
+async def db() -> AsyncIterator[_Db]:
+    """A fresh engine per test, disposed at teardown.
+
+    A shared module-level engine cannot work here: asyncpg connections are
+    bound to the event loop that created them and pytest-asyncio runs each
+    test on its own loop. Leaking one engine per test (no dispose) exhausts
+    the TigerData connection cap partway through this file, and the late
+    605-row apply then fails as an opaque write failure instead of the
+    behaviour under test.
+    """
     engine = create_async_engine(get_database_url(flavour="async"), pool_pre_ping=True)
-    return async_sessionmaker(engine, expire_on_commit=False)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        yield _Db(factory=factory, repo=ChatTranscriptRepository(factory))
+    finally:
+        await engine.dispose()
+
+
+async def _apply(
+    repo: ChatTranscriptRepository,
+    projection: Projection,
+    *,
+    session_id: str,
+    **kwargs: Any,
+) -> Any:
+    """Apply the projection the way a boundary does (§5.3 guard).
+
+    The transcript watermark is read BEFORE the projection is handed to the
+    repository — the monotonicity guard requires that observation, and a test
+    helper that skipped it would silently disable the guard.
+    """
+    peek = await repo.peek_session_checkpoint(session_id=session_id)
+    prior = peek.unwrap()[0] if isinstance(peek, Success) else None
+    return await repo.apply_projection(
+        projection,
+        session_id=session_id,
+        prior_checkpoint_id=prior,
+        **kwargs,
+    )
 
 
 def _projection(
@@ -81,15 +126,15 @@ def _row(
     )
 
 
-async def test_replay_is_batch_noop_and_item_deduped() -> None:
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+async def test_replay_is_batch_noop_and_item_deduped(db: _Db) -> None:
+    repo = db.repo
     session_id = str(uuid4())
     rows = (
         _row(0, f"query:{session_id}", "query"),
         _row(1, "interrupt:int-1", "clarification_prompt"),
     )
-    first = await repo.apply_projection(
+    first = await _apply(
+        repo,
         _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-1"),
         user_id=USER_ID,
         session_id=session_id,
@@ -99,7 +144,8 @@ async def test_replay_is_batch_noop_and_item_deduped() -> None:
     assert outcome.applied is True
 
     # Same checkpoint, no rows → batch no-op.
-    replay = await repo.apply_projection(
+    replay = await _apply(
+        repo,
         _projection(query_id=f"query:{session_id}", checkpoint_id="cp-1"),
         user_id=USER_ID,
         session_id=session_id,
@@ -109,14 +155,15 @@ async def test_replay_is_batch_noop_and_item_deduped() -> None:
     assert replayed.applied is False
 
     # Same checkpoint, WITH rows (crash-heal form): no duplicate rows land.
-    heal = await repo.apply_projection(
+    heal = await _apply(
+        repo,
         _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-1"),
         user_id=USER_ID,
         session_id=session_id,
     )
     assert isinstance(heal, Success)
     assert heal.unwrap().rows_inserted == 0
-    async with factory() as session:
+    async with db.factory() as session:
         count = (
             await session.execute(
                 sa_text("SELECT count(*) FROM chat_messages WHERE session_id = :sid"),
@@ -126,27 +173,28 @@ async def test_replay_is_batch_noop_and_item_deduped() -> None:
     assert int(count) == 2
 
 
-async def test_tokens_fill_once_under_replay() -> None:
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+async def test_tokens_fill_once_under_replay(db: _Db) -> None:
+    repo = db.repo
     session_id = str(uuid4())
     rows = (_row(0, f"query:{session_id}", "query"),)
 
-    await repo.apply_projection(
+    await _apply(
+        repo,
         _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-a"),
         user_id=USER_ID,
         session_id=session_id,
         usage={f"query:{session_id}": 420},
     )
     # A higher usage on replay must NOT overwrite (fill-once COALESCE).
-    replay = await repo.apply_projection(
+    replay = await _apply(
+        repo,
         _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-a"),
         user_id=USER_ID,
         session_id=session_id,
         usage={f"query:{session_id}": 999},
     )
     assert isinstance(replay, Success)  # batch no-op keeps tokens intact
-    async with factory() as session:
+    async with db.factory() as session:
         tokens = (
             await session.execute(
                 sa_text("SELECT tokens_used FROM chat_messages WHERE session_id = :sid"),
@@ -156,14 +204,14 @@ async def test_tokens_fill_once_under_replay() -> None:
     assert int(tokens) == 420
 
 
-async def test_turn_seq_stable_across_pause_and_resume() -> None:
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+async def test_turn_seq_stable_across_pause_and_resume(db: _Db) -> None:
+    repo = db.repo
     session_id = str(uuid4())
     q_key = f"query:{session_id}"
 
     # First boundary: query lands inside a fresh turn.
-    r1 = await repo.apply_projection(
+    r1 = await _apply(
+        repo,
         _projection(query_id=q_key, rows=(_row(0, q_key, "query"),), checkpoint_id="cp-t1"),
         user_id=USER_ID,
         session_id=session_id,
@@ -173,7 +221,8 @@ async def test_turn_seq_stable_across_pause_and_resume() -> None:
     assert r1.unwrap().turn_opened is True
 
     # Second boundary (same turn, post-resume): turn_seq MUST stay 1.
-    r2 = await repo.apply_projection(
+    r2 = await _apply(
+        repo,
         _projection(
             query_id=q_key,
             status=SessionStatus.CLARIFYING,
@@ -186,7 +235,7 @@ async def test_turn_seq_stable_across_pause_and_resume() -> None:
     assert isinstance(r2, Success)
     assert r2.unwrap().turn_seq == 1
     assert r2.unwrap().turn_opened is False
-    async with factory() as session:
+    async with db.factory() as session:
         session_row = (
             await session.execute(
                 sa_text("SELECT turn_count, status FROM chat_sessions WHERE session_id = :sid"),
@@ -197,12 +246,12 @@ async def test_turn_seq_stable_across_pause_and_resume() -> None:
     assert session_row[1] == "clarifying"
 
 
-async def test_write_failure_returns_typed_failure_not_raised() -> None:
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+async def test_write_failure_returns_typed_failure_not_raised(db: _Db) -> None:
+    repo = db.repo
     # A NUL byte in any text parameter is rejected by Postgres at bind time —
     # a deterministic driver failure to prove the edge sanitizes, not raises.
-    failure = await repo.apply_projection(
+    failure = await _apply(
+        repo,
         _projection(
             query_id="query:bad",
             rows=(_row(0, "query:bad", "query"),),
@@ -219,18 +268,18 @@ async def test_write_failure_returns_typed_failure_not_raised() -> None:
     assert "0x00" not in error.message
 
 
-async def test_schema_gate_fails_closed_on_unknown_version() -> None:
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+async def test_schema_gate_fails_closed_on_unknown_version(db: _Db) -> None:
+    repo = db.repo
     session_id = str(uuid4())
-    await repo.apply_projection(
+    await _apply(
+        repo,
         _projection(
             query_id=f"query:{session_id}", rows=(_row(0, f"query:{session_id}", "query"),)
         ),
         user_id=USER_ID,
         session_id=session_id,
     )
-    async with factory() as session:
+    async with db.factory() as session:
         await session.execute(
             sa_text("UPDATE chat_sessions SET schema_version = 0 WHERE session_id = :sid"),
             {"sid": session_id},
@@ -245,9 +294,8 @@ async def test_schema_gate_fails_closed_on_unknown_version() -> None:
     assert isinstance(other.failure(), TranscriptNotFoundError)
 
 
-async def test_turn_closed_flow_over_24h_pause_window() -> None:
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+async def test_turn_closed_flow_over_24h_pause_window(db: _Db) -> None:
+    repo = db.repo
     session_id = str(uuid4())
     # The D4 chain-of-custody key IS the HumanMessage id; the projector keys
     # the query row by it. Use the raw id everywhere so the seeded turn and
@@ -255,7 +303,8 @@ async def test_turn_closed_flow_over_24h_pause_window() -> None:
     q_key = session_id
 
     # Seed the paused turn: query + clarification prompt recorded at T1.
-    await repo.apply_projection(
+    await _apply(
+        repo,
         _projection(
             query_id=q_key,
             status=SessionStatus.CLARIFYING,
@@ -289,7 +338,7 @@ async def test_turn_closed_flow_over_24h_pause_window() -> None:
         aliveness=False,
     )
     assert derived.session_status == SessionStatus.ABANDONED_EXPIRED
-    applied = await repo.apply_projection(derived, user_id=USER_ID, session_id=session_id)
+    applied = await _apply(repo, derived, user_id=USER_ID, session_id=session_id)
     assert isinstance(applied, Success)
     assert applied.unwrap().rows_inserted == 1  # the turn_closed row
 
@@ -341,13 +390,13 @@ def _snapshot_with(
     )
 
 
-async def test_checkpointer_gc_cannot_touch_the_transcript() -> None:
+async def test_checkpointer_gc_cannot_touch_the_transcript(db: _Db) -> None:
     """Checkpointer lifecycle is namespace-orthogonal to chat rows (D-coverage)."""
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+    repo = db.repo
     session_id = str(uuid4())
     q_key = session_id
-    persisted = await repo.apply_projection(
+    persisted = await _apply(
+        repo,
         _projection(query_id=q_key, rows=(_row(0, q_key, "query"),)),
         user_id=USER_ID,
         session_id=session_id,
@@ -370,24 +419,25 @@ async def test_checkpointer_gc_cannot_touch_the_transcript() -> None:
     assert rows[0].kind == "query"
 
 
-async def test_owner_mismatch_refused_before_writes() -> None:
+async def test_owner_mismatch_refused_before_writes(db: _Db) -> None:
     """§9: a wrong-owner projection is a sanitized not-found, no rows, no move."""
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+    repo = db.repo
     session_id = str(uuid4())
     rows = (
         _row(0, f"query:{session_id}", "query"),
         _row(1, "interrupt:int-owner", "clarification_prompt"),
     )
 
-    first = await repo.apply_projection(
+    first = await _apply(
+        repo,
         _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-owner"),
         user_id=USER_ID,
         session_id=session_id,
     )
     assert isinstance(first, Success)
 
-    attack = await repo.apply_projection(
+    attack = await _apply(
+        repo,
         _projection(
             query_id=f"query:{session_id}",
             rows=(_row(2, "interrupt:int-stranger", "clarification_prompt"),),
@@ -400,7 +450,7 @@ async def test_owner_mismatch_refused_before_writes() -> None:
     assert isinstance(attack.failure(), TranscriptNotFoundError)
 
     # Nothing about the real session moved: no stray rows, watermark intact.
-    async with factory() as session:
+    async with db.factory() as session:
         stranger_rows = await session.execute(
             sa_text("SELECT count(*) FROM chat_messages WHERE user_id = 'stranger-user'"),
         )
@@ -412,17 +462,17 @@ async def test_owner_mismatch_refused_before_writes() -> None:
         assert (cp.scalar_one()) == "cp-owner"
 
 
-async def test_sweep_context_returns_owner_with_context() -> None:
+async def test_sweep_context_returns_owner_with_context(db: _Db) -> None:
     """§8: the sweep helper is (owner_user_id, turn_context) — never bare.
 
     _reconcile_once unpacks the pair; a bare context here would TypeError
     every sweep pass into its per-thread guard and silently disable
     background reconciliation AND checkpoint GC.
     """
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+    repo = db.repo
     session_id = str(uuid4())
-    first = await repo.apply_projection(
+    first = await _apply(
+        repo,
         _projection(
             query_id=f"query:{session_id}",
             rows=(_row(0, f"query:{session_id}", "query"),),
@@ -444,7 +494,7 @@ async def test_sweep_context_returns_owner_with_context() -> None:
     assert isinstance(unknown.failure(), TranscriptNotFoundError)
 
 
-async def test_gc_stamp_excludes_freshly_audited_session() -> None:
+async def test_gc_stamp_excludes_freshly_audited_session(db: _Db) -> None:
     """§8: exclusion is stamp-generation AND pending-aware, not one-shot.
 
     A terminal session past retention IS a candidate with no stamp; a PENDING
@@ -453,10 +503,10 @@ async def test_gc_stamp_excludes_freshly_audited_session() -> None:
     covers the checkpoint generation — a later NEWER checkpoint must
     qualify again, which the SQL comparison — not a boolean flag — guarantees.
     """
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+    repo = db.repo
     session_id = str(uuid4())
-    first = await repo.apply_projection(
+    first = await _apply(
+        repo,
         _projection(
             query_id=f"query:{session_id}",
             rows=(_row(0, f"query:{session_id}", "query"),),
@@ -512,7 +562,8 @@ async def test_gc_stamp_excludes_freshly_audited_session() -> None:
 
     # A NEWER checkpoint generation re-qualifies: its watermark postdates the
     # stamp, so the stamp no longer covers the checkpoint (§8).
-    newer = await repo.apply_projection(
+    newer = await _apply(
+        repo,
         _projection(
             query_id=f"query:{session_id}",
             rows=(_row(1, "interrupt:gc2", "clarification_prompt"),),
@@ -528,17 +579,79 @@ async def test_gc_stamp_excludes_freshly_audited_session() -> None:
     assert session_id in {m.session_id for m in reopened.unwrap()}
 
 
-async def test_usage_only_fill_lands_on_existing_row() -> None:
+async def test_apply_rejects_a_stale_projection_under_the_row_lock(db: _Db) -> None:
+    """§5.3: a caller that read an OLD watermark must not move the cache.
+
+    Row locking only ORDERS writers — without the comparison, a sweep that
+    read checkpoint A and applies late would overwrite a newer writer's
+    status and watermark with A's (older) values. The comparison is against
+    the watermark the caller OBSERVED, so a legitimately newer projection
+    still lands while a stale one answers a no-op.
+    """
+    repo = db.repo
+    session_id = str(uuid4())
+    q = f"query:{session_id}"
+
+    first = await _apply(
+        repo,
+        _projection(
+            query_id=q,
+            rows=(_row(0, q, "query"),),
+            checkpoint_id="cp-a",
+            status=SessionStatus.ACTIVE,
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    # A boundary that observed "cp-a" and projects the NEXT checkpoint
+    # "cp-b": observed-prior is older by one step — must still land.
+    second = await _apply(
+        repo,
+        _projection(query_id=q, checkpoint_id="cp-b", status=SessionStatus.COMPLETED),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(second, Success)
+    assert second.unwrap().applied is True
+
+    # A stale sweep that read "cp-a" before that writer landed now applies a
+    # FAILED verdict derived from the OLD checkpoint → refused, nothing moves.
+    stale = await repo.apply_projection(
+        _projection(query_id=q, checkpoint_id="cp-a", status=SessionStatus.FAILED),
+        user_id=USER_ID,
+        session_id=session_id,
+        prior_checkpoint_id="cp-a",
+    )
+    assert isinstance(stale, Success)
+    assert stale.unwrap().applied is False
+    assert stale.unwrap().reason == "stale_projection"
+
+    async with db.factory() as session:
+        row = (
+            await session.execute(
+                sa_text(
+                    "SELECT status, last_checkpoint_id FROM chat_sessions WHERE session_id = :sid"
+                ),
+                {"sid": session_id},
+            )
+        ).one()
+        assert row.status == str(SessionStatus.COMPLETED.value)
+        assert row.last_checkpoint_id == "cp-b"
+
+
+async def test_usage_only_fill_lands_on_existing_row(db: _Db) -> None:
     """§7: segment totals land once even when the projector deduped the row."""
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+    repo = db.repo
     session_id = str(uuid4())
     rows = (
         _row(0, f"query:{session_id}", "query"),
         _row(1, "interrupt:fill-target", "clarification_prompt"),
     )
 
-    await repo.apply_projection(
+    await _apply(
+        repo,
         _projection(query_id=f"query:{session_id}", rows=rows, checkpoint_id="cp-fill-1"),
         user_id=USER_ID,
         session_id=session_id,
@@ -547,7 +660,8 @@ async def test_usage_only_fill_lands_on_existing_row() -> None:
     # Follow-up boundary (new checkpoint) whose target row already exists: the
     # projector drops it, so the usage rides as a usage-only fill. The
     # content-free metadata breakdown merges into the same row (§7), fill-once.
-    fill = await repo.apply_projection(
+    fill = await _apply(
+        repo,
         _projection(
             query_id=f"query:{session_id}",
             rows=(_row(2, "interrupt:fill-other", "clarification_prompt"),),
@@ -561,7 +675,7 @@ async def test_usage_only_fill_lands_on_existing_row() -> None:
         },
     )
     assert isinstance(fill, Success)
-    async with factory() as session:
+    async with db.factory() as session:
         landed = (
             await session.execute(
                 sa_text(
@@ -575,7 +689,8 @@ async def test_usage_only_fill_lands_on_existing_row() -> None:
         assert landed.extra_metadata["usage"] == {"input": 40, "output": 37}
         # Fill-once for the merge gate as well: a replayed boundary cannot
         # rewrite it.
-        replay = await repo.apply_projection(
+        replay = await _apply(
+            repo,
             _projection(
                 query_id=f"query:{session_id}",
                 rows=(_row(2, "interrupt:fill-other", "clarification_prompt"),),
@@ -600,10 +715,9 @@ async def test_usage_only_fill_lands_on_existing_row() -> None:
         assert unchanged.extra_metadata["usage"] == {"input": 40, "output": 37}
 
 
-async def test_read_transcript_paging_completes_large_transcripts() -> None:
+async def test_read_transcript_paging_completes_large_transcripts(db: _Db) -> None:
     """§8 export: offset paging returns every row in display order (D3)."""
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+    repo = db.repo
     session_id = str(uuid4())
     big = tuple(
         _row(
@@ -611,7 +725,8 @@ async def test_read_transcript_paging_completes_large_transcripts() -> None:
         )
         for i in range(605)
     )
-    first = await repo.apply_projection(
+    first = await _apply(
+        repo,
         _projection(
             query_id=f"query:{session_id}",
             rows=big,
@@ -653,16 +768,16 @@ async def test_read_transcript_paging_completes_large_transcripts() -> None:
     assert len(seen) == len(set(seen))
 
 
-async def test_turn_recovery_reserves_the_slot() -> None:
+async def test_turn_recovery_reserves_the_slot(db: _Db) -> None:
     """§6: a recovered query row OPENS its turn — turn_count advances in the
     same transaction, so the next real turn cannot reuse its turn_seq."""
-    factory = await _session_factory()
-    repo = ChatTranscriptRepository(factory)
+    repo = db.repo
     session_id = str(uuid4())
 
     # Established turn 1, then a crash-like situation for a NEW turn: the
     # recovery path replays the historical projection carrying its query.
-    first = await repo.apply_projection(
+    first = await _apply(
+        repo,
         _projection(
             query_id=f"query:{session_id}", rows=(_row(0, f"query:{session_id}", "query"),)
         ),
@@ -685,7 +800,8 @@ async def test_turn_recovery_reserves_the_slot() -> None:
     # The slot was RESERVED: a later full projection of turn 3 must not
     # collide with the recovered one.
     third_key = f"query:{session_id}-3"
-    third = await repo.apply_projection(
+    third = await _apply(
+        repo,
         _projection(
             query_id=third_key,
             rows=(_row(0, third_key, "query"),),
@@ -698,7 +814,7 @@ async def test_turn_recovery_reserves_the_slot() -> None:
     third_outcome = third.unwrap()
     assert third_outcome.turn_seq == 3
 
-    async with factory() as session:
+    async with db.factory() as session:
         counts = (
             await session.execute(
                 sa_text("SELECT turn_count FROM chat_sessions WHERE session_id = :sid"),

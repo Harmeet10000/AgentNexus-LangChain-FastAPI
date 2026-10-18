@@ -420,6 +420,7 @@ class TurnRecorder:
         # 4. Apply (sub-step of the bounded boundary; the WS loop never waits
         # longer than the boundary deadline, §5.2).
         usage_map: dict[str, int] = {}
+        last_key: str | None = None
         if attach_usage and self._usage.usage.total:
             # §7 target: this projection's last assistant row; when the
             # projector deduped it away (row already exists), the saved turn
@@ -433,9 +434,9 @@ class TurnRecorder:
             session_id=self._thread_id,
             usage=usage_map,
             usage_metadata=(
-                {last_key: self._usage.as_metadata()} if last_key is not None else None
+                {last_key: self._usage.usage.as_metadata()} if last_key is not None else None
             ),
-            expect_checkpoint_id=projection.watermark_checkpoint_id,
+            prior_checkpoint_id=context.last_checkpoint_id,
         )
 
         if isinstance(applied, Failure):
