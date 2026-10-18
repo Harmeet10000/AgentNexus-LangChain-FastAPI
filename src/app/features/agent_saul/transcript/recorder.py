@@ -265,6 +265,12 @@ class TurnRecorder:
             except Exception as exc:  # noqa: BLE001 — §9 boundary guard
                 self.log.bind(error=str(exc)).debug("transcript_history_state_skipped")
                 continue
+            # Adopt the plan THIS snapshot shows BEFORE the row check: a
+            # replayed interrupt state may add no rows but still rewrites the
+            # plan a later replayed decision must read (§6).
+            plan_seen = _paused_plan_of(state)
+            if plan_seen:
+                paused_plan = plan_seen
             if projection.is_no_op or not projection.rows:
                 continue
             if not any(row.kind not in VERDICT_ROW_KINDS for row in projection.rows):
@@ -276,9 +282,6 @@ class TurnRecorder:
                 self.log.bind(operation="insert_rows_only").warning("transcript_hole_fill_failed")
             elif applied.unwrap().rows_inserted > 0:
                 turn_context = await self._turn_context() or turn_context
-            plan_seen = _paused_plan_of(state)
-            if plan_seen is not None:
-                paused_plan = plan_seen  # later decisions read the shown plan
 
     async def _turn_context(self) -> TranscriptTurnContext | None:
         """Fresh turn context, or None when the repository cannot serve it."""

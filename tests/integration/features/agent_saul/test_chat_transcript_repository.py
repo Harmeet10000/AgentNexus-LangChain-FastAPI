@@ -444,6 +444,61 @@ async def test_sweep_context_returns_owner_with_context() -> None:
     assert isinstance(unknown.failure(), TranscriptNotFoundError)
 
 
+async def test_gc_stamp_excludes_freshly_audited_session() -> None:
+    """§8: the stamp filter is stamp-at-or-after-checkpoint, not one-shot.
+
+    A terminal session past retention IS a candidate with no stamp; once the
+    audit stamp (swept_at >= last_checkpoint_ts) covers its checkpoint it is
+    excluded in SQL — and a session that later gains a NEWER checkpoint must
+    qualify again (the stamp predates the new work), which the SQL comparison
+    — not a boolean flag — guarantees.
+    """
+    factory = await _session_factory()
+    repo = ChatTranscriptRepository(factory)
+    session_id = str(uuid4())
+    first = await repo.apply_projection(
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=(_row(0, f"query:{session_id}", "query"),),
+            checkpoint_id="cp-gc",
+            status=SessionStatus.COMPLETED,
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+    older_than = datetime.now(tz=UTC) + timedelta(days=9)  # far horizon: fresh rows qualify
+    fresh = await repo.list_gc_candidates(older_than=older_than, limit=1000)
+    assert isinstance(fresh, Success)
+    assert session_id in {m.session_id for m in fresh.unwrap()}
+
+    # The audit stamp now covers the (old) checkpoint generation — excluded.
+    stamped = await repo.stamp_gc_audit(
+        session_id=session_id, deleted_checkpoint_id="cp-gc", swept_at=datetime.now(tz=UTC)
+    )
+    assert isinstance(stamped, Success)
+    after = await repo.list_gc_candidates(older_than=older_than, limit=1000)
+    assert isinstance(after, Success)
+    assert session_id not in {m.session_id for m in after.unwrap()}
+
+    # A NEWER checkpoint generation re-qualifies: its watermark postdates the
+    # stamp, so the stamp no longer covers the checkpoint (§8).
+    newer = await repo.apply_projection(
+        _projection(
+            query_id=f"query:{session_id}",
+            rows=(_row(1, "interrupt:gc2", "clarification_prompt"),),
+            checkpoint_id="cp-gc-2",
+            status=SessionStatus.COMPLETED,
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(newer, Success)
+    reopened = await repo.list_gc_candidates(older_than=older_than, limit=1000)
+    assert isinstance(reopened, Success)
+    assert session_id in {m.session_id for m in reopened.unwrap()}
+
+
 async def test_usage_only_fill_lands_on_existing_row() -> None:
     """§7: segment totals land once even when the projector deduped the row."""
     factory = await _session_factory()
@@ -513,6 +568,7 @@ async def test_read_transcript_paging_completes_large_transcripts() -> None:
     page_guard = 0
     cursor_seq: int | None = None
     cursor_ord: int | None = None
+    cursor_id: int | None = None
     while True:
         result = await repo.read_transcript(
             session_id=session_id,
@@ -520,6 +576,7 @@ async def test_read_transcript_paging_completes_large_transcripts() -> None:
             limit=500,
             after_turn_seq=cursor_seq,
             after_ordinal=cursor_ord,
+            after_id=cursor_id,
         )
         assert isinstance(result, Success)
         page_rows = list(result.unwrap())
@@ -530,7 +587,7 @@ async def test_read_transcript_paging_completes_large_transcripts() -> None:
         if len(page_rows) < 500:
             break
         last = page_rows[-1]
-        cursor_seq, cursor_ord = last.turn_seq, last.ordinal
+        cursor_seq, cursor_ord, cursor_id = last.turn_seq, last.ordinal, last.row_id
         page_guard += 1
         assert page_guard < 10  # safety bound — 605 rows need exactly 2 pages
     assert len(seen) == 605

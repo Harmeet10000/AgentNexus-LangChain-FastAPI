@@ -92,10 +92,17 @@ class TranscriptTurnContext(BaseModel):
 
 
 class TranscriptMessage(BaseModel):
-    """Read model for transcript reads/export (D3 order: turn_seq, ordinal)."""
+    """Read model for transcript reads/export (D3 order: turn_seq, ordinal).
+
+    ``row_id`` carries the storage row's id so a keyset cursor can compare
+    the FULL ordering key (``(turn_seq, ordinal, id)`` — the id tiebreak is
+    in the ORDER BY) across page boundaries. Not part of the display payload
+    contract: treat it as the cursor token.
+    """
 
     model_config = ConfigDict(frozen=True)
 
+    row_id: int
     turn_seq: int
     ordinal: int
     kind: str
@@ -515,6 +522,34 @@ class ChatTranscriptRepository:
             return context_result
         return Success((session_row.user_id, context_result.unwrap()))
 
+    async def peek_session_checkpoint(
+        self,
+        *,
+        session_id: str,
+    ) -> TranscriptResult[tuple[str | None, datetime | None]]:
+        """The session row's CURRENT checkpoint identity — the GC fence (§8).
+
+        Returns ``(last_checkpoint_id, last_checkpoint_ts)`` as read NOW: a
+        sweep compares both under its thread lock — id mismatch means the
+        thread moved and the verdict is stale; a ts at-or-after the retention
+        deadline means a new turn arrived.
+        """
+        try:
+            async with self._session_factory() as session:
+                row = (
+                    await session.execute(
+                        select(
+                            ChatSession.last_checkpoint_id,
+                            ChatSession.last_checkpoint_ts,
+                        ).where(ChatSession.session_id == session_id)
+                    )
+                ).one_or_none()
+        except SQLAlchemyError as exc:
+            return _sanitize_db_error(exc, "peek_session_checkpoint")
+        if row is None:
+            return Success((None, None))
+        return Success((row[0], row[1]))
+
     @trace_layer("repository")
     async def list_stale_sessions(
         self,
@@ -581,10 +616,13 @@ class ChatTranscriptRepository:
                                 ChatSession.last_checkpoint_ts <= older_than,
                                 # No stamp, or a stamp from a previous
                                 # checkpoint generation (§8; _GC_STAMP_KEY).
+                                # Parenthesized: TextClause renders verbatim —
+                                # an ungrouped OR would leak past the AND
+                                # chain and bypass every filter above.
                                 text(
-                                    "chat_sessions.extra_metadata ->> :stamp_key IS NULL "
+                                    "(chat_sessions.extra_metadata ->> :stamp_key IS NULL "
                                     "OR (chat_sessions.extra_metadata ->> :stamp_key)"
-                                    "::timestamptz < chat_sessions.last_checkpoint_ts"
+                                    "::timestamptz < chat_sessions.last_checkpoint_ts)"
                                 ).params(stamp_key=_GC_STAMP_KEY),
                             )
                             .order_by(ChatSession.last_checkpoint_ts)
@@ -636,6 +674,46 @@ class ChatTranscriptRepository:
                 return Success(True)
         except SQLAlchemyError as exc:
             return _sanitize_db_error(exc, "stamp_gc_audit")
+
+    async def clear_gc_audit(
+        self,
+        *,
+        session_id: str,
+    ) -> TranscriptResult[bool]:
+        """Remove the GC stamp — the retry path after a failed delete (§8).
+
+        The stamp is written BEFORE the checkpoint disappears so a crash mid
+        GC never strands the candidate; when the delete itself fails the
+        stamp must come off, or the audited checkpoint would never be
+        revisited.
+        """
+        try:
+            async with self._session_factory() as session, session.begin():
+                session_row = (
+                    await session.execute(
+                        select(ChatSession)
+                        .where(ChatSession.session_id == session_id)
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if session_row is None:
+                    return Failure(
+                        TranscriptNotFoundError(
+                            message="transcript session not found",
+                            session_id=session_id,
+                        )
+                    )
+                existing = dict(session_row.extra_metadata or {})
+                _ = existing.pop(_GC_STAMP_KEY, None)
+                _ = existing.pop("gc_deleted_checkpoint_id", None)
+                await session.execute(
+                    update(ChatSession)
+                    .where(ChatSession.id == session_row.id)
+                    .values(extra_metadata=existing)
+                )
+                return Success(True)
+        except SQLAlchemyError as exc:
+            return _sanitize_db_error(exc, "clear_gc_audit")
 
     # ------------------------------------------------------------------
     # Turn context for the projector
@@ -765,13 +843,16 @@ class ChatTranscriptRepository:
         limit: int = 500,
         after_turn_seq: int | None = None,
         after_ordinal: int | None = None,
+        after_id: int | None = None,
     ) -> TranscriptResult[Sequence[TranscriptMessage]]:
         """Keyset pagination: display order (turn_seq, ordinal), stable reads.
 
-        The cursor is the (turn_seq, ordinal) pair the caller last saw —
-        OFFSET rereads the whole table on every page and can repeat rows
-        when exports and appends overlap; keyset paging never revisits rows
-        (D3). The leading ``session_id`` equality still drives the index.
+        The cursor is the (turn_seq, ordinal, id) triple the caller last saw
+        — the FULL ordering key, so rows sharing turn_seq and ordinal (a
+        legacy import can produce them; the id tiebreaker is in the ORDER
+        BY) are never skipped at a page boundary. OFFSET rereads the whole
+        table on every page and can repeat rows when exports and appends
+        overlap; keyset paging never revisits rows (D3).
         """
         try:
             async with self._session_factory() as session:
@@ -786,11 +867,11 @@ class ChatTranscriptRepository:
                 version_failure = _schema_gate(session_row.schema_version)
                 if version_failure is not None:
                     return Failure(version_failure)
-                cursor = (after_turn_seq, after_ordinal)
+                key = (after_turn_seq, after_ordinal, after_id)
                 statement = select(ChatMessage).where(ChatMessage.session_id == session_id)
-                if cursor[0] is not None and cursor[1] is not None:
+                if all(part is not None for part in key):
                     statement = statement.where(
-                        tuple_(ChatMessage.turn_seq, ChatMessage.ordinal) > cursor
+                        tuple_(ChatMessage.turn_seq, ChatMessage.ordinal, ChatMessage.id) > key
                     )
                 rows = (
                     (
@@ -806,6 +887,7 @@ class ChatTranscriptRepository:
                 return Success(
                     tuple(
                         TranscriptMessage(
+                            row_id=row.id,
                             turn_seq=row.turn_seq,
                             ordinal=row.ordinal,
                             kind=row.kind,

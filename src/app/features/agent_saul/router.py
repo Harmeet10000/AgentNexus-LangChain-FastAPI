@@ -146,6 +146,7 @@ async def export_session_transcript(
         # the (turn_seq, ordinal) the reader itself walks).
         cursor_seq: int | None = None
         cursor_ord: int | None = None
+        cursor_id: int | None = None
         while True:
             result = await repo.read_transcript(
                 session_id=session_id,
@@ -153,6 +154,7 @@ async def export_session_transcript(
                 limit=_EXPORT_PAGE_ROWS,
                 after_turn_seq=cursor_seq,
                 after_ordinal=cursor_ord,
+                after_id=cursor_id,
             )
             if isinstance(result, Failure):
                 # Surface the typed error as a terminal line, never a silent
@@ -176,7 +178,7 @@ async def export_session_transcript(
             if len(page_rows) < _EXPORT_PAGE_ROWS:
                 return
             last = page_rows[-1]
-            cursor_seq, cursor_ord = last.turn_seq, last.ordinal
+            cursor_seq, cursor_ord, cursor_id = last.turn_seq, last.ordinal, last.row_id
 
     return StreamingResponse(
         rows(),

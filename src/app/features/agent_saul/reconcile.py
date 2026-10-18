@@ -36,6 +36,7 @@ from redis.exceptions import RedisError
 from returns.result import Failure
 
 from app.features.agent_saul.graph.graph import wire_saul_topology
+from app.features.agent_saul.thread_lock import ThreadLock
 from app.features.agent_saul.transcript.projection import (
     ORPHAN_GRACE,
     SessionStatus,
@@ -200,6 +201,7 @@ class _ThreadReconcileOutcome:
     """
 
     status: str | None = None
+    checkpoint_id: str | None = None
     clean: bool = False
     failed: bool = True
 
@@ -224,22 +226,27 @@ async def _reconcile_once(
     redis: Redis,
     session_id: str,
     now: datetime,
+    aliveness: bool | None = None,
 ) -> _ThreadReconcileOutcome:
     """Reconcile one thread through the projector; the outcome is explicit.
 
     The sweep context is the projector's only extra privilege: the CALLER's
     turn context arrives owner-checked inside the repository, and the write
     itself re-runs every §9 gate (unknown kinds, fail-closed versions).
+    ``aliveness`` is normally probed against the live lock key; a caller
+    holding the thread lock passes ``False`` outright — inside its exclusive
+    section the thread is un-owned by FACT, not by probe (§8 GC).
     """
     context_result = await repo.get_sweep_context(session_id=session_id)
     if isinstance(context_result, Failure):
         return _ThreadReconcileOutcome()
     owner_user_id, turn_context = context_result.unwrap()
     config: RunnableConfig = {"configurable": {"thread_id": session_id}}
-    aliveness = await _lock_alive(redis, session_id)
     if aliveness is None:
-        # §6 [v3]: aliveness unknowable → no verdict, no rows, no close.
-        return _ThreadReconcileOutcome()
+        aliveness = await _lock_alive(redis, session_id)
+        if aliveness is None:
+            # §6 [v3]: aliveness unknowable → no verdict, no rows, no close.
+            return _ThreadReconcileOutcome()
     snapshot = await graph.aget_state(config)  # public LangGraph API (§1)
     view = snapshot_to_view(snapshot)
     derived = project(
@@ -262,7 +269,12 @@ async def _reconcile_once(
     )
     if isinstance(applied, Failure):
         return _ThreadReconcileOutcome()
-    return _ThreadReconcileOutcome(status=derived.session_status.value, clean=False, failed=False)
+    return _ThreadReconcileOutcome(
+        status=derived.session_status.value,
+        checkpoint_id=derived.watermark_checkpoint_id,
+        clean=False,
+        failed=False,
+    )
 
 
 async def _reconcile_hinted_threads(
@@ -359,9 +371,24 @@ async def _gc_checkpointed_threads(
     deleted = 0
     for session_meta in candidates.unwrap():
         session_id = session_meta.session_id
+        # §5.5/§8: the catch-up and the deletion run UNDER the same thread
+        # exclusion a connection uses. While it is held, a reconnect can
+        # neither start a new turn on the thread nor lose checkpoints it is
+        # writing; conversely, holding it makes "no live connection" a FACT
+        # inside the section, so the verdict runs with aliveness=False
+        # instead of probing a key this very section holds.
+        lock = ThreadLock(redis, session_id)
+        acquired = await lock.acquire()
+        if not acquired:
+            continue  # owned by a live connection — never GC under it (§5.5)
         try:
             outcome = await _reconcile_once(
-                repo=repo, graph=graph, redis=redis, session_id=session_id, now=now
+                repo=repo,
+                graph=graph,
+                redis=redis,
+                session_id=session_id,
+                now=now,
+                aliveness=False,
             )
             # §8 verified catch-up: GC acts ONLY when the catch-up just
             # derived a FRESH terminal verdict from the CURRENT checkpoint.
@@ -370,16 +397,45 @@ async def _gc_checkpointed_threads(
             # nothing.
             if not (not outcome.failed and outcome.status in _TERMINAL_STATUS_VALUES):
                 continue  # catch-up did not complete — keep the checkpoint (§8)
-            await checkpointer.adelete_thread(session_id)  # public API only (§1)
-            await repo.stamp_gc_audit(
+            # Generation + retention recheck UNDER the lock (§8): the
+            # checkpoint the verdict came from must STILL be the session
+            # row's latest, and past the retention deadline as read now.
+            peek = await repo.peek_session_checkpoint(session_id=session_id)
+            if isinstance(peek, Failure):
+                continue
+            current_id, current_ts = peek.unwrap()
+            if current_id != outcome.checkpoint_id:
+                logger.bind(
+                    session_id=session_id,
+                    verdict_checkpoint=outcome.checkpoint_id,
+                    current_checkpoint=current_id,
+                ).debug("transcript_gc_generation_moved_skip")
+                continue
+            if current_ts is None or current_ts > older_than:
+                continue  # a new turn (+its checkpoint) arrived — survive (§8)
+            # The audit stamp lands BEFORE the checkpoint disappears (§8) so
+            # a crash mid-GC cannot strand a candidate; a failed delete
+            # clears the stamp so the next sweep may retry.
+            stamped = await repo.stamp_gc_audit(
                 session_id=session_id,
                 deleted_checkpoint_id=session_meta.last_checkpoint_id,
                 swept_at=now,
             )
+            if isinstance(stamped, Failure):
+                logger.bind(session_id=session_id, error=str(stamped.failure())).warning(
+                    "transcript_gc_stamp_failed"
+                )
+                continue
+            await checkpointer.adelete_thread(session_id)  # public API only (§1)
             deleted += 1
         except Exception as exc:  # noqa: BLE001 — a GC refusal never stops the sweep
             exc.add_note(f"operation=transcript_gc, session_id={session_meta.session_id}")
             logger.bind(session_id=session_meta.session_id, error=str(exc)).warning(
                 "transcript_gc_refused"
             )
+            unstamp = await repo.clear_gc_audit(session_id=session_id)
+            if isinstance(unstamp, Failure):
+                logger.bind(session_id=session_id).warning("transcript_gc_unstamp_failed")
+        finally:
+            await lock.release()
     return deleted

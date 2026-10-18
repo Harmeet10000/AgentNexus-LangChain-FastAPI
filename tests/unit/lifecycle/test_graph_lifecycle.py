@@ -9,8 +9,6 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
-from sqlalchemy.ext.asyncio import async_sessionmaker
-
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -18,6 +16,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.features.agent_saul.dependencies import get_agent_saul_deps
 from app.lifecycle import graphs

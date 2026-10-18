@@ -284,7 +284,7 @@ The checkpoint contains `document_text`, so GC is also a data-minimization contr
 
 **Transcript retention.** Indefinite until the user deletes or an erasure request is processed.
 
-**Export.** `GET /agent-saul/sessions/{id}/export` reads the transcript only and streams via an async generator (`StreamingResponse`). Redacted rows export as redacted. Reads are bounded (500 rows/page) and walk a keyset cursor — `(turn_seq, ordinal)` the previous page ended on — so a long transcript pages in stable display order without rereading, rows appended mid-export cannot duplicate or skip a page, a read failure yields a terminal `{error, message}` line rather than an incomplete file presented as complete.
+**Export.** `GET /agent-saul/sessions/{id}/export` reads the transcript only and streams via an async generator (`StreamingResponse`). Redacted rows export as redacted. Reads are bounded (500 rows/page) and walk a keyset cursor — the `(turn_seq, ordinal, id)` triple the previous page ended on. Keyset paging therefore cannot duplicate rows or lose a page to overlapping appends; rows inserted BEHIND the cursor mid-export (an earlier turn landing during the export) are omitted here and captured by a later export. A read failure yields a terminal `{error, message}` line rather than an incomplete file presented as complete.
 
 **Deletion and erasure** (designed for, **not a V1 build item**). One transaction:
 

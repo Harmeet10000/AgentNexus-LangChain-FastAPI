@@ -19,6 +19,13 @@ if TYPE_CHECKING:
     from typing import Any
 
 
+class _CompletingGraph:
+    """astream_events that ends after one event — a normal round."""
+
+    async def astream_events(self, *_args: Any, **_kwargs: Any) -> Any:
+        yield {"event": "done"}
+
+
 class _FakeLock:
     def __init__(self) -> None:
         self.lease_lost = asyncio.Event()
@@ -105,6 +112,27 @@ async def test_healthy_round_is_not_lock_lost() -> None:
     # chats keep writing).
     await asyncio.sleep(0.05)
     assert graph.cancelled.is_set()
+    assert sent == []
+
+
+async def test_completed_round_under_healthy_lock_returns_false_sends_nothing() -> None:
+    """CodeRabbit (round 5): a round that completes while the lock is held
+    returns False and never emits LOCK_LOST — the cancelled waiter is not a
+    loss signal."""
+    sent: list[Any] = []
+    service = _service(_CompletingGraph(), sent)
+    result = await asyncio.wait_for(
+        service._stream_round_guarded(
+            ws=None,
+            lock=_FakeLock(),
+            config={},
+            current_input={},
+            step=0,
+            thread_id="t",
+        ),
+        timeout=2,
+    )
+    assert result is False
     assert sent == []
 
 
