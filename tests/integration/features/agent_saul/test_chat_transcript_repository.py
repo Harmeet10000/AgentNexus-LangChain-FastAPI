@@ -477,14 +477,17 @@ async def test_read_transcript_paging_completes_large_transcripts() -> None:
     )
     assert isinstance(first, Success)
 
-    seen: list[str] = []
-    page = 0
+    seen: list[int] = []
+    page_guard = 0
+    cursor_seq: int | None = None
+    cursor_ord: int | None = None
     while True:
         result = await repo.read_transcript(
             session_id=session_id,
             user_id=USER_ID,
             limit=500,
-            offset=page * 500,
+            after_turn_seq=cursor_seq,
+            after_ordinal=cursor_ord,
         )
         assert isinstance(result, Success)
         page_rows = list(result.unwrap())
@@ -492,8 +495,12 @@ async def test_read_transcript_paging_completes_large_transcripts() -> None:
             break
         seen.extend(r.ordinal for r in page_rows)
         assert all(r.turn_seq == 1 for r in page_rows)
-        page += 1
-        assert page < 10  # safety bound — 605 rows need exactly 2 pages
+        if len(page_rows) < 500:
+            break
+        last = page_rows[-1]
+        cursor_seq, cursor_ord = last.turn_seq, last.ordinal
+        page_guard += 1
+        assert page_guard < 10  # safety bound — 605 rows need exactly 2 pages
     assert len(seen) == 605
     assert len(seen) == len(set(seen))
 

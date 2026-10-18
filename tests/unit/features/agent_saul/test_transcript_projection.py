@@ -217,9 +217,7 @@ def _expected_sweep_status(
 
 def _age_adjusted(view: SnapshotView, age: str) -> SnapshotView:
     if age == "past":
-        return view.model_copy(
-            update={"checkpoint_ts": NOW - PAUSE_WINDOW - timedelta(minutes=5)}
-        )
+        return view.model_copy(update={"checkpoint_ts": NOW - PAUSE_WINDOW - timedelta(minutes=5)})
     if age == "middle":
         # Past the orphan grace, inside the 24 h pause window — the bucket all
         # normal long reviews live in (§5.3 vs §8).

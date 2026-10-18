@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any  # noqa: TC003 — pydantic field annotati
 
 from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Failure, Success
-from sqlalchemy import func, literal_column, select, text, update
+from sqlalchemy import func, literal_column, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -550,9 +550,12 @@ class ChatTranscriptRepository:
     ) -> TranscriptResult[Sequence[SessionMeta]]:
         """Terminal sessions past the retention horizon — GC input (§8).
 
-        Sessions already swept (``extra_metadata.gc_swept_at``) are excluded
-        in the query itself so the oldest batch cannot clog the candidate
-        list and starve newer deletions.
+        A session is excluded only while its sweep stamp is up to date with
+        its checkpoint: an ``gc_swept_at`` at-or-after ``last_checkpoint_ts``
+        means that checkpoint generation was already audited. A session with
+        no stamp, or with a stamp OLDER than its (later re-created)
+        checkpoint, is a fresh candidate — the oldest audited batch cannot
+        clog the list and starve newer deletions.
         """
         terminal = frozenset(
             (
@@ -571,7 +574,13 @@ class ChatTranscriptRepository:
                                 ChatSession.status.in_(terminal),
                                 ChatSession.last_checkpoint_ts.is_not(None),
                                 ChatSession.last_checkpoint_ts <= older_than,
-                                text("chat_sessions.extra_metadata ->> 'gc_swept_at' IS NULL"),
+                                # No stamp, or a stamp from a previous
+                                # checkpoint generation (§8; _GC_STAMP_KEY).
+                                text(
+                                    "chat_sessions.extra_metadata ->> :stamp_key IS NULL "
+                                    "OR (chat_sessions.extra_metadata ->> :stamp_key)"
+                                    "::timestamptz < chat_sessions.last_checkpoint_ts"
+                                ).params(stamp_key=_GC_STAMP_KEY),
                             )
                             .order_by(ChatSession.last_checkpoint_ts)
                             .limit(limit)
@@ -749,9 +758,16 @@ class ChatTranscriptRepository:
         session_id: str,
         user_id: str,
         limit: int = 500,
-        offset: int = 0,
+        after_turn_seq: int | None = None,
+        after_ordinal: int | None = None,
     ) -> TranscriptResult[Sequence[TranscriptMessage]]:
-        """Display order is (turn_seq, ordinal), NOT insert order (§4.2/D3)."""
+        """Keyset pagination: display order (turn_seq, ordinal), stable reads.
+
+        The cursor is the (turn_seq, ordinal) pair the caller last saw —
+        OFFSET rereads the whole table on every page and can repeat rows
+        when exports and appends overlap; keyset paging never revisits rows
+        (D3). The leading ``session_id`` equality still drives the index.
+        """
         try:
             async with self._session_factory() as session:
                 session_row = await _load_session(session, session_id, user_id)
@@ -765,14 +781,18 @@ class ChatTranscriptRepository:
                 version_failure = _schema_gate(session_row.schema_version)
                 if version_failure is not None:
                     return Failure(version_failure)
+                cursor = (after_turn_seq, after_ordinal)
+                statement = select(ChatMessage).where(ChatMessage.session_id == session_id)
+                if cursor[0] is not None and cursor[1] is not None:
+                    statement = statement.where(
+                        tuple_(ChatMessage.turn_seq, ChatMessage.ordinal) > cursor
+                    )
                 rows = (
                     (
                         await session.execute(
-                            select(ChatMessage)
-                            .where(ChatMessage.session_id == session_id)
+                            statement
                             .order_by(ChatMessage.turn_seq, ChatMessage.ordinal, ChatMessage.id)
                             .limit(limit)
-                            .offset(max(offset, 0))
                         )
                     )
                     .scalars()

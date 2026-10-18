@@ -206,9 +206,13 @@ class TurnRecorder:
     async def reconcile(self) -> TranscriptResult[ApplyOutcome]:
         """§6: reconcile = the projector over a fresh ``aget_state`` snapshot,
         preceded by the §6 hole-fill (missing prompt row ⇒ recover from
-        ``aget_state_history``)."""
+        ``aget_state_history``). The recovery replay rides the same hard
+        deadline as a projection (§5.2) — recovery must never wedge a turn."""
         await self._await_t0()
-        await self._fill_prompt_holes()
+        try:
+            await asyncio.wait_for(self._fill_prompt_holes(), self._timeout)
+        except TimeoutError:
+            self.log.warning("transcript_hole_fill_timeout")
         return await self._project(stage="reconcile")
 
     async def _fill_prompt_holes(
@@ -228,6 +232,7 @@ class TurnRecorder:
         primary latest projection's job, so an old pause can never plant a
         false terminal outcome under today's clock.
         """
+        now = datetime.now(tz=UTC)
         try:
             history = [
                 state
@@ -236,14 +241,25 @@ class TurnRecorder:
         except Exception:  # noqa: BLE001 — history is a recovery path, never a gate (§10)
             self.log.warning("transcript_history_unavailable")
             return
+        # One turn context for the whole replay: keys refresh ONLY after rows
+        # actually land, so each state dedupes against everything recovered
+        # before it (§6).
+        turn_context = await self._turn_context()
+        if turn_context is None:
+            return
+        paused_plan = self._paused_plan  # the plan this connection knows about
         for state in reversed(history):  # oldest → newest; watermark stays latest-first
             try:
                 view = snapshot_to_view(state)
                 projection = project(
                     view,
-                    existing_keys=await self._existing_keys(),
-                    turn_rows=await self._turn_rows(),
-                    now=datetime.now(tz=UTC),
+                    existing_keys=turn_context.existing_keys,
+                    turn_rows=turn_context.turn_rows.model_copy(
+                        update={"paused_plan": paused_plan}
+                    ),
+                    # Historical time: a historical boundary is judged in its
+                    # own moment — today's clock would plant verdicts (§6).
+                    now=view.checkpoint_ts or now,
                     aliveness=self._lock.is_alive(),
                 )
             except Exception as exc:  # noqa: BLE001 — §9 boundary guard
@@ -258,6 +274,20 @@ class TurnRecorder:
             )
             if isinstance(applied, Failure):
                 self.log.bind(operation="insert_rows_only").warning("transcript_hole_fill_failed")
+            elif applied.unwrap().rows_inserted > 0:
+                turn_context = await self._turn_context() or turn_context
+            plan_seen = _paused_plan_of(state)
+            if plan_seen is not None:
+                paused_plan = plan_seen  # later decisions read the shown plan
+
+    async def _turn_context(self) -> TranscriptTurnContext | None:
+        """Fresh turn context, or None when the repository cannot serve it."""
+        context_result = await self._repo.get_turn_context(
+            session_id=self._thread_id, user_id=self._user_id
+        )
+        if isinstance(context_result, Failure):
+            return None
+        return context_result.unwrap()
 
     async def _existing_keys(self) -> frozenset[str]:
         context_result = await self._repo.get_turn_context(

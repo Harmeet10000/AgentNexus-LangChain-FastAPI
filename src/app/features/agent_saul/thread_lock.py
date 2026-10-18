@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -73,6 +74,7 @@ class ThreadLock:
         self._token: str | None = None
         self._renew_task: asyncio.Task[None] | None = None
         self.heartbeat = Heartbeat()
+        self.lease_lost = asyncio.Event()
         self.log = logger.bind(thread_id=thread_id, component="thread_lock")
 
     @property
@@ -149,6 +151,7 @@ class ThreadLock:
                     self.log.warning("thread_lock_renew_failed")
                     self.heartbeat.fresh = False
                     self._held = False  # lease lost: stop renewing, stop aliveness
+                    self.lease_lost.set()  # unknowable fence → the run must stop
                     return
                 if renewed:
                     self.heartbeat.fresh = True
@@ -156,6 +159,7 @@ class ThreadLock:
                     self.log.warning("thread_lock_lost")
                     self.heartbeat.fresh = False
                     self._held = False
+                    self.lease_lost.set()  # the RUN sees this even mid-stream
                     return
         except asyncio.CancelledError:
             # Best-effort owner-checked release on cancellation; when the
@@ -184,7 +188,11 @@ class ThreadLock:
         async with self._redis.pipeline() as pipe:
             await pipe.watch(key)
             if await pipe.get(key) != owner:
-                pipe.unwatch()  # sync: clears the WATCH locally, no round trip
+                # redis-py asyncio defines unwatch() as a coroutine while
+                # fakeredis's is sync — await only a real awaitable (P5a).
+                unwatched = pipe.unwatch()
+                if isinstance(unwatched, Awaitable):
+                    await unwatched
                 self.log.bind(stage=stage).info("thread_lock_not_owner")
                 return False
             pipe.multi()  # transaction marker — sync command in redis-py pipelines

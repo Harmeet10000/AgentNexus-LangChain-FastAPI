@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, cast
 from redis.exceptions import RedisError
 from returns.result import Failure
 
+from app.features.agent_saul.graph.graph import wire_saul_topology
 from app.features.agent_saul.transcript.projection import (
     ORPHAN_GRACE,
     SessionStatus,
@@ -44,6 +45,7 @@ from app.features.agent_saul.transcript.projection import (
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import Any
 
     from langchain_core.runnables import RunnableConfig
@@ -72,17 +74,36 @@ _TERMINAL_STATUS_VALUES: frozenset[str] = frozenset(
 def build_saul_read_graph(checkpointer: AsyncPostgresSaver) -> CompiledStateGraph[Any]:
     """Compile a state-compatible read graph for sweep-only checkpoint reads.
 
-    Same state schema ⇒ same channel names ⇒ ``aget_state`` resolves the
-    production checkpoints. The stub node only satisfies the entrypoint
-    rule; the sweep never invokes the graph.
+    Same schema ⇒ same channels; the SAME edge topology as the production
+    graph (``wire_saul_topology``) over self-ending stub nodes. The topology
+    matters even for reads: ``Pregel.aget_state`` resolves pending tasks by
+    node NAME against the graph's process map, so a node that is absent here
+    makes its pending task (a production interrupt incl.) silently vanish
+    and the sweep mis-derive the thread's status. The stubs are never
+    executed by the sweep — the graph exists to interpret checkpoints.
     """
-    from langgraph.graph import START, StateGraph  # noqa: PLC0415 — cold path
+    from langgraph.graph import StateGraph  # noqa: PLC0415 — cold path
 
     from app.features.agent_saul.graph.state import (  # noqa: PLC0415 — cold path
         LegalAgentInputState,
         LegalAgentOutputState,
         LegalAgentState,
     )
+
+    def _stub_factory() -> Callable[[str], Any]:
+        stubs: dict[str, Any] = {}
+
+        def node_for(name: str) -> Any:
+            if name not in stubs:
+
+                async def stub(_state: dict[str, Any], _name: str = name) -> None:
+                    """Self-ending stub: interprets nothing, writes nothing."""
+
+                stub.__name__ = name
+                stubs[name] = stub
+            return stubs[name]
+
+        return node_for
 
     # Same cast idiom as graph.build_saul_graph: langgraph's generics reject
     # the plain TypedDict at type-check time though it compiles fine.
@@ -92,12 +113,7 @@ def build_saul_read_graph(checkpointer: AsyncPostgresSaver) -> CompiledStateGrap
         input_schema=LegalAgentInputState,
         output_schema=LegalAgentOutputState,
     )
-
-    async def _stub_node(_state: dict[str, Any]) -> None:
-        return None
-
-    state_graph.add_node("sweep_read_stub", _stub_node)
-    state_graph.add_edge(START, "sweep_read_stub")
+    wire_saul_topology(state_graph, _stub_factory())
     return state_graph.compile(checkpointer=checkpointer)
 
 
@@ -170,11 +186,17 @@ async def sweep_transcripts(
 class _ThreadReconcileOutcome:
     """What one pass of the projector did to a thread (never a euphemism).
 
-    ``status``      — the freshly derived status value when a projection row
-                      actually landed (§3.1: the cache moves through it).
-    ``clean``       — the latest checkpoint was already fully persisted: the
-                      verified catch-up condition for §8 checkpoint GC.
-    ``failed``      — any repository/graph error; nothing may be concluded.
+    ``status``      — the freshly derived status value when a projection with
+                      a derivable status ran to completion (§3.1), whether or
+                      not it landed new rows (an already-persisted replay is
+                      still a fresh derivation of the CURRENT checkpoint).
+    ``clean``       — the projector derived nothing (NoOp). NOT proof of
+                      verified catch-up: a NoOp may equally mean the
+                      projector saw nothing derivable (pre-first-step,
+                      missing opener, stale heartbeat) — a checkpoint under
+                      such a verdict stays put.
+    ``failed``      — any repository/graph/aliveness error; nothing may be
+                      concluded.
     """
 
     status: str | None = None
@@ -182,12 +204,17 @@ class _ThreadReconcileOutcome:
     failed: bool = True
 
 
-async def _lock_alive(redis: Redis, thread_id: str) -> bool:
-    """Aliveness input for sweep projections (§4.1 [v2]): heartbeat fresh only."""
+async def _lock_alive(redis: Redis, thread_id: str) -> bool | None:
+    """Aliveness input for sweep projections: heartbeat fresh, dead, or UNKNOWN.
+
+    ``None`` means the probe itself failed (§6 [v3]): aliveness is unknowable,
+    and the projector must derive NOTHING from a verdict it cannot see.
+    """
     try:
-        return bool(await redis.exists(f"{_LIVE_LOCK_KEY_PREFIX}{thread_id}"))
+        exists = await redis.exists(f"{_LIVE_LOCK_KEY_PREFIX}{thread_id}")
     except RedisError:
-        return False
+        return None
+    return bool(exists)
 
 
 async def _reconcile_once(
@@ -209,6 +236,10 @@ async def _reconcile_once(
         return _ThreadReconcileOutcome()
     owner_user_id, turn_context = context_result.unwrap()
     config: RunnableConfig = {"configurable": {"thread_id": session_id}}
+    aliveness = await _lock_alive(redis, session_id)
+    if aliveness is None:
+        # §6 [v3]: aliveness unknowable → no verdict, no rows, no close.
+        return _ThreadReconcileOutcome()
     snapshot = await graph.aget_state(config)  # public LangGraph API (§1)
     view = snapshot_to_view(snapshot)
     derived = project(
@@ -216,11 +247,11 @@ async def _reconcile_once(
         turn_context.existing_keys,
         turn_context.turn_rows,
         now,
-        aliveness=await _lock_alive(redis, session_id),
+        aliveness=aliveness,
     )
     if derived.is_no_op:
-        # §8 verified catch-up: everything the checkpoint holds already sits
-        # in the transcript — the only state under which GC may act.
+        # Explicit "derive nothing" (§5.3 NoOp row). Neither clean nor a
+        # verdict — the reason field says which observation gap it was.
         return _ThreadReconcileOutcome(clean=True, failed=False)
     if derived.session_status is None:
         return _ThreadReconcileOutcome(failed=True)
@@ -332,11 +363,12 @@ async def _gc_checkpointed_threads(
             outcome = await _reconcile_once(
                 repo=repo, graph=graph, redis=redis, session_id=session_id, now=now
             )
-            # §8 verified catch-up: GC acts ONLY when the projector itself
-            # proved the checkpoint is fully persisted (clean no-op) or the
-            # catch-up just landed a fresh terminal verdict. A repository or
-            # graph failure (outcome.failed) releases nothing.
-            if not (outcome.clean or outcome.status in _TERMINAL_STATUS_VALUES):
+            # §8 verified catch-up: GC acts ONLY when the catch-up just
+            # derived a FRESH terminal verdict from the CURRENT checkpoint.
+            # A no-op (outcome.clean) is not proof — it may equally be an
+            # observation gap — and a failure (outcome.failed) releases
+            # nothing.
+            if not (not outcome.failed and outcome.status in _TERMINAL_STATUS_VALUES):
                 continue  # catch-up did not complete — keep the checkpoint (§8)
             await checkpointer.adelete_thread(session_id)  # public API only (§1)
             await repo.stamp_gc_audit(

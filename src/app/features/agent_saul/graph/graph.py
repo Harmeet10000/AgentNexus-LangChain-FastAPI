@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 from langgraph.graph import END, StateGraph
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import Any, Final
 
     from langchain_core.language_models import BaseChatModel
@@ -50,14 +51,23 @@ def saul_runtime_config(thread_id: str) -> dict[str, Any]:
     }
 
 
-def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
+def wire_saul_topology(graph: Any, node_for: Callable[[str], Any]) -> None:
+    """The single source of Agent Saul's edge topology.
+
+    ``node_for(name)`` supplies the node callable — the real nodes for the
+    production graph, self-ending stubs for the sweep's read graph. Both
+    builders MUST go through this function: a topology edited here without
+    both graphs recompiling is a sweep that silently mis-reads checkpoints
+    (missing node names make Pregel drop their pending tasks, so paused
+    threads stop looking CLARIFYING).
+    """
     for name in GRAPH_NODE_NAMES:
-        graph.add_node(name, getattr(nodes, name))
+        graph.add_node(name, node_for(name))
 
     # Hydration runs before gateway on every run and is never a routing
     # target: it is wired explicitly so it stays out of GRAPH_NODE_NAMES,
     # _VALID_WORKER_NODES, and the orchestrator's dispatch table.
-    graph.add_node("state_hydration", make_state_hydration_node())
+    graph.add_node("state_hydration", node_for("state_hydration"))
     graph.set_entry_point("state_hydration")
     graph.add_edge("state_hydration", "gateway")
     graph.add_edge("gateway", "qna")
@@ -88,6 +98,15 @@ def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
     graph.add_edge("human_review", "orchestrator")
     graph.add_edge("finalization", "persist_memory")
     graph.add_edge("persist_memory", END)
+
+
+def _wire_graph(graph: Any, nodes: SaulGraphNodes) -> None:
+    wire_saul_topology(
+        graph,
+        lambda name: (
+            make_state_hydration_node() if name == "state_hydration" else getattr(nodes, name)
+        ),
+    )
 
 
 def build_saul_graph(

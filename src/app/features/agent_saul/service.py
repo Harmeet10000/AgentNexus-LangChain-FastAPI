@@ -20,8 +20,12 @@ This service is instantiated ONCE per WebSocket session.  It holds no
 class-level mutable state across sessions — thread-safe.
 """
 
+from __future__ import annotations
+
+import asyncio
+import contextlib
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from fastapi import WebSocket
@@ -30,10 +34,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, StateSnapshot
 from pydantic import ValidationError
-from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.features.agent_saul.dto import (
     CreateSessionResponse,
@@ -42,11 +44,9 @@ from app.features.agent_saul.dto import (
     WSHITLInterruptFrame,
     WSNodeEndFrame,
     WSNodeStartFrame,
-    WSOutbound,
     WSPingMessage,
     WSPongFrame,
     WSResumeMessage,
-    WSStartMessage,
     WSStateUpdateFrame,
     WSTokenFrame,
     ws_inbound_adapter,
@@ -65,13 +65,25 @@ from app.features.agent_saul.transcript.recorder import TurnRecorder
 from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
 from app.features.auth.websocket_security import (
     WebSocketIdleTimeout,
-    WebSocketSecurityContext,
-    WebSocketSecurityService,
     WebSocketSecurityViolation,
 )
 from app.observability.logging import logger, trace_layer
 
-from .exceptions import AgentSaulResult
+if TYPE_CHECKING:
+    from typing import Any
+
+    from redis.asyncio import Redis
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from app.features.agent_saul.dto import (
+        WSOutbound,
+        WSStartMessage,
+    )
+    from app.features.agent_saul.exceptions import AgentSaulResult
+    from app.features.auth.websocket_security import (
+        WebSocketSecurityContext,
+        WebSocketSecurityService,
+    )
 
 # Status emitted when a node starts — keeps WS client progress bar accurate.
 _NODE_STATUS_MAP: dict[str, WorkflowStatus] = {
@@ -205,24 +217,20 @@ class AgentSaulService:
             step = 0
             first_stream_done = has_initial_stream
             while True:
-                # Lease-loss guard (§5.5): a lost lock means another connection
-                # may own this thread — stop the run before any further writes.
-                if not lock.is_alive():
-                    await self._send_json(
-                        ws,
-                        WSErrorFrame(
-                            node=None,
-                            code="LOCK_LOST",
-                            message="Thread exclusion was lost; this run must stop",
-                            retryable=False,
-                        ).model_dump(),
-                    )
-                    self._log.bind(thread_id=thread_id).warning("saul_lock_lost_aborting")
-                    break
+                # Lease-loss guard between rounds (§5.5): a lost lock means
+                # another connection may own this thread — stop before any
+                # further writes. Mid-round loss is handled by the
+                # lease_lost race inside each round below.
                 # --- Stream graph events → WS frames ----------------------------
-                await self._stream_round(
-                    ws=ws, config=config, current_input=current_input, step=step
-                )
+                if await self._stream_round_guarded(
+                    ws=ws,
+                    lock=lock,
+                    config=config,
+                    current_input=current_input,
+                    step=step,
+                    thread_id=thread_id,
+                ):
+                    break
                 # T0/T1): register the boundary once the first stream round has
                 # produced durable checkpoints; no-op on later rounds (§5.2).
                 if not first_stream_done:
@@ -341,6 +349,58 @@ class AgentSaulService:
         """Pending interrupts across tasks (P5a over task objects)."""
         return [interrupt for task in snapshot.tasks for interrupt in task.interrupts]
 
+    async def _stream_round_guarded(
+        self,
+        *,
+        ws: WebSocket,
+        lock: Any,
+        config: RunnableConfig,
+        current_input: Any,
+        step: int,
+        thread_id: str,
+    ) -> bool:
+        """One stream round under the lease, True when the run must stop.
+
+        The round runs as a task racing ``lock.lease_lost`` so a lost fence
+        stops an ACTIVE graph execution, not just the gaps between rounds
+        (§5.5): once the fence is gone a successor may resume this thread
+        and produce checkpoints this run would trample. A round that dies
+        normally propagates its exception (§9) — never masked as success.
+        """
+        stream_task = asyncio.create_task(
+            self._stream_round(ws=ws, config=config, current_input=current_input, step=step),
+            name=f"saul-stream-round-{thread_id}",
+        )
+        lost = asyncio.create_task(lock.lease_lost.wait())
+        try:
+            await asyncio.wait({stream_task, lost}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            if not lost.done():
+                lost.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await lost
+        if lost.done() or not lock.is_alive():
+            if not stream_task.done():
+                stream_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await stream_task
+            else:
+                _ = stream_task.result()  # surface a failed round (§9)
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="LOCK_LOST",
+                    message="Thread exclusion was lost; this run must stop",
+                    retryable=False,
+                ).model_dump(),
+            )
+            self._log.bind(thread_id=thread_id).warning("saul_lock_lost_aborting")
+            return True
+        # Stream finished while the lease held: re-raise its failure (§9).
+        stream_task.result()
+        return False
+
     async def _stream_round(
         self,
         *,
@@ -366,19 +426,47 @@ class AgentSaulService:
         initial_input: dict[str, Any],
         thread_id: str,
     ) -> dict[str, Any] | None:
-        """Hydrate checkpointed state; ``None`` means the session was refused.
+        """Schema-gate the thread before anything runs; None = refused.
 
-        Persisted values may predate schema_version. Hydrate them before the
-        first node sees state; shapes this runtime refuses fail the session
-        loudly with a typed frame — never by resuming unmigrated state (§9).
+        Persisted values may predate schema_version: hydrate a copy of them
+        to version-check, refusing incompatible shapes with a typed frame —
+        never by resuming unmigrated state (§9). Hydration is VALIDATION
+        here, not run input: the graph starts from ``initial_input`` only.
+        An empty delta with an empty checkpoint (nothing to gate) returns
+        ``{}``.
         """
         persisted = await self._graph.aget_state(config)
+        if persisted.values:
+            # §9 gate only: persisted values ride along inside the checkpoint,
+            # so hydration here exists to REFUSE incompatible shapes, not to
+            # feed the run. The graph gets only this turn's delta — replaying
+            # the full hydrated state would also clobber the pending-turn
+            # channels (plan, current_step, …) the checkpoint legitimately
+            # holds for a paused-then-resumed thread (§6).
+            try:
+                _ = hydrate_state(dict(persisted.values))
+            except StateSchemaVersionError as exc:
+                exc.add_note(f"thread_id={thread_id}")
+                self._log.bind(thread_id=thread_id, error=str(exc)).warning(
+                    "saul_session_state_schema_refused"
+                )
+                await self._send_json(
+                    ws,
+                    WSErrorFrame(
+                        node=None,
+                        code="STATE_SCHEMA_INCOMPATIBLE",
+                        message=(
+                            "Saved session state is incompatible with this runtime; "
+                            "start a new session"
+                        ),
+                        retryable=False,
+                    ).model_dump(),
+                )
+                return None
+        if not initial_input:
+            return {}  # empty delta + empty checkpoint: nothing to gate
         try:
-            return (
-                hydrate_state(dict(persisted.values))
-                if persisted.values
-                else hydrate_state(initial_input)
-            )
+            return hydrate_state(dict(initial_input))
         except StateSchemaVersionError as exc:
             exc.add_note(f"thread_id={thread_id}")
             self._log.bind(thread_id=thread_id, error=str(exc)).warning(
@@ -573,10 +661,30 @@ class AgentSaulService:
           the window → proceed to the resume-reconnect path (§6).
         - ``resume`` frame past the window → SESSION_PAUSE_EXPIRED: the turn
           is already closed by the projector; nothing may resume (§8).
-        - anything else on a paused thread (mismatched identity) → refused.
+        - anything else on a paused thread → refused. The OWNER identity is
+          gated for EVERY first frame above, start and resume alike (§9).
         """
         await recorder.reconcile()
         snapshot = await self._graph.aget_state(config)
+
+        # Identity gate — EVERY first frame (§9): the state's owner is the
+        # only user this thread may serve, before anything about its state
+        # (paused or not) is revealed. Threads with no persisted owner yet
+        # (clean checkpoint lineage) gate on acquisition alone.
+        state_user = snapshot.values.get("user_id") if snapshot.values else None
+        if state_user is not None and str(state_user) != user_id:
+            self._log.bind(thread_id=thread_id).warning("saul_first_frame_identity_refused")
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="THREAD_NOT_OWNED",
+                    message="This thread belongs to another user",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return False
+
         paused = [interrupt for task in snapshot.tasks for interrupt in task.interrupts]
         if not paused:
             if first_resume is not None:
@@ -611,21 +719,8 @@ class AgentSaulService:
             )
             return False
 
-        # Resume-reconnect: identity gate first (§8 — only the state's owner
-        # may resume), then the window.
-        state_user = snapshot.values.get("user_id") if snapshot.values else None
-        if state_user is not None and str(state_user) != user_id:
-            self._log.bind(thread_id=thread_id).warning("saul_resume_identity_refused")
-            await self._send_json(
-                ws,
-                WSErrorFrame(
-                    node=None,
-                    code="THREAD_NOT_OWNED",
-                    message="This thread belongs to another user",
-                    retryable=False,
-                ).model_dump(),
-            )
-            return False
+        # Resume-reconnect claim: the window decides next (§8) — the owner
+        # identity already passed above (same gate as the start frame).
         if past_window:
             self._log.bind(thread_id=thread_id).info("saul_paused_turn_expired_resume_refused")
             await self._send_json(

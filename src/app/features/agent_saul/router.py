@@ -141,17 +141,18 @@ async def export_session_transcript(
     _ = meta_result.unwrap()  # fail-closed gate passed: owner + schema verified
 
     async def rows() -> AsyncIterator[str]:
-        # Bounded 500-row reads streamed page by page: memory stays flat while
-        # D3 order (turn_seq, ordinal) is preserved by the reader. Paging
-        # continues until a short page, so a long transcript never truncates
-        # silently (§8 export).
-        page = 0
+        # Keyset-paged bounded reads streamed page by page: memory stays flat
+        # and appends mid-export can never repeat or skip a page (D3 order is
+        # the (turn_seq, ordinal) the reader itself walks).
+        cursor_seq: int | None = None
+        cursor_ord: int | None = None
         while True:
             result = await repo.read_transcript(
                 session_id=session_id,
                 user_id=user_id,
                 limit=_EXPORT_PAGE_ROWS,
-                offset=page * _EXPORT_PAGE_ROWS,
+                after_turn_seq=cursor_seq,
+                after_ordinal=cursor_ord,
             )
             if isinstance(result, Failure):
                 # Surface the typed error as a terminal line, never a silent
@@ -168,11 +169,14 @@ async def export_session_transcript(
                 )
                 return
             page_rows = list(result.unwrap())
+            if not page_rows:
+                return
             for item in page_rows:
                 yield dumps(item.model_dump(mode="json"), default=str) + "\n"
             if len(page_rows) < _EXPORT_PAGE_ROWS:
                 return
-            page += 1
+            last = page_rows[-1]
+            cursor_seq, cursor_ord = last.turn_seq, last.ordinal
 
     return StreamingResponse(
         rows(),
