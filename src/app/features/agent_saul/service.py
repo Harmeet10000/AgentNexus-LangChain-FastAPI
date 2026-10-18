@@ -37,6 +37,7 @@ from pydantic import ValidationError
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
+from app.config import get_settings
 from app.features.agent_saul.dto import (
     CreateSessionResponse,
     WSDoneFrame,
@@ -177,6 +178,7 @@ class AgentSaulService:
             user_id=user_id,
             redis=self._redis,
             lock=lock,
+            timeout_ms=get_settings().SAUL_PROJECTION_TIMEOUT_MS,
         )
         config["callbacks"] = [recorder.usage_handler]
 

@@ -407,6 +407,12 @@ class Settings(BaseSettings):
     WEBSOCKET_MAX_CONNECTIONS_PER_USER: int = Field(default=3)
     WEBSOCKET_PRESENCE_TTL_SECONDS: int = Field(default=360)
 
+    # --- Agent Saul transcript boundaries (§5.2 — hard deadline, configurable) ---
+    # Whole-boundary budget (read turn context + snapshot + view + apply).
+    # 750ms assumes DB co-location; raise for dev against WAN Postgres
+    # (each round trip was measured at 237-681ms, so several per boundary).
+    SAUL_PROJECTION_TIMEOUT_MS: float = Field(default=750)
+
     # --- Uvicorn WebSocket Transport ---
     UVICORN_WS_MAX_SIZE: int = Field(default=1_048_576)
     UVICORN_WS_MAX_QUEUE: int = Field(default=32)
