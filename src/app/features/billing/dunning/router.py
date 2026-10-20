@@ -20,6 +20,21 @@ if TYPE_CHECKING:
 router = APIRouter(prefix="/admin/billing", tags=["billing-admin"])
 
 
+def _persisted_payment_link_url(subscription: object) -> str | None:
+    """Read the retry URL from the durable subscription attempt record."""
+    metadata = getattr(subscription, "metadata_", None)
+    if not isinstance(metadata, dict):
+        return None
+    raw_attempts = metadata.get("dunning_attempts")
+    if not isinstance(raw_attempts, list) or not raw_attempts:
+        return None
+    latest = raw_attempts[-1]
+    if not isinstance(latest, dict):
+        return None
+    short_url = latest.get("short_url")
+    return short_url if isinstance(short_url, str) and short_url else None
+
+
 @router.get(
     "/dunning",
     dependencies=[Depends(require_role(UserRole.ADMIN))],
@@ -54,7 +69,20 @@ async def run_dunning_now(
             failure = Failure(updated_result.failure())
             return render_result(failure, response, message="Dunning run complete")
         updated = updated_result.unwrap()
-        results.append({"subscription_id": str(updated.id), "status": updated.status})
+        result_item: dict[str, object] = {
+            "subscription_id": str(updated.id),
+            "status": updated.status,
+        }
+        # ``short_url`` is persisted inside the JSONB dunning attempt record
+        # by DunningService.  The attribute fallback preserves compatibility
+        # with older in-memory callers while production responses use data
+        # that survives a process restart and is queryable from the database.
+        payment_link_url = _persisted_payment_link_url(updated)
+        if payment_link_url is None:
+            payment_link_url = getattr(updated, "payment_link_url", None)
+        if isinstance(payment_link_url, str) and payment_link_url:
+            result_item["payment_link_url"] = payment_link_url
+        results.append(result_item)
     return render_result(
         Success({"checked": len(due), "retried": len(results), "items": results}),
         response,

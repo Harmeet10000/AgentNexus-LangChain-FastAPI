@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query, Response, status
+from fastapi import APIRouter, Header, Path, Query, Response, status
 from returns.result import Failure
 
 from app.features.auth.dependencies import CurrentClaims, CurrentVerifiedUser
@@ -70,6 +70,7 @@ async def refund_payment(  # noqa: PLR0917 - endpoint needs path payload, servic
     sub_service: SubscriptionServiceDep,
     claims: CurrentClaims,
     response: Response,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> APIResponse[RefundResponse]:
     resolved = await service.get_payment(payment_id)
     if isinstance(resolved, Failure):
@@ -85,7 +86,12 @@ async def refund_payment(  # noqa: PLR0917 - endpoint needs path payload, servic
             message="Refund issued",
             success_status=status.HTTP_200_OK,
         )
-    refund = await service.refund(payment_id, payload, user_id=claims.sub)
+    refund = await service.refund(
+        payment_id,
+        payload,
+        user_id=claims.sub,
+        idempotency_key=idempotency_key,
+    )
     return render_result(
         refund, response, message="Refund issued", success_status=status.HTTP_200_OK
     )

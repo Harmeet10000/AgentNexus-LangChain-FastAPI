@@ -47,6 +47,7 @@ from app.features.auth.models import User
 from app.features.auth.repository import RefreshTokenRepository
 from app.features.auth.token_audit_log import TokenAuditLog
 from app.features.auth.websocket_security import build_websocket_security_service
+from app.features.billing.providers import RazorpayBillingProvider
 from app.features.documents.service import process_document_ingestion
 from app.features.health.health_check import ALL_PROBES, check_cognee, check_graphiti
 from app.lifecycle.graphs import (
@@ -620,6 +621,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     # Initialize Tavily HTTP client
     app.state.tavily_http_client = await create_tavily_http_client()
     logger.info("Tavily HTTP client initialized")
+
+    # Billing clients/providers are process-scoped resources.  Subscription
+    # request handlers receive this seam from app state; they never construct
+    # a provider while mutating a subscription.
+    app.state.billing_provider = RazorpayBillingProvider()
 
     # FastAPI-Guard setup (depends on Redis, but non-blocking)
     await initialize_fastapi_guard(app=app, settings=settings)

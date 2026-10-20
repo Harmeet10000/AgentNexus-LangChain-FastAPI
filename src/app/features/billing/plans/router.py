@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Response, status
+from fastapi import APIRouter, Depends, Header, Path, Query, Response, status
 
 from app.features.auth.dependencies import CurrentClaims, require_role
 from app.features.auth.models import UserRole
@@ -47,8 +47,9 @@ async def create_plan(
     service: PlanServiceDep,
     claims: CurrentClaims,
     response: Response,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> APIResponse[PlanResponse]:
-    result = await service.create_plan(payload, user_id=claims.sub)
+    result = await service.create_plan(payload, user_id=claims.sub, idempotency_key=idempotency_key)
     return render_result(
         result, response, message="Plan created", success_status=status.HTTP_201_CREATED
     )
@@ -58,14 +59,17 @@ async def create_plan(
     "/{plan_id}",
     dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
-async def update_plan(
+async def update_plan(  # noqa: PLR0917 — FastAPI's explicit endpoint dependency parameters
     plan_id: Annotated[str, Path(min_length=1)],
     payload: PlanUpdateDTO,
     service: PlanServiceDep,
     claims: CurrentClaims,
     response: Response,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> APIResponse[PlanResponse]:
-    result = await service.update_plan(plan_id, payload, user_id=claims.sub)
+    result = await service.update_plan(
+        plan_id, payload, user_id=claims.sub, idempotency_key=idempotency_key
+    )
     return render_result(result, response, message="Plan updated")
 
 

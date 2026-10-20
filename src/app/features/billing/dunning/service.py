@@ -12,8 +12,21 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.features.audit.models import AuditLog
-from app.features.billing.payments.clients.razorpay_client import RazorpayClient
+from app.features.billing.providers import (
+    CreatePaymentLinkOperation,
+    ObserveSubscriptionOperation,
+    ProviderPaymentLink,
+    ProviderSubscriptionState,
+)
+from app.features.billing.providers.factory import build_billing_provider
+from app.features.billing.subscriptions.coordinator import SubscriptionLifecycleCoordinator
+from app.features.billing.subscriptions.lifecycle import (
+    EventMetadata,
+    PolicyContext,
+    SubscriptionHalted,
+)
 from app.features.billing.subscriptions.models import Subscription, SubscriptionStatus
+from app.features.billing.subscriptions.repository import SqlAlchemyLifecyclePersistence
 from app.kernel.result import add_database_error_note
 from app.observability.logging import logger, trace_layer
 
@@ -26,6 +39,7 @@ if TYPE_CHECKING:
 
     from app.features.audit.repository import AuditLogRepository
     from app.features.billing.plans.repository import PlanRepository
+    from app.features.billing.providers import BillingProvider
     from app.features.billing.subscriptions.models import Subscription as SubscriptionModel
     from app.features.billing.subscriptions.repository import SubscriptionRepository
 
@@ -41,19 +55,23 @@ class DunningService:
     Razorpay in lockstep (Requirement 47).
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0917 — explicit collaborators keep the dunning seam injectable
         self,
         session: AsyncSession,
         subscriptions: SubscriptionRepository,
         plans: PlanRepository,
         audit: AuditLogRepository,
-        razorpay: RazorpayClient | None = None,
+        provider: BillingProvider | None = None,
+        lifecycle_coordinator: SubscriptionLifecycleCoordinator | None = None,
     ) -> None:
         self.session = session
         self.subscriptions = subscriptions
         self.plans = plans
         self.audit = audit
-        self.razorpay = razorpay or RazorpayClient()
+        self.provider = provider or build_billing_provider()
+        self.lifecycle_coordinator = lifecycle_coordinator or SubscriptionLifecycleCoordinator(
+            SqlAlchemyLifecyclePersistence(session), self.provider
+        )
 
     @staticmethod
     def _retry_delay_ladder() -> list[int]:
@@ -78,15 +96,31 @@ class DunningService:
         last = cast("dict[str, Any]", attempts[-1])
         return self._parse_dt(last.get("executed_at"))
 
+    def _persisted_next_retry_at(self, subscription: SubscriptionModel) -> datetime | None:
+        raw_attempts = subscription.metadata_.get("dunning_attempts", [])
+        attempts = raw_attempts if isinstance(raw_attempts, list) else []
+        if not attempts:
+            return None
+        last = attempts[-1]
+        if not isinstance(last, dict):
+            return None
+        return self._parse_dt(last.get("next_retry_at"))
+
     def is_due_for_retry(self, subscription: SubscriptionModel, *, now: datetime) -> bool:
         if subscription.status != SubscriptionStatus.PAST_DUE.value:
             return False
         if subscription.retry_count >= subscription.max_retries:
             return False
+        persisted_next = self._persisted_next_retry_at(subscription)
+        if persisted_next is not None:
+            return persisted_next <= now
+        # Legacy rows have no scheduled timestamp.  Use the deterministic
+        # ladder until the next successful attempt writes one; never sample
+        # fresh jitter during every scheduler scan.
         ladder = self._retry_delay_ladder()
         delay_days = ladder[min(subscription.retry_count, len(ladder) - 1)]
         last_at = self._last_attempt_at(subscription) or subscription.updated_at or now
-        return last_at + self._jittered_delay(delay_days) <= now
+        return last_at + timedelta(days=delay_days) <= now
 
     @trace_layer("service")
     async def find_due_for_retry(self, *, limit: int = 200) -> DunningResult[list[Subscription]]:
@@ -144,15 +178,50 @@ class DunningService:
                         operation="find_plan",
                     )
                 )
-            link = await self.razorpay.create_payment_link(
+            operation = CreatePaymentLinkOperation(
                 amount=plan.amount,
                 currency=plan.currency,
                 description=f"Dunning retry for subscription {str(subscription.id)[:8]}",
+                correlation_id=(
+                    f"billing:dunning:{subscription.id}:attempt:{subscription.retry_count + 1}"
+                ),
                 customer_id=subscription.razorpay_customer_id,
                 notes={"subscription_id": str(subscription.id), "dunning": "retry"},
             )
-            return Success({"status": "charge_attempted", "payment_link_id": link.get("id")})
+            result = await self.lifecycle_coordinator.execute_provider_operation(
+                operation,
+                subscription_id=str(subscription.id),
+                idempotency_key=operation.correlation_id,
+            )
+            if isinstance(result, Failure):
+                error = result.failure()
+                return Failure(
+                    DunningExternalServiceError(
+                        message=error.message,
+                        details={"subscription_id": str(subscription.id)},
+                        source="dunning_service",
+                        operation="attempt_charge",
+                    )
+                )
+            value = result.unwrap().value
+            if not isinstance(value, ProviderPaymentLink):
+                return Failure(
+                    DunningExternalServiceError(
+                        message="Billing provider returned an invalid payment-link observation",
+                        details={"subscription_id": str(subscription.id)},
+                        source="dunning_service",
+                        operation="attempt_charge",
+                    )
+                )
+            return Success(
+                {
+                    "status": "charge_attempted",
+                    "payment_link_id": value.provider_payment_link_id,
+                    "short_url": value.short_url,
+                }
+            )
         except Exception as exc:  # noqa: BLE001  -- recorded, not re-raised
+            exc.add_note(f"operation=dunning, subscription_id={subscription.id}")
             logger.bind(
                 operation="dunning", subscription_id=str(subscription.id), error=str(exc)
             ).exception("Charge attempt failed")
@@ -166,7 +235,9 @@ class DunningService:
             )
 
     @trace_layer("service")
-    async def execute_retry(self, subscription: Subscription) -> DunningResult[Subscription]:
+    async def execute_retry(  # noqa: PLR0914 — retry workflow keeps typed stages explicit
+        self, subscription: Subscription
+    ) -> DunningResult[Subscription]:
         """Attempt a charge, record the attempt, and maybe halt (R9.5/R40)."""
         now = datetime.now(tz=UTC)
         raw_attempts = subscription.metadata_.get("dunning_attempts", [])
@@ -179,6 +250,36 @@ class DunningService:
         if isinstance(charge_result, Failure):
             return charge_result
         charge = charge_result.unwrap()
+
+        provider_subscription_id = getattr(subscription, "razorpay_subscription_id", None)
+        if provider_subscription_id:
+            observed = await self.provider.execute(
+                ObserveSubscriptionOperation(
+                    provider_subscription_id=provider_subscription_id,
+                    correlation_id=(
+                        f"billing:dunning-observe:{subscription.id}:{subscription.version}"
+                    ),
+                )
+            )
+            if isinstance(observed, Failure):
+                error = observed.failure()
+                return Failure(
+                    DunningExternalServiceError(
+                        message=error.message,
+                        details={"subscription_id": str(subscription.id)},
+                        source="dunning_service",
+                        operation="observe_subscription",
+                    )
+                )
+            if not isinstance(observed.unwrap().value, ProviderSubscriptionState):
+                return Failure(
+                    DunningExternalServiceError(
+                        message="Billing provider returned an invalid subscription observation",
+                        details={"subscription_id": str(subscription.id)},
+                        source="dunning_service",
+                        operation="observe_subscription",
+                    )
+                )
 
         next_retry_at = self._next_retry_at(subscription, now=now)
         attempts.append(
@@ -196,11 +297,34 @@ class DunningService:
         }
 
         if subscription.retry_count + 1 >= subscription.max_retries:
-            update = await self.subscriptions.update_status(
+            halt_key = f"billing:dunning:halt:{subscription.id}:{subscription.version}"
+            halted = await self.lifecycle_coordinator.observe(
+                SubscriptionHalted(
+                    metadata=EventMetadata(
+                        event_id=halt_key,
+                        occurred_at=now,
+                        expected_version=subscription.version,
+                    )
+                ),
+                idempotency_key=halt_key,
+                subscription_id=str(subscription.id),
+                context=PolicyContext(now=now),
+            )
+            if isinstance(halted, Failure):
+                error = halted.failure()
+                return Failure(
+                    DunningInfrastructureError(
+                        message=error.message,
+                        details=error.details,
+                        source="dunning_service",
+                        operation="halt_subscription",
+                    )
+                )
+            lifecycle_version = halted.unwrap().snapshot.version
+            update = await self.subscriptions.update_with_lock(
                 subscription,
-                SubscriptionStatus.HALTED,
-                expected_version=subscription.version,
-                extra_values=values,
+                lifecycle_version,
+                values={**values, "retry_count": subscription.retry_count + 1},
             )
         else:
             update = await self.subscriptions.update_with_lock(

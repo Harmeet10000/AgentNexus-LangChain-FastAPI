@@ -20,9 +20,9 @@ async def expire_credits_job() -> dict[str, int]:
         async with session_local() as session:
             service = CreditService(
                 session,
-                CreditRepository(session),
-                ConsumptionRepository(session),
-                AuditLogRepository(session),
+                credit_repo=CreditRepository(session),
+                consumptions=ConsumptionRepository(session),
+                audit=AuditLogRepository(session),
             )
             try:
                 count = await service.expire_credits()

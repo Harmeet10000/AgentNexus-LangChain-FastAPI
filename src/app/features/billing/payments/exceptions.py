@@ -37,6 +37,12 @@ class PaymentValidationError(FeatureError):
     retryable: ClassVar[bool] = False
 
 
+class PaymentManualReviewError(FeatureError):
+    kind: ClassVar[ErrorKind] = ErrorKind.EXTERNAL_SERVICE
+    code: ClassVar[PaymentCode] = PaymentCode.PROVIDER_ERROR
+    retryable: ClassVar[bool] = False
+
+
 class PaymentInfrastructureError(FeatureError):
     kind: ClassVar[ErrorKind] = ErrorKind.INFRASTRUCTURE
     code: ClassVar[PaymentCode] = PaymentCode.DATABASE_ERROR
@@ -65,6 +71,7 @@ type PaymentError = (
     PaymentConflictError
     | PaymentNotFoundError
     | PaymentValidationError
+    | PaymentManualReviewError
     | PaymentInfrastructureError
     | PaymentProviderError
     | PaymentProviderUnavailableError
@@ -80,6 +87,8 @@ def payment_error_to_http_status(error: PaymentError) -> int:
         case PaymentNotFoundError():
             return http_status_for_kind(error.kind)
         case PaymentValidationError():
+            return http_status_for_kind(error.kind)
+        case PaymentManualReviewError():
             return http_status_for_kind(error.kind)
         case PaymentInfrastructureError():
             return http_status_for_kind(error.kind, retryable=error.retryable)

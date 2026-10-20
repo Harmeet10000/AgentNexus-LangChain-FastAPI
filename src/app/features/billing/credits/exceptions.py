@@ -19,6 +19,7 @@ class CreditCode(StrEnum):
     FORBIDDEN = "CREDIT_FORBIDDEN"
     DATABASE_ERROR = "CREDIT_DATABASE_ERROR"
     COLLABORATOR_ERROR = "CREDIT_COLLABORATOR_ERROR"
+    MANUAL_REVIEW = "CREDIT_MANUAL_REVIEW"
 
 
 class CreditConflictError(FeatureError):
@@ -75,6 +76,14 @@ class CreditCollaboratorError(FeatureError):
     retryable: ClassVar[bool] = False
 
 
+class CreditManualReviewError(FeatureError):
+    """An economic record is incomplete and must not be guessed or applied."""
+
+    kind: ClassVar[ErrorKind] = ErrorKind.CONFLICT
+    code: ClassVar[CreditCode] = CreditCode.MANUAL_REVIEW
+    retryable: ClassVar[bool] = False
+
+
 type CreditError = (
     CreditConflictError
     | CreditConsumptionConflictError
@@ -85,6 +94,7 @@ type CreditError = (
     | CreditValidationError
     | CreditInfrastructureError
     | CreditCollaboratorError
+    | CreditManualReviewError
 )
 type CreditResult[T] = Result[T, CreditError]
 
@@ -101,5 +111,7 @@ def credit_error_to_http_status(error: CreditError) -> int:
             return http_status_for_kind(error.kind)
         case CreditInfrastructureError() | CreditCollaboratorError():
             return http_status_for_kind(error.kind, retryable=error.retryable)
+        case CreditManualReviewError():
+            return http_status_for_kind(error.kind)
         case _ as unreachable:
             assert_never(unreachable)

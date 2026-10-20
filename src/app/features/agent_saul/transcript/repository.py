@@ -889,7 +889,7 @@ class ChatTranscriptRepository:
         *,
         session_id: str,
         user_id: str,
-    ) -> TranscriptResult[SessionMeta | None]:
+    ) -> TranscriptResult[SessionMeta]:
         try:
             async with self._session_factory() as session:
                 session_row = await _load_session(session, session_id, user_id)

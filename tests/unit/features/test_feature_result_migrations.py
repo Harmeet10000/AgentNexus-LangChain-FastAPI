@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import get_args
 from unittest.mock import AsyncMock
@@ -14,6 +15,8 @@ from returns.result import Failure, Success
 from app.features.agent_saul.exceptions import AgentSaulError
 from app.features.agent_saul.service import AgentSaulService
 from app.features.audit.exceptions import AuditCode, AuditInfrastructureError
+from app.features.auth.account_store import AuthAccount
+from app.features.auth.models import UserRole
 from app.features.billing.dunning.exceptions import DunningInfrastructureError
 from app.features.billing.dunning.service import DunningService
 from app.features.billing.plans.exceptions import PlanConflictError
@@ -137,7 +140,18 @@ async def test_plan_duplicate_is_returned_without_calling_create() -> None:
 
 async def test_profile_invalid_current_password_is_typed() -> None:
     service = ProfileService(AsyncMock(), AsyncMock(), None)
-    user = SimpleNamespace(hashed_password="not-a-valid-hash")
+    user = AuthAccount(
+        id="507f1f77bcf86cd799439011",
+        email="user@example.com",
+        full_name=None,
+        password_hash="not-a-valid-hash",
+        is_active=True,
+        is_verified=True,
+        role=UserRole.USER,
+        permissions=frozenset(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
     result = await service.change_password(user, "wrong", "new", None, revoke_other_sessions=False)
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), ProfileAuthenticationError)

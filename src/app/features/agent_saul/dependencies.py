@@ -23,6 +23,7 @@ from redis.asyncio import Redis
 from returns.result import Failure
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.features.agent_saul.transcript.export import TranscriptExporter
 from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
 from app.features.auth.dependencies import WebSocketClaims, get_refresh_token_repository
 from app.features.auth.repository import RefreshTokenRepository
@@ -128,6 +129,13 @@ async def get_transcript_repository(
     return ChatTranscriptRepository(session_factory)
 
 
+async def get_transcript_exporter(
+    repository: Annotated[ChatTranscriptRepository, Depends(get_transcript_repository)],
+) -> TranscriptExporter:
+    """Deep transcript export operation — owns pagination, cursors, schema gating."""
+    return TranscriptExporter(repository)
+
+
 # ---------------------------------------------------------------------------
 # Bundled context object — avoids long parameter lists at orchestration layer
 # ---------------------------------------------------------------------------
@@ -213,3 +221,4 @@ AgentSaulWebSocketSecurityContextAnnotated = Annotated[
     WebSocketSecurityContext,
     Depends(get_agent_saul_ws_security_context),
 ]
+TranscriptExporterDep = Annotated[TranscriptExporter, Depends(get_transcript_exporter)]

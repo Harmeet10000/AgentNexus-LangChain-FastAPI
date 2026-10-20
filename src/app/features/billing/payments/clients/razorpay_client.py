@@ -1,16 +1,17 @@
 """Async Razorpay API client with tenacity retries.
 
-Retry policy (Requirement 34):
-- transient errors (503, 504, 429, timeouts) are retried with exponential
-  backoff (multiplier=1, min=1s, max=10s, stop after 3 attempts);
-- permanent errors (401, 403, 4xx) raise immediately with no retry.
+Retry policy:
+- read-only GET operations retry transient errors (503, 504, 429, timeouts)
+  with exponential backoff;
+- mutation POST/PATCH operations raise once because Razorpay does not document
+  request idempotency for these endpoints.
 """
 
 from __future__ import annotations
 
 import time
 from collections import defaultdict
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from tenacity import (
@@ -24,6 +25,9 @@ from app.config import get_settings
 from app.observability.logging import logger
 from app.utils import ExternalServiceException
 
+if TYPE_CHECKING:
+    from typing import Literal
+
 type _JsonObject = dict[str, Any]
 
 _RAZORPAY_TIMEOUT_CODES = (503, 504, 429)
@@ -32,9 +36,17 @@ _RAZORPAY_TIMEOUT_CODES = (503, 504, 429)
 class RazorpayRetryableError(ExternalServiceException):
     """Transient provider failure after the retry policy is exhausted."""
 
+    def __init__(self, service: str, detail: str, *, status_code: int | None = None) -> None:
+        self.razorpay_status_code = status_code
+        super().__init__(service, detail)
+
 
 class RazorpayPermanentError(ExternalServiceException):
     """Non-retryable Razorpay failure (401/403/bad request)."""
+
+    def __init__(self, service: str, detail: str, *, status_code: int | None = None) -> None:
+        self.razorpay_status_code = status_code
+        super().__init__(service, detail)
 
 
 class CircuitOpenError(ExternalServiceException):
@@ -88,8 +100,12 @@ def _raise_for_status(response: httpx.Response, *, operation: str) -> None:
         "Razorpay request failed"
     )
     if response.status_code in _RAZORPAY_TIMEOUT_CODES:
-        raise RazorpayRetryableError(service="razorpay", detail=detail)
-    raise RazorpayPermanentError(service="razorpay", detail=detail)
+        raise RazorpayRetryableError(
+            service="razorpay", detail=detail, status_code=response.status_code
+        )
+    raise RazorpayPermanentError(
+        service="razorpay", detail=detail, status_code=response.status_code
+    )
 
 
 def _retry_policy() -> Any:
@@ -156,7 +172,6 @@ class RazorpayClient:
         _circuit.record_success(operation)
         return response.json()
 
-    @_retry_policy()
     async def create_customer(
         self,
         *,
@@ -190,9 +205,15 @@ class RazorpayClient:
                 return customer
         return None
 
-    @_retry_policy()
     async def create_plan(
-        self, *, name: str, amount: int, interval: str, currency: str, period: int
+        self,
+        *,
+        name: str,
+        amount: int,
+        interval: str,
+        currency: str,
+        period: int,
+        notes: dict[str, Any] | None = None,
     ) -> _JsonObject:
         return await self._request(
             "POST",
@@ -202,10 +223,15 @@ class RazorpayClient:
                 "period": interval,
                 "interval": period,
                 "item": {"name": name, "amount": amount, "currency": currency},
+                "notes": notes or {},
             },
         )
 
     @_retry_policy()
+    async def list_plans(self, *, params: dict[str, Any]) -> list[_JsonObject]:
+        data = await self._request("GET", "/v1/plans", operation="list_plans", params=params)
+        return list(data.get("items", []))
+
     async def create_subscription(
         self,
         *,
@@ -230,7 +256,6 @@ class RazorpayClient:
             },
         )
 
-    @_retry_policy()
     async def cancel_subscription(
         self, subscription_id: str, *, cancel_at_cycle_end: bool = False
     ) -> _JsonObject:
@@ -241,7 +266,6 @@ class RazorpayClient:
             json={"cancel_at_cycle_end": cancel_at_cycle_end},
         )
 
-    @_retry_policy()
     async def update_subscription(
         self, subscription_id: str, *, values: dict[str, Any]
     ) -> _JsonObject:
@@ -251,6 +275,40 @@ class RazorpayClient:
             f"/v1/subscriptions/{subscription_id}",
             operation="update_subscription",
             json=values,
+        )
+
+    async def pause_subscription(
+        self, subscription_id: str, *, pause_at: Literal["now"] = "now"
+    ) -> _JsonObject:
+        return await self._request(
+            "POST",
+            f"/v1/subscriptions/{subscription_id}/pause",
+            operation="pause_subscription",
+            json={"pause_at": pause_at},
+        )
+
+    async def resume_subscription(
+        self, subscription_id: str, *, resume_at: Literal["now"] = "now"
+    ) -> _JsonObject:
+        return await self._request(
+            "POST",
+            f"/v1/subscriptions/{subscription_id}/resume",
+            operation="resume_subscription",
+            json={"resume_at": resume_at},
+        )
+
+    async def change_subscription_plan(
+        self,
+        subscription_id: str,
+        *,
+        plan_id: str,
+        schedule_at: Literal["now", "cycle_end"] = "now",
+    ) -> _JsonObject:
+        return await self._request(
+            "PATCH",
+            f"/v1/subscriptions/{subscription_id}",
+            operation="change_subscription_plan",
+            json={"plan_id": plan_id, "schedule_change_at": schedule_at},
         )
 
     @_retry_policy()
@@ -268,7 +326,6 @@ class RazorpayClient:
         )
         return list(data.get("items", []))
 
-    @_retry_policy()
     async def create_payment_link(
         self,
         *,
@@ -293,6 +350,13 @@ class RazorpayClient:
         )
 
     @_retry_policy()
+    async def list_payment_links(self, *, params: dict[str, Any]) -> list[_JsonObject]:
+        data = await self._request(
+            "GET", "/v1/payment_links", operation="list_payment_links", params=params
+        )
+        return list(data.get("items", []))
+
+    @_retry_policy()
     async def list_payments(self, *, params: dict[str, Any]) -> list[_JsonObject]:
         data = await self._request("GET", "/v1/payments", operation="list_payments", params=params)
         return list(data.get("items", []))
@@ -301,7 +365,6 @@ class RazorpayClient:
     async def fetch_payment(self, payment_id: str) -> _JsonObject:
         return await self._request("GET", f"/v1/payments/{payment_id}", operation="fetch_payment")
 
-    @_retry_policy()
     async def create_refund(
         self, *, payment_id: str, amount: int, notes: dict[str, Any] | None = None
     ) -> _JsonObject:
@@ -313,6 +376,15 @@ class RazorpayClient:
         )
 
     @_retry_policy()
+    async def list_refunds(self, *, payment_id: str, params: dict[str, Any]) -> list[_JsonObject]:
+        data = await self._request(
+            "GET",
+            f"/v1/payments/{payment_id}/refunds",
+            operation="list_refunds",
+            params=params,
+        )
+        return list(data.get("items", []))
+
     async def submit_dispute_evidence(
         self, *, dispute_id: str, evidence: dict[str, Any]
     ) -> _JsonObject:

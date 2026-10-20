@@ -13,24 +13,46 @@ from app.connections.postgres import independent_session, init_db
 from app.features.audit.models import AuditAction, AuditLog
 from app.features.audit.repository import AuditLogRepository
 from app.features.billing.dunning.service import DunningService
-from app.features.billing.invoices.models import Invoice
 from app.features.billing.invoices.receipt import PaymentReceipt
 from app.features.billing.invoices.repository import InvoiceRepository
 from app.features.billing.invoices.service import InvoiceService
-from app.features.billing.payments.clients.razorpay_client import RazorpayClient
+from app.features.billing.payments.currency import CurrencyCode
 from app.features.billing.payments.dto import PaymentRecordDTO
-from app.features.billing.payments.models import Payment
+from app.features.billing.payments.models import Payment, PaymentMethod
 from app.features.billing.payments.repository import PaymentRepository
 from app.features.billing.payments.service import PaymentService
 from app.features.billing.plans.repository import PlanRepository
+from app.features.billing.plans.service import PlanService
+from app.features.billing.providers import (
+    ListPaymentsOperation,
+    ObserveSubscriptionOperation,
+    ProviderPaymentBatch,
+    ProviderSubscriptionState,
+)
+from app.features.billing.providers.factory import build_billing_provider
+from app.features.billing.subscriptions.coordinator import SubscriptionLifecycleCoordinator
+from app.features.billing.subscriptions.lifecycle import (
+    CommandMetadata,
+    EventMetadata,
+    PaymentCaptured,
+    PolicyContext,
+    ResumeSubscription,
+    SubscriptionCharged,
+    SubscriptionResumed,
+)
 from app.features.billing.subscriptions.models import Subscription, SubscriptionStatus
-from app.features.billing.subscriptions.repository import SubscriptionRepository
+from app.features.billing.subscriptions.repository import (
+    SqlAlchemyLifecyclePersistence,
+    SubscriptionRepository,
+)
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from app.features.billing.providers import BillingProvider
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 type BillingOperation = Callable[[AsyncSession, SessionFactory], Awaitable[dict[str, int]]]
@@ -88,7 +110,12 @@ def _current_utc() -> datetime:
     return datetime.now(tz=UTC)
 
 
-async def renewal_job(session: AsyncSession, session_factory: SessionFactory) -> dict[str, int]:
+async def renewal_job(
+    session: AsyncSession,
+    session_factory: SessionFactory,
+    *,
+    provider: BillingProvider | None = None,
+) -> dict[str, int]:
     """Reconcile-only renewal pass: no Razorpay charges are initiated here."""
     audit = _audit_repo(session)
     now = _current_utc()
@@ -105,35 +132,66 @@ async def renewal_job(session: AsyncSession, session_factory: SessionFactory) ->
     result = await session.execute(statement)
     subscription_rows = list(result.scalars().all())
 
-    razorpay = RazorpayClient()
+    provider = provider or build_billing_provider()
     renewed = 0
     for subscription in subscription_rows:
         if not subscription.razorpay_subscription_id:
             continue
         try:
-            data = await razorpay.fetch_subscription(subscription.razorpay_subscription_id)
-            current_start = data.get("current_start")
-            current_end = data.get("current_end")
-            values: dict[str, object] = {}
-            if current_start:
-                values["current_period_start"] = datetime.fromtimestamp(int(current_start), tz=UTC)
-            if current_end:
-                values["current_period_end"] = datetime.fromtimestamp(int(current_end), tz=UTC)
-            if not values:
+            observed = await provider.execute(
+                ObserveSubscriptionOperation(
+                    provider_subscription_id=subscription.razorpay_subscription_id,
+                    correlation_id=f"billing:renewal:{subscription.id}:{subscription.version}",
+                )
+            )
+            if isinstance(observed, Failure):
+                error = observed.failure()
+                logger.bind(
+                    operation="billing.renewal",
+                    subscription_id=str(subscription.id),
+                    error=error.message,
+                    details=error,
+                ).warning("Renewal provider observation failed")
+                continue
+            value = observed.unwrap().value
+            if not isinstance(value, ProviderSubscriptionState):
+                logger.bind(
+                    operation="billing.renewal",
+                    subscription_id=str(subscription.id),
+                ).warning("Renewal provider observation had an unexpected value")
+                continue
+            current_start = value.current_period_start
+            current_end = value.current_period_end
+            if current_start is None and current_end is None:
                 continue
             async with independent_session(session_factory) as item_session:
-                update = await _subscription_repo(item_session).update_with_lock(
-                    subscription, subscription.version, values=values
+                coordinator = SubscriptionLifecycleCoordinator(
+                    SqlAlchemyLifecyclePersistence(item_session), provider
                 )
-                if isinstance(update, Failure):
-                    renewal_error = update.failure()
+                lifecycle_result = await coordinator.observe(
+                    SubscriptionCharged(
+                        metadata=EventMetadata(
+                            event_id=(f"billing:renewal:{subscription.id}:{subscription.version}"),
+                            occurred_at=now,
+                            expected_version=subscription.version,
+                        ),
+                        period_start=current_start,
+                        period_end=current_end,
+                    ),
+                    idempotency_key=f"billing:renewal:{subscription.id}:{subscription.version}",
+                    subscription_id=str(subscription.id),
+                    context=PolicyContext(now=now),
+                )
+                if isinstance(lifecycle_result, Failure):
+                    renewal_error = lifecycle_result.failure()
                     logger.bind(
                         operation="billing.renewal",
                         error=renewal_error.message,
                         details=renewal_error.details,
                     ).warning("Renewal update failed")
                     continue
-                renewed += 1
+                if lifecycle_result.unwrap().status.value != "skipped":
+                    renewed += 1
         except Exception as exc:  # noqa: BLE001 — one bad subscription must not kill the run
             exc.add_note("operation=billing.renewal, stage=reconcile_subscription")
             logger.bind(
@@ -153,12 +211,19 @@ async def renewal_job(session: AsyncSession, session_factory: SessionFactory) ->
     return {"checked": len(subscription_rows), "renewed": renewed}
 
 
-async def dunning_job(session: AsyncSession, session_factory: SessionFactory) -> dict[str, int]:
+async def dunning_job(
+    session: AsyncSession,
+    session_factory: SessionFactory,
+    *,
+    provider: BillingProvider | None = None,
+) -> dict[str, int]:
+    provider = provider or build_billing_provider()
     service = DunningService(
         session,
         SubscriptionRepository(session),
         PlanRepository(session),
         AuditLogRepository(session),
+        provider=provider,
     )
     due_result = await service.find_due_for_retry(limit=200)
     if isinstance(due_result, Failure):
@@ -179,6 +244,7 @@ async def dunning_job(session: AsyncSession, session_factory: SessionFactory) ->
                 subscriptions=SubscriptionRepository(item_session),
                 plans=PlanRepository(item_session),
                 audit=AuditLogRepository(item_session),
+                provider=provider,
             )
             updated_result = await item_service.execute_retry(subscription)
             if isinstance(updated_result, Failure):
@@ -197,17 +263,58 @@ async def dunning_job(session: AsyncSession, session_factory: SessionFactory) ->
     return {"due": len(due), "retried": retried, "halted": halted}
 
 
+async def plan_recovery_job(
+    session: AsyncSession,
+    _session_factory: SessionFactory,
+    *,
+    provider: BillingProvider | None = None,
+) -> dict[str, int]:
+    """Admin-safe sweep for plan operations stranded before local binding."""
+    provider = provider or build_billing_provider()
+    coordinator = SubscriptionLifecycleCoordinator(
+        SqlAlchemyLifecyclePersistence(session), provider
+    )
+    intent_recovery = await coordinator.recover_pending()
+    recovered_intents = 0
+    if isinstance(intent_recovery, Failure):
+        logger.bind(
+            operation="billing.plan_recovery",
+            error=intent_recovery.failure().message,
+            details=intent_recovery.failure().details,
+        ).warning("Provider intent recovery sweep failed")
+    else:
+        recovered_intents = intent_recovery.unwrap()
+    service = PlanService(
+        session,
+        plans=PlanRepository(session),
+        audit=AuditLogRepository(session),
+        lifecycle_coordinator=coordinator,
+    )
+    result = await service.recover_pending_provider_plans()
+    if isinstance(result, Failure):
+        logger.bind(
+            operation="billing.plan_recovery",
+            error=result.failure().message,
+            details=result.failure().details,
+        ).warning("Provider plan recovery sweep failed")
+        return {"recovered": 0, "intents_recovered": recovered_intents}
+    return {"recovered": result.unwrap(), "intents_recovered": recovered_intents}
+
+
 async def invoice_backfill(
     session: AsyncSession, session_factory: SessionFactory
 ) -> dict[str, int]:
     subscriptions = _subscription_repo(session)
     plans = _plan_repo(session)
-    existing = select(Invoice.payment_id).where(Invoice.payment_id.is_not(None))
     statement = (
         select(Payment)
         .where(
             Payment.status == "captured",
-            Payment.id.not_in(existing),
+            # A historical invoice may already point at this payment while
+            # the inverse payment relation is still NULL.  Include both that
+            # repair case and genuinely missing invoices; the invoice service
+            # is idempotent for the former.
+            Payment.invoice_id.is_(None),
         )
         .limit(200)
     )
@@ -292,8 +399,12 @@ async def receipt_backfill(
 
 
 async def pause_resume_job(
-    session: AsyncSession, session_factory: SessionFactory
+    session: AsyncSession,
+    session_factory: SessionFactory,
+    *,
+    provider: BillingProvider | None = None,
 ) -> dict[str, int]:
+    provider = provider or build_billing_provider()
     now = _current_utc()
     statement = (
         select(Subscription)
@@ -310,15 +421,62 @@ async def pause_resume_job(
 
     resumed = 0
     for subscription in subscription_rows:
-        async with independent_session(session_factory) as item_session:
-            update = await _subscription_repo(item_session).update_status(
-                subscription,
-                SubscriptionStatus.ACTIVE,
-                expected_version=subscription.version,
-                extra_values={"pause_start": None, "pause_end": None},
+        if not subscription.razorpay_subscription_id:
+            continue
+        observed = await provider.execute(
+            ObserveSubscriptionOperation(
+                provider_subscription_id=subscription.razorpay_subscription_id,
+                correlation_id=f"billing:pause-resume:{subscription.id}:{subscription.version}",
             )
-            if isinstance(update, Failure):
-                pause_error = update.failure()
+        )
+        if isinstance(observed, Failure):
+            error = observed.failure()
+            logger.bind(
+                operation="billing.pause_resume",
+                subscription_id=str(subscription.id),
+                error=error.message,
+                details=error,
+            ).warning("Pause resume provider observation failed")
+            continue
+        value = observed.unwrap().value
+        if not isinstance(value, ProviderSubscriptionState) or value.status not in {
+            "active",
+            "paused",
+        }:
+            continue
+        async with independent_session(session_factory) as item_session:
+            coordinator = SubscriptionLifecycleCoordinator(
+                SqlAlchemyLifecyclePersistence(item_session), provider
+            )
+            key = f"billing:pause-resume:{subscription.id}:{subscription.version}"
+            if value.status == "active":
+                lifecycle_input = SubscriptionResumed(
+                    metadata=EventMetadata(
+                        event_id=key,
+                        occurred_at=now,
+                        expected_version=subscription.version,
+                    )
+                )
+                lifecycle_result = await coordinator.observe(
+                    lifecycle_input,
+                    idempotency_key=key,
+                    subscription_id=str(subscription.id),
+                    context=PolicyContext(now=now),
+                )
+            else:
+                lifecycle_result = await coordinator.apply(
+                    ResumeSubscription(
+                        metadata=CommandMetadata(
+                            request_id=key,
+                            expected_version=subscription.version,
+                        )
+                    ),
+                    idempotency_key=key,
+                    subscription_id=str(subscription.id),
+                    context=PolicyContext(now=now),
+                )
+            if isinstance(lifecycle_result, Failure):
+                pause_error = lifecycle_result.failure()
                 logger.bind(
                     operation="billing.pause_resume",
                     subscription_id=str(subscription.id),
@@ -326,30 +484,49 @@ async def pause_resume_job(
                     details=pause_error.details,
                 ).warning("Pause resume update failed")
                 continue
-            resumed += 1
+            if lifecycle_result.unwrap().status.value != "skipped":
+                resumed += 1
     return {"checked": len(subscription_rows), "resumed": resumed}
 
 
-async def reconciliation_job(
-    session: AsyncSession, session_factory: SessionFactory
+async def reconciliation_job(  # noqa: PLR0912, PLR0914, PLR0915 — typed facts and persistence stages stay local
+    session: AsyncSession,
+    session_factory: SessionFactory,
+    *,
+    provider: BillingProvider | None = None,
 ) -> dict[str, int]:
     """Daily Razorpay reconciliation: fetch captured payments and align local records."""
     service = PaymentService(PaymentRepository(session), AuditLogRepository(session))
     subscriptions = _subscription_repo(session)
-    razorpay = RazorpayClient()
+    provider = provider or build_billing_provider()
     lookback_days = get_settings().BILLING_RECONCILIATION_LOOKBACK_DAYS
 
     since = _current_utc() - timedelta(days=lookback_days)
     reconciled = 0
     missing = 0
     try:
-        payments = await razorpay.list_payments(
-            params={
-                "from": int(since.timestamp()),
-                "to": int(_current_utc().timestamp()),
-                "count": 100,
-            }
+        observed = await provider.execute(
+            ListPaymentsOperation(
+                correlation_id=f"billing:reconciliation:{since.date().isoformat()}",
+                from_timestamp=int(since.timestamp()),
+                to_timestamp=int(_current_utc().timestamp()),
+                count=100,
+            )
         )
+        if isinstance(observed, Failure):
+            error = observed.failure()
+            logger.bind(
+                operation="billing.reconciliation",
+                error=error.message,
+                details=error,
+            ).warning("Billing provider payment observation failed")
+            return {"reconciled": 0, "missing": 0}
+        value = observed.unwrap().value
+        if not isinstance(value, ProviderPaymentBatch):
+            logger.bind(operation="billing.reconciliation").warning(
+                "Billing provider returned an unexpected payment observation"
+            )
+            return {"reconciled": 0, "missing": 0}
     except Exception as exc:  # noqa: BLE001 -- upstream failure degrades this scheduled run
         exc.add_note("operation=billing.reconciliation, stage=fetch_payments")
         logger.bind(operation="billing.reconciliation", error=str(exc)).exception(
@@ -357,42 +534,98 @@ async def reconciliation_job(
         )
         return {"reconciled": 0, "missing": 0}
 
-    for payment in payments:
-        rz_id = payment.get("id")
-        if not isinstance(rz_id, str):
+    for payment in value.payments:
+        rz_id = payment.provider_payment_id
+        if (
+            not isinstance(rz_id, str)
+            or not rz_id.strip()
+            or isinstance(payment.amount, bool)
+            or payment.amount <= 0
+            or payment.currency not in {code.value for code in CurrencyCode}
+        ):
+            missing += 1
             continue
         existing = await service.payments.find_by_razorpay_id(rz_id)
         if isinstance(existing, Failure):
             continue
-        if existing.unwrap() is not None:
-            reconciled += 1
-            continue
-        # New payment not created via webhook: create if subscription resolvable.
-        sub_result = await subscriptions.find_by_razorpay_id(
-            str(payment.get("subscription_id") or "")
-        )
-        if isinstance(sub_result, Failure) or sub_result.unwrap() is None:
-            missing += 1
-            continue
-        subscription = sub_result.unwrap()
+        existing_payment = existing.unwrap()
+        if existing_payment is not None:
+            # A payment row can be durable before a pending-upgrade capture
+            # gate succeeds.  Keep retrying the lifecycle dependency while
+            # the subscription still advertises that exact pending upgrade;
+            # ordinary already-processed payments remain a cheap no-op.
+            sub_result = await subscriptions.find_by_id(existing_payment.subscription_id)
+            if isinstance(sub_result, Failure) or sub_result.unwrap() is None:
+                missing += 1
+                continue
+            subscription = sub_result.unwrap()
+            pending_upgrade = (getattr(subscription, "metadata_", None) or {}).get(
+                "pending_upgrade"
+            )
+            if not isinstance(pending_upgrade, dict):
+                reconciled += 1
+                continue
+        else:
+            # New payment not created via webhook: create if subscription resolvable.
+            sub_result = await subscriptions.find_by_razorpay_id(payment.subscription_id or "")
+            if isinstance(sub_result, Failure) or sub_result.unwrap() is None:
+                missing += 1
+                continue
+            subscription = sub_result.unwrap()
         if subscription is None:
             missing += 1
             continue
         async with independent_session(session_factory) as item_session:
+            try:
+                method = PaymentMethod(payment.method) if payment.method is not None else None
+            except ValueError:
+                method = None
             item_service = PaymentService(
                 PaymentRepository(item_session), AuditLogRepository(item_session)
             )
-            await item_service.record_payment(
-                PaymentRecordDTO(
-                    razorpay_payment_id=rz_id,
-                    subscription_id=str(subscription.id),
-                    amount=int(payment.get("amount") or 0),
-                    currency=str(payment.get("currency") or "INR"),
-                    method=payment.get("method"),
-                    captured_at=datetime.fromtimestamp(int(payment.get("created_at") or 0), tz=UTC),
-                ),
-                subscription=subscription,
+            if existing_payment is None:
+                recorded = await item_service.record_payment(
+                    PaymentRecordDTO(
+                        razorpay_payment_id=rz_id,
+                        subscription_id=str(subscription.id),
+                        amount=payment.amount,
+                        currency=payment.currency,
+                        method=method,
+                        captured_at=payment.captured_at or payment.created_at or _current_utc(),
+                    ),
+                    subscription=subscription,
+                )
+                if isinstance(recorded, Failure):
+                    missing += 1
+                    continue
+            lifecycle = SubscriptionLifecycleCoordinator(
+                SqlAlchemyLifecyclePersistence(item_session), provider
             )
+            payment_key = f"billing:payment-captured:{subscription.id}:{rz_id}"
+            lifecycle_result = await lifecycle.observe(
+                PaymentCaptured(
+                    metadata=EventMetadata(
+                        event_id=payment_key,
+                        occurred_at=payment.captured_at or payment.created_at or _current_utc(),
+                        expected_version=subscription.version,
+                    ),
+                    payment_id=rz_id,
+                    amount_paisa=payment.amount,
+                    currency=payment.currency,
+                ),
+                idempotency_key=payment_key,
+                subscription_id=str(subscription.id),
+                context=PolicyContext(now=_current_utc()),
+            )
+            if isinstance(lifecycle_result, Failure):
+                logger.bind(
+                    operation="billing.reconciliation",
+                    subscription_id=str(subscription.id),
+                    payment_id=rz_id,
+                    error=lifecycle_result.failure().message,
+                ).warning("Payment lifecycle observation failed")
+                missing += 1
+                continue
             reconciled += 1
 
     await _audit_repo(session).create(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import calendar
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from returns.result import Failure, Success
 
@@ -13,11 +13,13 @@ from app.features.audit.models import AuditLog
 from app.features.billing.credits.exceptions import (
     CreditAmountError,
     CreditCollaboratorError,
+    CreditManualReviewError,
     CreditMetadataError,
     CreditValidationError,
 )
 from app.features.billing.credits.models import (
     CreditConsumption,
+    CreditNote,
     CreditStatus,
     CreditType,
     UserCredit,
@@ -324,15 +326,63 @@ class CreditService:
 
         return Success(len(expired))
 
-    async def grant_credit_on_downgrade(
+    async def grant_credit_on_downgrade(  # noqa: PLR0912, PLR0914
         self,
         user_id: str,
         subscription_id,
         proration_amount_paisa: int,
         *,
         billing_cycle_end: datetime,
+        currency: str | None = None,
+        operation_key: str | None = None,
+        source_invoice_id: UUID | None = None,
     ) -> CreditResult[CreditGrantResponse]:
         """Grant credit from plan downgrade proration (Requirement 54)."""
+        if operation_key is None:
+            return Failure(
+                CreditMetadataError(message="Downgrade credit requires an operation key")
+            )
+        if currency is None:
+            return Failure(CreditMetadataError(message="Downgrade credit requires plan currency"))
+        if source_invoice_id is None:
+            # The original invoice is the GST/audit anchor.  Looking up "the
+            # latest invoice" is unsafe under concurrent renewals and can
+            # silently attach a credit to the wrong economic event.
+            return Failure(
+                CreditManualReviewError(
+                    message="Downgrade credit requires the authoritative source invoice",
+                    details={
+                        "operation_key": operation_key,
+                        "subscription_id": str(subscription_id),
+                        "manual_review": True,
+                    },
+                    source="credit_service",
+                )
+            )
+        existing_note_method = getattr(self.credit_repo, "find_credit_note_by_operation_key", None)
+        if existing_note_method is not None:
+            existing_note = await existing_note_method(operation_key)
+            if isinstance(existing_note, Failure):
+                return existing_note
+            note = existing_note.unwrap()
+            if note is not None:
+                credit_id = note.credit_id
+                if credit_id is None:
+                    metadata_credit_id = note.metadata_.get("credit_id")
+                    credit_id = (
+                        UUID(metadata_credit_id) if isinstance(metadata_credit_id, str) else None
+                    )
+                existing_credit = None
+                if isinstance(credit_id, UUID):
+                    existing_credit = await self.credit_repo.find_by_id(credit_id)
+                if existing_credit is None:
+                    find_credit = getattr(self.credit_repo, "find_by_operation_key", None)
+                    if find_credit is not None:
+                        existing_credit = await find_credit(operation_key)
+                if isinstance(existing_credit, Success):
+                    existing_credit_row = existing_credit.unwrap()
+                    if existing_credit_row is not None:
+                        return Success(_grant_response(existing_credit_row))
         new_year = billing_cycle_end.year + 1
         new_month = billing_cycle_end.month
         max_day = calendar.monthrange(new_year, new_month)[1]
@@ -342,12 +392,70 @@ class CreditService:
             day=min(billing_cycle_end.day, max_day),
         )
 
+        credit_id = uuid4()
+        now = datetime.now(tz=UTC)
+        note = CreditNote(
+            id=uuid4(),
+            credit_id=credit_id,
+            user_id=user_id,
+            subscription_id=subscription_id,
+            source_invoice_id=source_invoice_id,
+            operation_key=operation_key,
+            amount_paisa=proration_amount_paisa,
+            remaining_paisa=proration_amount_paisa,
+            currency=currency,
+            applies_at=billing_cycle_end,
+            # Assign a fresh dict before the first flush.  In-place mutation of
+            # a plain JSONB dict after flush is not reliably dirty-tracked.
+            metadata_={"credit_id": str(credit_id)},
+        )
         dto = CreditGrantDTO(
             credit_type=CreditType.PLAN_CREDIT.value,
             credit_amount=proration_amount_paisa,
-            valid_from=datetime.now(tz=UTC),
+            valid_from=now,
             valid_until=valid_until,
             description=f"Proration credit for subscription {subscription_id}",
-            metadata_={"subscription_id": str(subscription_id)},
+            metadata_={
+                "subscription_id": str(subscription_id),
+                "operation_key": operation_key,
+            },
         )
-        return await self.grant_credit(user_id, dto)
+        credit = UserCredit(
+            id=credit_id,
+            user_id=user_id,
+            credit_type=dto.credit_type,
+            credit_amount=dto.credit_amount,
+            remaining_balance=dto.credit_amount,
+            valid_from=now,
+            valid_until=valid_until,
+            status=CreditStatus.ACTIVE.value,
+            metadata_={
+                **dto.metadata_,
+                "operation_key": operation_key,
+                "credit_note_id": str(note.id),
+            },
+        )
+        credit_result = await self.credit_repo.create(credit)
+        if isinstance(credit_result, Failure):
+            return credit_result
+        note_result = await self.credit_repo.create_credit_note(note)
+        if isinstance(note_result, Failure):
+            return note_result
+        audit_result = await self.audit.create(
+            AuditLog(
+                entity_type="user_credit",
+                entity_id=str(credit.id),
+                action="credit.granted",
+                user_id=user_id,
+                changes={
+                    "credit_type": credit.credit_type,
+                    "credit_amount": credit.credit_amount,
+                    "credit_note_id": str(note.id),
+                    "source_invoice_id": str(source_invoice_id),
+                },
+            )
+        )
+        if isinstance(audit_result, Failure):
+            error = audit_result.failure()
+            return Failure(CreditCollaboratorError(message=error.message, details=error.details))
+        return Success(_grant_response(credit))

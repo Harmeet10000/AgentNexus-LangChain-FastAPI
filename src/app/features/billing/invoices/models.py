@@ -66,6 +66,10 @@ class Invoice(Base):
     )
     tax_amount: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     total: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    # Payment-method credit offset; GST fields remain based on ``total``.
+    credit_applied: Mapped[Decimal] = mapped_column(
+        Numeric(20, 2), nullable=False, default=Decimal(0)
+    )
     currency: Mapped[str] = mapped_column(String(length=3), nullable=False, default="INR")
 
     seller_gstin: Mapped[str] = mapped_column(String(length=15), nullable=False)

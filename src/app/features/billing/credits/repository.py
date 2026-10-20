@@ -10,14 +10,19 @@ from returns.result import Failure, Success
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.features.billing.credits.models import CreditConsumption, CreditStatus, UserCredit
+from app.features.billing.credits.models import (
+    CreditConsumption,
+    CreditNote,
+    CreditNoteApplication,
+    CreditStatus,
+    UserCredit,
+)
 from app.kernel.result import add_database_error_note
 
 from .exceptions import (
     CreditConflictError,
     CreditConsumptionConflictError,
     CreditInfrastructureError,
-    CreditNotFoundError,
 )
 
 if TYPE_CHECKING:
@@ -115,6 +120,29 @@ class ConsumptionRepository:
                 )
             )
 
+    async def find_all_by_invoice_id(
+        self, invoice_id: UUID
+    ) -> CreditResult[list[CreditConsumption]]:
+        """Return every consumption for an invoice, not just the first row."""
+        try:
+            statement = (
+                select(CreditConsumption)
+                .where(CreditConsumption.invoice_id == invoice_id)
+                .order_by(CreditConsumption.created_at.asc())
+            )
+            result = await self.session.execute(statement)
+            return Success(list(result.scalars().all()))
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="credit_consumptions")
+            await self.session.rollback()
+            return Failure(
+                CreditInfrastructureError(
+                    message="Database error while fetching invoice consumptions",
+                    details={"invoice_id": str(invoice_id), "error": str(exc)},
+                    source="consumption_repository",
+                )
+            )
+
     async def find_by_credit_id(self, credit_id: UUID) -> CreditResult[list[CreditConsumption]]:
         """Find all consumption records for a credit."""
         try:
@@ -200,9 +228,120 @@ class CreditRepository:
                 )
             )
 
+    async def find_credit_note_by_operation_key(
+        self, operation_key: str
+    ) -> CreditResult[CreditNote | None]:
+        try:
+            statement = (
+                select(CreditNote)
+                .where(CreditNote.operation_key == operation_key)
+                .with_for_update()
+            )
+            result = await self.session.execute(statement)
+            return Success(result.scalar_one_or_none())
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="credit_notes")
+            await self.session.rollback()
+            return Failure(
+                CreditInfrastructureError(
+                    message="Database error while finding credit note",
+                    details={"operation_key": operation_key, "error": str(exc)},
+                    source="credit_repository",
+                )
+            )
+
+    async def find_credit_notes_for_consumption(
+        self,
+        user_id: str,
+        *,
+        limit: int | None = None,
+    ) -> CreditResult[list[CreditNote]]:
+        """Lock all eligible authoritative notes in deterministic order.
+
+        ``limit=None`` is intentional: a user may have more than one hundred
+        notes and truncating the economic ledger can leave cash due when a
+        later note could have covered the invoice.
+        """
+        try:
+            now = datetime.now(tz=UTC)
+            statement = (
+                select(CreditNote)
+                .where(
+                    CreditNote.user_id == user_id,
+                    CreditNote.status == "available",
+                    CreditNote.remaining_paisa > 0,
+                    CreditNote.applies_at <= now,
+                )
+                .order_by(CreditNote.applies_at.asc(), CreditNote.created_at.asc())
+                .with_for_update()
+            )
+            if limit is not None:
+                statement = statement.limit(limit)
+            result = await self.session.execute(statement)
+            return Success(list(result.scalars().all()))
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="credit_notes")
+            await self.session.rollback()
+            return Failure(
+                CreditInfrastructureError(
+                    message="Database error while finding credit notes",
+                    details={"user_id": user_id, "error": str(exc)},
+                    source="credit_repository",
+                )
+            )
+
+    async def find_by_operation_key(self, operation_key: str) -> CreditResult[UserCredit | None]:
+        """Direct indexed JSON lookup for a downgrade grant; never scan a page."""
+        try:
+            statement = select(UserCredit).where(
+                UserCredit.metadata_["operation_key"].as_string() == operation_key,
+                UserCredit.deleted_at.is_(None),
+            )
+            result = await self.session.execute(statement)
+            return Success(result.scalar_one_or_none())
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="user_credits")
+            await self.session.rollback()
+            return Failure(
+                CreditInfrastructureError(
+                    message="Database error while finding credit by operation key",
+                    details={"operation_key": operation_key, "error": str(exc)},
+                    source="credit_repository",
+                )
+            )
+
+    async def create_credit_note(self, note: CreditNote) -> CreditResult[CreditNote]:
+        try:
+            self.session.add(note)
+            await self.session.flush()
+            return Success(note)
+        except IntegrityError as exc:
+            add_database_error_note(exc, table="credit_notes")
+            await self.session.rollback()
+            existing = await self.find_credit_note_by_operation_key(note.operation_key)
+            if isinstance(existing, Success) and existing.unwrap() is not None:
+                return existing
+            return Failure(
+                CreditConflictError(
+                    message="Credit note operation has already been recorded",
+                    details={"operation_key": note.operation_key},
+                    source="credit_repository",
+                )
+            )
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="credit_notes")
+            await self.session.rollback()
+            return Failure(
+                CreditInfrastructureError(
+                    message="Database error while creating credit note",
+                    details={"operation_key": note.operation_key, "error": str(exc)},
+                    source="credit_repository",
+                )
+            )
+
     async def find_by_id(self, credit_id: UUID) -> CreditResult[UserCredit | None]:
         try:
-            statement = select(UserCredit).where(UserCredit.id == credit_id)
+            statement = select(UserCredit).where(UserCredit.id == credit_id).with_for_update()
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
@@ -262,7 +401,7 @@ class CreditRepository:
         self,
         user_id: str,
         *,
-        limit: int = 100,
+        limit: int | None = None,
     ) -> CreditResult[list[UserCredit]]:
         """Find ACTIVE, non-expired credits ordered by soonest valid_until, then oldest created_at.
 
@@ -276,14 +415,17 @@ class CreditRepository:
                     UserCredit.user_id == user_id,
                     UserCredit.status == CreditStatus.ACTIVE.value,
                     UserCredit.deleted_at.is_(None),
+                    UserCredit.valid_from <= now,
                     ((UserCredit.valid_until.is_(None)) | (UserCredit.valid_until > now)),
                 )
                 .order_by(
                     UserCredit.valid_until.asc().nullslast(),
                     UserCredit.created_at.asc(),
                 )
-                .limit(limit)
+                .with_for_update()
             )
+            if limit is not None:
+                statement = statement.limit(limit)
             result = await self.session.execute(statement)
             return Success(list(result.scalars().all()))
         except SQLAlchemyError as exc:
@@ -337,18 +479,22 @@ class CreditRepository:
             if consumed_at is not None:
                 values["consumed_at"] = consumed_at
 
-            statement = (
-                update(UserCredit)
-                .where(UserCredit.id == credit.id)
-                .values(**values)
-                .returning(UserCredit)
-            )
+            # The row is normally locked by the caller.  The compare-and-set
+            # predicate is still required: it protects callers that enter this
+            # repository method directly and turns a lost update into a typed
+            # conflict instead of silently overwriting a concurrent spend.
+            conditions = [
+                UserCredit.id == credit.id,
+                UserCredit.remaining_balance == credit.remaining_balance,
+                UserCredit.remaining_balance >= new_remaining_balance,
+            ]
+            statement = update(UserCredit).where(*conditions).values(**values).returning(UserCredit)
             result = await self.session.execute(statement)
             updated = result.scalar_one_or_none()
             if updated is None:
                 return Failure(
-                    CreditNotFoundError(
-                        message="Credit not found during balance update",
+                    CreditConflictError(
+                        message="Credit balance changed concurrently",
                         details={"credit_id": str(credit.id)},
                         source="credit_repository",
                     )
@@ -361,6 +507,125 @@ class CreditRepository:
                 CreditInfrastructureError(
                     message="Database error while updating credit balance",
                     details={"credit_id": str(credit.id), "error": str(exc)},
+                    source="credit_repository",
+                )
+            )
+
+    async def update_credit_note_balance(
+        self,
+        note: CreditNote,
+        *,
+        new_remaining_paisa: int,
+    ) -> CreditResult[CreditNote]:
+        """Conditionally advance the authoritative note balance."""
+        try:
+            status = "applied" if new_remaining_paisa == 0 else "available"
+            statement = (
+                update(CreditNote)
+                .where(
+                    CreditNote.id == note.id,
+                    CreditNote.remaining_paisa == note.remaining_paisa,
+                    CreditNote.remaining_paisa >= new_remaining_paisa,
+                    CreditNote.status == "available",
+                )
+                .values(remaining_paisa=new_remaining_paisa, status=status)
+                .returning(CreditNote)
+            )
+            result = await self.session.execute(statement)
+            updated = result.scalar_one_or_none()
+            if updated is None:
+                return Failure(
+                    CreditConflictError(
+                        message="Credit note balance changed concurrently",
+                        details={"credit_note_id": str(note.id)},
+                        source="credit_repository",
+                    )
+                )
+            return Success(updated)
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="credit_notes")
+            await self.session.rollback()
+            return Failure(
+                CreditInfrastructureError(
+                    message="Database error while updating credit note balance",
+                    details={"credit_note_id": str(note.id), "error": str(exc)},
+                    source="credit_repository",
+                )
+            )
+
+    async def create_note_application(
+        self, application: CreditNoteApplication
+    ) -> CreditResult[CreditNoteApplication]:
+        """Persist the unique invoice/note application boundary."""
+
+        async def insert() -> None:
+            self.session.add(application)
+            await self.session.flush()
+
+        try:
+            # A duplicate application is an expected race when two payment
+            # notifications for the same invoice arrive together.  A
+            # savepoint contains the failed INSERT so the caller's outer
+            # invoice transaction remains usable.  The small fallback keeps
+            # this repository's lightweight test doubles compatible.
+            if hasattr(self.session, "begin_nested"):
+                async with self.session.begin_nested():
+                    await insert()
+            else:
+                await insert()
+            return Success(application)
+        except IntegrityError as exc:
+            add_database_error_note(exc, table="credit_note_applications")
+            if not hasattr(self.session, "begin_nested"):
+                # Legacy/test sessions have no savepoint API; they must be
+                # reset before exposing a failed flush to their caller.
+                await self.session.rollback()
+            else:
+                # The begin_nested context has already rolled back its
+                # savepoint.  Looking up the winner makes the operation
+                # idempotent without rolling back unrelated outer work.
+                try:
+                    result = await self.session.execute(
+                        select(CreditNoteApplication).where(
+                            CreditNoteApplication.credit_note_id == application.credit_note_id,
+                            CreditNoteApplication.invoice_id == application.invoice_id,
+                        )
+                    )
+                    existing = result.scalar_one_or_none()
+                except SQLAlchemyError as lookup_exc:
+                    add_database_error_note(
+                        lookup_exc,
+                        table="credit_note_applications",
+                        operation="lookup_duplicate",
+                    )
+                    await self.session.rollback()
+                    return Failure(
+                        CreditInfrastructureError(
+                            message="Database error while checking credit note application",
+                            details={"invoice_id": str(application.invoice_id)},
+                            source="credit_repository",
+                        )
+                    )
+                if existing is not None:
+                    return Success(existing)
+            return Failure(
+                CreditConsumptionConflictError(
+                    message="Credit note has already been applied to this invoice",
+                    details={
+                        "credit_note_id": str(application.credit_note_id),
+                        "invoice_id": str(application.invoice_id),
+                        "error": str(exc),
+                    },
+                    source="credit_repository",
+                )
+            )
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="credit_note_applications")
+            await self.session.rollback()
+            return Failure(
+                CreditInfrastructureError(
+                    message="Database error while creating credit note application",
+                    details={"invoice_id": str(application.invoice_id), "error": str(exc)},
                     source="credit_repository",
                 )
             )

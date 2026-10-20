@@ -71,6 +71,7 @@ def _invoice_to_response(invoice: Invoice) -> InvoiceResponse:
         tax_rate=invoice.tax_rate,
         tax_amount=invoice.tax_amount,
         total=invoice.total,
+        credit_applied=invoice.credit_applied,
         currency=invoice.currency,
         seller_gstin=invoice.seller_gstin,
         buyer_gstin=invoice.buyer_gstin,
@@ -147,6 +148,35 @@ class InvoiceService:
         computed in integer paisa so ``invoice.total * 100 == payment.amount``
         exactly, then converted to rupees for the stored columns.
         """
+        # Webhook redelivery and the backfill can both reach this method after
+        # the invoice row exists.  Treat the invoice relation as idempotent,
+        # but repair the inverse Payment.invoice_id when an older write left
+        # only Invoice.payment_id populated.  The repository update shares
+        # this session with invoice creation, so either side commits together.
+        existing_result = await self.invoices.find_by_payment_id(payment.id)
+        if isinstance(existing_result, Failure):
+            return existing_result
+        existing = existing_result.unwrap()
+        if existing is not None:
+            if payment.invoice_id is not None and payment.invoice_id != existing.id:
+                return Failure(
+                    InvoiceConflictError(
+                        message="Payment and invoice relations disagree",
+                        details={
+                            "payment_id": str(payment.id),
+                            "payment_invoice_id": str(payment.invoice_id),
+                            "invoice_id": str(existing.id),
+                        },
+                        source="invoice_service",
+                    )
+                )
+            if payment.invoice_id != existing.id:
+                link_result = await self.payments.link_invoice(payment, existing.id)
+                if isinstance(link_result, Failure):
+                    return Failure(_translate_collaborator_error(link_result.failure()))
+                payment.invoice_id = existing.id
+            return Success(existing)
+
         settings = get_settings()
         subtotal_paisa, tax_paisa = split_tax_inclusive(payment.amount, plan.tax_rate)
         seller_state = state_code_from_gstin(settings.BILLING_SELLER_GSTIN)
@@ -206,6 +236,11 @@ class InvoiceService:
         if isinstance(create_result, Failure):
             return create_result
         created = create_result.unwrap()
+
+        link_result = await self.payments.link_invoice(payment, created.id)
+        if isinstance(link_result, Failure):
+            return Failure(_translate_collaborator_error(link_result.failure()))
+        payment.invoice_id = created.id
 
         pdf_result = await self._store_pdf(
             render_invoice_pdf(created, SellerProfile.from_settings(settings)),

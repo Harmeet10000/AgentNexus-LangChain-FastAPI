@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from decimal import Decimal
+from typing import TYPE_CHECKING, cast
+from uuid import UUID, uuid4
 
 from returns.result import Failure, Success
 
-from app.config import get_settings
 from app.features.audit.models import AuditAction, AuditLog
-from app.features.billing.payments.clients.razorpay_client import RazorpayClient
-from app.features.billing.payments.dto import RefundRequestDTO
+from app.features.billing.exceptions import (
+    LifecycleCoordinatorVersionConflictError,
+)
 from app.features.billing.payments.models import PaymentStatus
+from app.features.billing.providers import CreateRefundOperation, ProviderReceipt
 from app.kernel.errors import ErrorKind
 from app.observability.logging import logger, trace_layer
 
@@ -24,19 +27,34 @@ from .exceptions import (
     SubscriptionInvalidTransitionError,
     SubscriptionNotFoundError,
     SubscriptionPlanNotFoundError,
+    SubscriptionRefundError,
     SubscriptionTransientInfrastructureError,
     SubscriptionValidationError,
+    SubscriptionVersionConflictError,
+)
+from .lifecycle import (
+    CancelSubscription,
+    ChangeSubscriptionPlan,
+    CommandMetadata,
+    CreateSubscription,
+    PauseSubscription,
+    PolicyContext,
+    RemoteSyncState,
+    ResumeSubscription,
 )
 from .models import Subscription, SubscriptionStatus
 from .proration import calculate_plan_change_proration
 from .trial_extension import TrialExtension
 
 if TYPE_CHECKING:
-    from uuid import UUID
+    from typing import Any
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.features.audit.repository import AuditLogRepository
+    from app.features.billing.credits.service import CreditService
+    from app.features.billing.exceptions import LifecycleCoordinatorError
+    from app.features.billing.payments.clients.razorpay_client import RazorpayClient
     from app.features.billing.payments.repository import PaymentRepository
     from app.features.billing.payments.service import PaymentService
     from app.features.billing.plans.models import Plan
@@ -44,6 +62,7 @@ if TYPE_CHECKING:
     from app.features.billing.subscriptions.repository import SubscriptionRepository
     from app.kernel.errors import FeatureError
 
+    from .coordinator import SubscriptionLifecycleCoordinator
     from .dto import (
         PlanChangeDTO,
         ProrationCalculation,
@@ -52,6 +71,7 @@ if TYPE_CHECKING:
         SubscriptionPauseDTO,
     )
     from .exceptions import SubscriptionError, SubscriptionResult
+    from .lifecycle import SubscriptionCommand
 
 
 def _subscription_to_response(
@@ -83,6 +103,14 @@ def _subscription_to_response(
         retry_count=subscription.retry_count,
         currency_display=subscription.currency_display,
         version=subscription.version,
+        remote_sync=subscription.remote_sync,
+        observed_plan_id=(
+            str(subscription.observed_plan_id)
+            if subscription.observed_plan_id is not None
+            else None
+        ),
+        entitlement_until=subscription.entitlement_until,
+        cancellation_requested_at=subscription.cancellation_requested_at,
         payment_url=payment_url,
         created_at=subscription.created_at,
         updated_at=subscription.updated_at,
@@ -100,6 +128,8 @@ class SubscriptionService:
         payments: PaymentRepository,
         audit: AuditLogRepository,
         payment_service: PaymentService,
+        lifecycle_coordinator: SubscriptionLifecycleCoordinator,
+        credit_service: CreditService | None = None,
         razorpay: RazorpayClient | None = None,
     ) -> None:
         self.session = session
@@ -108,7 +138,12 @@ class SubscriptionService:
         self.payments = payments
         self.audit = audit
         self.payment_service = payment_service
-        self.razorpay = razorpay or RazorpayClient()
+        # External clients/providers are lifespan-owned dependencies.  The
+        # lifecycle coordinator is mandatory for all subscription mutations;
+        # the legacy client is retained only for constructor compatibility.
+        self.razorpay = razorpay
+        self.lifecycle_coordinator = lifecycle_coordinator
+        self.credit_service = credit_service
 
     async def _get_owned_subscription(
         self, user_id: str, subscription_id: str | UUID
@@ -152,6 +187,77 @@ class SubscriptionService:
             )
         return Success(plan)
 
+    async def _authoritative_source_invoice_id(
+        self, subscription: Subscription
+    ) -> SubscriptionResult[UUID | None]:
+        """Resolve the invoice that economically funded this subscription.
+
+        Downgrade credit notes must point at the original invoice; selecting a
+        latest invoice is unsafe when renewals race with a plan change.  Prefer
+        an explicit subscription binding, then the oldest captured payment
+        carrying an invoice foreign key.
+        """
+        raw = (subscription.metadata_ or {}).get("source_invoice_id")
+        if isinstance(raw, str):
+            try:
+                return Success(UUID(raw))
+            except ValueError:
+                return Failure(
+                    SubscriptionValidationError(
+                        message="Subscription source invoice binding is invalid",
+                        details={"subscription_id": str(subscription.id), "manual_review": True},
+                        source="subscription_service",
+                    )
+                )
+        direct_lookup = getattr(self.payments, "find_oldest_captured_invoice_by_subscription", None)
+        if callable(direct_lookup):
+            invoice_result = await direct_lookup(subscription.id)
+            if isinstance(invoice_result, Failure):
+                return Failure(
+                    SubscriptionInfrastructureError(
+                        message=invoice_result.failure().message,
+                        details=invoice_result.failure().details,
+                        source="subscription_service",
+                        operation="resolve_source_invoice",
+                    )
+                )
+            return Success(invoice_result.unwrap())
+
+        # Compatibility for lightweight pre-ledger doubles.  Production uses
+        # the direct repository query above; this fallback still requests the
+        # complete result and never uses a newest-page heuristic.
+        payments = await self.payments.find_by_subscription(subscription.id, limit=None)  # type: ignore[arg-type]
+        if isinstance(payments, Failure):
+            return Failure(
+                SubscriptionInfrastructureError(
+                    message=payments.failure().message,
+                    details=payments.failure().details,
+                    source="subscription_service",
+                    operation="resolve_source_invoice",
+                )
+            )
+        captured = [
+            payment
+            for payment in payments.unwrap()
+            if payment.status
+            in {
+                PaymentStatus.CAPTURED.value,
+                PaymentStatus.PARTIALLY_REFUNDED.value,
+                PaymentStatus.REFUNDED.value,
+            }
+            and payment.invoice_id is not None
+        ]
+        if not captured:
+            return Success(None)
+        captured.sort(
+            key=lambda payment: (
+                getattr(payment, "captured_at", None)
+                or getattr(payment, "created_at", datetime.min.replace(tzinfo=UTC))
+            )
+        )
+        source = captured[0].invoice_id
+        return Success(source if isinstance(source, UUID) else None)
+
     @staticmethod
     def _translate_plan_error(error: FeatureError, plan_id: str | UUID) -> SubscriptionError:
         details = error.details or {"plan_id": str(plan_id)}
@@ -175,52 +281,379 @@ class SubscriptionService:
             source="subscription_service",
         )
 
-    async def _refund_on_cancel(self, subscription: Subscription, plan: Plan, user_id: str) -> int:
+    async def _refund_on_cancel(  # noqa: PLR0914, PLR0915
+        self,
+        subscription: Subscription,
+        plan: Plan,
+        user_id: str,
+        *,
+        idempotency_key: str,
+    ) -> SubscriptionResult[int]:
         """Apply the plan's refund policy on immediate cancellation (Requirement 41)."""
-        if not self._razorpay_enabled() or plan.refund_policy == "NONE":
-            return 0
-        result = await self.payments.find_by_subscription(subscription.id, limit=1)
-        if isinstance(result, Failure) or not result.unwrap():
-            return 0
-        payment = result.unwrap()[0]
-        if payment.status != PaymentStatus.CAPTURED.value:
-            return 0
+        # This request key belongs to the cancellation command.  The refund
+        # operation key below is intentionally derived from the economic
+        # subscription/payment identity instead.
+        del idempotency_key
+        if plan.refund_policy == "NONE":
+            return Success(0)
+        direct_lookup = getattr(self.payments, "find_refundable_captured_by_subscription", None)
+        result = (
+            await direct_lookup(subscription.id)
+            if callable(direct_lookup)
+            else await self.payments.find_by_subscription(  # type: ignore[arg-type]
+                subscription.id, limit=None
+            )
+        )
+        if isinstance(result, Failure):
+            error = result.failure()
+            return Failure(
+                SubscriptionRefundError(
+                    message="Unable to resolve a refundable captured payment",
+                    details={
+                        "subscription_id": str(subscription.id),
+                        "manual_review": True,
+                        "operation": "resolve_refundable_payment",
+                        "cause": error.message,
+                        **(error.details or {}),
+                    },
+                    source="subscription_service",
+                )
+            )
+        refundable_payments = [
+            candidate
+            for candidate in result.unwrap()
+            if candidate.status
+            in {
+                PaymentStatus.CAPTURED.value,
+                PaymentStatus.PARTIALLY_REFUNDED.value,
+            }
+            and candidate.amount > int((getattr(candidate, "refund_amount", 0) or 0) * 100)
+        ]
+        if not refundable_payments:
+            return Success(0)
 
-        refund_paisa = payment.amount
+        def _recency_key(candidate: object) -> tuple[bool, datetime, datetime, str]:
+            minimum = datetime.min.replace(tzinfo=UTC)
+
+            def _timestamp(value: object) -> datetime:
+                if not isinstance(value, datetime):
+                    return minimum
+                return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+            return (
+                getattr(candidate, "captured_at", None) is not None,
+                _timestamp(getattr(candidate, "captured_at", None)),
+                _timestamp(getattr(candidate, "created_at", None)),
+                str(getattr(candidate, "id", "")),
+            )
+
+        # Keep the service authoritative for lightweight repository doubles as
+        # well as the production query: failed rows are excluded before the
+        # latest/current captured payment is selected.
+        payment = max(refundable_payments, key=_recency_key)
+
+        previously_refunded = int((getattr(payment, "refund_amount", 0) or 0) * 100)
+        refundable_paisa = max(payment.amount - previously_refunded, 0)
+        refund_paisa = refundable_paisa
         if plan.refund_policy == "PRO_RATA":
             now = datetime.now(tz=UTC)
             start = subscription.current_period_start
             end = subscription.current_period_end
             if start is None or end is None or end <= now or end <= start:
-                return 0
+                return Success(0)
             total = (end - start).total_seconds()
             used = max((now - start).total_seconds(), 0.0)
-            refund_paisa = max(int(payment.amount * (1.0 - used / total)), 0)
+            refund_paisa = min(
+                refundable_paisa,
+                max(int(payment.amount * (1.0 - used / total)), 0),
+            )
         if refund_paisa <= 0:
-            return 0
+            return Success(0)
 
+        coordinator = self.lifecycle_coordinator
+        operation = CreateRefundOperation(
+            payment_id=payment.razorpay_payment_id,
+            amount=refund_paisa,
+            correlation_id=f"subscription:{subscription.id}:refund:{payment.id}",
+            notes={"subscription_id": str(subscription.id), "reason": "immediate_cancellation"},
+        )
+        # The HTTP request key identifies the cancellation command, not the
+        # economic refund.  A retry can arrive with a different request key
+        # (for example, a new correlation id after a worker crash), so using
+        # it here would let two workers issue the same cash refund.  The
+        # subscription/payment pair is the durable identity of this one
+        # immediate-cancellation refund; the coordinator claims this key
+        # before the provider mutation and reconciles a claimed retry.
+        refund_operation_key = f"billing:cancel-refund:{subscription.id}:{payment.id}"
         try:
-            refund_result = await self.payment_service.refund(
-                str(payment.id),
-                RefundRequestDTO(amount=refund_paisa, reason="Immediate cancellation refund"),
-                user_id=user_id,
+            refund_result = await coordinator.execute_provider_operation(
+                operation,
+                subscription_id=str(subscription.id),
+                idempotency_key=refund_operation_key,
             )
         except Exception as exc:  # noqa: BLE001 — refund is best-effort on cancel
+            exc.add_note(f"subscription_id={subscription.id}, operation=cancel_refund")
             logger.bind(operation="cancel_subscription", error=str(exc)).exception(
                 "Refund on cancel failed"
             )
-            return 0
+            return await self._refund_failure(
+                subscription,
+                refund_paisa=refund_paisa,
+                status="unknown",
+                message="Cancellation refund outcome is unknown; reconciliation is required",
+                details={"exception_type": type(exc).__name__},
+            )
         if isinstance(refund_result, Failure):
             error = refund_result.failure()
             logger.bind(operation="cancel_subscription", error=error.message).warning(
                 "Refund on cancel returned failure"
             )
-            return 0
-        return refund_paisa
+            provider_code = str((error.details or {}).get("provider_code", ""))
+            refund_status = (
+                "unknown"
+                if provider_code.endswith("outcome_unknown")
+                else "manual_review"
+                if provider_code.endswith("manual_review_required")
+                else "pending"
+                if error.retryable
+                else "failed"
+            )
+            return await self._refund_failure(
+                subscription,
+                refund_paisa=refund_paisa,
+                status=refund_status,
+                message=error.message,
+                details=dict(error.details or {}),
+            )
+        receipt = refund_result.unwrap().value
+        if not isinstance(receipt, ProviderReceipt):
+            logger.bind(operation="cancel_subscription").warning(
+                "Provider refund did not return a receipt"
+            )
+            return await self._refund_failure(
+                subscription,
+                refund_paisa=refund_paisa,
+                status="manual_review",
+                message="Provider refund returned no durable receipt",
+                details={"manual_review": True},
+            )
+        if receipt.payment_id != payment.razorpay_payment_id or receipt.amount != refund_paisa:
+            logger.bind(
+                operation="cancel_subscription",
+                expected_payment_id=payment.razorpay_payment_id,
+                received_payment_id=receipt.payment_id,
+                expected_amount=refund_paisa,
+                received_amount=receipt.amount,
+            ).warning("Provider refund receipt requires reconciliation")
+            return Failure(
+                SubscriptionRefundError(
+                    message="Provider refund receipt does not match the selected payment",
+                    details={
+                        "manual_review": True,
+                        "requires_reconciliation": True,
+                        "expected_payment_id": payment.razorpay_payment_id,
+                        "provider_payment_id": receipt.payment_id,
+                        "expected_amount_paisa": refund_paisa,
+                        "provider_amount_paisa": receipt.amount,
+                        "received_amount_paisa": receipt.amount,
+                        "provider_refund_id": receipt.provider_refund_id,
+                    },
+                    source="subscription_service",
+                )
+            )
+        previous = int((getattr(payment, "refund_amount", 0) or 0) * 100)
+        recorded_ids = {
+            item
+            for item in (payment.metadata_ or {}).get("processed_refund_ids", [])
+            if isinstance(item, str)
+        }
+        if receipt.provider_refund_id in recorded_ids:
+            logger.bind(operation="cancel_subscription", refund_id=receipt.provider_refund_id).info(
+                "Immediate-cancellation refund already applied"
+            )
+            return Success(0)
+        total = previous + receipt.amount
+        payment_update = await self.payments.update_status(
+            payment,
+            status=(
+                PaymentStatus.REFUNDED.value
+                if total >= payment.amount
+                else PaymentStatus.PARTIALLY_REFUNDED.value
+            ),
+            extra_values={
+                "refund_amount": Decimal(total) / Decimal(100),
+                "metadata_": {
+                    **(payment.metadata_ or {}),
+                    "processed_refund_ids": [*recorded_ids, receipt.provider_refund_id],
+                },
+            },
+        )
+        if isinstance(payment_update, Failure):
+            logger.bind(
+                operation="cancel_subscription", error=payment_update.failure().message
+            ).warning("Refund provider receipt was durable but payment update failed")
+            return await self._refund_failure(
+                subscription,
+                refund_paisa=receipt.amount,
+                status="manual_review",
+                message="Refund receipt is durable but local payment projection failed",
+                details={"manual_review": True, "provider_refund_id": receipt.provider_refund_id},
+            )
+        await self.audit.create(
+            AuditLog(
+                entity_type="payment",
+                entity_id=str(payment.id),
+                action=AuditAction.REFUND_ISSUED.value,
+                user_id=user_id,
+                changes={
+                    "razorpay_refund_id": receipt.provider_refund_id,
+                    "amount": receipt.amount,
+                },
+            )
+        )
+        return Success(receipt.amount)
+
+    async def _refund_failure(
+        self,
+        subscription: Subscription,
+        *,
+        refund_paisa: int,
+        status: str,
+        message: str,
+        details: dict[str, object],
+    ) -> SubscriptionResult[int]:
+        """Persist unresolved refund sync state without undoing cancellation."""
+        remote_sync = (
+            RemoteSyncState.RETRYABLE_FAILURE
+            if status == "pending"
+            else RemoteSyncState.PENDING
+            if status in {"unknown", "manual_review"}
+            else RemoteSyncState.PERMANENT_FAILURE
+        )
+        update = getattr(self.subscriptions, "update_with_lock", None)
+        if callable(update):
+            updated = await update(
+                subscription,
+                subscription.version,
+                values={"remote_sync": remote_sync.value},
+            )
+            if isinstance(updated, Success):
+                subscription = updated.unwrap()
+            else:
+                logger.bind(
+                    operation="cancel_subscription",
+                    error=updated.failure().message,
+                ).warning("Could not persist refund remote sync state")
+        failure_details = {
+            **details,
+            "refund_status": status,
+            "operation_status": status,
+            "refundable_amount_paisa": refund_paisa,
+            "cancelled": subscription.status == SubscriptionStatus.CANCELLED.value,
+            "remote_sync": remote_sync.value,
+            "manual_review": status in {"manual_review", "unknown"},
+        }
+        return Failure(
+            SubscriptionRefundError(
+                message=message,
+                details=failure_details,
+                source="subscription_service",
+            )
+        )
+
+    async def _apply_lifecycle(
+        self,
+        subscription: Subscription,
+        command: object,
+        *,
+        context: PolicyContext,
+        idempotency_key: str,
+    ) -> SubscriptionResult[Any]:
+        """Apply one user command through the durable coordinator seam."""
+
+        coordinator = self.lifecycle_coordinator
+        result = await coordinator.apply(
+            cast("SubscriptionCommand", command),
+            idempotency_key,
+            subscription_id=str(subscription.id),
+            context=context,
+        )
+        if isinstance(result, Failure):
+            error = result.failure()
+            return Failure(self._translate_lifecycle_error(error))
+        return Success(result.unwrap())
+
+    @staticmethod
+    def _request_idempotency_key(value: str | None, operation: str) -> str:
+        """Use the HTTP key verbatim; only keyless legacy calls get a nonce."""
+        if value:
+            return value
+        # Backward-compatible callers predate Idempotency-Key.  Their old
+        # behavior was one fresh operation per invocation; HTTP retries should
+        # supply the header to obtain durable replay semantics.
+        return f"legacy:{operation}:{uuid4()}"
+
+    @staticmethod
+    def _translate_lifecycle_error(error: LifecycleCoordinatorError) -> SubscriptionError:
+        details = dict(error.details or {})
+        details["lifecycle_code"] = str(error.code)
+        if isinstance(error, LifecycleCoordinatorVersionConflictError):
+            return SubscriptionVersionConflictError(
+                message=error.message,
+                details=details,
+                source="subscription_service",
+                subscription_id=error.subscription_id,
+                expected_version=error.expected_version,
+            )
+        if error.kind is ErrorKind.VALIDATION:
+            return SubscriptionValidationError(
+                message=error.message,
+                details=details,
+                source="subscription_service",
+            )
+        if getattr(error, "retryable", False):
+            return SubscriptionTransientInfrastructureError(
+                message=error.message,
+                details=details,
+                source="subscription_service",
+                operation="lifecycle_apply",
+            )
+        return SubscriptionInfrastructureError(
+            message=error.message,
+            details=details,
+            source="subscription_service",
+            operation="lifecycle_apply",
+        )
+
+    @staticmethod
+    def _provider_payment_url(outcome: object) -> str | None:
+        for result in getattr(outcome, "provider_results", ()):
+            value = getattr(result, "value", None)
+            # ProviderPaymentLink deliberately mirrors Razorpay's ``short_url``
+            # field; the domain response exposes it as paymentUrl.
+            url = getattr(value, "short_url", None)
+            if not isinstance(url, str) or not url:
+                url = getattr(value, "payment_url", None)
+            if isinstance(url, str) and url:
+                return url
+        return None
+
+    @staticmethod
+    def _ensure_plan_binding(subscription: Subscription, plan: Plan) -> None:
+        metadata = dict(subscription.metadata_ or {})
+        raw_bindings = metadata.get("billing_provider_plan_ids")
+        bindings = (
+            dict(cast("dict[str, str]", raw_bindings)) if isinstance(raw_bindings, dict) else {}
+        )
+        if not plan.razorpay_plan_id:
+            return
+        bindings[str(plan.id)] = plan.razorpay_plan_id
+        metadata["billing_provider_plan_ids"] = bindings
+        subscription.metadata_ = metadata
 
     @trace_layer("service")
     async def create_subscription(
-        self, user_id: str, dto: SubscriptionCreateDTO
+        self, user_id: str, dto: SubscriptionCreateDTO, *, idempotency_key: str | None = None
     ) -> SubscriptionResult[SubscriptionResponse]:
         plan_result = await self._load_plan(dto.plan_id)
         if isinstance(plan_result, Failure):
@@ -230,6 +663,14 @@ class SubscriptionService:
             return Failure(
                 SubscriptionValidationError(
                     message="Plan is not active",
+                    details={"plan_id": str(plan.id)},
+                    source="subscription_service",
+                )
+            )
+        if not plan.razorpay_plan_id:
+            return Failure(
+                SubscriptionValidationError(
+                    message="Plan is missing its provider billing binding",
                     details={"plan_id": str(plan.id)},
                     source="subscription_service",
                 )
@@ -257,6 +698,12 @@ class SubscriptionService:
             status=SubscriptionStatus.CREATED.value,
             trial_end=now + timedelta(days=trial_days) if trial_days > 0 else None,
             currency_display=plan.currency,
+            metadata_={
+                "billing_customer_email": dto.customer_email,
+                "billing_customer_phone": dto.customer_phone,
+                "billing_customer_name": dto.customer_email.split("@", maxsplit=1)[0],
+                "billing_provider_plan_ids": {str(plan.id): plan.razorpay_plan_id},
+            },
         )
         result = await self.subscriptions.create(subscription)
         if isinstance(result, Failure):
@@ -264,35 +711,26 @@ class SubscriptionService:
         created = result.unwrap()
 
         payment_url: str | None = None
-        if self._razorpay_enabled():
-            try:
-                customer_id = await self._find_or_create_customer(
-                    dto.customer_email, dto.customer_phone
-                )
-                razorpay_sub = await self.razorpay.create_subscription(
-                    plan_id=plan.razorpay_plan_id or "",
-                    customer_id=customer_id,
-                    total_count=0,
-                    quantity=1,
-                    customer_notify=dto.customer_notify,
-                    notes={"subscription_id": str(created.id), "user_id": user_id},
-                )
-                payment_url = razorpay_sub.get("short_url")
-                update = await self.subscriptions.update_with_lock(
-                    created,
-                    created.version,
-                    values={
-                        "razorpay_subscription_id": razorpay_sub.get("id"),
-                        "razorpay_customer_id": customer_id,
-                    },
-                )
-                if isinstance(update, Failure):
-                    return update
-                created = update.unwrap()
-            except Exception as exc:  # noqa: BLE001 — Razorpay is optional in dev
-                logger.bind(operation="create_subscription", error=str(exc)).exception(
-                    "Razorpay subscription creation failed"
-                )
+        operation_key = self._request_idempotency_key(idempotency_key, "create")
+        applied = await self._apply_lifecycle(
+            created,
+            CreateSubscription(
+                metadata=CommandMetadata(
+                    request_id=operation_key, expected_version=created.version
+                ),
+                plan_id=str(plan.id),
+            ),
+            context=PolicyContext(now=now),
+            idempotency_key=operation_key,
+        )
+        if isinstance(applied, Failure):
+            return applied
+        payment_url = self._provider_payment_url(applied.unwrap())
+        refreshed = await self.subscriptions.find_by_id(created.id)
+        if isinstance(refreshed, Failure):
+            return refreshed
+        if refreshed.unwrap() is not None:
+            created = refreshed.unwrap()
 
         await self.audit.create(
             AuditLog(
@@ -371,13 +809,48 @@ class SubscriptionService:
         return Success(_subscription_to_response(subscription, plan=plan))
 
     @trace_layer("service")
-    async def cancel_subscription(
-        self, user_id: str, subscription_id: str, dto: SubscriptionCancelDTO
+    async def cancel_subscription(  # noqa: PLR0912 -- refund reconciliation branches are explicit
+        self,
+        user_id: str,
+        subscription_id: str,
+        dto: SubscriptionCancelDTO,
+        *,
+        idempotency_key: str | None = None,
     ) -> SubscriptionResult[SubscriptionResponse]:
         owned = await self._get_owned_subscription(user_id, subscription_id)
         if isinstance(owned, Failure):
             return owned
         subscription = owned.unwrap()
+        operation_key = idempotency_key or (
+            f"billing:cancel:{subscription.id}:"
+            f"{'period-end' if dto.cancel_at_period_end else 'immediate'}"
+        )
+        # Immediate cancellation stages the local terminal state before the
+        # refund provider call.  If the process dies after the remote receipt
+        # but before the HTTP response, a keyless retry must enter the refund
+        # ledger again instead of failing the state transition first.
+        if subscription.status == SubscriptionStatus.CANCELLED.value:
+            if dto.cancel_at_period_end:
+                plan_result = await self._load_plan(subscription.plan_id)
+                if isinstance(plan_result, Failure):
+                    return Success(_subscription_to_response(subscription, plan=None))
+                return Success(_subscription_to_response(subscription, plan=plan_result.unwrap()))
+            plan_result = await self._load_plan(subscription.plan_id)
+            if isinstance(plan_result, Failure):
+                return plan_result
+            refund = await self._refund_on_cancel(
+                subscription,
+                plan_result.unwrap(),
+                user_id,
+                idempotency_key=operation_key,
+            )
+            if isinstance(refund, Failure):
+                return refund
+            refreshed = await self.subscriptions.find_by_id(subscription.id)
+            if isinstance(refreshed, Failure):
+                return refreshed
+            recovered = refreshed.unwrap() or subscription
+            return Success(_subscription_to_response(recovered, plan=plan_result.unwrap()))
         if subscription.status not in {
             SubscriptionStatus.ACTIVE.value,
             SubscriptionStatus.PAUSED.value,
@@ -398,65 +871,44 @@ class SubscriptionService:
                 )
             )
 
-        if dto.cancel_at_period_end:
-            if subscription.cancel_at_period_end:
-                return Failure(
-                    SubscriptionValidationError(
-                        message="Subscription is already scheduled to cancel",
-                        details={"subscription_id": str(subscription.id)},
-                        source="subscription_service",
-                    )
-                )
-            update = await self.subscriptions.update_with_lock(
-                subscription,
-                subscription.version,
-                values={"cancel_at_period_end": True},
-            )
-            if isinstance(update, Failure):
-                return update
-            subscription = update.unwrap()
-        else:
+        now = datetime.now(tz=UTC)
+        applied = await self._apply_lifecycle(
+            subscription,
+            CancelSubscription(
+                metadata=CommandMetadata(
+                    request_id=operation_key, expected_version=subscription.version
+                ),
+                cancel_at_period_end=dto.cancel_at_period_end,
+            ),
+            context=PolicyContext(now=now),
+            idempotency_key=operation_key,
+        )
+        if isinstance(applied, Failure):
+            return applied
+        if not dto.cancel_at_period_end:
             plan_result = await self._load_plan(subscription.plan_id)
             if isinstance(plan_result, Failure):
                 return plan_result
-            plan = plan_result.unwrap()
-            if self._razorpay_enabled() and subscription.razorpay_subscription_id:
-                try:
-                    await self.razorpay.cancel_subscription(
-                        subscription.razorpay_subscription_id, cancel_at_cycle_end=False
-                    )
-                except Exception as exc:  # noqa: BLE001 -- subscription op best-effort
-                    logger.bind(operation="cancel_subscription", error=str(exc)).exception(
-                        "Razorpay cancel failed"
-                    )
-            refund_paisa = await self._refund_on_cancel(subscription, plan, user_id)
-            update = await self.subscriptions.update_status(
-                subscription,
-                SubscriptionStatus.CANCELLED,
-                expected_version=subscription.version,
-                extra_values={
-                    "cancelled_at": datetime.now(tz=UTC),
-                    "ended_at": datetime.now(tz=UTC),
-                    "cancel_at_period_end": False,
-                },
+            # The coordinator committed the local cancellation before the
+            # independent refund mutation.  Refresh first so a refund-sync
+            # failure can update remote_sync against the new lifecycle
+            # version without touching/undoing the terminal cancellation.
+            current_result = await self.subscriptions.find_by_id(subscription.id)
+            if isinstance(current_result, Failure):
+                return current_result
+            current = current_result.unwrap() or subscription
+            refund = await self._refund_on_cancel(
+                current,
+                plan_result.unwrap(),
+                user_id,
+                idempotency_key=operation_key,
             )
-            if isinstance(update, Failure):
-                return update
-            subscription = update.unwrap()
-            if refund_paisa > 0:
-                await self.audit.create(
-                    AuditLog(
-                        entity_type="subscription",
-                        entity_id=str(subscription.id),
-                        action="subscription.refunded_on_cancel",
-                        user_id=user_id,
-                        changes={
-                            "refund_paisa": refund_paisa,
-                            "policy": plan.refund_policy,
-                        },
-                    )
-                )
-
+            if isinstance(refund, Failure):
+                return refund
+        refreshed = await self.subscriptions.find_by_id(subscription.id)
+        if isinstance(refreshed, Failure):
+            return refreshed
+        subscription = refreshed.unwrap() or subscription
         await self.audit.create(
             AuditLog(
                 entity_type="subscription",
@@ -475,7 +927,12 @@ class SubscriptionService:
 
     @trace_layer("service")
     async def pause_subscription(
-        self, user_id: str, subscription_id: str, dto: SubscriptionPauseDTO
+        self,
+        user_id: str,
+        subscription_id: str,
+        dto: SubscriptionPauseDTO,
+        *,
+        idempotency_key: str | None = None,
     ) -> SubscriptionResult[SubscriptionResponse]:
         owned = await self._get_owned_subscription(user_id, subscription_id)
         if isinstance(owned, Failure):
@@ -496,40 +953,34 @@ class SubscriptionService:
                 )
             )
 
-        now = datetime.now(tz=UTC)
-        values: dict[str, object] = {
-            "pause_start": now,
-            "pause_end": now + timedelta(days=dto.pause_duration_days)
-            if dto.pause_duration_days
-            else None,
-        }
-        if self._razorpay_enabled() and subscription.razorpay_subscription_id:
-            try:
-                await self.razorpay.update_subscription(
-                    subscription.razorpay_subscription_id,
-                    values={"pause_at": int(now.timestamp())},
-                )
-            except Exception as exc:  # noqa: BLE001 -- subscription op best-effort
-                logger.bind(operation="pause_subscription", error=str(exc)).exception(
-                    "Razorpay pause failed"
-                )
-        update = await self.subscriptions.update_status(
+        operation_key = self._request_idempotency_key(idempotency_key, "pause")
+        applied = await self._apply_lifecycle(
             subscription,
-            new_status=SubscriptionStatus.PAUSED,
-            expected_version=subscription.version,
-            extra_values=values,
+            PauseSubscription(
+                metadata=CommandMetadata(
+                    request_id=operation_key, expected_version=subscription.version
+                ),
+                duration_days=dto.pause_duration_days,
+            ),
+            context=PolicyContext(now=datetime.now(tz=UTC)),
+            idempotency_key=operation_key,
         )
-        if isinstance(update, Failure):
-            return update
-        subscription = update.unwrap()
-
+        if isinstance(applied, Failure):
+            return applied
+        refreshed = await self.subscriptions.find_by_id(subscription.id)
+        if isinstance(refreshed, Failure):
+            return refreshed
+        subscription = refreshed.unwrap() or subscription
         await self.audit.create(
             AuditLog(
                 entity_type="subscription",
                 entity_id=str(subscription.id),
                 action="subscription.paused",
                 user_id=user_id,
-                changes=values,
+                changes={
+                    "pause_start": subscription.pause_start,
+                    "pause_end": subscription.pause_end,
+                },
             )
         )
         plan_result = await self._load_plan(subscription.plan_id)
@@ -540,7 +991,11 @@ class SubscriptionService:
 
     @trace_layer("service")
     async def resume_subscription(
-        self, user_id: str, subscription_id: str
+        self,
+        user_id: str,
+        subscription_id: str,
+        *,
+        idempotency_key: str | None = None,
     ) -> SubscriptionResult[SubscriptionResponse]:
         owned = await self._get_owned_subscription(user_id, subscription_id)
         if isinstance(owned, Failure):
@@ -561,26 +1016,23 @@ class SubscriptionService:
                 )
             )
 
-        if self._razorpay_enabled() and subscription.razorpay_subscription_id:
-            try:
-                await self.razorpay.update_subscription(
-                    subscription.razorpay_subscription_id,
-                    values={"resume_at": int(datetime.now(tz=UTC).timestamp())},
-                )
-            except Exception as exc:  # noqa: BLE001 -- subscription op best-effort
-                logger.bind(operation="resume_subscription", error=str(exc)).exception(
-                    "Razorpay resume failed"
-                )
-        update = await self.subscriptions.update_status(
+        operation_key = self._request_idempotency_key(idempotency_key, "resume")
+        applied = await self._apply_lifecycle(
             subscription,
-            SubscriptionStatus.ACTIVE,
-            expected_version=subscription.version,
-            extra_values={"pause_start": None, "pause_end": None},
+            ResumeSubscription(
+                metadata=CommandMetadata(
+                    request_id=operation_key, expected_version=subscription.version
+                )
+            ),
+            context=PolicyContext(now=datetime.now(tz=UTC)),
+            idempotency_key=operation_key,
         )
-        if isinstance(update, Failure):
-            return update
-        subscription = update.unwrap()
-
+        if isinstance(applied, Failure):
+            return applied
+        refreshed = await self.subscriptions.find_by_id(subscription.id)
+        if isinstance(refreshed, Failure):
+            return refreshed
+        subscription = refreshed.unwrap() or subscription
         await self.audit.create(
             AuditLog(
                 entity_type="subscription",
@@ -597,11 +1049,13 @@ class SubscriptionService:
         return Success(_subscription_to_response(subscription, plan=plan))
 
     @trace_layer("service")
-    async def change_plan(
+    async def change_plan(  # noqa: PLR0912 -- lifecycle and economic branches are explicit
         self,
         user_id: str,
         subscription_id: str,
         dto: PlanChangeDTO,
+        *,
+        idempotency_key: str | None = None,
     ) -> SubscriptionResult[SubscriptionResponse]:
         owned = await self._get_owned_subscription(user_id, subscription_id)
         if isinstance(owned, Failure):
@@ -624,73 +1078,113 @@ class SubscriptionService:
                 )
             )
 
-        proration_result = calculate_plan_change_proration(
-            subscription, current_plan, new_plan, effective_date=dto.effective_date
+        if not new_plan.razorpay_plan_id:
+            return Failure(
+                SubscriptionValidationError(
+                    message="Plan is missing its provider billing binding",
+                    details={"new_plan_id": str(new_plan.id)},
+                    source="subscription_service",
+                )
+            )
+        self._ensure_plan_binding(subscription, new_plan)
+        operation_key = self._request_idempotency_key(idempotency_key, "change-plan")
+        effective_at = dto.effective_date or datetime.now(tz=UTC)
+        proration_value = None
+        if (
+            current_plan.interval == new_plan.interval
+            and subscription.current_period_start is not None
+            and subscription.current_period_end is not None
+        ):
+            proration = calculate_plan_change_proration(
+                subscription, current_plan, new_plan, effective_date=effective_at
+            )
+            if isinstance(proration, Failure):
+                return proration
+            proration_value = proration.unwrap()
+        applied = await self._apply_lifecycle(
+            subscription,
+            ChangeSubscriptionPlan(
+                metadata=CommandMetadata(
+                    request_id=operation_key, expected_version=subscription.version
+                ),
+                new_plan_id=str(new_plan.id),
+                effective_at=effective_at,
+            ),
+            context=PolicyContext(
+                now=datetime.now(tz=UTC),
+                current_plan_amount=int(current_plan.amount),
+                target_plan_amount=int(new_plan.amount),
+                current_interval=current_plan.interval,
+                target_interval=new_plan.interval,
+                target_currency=new_plan.currency,
+                target_provider_plan_id=new_plan.razorpay_plan_id,
+            ),
+            idempotency_key=operation_key,
         )
-        if isinstance(proration_result, Failure):
-            return proration_result
-        proration: ProrationCalculation = proration_result.unwrap()
-        payment_url: str | None = None
-        if proration.direction.value == "upgrade" and proration.proration_amount > 0:
-            if self._razorpay_enabled():
-                try:
-                    link = await self.razorpay.create_payment_link(
-                        amount=proration.proration_amount,
-                        currency=current_plan.currency,
-                        description=f"Prorated upgrade to {new_plan.name}",
-                        notes={"subscription_id": str(subscription.id)},
-                    )
-                    payment_url = link.get("short_url")
-                except Exception as exc:  # noqa: BLE001 -- subscription op best-effort
-                    logger.bind(operation="change_plan", error=str(exc)).exception(
-                        "Proration payment link creation failed"
-                    )
-                    return Failure(
-                        SubscriptionInfrastructureError(
-                            message="Could not create the prorated upgrade payment link",
-                            details={
-                                "subscription_id": str(subscription.id),
-                                "proration_amount": proration.proration_amount,
-                                "error": str(exc),
-                            },
-                            source="subscription_service",
-                            operation="change_plan",
-                        )
-                    )
-            else:
+        if isinstance(applied, Failure):
+            return applied
+        # The provider plan mutation must succeed before issuing the economic
+        # compensation.  If the request crashes here, retrying the same
+        # idempotency key reuses the lifecycle outcome and the operation-keyed
+        # credit grant below, so reconciliation cannot orphan or duplicate it.
+        if (
+            proration_value is not None
+            and proration_value.direction.value == "downgrade"
+            and self.credit_service is not None
+            and subscription.current_period_end is not None
+        ):
+            source_invoice = await self._authoritative_source_invoice_id(subscription)
+            if isinstance(source_invoice, Failure):
+                return source_invoice
+            source_invoice_id = source_invoice.unwrap()
+            if source_invoice_id is None:
                 return Failure(
                     SubscriptionValidationError(
-                        message="Razorpay is required to charge the prorated upgrade amount",
-                        details={"proration_amount": proration.proration_amount},
+                        message="Downgrade credit requires the authoritative source invoice",
+                        details={
+                            "subscription_id": str(subscription.id),
+                            "manual_review": True,
+                        },
                         source="subscription_service",
                     )
                 )
-
-        update = await self.subscriptions.update_with_lock(
-            subscription,
-            subscription.version,
-            values={"plan_id": new_plan.id},
-        )
-        if isinstance(update, Failure):
-            return update
-        subscription = update.unwrap()
-
+            credit = await self.credit_service.grant_credit_on_downgrade(
+                user_id,
+                subscription.id,
+                proration_value.total_amount,
+                billing_cycle_end=subscription.current_period_end,
+                currency=new_plan.currency,
+                operation_key=f"{operation_key}:downgrade-credit",
+                source_invoice_id=source_invoice_id,
+            )
+            if isinstance(credit, Failure):
+                return Failure(
+                    SubscriptionInfrastructureError(
+                        message=credit.failure().message,
+                        details=credit.failure().details,
+                        source="subscription_service",
+                        operation="grant_downgrade_credit",
+                    )
+                )
+        refreshed = await self.subscriptions.find_by_id(subscription.id)
+        if isinstance(refreshed, Failure):
+            return refreshed
+        subscription = refreshed.unwrap() or subscription
         await self.audit.create(
             AuditLog(
                 entity_type="subscription",
                 entity_id=str(subscription.id),
                 action=AuditAction.PLAN_CHANGED.value,
                 user_id=user_id,
-                changes={
-                    "old_plan_id": str(current_plan.id),
-                    "new_plan_id": str(new_plan.id),
-                    "proration_amount": proration.proration_amount,
-                    "direction": proration.direction.value,
-                },
+                changes={"old_plan_id": str(current_plan.id), "new_plan_id": str(new_plan.id)},
             )
         )
         return Success(
-            _subscription_to_response(subscription, plan=new_plan, payment_url=payment_url)
+            _subscription_to_response(
+                subscription,
+                plan=new_plan,
+                payment_url=self._provider_payment_url(applied.unwrap()),
+            )
         )
 
     @trace_layer("service")
@@ -761,18 +1255,3 @@ class SubscriptionService:
             )
         )
         return Success({"status": "pending", "requested_days": days})
-
-    @staticmethod
-    def _razorpay_enabled() -> bool:
-        return bool(get_settings().RAZORPAY_KEY_ID)
-
-    async def _find_or_create_customer(self, email: str, phone: str | None) -> str:
-        customer = await self.razorpay.find_customer_by_email(email)
-        if customer is not None:
-            return str(customer.get("id"))
-        created = await self.razorpay.create_customer(
-            email=email,
-            contact=phone,
-            name=email.split("@", maxsplit=1)[0],
-        )
-        return str(created.get("id"))

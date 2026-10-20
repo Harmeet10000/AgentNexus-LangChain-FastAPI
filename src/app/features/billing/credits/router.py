@@ -1,29 +1,31 @@
 # ── from credit_admin_router.py ──
 """Admin/Portal credit endpoints."""
 
-from decimal import Decimal
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Response, status
-from returns.result import Failure
+from returns.result import Failure, Success
 
-from app.connections import get_postgres_db
 from app.features.auth.dependencies import CurrentClaims, CurrentVerifiedUser, require_role
 from app.features.auth.models import UserRole
-from app.features.billing.invoices.dependencies import InvoiceServiceDep
 from app.kernel.result import render_result
 from app.utils import APIResponse
 
-from .dependencies import CreditServiceDep
+from .dependencies import ApplyCreditsToInvoiceDep, CreditServiceDep
 from .dto import (
+    ConsumedCredit,
     CreditBalanceResponse,
     CreditConsumptionResult,
     CreditGrantDTO,
     CreditGrantResponse,
     CreditHistoryResponse,
 )
-from .exceptions import CreditAuthorizationError, CreditCollaboratorError, CreditMetadataError
+from .exceptions import CreditAuthorizationError, CreditMetadataError
+
+if TYPE_CHECKING:
+    from .apply import CreditApplication
+    from .exceptions import CreditResult
 
 admin_router = APIRouter(prefix="/credits", tags=["credits"])
 
@@ -98,37 +100,49 @@ internal_router = APIRouter(prefix="/credits", tags=["credits-internal"])
 
 
 @internal_router.post("/apply-to-invoice")
-async def apply_credit_to_invoice(  # noqa: PLR0917 - endpoint needs services, identity, params, response
-    service: CreditServiceDep,
-    invoice_service: InvoiceServiceDep,
+async def apply_credit_to_invoice(
+    apply_op: ApplyCreditsToInvoiceDep,
     user: CurrentVerifiedUser,
     invoice_id: Annotated[str, Query(min_length=1)],
-    invoice_gross_total: Annotated[Decimal, Query(gt=0)],
     response: Response,
-    *,
-    session=Depends(get_postgres_db),
 ) -> APIResponse[CreditConsumptionResult]:
     """Apply available credits to an invoice (Requirement 50, 55).
 
-    System/internal endpoint called by InvoiceService during invoice generation.
-    The session is owned by InvoiceService — this endpoint does NOT commit.
-
-    The caller is authenticated and the invoice must belong to them: a
-    caller-supplied user id is never trusted, so credits cannot be drained
-    across accounts.
+    Deep operation that owns the complete transaction:
+    - Loads and locks the invoice authoritatively
+    - Verifies ownership and status
+    - Obtains the authoritative invoice amount (no caller-supplied amount)
+    - Selects and applies credits deterministically
+    - Records consumption and updates balances
+    - Updates invoice status if fully covered
+    - Commits or rolls back atomically
     """
-    invoice_result = await invoice_service.get_invoice(invoice_id, user_id=str(user.id))
-    if isinstance(invoice_result, Failure):
-        error = invoice_result.failure()
-        return render_result(
-            Failure(CreditCollaboratorError(message=error.message, details=error.details)),
-            response,
-            message="Credit applied",
+    raw_result = await apply_op.execute(invoice_id=UUID(invoice_id), user_id=str(user.id))
+    if isinstance(raw_result, Failure):
+        # Construct a properly-typed failure result for render_result
+        failure_result: CreditResult[CreditConsumptionResult] = Failure(raw_result.failure())
+        return render_result(failure_result, response, message="Credit application failed")
+    application: CreditApplication = raw_result.unwrap()
+    # Convert to existing DTO for API compatibility
+    dto_consumed = [
+        ConsumedCredit(
+            credit_id=c.credit_id,
+            consumed_amount=c.consumed_amount,
+            remaining_balance=c.remaining_balance,
         )
-    result = await service.consume_credits(
-        user_id=str(user.id),
-        invoice_id=UUID(invoice_id),
-        invoice_gross_total=invoice_gross_total,
-        session=session,
+        for c in application.credits_consumed
+    ]
+    return render_result(
+        Success(
+            CreditConsumptionResult(
+                credit_applied=application.credit_applied_paisa,
+                credit_applied_rupees=application.credit_applied_rupees,
+                cash_due=application.cash_due_paisa,
+                cash_due_rupees=application.cash_due_rupees,
+                credits_consumed=dto_consumed,
+                invoice_paid_in_full=application.invoice_paid_in_full,
+            )
+        ),
+        response,
+        message="Credit applied",
     )
-    return render_result(result, response, message="Credit applied")

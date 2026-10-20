@@ -38,3 +38,4 @@ class RetryAttemptResponse(BaseModel):
     executed_at: datetime | None = Field(default=None, serialization_alias="executedAt")
     status: str
     error_code: str | None = Field(default=None, serialization_alias="errorCode")
+    short_url: str | None = Field(default=None, serialization_alias="shortUrl")

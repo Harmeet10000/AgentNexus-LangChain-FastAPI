@@ -1,7 +1,10 @@
 import asyncio
+from collections.abc import MutableMapping
 from logging.config import fileConfig
+from typing import Literal
 
 from sqlalchemy.engine import Connection
+from sqlalchemy.schema import SchemaItem
 
 from alembic import context
 from app.connections import init_db
@@ -33,6 +36,17 @@ target_metadata = Base.metadata
 
 # Cognee owns its own schema — never let autogenerate touch it.
 MEMORY_SCHEMA_NAME = "cognee_memory"
+type AlembicObjectType = Literal[
+    "schema",
+    "table",
+    "column",
+    "index",
+    "unique_constraint",
+    "foreign_key_constraint",
+]
+type AlembicParentNames = MutableMapping[
+    Literal["schema_name", "table_name", "schema_qualified_table_name"], str | None
+]
 
 
 def _is_memory_schema(schema: str | None) -> bool:
@@ -40,7 +54,11 @@ def _is_memory_schema(schema: str | None) -> bool:
 
 
 def include_object(
-    obj: object, name: str, type_: str, reflected: bool, compare_to: object | None
+    obj: SchemaItem,
+    name: str | None,
+    type_: AlembicObjectType,
+    reflected: bool,
+    compare_to: SchemaItem | None,
 ) -> bool:
     """Exclude non-app schemas and reflected public tables the app does not own."""
     schema = getattr(obj, "schema", None)
@@ -54,7 +72,9 @@ def include_object(
     return not (schema is not None and schema != "public")
 
 
-def include_name(name: str | None, type_: str, parent_names: dict[str, str | None]) -> bool:
+def include_name(
+    name: str | None, type_: AlembicObjectType, parent_names: AlembicParentNames
+) -> bool:
     """Alembic include_name — filter schema names themselves."""
     return not (type_ == "schema" and name == MEMORY_SCHEMA_NAME)
 

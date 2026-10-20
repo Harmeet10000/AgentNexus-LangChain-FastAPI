@@ -1,8 +1,9 @@
 """Authentication feature typed errors."""
 
 from enum import StrEnum
-from typing import ClassVar, assert_never
+from typing import ClassVar, assert_never, cast
 
+from pydantic import model_validator
 from returns.result import Result
 
 from app.kernel.errors import ErrorKind, FeatureError
@@ -52,6 +53,18 @@ class AuthInfrastructureError(FeatureError):
     kind: ClassVar[ErrorKind] = ErrorKind.INFRASTRUCTURE
     code: ClassVar[AuthCode] = AuthCode.DATABASE_ERROR
     retryable: ClassVar[bool] = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sanitize_details(cls, value: object) -> object:
+        """Keep driver and credential material out of HTTP error envelopes."""
+        if not isinstance(value, dict):
+            return value
+        details = value.get("details")
+        details_dict = cast("dict[str, object]", details) if isinstance(details, dict) else {}
+        operation = details_dict.get("operation")
+        safe_details = {"operation": operation} if isinstance(operation, str) else None
+        return {**value, "details": safe_details}
 
 
 type AuthError = (

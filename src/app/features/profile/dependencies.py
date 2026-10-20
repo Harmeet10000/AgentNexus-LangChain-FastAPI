@@ -4,13 +4,14 @@ from typing import TYPE_CHECKING
 
 from fastapi import Request
 
-from app.features.auth.dependencies import get_refresh_token_repository, get_user_repository
+from app.features.auth.dependencies import get_account_store, get_refresh_token_repository
 from app.utils import ServiceUnavailableException
 
 from .service import ProfileService
 
 if TYPE_CHECKING:
     from app.connections.object_storage import StorageService
+    from app.features.auth.account_store import AuthAccountStore
 
 
 async def get_profile_service(request: Request) -> ProfileService:
@@ -27,6 +28,6 @@ async def get_profile_service(request: Request) -> ProfileService:
         raise ServiceUnavailableException(message)
 
     storage: StorageService | None = getattr(state, "object_store", None)
-    user_repo = await get_user_repository(db)
+    account_store: AuthAccountStore = await get_account_store()
     token_repo = await get_refresh_token_repository(redis)
-    return ProfileService(user_repo, token_repo, storage)
+    return ProfileService(account_store, token_repo, storage)

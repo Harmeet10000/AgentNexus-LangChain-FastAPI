@@ -84,6 +84,26 @@ class InvoiceRepository:
             )
 
     @trace_layer("repository")
+    async def find_by_id_for_update(self, invoice_id: str | UUID) -> InvoiceResult[Invoice | None]:
+        """Fetch invoice with row-level lock (SELECT ... FOR UPDATE)."""
+        try:
+            statement: Select[tuple[Invoice]] = (
+                select(Invoice).where(Invoice.id == invoice_id).with_for_update()
+            )
+            result = await self.session.execute(statement)
+            return Success(result.scalar_one_or_none())
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="invoices")
+            await self.session.rollback()
+            return Failure(
+                InvoiceInfrastructureError(
+                    message="Database error while fetching invoice for update",
+                    details={"invoice_id": str(invoice_id), "error": str(exc)},
+                    source="invoice_repository",
+                )
+            )
+
+    @trace_layer("repository")
     async def find_by_payment_id(self, payment_id: str | UUID) -> InvoiceResult[Invoice | None]:
         try:
             statement: Select[tuple[Invoice]] = select(Invoice).where(

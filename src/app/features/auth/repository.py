@@ -118,6 +118,7 @@ class UserRepository:
                 )
             return Success(user)
         except PyMongoError as exc:
+            exc.add_note("auth_repository operation=find_by_email")
             return Failure(
                 AuthInfrastructureError(
                     message="Database error while finding user by email",
@@ -143,6 +144,7 @@ class UserRepository:
                 )
             return Success(user)
         except PyMongoError as exc:
+            exc.add_note("auth_repository operation=find_by_verification_token_hash")
             return Failure(
                 AuthInfrastructureError(
                     message="Database error while finding user by verification token hash",
@@ -168,6 +170,7 @@ class UserRepository:
                 )
             return Success(user)
         except PyMongoError as exc:
+            exc.add_note("auth_repository operation=find_by_reset_token_hash")
             return Failure(
                 AuthInfrastructureError(
                     message="Database error while finding user by reset token hash",
@@ -183,6 +186,7 @@ class UserRepository:
             created = await user.insert()
             return Success(created)
         except DuplicateKeyError as exc:
+            exc.add_note("auth_repository operation=create duplicate_email")
             return Failure(
                 AuthConflictError(
                     message="User with this email already exists",
@@ -191,6 +195,7 @@ class UserRepository:
                 )
             )
         except PyMongoError as exc:
+            exc.add_note("auth_repository operation=create")
             return Failure(
                 AuthInfrastructureError(
                     message="Database error while creating user",
@@ -207,6 +212,7 @@ class UserRepository:
             await user.save()
             return Success(user)
         except PyMongoError as exc:
+            exc.add_note("auth_repository operation=save")
             return Failure(
                 AuthInfrastructureError(
                     message="Database error while saving user",
@@ -222,6 +228,7 @@ class UserRepository:
             count = await User.find(User.email == email.lower()).count()
             return Success(count > 0)
         except PyMongoError as exc:
+            exc.add_note("auth_repository operation=email_exists")
             return Failure(
                 AuthInfrastructureError(
                     message="Database error while checking email existence",
@@ -248,6 +255,7 @@ class UserRepository:
                 full_name,
             )
         except DuplicateKeyError as exc:
+            exc.add_note("auth_repository operation=find_or_create_oauth_user duplicate")
             return Failure(
                 AuthConflictError(
                     message="OAuth user creation failed due to a duplicate",
@@ -256,6 +264,7 @@ class UserRepository:
                 )
             )
         except PyMongoError as exc:
+            exc.add_note("auth_repository operation=find_or_create_oauth_user")
             return Failure(
                 AuthInfrastructureError(
                     message="Database error during OAuth user find-or-create",
@@ -314,10 +323,7 @@ class RefreshTokenRepository:
             else:
                 sessions.append(SessionData.model_validate_json(raw))
         if dead:
-            await cast(
-                "Awaitable[int]",
-                self._redis.srem(_USER_SESSIONS_KEY.format(user_id), *dead),
-            )
+            await self._redis.srem(_USER_SESSIONS_KEY.format(user_id), *dead)
         return Success(sessions)
 
     async def _do_revoke_all_user_sessions(
@@ -360,6 +366,7 @@ class RefreshTokenRepository:
         try:
             return await self._do_store_session(session, session_key, user_key)
         except (RedisError, PyMongoError) as exc:
+            exc.add_note("auth_repository operation=store_session")
             return Failure(
                 AuthInfrastructureError(
                     message="Failed to store session",
@@ -376,6 +383,7 @@ class RefreshTokenRepository:
                 return Success(None)
             return Success(SessionData.model_validate_json(raw))
         except RedisError as exc:
+            exc.add_note("auth_repository operation=get_session")
             return Failure(
                 AuthInfrastructureError(
                     message="Failed to retrieve session",
@@ -408,6 +416,7 @@ class RefreshTokenRepository:
             )
             return Success(None)
         except (RedisError, PyMongoError) as exc:
+            exc.add_note("auth_repository operation=revoke_session")
             return Failure(
                 AuthInfrastructureError(
                     message="Failed to revoke session",
@@ -421,6 +430,7 @@ class RefreshTokenRepository:
         try:
             return await self._do_get_user_sessions(user_id)
         except RedisError as exc:
+            exc.add_note("auth_repository operation=get_user_sessions")
             return Failure(
                 AuthInfrastructureError(
                     message="Failed to list user sessions",
@@ -439,6 +449,7 @@ class RefreshTokenRepository:
         try:
             return await self._do_revoke_all_user_sessions(user_id, except_session_id, reason)
         except (RedisError, PyMongoError) as exc:
+            exc.add_note("auth_repository operation=revoke_all_user_sessions")
             return Failure(
                 AuthInfrastructureError(
                     message="Failed to revoke all user sessions",

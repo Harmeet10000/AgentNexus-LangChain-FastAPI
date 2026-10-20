@@ -10,8 +10,11 @@ from app.shared.jobs.names import (
     AGENT_SAUL_TRANSCRIPT_SWEEP,
     BILLING_DUNNING,
     BILLING_INVOICE_GENERATION,
+    BILLING_PAUSE_RESUME,
+    BILLING_PLAN_RECOVERY,
     BILLING_RECEIPT_GENERATION,
     BILLING_RECONCILIATION,
+    BILLING_RENEWAL,
     CREDITS_EXPIRE,
     CREDITS_RECONCILE,
 )
@@ -33,6 +36,18 @@ BEAT_SCHEDULE = {
     "billing-reconciliation-daily": {
         "task": BILLING_RECONCILIATION,
         "schedule": crontab(hour=2, minute=0),
+    },
+    "billing-renewal-daily": {
+        "task": BILLING_RENEWAL,
+        "schedule": crontab(hour=2, minute=15),
+    },
+    "billing-pause-resume-daily": {
+        "task": BILLING_PAUSE_RESUME,
+        "schedule": crontab(hour=2, minute=30),
+    },
+    "billing-plan-recovery-daily": {
+        "task": BILLING_PLAN_RECOVERY,
+        "schedule": crontab(hour=2, minute=45),
     },
     "credits-expire-daily": {
         "task": CREDITS_EXPIRE,

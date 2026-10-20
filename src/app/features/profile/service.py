@@ -1,8 +1,8 @@
 from returns.result import Failure, Success
 
 from app.connections.object_storage import StorageService
-from app.features.auth.models import User
-from app.features.auth.repository import RefreshTokenRepository, UserRepository
+from app.features.auth.account_store import AuthAccount, AuthAccountStore
+from app.features.auth.repository import RefreshTokenRepository
 from app.observability.logging import logger, trace_layer
 from app.security.passwords import hash_password, verify_password
 
@@ -19,23 +19,23 @@ from .exceptions import (
 class ProfileService:
     def __init__(
         self,
-        user_repo: UserRepository,
+        account_store: AuthAccountStore,
         token_repo: RefreshTokenRepository,
         storage: StorageService | None,
     ) -> None:
-        self._user_repo: UserRepository = user_repo
+        self._account_store: AuthAccountStore = account_store
         self._token_repo: RefreshTokenRepository = token_repo
         self._storage: StorageService | None = storage
 
     @trace_layer(layer_name="service")
     async def update_profile(
         self,
-        user: User,
+        user: AuthAccount,
         dto: UpdateProfileRequest,
-    ) -> ProfileResult[User]:
-        if dto.full_name is not None:
-            user.full_name = dto.full_name
-        result = await self._user_repo.save(user)
+    ) -> ProfileResult[AuthAccount]:
+        if dto.full_name is None:
+            return Success(user)
+        result = await self._account_store.update_profile(user.id, full_name=dto.full_name)
         if isinstance(result, Failure):
             error = result.failure()
             return Failure(
@@ -47,20 +47,20 @@ class ProfileService:
                 )
             )
         updated = result.unwrap()
-        logger.bind(user_id=str(user.id)).info("Profile updated")
+        logger.bind(user_id=user.id).info("Profile updated")
         return Success(updated)
 
     @trace_layer(layer_name="service")
     async def change_password(
         self,
-        user: User,
+        user: AuthAccount,
         current_password: str,
         new_password: str,
         current_session_id: str | None,
         *,
         revoke_other_sessions: bool,
     ) -> ProfileResult[None]:
-        if user.hashed_password is None:
+        if user.password_hash is None:
             return Failure(
                 inner_value=ProfileConflictError(
                     message=(
@@ -71,7 +71,7 @@ class ProfileService:
                     operation="change_password",
                 )
             )
-        if not verify_password(user.hashed_password, current_password):
+        if not verify_password(user.password_hash, current_password):
             return Failure(
                 inner_value=ProfileAuthenticationError(
                     message="Current password is incorrect",
@@ -87,8 +87,9 @@ class ProfileService:
                 )
             )
 
-        user.hashed_password = hash_password(new_password)
-        saved = await self._user_repo.save(user)
+        saved = await self._account_store.replace_password_hash(
+            user.id, hash_password(new_password)
+        )
         if isinstance(saved, Failure):
             error = saved.failure()
             return Failure(
@@ -116,13 +117,13 @@ class ProfileService:
                         operation="revoke_sessions",
                     )
                 )
-        logger.bind(user_id=str(user.id)).info("Password changed")
+        logger.bind(user_id=user.id).info("Password changed")
         return Success(None)
 
     @trace_layer(layer_name="service")
     async def upload_avatar(
         self,
-        user: User,
+        user: AuthAccount,
         file_data: bytes,
         content_type: str,
     ) -> ProfileResult[AvatarResponse]:
@@ -145,15 +146,23 @@ class ProfileService:
         public_url = f"{storage.public_url}/{key}" if storage.public_url else stored.unwrap()
 
         # Optionally delete old avatar — best-effort, non-blocking
-        old_avatar: str | None = getattr(user, "avatar_url", None)
-
-        user.avatar_url = public_url
-        await self._user_repo.save(user)
+        old_avatar = user.avatar_url
+        saved = await self._account_store.set_avatar_url(user.id, public_url)
+        if isinstance(saved, Failure):
+            error = saved.failure()
+            return Failure(
+                ProfileInfrastructureError(
+                    message=error.message,
+                    details=error.details,
+                    source="profile_service",
+                    operation="upload_avatar",
+                )
+            )
 
         if old_avatar and storage.public_url:
             # Extract key from old URL and delete asynchronously
             old_key = old_avatar.removeprefix(storage.public_url + "/")
             await storage.delete_object(key=old_key)
 
-        logger.bind(user_id=str(user.id)).info("Avatar uploaded")
+        logger.bind(user_id=user.id).info("Avatar uploaded")
         return Success(AvatarResponse(avatar_url=public_url))

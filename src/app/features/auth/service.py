@@ -17,9 +17,10 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
     from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
+    from .account_store import AuthAccount, AuthAccountStore
     from .dto import LoginRequest, RegisterRequest
     from .exceptions import AuthResult
-    from .repository import RefreshTokenRepository, UserRepository
+    from .repository import RefreshTokenRepository
 
 from app.security.passwords import (
     generate_token,
@@ -36,6 +37,7 @@ from app.security.tokens import (
     verify_oauth_state,
 )
 
+from .account_store import NewAuthAccount, OAuthAccountInput
 from .dto import SessionResponse, TokenResponse, UserResponse
 from .exceptions import (
     AuthAuthenticationError,
@@ -43,7 +45,6 @@ from .exceptions import (
     AuthConflictError,
     AuthNotFoundError,
 )
-from .models import User
 from .oauth import fetch_oauth_userinfo, get_oauth_config
 from .repository import SessionData
 
@@ -72,57 +73,57 @@ class WebSocketConnectionCloser(Protocol):
     async def close_connection(self, connection_id: str, /, *, reason: str) -> None: ...
 
 
-def _to_user_response(user: User) -> UserResponse:
+def _to_user_response(account: AuthAccount) -> UserResponse:
     return UserResponse(
-        id=str(user.id),
-        email=user.email,
-        full_name=user.full_name,
-        role=user.role.value,
-        is_verified=user.is_verified,
-        is_active=user.is_active,
-        created_at=user.created_at,
+        id=account.id,
+        email=account.email,
+        full_name=account.full_name,
+        avatar_url=account.avatar_url,
+        role=account.role.value,
+        is_verified=account.is_verified,
+        is_active=account.is_active,
+        created_at=account.created_at,
     )
 
 
 class AuthService:
     def __init__(
         self,
-        user_repo: UserRepository,
+        account_store: AuthAccountStore,
         token_repo: RefreshTokenRepository,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
-        self._user_repo = user_repo
+        self._account_store = account_store
         self._token_repo = token_repo
         self._session_factory = session_factory
 
     @trace_layer("service")
     async def register(self, dto: RegisterRequest) -> AuthResult[UserResponse]:
-        email_exists_result = await self._user_repo.email_exists(dto.email)
+        email_exists_result = await self._account_store.email_exists(dto.email)
         if isinstance(email_exists_result, Failure):
             error = email_exists_result.failure()
             log_expected_failure(error, operation="email_exists")
             return Failure(error)
-        exists = email_exists_result.unwrap()
-        if exists:
+        if email_exists_result.unwrap():
             return Failure(
                 AuthConflictError(message="Email already registered", source="auth_service")
             )
 
         verification_token = generate_token()
-        user = User(
+        new_account = NewAuthAccount(
             email=dto.email.lower(),
+            password_hash=hash_password(dto.password),
             full_name=dto.full_name,
-            hashed_password=hash_password(dto.password),
             verification_token_hash=hash_token(verification_token),
         )
-        create_result = await self._user_repo.create(user)
+        create_result = await self._account_store.create(new_account)
         if isinstance(create_result, Failure):
             error = create_result.failure()
             log_expected_failure(error, operation="create_user")
             return Failure(error)
         resolved = create_result.unwrap()
 
-        logger.bind(user_id=str(resolved.id)).info("User registered")
+        logger.bind(user_id=resolved.id).info("User registered")
         return Success(_to_user_response(resolved))
 
     @trace_layer("service")
@@ -132,32 +133,30 @@ class AuthService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> AuthResult[TokenResponse]:
-        find_result = await self._user_repo.find_by_email(dto.email)
+        find_result = await self._account_store.find_by_email(dto.email)
         if isinstance(find_result, Failure):
             error = find_result.failure()
             log_expected_failure(error, operation="find_user")
-            if error.kind.value == "not_found":
-                return Failure(
-                    AuthAuthenticationError(message="Invalid credentials", source="auth_service")
-                )
             return Failure(error)
-        resolved = find_result.unwrap()
-        if resolved is None or resolved.hashed_password is None:
+        account = find_result.unwrap()
+        if account is None or account.password_hash is None:
+            # Use dummy hash for constant-time comparison to prevent timing attacks
+            verify_password(_DUMMY_HASH, dto.password)
             return Failure(
                 AuthAuthenticationError(message="Invalid credentials", source="auth_service")
             )
 
-        if not verify_password(resolved.hashed_password, dto.password):
+        if not verify_password(account.password_hash, dto.password):
             return Failure(
                 AuthAuthenticationError(message="Invalid credentials", source="auth_service")
             )
 
-        if not resolved.is_active:
+        if not account.is_active:
             return Failure(
                 AuthAuthenticationError(message="Account is disabled", source="auth_service")
             )
 
-        if not resolved.is_verified:
+        if not account.is_verified:
             return Failure(
                 AuthAuthenticationError(
                     message="Email not verified. Check your inbox.", source="auth_service"
@@ -165,16 +164,19 @@ class AuthService:
             )
 
         # Transparent rehash: argon2 params may have been upgraded since this hash was created
-        if needs_rehash(resolved.hashed_password):
-            resolved.hashed_password = hash_password(dto.password)
-            save_result = await self._user_repo.save(resolved)
-            if isinstance(save_result, Failure):
-                error = save_result.failure()
-                log_expected_failure(error, operation="save_user")
+        if needs_rehash(account.password_hash):
+            rehash_result = await self._account_store.replace_password_hash(
+                account.id, hash_password(dto.password)
+            )
+            if isinstance(rehash_result, Failure):
+                error = rehash_result.failure()
+                log_expected_failure(error, operation="rehash_password")
                 return Failure(error)
 
         return await self._create_session(
-            user=resolved,
+            user_id=account.id,
+            role=account.role,
+            permissions=account.permissions,
             device_name=dto.device_name,
             ip=ip,
             user_agent=user_agent,
@@ -208,36 +210,30 @@ class AuthService:
 
         # Redis lookup is the revocation gate — if the session was deleted, deny
         session_result = await self._token_repo.get_session(claims.jti)
-        if isinstance(session_result, Success) and session_result.unwrap() is not None:
-            pass  # session is valid
-        else:
-            if isinstance(session_result, Failure):
-                return Failure(session_result.failure())
+        if isinstance(session_result, Failure):
+            return Failure(session_result.failure())
+        session = session_result.unwrap()
+        if session is None:
             return Failure(
                 AuthAuthenticationError(message="Session expired or revoked", source="auth_service")
             )
 
-        user_result = await self._user_repo.find_by_id(claims.sub)
+        user_result = await self._account_store.find_by_id(claims.sub)
         if isinstance(user_result, Failure):
             error = user_result.failure()
             log_expected_failure(error, operation="refresh_user_lookup")
             return Failure(error)
-        resolved_user = user_result.unwrap()
-        if resolved_user is None:
-            return Failure(
-                AuthAuthenticationError(message="User not found or disabled", source="auth_service")
-            )
-
-        if not resolved_user.is_active:
+        account = user_result.unwrap()
+        if account is None or not account.is_active:
             return Failure(
                 AuthAuthenticationError(message="User not found or disabled", source="auth_service")
             )
 
         access_token, expires_in = create_access_token(
-            user_id=str(resolved_user.id),
+            user_id=account.id,
             session_id=claims.jti,
-            role=resolved_user.role.value,
-            permissions=frozenset(p.value for p in resolved_user.get_permissions()),
+            role=account.role,
+            permissions=account.permissions,
         )
         return Success(
             TokenResponse(
@@ -250,136 +246,135 @@ class AuthService:
 
     @trace_layer("service")
     async def verify_email(self, token: str) -> AuthResult[None]:
-        verify_result = await self._user_repo.find_by_verification_token_hash(hash_token(token))
+        verify_result = await self._account_store.find_by_verification_token_hash(hash_token(token))
         if isinstance(verify_result, Failure):
             error = verify_result.failure()
             log_expected_failure(error, operation="verify_email")
             return Failure(error)
-        resolved = verify_result.unwrap()
-        if resolved is None:
+        account = verify_result.unwrap()
+        if account is None:
             return Failure(
                 AuthNotFoundError(
                     message="Invalid or expired verification token", source="auth_service"
                 )
             )
-        resolved.is_verified = True
-        resolved.verification_token_hash = None
-        save_result = await self._user_repo.save(resolved)
-        if isinstance(save_result, Failure):
-            error = save_result.failure()
-            log_expected_failure(error, operation="save_user")
+        mark_result = await self._account_store.mark_email_verified(account.id)
+        if isinstance(mark_result, Failure):
+            error = mark_result.failure()
+            log_expected_failure(error, operation="mark_email_verified")
             return Failure(error)
-        logger.bind(user_id=str(resolved.id)).info("Email verified")
+        logger.bind(user_id=account.id).info("Email verified")
         return Success(None)
 
     @trace_layer("service")
     async def resend_verification(self, email: str) -> AuthResult[None]:
-        find_result = await self._user_repo.find_by_email(email)
-        if isinstance(find_result, Success):
-            resolved = find_result.unwrap()
-        else:
+        find_result = await self._account_store.find_by_email(email)
+        if isinstance(find_result, Failure):
             return Success(None)  # silent — don't reveal email existence
-
-        if resolved.is_verified:
-            return Failure(
-                AuthConflictError(message="Email already verified", source="auth_service")
+        account = find_result.unwrap()
+        if account is None or account.is_verified:
+            return (
+                Success(None)
+                if account is None
+                else Failure(
+                    AuthConflictError(message="Email already verified", source="auth_service")
+                )
             )
 
         new_token = generate_token()
-        resolved.verification_token_hash = hash_token(new_token)
-        save_result = await self._user_repo.save(resolved)
-        if isinstance(save_result, Failure):
-            log_expected_failure(save_result.failure(), operation="save_user")
-            return Failure(save_result.failure())
+        token_hash = hash_token(new_token)
+        set_result = await self._account_store.set_verification_token_hash(account.id, token_hash)
+        if isinstance(set_result, Failure):
+            log_expected_failure(set_result.failure(), operation="set_verification_token")
+            return Failure(set_result.failure())
 
         await self._publish_outbox_event(
             aggregate_type="auth_email",
-            aggregate_id=str(resolved.id),
+            aggregate_id=account.id,
             event_type="auth.send_verification_email",
             payload={
-                "user_id": str(resolved.id),
-                "email": resolved.email,
+                "user_id": account.id,
+                "email": account.email,
                 "token": new_token,
-                # Stable per-email key derived from the stored token hash, so
-                # retries and duplicate resends dedupe instead of re-sending.
-                # The raw token never lands in the key.
-                "idempotency_key": f"email-verify:{resolved.id}:{hash_token(new_token)}",
+                "idempotency_key": f"email-verify:{account.id}:{token_hash}",
             },
         )
         return Success(None)
 
     @trace_layer("service")
     async def forgot_password(self, email: str) -> AuthResult[None]:
-        find_result = await self._user_repo.find_by_email(email)
-        if isinstance(find_result, Success):
-            resolved = find_result.unwrap()
-        else:
+        find_result = await self._account_store.find_by_email(email)
+        if isinstance(find_result, Failure):
             return Success(None)  # silent — identical response regardless of outcome
-
-        if not resolved or not resolved.is_verified:
+        account = find_result.unwrap()
+        if account is None or not account.is_verified:
             return Success(None)  # silent — identical response regardless of outcome
 
         settings = get_settings()
         reset_token = generate_token()
-        resolved.reset_token_hash = hash_token(reset_token)
-        resolved.reset_token_expires_at = datetime.now(UTC) + timedelta(
+        token_hash = hash_token(reset_token)
+        expires_at = datetime.now(UTC) + timedelta(
             minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES,
         )
-        save_result = await self._user_repo.save(resolved)
-        if isinstance(save_result, Failure):
-            log_expected_failure(save_result.failure(), operation="save_user")
-            return Failure(save_result.failure())
+        set_result = await self._account_store.set_reset_token(account.id, token_hash, expires_at)
+        if isinstance(set_result, Failure):
+            log_expected_failure(set_result.failure(), operation="set_reset_token")
+            return Failure(set_result.failure())
+
         await self._publish_outbox_event(
             aggregate_type="auth_email",
-            aggregate_id=str(resolved.id),
+            aggregate_id=account.id,
             event_type="auth.send_password_reset_email",
             payload={
-                "user_id": str(resolved.id),
-                "email": resolved.email,
+                "user_id": account.id,
+                "email": account.email,
                 "token": reset_token,
-                "idempotency_key": f"email-reset:{resolved.id}:{hash_token(reset_token)}",
+                "idempotency_key": f"email-reset:{account.id}:{token_hash}",
             },
         )
         return Success(None)
 
     @trace_layer("service")
     async def reset_password(self, token: str, new_password: str) -> AuthResult[None]:
-        reset_result = await self._user_repo.find_by_reset_token_hash(hash_token(token))
+        token_hash = hash_token(token)
+        reset_result = await self._account_store.find_by_reset_token_hash(token_hash)
         if isinstance(reset_result, Failure):
             error = reset_result.failure()
             log_expected_failure(error, operation="reset_password")
             return Failure(error)
-        resolved = reset_result.unwrap()
-        if resolved is None:
+        account = reset_result.unwrap()
+        if account is None:
             return Failure(
                 AuthNotFoundError(message="Invalid or expired reset token", source="auth_service")
             )
 
-        if (
-            resolved.reset_token_expires_at is None
-            or resolved.reset_token_expires_at < datetime.now(UTC)
+        if account.reset_token_expires_at is None or account.reset_token_expires_at < datetime.now(
+            UTC
         ):
             return Failure(
                 AuthAuthenticationError(message="Reset token has expired", source="auth_service")
             )
 
-        resolved.hashed_password = hash_password(new_password)
-        resolved.reset_token_hash = None
-        resolved.reset_token_expires_at = None
-        save_result = await self._user_repo.save(resolved)
-        if isinstance(save_result, Failure):
-            log_expected_failure(save_result.failure(), operation="save_user")
-            return Failure(save_result.failure())
+        # Atomic operation: consume reset token and replace password
+        consume_result = await self._account_store.consume_reset_token_and_replace_password(
+            account_id=account.id,
+            expected_token_hash=token_hash,
+            new_password_hash=hash_password(new_password),
+        )
+        if isinstance(consume_result, Failure):
+            error = consume_result.failure()
+            log_expected_failure(error, operation="consume_reset_token_and_replace_password")
+            return Failure(error)
 
         # Force all sessions offline after a password reset
         revoke_result = await self._token_repo.revoke_all_user_sessions(
-            user_id=str(resolved.id),
+            user_id=account.id,
             reason="password_reset",
         )
         if isinstance(revoke_result, Failure):
             log_expected_failure(revoke_result.failure(), operation="revoke_all_user_sessions")
             return Failure(revoke_result.failure())
-        logger.bind(user_id=str(resolved.id)).info("Password reset — all sessions revoked")
+        logger.bind(user_id=account.id).info("Password reset — all sessions revoked")
         return Success(None)
 
     @staticmethod
@@ -421,28 +416,67 @@ class AuthService:
         config = get_oauth_config(provider)
         userinfo = await fetch_oauth_userinfo(provider, config, code)
 
-        oauth_result = await self._user_repo.find_or_create_oauth_user(
-            email=userinfo.email,
-            provider=provider,
-            provider_user_id=userinfo.provider_user_id,
-            provider_email=userinfo.email,
-            full_name=userinfo.full_name,
-        )
-        if isinstance(oauth_result, Failure):
-            error = oauth_result.failure()
-            log_expected_failure(error, operation="find_or_create_oauth_user")
+        # Check if user exists by email
+        find_result = await self._account_store.find_by_email(userinfo.email)
+        if isinstance(find_result, Failure):
+            error = find_result.failure()
+            log_expected_failure(error, operation="oauth_find_user")
             return Failure(error)
-        resolved_user, was_created = oauth_result.unwrap()
 
-        if not resolved_user.is_active:
-            return Failure(
-                AuthAuthenticationError(message="Account is disabled", source="auth_service")
+        account = find_result.unwrap()
+        if account is not None:
+            # User exists - login
+            if not account.is_active:
+                return Failure(
+                    AuthAuthenticationError(message="Account is disabled", source="auth_service")
+                )
+            link_result = await self._account_store.link_oauth_account(
+                account.id,
+                provider,
+                userinfo.provider_user_id,
+                userinfo.email,
+            )
+            if isinstance(link_result, Failure):
+                error = link_result.failure()
+                log_expected_failure(error, operation="oauth_link_user")
+                return Failure(error)
+            logger.bind(user_id=account.id, provider=provider, created=False).info("OAuth login")
+            return await self._create_session(
+                user_id=account.id,
+                role=account.role.value,
+                permissions=account.permissions,
+                ip=ip,
+                user_agent=user_agent,
             )
 
-        logger.bind(user_id=str(resolved_user.id), provider=provider, created=was_created).info(
-            "OAuth login"
+        # Create new OAuth user
+        new_account = NewAuthAccount(
+            email=userinfo.email.lower(),
+            password_hash=None,  # OAuth-only account
+            full_name=userinfo.full_name,
+            is_verified=True,
+            verification_token_hash=None,
+            oauth_account=OAuthAccountInput(
+                provider=provider,
+                provider_user_id=userinfo.provider_user_id,
+                provider_email=userinfo.email,
+            ),
         )
-        return await self._create_session(user=resolved_user, ip=ip, user_agent=user_agent)
+        create_result = await self._account_store.create(new_account)
+        if isinstance(create_result, Failure):
+            error = create_result.failure()
+            log_expected_failure(error, operation="oauth_create_user")
+            return Failure(error)
+        account = create_result.unwrap()
+
+        logger.bind(user_id=account.id, provider=provider, created=True).info("OAuth login")
+        return await self._create_session(
+            user_id=account.id,
+            role=account.role.value,
+            permissions=account.permissions,
+            ip=ip,
+            user_agent=user_agent,
+        )
 
     @trace_layer("service")
     async def list_sessions(
@@ -611,7 +645,10 @@ class AuthService:
 
     async def _create_session(
         self,
-        user: User,
+        *,
+        user_id: str,
+        role: str,
+        permissions: frozenset[str],
         device_name: str | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -622,20 +659,20 @@ class AuthService:
         now = datetime.now(UTC)
 
         access_token, expires_in = create_access_token(
-            user_id=str(user.id),
+            user_id=user_id,
             session_id=session_id,
-            role=user.role.value,
-            permissions=frozenset(p.value for p in user.get_permissions()),
+            role=role,
+            permissions=permissions,
         )
         refresh_token, refresh_ttl = create_refresh_token(
-            user_id=str(user.id),
+            user_id=user_id,
             session_id=session_id,
             device_id=device_id,
         )
         store_result = await self._token_repo.store_session(
             SessionData(
                 session_id=session_id,
-                user_id=str(user.id),
+                user_id=user_id,
                 device_id=device_id,
                 device_name=device_name,
                 ip_address=ip,

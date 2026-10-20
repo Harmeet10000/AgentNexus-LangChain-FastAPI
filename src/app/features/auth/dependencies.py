@@ -3,10 +3,9 @@ from typing import Annotated, assert_never
 
 from fastapi import Depends, Request, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from returns.result import Failure
+from returns.result import Failure, Success
 from starlette.requests import HTTPConnection
 
-from app.connections.mongodb import get_mongodb
 from app.connections.redis import get_redis
 from app.observability.logging import set_request_actor
 from app.security.tokens import TokenClaims, decode_token
@@ -19,6 +18,11 @@ from app.utils import (
     ValidationException,
 )
 
+from .account_store import (
+    AuthAccount,
+    AuthAccountStore,
+    BeanieAuthAccountStore,
+)
 from .exceptions import (
     AuthAuthenticationError,
     AuthAuthorizationError,
@@ -28,8 +32,8 @@ from .exceptions import (
     AuthResult,
     AuthValidationError,
 )
-from .models import Permission, User, UserRole
-from .repository import RefreshTokenRepository, UserRepository
+from .models import Permission, UserRole
+from .repository import RefreshTokenRepository
 from .service import AuthService
 
 _http_bearer = HTTPBearer(auto_error=False)
@@ -39,10 +43,9 @@ _ACCESS_TOKEN_TYPE = "access"  # noqa: S105 — token type constant, not a passw
 # ── Repository and service wiring ─────────────────────────────────────────────
 
 
-async def get_user_repository(
-    db=Depends(get_mongodb),
-) -> UserRepository:
-    return UserRepository(db)
+async def get_account_store() -> AuthAccountStore:
+    """Production MongoDB/Beanie adapter for AuthAccountStore."""
+    return BeanieAuthAccountStore()
 
 
 async def get_refresh_token_repository(
@@ -52,12 +55,12 @@ async def get_refresh_token_repository(
 
 
 async def get_auth_service(
-    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    account_store: Annotated[AuthAccountStore, Depends(get_account_store)],
     token_repo: Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)],
     connection: HTTPConnection,
 ) -> AuthService:
     session_factory = getattr(connection.app.state, "db_session_local", None)
-    return AuthService(user_repo, token_repo, session_factory=session_factory)
+    return AuthService(account_store, token_repo, session_factory=session_factory)
 
 
 # ── Token extraction ──────────────────────────────────────────────────────────
@@ -127,10 +130,10 @@ async def get_websocket_token_claims(websocket: WebSocket) -> TokenClaims:
 
 async def get_current_user_result(
     claims: Annotated[TokenClaims, Depends(get_token_claims)],
-    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
-) -> AuthResult[User]:
+    account_store: Annotated[AuthAccountStore, Depends(get_account_store)],
+) -> AuthResult[AuthAccount]:
     """Hydrate the current user while preserving repository failures as typed Results."""
-    result = await user_repo.find_by_id(claims.sub)
+    result = await account_store.find_by_id(claims.sub)
     if isinstance(result, Failure):
         error = result.failure()
         if isinstance(error, AuthNotFoundError | AuthValidationError):
@@ -142,8 +145,8 @@ async def get_current_user_result(
                 )
             )
         return Failure(error)
-    user = result.unwrap()
-    if user is None:
+    account = result.unwrap()
+    if account is None:
         return Failure(
             AuthAuthenticationError(
                 message="User not found",
@@ -151,12 +154,12 @@ async def get_current_user_result(
                 source="auth_dependency",
             )
         )
-    return result
+    return Success(account)
 
 
 async def get_current_user(
-    result: Annotated[AuthResult[User], Depends(get_current_user_result)],
-) -> User:
+    result: Annotated[AuthResult[AuthAccount], Depends(get_current_user_result)],
+) -> AuthAccount:
     """Resolve the typed user result at FastAPI's exception-native dependency boundary."""
     if isinstance(result, Failure):
         error = result.failure()
@@ -190,21 +193,21 @@ async def get_current_user(
 
 
 async def get_current_active_user(
-    user: Annotated[User, Depends(get_current_user)],
-) -> User:
-    if not user.is_active:
+    account: Annotated[AuthAccount, Depends(get_current_user)],
+) -> AuthAccount:
+    if not account.is_active:
         msg = "Account is disabled"
         raise UnauthorizedException(msg)
-    return user
+    return account
 
 
 async def get_current_verified_user(
-    user: Annotated[User, Depends(get_current_active_user)],
-) -> User:
-    if not user.is_verified:
+    account: Annotated[AuthAccount, Depends(get_current_active_user)],
+) -> AuthAccount:
+    if not account.is_verified:
         msg = "Email not verified"
         raise UnauthorizedException(msg)
-    return user
+    return account
 
 
 # ── RBAC guards (claims-based — no DB hit) ────────────────────────────────────
@@ -248,8 +251,8 @@ def require_role(*roles: UserRole) -> Callable[[TokenClaims], Awaitable[TokenCla
 
 # ── Annotated aliases — import and use directly in router signatures ───────────
 
-CurrentUser = Annotated[User, Depends(get_current_active_user)]
-CurrentVerifiedUser = Annotated[User, Depends(get_current_verified_user)]
+CurrentUser = Annotated[AuthAccount, Depends(get_current_active_user)]
+CurrentVerifiedUser = Annotated[AuthAccount, Depends(get_current_verified_user)]
 CurrentClaims = Annotated[TokenClaims, Depends(get_token_claims)]
 WebSocketClaims = Annotated[TokenClaims, Depends(get_websocket_token_claims)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]

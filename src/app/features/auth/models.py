@@ -64,6 +64,7 @@ class User(Document):
     email: Annotated[str, Indexed(unique=True)]
     hashed_password: str | None = None
     full_name: str | None = None
+    avatar_url: str | None = None
     is_verified: bool = Field(default=False)
     is_active: bool = Field(default=True)
     role: UserRole = Field(default=UserRole.USER)

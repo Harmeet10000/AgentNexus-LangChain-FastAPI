@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import TYPE_CHECKING
 
@@ -15,6 +15,8 @@ from .exceptions import SubscriptionValidationError
 from .models import SubscriptionStatus
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from app.features.billing.plans.models import Plan
     from app.features.billing.subscriptions.models import Subscription
 
@@ -30,6 +32,20 @@ def calculate_proration_fraction(
     timedelta(microseconds=1)`` never passes through binary floating point,
     so no precision is lost converting between datetimes and Decimal.
     """
+
+    for name, value in (
+        ("period_start", period_start),
+        ("period_end", period_end),
+        ("effective_date", effective_date),
+    ):
+        if value.tzinfo is None or value.utcoffset() is None:
+            return Failure(
+                SubscriptionValidationError(
+                    message=f"{name} must include a timezone offset",
+                    details={"field": name},
+                    source="proration",
+                )
+            )
     total_microseconds = (period_end - period_start) // timedelta(microseconds=1)
     if total_microseconds <= 0:
         msg = "Billing period is empty or inverted"
@@ -39,6 +55,18 @@ def calculate_proration_fraction(
                 details={
                     "period_start": period_start.isoformat(),
                     "period_end": period_end.isoformat(),
+                },
+                source="proration",
+            )
+        )
+    if effective_date < period_start:
+        msg = "Effective date is before the current billing period start"
+        return Failure(
+            SubscriptionValidationError(
+                message=msg,
+                details={
+                    "effective_date": effective_date.isoformat(),
+                    "period_start": period_start.isoformat(),
                 },
                 source="proration",
             )
@@ -105,8 +133,16 @@ def calculate_plan_change_proration(
             )
         )
 
-    now = effective_date or datetime.now(tz=UTC)
-    if now.tzinfo is None:
+    if effective_date is None:
+        return Failure(
+            SubscriptionValidationError(
+                message="effective_date is required",
+                details={"field": "effective_date"},
+                source="proration",
+            )
+        )
+    now = effective_date
+    if now.tzinfo is None or now.utcoffset() is None:
         msg = "effective_date must include a timezone offset"
         return Failure(
             SubscriptionValidationError(

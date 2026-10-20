@@ -99,6 +99,7 @@ class UserResponse(BaseModel):
     id: str
     email: str
     full_name: str | None = Field(default=None, serialization_alias="fullName")
+    avatar_url: str | None = Field(default=None, serialization_alias="avatarUrl")
     role: str
     is_verified: bool = Field(serialization_alias="isVerified")
     is_active: bool = Field(serialization_alias="isActive")

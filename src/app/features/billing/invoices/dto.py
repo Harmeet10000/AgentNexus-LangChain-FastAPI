@@ -38,6 +38,7 @@ class InvoiceResponse(BaseModel):
     tax_rate: Decimal = Field(serialization_alias="taxRate")
     tax_amount: Decimal = Field(serialization_alias="taxAmount")
     total: Decimal
+    credit_applied: Decimal = Field(default=Decimal(0), serialization_alias="creditApplied")
     currency: str
     seller_gstin: str = Field(serialization_alias="sellerGstin")
     buyer_gstin: str | None = Field(default=None, serialization_alias="buyerGstin")

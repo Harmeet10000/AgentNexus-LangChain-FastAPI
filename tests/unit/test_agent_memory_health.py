@@ -108,8 +108,15 @@ async def test_features_surface_reports_present_procedures() -> None:
     assert report.graph_procedures_available is True
 
 
-async def test_health_keeps_its_own_200_status_when_optional_backends_are_absent() -> None:
-    result = await _service(cognee_config=None).get_health()
+async def test_health_keeps_its_own_200_status_when_optional_backends_are_absent(
+    monkeypatch,
+) -> None:
+    service = _service(cognee_config=None)
+    # Disk usage is host state, not part of this contract. Keep this test
+    # focused on optional backend absence instead of making its status depend
+    # on how full the runner's filesystem happens to be.
+    monkeypatch.setattr(service, "_check_disk", lambda: ComponentCheck.healthy(state="accessible"))
+    result = await service.get_health()
 
     assert result.status_code == 200
     assert result.data is not None

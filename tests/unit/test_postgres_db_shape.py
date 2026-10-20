@@ -52,15 +52,29 @@ async def test_get_postgres_db_commits_on_clean_exit():
     mock_session2.close.assert_awaited_once()
 
 
-def test_get_postgres_db_rolls_back_on_exception():
-    import inspect
+@pytest.mark.asyncio
+async def test_get_postgres_db_rolls_back_on_exception():
+    mock_session = AsyncMock()
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_session
+    mock_cm.__aexit__.return_value = None
+    mock_session_local = MagicMock(return_value=mock_cm)
 
-    src = inspect.getsource(get_postgres_db)
-    # Must rollback on exception, not commit
-    assert "except Exception:" in src
-    assert "await session.rollback()" in src
-    # Must re-raise after rollback
-    assert "raise" in src.split("await session.rollback()")[1].split("finally")[0]
+    mock_connection = MagicMock()
+    mock_connection.app.state.db_session_local = mock_session_local
+
+    gen = get_postgres_db(mock_connection)
+    session = await anext(gen)
+    assert session is mock_session
+
+    error = RuntimeError("query failed")
+    with pytest.raises(RuntimeError, match="query failed") as raised:
+        await gen.athrow(error)
+
+    assert raised.value is error
+    mock_session.commit.assert_not_awaited()
+    mock_session.rollback.assert_awaited_once()
+    mock_session.close.assert_awaited_once()
 
 
 def test_get_postgres_db_cannot_see_result():

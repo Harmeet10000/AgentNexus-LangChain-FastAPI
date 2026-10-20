@@ -24,7 +24,7 @@ socket.socket.connect = no_connection
 from app.connections.celery_producer import celery_app
 from app.shared.jobs.names import DOCUMENTS_INGEST
 from app.shared.jobs.registry import CeleryTaskRegistry, TaskPayloadValidationError
-assert len(CeleryTaskRegistry.registered_names()) == 13
+assert len(CeleryTaskRegistry.registered_names()) == 14
 try:
     CeleryTaskRegistry.validate(DOCUMENTS_INGEST, {})
 except TaskPayloadValidationError:

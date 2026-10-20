@@ -117,6 +117,50 @@ class PlanRepository:
                 )
             )
 
+    async def find_by_operation_key(self, operation_key: str) -> PlanResult[Plan | None]:
+        """Find a local plan/version by its durable create/update request key."""
+        try:
+            statement: Select[tuple[Plan]] = select(Plan).where(
+                Plan.metadata_["billing_operation_key"].as_string() == operation_key
+            )
+            result = await self.session.execute(statement)
+            return Success(result.scalar_one_or_none())
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="plans", operation="find_by_operation_key")
+            await self.session.rollback()
+            return Failure(
+                PlanInfrastructureError(
+                    message="Database error while finding plan operation",
+                    details={"operation_key": operation_key, "error": str(exc)},
+                    source="plan_repository",
+                    operation="find_by_operation_key",
+                )
+            )
+
+    async def find_by_idempotency_scope(self, scope: str) -> PlanResult[Plan | None]:
+        """Find a plan bound to ``user + request key``.
+
+        The operation ledger remains the authority for provider mutations;
+        this additive metadata lookup binds the HTTP key to its canonical
+        request payload without a schema migration.
+        """
+        try:
+            statement: Select[tuple[Plan]] = select(Plan).where(
+                Plan.metadata_["billing_idempotency_scope"].as_string() == scope
+            )
+            return Success((await self.session.execute(statement)).scalar_one_or_none())
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="plans", operation="find_by_idempotency_scope")
+            await self.session.rollback()
+            return Failure(
+                PlanInfrastructureError(
+                    message="Database error while finding plan idempotency binding",
+                    details={"scope": scope, "error": str(exc)},
+                    source="plan_repository",
+                    operation="find_by_idempotency_scope",
+                )
+            )
+
     @trace_layer("repository")
     async def list_active(self, *, limit: int = 50, offset: int = 0) -> PlanResult[list[Plan]]:
         try:

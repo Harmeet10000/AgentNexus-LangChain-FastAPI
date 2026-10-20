@@ -22,6 +22,7 @@ class SubscriptionCode(StrEnum):
     PLAN_NOT_FOUND = "PLAN_NOT_FOUND"
     DATABASE_ERROR = "DATABASE_ERROR"
     VALIDATION_ERROR = "VALIDATION_ERROR"
+    REFUND_RECONCILIATION_REQUIRED = "REFUND_RECONCILIATION_REQUIRED"
 
 
 class SubscriptionNotFoundError(FeatureError):
@@ -90,6 +91,14 @@ class SubscriptionValidationError(FeatureError):
     retryable: ClassVar[bool] = False
 
 
+class SubscriptionRefundError(FeatureError):
+    """Cancellation succeeded locally but its economic refund is unresolved."""
+
+    kind: ClassVar[ErrorKind] = ErrorKind.EXTERNAL_SERVICE
+    code: ClassVar[SubscriptionCode] = SubscriptionCode.REFUND_RECONCILIATION_REQUIRED
+    retryable: ClassVar[bool] = False
+
+
 type SubscriptionError = (
     SubscriptionNotFoundError
     | SubscriptionDuplicateError
@@ -99,6 +108,7 @@ type SubscriptionError = (
     | SubscriptionInfrastructureError
     | SubscriptionTransientInfrastructureError
     | SubscriptionValidationError
+    | SubscriptionRefundError
 )
 
 type SubscriptionResult[T] = Result[T, SubscriptionError]
@@ -114,5 +124,7 @@ def subscription_error_to_http_status(error: SubscriptionError) -> int:
             return http_status_for_kind(error.kind)
         case SubscriptionInfrastructureError() | SubscriptionTransientInfrastructureError():
             return http_status_for_kind(error.kind, retryable=error.retryable)
+        case SubscriptionRefundError():
+            return http_status_for_kind(error.kind)
         case _ as unreachable:
             assert_never(unreachable)

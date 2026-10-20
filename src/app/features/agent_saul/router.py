@@ -13,7 +13,7 @@ validation of the first inbound frame, and structured error emission.
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from json import dumps
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Path, Request, Response, WebSocket, WebSocketDisconnect
@@ -32,7 +32,7 @@ from .dependencies import (
     AgentSaulDepsAnnotated,
     AgentSaulDepsWsAnnotated,
     AgentSaulWebSocketSecurityContextAnnotated,
-    get_transcript_repository,
+    TranscriptExporterDep,
 )
 from .dto import (
     CreateSessionRequest,
@@ -43,9 +43,10 @@ from .dto import (
     ws_inbound_adapter,
 )
 from .service import AgentSaulService
-from .transcript.repository import ChatTranscriptRepository
+from .transcript.export import ExportTranscript
 
-_EXPORT_PAGE_ROWS = 500  # §8 export: bounded read size; pages stream until short page
+if TYPE_CHECKING:
+    from .transcript.export import PreparedTranscriptExport
 
 router = APIRouter(
     prefix="/agent-saul",
@@ -120,7 +121,7 @@ async def create_session(
 @router.get("/sessions/{session_id}/export", response_model=None)
 async def export_session_transcript(
     session_id: Annotated[str, Path(min_length=1, max_length=100)],
-    repo: Annotated[ChatTranscriptRepository, Depends(get_transcript_repository)],
+    exporter: TranscriptExporterDep,
     claims: CurrentClaims,
     response: Response,
 ) -> StreamingResponse | APIResponse[Any]:
@@ -129,57 +130,23 @@ async def export_session_transcript(
     NDJSON, one row per line, so a client can render large transcripts
     incrementally. Redacted rows export AS redacted: ``content`` is null and
     ``redacted`` is true — erasure is represented, never reconstructed (§3.2).
-    Reads are schema-version gated in the repository (§9 fail closed).
+    Ownership and schema gating happen in preflight BEFORE streaming begins.
+    Pagination and cursor management are owned by PreparedTranscriptExport.
     """
-    user_id = claims.sub
-    meta_result = await repo.get_session_meta(session_id=session_id, user_id=user_id)
-    if isinstance(meta_result, Failure):
-        # Every transcript error variant is a FeatureError; render_result
-        # derives the transport status from error.kind — a future variant
-        # renders instead of raising (§10, router-renders-result).
-        return render_result(meta_result, response)
+    # Preflight: ownership + schema gate. Fails with proper HTTP status.
+    prepare_result = await exporter.prepare(
+        ExportTranscript(session_id=session_id, requesting_user_id=claims.sub)
+    )
+    if isinstance(prepare_result, Failure):
+        return render_result(prepare_result, response, message="Transcript export failed")
 
-    _ = meta_result.unwrap()  # fail-closed gate passed: owner + schema verified
+    prepared: PreparedTranscriptExport = prepare_result.unwrap()
 
+    # Stream typed events, encode as NDJSON in the transport adapter
     async def rows() -> AsyncIterator[str]:
-        # Keyset-paged bounded reads streamed page by page: memory stays flat
-        # and appends mid-export can never repeat or skip a page (D3 order is
-        # the (turn_seq, ordinal) the reader itself walks).
-        cursor_seq: int | None = None
-        cursor_ord: int | None = None
-        cursor_id: int | None = None
-        while True:
-            result = await repo.read_transcript(
-                session_id=session_id,
-                user_id=user_id,
-                limit=_EXPORT_PAGE_ROWS,
-                after_turn_seq=cursor_seq,
-                after_ordinal=cursor_ord,
-                after_id=cursor_id,
-            )
-            if isinstance(result, Failure):
-                # Surface the typed error as a terminal line, never a silent
-                # truncation; driver detail is already stripped (§10).
-                error_payload = result.failure()
-                yield (
-                    dumps(
-                        {
-                            "error": str(error_payload.code),
-                            "message": error_payload.message,
-                        }
-                    )
-                    + "\n"
-                )
-                return
-            page_rows = list(result.unwrap())
-            if not page_rows:
-                return
-            for item in page_rows:
-                yield dumps(item.model_dump(mode="json"), default=str) + "\n"
-            if len(page_rows) < _EXPORT_PAGE_ROWS:
-                return
-            last = page_rows[-1]
-            cursor_seq, cursor_ord, cursor_id = last.turn_seq, last.ordinal, last.row_id
+        async for event in prepared.events():
+            # Serialize with snake_case (preserves existing wire format)
+            yield dumps(event.model_dump(mode="json", by_alias=False)) + "\n"
 
     return StreamingResponse(
         rows(),

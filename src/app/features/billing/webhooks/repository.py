@@ -176,3 +176,48 @@ class WebhookEventRepository:
                     source="webhook_event_repository",
                 )
             )
+
+    async def commit(self) -> WebhookResult[None]:
+        """Commit an event claim before any external side effect is dispatched."""
+        try:
+            await self.session.commit()
+            return Success(None)
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="webhook_events", operation="commit_claim")
+            await self.session.rollback()
+            return Failure(
+                WebhookInfrastructureError(
+                    message="Database error while committing webhook claim",
+                    details={"error": str(exc)},
+                    source="webhook_event_repository",
+                )
+            )
+
+    @trace_layer("repository")
+    async def claim_stale_processing(
+        self, event: WebhookEvent, *, stale_before: datetime
+    ) -> WebhookResult[WebhookEvent | None]:
+        """Recover a PROCESSING lease only after its timeout has elapsed."""
+        try:
+            statement = (
+                update(WebhookEvent)
+                .where(
+                    WebhookEvent.id == event.id,
+                    WebhookEvent.status == "processing",
+                    WebhookEvent.updated_at <= stale_before,
+                )
+                .values(status="processing", updated_at=datetime.now(tz=UTC))
+                .returning(WebhookEvent)
+            )
+            result = await self.session.execute(statement)
+            return Success(result.scalar_one_or_none())
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="webhook_events", operation="claim_stale_processing")
+            await self.session.rollback()
+            return Failure(
+                WebhookInfrastructureError(
+                    message="Database error while recovering webhook lease",
+                    details={"event_id": str(event.id)},
+                    source="webhook_event_repository",
+                )
+            )

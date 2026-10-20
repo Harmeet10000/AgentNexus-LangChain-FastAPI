@@ -22,7 +22,6 @@ MODEL_MODULE_NAMES: tuple[str, ...] = (
     "app.features.audit.models",
     "app.features.agent_saul.models",
     "app.features.billing.credits.models",
-    "app.features.billing.credits.models",
     "app.features.documents.models",
     "app.features.billing.invoices.invoice_batch",
     "app.features.billing.invoices.invoice_void",

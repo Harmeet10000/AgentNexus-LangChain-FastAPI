@@ -82,7 +82,9 @@ def test_relational_handlers_note_before_rollback_and_failure() -> None:
                     for statement in body
                     for node in ast.walk(statement)
                 )
-    assert checked == 72
+    # Includes the invoices row-lock repository operation and the durable
+    # subscription lifecycle persistence adapter's SQL handlers.
+    assert checked == 113
 
 
 def test_rollback_gate_fixture_has_forbidden_and_permitted_forms() -> None:

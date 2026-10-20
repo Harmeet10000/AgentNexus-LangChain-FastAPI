@@ -243,9 +243,11 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
         return compiled_graph
 
     settings = SimpleNamespace(
+        REDIS_URL=None,
         NEO4J_URI="bolt://unused",
         NEO4J_USERNAME="unused",
         NEO4J_PASSWORD=SimpleNamespace(get_secret_value=lambda: "unused"),
+        NEO4J_DATABASE="neo4j",
     )
     monkeypatch.setattr(document_worker, "get_settings", lambda: settings)
     monkeypatch.setattr(document_worker, "init_db", init_db)

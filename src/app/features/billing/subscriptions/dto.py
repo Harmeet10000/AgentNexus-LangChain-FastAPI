@@ -106,6 +106,12 @@ class SubscriptionResponse(BaseModel):
     retry_count: int = Field(default=0, serialization_alias="retryCount")
     currency_display: str = Field(default="INR", serialization_alias="currencyDisplay")
     version: int = Field(default=0)
+    remote_sync: str = Field(default="pending", serialization_alias="remoteSync")
+    observed_plan_id: str | None = Field(default=None, serialization_alias="observedPlanId")
+    entitlement_until: datetime | None = Field(default=None, serialization_alias="entitlementUntil")
+    cancellation_requested_at: datetime | None = Field(
+        default=None, serialization_alias="cancellationRequestedAt"
+    )
     payment_url: str | None = Field(default=None, serialization_alias="paymentUrl")
     created_at: datetime = Field(serialization_alias="createdAt")
     updated_at: datetime = Field(serialization_alias="updatedAt")

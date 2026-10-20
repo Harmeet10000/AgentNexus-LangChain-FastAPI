@@ -5,7 +5,6 @@ from fastapi.responses import RedirectResponse, Response
 from returns.result import Failure
 
 from app.config import get_settings
-from app.connections.mongodb import get_mongodb
 from app.connections.redis import get_redis
 from app.kernel.result import render_result
 from app.resilience.rate_limit import get_rate_limiter
@@ -16,6 +15,7 @@ from .dependencies import (
     AuthServiceDep,
     CurrentClaims,
     CurrentVerifiedUser,
+    get_account_store,
 )
 from .dto import (
     ForgotPasswordRequest,
@@ -32,7 +32,7 @@ from .dto import (
     VerifyEmailRequest,
 )
 from .exceptions import AuthAuthenticationError, AuthValidationError
-from .repository import RefreshTokenRepository, UserRepository
+from .repository import RefreshTokenRepository
 from .service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -303,9 +303,9 @@ async def oauth_callback(
 
     # Resolve service manually — can't use AuthServiceDep with mixed Response return types
 
-    user_repo = UserRepository(await get_mongodb(request))
+    account_store = await get_account_store()
     token_repo = RefreshTokenRepository(await get_redis(request))
-    service = AuthService(user_repo, token_repo)
+    service = AuthService(account_store, token_repo)
 
     ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
@@ -348,6 +348,7 @@ async def get_me(user: CurrentVerifiedUser) -> APIResponse[UserResponse]:
         id=str(user.id),
         email=user.email,
         full_name=user.full_name,
+        avatar_url=user.avatar_url,
         role=user.role.value,
         is_verified=user.is_verified,
         is_active=user.is_active,
