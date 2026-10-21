@@ -28,6 +28,7 @@ from .exceptions import (
 if TYPE_CHECKING:
     from uuid import UUID
 
+    from sqlalchemy import Select
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from .exceptions import CreditResult
@@ -81,7 +82,7 @@ class ConsumptionRepository:
                 )
             ).scalar_one()
 
-            statement = (
+            statement: Select[tuple[CreditConsumption]] = (
                 select(CreditConsumption)
                 .where(*conditions)
                 .order_by(CreditConsumption.created_at.desc())
@@ -106,7 +107,9 @@ class ConsumptionRepository:
         invoice_id: UUID,
     ) -> CreditResult[CreditConsumption | None]:
         try:
-            statement = select(CreditConsumption).where(CreditConsumption.invoice_id == invoice_id)
+            statement: Select[tuple[CreditConsumption]] = select(CreditConsumption).where(
+                CreditConsumption.invoice_id == invoice_id
+            )
             result = await self.session.execute(statement)
             return Success(inner_value=result.scalar_one_or_none())
         except SQLAlchemyError as exc:
@@ -125,7 +128,7 @@ class ConsumptionRepository:
     ) -> CreditResult[list[CreditConsumption]]:
         """Return every consumption for an invoice, not just the first row."""
         try:
-            statement = (
+            statement: Select[tuple[CreditConsumption]] = (
                 select(CreditConsumption)
                 .where(CreditConsumption.invoice_id == invoice_id)
                 .order_by(CreditConsumption.created_at.asc())
@@ -146,7 +149,7 @@ class ConsumptionRepository:
     async def find_by_credit_id(self, credit_id: UUID) -> CreditResult[list[CreditConsumption]]:
         """Find all consumption records for a credit."""
         try:
-            statement = (
+            statement: Select[tuple[CreditConsumption]] = (
                 select(CreditConsumption)
                 .where(CreditConsumption.credit_id == credit_id)
                 .order_by(CreditConsumption.created_at.desc())
@@ -167,9 +170,9 @@ class ConsumptionRepository:
     async def get_total_consumed(self, credit_id: UUID) -> CreditResult[int]:
         """Get total consumed amount for a credit (in paisa)."""
         try:
-            statement = select(func.coalesce(func.sum(CreditConsumption.consumed_amount), 0)).where(
-                CreditConsumption.credit_id == credit_id
-            )
+            statement: Select[tuple[int]] = select(
+                func.coalesce(func.sum(CreditConsumption.consumed_amount), 0)
+            ).where(CreditConsumption.credit_id == credit_id)
             result = await self.session.execute(statement)
             return Success(inner_value=int(result.scalar_one()))
         except SQLAlchemyError as exc:
@@ -191,6 +194,7 @@ class ConsumptionRepository:
 if TYPE_CHECKING:
     from uuid import UUID
 
+    from sqlalchemy import Select, Update
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from .exceptions import CreditResult
@@ -232,7 +236,7 @@ class CreditRepository:
         self, operation_key: str
     ) -> CreditResult[CreditNote | None]:
         try:
-            statement = (
+            statement: Select[tuple[CreditNote]] = (
                 select(CreditNote)
                 .where(CreditNote.operation_key == operation_key)
                 .with_for_update()
@@ -264,7 +268,7 @@ class CreditRepository:
         """
         try:
             now = datetime.now(tz=UTC)
-            statement = (
+            statement: Select[tuple[CreditNote]] = (
                 select(CreditNote)
                 .where(
                     CreditNote.user_id == user_id,
@@ -293,7 +297,7 @@ class CreditRepository:
     async def find_by_operation_key(self, operation_key: str) -> CreditResult[UserCredit | None]:
         """Direct indexed JSON lookup for a downgrade grant; never scan a page."""
         try:
-            statement = select(UserCredit).where(
+            statement: Select[tuple[UserCredit]] = select(UserCredit).where(
                 UserCredit.metadata_["operation_key"].as_string() == operation_key,
                 UserCredit.deleted_at.is_(None),
             )
@@ -341,7 +345,9 @@ class CreditRepository:
 
     async def find_by_id(self, credit_id: UUID) -> CreditResult[UserCredit | None]:
         try:
-            statement = select(UserCredit).where(UserCredit.id == credit_id).with_for_update()
+            statement: Select[tuple[UserCredit]] = (
+                select(UserCredit).where(UserCredit.id == credit_id).with_for_update()
+            )
             result = await self.session.execute(statement)
             return Success(result.scalar_one_or_none())
         except SQLAlchemyError as exc:
@@ -377,7 +383,7 @@ class CreditRepository:
                 )
             ).scalar_one()
 
-            statement = (
+            statement: Select[tuple[UserCredit]] = (
                 select(UserCredit)
                 .where(*conditions)
                 .order_by(UserCredit.created_at.desc())
@@ -409,7 +415,7 @@ class CreditRepository:
         """
         try:
             now = datetime.now(tz=UTC)
-            statement = (
+            statement: Select[tuple[UserCredit]] = (
                 select(UserCredit)
                 .where(
                     UserCredit.user_id == user_id,
@@ -443,7 +449,9 @@ class CreditRepository:
         """Sum remaining_balance across ACTIVE, non-expired credits (paisa)."""
         try:
             now = datetime.now(tz=UTC)
-            statement = select(func.coalesce(func.sum(UserCredit.remaining_balance), 0)).where(
+            statement: Select[tuple[int]] = select(
+                func.coalesce(func.sum(UserCredit.remaining_balance), 0)
+            ).where(
                 UserCredit.user_id == user_id,
                 UserCredit.status == CreditStatus.ACTIVE.value,
                 UserCredit.deleted_at.is_(None),
@@ -488,7 +496,9 @@ class CreditRepository:
                 UserCredit.remaining_balance == credit.remaining_balance,
                 UserCredit.remaining_balance >= new_remaining_balance,
             ]
-            statement = update(UserCredit).where(*conditions).values(**values).returning(UserCredit)
+            statement: Update = (
+                update(UserCredit).where(*conditions).values(**values).returning(UserCredit)
+            )
             result = await self.session.execute(statement)
             updated = result.scalar_one_or_none()
             if updated is None:
@@ -520,7 +530,7 @@ class CreditRepository:
         """Conditionally advance the authoritative note balance."""
         try:
             status = "applied" if new_remaining_paisa == 0 else "available"
-            statement = (
+            statement: Update = (
                 update(CreditNote)
                 .where(
                     CreditNote.id == note.id,
@@ -633,7 +643,7 @@ class CreditRepository:
     async def expire_credits_past_date(self, cutoff: datetime) -> CreditResult[list[UserCredit]]:
         """Find ACTIVE credits past their valid_until and mark them EXPIRED."""
         try:
-            statement = (
+            statement: Select[tuple[UserCredit]] = (
                 select(UserCredit)
                 .where(
                     UserCredit.status == CreditStatus.ACTIVE.value,
@@ -651,7 +661,7 @@ class CreditRepository:
 
             credit_ids = [c.id for c in credit_rows]
 
-            update_stmt = (
+            update_stmt: Update = (
                 update(UserCredit)
                 .where(UserCredit.id.in_(credit_ids))
                 .values(
