@@ -1,0 +1,16 @@
+[merge]
+	conflictStyle = zdiff3
+[rerere]
+	enabled = true
+[fetch]
+	prune = true
+[checkout]
+	defaultRemote = origin
+[push]
+	autoSetupRemote = true
+[branch]
+	sort = -committerdate
+[init]
+	defaultBranch = main
+[pull]
+	rebase = false
