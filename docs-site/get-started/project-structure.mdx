@@ -36,7 +36,7 @@ description: "Tour of the repository layout and what each directory owns."
       - result/             #   Renderers + shared failure conveniences (spine lives in kernel/)
       - services/           #   Shared service error unions (classifiers only)
       - jobs/               #   Celery wire names, payloads, dispatch registry
-    - worker/               # app.py, tasks/ per feature, schedules, runtime
+    - worker/               # role-scoped Celery runtime, jobs/, capabilities/, schedules
     - utils/                # Exceptions, response envelope, cache helpers
     - examples/             # Reference snippets (logger, Celery usage)
     - main.py               # App factory and middleware stack
@@ -78,5 +78,6 @@ Adding a feature means adding a directory with this shape and registering its ro
 | Retrieval & fusion | `src/app/features/documents/retrieval_graph/` + shared `src/app/retrieval/` | [RAG pipeline](/architecture/rag-pipeline) |
 | Knowledge-graph memory | `src/app/shared/rag/graphiti/`, Cognee settings | [Graph memory](/architecture/graph-memory) |
 | Reliable side effects | `src/app/events/` (outbox model, writer, relay) | [Outbox pattern](/architecture/outbox-pattern) |
+| Background jobs | `src/app/shared/jobs/` contracts + `src/app/worker/celery/` runtime + `src/app/worker/jobs/` adapters | [Celery runtime](/architecture/celery-runtime), [JobBus](/architecture/job-bus) |
 | Error handling model | `src/app/kernel/errors.py`, `src/app/utils/exceptions.py`, `src/app/shared/result/` | [Error & Result pattern](/architecture/error-and-result-pattern) |
 | Auth, RBAC, guard | `src/app/features/auth/`, `src/app/middleware/` | [Security architecture](/architecture/security-architecture) |

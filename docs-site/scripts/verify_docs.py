@@ -38,7 +38,7 @@ def load_nav_entries() -> list[str]:
         if not isinstance(g, dict):
             continue
         for p in g.get("pages", []):
-            # mint.json nav pages are strings; ignore dict/openapi shapes
+            # docs.json nav pages are strings; ignore dict/openapi shapes
             if isinstance(p, str):
                 entries.append(p.strip())
             elif isinstance(p, dict):

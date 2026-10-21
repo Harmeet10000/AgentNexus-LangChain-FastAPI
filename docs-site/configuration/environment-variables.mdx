@@ -112,6 +112,15 @@ Details on [LLM models](/configuration/llm-models).
 | `CELERY_DEAD_LETTER_ROUTING_KEY` | str | `task.default.dlq` | Dead-letter routing key |
 | `CELERY_INGESTION_QUEUE` | str | `ingestion` | Isolated queue for minutes-long ingestion work |
 | `CELERY_INGESTION_ROUTING_KEY` | str | `task.ingestion` | Ingestion routing key |
+| `CELERY_CRAWLER_QUEUE` | str | `crawler` | Isolated queue for browser/network crawler work |
+| `CELERY_CRAWLER_ROUTING_KEY` | str | `task.crawler` | Crawler routing key |
+| `CELERY_DEFAULT_CONCURRENCY` | int | `8` | Prefork slots for the default role |
+| `CELERY_INGESTION_CONCURRENCY` | int | `2` | Prefork slots for the ingestion role |
+| `CELERY_CRAWLER_CONCURRENCY` | int | `2` | Prefork slots for the crawler role |
+| `CELERY_DEFAULT_MAX_TASKS_PER_CHILD` | int | `500` | Default-role child recycling limit |
+| `CELERY_INGESTION_MAX_TASKS_PER_CHILD` | int | `100` | Ingestion-role child recycling limit |
+| `CELERY_CRAWLER_MAX_TASKS_PER_CHILD` | int | `100` | Crawler-role child recycling limit |
+| `CELERY_BEAT_SCHEDULE_FILE` | str | `celerybeat-schedule` | Persistent Beat schedule filename; use a mounted path in containers |
 | `CELERY_RETRY_MAX_RETRIES` | int | `5` | Per-task retry budget |
 | `CELERY_RETRY_BACKOFF_MAX` | int | `600` | Max backoff (seconds) |
 | `CELERY_DEFAULT_RETRY_DELAY` | int | `5` | Base retry delay (seconds) |
@@ -122,6 +131,8 @@ Details on [LLM models](/configuration/llm-models).
 | `CELERY_IDEMPOTENCY_TTL_SECONDS` | int | `86400` | Task deduplication window (seconds) |
 | `CELERY_CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int | `5` | Failures before breaker opens |
 | `CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT` | int | `60` | Breaker recovery wait (seconds) |
+
+Celery uses RabbitMQ for transport and `rpc://` for task results. The RPC backend is ephemeral and is not durable application state. Worker startup is through `uv run worker --role default|ingestion|crawler`; role profiles own queue, prefork pool, concurrency, and recycling. Beat is a separate singleton publisher and persists its schedule at `CELERY_BEAT_SCHEDULE_FILE`; this is an operational singleton requirement, not leader election.
 
 Credit-system cron schedules ride on Celery beat: `CREDIT_EXPIRATION_CRON_HOUR`/`_MINUTE` (default 03:00), `CREDIT_RECONCILIATION_CRON_HOUR`/`_MINUTE`/`_DAY_OF_WEEK` (default 04:00, Sunday).
 

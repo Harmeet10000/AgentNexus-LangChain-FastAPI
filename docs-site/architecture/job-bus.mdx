@@ -1,0 +1,98 @@
+---
+title: "JobBus"
+description: "The producer-facing contract for validated direct publication and transaction-bound outbox staging."
+---
+
+`JobBus` is the producer-facing seam for background work. It keeps feature services independent of Celery, RabbitMQ, and SQLAlchemy while preserving one validated wire contract. The implementation is deliberately small: it validates a catalog-owned `TypedJob`, then delegates to an injected adapter.
+
+## The immutable catalog owns the message contract
+
+`app.shared.jobs.catalog.JOB_CATALOG` is a read-only mapping of stable wire names to frozen `JobDefinition` values. Each definition contains:
+
+- `name`: the wire name sent to Celery;
+- `payload_model`: the Pydantic model for keyword arguments;
+- `queue`: the logical `JobQueue` (`default`, `ingestion`, or `crawler`);
+- `capability`: the owning worker capability;
+- `declaring_module`: the canonical `app.worker.jobs.*` module.
+
+`JobDefinition.prepare(payload)` (also spelled `.make`) validates the payload and creates `TypedJob`. `prepare_job(name, payload)` is the convenience function for callers that start with a wire name. A raw task name cannot be smuggled through an adapter: `JobBus` re-checks both the catalog identity and payload before every adapter side effect.
+
+The mapping is immutable (`MappingProxyType`) and definitions are frozen Pydantic models. Queue and routing metadata therefore cannot be supplied by a feature call site. `app.shared.jobs.topology.task_routes()` derives the Celery route table from these definitions.
+
+## The exact interface
+
+The current interface in `app.shared.jobs.bus` is:
+
+```python
+from app.shared.jobs import AggregateRef, EnqueueOptions, JobBus, prepare_job
+
+job = prepare_job("auth.send_verification_email", payload)
+
+# Direct publication: broker task ID, no database transaction involved.
+receipt = await bus.enqueue(
+    job,
+    EnqueueOptions(countdown=5),
+)
+
+# Durable publication: stage in the caller's transaction; do not commit here.
+durable = await bus.in_transaction(session).enqueue(
+    job,
+    aggregate=AggregateRef(aggregate_type="user", aggregate_id=user_id),
+)
+```
+
+The signatures are intentional:
+
+```python
+await bus.enqueue(job, options: EnqueueOptions | None = None) -> DirectEnqueueReceipt
+bus.in_transaction(tx: TransactionScope) -> TransactionalJobBus
+await transactional.enqueue(job, *, aggregate: AggregateRef) -> DurableEnqueueReceipt
+```
+
+`EnqueueOptions` contains only `expires` and `countdown`. It does not contain `queue`, `routing_key`, `exchange`, or a task name. The catalog owns those values.
+
+## Two adapters, two ownership models
+
+`DirectPublicationAdapter.publish(job, *, options)` is the Celery edge. `app.connections.celery_producer.DirectPublicationAdapter` validates again, moves the synchronous `send_task` call off the event loop, and returns Celery's task ID. The broker call and its transport failure belong to this adapter.
+
+`TransactionalStagingAdapter.stage(tx, job, *, aggregate)` is the database edge. `app.events.writer.PostgresOutboxAdapter` inserts the validated event and sends `pg_notify` using the transaction handle supplied by the caller. It does not commit, roll back, close, or own the session. SQL errors propagate to the feature service, which owns the business transaction.
+
+This split allows the same producer logic to choose latency or durability deliberately:
+
+| Path | Receipt | Ownership | Use when |
+| --- | --- | --- | --- |
+| `enqueue` | `DirectEnqueueReceipt.task_id` | adapter publishes now | Losing the job would not leave committed domain state inconsistent |
+| `in_transaction(...).enqueue` | `DurableEnqueueReceipt.event_id` | caller commits/rolls back; relay publishes later | Work must follow a database change |
+
+The durable receipt is not a broker receipt. Use `require_direct_receipt()` only in the relay after the direct adapter has published.
+
+## Compatible in-memory example
+
+The test implementation in `app.shared.jobs.in_memory` implements the same adapter shapes. It does not pretend to run Celery or SQL; it models publication and transaction visibility:
+
+```python
+from app.shared.jobs import AggregateRef, EnqueueOptions, prepare_job
+from app.shared.jobs.in_memory import InMemoryJobBus
+
+bus = InMemoryJobBus()
+job = prepare_job("billing.renewal", {})
+
+direct = await bus.enqueue(job, EnqueueOptions())
+assert direct.task_id == "broker-1"
+
+async with bus.transaction() as tx:
+    durable = await bus.in_transaction(tx).enqueue(
+        job,
+        aggregate=AggregateRef(aggregate_type="account", aggregate_id="acct-1"),
+    )
+assert durable.event_id == "outbox-1"
+assert len(bus.transactional.committed) == 1
+```
+
+An exception inside the `async with` rolls back staged jobs; a direct adapter failure is injected with `InMemoryJobBus(direct_failure=...)`. The fake transaction exposes the one `execute` capability required by `TransactionScope`, but intentionally raises if code tries to use it as a SQL engine. This keeps tests honest about the seam instead of coupling them to Celery internals.
+
+## Failure boundaries
+
+Unknown names and invalid payloads fail before a broker call or SQL statement. A forged `TypedJob` with caller-controlled definition metadata is also refused. Direct transport failures become the adapter's service-unavailable error; transactional SQL failures remain visible to the transaction owner. The relay retries failed publication and eventually parks exhausted events in the outbox dead-letter table.
+
+For the transport and role consequences, see [Celery runtime architecture](/architecture/celery-runtime). For adding a new catalog entry and task, see [Add a Celery job](/guides/add-celery-job).

@@ -7,7 +7,7 @@ description: "Local workflow, code quality gates, testing, and contribution conv
 
 ```bash
 uv sync --extra dev                       # install/refresh dependencies
-uv run uvicorn src.app.main:app --reload --reload-dir src --port 5000   # API
+uv run uvicorn app.main:app --reload --reload-dir src --port 5000   # API
 uv run pytest -x                          # tests
 uv run ruff check --fix && uv run ruff format   # lint + format
 uv run alembic revision --autogenerate -m "Add table"   # migration

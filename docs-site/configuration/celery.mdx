@@ -1,0 +1,127 @@
+---
+title: "Celery configuration reference"
+description: "Queues, exchanges, worker profiles, delivery semantics, retries, Beat, commands, and completeness checks."
+---
+
+The authoritative configuration is split intentionally: values live in `src/app/config/settings.py`; broker topology and routes in `src/app/connections/celery_producer.py` and `src/app/shared/jobs/topology.py`; worker process shape in `src/app/worker/celery/profiles.py`; CLI entry points in `src/app/worker/celery/cli.py`.
+
+## Broker and result backend
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `RABBITMQ_URL` | `amqp://guest:guest@localhost:5672//` | RabbitMQ broker used by the producer and worker app |
+| `RABBITMQ_PRIVATE_URL` | same as `RABBITMQ_URL` | Separate internal URL, when deployment needs one |
+| Celery result backend | `rpc://` | Ephemeral AMQP reply queues; results are not durable application state |
+| `CELERY_TASK_RESULT_EXPIRES` | `3600` seconds | Expiry applied to result messages |
+
+`rpc://` is ephemeral: it is suitable for short-lived task results and inspection, not an audit log or durable workflow state. Persist business outcomes in the owning feature's database or job store.
+
+## Exchanges, queues, and routing
+
+The application uses durable direct exchanges and quorum queues. Every catalog name receives an explicit route; missing queues are not created implicitly (`task_create_missing_queues=False`).
+
+| Role | Queue | Exchange | Routing key | Consumers |
+| --- | --- | --- | --- | --- |
+| default | `CELERY_DEFAULT_QUEUE` = `default` | `CELERY_DEFAULT_EXCHANGE` = `tasks` | `CELERY_DEFAULT_ROUTING_KEY` = `task.default` | `default` role, prefork 8 |
+| ingestion | `CELERY_INGESTION_QUEUE` = `ingestion` | `CELERY_DEFAULT_EXCHANGE` = `tasks` | `CELERY_INGESTION_ROUTING_KEY` = `task.ingestion` | `ingestion` role, prefork 2 |
+| crawler | `CELERY_CRAWLER_QUEUE` = `crawler` | `CELERY_DEFAULT_EXCHANGE` = `tasks` | `CELERY_CRAWLER_ROUTING_KEY` = `task.crawler` | `crawler` role, prefork 2 |
+| dead letter | `CELERY_DEAD_LETTER_QUEUE` = `default.dlq` | `CELERY_DEAD_LETTER_EXCHANGE` = `tasks.dlx` | `CELERY_DEAD_LETTER_ROUTING_KEY` = `task.default.dlq` | no role profile |
+
+The three application queues are durable quorum queues with the DLX and DLX routing key above. The dead-letter queue is itself durable and quorum-backed, without another dead-letter hop. Logical queue selection comes from `JobDefinition.queue`; do not pass `queue=` or a routing override to dispatch.
+
+## Worker profiles
+
+`WorkerRole` supports `default`, `ingestion`, and `crawler`. All profiles use `prefork` and one explicitly selected queue. The configured values are:
+
+| Role | Queue setting | Concurrency | Max tasks per child | Task modules |
+| --- | --- | ---: | ---: | --- |
+| `default` | `CELERY_DEFAULT_QUEUE` | `CELERY_DEFAULT_CONCURRENCY` = `8` | `CELERY_DEFAULT_MAX_TASKS_PER_CHILD` = `500` | catalog entries declaring default jobs |
+| `ingestion` | `CELERY_INGESTION_QUEUE` | `CELERY_INGESTION_CONCURRENCY` = `2` | `CELERY_INGESTION_MAX_TASKS_PER_CHILD` = `100` | document ingestion module |
+| `crawler` | `CELERY_CRAWLER_QUEUE` | `CELERY_CRAWLER_CONCURRENCY` = `2` | `CELERY_CRAWLER_MAX_TASKS_PER_CHILD` = `100` | crawler module |
+
+`CELERY_WORKER_MAX_TASKS_PER_CHILD` defaults to `500` for the base Celery app, but role startup emits the role-specific recycling value. Tune ingestion and crawler concurrency against memory and browser capacity; scale replicas before multiplying process slots.
+
+## Delivery and serialization
+
+| Celery option | Current value | Effect |
+| --- | --- | --- |
+| `task_serializer` / `result_serializer` | `json` | Wire payloads and results are JSON |
+| `accept_content` | `['json']` | Reject non-JSON content |
+| `task_default_delivery_mode` | `persistent` | Published messages are persistent |
+| `worker_prefetch_multiplier` | `1` | One reserved message per process slot |
+| `task_acks_late` | `true` | Acknowledge after task execution |
+| `task_acks_on_failure_or_timeout` | `true` | Ordinary failure/timeout is acknowledged; it does not by itself route the delivery to RabbitMQ DLX |
+| `task_reject_on_worker_lost` | `true` | Child loss permits broker redelivery |
+| publisher confirms | `true` | RabbitMQ confirms publication |
+| `task_publish_retry` | `true` | Publication retries up to 3 attempts with 0.25–5 second backoff |
+
+These settings provide at-least-once delivery. They do not provide exactly-once execution. Use `ResilientTask` idempotency helpers and durable domain state to make side effects safe to repeat.
+
+### Failure destinations
+
+The RabbitMQ and PostgreSQL dead-letter paths are not interchangeable:
+
+| Failure | Acknowledgement / destination |
+| --- | --- |
+| Ordinary task exception or timeout | Acknowledged by `task_acks_on_failure_or_timeout=True`; retries are new publications and an exhausted retry is not automatically sent to RabbitMQ DLX |
+| Registered task with malformed payload | `ResilientTask.before_start()` raises `Reject(requeue=False)`; RabbitMQ can route the rejected message to the configured DLX queue |
+| Worker child loss | `task_reject_on_worker_lost=True` permits broker redelivery |
+| Outbox relay publication failure after five attempts | Relay writes PostgreSQL `dead_letter_events`; this is separate from RabbitMQ DLX |
+
+## Retries and time limits
+
+`ResilientTask` retries `ConnectionError`, `TimeoutError`, and `OSError` with exponential backoff, jitter, and a maximum backoff of `CELERY_RETRY_BACKOFF_MAX` (default `600` seconds). The default retry budget is `CELERY_RETRY_MAX_RETRIES=5`; the base delay is `CELERY_DEFAULT_RETRY_DELAY=5` seconds. Tasks may add typed infrastructure exceptions or override their own time limits.
+
+| Setting | Default |
+| --- | ---: |
+| `CELERY_RETRY_MAX_RETRIES` | `5` |
+| `CELERY_RETRY_BACKOFF_MAX` | `600` seconds |
+| `CELERY_DEFAULT_RETRY_DELAY` | `5` seconds |
+| `CELERY_TASK_SOFT_TIME_LIMIT` | `270` seconds |
+| `CELERY_TASK_TIME_LIMIT` | `300` seconds |
+| `CELERY_IDEMPOTENCY_TTL_SECONDS` | `86400` seconds |
+| `CELERY_CIRCUIT_BREAKER_FAILURE_THRESHOLD` | `5` failures |
+| `CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT` | `60` seconds |
+
+Task-specific overrides are visible in the canonical job module. For example, document ingestion uses 1500/1620-second soft/hard limits and crawler uses 330/360 seconds.
+
+## Beat persistence and singleton operation
+
+`uv run beat` uses `CELERY_BEAT_SCHEDULE_FILE` (default `celerybeat-schedule`) and the schedule in `src/app/worker/celery/schedules.py`. The schedule includes billing, credits, agent-memory consolidation, and the periodic transcript sweep. In Compose, mount a persistent volume and set the path to `/var/lib/celery/celerybeat-schedule`.
+
+Run exactly one Beat instance for a schedule. This is an operational singleton requirement: the application does not implement leader election, fencing, or distributed duplicate suppression. A second Beat process can publish the same periodic task twice.
+
+## Commands
+
+The installed scripts are the supported interface:
+
+```bash
+make celery                 # uv run worker --role default --loglevel=info
+make celery-ingestion      # uv run worker --role ingestion --loglevel=info
+make celery-crawler        # uv run worker --role crawler --loglevel=info
+make celery-beat           # uv run beat --loglevel=info
+make celery-command        # print all worker/Beat commands
+make celery-completeness   # aggregate queue coverage check
+```
+
+For Compose, the corresponding services run `uv run worker --role default`, `--role ingestion`, `--role crawler`, and `uv run beat`; production images omit `uv run` because the installed entry points are on `PATH`. Do not use legacy module-based Celery startup or raw queue/process flags. The role interface owns `-Q`, pool, concurrency, and recycling and rejects duplicates.
+
+```bash
+docker compose up celery-worker celery-worker-ingestion celery-worker-crawler celery-beat
+docker compose -f docker-compose.prod.yml up celery-worker celery-worker-ingestion celery-worker-crawler celery-beat
+```
+
+## Inspection and completeness
+
+The worker validates catalog coverage after task modules bind. CI/deploy checks can run:
+
+```bash
+uv run worker-completeness \
+  --consumed-queue default \
+  --consumed-queue ingestion \
+  --consumed-queue crawler
+```
+
+`app.worker.celery.completeness` compares catalog names, declaring modules, bound application tasks, route metadata, queues, and Beat schedule entries. Celery framework tasks are excluded from application drift checks. The dead-letter queue is declared but intentionally ignored as a consumed application queue.
+
+For the complete environment-variable table, see [Environment variables](/configuration/environment-variables). For the flow and rationale, see [Celery runtime architecture](/architecture/celery-runtime).

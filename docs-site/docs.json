@@ -44,6 +44,8 @@
           "architecture/rag-pipeline",
           "architecture/graph-memory",
           "architecture/document-ingestion",
+          "architecture/celery-runtime",
+          "architecture/job-bus",
           "architecture/outbox-pattern",
           "architecture/error-and-result-pattern",
           "architecture/security-architecture"
@@ -58,7 +60,8 @@
           "guides/legal-qa",
           "guides/agent-saul-workflow",
           "guides/human-review",
-          "guides/web-crawl-research"
+          "guides/web-crawl-research",
+          "guides/add-celery-job"
         ]
       },
       {
@@ -72,7 +75,8 @@
           "configuration/llm-models",
           "configuration/rate-limits",
           "configuration/caching",
-          "configuration/observability"
+          "configuration/observability",
+          "configuration/celery"
         ]
       },
       { "group": "Deployment", "pages": ["deployment/index"] },

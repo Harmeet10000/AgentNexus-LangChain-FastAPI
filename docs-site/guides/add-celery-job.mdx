@@ -1,0 +1,120 @@
+---
+title: "Add a Celery job"
+description: "How to add a typed wire contract, catalog definition, canonical worker adapter, and role assignment."
+---
+
+This guide assumes the job has a clear owning capability and that its side effects can be made idempotent. The catalog is the source of truth; derived registration metadata is never edited by hand.
+
+## 1. Add the stable wire name
+
+Add a `Final` string in `src/app/shared/jobs/names.py`. Keep names stable once published because the name is the broker contract and appears in outbox rows:
+
+```python
+from typing import Final
+
+REPORT_REFRESH: Final = "reports.refresh"
+```
+
+Do not reuse a name for a new payload shape. Introduce a new wire name when the contract is incompatible.
+
+## 2. Define the payload
+
+Add a frozen, extra-forbid Pydantic model in `src/app/shared/jobs/payloads.py`:
+
+```python
+class ReportRefreshPayload(CeleryTaskPayload):
+    report_id: str
+    requested_by: str
+```
+
+The model must be JSON-compatible. The producer and the worker both validate it: `TypedJob` validates before adapter side effects, and `ResilientTask.before_start()` validates registered task kwargs before the task body runs.
+
+## 3. Add the immutable catalog definition
+
+Import the name and payload model in `src/app/shared/jobs/catalog.py`, then add a `JobDefinition` entry to `_CATALOG`:
+
+```python
+REPORT_REFRESH: _job(
+    REPORT_REFRESH,
+    ReportRefreshPayload,
+    queue=JobQueue.DEFAULT,
+    capability=JobCapability.BILLING,  # choose the real owning capability
+    declaring_module="app.worker.jobs.reports",
+),
+```
+
+Choose `JobQueue.INGESTION` or `JobQueue.CRAWLER` when the work belongs to those isolated roles. The `declaring_module` must be the canonical module under `app.worker.jobs`. `JOB_CATALOG` is immutable; do not add a second ad-hoc route table.
+
+## 4. Implement the canonical worker adapter
+
+Create or extend the declaring module under `src/app/worker/jobs/`. Import the lazy worker app and `ResilientTask` from the current paths, then use an explicit stable name:
+
+```python
+from app.shared.jobs.names import REPORT_REFRESH
+from app.worker.celery.app import get_worker_celery_app
+from app.worker.celery.task import ResilientTask
+
+celery_app = get_worker_celery_app()
+
+
+@celery_app.task(name=REPORT_REFRESH, bind=True, base=ResilientTask)
+def refresh_report(
+    self: ResilientTask,
+    *,
+    report_id: str,
+    requested_by: str,
+) -> dict[str, str]:
+    # Call the service/capability layer; do not put route or HTTP logic here.
+    return {"report_id": report_id, "status": "refreshed"}
+```
+
+For transient infrastructure failures, add the task's `autoretry_for` and time-limit overrides beside the decorator. Use `ResilientTask`'s idempotency helpers around external side effects. The task module should not import a removed compatibility path or manually register itself in `TASK_MODULES`.
+
+## 5. Verify role and scheduling
+
+The queue comes from the catalog definition and the route is derived by `app.shared.jobs.topology.task_routes()`. Do not pass `queue=`, `routing_key=`, or `exchange=` to a dispatch call. A default-queue job is loaded by the default role; ingestion and crawler jobs are loaded only by their respective role profiles.
+
+If the job is periodic, add one entry to `src/app/worker/celery/schedules.py` using the same wire-name constant and payload shape:
+
+```python
+"report-refresh-hourly": {
+    "task": REPORT_REFRESH,
+    "schedule": crontab(minute=0),
+    "kwargs": {"report_id": "scheduled", "requested_by": "beat"},
+},
+```
+
+Keep Beat singleton operation in mind: persistent schedule storage prevents schedule loss across restarts, but it is not leader election. Run one Beat process.
+
+## 6. Dispatch through JobBus
+
+Producer code should prepare a job and use the injected `JobBus`:
+
+```python
+from app.shared.jobs import EnqueueOptions, prepare_job
+
+job = prepare_job(
+    REPORT_REFRESH,
+    {"report_id": report_id, "requested_by": user_id},
+)
+receipt = await job_bus.enqueue(job, EnqueueOptions())
+```
+
+When the job describes a database mutation, use `job_bus.in_transaction(session).enqueue(...)` with an `AggregateRef` so the outbox row and business change commit together. Never treat its durable event ID as a broker task ID.
+
+## 7. Run the checks
+
+Use the role and catalog checks before deploying:
+
+```bash
+uv run pytest tests/unit/celery/test_job_catalog.py tests/unit/celery/test_task_registration.py
+uv run worker-completeness \
+  --consumed-queue default \
+  --consumed-queue ingestion \
+  --consumed-queue crawler
+make celery-command
+```
+
+Also run the relevant task tests and the repository's normal `uv run pytest`, `uv run ruff check src/`, and `uv run ty check src/`. The completeness report catches invalid scheduled names, declaring-module drift, unbound task names, route mismatches, and scheduled entries that refer to undeclared jobs. It cannot infer that a catalog job was intended to be periodic and omitted from Beat, so that intent must be reviewed explicitly.
+
+The registration map in `app.worker.celery.registration` (`TASK_DECLARING_MODULES` and `TASK_MODULES`) is derived from the catalog. Update the name, payload, catalog, task module, and optional schedule; never manually edit those derived maps.

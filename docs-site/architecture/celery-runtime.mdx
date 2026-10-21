@@ -1,0 +1,65 @@
+---
+title: "Celery runtime architecture"
+description: "How validated jobs move from producers through the outbox and RabbitMQ into isolated Celery worker roles."
+---
+
+Celery is the execution and transport adapter at the edge of the background-job system. It is not the interface that feature code uses to describe work. Producers create a catalog-owned job through `JobBus`; only a composition root chooses the Celery adapter.
+
+## The runtime path
+
+There are two producer paths, but they converge on the same immutable job catalog and the same Celery route table:
+
+```text
+feature/service
+    │
+    ├─ direct: JobBus.enqueue(job) ──> DirectPublicationAdapter ──> RabbitMQ
+    │
+    └─ durable: JobBus.in_transaction(tx).enqueue(job, aggregate=...)
+                                      │
+                                      └─> PostgreSQL outbox row + pg_notify
+                                               │
+                                               └─> OutboxRelay ──> DirectPublicationAdapter
+
+RabbitMQ task exchange ──> default / ingestion / crawler queue
+                              │          │          │
+                         default role  ingestion role  crawler role
+```
+
+`prepare_job()` resolves the stable wire name in `app.shared.jobs.catalog.JOB_CATALOG`, validates the Pydantic payload, and produces a `TypedJob`. `DirectPublicationAdapter` sends the JSON payload with `Celery.send_task`; it deliberately does not accept a queue override. `task_routes()` derives the destination from the catalog entry.
+
+The durable path writes the domain change and outbox row on the caller-owned PostgreSQL transaction. PostgreSQL emits `outbox_channel` only after commit. `OutboxRelay` scans unpublished rows at startup and listens continuously, so a relay restart does not lose committed work. After a successful direct receipt, it marks the row published.
+
+## Direct and durable receipt semantics
+
+`JobBus.enqueue()` returns `DirectEnqueueReceipt(kind="direct", task_id=...)`. The task ID says that the broker publication returned successfully; it does not say that a worker has finished the task.
+
+`JobBus.in_transaction(tx).enqueue(...)` returns `DurableEnqueueReceipt(kind="durable", event_id=...)`. The event ID identifies a staged outbox row. It is intentionally not accepted as proof of broker publication. The transaction owner still decides whether to commit or roll back, and the relay later obtains the direct receipt.
+
+This type distinction prevents a subtle acknowledgement bug: treating an outbox ID as a Celery task ID would let a relay mark an unpublished event complete. `require_direct_receipt()` accepts only a direct receipt (or the legacy adapter's string task ID) before `published_at` is written.
+
+## Why roles are isolated
+
+The broker declares one durable direct task exchange and three application queues. The default queue carries short billing, email, credit, and agent tasks; ingestion holds document work; crawler owns browser/network work. Each role consumes exactly one queue and imports only the catalog-derived `app.worker.jobs.*` module subset.
+
+This is more than a routing preference. A prefetch multiplier of one prevents a worker from hoarding messages, but it cannot prevent head-of-line blocking after every process slot is occupied by a long task. Disjoint queues and disjoint consumers provide the isolation. The dead-letter queue is declared for inspection and is deliberately consumed by no role profile.
+
+`WorkerRole` profiles in `app.worker.celery.profiles` own the pool (`prefork`), concurrency, child recycling limit, queue, task names, and task modules. `app.worker.celery.cli.build_worker_argv()` emits those values and rejects duplicate queue/process-shape flags. Beat is a separate publisher process, not a worker role.
+
+## Process-local capabilities
+
+Prefork means a worker parent forks child processes. Resources that are unsafe to share across a fork—document conversion loops, browser instances, and event-loop-bound clients—are created by the capability owner in the worker process and reused for that process's tasks. The task should close per-task clients; it must not tear down a worker-owned browser or loop after each message. Recycling (`max_tasks_per_child`) is the containment boundary for leaks and fragmented native memory.
+
+The role application is lazy: `create_worker_celery_app(role)` selects the role before importing task modules. Producer imports of `app.shared.jobs` and `app.connections.celery_producer` therefore do not load worker implementations. A process constructs one worker or beat app; run multiple roles as separate deployments.
+
+## At-least-once is the contract
+
+RabbitMQ acknowledgements are late, but failure paths are deliberately distinct:
+
+- An ordinary task exception or timeout is acknowledged because `task_acks_on_failure_or_timeout=True`. A Celery retry publishes a new delivery; when that retry budget is exhausted, the final failure is still acknowledged and is not automatically sent to the RabbitMQ DLX.
+- A malformed payload for a registered catalog name is rejected explicitly by `ResilientTask.before_start()` with `Reject(requeue=False)`. RabbitMQ can route that rejected delivery to the queue's DLX (`default.dlq`), where it is inspected separately from application retry exhaustion.
+- If a worker child is lost, `task_reject_on_worker_lost=True` allows the broker to redeliver the message. That is the redelivery path, not a normal task-failure DLX path.
+- If the outbox relay cannot publish after five attempts, it writes a PostgreSQL `dead_letter_events` row. That database dead-letter table is independent of RabbitMQ's DLX.
+
+The result is at-least-once execution, not exactly-once execution. Every task that causes an external side effect needs an idempotency key and an idempotency decision at its boundary. `ResilientTask` exposes Redis-backed idempotency helpers with `CELERY_IDEMPOTENCY_TTL_SECONDS` (default `86400`); task-specific locks and durable domain state still determine what is safe to repeat. A successful broker receipt is never a substitute for idempotency.
+
+See [JobBus](/architecture/job-bus), [Outbox pattern](/architecture/outbox-pattern), and [Celery configuration](/configuration/celery) for the contracts and operational values.
