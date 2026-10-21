@@ -43,7 +43,33 @@ def upgrade() -> None:
         )
     )
 
-    op.drop_constraint("credit_notes_source_invoice_id_fkey", "credit_notes", type_="foreignkey")
+    # Drop whichever FK 0024 left on source_invoice_id AFTER creation: the
+    # metadata naming convention (fk_credit_notes_source_invoice_id_invoices,
+    # as it lands in every database migrated through this chain) or the bare
+    # PostgreSQL default (credit_notes_source_invoice_id_fkey). Hard-coding
+    # either name makes the drop environment-dependent and fails the other.
+    op.execute(
+        sa.text(
+            r"""
+            DO $$
+            DECLARE
+                existing text;
+            BEGIN
+                SELECT conname INTO existing
+                FROM pg_constraint
+                WHERE conrelid = 'credit_notes'::regclass
+                  AND contype = 'f'
+                  AND pg_get_constraintdef(oid) =
+                      'FOREIGN KEY (source_invoice_id) REFERENCES invoices(id) ON DELETE SET NULL'
+                  AND conname <> 'fk_credit_notes_source_invoice_id';
+                IF existing IS NOT NULL THEN
+                    EXECUTE format('ALTER TABLE credit_notes DROP CONSTRAINT %I', existing);
+                END IF;
+            END
+            $$;
+            """
+        )
+    )
     op.create_foreign_key(
         "fk_credit_notes_source_invoice_id",
         "credit_notes",
@@ -63,7 +89,7 @@ def downgrade() -> None:
     op.drop_constraint("ck_credit_notes_source_invoice_required", "credit_notes", type_="check")
     op.drop_constraint("fk_credit_notes_source_invoice_id", "credit_notes", type_="foreignkey")
     op.create_foreign_key(
-        "credit_notes_source_invoice_id_fkey",
+        "fk_credit_notes_source_invoice_id_invoices",
         "credit_notes",
         "invoices",
         ["source_invoice_id"],
