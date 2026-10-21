@@ -9,11 +9,31 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+from fakeredis.aioredis import FakeRedis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.features.agent_saul.thread_lock import DEFAULT_TTL_SECONDS, ThreadLock, lock_key
 
 pytestmark = pytest.mark.unit
+
+
+async def test_renew_survives_a_bytes_returning_client() -> None:
+    """Regression (§5.5): the production pool (redis_fastapi) is built WITHOUT
+    decode_responses, so the same lock key reads back as bytes here and as str
+    through every other client. The ownership compare must treat b'…' and
+    '…' as the same token, or every first renewal at TTL/3 declared the lease
+    lost mid-stream and the run died with LOCK_LOST ~20s in.
+    """
+    for decode_responses in (True, False):
+        client = FakeRedis(decode_responses=decode_responses)
+        lock = ThreadLock(client, "t-bytes")
+        try:
+            assert await lock.acquire() is True
+            assert await lock._renew_once() is True
+            assert lock.is_held is True
+        finally:
+            await lock.release()
+            client.close()
 
 
 async def make_lock(test_redis, thread_id: str = "t-1", **kwargs) -> ThreadLock:

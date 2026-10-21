@@ -187,7 +187,12 @@ class ThreadLock:
             return False
         async with self._redis.pipeline() as pipe:
             await pipe.watch(key)
-            if await pipe.get(key) != owner:
+            stored = await pipe.get(key)
+            # The SDK pool (redis_fastapi) builds without decode_responses, so
+            # the same key can read back as bytes on this path and str
+            # elsewhere; compare as text (P5a — genuinely dynamic bytes|str).
+            stored_text = stored.decode() if isinstance(stored, bytes) else stored
+            if stored_text != owner:
                 # redis-py asyncio defines unwatch() as a coroutine while
                 # fakeredis's is sync — await only a real awaitable (P5a).
                 unwatched = pipe.unwatch()
