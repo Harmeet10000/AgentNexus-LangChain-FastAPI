@@ -1,4 +1,4 @@
-.PHONY: help check-imports lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery celery-ingestion celery-crawler celery-beat celery-command image-build image-build-prod image-push image-tag
+.PHONY: help check-imports lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery celery-ingestion celery-crawler celery-beat celery-command celery-completeness image-build image-build-prod image-push image-tag
 
 help:
 	@echo "Available commands:"
@@ -16,6 +16,7 @@ help:
 	@echo "  make celery-ingestion - Start the ingestion-queue Celery worker"
 	@echo "  make celery-beat    - Start the Celery scheduler"
 	@echo "  make celery-command - Print the worker and scheduler commands without running them"
+	@echo "  make celery-completeness - Check aggregate catalog queue coverage"
 	@echo "  make image-tag      - Print computed IMAGE_TAG (sha-<commit>[-dirty])"
 	@echo "  make image-build    - Build dev image with git-sha labels (IMAGE_TAG=sha-xxx)"
 	@echo "  make image-build-prod - Build prod image with git-sha labels"
@@ -59,28 +60,13 @@ migrate-history:
 
 # Celery
 #
-# The task application is named **once**, here. Every other place that has to start a worker
-# — the README's command list, and the compose service C7 adds — references this definition
-# rather than repeating the string, because the previous arrangement had two copies and both
-# were wrong: they named a Celery configuration module that has never existed in this repository,
-# so the documented command could not start a worker at all. The name is described rather than
-# spelled here, because a test greps these files for it and a comment quoting it would defeat
-# the check.
-#
-# Written as `module:attribute` rather than the bare module. Celery would find `celery_app` by
-# probing the module for a Celery instance, but the probe picks whatever it finds first; naming
-# the attribute means adding a second instance to that module cannot silently re-target the
-# worker.
-#
-# The `app.` prefix (not `src.app.`) is deliberate and load-bearing. `src/` is on the import
-# path, so both spellings resolve — to two *different* module objects, each with its own task
-# registry, because Python keys sys.modules by the import string. The task modules are listed
-# as `tasks.*`, which is the same rooting, so `app.` is the identity the registry already uses.
-CELERY_APP := app.worker.app:celery_app
-CELERY_WORKER_CMD := uv run celery -A $(CELERY_APP) worker --loglevel=info
+# Worker startup goes through the installed role interface. The profile resolves
+# queue, pool, concurrency and child recycling in one place; deployment files
+# only select a role and may add harmless Celery flags such as log level.
+CELERY_WORKER_CMD := uv run worker
 
-# The three commands the deployment actually runs, all derived from the one above so
-# that the application reference exists in exactly one place. Two workers, not one:
+# The three commands the deployment actually runs, all derived from the one
+# interface. Two workers, not one:
 # ingestion is minutes of model work per message and the default queue carries
 # sub-second billing and transactional-email tasks, so one shared worker pool means
 # those wait behind ingestion whenever every slot is busy. `worker_prefetch_multiplier=1`
@@ -88,18 +74,19 @@ CELERY_WORKER_CMD := uv run celery -A $(CELERY_APP) worker --loglevel=info
 # says nothing about head-of-line blocking once every slot is occupied. Disjoint
 # queues with disjoint consumers is what removes the coupling.
 #
-# `-Q` is mandatory, not tidiness. A worker started without it consumes every queue
-# the application declares, dead-letter queue included, so it re-runs the messages
-# that were parked for a human to look at.
+# The role interface emits exactly one queue selection. A worker started without
+# one consumes every queue the application declares, including the dead-letter
+# queue, and can re-run messages parked for inspection.
 #
 # The concurrency figures: the default queue's tasks are short and mostly waiting on
 # other services, so it can afford slots; ingestion holds a document-conversion and
 # embedding pipeline per slot, so two is deliberate rather than conservative — raising
 # it multiplies peak memory by whatever the largest document costs.
-CELERY_DEFAULT_WORKER_CMD := $(CELERY_WORKER_CMD) -Q default --concurrency=8
-CELERY_INGESTION_WORKER_CMD := $(CELERY_WORKER_CMD) -Q ingestion --concurrency=2
-CELERY_CRAWLER_WORKER_CMD := $(CELERY_WORKER_CMD) -Q crawler --concurrency=2
-CELERY_BEAT_CMD := uv run celery -A $(CELERY_APP) beat --loglevel=info
+CELERY_DEFAULT_WORKER_CMD := $(CELERY_WORKER_CMD) --role default --loglevel=info
+CELERY_INGESTION_WORKER_CMD := $(CELERY_WORKER_CMD) --role ingestion --loglevel=info
+CELERY_CRAWLER_WORKER_CMD := $(CELERY_WORKER_CMD) --role crawler --loglevel=info
+CELERY_BEAT_CMD := uv run beat --loglevel=info
+CELERY_COMPLETENESS_CMD := uv run worker-completeness --consumed-queue default --consumed-queue ingestion --consumed-queue crawler
 
 celery:
 	$(CELERY_DEFAULT_WORKER_CMD)
@@ -120,6 +107,9 @@ celery-command:
 	@echo '$(CELERY_INGESTION_WORKER_CMD)'
 	@echo '$(CELERY_CRAWLER_WORKER_CMD)'
 	@echo '$(CELERY_BEAT_CMD)'
+
+celery-completeness:
+	$(CELERY_COMPLETENESS_CMD)
 
 # --- Docker image versioning (git-sha) ---------------------------------------
 # ponytail: single source of truth for IMAGE_TAG — sha-<short> + -dirty if working tree is dirty.

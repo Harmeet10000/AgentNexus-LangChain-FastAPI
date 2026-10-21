@@ -40,6 +40,7 @@ from app.shared.jobs.names import (
     INGESTION_TASK_NAMES,
     SEND_PASSWORD_RESET_EMAIL,
 )
+from app.worker.celery.profiles import profile_for_role
 from app.worker.task_modules import TASK_DECLARING_MODULES
 
 pytestmark = pytest.mark.unit
@@ -53,7 +54,8 @@ _settings = get_settings()
 _COMPOSE = Path(__file__).resolve().parents[3] / "docker-compose.yml"
 
 _COMPOSE_CELERY_COMMAND = re.compile(
-    r"^\s*command:\s*(?P<command>uv run celery .*?)\s*$", re.MULTILINE
+    r"^\s*command:\s*(?P<command>(?:(?:uv run )?(?:worker|beat))\s+.*?)\s*$",
+    re.MULTILINE,
 )
 
 #: One per worker, one for the scheduler. Asserted rather than assumed, so that a service deleted by
@@ -74,11 +76,12 @@ def _compose_celery_commands() -> list[str]:
 
 
 def _selected_queues(command: str) -> frozenset[str]:
-    """The queues one command tells its worker to consume, or nothing for the scheduler."""
+    """Resolve the queue selected by a role command, or nothing for beat."""
     argv = shlex.split(command)
-    if "-Q" not in argv:
+    if "worker" not in argv:
         return frozenset()
-    return frozenset(argv[argv.index("-Q") + 1].split(","))
+    role = argv[argv.index("--role") + 1]
+    return frozenset({profile_for_role(role).queue})
 
 
 def _worker_queue_selections() -> list[frozenset[str]]:

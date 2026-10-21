@@ -185,6 +185,7 @@ dependencies = [
 dev = "app.server:main"
 worker = "app.worker.cli:main"
 beat = "app.worker.cli:beat"
+worker-completeness = "app.worker.cli:completeness"
 # precommit = "pre-commit:run"
 test = "pytest:main"
 replay-outbox = "app.worker.replay_outbox:main"

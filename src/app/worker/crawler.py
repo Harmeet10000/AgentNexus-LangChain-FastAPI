@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from celery.signals import worker_process_init, worker_process_shutdown, worker_shutdown
 from crawl4ai import AsyncWebCrawler
@@ -14,6 +12,11 @@ from pydantic import BaseModel, ConfigDict
 from app.connections.crawl4ai import close_crawl4ai_crawler, create_crawl4ai_crawler
 from app.observability.logging import logger
 from app.utils import ServiceUnavailableException
+from app.worker.capability_runtime import (
+    CapabilityLifecycle,
+    CapabilityOwner,
+    CapabilityUsageError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -38,44 +41,69 @@ async def _provision_crawler_worker() -> CrawlerWorkerResources:
     return CrawlerWorkerResources(browser=await create_crawl4ai_crawler())
 
 
+async def _close_crawler_browser(resources: CrawlerWorkerResources) -> None:
+    """Close the browser with a deadline so shutdown and reset never hang."""
+    try:
+        async with asyncio.timeout(10):
+            await close_crawl4ai_crawler(resources.browser)
+    except Exception as exc:  # noqa: BLE001 — shutdown must never raise
+        exc.add_note("operation=shutdown_crawler_worker")
+        logger.bind(error_type=type(exc).__name__).warning("crawler_browser_close_failed")
+
+
+class _CrawlerCapability(CapabilityLifecycle[CrawlerWorkerResources]):
+    """Crawler adapter for the generic process/loop capability owner."""
+
+    @override
+    async def provision(self) -> CrawlerWorkerResources:
+        return await _provision_crawler_worker()
+
+    @override
+    async def release(self, resources: CrawlerWorkerResources) -> None:
+        await _close_crawler_browser(resources)
+
+
+_CRAWLER_OWNER = CapabilityOwner(_CrawlerCapability())
+
+
+def _sync_crawler_compat_state() -> None:
+    """Mirror owner state for older tests and external worker callers."""
+    global _WORKER_PID, _WORKER_RUNNER, _WORKER_RESOURCES
+    _WORKER_PID, _WORKER_RUNNER, _WORKER_RESOURCES = _CRAWLER_OWNER._state()
+
+
 @worker_process_init.connect
 def initialize_crawler_worker(**_kwargs: object) -> None:
     """Reset inherited state; first task provisions resources after child startup."""
-    global _WORKER_RESOURCES, _WORKER_RUNNER, _WORKER_PID  # noqa: PLW0603
-    _WORKER_RESOURCES = None
-    _WORKER_RUNNER = None
-    _WORKER_PID = os.getpid()
+    _CRAWLER_OWNER.reset_after_fork()
+    _sync_crawler_compat_state()
 
 
 def _ensure_crawler_worker() -> None:
     """Lazily provision once on the owning child's persistent loop."""
-    global _WORKER_RESOURCES, _WORKER_RUNNER  # noqa: PLW0603
-    if os.getpid() != _WORKER_PID:
-        initialize_crawler_worker()
-    if _WORKER_RESOURCES is not None:
-        return
-    if _WORKER_RUNNER is None:
-        _WORKER_RUNNER = asyncio.Runner()
     try:
-        _WORKER_RESOURCES = _WORKER_RUNNER.run(_provision_crawler_worker())
+        _CRAWLER_OWNER.ensure()
+    except CapabilityUsageError:
+        raise
     except Exception as exc:
         exc.add_note("capability=crawler, operation=worker_provision")
-        _WORKER_RUNNER.close()
-        _WORKER_RUNNER = None
+        _sync_crawler_compat_state()
         raise ServiceUnavailableException(detail="Crawler worker provisioning failed") from exc
     else:
+        _sync_crawler_compat_state()
         logger.info("Crawler worker resources initialized")
 
 
 def get_crawler_worker_resources() -> CrawlerWorkerResources:
     """Return provisioned resources or a typed, capability-naming failure."""
     _ensure_crawler_worker()
-    if _WORKER_RESOURCES is None:
+    resources = _WORKER_RESOURCES
+    if resources is None:
         raise ServiceUnavailableException(
             detail="Crawler worker is unavailable",
             data={"capability": "crawler_browser"},
         )
-    return _WORKER_RESOURCES
+    return resources
 
 
 def run_on_crawler_worker_loop[T](
@@ -88,23 +116,14 @@ def run_on_crawler_worker_loop[T](
     task. Cancel and drain it before the next task runs.
     """
     get_crawler_worker_resources()
-    if _WORKER_RUNNER is None:
-        message = "Worker resource guard returned without a runner"
-        raise AssertionError(message)
-    loop = _WORKER_RUNNER.get_loop()
-    task = loop.create_task(coroutine_factory())
-    try:
-        return loop.run_until_complete(task)
-    except BaseException:
-        task.cancel()
-        with contextlib.suppress(BaseException):
-            loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
-        raise
+    result = _CRAWLER_OWNER.run(coroutine_factory)
+    _sync_crawler_compat_state()
+    return result
 
 
 async def _probe_crawler_browser() -> bool:
     """Return True when the shared browser still executes a trivial load."""
-    resources = _WORKER_RESOURCES
+    resources = _CRAWLER_OWNER.peek()
     if resources is None:
         return False
     try:
@@ -126,11 +145,12 @@ async def _probe_crawler_browser() -> bool:
 
 def probe_crawler_browser() -> bool:
     """Synchronously probe the shared browser on its owning loop."""
-    runner = _WORKER_RUNNER
-    if runner is None or _WORKER_RESOURCES is None:
+    if _CRAWLER_OWNER.peek() is None:
         return False
     try:
-        return runner.run(_probe_crawler_browser())
+        return _CRAWLER_OWNER.run(_probe_crawler_browser)
+    except CapabilityUsageError:
+        raise
     except Exception as exc:  # noqa: BLE001 — probe must never raise
         exc.add_note("operation=crawler_browser_probe")
         return False
@@ -138,7 +158,7 @@ def probe_crawler_browser() -> bool:
 
 async def aprobe_crawler_browser() -> bool:
     """Probe the shared browser from inside its owning loop."""
-    if _WORKER_RESOURCES is None:
+    if _CRAWLER_OWNER.peek() is None:
         return False
     return await _probe_crawler_browser()
 
@@ -151,11 +171,8 @@ async def areset_crawler_worker() -> None:
     ``runner.run`` nor be closed. The next ``_ensure`` re-provisions the
     browser on the same runner.
     """
-    global _WORKER_RESOURCES  # noqa: PLW0603
-    resources = _WORKER_RESOURCES
-    _WORKER_RESOURCES = None
-    if resources is not None:
-        await _close_crawler_browser(resources)
+    await _CRAWLER_OWNER.reset_in_loop()
+    _sync_crawler_compat_state()
 
 
 def reset_crawler_worker() -> None:
@@ -164,54 +181,30 @@ def reset_crawler_worker() -> None:
     Sync contexts only (task boundary, shutdown): the loop must not be
     running. From inside the owning loop, use :func:`areset_crawler_worker`.
     """
-    global _WORKER_RESOURCES, _WORKER_RUNNER  # noqa: PLW0603
-    resources = _WORKER_RESOURCES
-    runner = _WORKER_RUNNER
-    _WORKER_RESOURCES = None
-    _WORKER_RUNNER = None
-    if runner is not None and resources is not None:
-        try:
-            runner.run(_close_crawler_browser(resources))
-        except Exception as exc:  # noqa: BLE001 — reset must never raise
-            exc.add_note("operation=reset_crawler_worker")
-            logger.bind(error_type=type(exc).__name__).warning("crawler_browser_reset_close_failed")
-    if runner is not None:
-        runner.close()
-
-
-async def _close_crawler_browser(resources: CrawlerWorkerResources) -> None:
-    """Close the browser with a deadline so shutdown and reset never hang."""
     try:
-        async with asyncio.timeout(10):
-            await close_crawl4ai_crawler(resources.browser)
+        _CRAWLER_OWNER.shutdown()
+    except CapabilityUsageError:
+        raise
     except Exception as exc:  # noqa: BLE001 — shutdown must never raise
-        exc.add_note("operation=shutdown_crawler_worker")
+        exc.add_note("operation=reset_crawler_worker")
         logger.bind(error_type=type(exc).__name__).warning("crawler_browser_close_failed")
+    finally:
+        _sync_crawler_compat_state()
 
 
 @worker_process_shutdown.connect
 @worker_shutdown.connect
 def shutdown_crawler_worker(**_kwargs: object) -> None:
     """Release the browser once and close the persistent loop."""
-    global _WORKER_RESOURCES, _WORKER_RUNNER  # noqa: PLW0603
-    resources = _WORKER_RESOURCES
-    runner = _WORKER_RUNNER
-    _WORKER_RESOURCES = None
-    _WORKER_RUNNER = None
-    if resources is None:
+    if _CRAWLER_OWNER.peek() is None:
         logger.info("Crawler worker had no resources to close")
-        if runner is not None:
-            runner.close()
-        return
     try:
-        if runner is None:
-            logger.error("Crawler worker loop absent during resource shutdown")
-            return
-        runner.run(_close_crawler_browser(resources))
+        _CRAWLER_OWNER.shutdown()
         logger.info("Crawler worker resources closed")
+    except CapabilityUsageError:
+        raise
     except Exception as exc:  # noqa: BLE001 — shutdown must never raise
         exc.add_note("operation=shutdown_crawler_worker")
         logger.bind(error_type=type(exc).__name__).warning("crawler_browser_close_failed")
     finally:
-        if runner is not None:
-            runner.close()
+        _sync_crawler_compat_state()

@@ -208,6 +208,16 @@ class Settings(BaseSettings):
     CELERY_INGESTION_ROUTING_KEY: str = Field(default="task.ingestion")
     CELERY_CRAWLER_QUEUE: str = Field(default="crawler")
     CELERY_CRAWLER_ROUTING_KEY: str = Field(default="task.crawler")
+    # Worker role profiles are the single command-level source for these
+    # values.  Keeping them configurable allows capacity tuning without
+    # duplicating flags in Make/Compose.
+    CELERY_DEFAULT_CONCURRENCY: int = Field(default=8, ge=1)
+    CELERY_INGESTION_CONCURRENCY: int = Field(default=2, ge=1)
+    CELERY_CRAWLER_CONCURRENCY: int = Field(default=2, ge=1)
+    CELERY_DEFAULT_MAX_TASKS_PER_CHILD: int = Field(default=500, ge=1)
+    CELERY_INGESTION_MAX_TASKS_PER_CHILD: int = Field(default=100, ge=1)
+    CELERY_CRAWLER_MAX_TASKS_PER_CHILD: int = Field(default=100, ge=1)
+    CELERY_BEAT_SCHEDULE_FILE: str = Field(default="celerybeat-schedule")
     CELERY_RETRY_MAX_RETRIES: int = Field(default=5)
     CELERY_RETRY_BACKOFF_MAX: int = Field(default=600)
     CELERY_DEFAULT_RETRY_DELAY: int = Field(default=5)

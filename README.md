@@ -286,24 +286,22 @@ uv run alembic history --verbose
 uv run ruff check --fix
 uv run ruff format
 uv run pytest -x
-uv run celery -A app.worker.app:celery_app worker --loglevel=info -Q default --concurrency=8
-uv run celery -A app.worker.app:celery_app worker --loglevel=info -Q ingestion --concurrency=2
-uv run celery -A app.worker.app:celery_app worker --loglevel=info -Q crawler --concurrency=2
-uv run celery -A app.worker.app:celery_app beat --loglevel=info
+uv run worker --role default --loglevel=info
+uv run worker --role ingestion --loglevel=info
+uv run worker --role crawler --loglevel=info
+uv run beat --loglevel=info
 ```
 
 Those four commands are defined once in the `Makefile` — `make celery`, `make celery-ingestion`,
-`make celery-crawler` and `make celery-beat` run exactly them, and `make celery-command` prints all four. A unit test asserts
-the block above, the `Makefile` and the compose services are the same strings, so they cannot drift
-apart: the previous version named a Celery configuration module that has never existed in this
-repository, and nothing caught it.
+`make celery-crawler` and `make celery-beat` run exactly them, and `make celery-command` prints the
+three worker commands. The role profile owns the queue, prefork pool, concurrency and child-recycle
+limit; deployments should not add a second `-Q` or process-shape flag.
 
-Two details worth knowing before changing them. **`-Q` is mandatory** — a worker started without it
-consumes every queue the application declares, the dead-letter queue included, and so re-runs the
-messages that were parked there for someone to look at. And **the two workers are two processes on
-purpose**: ingestion is minutes of model work per message, while the default queue carries
-sub-second billing and transactional-email tasks, so a single shared pool makes those wait behind
-ingestion whenever every slot is busy.
+Two details worth knowing before changing them. The role interface emits exactly one queue selection;
+a worker started without one consumes every queue the application declares, including the
+dead-letter queue. And **the worker pools are separate on purpose**: ingestion is minutes of model
+work per message, while the default queue carries sub-second billing and transactional-email tasks,
+so a single shared pool makes those wait behind ingestion whenever every slot is busy.
 
 ## Project structure
 

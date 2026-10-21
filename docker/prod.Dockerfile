@@ -18,9 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 COPY --from=ghcr.io/astral-sh/uv:latest@sha256:2bb3ebca0a796a155094a27773d290c4b074572e6107f171d88d086682fd2500 /uv /bin/uv
 
 COPY pyproject.toml uv.lock ./
+COPY src ./src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev && \
+    uv sync --frozen --no-dev && \
     test -d .venv || (echo "ERROR: .venv not created"; exit 1)
 
 # --- Production Stage ---
@@ -44,6 +45,11 @@ RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 
 COPY --chown=appuser:appuser src ./src
+
+# Beat persists its scheduler state in a dedicated compose volume.  Seed the
+# mount point with the runtime user's ownership so the first volume creation
+# is writable without running the scheduler as root.
+RUN mkdir -p /var/lib/celery && chown appuser:appuser /var/lib/celery
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app/src" \

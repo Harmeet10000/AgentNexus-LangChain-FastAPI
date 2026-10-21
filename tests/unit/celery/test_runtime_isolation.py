@@ -24,7 +24,7 @@ socket.socket.connect = no_connection
 from app.connections.celery_producer import celery_app
 from app.shared.jobs.names import DOCUMENTS_INGEST
 from app.shared.jobs.registry import CeleryTaskRegistry, TaskPayloadValidationError
-assert len(CeleryTaskRegistry.registered_names()) == 14
+assert len(CeleryTaskRegistry.registered_names()) == 15
 try:
     CeleryTaskRegistry.validate(DOCUMENTS_INGEST, {})
 except TaskPayloadValidationError:
@@ -75,7 +75,7 @@ def test_every_feature_task_module_is_explicitly_registered() -> None:
     src = Path(__file__).resolve().parents[3] / "src"
     discovered = {
         ".".join(path.relative_to(src).with_suffix("").parts)
-        for path in (src / "app/worker/tasks").glob("*.py")
+        for path in (src / "app/worker/jobs").glob("*.py")
         if path.name != "__init__.py"
     }
     assert discovered == set(TASK_MODULES)

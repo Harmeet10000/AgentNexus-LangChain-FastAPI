@@ -105,15 +105,12 @@ services:
   # blocking once every slot is occupied. Disjoint queues with disjoint consumers
   # is what removes the coupling.
   #
-  # Every command below is the fully expanded form of a `Makefile` variable
-  # (`make celery-command` prints all three). YAML cannot reference a Makefile
-  # variable, so these are copies — and a unit test asserts they are equal to the
-  # definitions, because the last time this command existed in two places both
-  # copies were wrong.
+  # Every command below selects a role from the same installed interface as the
+  # Makefile (`make celery-command` prints the equivalent commands). YAML cannot
+  # reference a Makefile variable, so these role selections remain explicit.
   #
-  # `-Q` is mandatory, not tidiness: a worker started without it consumes every
-  # queue the application declares, dead-letter queue included, and so re-runs the
-  # messages that were parked there for someone to look at.
+  # The role interface emits exactly one queue selection. A worker started without
+  # one consumes every declared queue, including the dead-letter queue.
   #
   # `RABBITMQ_URL` is overridden here exactly as it is for the API service, and
   # for these services it is a safety property rather than a convenience:
@@ -132,7 +129,7 @@ services:
         BUILD_DATE: ${BUILD_DATE:-unknown}
         APP_VERSION: ${APP_VERSION:-1.0.0}
     container_name: celery-worker
-    command: uv run celery -A app.worker.app:celery_app worker --loglevel=info -Q default --concurrency=8
+    command: uv run worker --role default --loglevel=info
     volumes:
       - ./src:/app/src:ro
       - ./data:/app/data
@@ -169,7 +166,7 @@ services:
         BUILD_DATE: ${BUILD_DATE:-unknown}
         APP_VERSION: ${APP_VERSION:-1.0.0}
     container_name: celery-worker-ingestion
-    command: uv run celery -A app.worker.app:celery_app worker --loglevel=info -Q ingestion --concurrency=2
+    command: uv run worker --role ingestion --loglevel=info
     volumes:
       - ./src:/app/src:ro
       - ./data:/app/data
@@ -200,7 +197,7 @@ services:
         BUILD_DATE: ${BUILD_DATE:-unknown}
         APP_VERSION: ${APP_VERSION:-1.0.0}
     container_name: celery-worker-crawler
-    command: uv run celery -A app.worker.app:celery_app worker --loglevel=info -Q crawler --concurrency=2
+    command: uv run worker --role crawler --loglevel=info
     volumes:
       - ./src:/app/src:ro
       - ./data:/app/data
@@ -235,14 +232,16 @@ services:
         BUILD_DATE: ${BUILD_DATE:-unknown}
         APP_VERSION: ${APP_VERSION:-1.0.0}
     container_name: celery-beat
-    command: uv run celery -A app.worker.app:celery_app beat --loglevel=info
+    command: uv run beat --loglevel=info
     volumes:
       - ./src:/app/src:ro
+      - celery-beat-data:/var/lib/celery
     environment:
       ENVIRONMENT: development
       GIT_SHA: ${GIT_SHA:-unknown}
       BUILD_DATE: ${BUILD_DATE:-unknown}
       APP_VERSION: ${APP_VERSION:-1.0.0}
+      CELERY_BEAT_SCHEDULE_FILE: /var/lib/celery/celerybeat-schedule
       POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your_secure_password}@timescale:5432/${POSTGRES_DB:-langchain_db}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672//
     env_file:
@@ -263,3 +262,4 @@ volumes:
   rabbitmq-data:
   caddy-data:
   caddy-config:
+  celery-beat-data:

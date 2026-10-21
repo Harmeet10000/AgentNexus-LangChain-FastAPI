@@ -80,6 +80,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      - name: Verify Celery deployment completeness
+        run: make celery-completeness
+
       - name: Lint code with ruff
         run: uv run ruff check src/ tests/
 

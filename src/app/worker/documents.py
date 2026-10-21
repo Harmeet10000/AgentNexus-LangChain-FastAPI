@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from celery.signals import worker_process_init, worker_process_shutdown, worker_shutdown
 from graphiti_core import Graphiti
@@ -32,6 +30,11 @@ from app.lifecycle.graphs import graphiti_service, provide_document_ingestion_gr
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard
 from app.utils import ServiceUnavailableException
+from app.worker.capability_runtime import (
+    CapabilityLifecycle,
+    CapabilityOwner,
+    CapabilityUsageError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
@@ -144,43 +147,60 @@ async def _release_document_worker(resources: DocumentWorkerResources) -> None:
     )
 
 
+class _DocumentCapability(CapabilityLifecycle[DocumentWorkerResources]):
+    """Document adapter for the generic process/loop capability owner."""
+
+    @override
+    async def provision(self) -> DocumentWorkerResources:
+        return await _provision_document_worker()
+
+    @override
+    async def release(self, resources: DocumentWorkerResources) -> None:
+        async with asyncio.timeout(30):
+            await _release_document_worker(resources)
+
+
+_DOCUMENT_OWNER = CapabilityOwner(_DocumentCapability())
+
+
+def _sync_document_compat_state() -> None:
+    """Mirror owner state for older tests and external worker callers."""
+    global _WORKER_PID, _WORKER_RUNNER, _WORKER_RESOURCES
+    _WORKER_PID, _WORKER_RUNNER, _WORKER_RESOURCES = _DOCUMENT_OWNER._state()
+
+
 @worker_process_init.connect
 def initialize_document_worker(**_kwargs: object) -> None:
     """Reset inherited state; first task provisions resources after child startup."""
-    global _WORKER_RESOURCES, _WORKER_RUNNER, _WORKER_PID  # noqa: PLW0603
-    _WORKER_RESOURCES = None
-    _WORKER_RUNNER = None
-    _WORKER_PID = os.getpid()
+    _DOCUMENT_OWNER.reset_after_fork()
+    _sync_document_compat_state()
 
 
 def _ensure_document_worker() -> None:
     """Lazily provision once on the owning child's persistent loop."""
-    global _WORKER_RESOURCES, _WORKER_RUNNER  # noqa: PLW0603
-    if os.getpid() != _WORKER_PID:
-        initialize_document_worker()
-    if _WORKER_RESOURCES is not None:
-        return
-    _WORKER_RUNNER = asyncio.Runner()
     try:
-        _WORKER_RESOURCES = _WORKER_RUNNER.run(_provision_document_worker())
+        _DOCUMENT_OWNER.ensure()
+    except CapabilityUsageError:
+        raise
     except Exception as exc:
         exc.add_note("capability=document, operation=worker_provision")
-        _WORKER_RUNNER.close()
-        _WORKER_RUNNER = None
+        _sync_document_compat_state()
         raise ServiceUnavailableException(detail="Document worker provisioning failed") from exc
     else:
+        _sync_document_compat_state()
         logger.info("Document ingestion worker resources initialized")
 
 
 def get_document_worker_resources() -> DocumentWorkerResources:
     """Return provisioned resources or a typed, capability-naming failure."""
     _ensure_document_worker()
-    if _WORKER_RESOURCES is None:
+    resources = _WORKER_RESOURCES
+    if resources is None:
         raise ServiceUnavailableException(
             detail="Document ingestion worker is unavailable",
             data={"capability": "document_ingestion_graph"},
         )
-    return _WORKER_RESOURCES
+    return resources
 
 
 def run_on_document_worker_loop[T](
@@ -193,49 +213,24 @@ def run_on_document_worker_loop[T](
     task while still holding DB sessions. Cancel and drain it first.
     """
     get_document_worker_resources()
-    if _WORKER_RUNNER is None:
-        message = "Worker resource guard returned without a runner"
-        raise AssertionError(message)
-    loop = _WORKER_RUNNER.get_loop()
-    task = loop.create_task(coroutine_factory())
-    try:
-        return loop.run_until_complete(task)
-    except BaseException:
-        task.cancel()
-        with contextlib.suppress(BaseException):
-            loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
-        raise
+    result = _DOCUMENT_OWNER.run(coroutine_factory)
+    _sync_document_compat_state()
+    return result
 
 
 @worker_process_shutdown.connect
 @worker_shutdown.connect
 def shutdown_document_worker(**_kwargs: object) -> None:
     """Release each constructed resource once and close the persistent loop."""
-    global _WORKER_RESOURCES, _WORKER_RUNNER  # noqa: PLW0603
-    resources = _WORKER_RESOURCES
-    runner = _WORKER_RUNNER
-    _WORKER_RESOURCES = None
-    _WORKER_RUNNER = None
-    if resources is None:
+    if _DOCUMENT_OWNER.peek() is None:
         logger.info("Document ingestion worker had no resources to close")
-        if runner is not None:
-            runner.close()
-        return
     try:
-        if runner is None:
-            logger.error("Document ingestion worker loop absent during resource shutdown")
-            return
-
-        async def _release_with_deadline() -> None:
-            try:
-                async with asyncio.timeout(30):
-                    await _release_document_worker(resources)
-            except Exception as exc:  # noqa: BLE001 — shutdown must never raise
-                exc.add_note("operation=shutdown_document_worker")
-                logger.bind(error_type=type(exc).__name__).warning("document_worker_close_failed")
-
-        runner.run(_release_with_deadline())
+        _DOCUMENT_OWNER.shutdown()
         logger.info("Document ingestion worker resources closed")
+    except CapabilityUsageError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — shutdown must never raise
+        exc.add_note("operation=shutdown_document_worker")
+        logger.bind(error_type=type(exc).__name__).warning("document_worker_close_failed")
     finally:
-        if runner is not None:
-            runner.close()
+        _sync_document_compat_state()

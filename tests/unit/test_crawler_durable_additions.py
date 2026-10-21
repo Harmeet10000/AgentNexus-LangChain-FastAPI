@@ -62,13 +62,8 @@ async def test_finish_single_result_rejects_private_redirect(
     assert isinstance(outcome.failure(), object)
 
 
-@pytest.mark.asyncio
-async def test_worker_browser_is_reused(monkeypatch: pytest.MonkeyPatch) -> None:
-    import os
-
+def test_worker_browser_is_reused(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.worker import crawler as worker_tasks
-
-    monkeypatch.setattr(worker_tasks, "_WORKER_PID", os.getpid())
 
     calls = {"count": 0}
 
@@ -77,14 +72,18 @@ async def test_worker_browser_is_reused(monkeypatch: pytest.MonkeyPatch) -> None
         return MagicMock(spec=AsyncWebCrawler)
 
     monkeypatch.setattr(worker_tasks, "create_crawl4ai_crawler", fake_create)
-    monkeypatch.setattr(worker_tasks, "_WORKER_RESOURCES", None)
-    first = await worker_tasks._provision_crawler_worker()
-    monkeypatch.setattr(worker_tasks, "_WORKER_RESOURCES", first)
+
+    async def close_noop(_browser: object) -> None:
+        return None
+
+    monkeypatch.setattr(worker_tasks, "close_crawl4ai_crawler", close_noop)
+    worker_tasks.initialize_crawler_worker()
+    first = worker_tasks.get_crawler_worker_resources()
     second = worker_tasks.get_crawler_worker_resources()
+    worker_tasks.shutdown_crawler_worker()
     assert first is second
     assert first.browser is second.browser
     assert calls["count"] == 1
-    monkeypatch.setattr(worker_tasks, "_WORKER_RESOURCES", None)
 
 
 @pytest.mark.asyncio

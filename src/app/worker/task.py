@@ -24,6 +24,7 @@ from celery.exceptions import Reject
 
 from app.shared.jobs.registry import (
     CeleryTaskRegistry,
+    TaskDispatchError,
     TaskPayloadValidationError,
     UnregisteredTaskError,
 )
@@ -69,12 +70,15 @@ class ResilientTask(Task):
         task_name = self.name or ""
         try:
             CeleryTaskRegistry.validate(task_name, dict(kwargs or {}))
-        except TaskPayloadValidationError as exc:
-            exc.add_note(f"task={task_name}, stage=payload_validation")
-            logger.bind(task=task_name, task_id=task_id).warning("task_payload_rejected")
-            raise Reject(exc, requeue=False) from exc
-        except UnregisteredTaskError:
-            logger.bind(task=task_name, task_id=task_id).debug("task_payload_unregistered")
+        except TaskDispatchError as exc:
+            if isinstance(exc, TaskPayloadValidationError):
+                exc.add_note(f"task={task_name}, stage=payload_validation")
+                logger.bind(task=task_name, task_id=task_id).warning("task_payload_rejected")
+                raise Reject(exc, requeue=False) from exc
+            if isinstance(exc, UnregisteredTaskError):
+                logger.bind(task=task_name, task_id=task_id).debug("task_payload_unregistered")
+            else:
+                raise
         # Celery never sets request.started; the duration metrics in
         # on_success/on_failure would raise AttributeError without this.
         self.request.started = time.time()
@@ -230,8 +234,11 @@ class TypedCeleryTask(ResilientTask):
         task_name = self.name or ""
         try:
             self._validated_payload = CeleryTaskRegistry.validate(task_name, dict(kwargs or {}))
-        except UnregisteredTaskError:
-            self._validated_payload = None
+        except TaskDispatchError as exc:
+            if isinstance(exc, UnregisteredTaskError):
+                self._validated_payload = None
+            else:
+                raise
 
     @override
     def on_success(

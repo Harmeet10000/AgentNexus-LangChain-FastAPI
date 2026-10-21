@@ -28,14 +28,10 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def clean_worker_state() -> Iterator[None]:
-    document_worker._WORKER_RESOURCES = None
-    document_worker._WORKER_RUNNER = None
+    document_worker.shutdown_document_worker()
+    document_worker.initialize_document_worker()
     yield
-    runner = document_worker._WORKER_RUNNER
-    document_worker._WORKER_RESOURCES = None
-    document_worker._WORKER_RUNNER = None
-    if runner is not None:
-        runner.close()
+    document_worker.shutdown_document_worker()
 
 
 def test_worker_hooks_construct_once_across_two_invocations_and_release_once(
