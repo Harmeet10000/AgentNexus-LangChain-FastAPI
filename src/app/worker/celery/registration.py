@@ -12,11 +12,7 @@ if TYPE_CHECKING:
 
 
 def _jobs_module(module: str) -> str:
-    return module.replace(".worker.tasks.", ".worker.jobs.")
-
-
-def _legacy_module(module: str) -> str:
-    return module.replace(".worker.jobs.", ".worker.tasks.")
+    return module
 
 
 TASK_DECLARING_MODULES: Final = MappingProxyType(
@@ -24,16 +20,7 @@ TASK_DECLARING_MODULES: Final = MappingProxyType(
 )
 TASK_MODULES: Final = tuple(dict.fromkeys(TASK_DECLARING_MODULES.values()))
 
-# The old spelling remains available to compatibility integrations; it is
-# intentionally not used as a second Celery include list.
-LEGACY_TASK_DECLARING_MODULES: Final = MappingProxyType(
-    {name: _legacy_module(definition.declaring_module) for name, definition in JOB_CATALOG.items()}
-)
-LEGACY_TASK_MODULES: Final = tuple(dict.fromkeys(LEGACY_TASK_DECLARING_MODULES.values()))
-
 __all__ = [
-    "LEGACY_TASK_DECLARING_MODULES",
-    "LEGACY_TASK_MODULES",
     "TASK_DECLARING_MODULES",
     "TASK_MODULES",
 ]

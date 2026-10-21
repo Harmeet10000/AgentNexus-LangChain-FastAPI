@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.worker.reliability import (
+from app.worker.execution.reliability import (
     CircuitBreakerState,
     is_circuit_breaker_open,
     record_circuit_breaker_failure,

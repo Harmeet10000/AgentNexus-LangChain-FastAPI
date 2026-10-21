@@ -25,8 +25,8 @@ from app.shared.jobs.names import (
     BILLING_RENEWAL,
 )
 from app.worker.celery.app import get_worker_celery_app
-from app.worker.runtime import run
-from app.worker.task import ResilientTask
+from app.worker.celery.task import ResilientTask
+from app.worker.execution.runtime import run
 
 celery_app = get_worker_celery_app()
 

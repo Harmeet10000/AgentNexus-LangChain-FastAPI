@@ -17,7 +17,7 @@ from app.features.documents.service import (
     run_document_ingestion_task,
 )
 from app.resilience.idempotency import IdempotencyGuard
-from app.worker import documents as document_worker
+from app.worker.capabilities import documents as document_worker
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -144,6 +144,8 @@ async def test_release_attempts_every_resource_after_close_failures(
         await document_worker._release_document_worker(resources)
 
     assert raised.value.exceptions == (graph_error, redis_error)
+    assert "resource=graphiti" in graph_error.__notes__[0]
+    assert "resource=redis" in redis_error.__notes__[0]
     close_graph.assert_awaited_once()
     redis.aclose.assert_awaited_once()
     engine.dispose.assert_awaited_once()

@@ -9,8 +9,8 @@ from app.shared.jobs.names import (
     BILLING_RECONCILIATION,
     BILLING_RENEWAL,
 )
-from app.worker.schedules import BEAT_SCHEDULE
-from app.worker.task_modules import TASK_DECLARING_MODULES
+from app.worker.celery.registration import TASK_DECLARING_MODULES
+from app.worker.celery.schedules import BEAT_SCHEDULE
 
 
 def test_lifecycle_sweeps_have_task_declarations_and_beat_entries() -> None:

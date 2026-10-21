@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from app.connections.crawl4ai import close_crawl4ai_crawler, create_crawl4ai_crawler
 from app.observability.logging import logger
 from app.utils import ServiceUnavailableException
-from app.worker.capability_runtime import (
+from app.worker.capabilities.owner import (
     CapabilityLifecycle,
     CapabilityOwner,
     CapabilityUsageError,

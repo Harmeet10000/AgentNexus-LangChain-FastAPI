@@ -8,8 +8,8 @@ from app.features.billing.credits.jobs import expire_credits_job, reconcile_cred
 from app.observability.logging import logger
 from app.shared.jobs.names import CREDITS_EXPIRE, CREDITS_RECONCILE
 from app.worker.celery.app import get_worker_celery_app
-from app.worker.runtime import run
-from app.worker.task import ResilientTask
+from app.worker.celery.task import ResilientTask
+from app.worker.execution.runtime import run
 
 celery_app = get_worker_celery_app()
 

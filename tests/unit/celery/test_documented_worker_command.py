@@ -7,10 +7,9 @@ import shlex
 from pathlib import Path
 
 import pytest
-from celery import Celery
 
+from app.worker.celery.cli import build_worker_argv
 from app.worker.celery.profiles import WorkerRole, profile_for_role
-from app.worker.cli import build_worker_argv
 
 pytestmark = pytest.mark.unit
 
@@ -94,8 +93,8 @@ def test_production_commands_have_installed_project_entrypoints() -> None:
     assert "COPY pyproject.toml uv.lock ./" in dockerfile
     assert "COPY src ./src" in dockerfile
     assert "uv sync --frozen --no-dev" in dockerfile
-    assert 'worker = "app.worker.cli:main"' in pyproject
-    assert 'beat = "app.worker.cli:beat"' in pyproject
+    assert 'worker = "app.worker.celery.cli:main"' in pyproject
+    assert 'beat = "app.worker.celery.cli:beat"' in pyproject
     assert all(
         command.startswith(("worker ", "beat ")) for command in _compose_commands(_PROD_COMPOSE)
     )
@@ -160,23 +159,6 @@ def test_operator_commands_do_not_repeat_profile_owned_flags() -> None:
         assert "--pool" not in tokens
         assert "--concurrency" not in tokens
         assert "--max-tasks-per-child" not in tokens
-
-
-def test_legacy_application_module_remains_resolvable(real_celery) -> None:
-    """The historical ``app.worker.app:celery_app`` import remains supported."""
-
-    import importlib
-
-    module = importlib.import_module("app.worker.app")
-    assert module.celery_app is real_celery.app
-    assert isinstance(module.celery_app, Celery)
-
-
-def test_legacy_application_has_one_identity(real_celery) -> None:
-    import importlib
-
-    resolved = importlib.import_module("app.worker.app").celery_app
-    assert resolved is real_celery.app
 
 
 @pytest.mark.parametrize("path", [_MAKEFILE, _README, _DEV_COMPOSE, _PROD_COMPOSE])

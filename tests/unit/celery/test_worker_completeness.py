@@ -8,8 +8,8 @@ import pytest
 
 from app.shared.jobs.catalog import JOB_CATALOG
 from app.shared.jobs.topology import task_routes
-from app.worker.app import CatalogValidatingBeat, CatalogValidatingWorker, celery_app
-from app.worker.completeness import (
+from app.worker.celery.app import CatalogValidatingBeat, CatalogValidatingWorker, celery_app
+from app.worker.celery.completeness import (
     CatalogCompletenessError,
     JobCatalogDrift,
     check_beat_catalog_completeness,
@@ -18,8 +18,8 @@ from app.worker.completeness import (
     check_worker_catalog_completeness,
     ensure_worker_catalog_completeness,
 )
-from app.worker.schedules import BEAT_SCHEDULE
-from app.worker.task_modules import TASK_DECLARING_MODULES, TASK_MODULES
+from app.worker.celery.registration import TASK_DECLARING_MODULES, TASK_MODULES
+from app.worker.celery.schedules import BEAT_SCHEDULE
 
 
 def _fake_app(
@@ -100,8 +100,8 @@ def test_drift_report_aggregates_every_runtime_category() -> None:
     name = next(iter(JOB_CATALOG))
     declarations = dict(TASK_DECLARING_MODULES)
     declarations.pop(name)
-    declarations["tasks.rogue"] = "app.worker.tasks.rogue"
-    modules = (*TASK_MODULES, "app.worker.tasks.orphan")
+    declarations["tasks.rogue"] = "app.worker.jobs.rogue"
+    modules = (*TASK_MODULES, "app.worker.jobs.orphan")
     bound = set(JOB_CATALOG) - {name} | {"tasks.rogue"}
     routes = dict(task_routes())
     routes.pop(name)
@@ -139,8 +139,9 @@ def test_worker_gate_raises_one_aggregated_error(monkeypatch: pytest.MonkeyPatch
         catalog_not_declared=("tasks.missing",),
         routes_to_undeclared_queue=("tasks.rogue=missing",),
     )
-    monkeypatch.setattr(
-        "app.worker.completeness.check_worker_catalog_completeness",
+    monkeypatch.setitem(
+        ensure_worker_catalog_completeness.__globals__,
+        "check_worker_catalog_completeness",
         lambda _app: report,
     )
 
@@ -221,7 +222,7 @@ def test_beat_completeness_does_not_require_worker_consumed_queues() -> None:
 def test_ci_completeness_command_reports_and_exits_on_missing_queue(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from app.worker import cli
+    from app.worker.celery import cli
 
     with pytest.raises(SystemExit) as exc_info:
         cli.completeness(["--consumed-queue", "default"])

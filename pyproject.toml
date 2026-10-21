@@ -183,12 +183,12 @@ dependencies = [
 
 [project.scripts]
 dev = "app.server:main"
-worker = "app.worker.cli:main"
-beat = "app.worker.cli:beat"
-worker-completeness = "app.worker.cli:completeness"
+worker = "app.worker.celery.cli:main"
+beat = "app.worker.celery.cli:beat"
+worker-completeness = "app.worker.celery.cli:completeness"
 # precommit = "pre-commit:run"
 test = "pytest:main"
-replay-outbox = "app.worker.replay_outbox:main"
+replay-outbox = "app.worker.operations.replay_outbox:main"
 seed = "database.seeders.run_seeders:main"
 
 

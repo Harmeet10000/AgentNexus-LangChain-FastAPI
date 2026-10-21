@@ -31,8 +31,8 @@ from app.features.agent_saul.transcript.repository import ChatTranscriptReposito
 from app.observability.logging import logger
 from app.shared.jobs.names import AGENT_MEMORY_CONSOLIDATION, AGENT_SAUL_TRANSCRIPT_SWEEP
 from app.worker.celery.app import get_worker_celery_app
-from app.worker.runtime import run
-from app.worker.task import ResilientTask
+from app.worker.celery.task import ResilientTask
+from app.worker.execution.runtime import run
 
 celery_app = get_worker_celery_app()
 

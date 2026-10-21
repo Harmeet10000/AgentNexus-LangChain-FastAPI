@@ -9,12 +9,12 @@ import pytest
 
 from app.config import get_settings
 from app.worker.celery.app import celery_app
+from app.worker.celery.cli import build_worker_argv
 from app.worker.celery.completeness import (
     check_worker_profile_completeness,
     ensure_worker_profile_completeness,
 )
 from app.worker.celery.profiles import profile_for_role
-from app.worker.cli import build_worker_argv
 
 
 @pytest.mark.parametrize(
@@ -43,23 +43,19 @@ def test_role_command_rejects_duplicate_queue_or_process_flags() -> None:
             build_worker_argv("default", (option, "other"))
 
 
-def test_canonical_and_compatibility_apps_are_one_instance() -> None:
-    from app.worker.app import celery_app as compatibility_app
-
-    assert compatibility_app is celery_app
+def test_canonical_app_has_one_identity() -> None:
     assert celery_app.conf.task_acks_on_failure_or_timeout is True
     assert celery_app.conf.task_acks_late is True
     assert celery_app.conf.task_reject_on_worker_lost is True
 
 
-def test_jobs_namespace_and_legacy_namespace_register_once() -> None:
-    """Importing both paths must preserve one task object per stable wire name."""
+def test_jobs_namespace_registers_once() -> None:
+    """The canonical jobs namespace is the only registration path."""
 
     import importlib
 
     celery_app.loader.import_default_modules()
     importlib.import_module("app.worker.jobs.auth")
-    importlib.import_module("app.worker.tasks.auth")
     names = [name for name in celery_app.tasks if name.startswith("auth.")]
     assert sorted(names) == [
         "auth.send_password_reset_email",
@@ -79,7 +75,7 @@ from app.worker.celery.profiles import profile_for_role
 app = create_worker_celery_app({role!r})
 profile = profile_for_role({role!r})
 assert tuple(app.conf.include) == profile.task_modules
-assert all(not module.startswith("app.worker.tasks.") for module in app.conf.include)
+assert all(module.startswith("app.worker.jobs.") for module in app.conf.include)
 app.loader.import_default_modules()
 loaded = {{name for name in sys.modules if name.startswith("app.worker.jobs.")}}
 expected = set(profile.task_modules)
@@ -96,7 +92,7 @@ assert profile.task_names <= set(app.tasks)
 def test_cli_import_does_not_construct_an_app_before_role_selection() -> None:
     script = """
 import sys
-import app.worker.cli
+import app.worker.celery.cli
 assert "app.worker.celery.app" not in sys.modules
 """
     result = subprocess.run(  # noqa: S603 — literal script with trusted interpreter
@@ -106,11 +102,47 @@ assert "app.worker.celery.app" not in sys.modules
 
 
 def test_beat_rejects_short_and_long_schedule_overrides() -> None:
-    from app.worker import cli
+    from app.worker.celery import cli
 
     for option in ("--schedule", "--schedule=/tmp/other", "-s", "-s/tmp/other"):
         with pytest.raises(ValueError, match="schedule/-s"):
             cli.beat([option])
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "app.worker.app",
+        "app.worker.cli",
+        "app.worker.capability_runtime",
+        "app.worker.completeness",
+        "app.worker.crawler",
+        "app.worker.documents",
+        "app.worker.observability",
+        "app.worker.reliability",
+        "app.worker.replay_outbox",
+        "app.worker.runtime",
+        "app.worker.schedules",
+        "app.worker.signals",
+        "app.worker.task",
+        "app.worker.task_modules",
+        "app.worker.tasks",
+        "app.worker.tasks.agent_saul",
+        "app.worker.tasks.auth",
+        "app.worker.tasks.billing",
+        "app.worker.tasks.crawler",
+        "app.worker.tasks.credits",
+        "app.worker.tasks.documents",
+    ],
+)
+def test_obsolete_worker_modules_are_absent(name: str) -> None:
+    import importlib.util
+
+    try:
+        spec = importlib.util.find_spec(name)
+    except ModuleNotFoundError:
+        spec = None
+    assert spec is None
 
 
 @pytest.mark.parametrize("role", ["default", "ingestion", "crawler"])

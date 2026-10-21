@@ -5,8 +5,8 @@ import sys
 from collections.abc import Sequence
 
 from app.config import get_settings
+from app.worker.celery.completeness import check_deployment_queue_coverage
 from app.worker.celery.profiles import WorkerRole, profile_for_role
-from app.worker.completeness import check_deployment_queue_coverage
 
 
 def _worker_parser() -> argparse.ArgumentParser:

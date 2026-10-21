@@ -1,8 +1,8 @@
 """Canonical Celery application composition for workers and beat.
 
 The module does not construct an app at import time. A role must be selected
-before Celery imports task modules; the old ``app.worker.app:celery_app``
-surface remains lazy and full-catalog compatible through ``__getattr__``.
+before Celery imports task modules; the application remains lazy so producer
+imports never load task modules.
 """
 
 from __future__ import annotations
@@ -14,15 +14,15 @@ from celery.apps.worker import Worker
 
 from app.config import get_settings
 from app.connections.celery_producer import create_celery_app
-from app.worker.celery.completeness import ensure_worker_profile_completeness
+from app.worker.celery.completeness import (
+    ensure_beat_catalog_completeness,
+    ensure_worker_catalog_completeness,
+    ensure_worker_profile_completeness,
+)
 from app.worker.celery.profiles import profile_for_role
 from app.worker.celery.registration import TASK_MODULES
 from app.worker.celery.schedules import BEAT_SCHEDULE
 from app.worker.celery.task import ResilientTask
-from app.worker.completeness import (
-    ensure_beat_catalog_completeness,
-    ensure_worker_catalog_completeness,
-)
 
 if TYPE_CHECKING:
     from celery import Celery
@@ -49,9 +49,10 @@ def create_worker_celery_app(
 ) -> Celery:
     """Compose one worker or beat app after its role has been selected.
 
-    ``role`` selects a strict task-module subset. ``None`` is reserved for the
-    legacy compatibility import and includes the complete catalog. Beat also
-    binds the complete catalog because it emits scheduled work for every queue.
+    ``role`` selects a strict task-module subset. ``None`` selects the complete
+    catalog for decorator registration and explicit full-catalog tooling. Beat
+    validates the catalog-owned schedule and routes without importing consumer
+    task modules.
     A process constructs exactly one worker or beat app; separate deployments
     are the supported way to run multiple roles.
     """
@@ -65,7 +66,9 @@ def create_worker_celery_app(
     app = create_celery_app()
     app.Task = ResilientTask
     app.conf.update(
-        include=profile.task_modules if profile is not None else TASK_MODULES,
+        # Beat only publishes catalog-owned names/routes and must not import
+        # consumer adapters or provision capability resources.
+        include=() if beat else (profile.task_modules if profile is not None else TASK_MODULES),
         imports=("app.worker.celery.signals", "app.worker.celery.observability"),
         beat_schedule=BEAT_SCHEDULE,
         beat_schedule_filename=settings.CELERY_BEAT_SCHEDULE_FILE,
@@ -82,7 +85,7 @@ def create_worker_celery_app(
 
 
 def get_worker_celery_app() -> Celery:
-    """Return the selected app, lazily creating the legacy full-catalog app."""
+    """Return the selected app, lazily creating a full-catalog app."""
     if _apps.active is not None:
         return _apps.active
     if _apps.compatibility is None:

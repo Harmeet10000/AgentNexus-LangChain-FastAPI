@@ -30,8 +30,8 @@ from app.shared.jobs.names import SEND_PASSWORD_RESET_EMAIL, SEND_VERIFICATION_E
 from app.shared.jobs.payloads import PasswordResetEmailPayload, VerificationEmailPayload
 from app.utils import ExternalServiceException
 from app.worker.celery.app import get_worker_celery_app
-from app.worker.reliability import CircuitBreakerOpenError, IdempotencyLockError
-from app.worker.task import ResilientTask
+from app.worker.celery.task import ResilientTask
+from app.worker.execution.reliability import CircuitBreakerOpenError, IdempotencyLockError
 
 celery_app = get_worker_celery_app()
 

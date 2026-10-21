@@ -8,7 +8,7 @@ import pytest
 from celery.exceptions import CeleryError
 from pydantic import ValidationError
 
-import app.worker.replay_outbox as replay_module
+import app.worker.operations.replay_outbox as replay_module
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

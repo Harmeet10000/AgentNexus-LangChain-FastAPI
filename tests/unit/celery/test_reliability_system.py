@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.worker.reliability import (
+from app.worker.execution.reliability import (
     CircuitBreakerOpenError,
     IdempotencyLockError,
     RateLimiter,

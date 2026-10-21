@@ -9,17 +9,17 @@ from app.features.documents.service import run_document_ingestion_task
 from app.observability.logging import logger
 from app.shared.jobs.names import DOCUMENTS_INGEST
 from app.utils import InfrastructureException, ServiceUnavailableException
-from app.worker.celery.app import get_worker_celery_app
-from app.worker.documents import (
+from app.worker.capabilities.documents import (
     get_document_worker_resources,
     run_on_document_worker_loop,
 )
-from app.worker.task import ResilientTask
+from app.worker.celery.app import get_worker_celery_app
+from app.worker.celery.task import ResilientTask
 
 celery_app = get_worker_celery_app()
 
 if TYPE_CHECKING:
-    from app.worker.documents import (
+    from app.worker.capabilities.documents import (
         DocumentWorkerResources,
     )
 

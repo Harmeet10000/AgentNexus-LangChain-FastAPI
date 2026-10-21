@@ -30,7 +30,7 @@ from app.lifecycle.graphs import graphiti_service, provide_document_ingestion_gr
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard
 from app.utils import ServiceUnavailableException
-from app.worker.capability_runtime import (
+from app.worker.capabilities.owner import (
     CapabilityLifecycle,
     CapabilityOwner,
     CapabilityUsageError,
@@ -78,6 +78,7 @@ async def _close_document_worker_resources(
         try:
             await close()
         except Exception as exc:  # noqa: BLE001 — cleanup must continue across resources
+            exc.add_note(f"capability=document, operation=resource_close, resource={resource}")
             logger.bind(resource=resource, error_type=type(exc).__name__).exception(
                 "Document ingestion worker resource close failed"
             )
@@ -128,7 +129,8 @@ async def _provision_document_worker() -> DocumentWorkerResources:
             idempotency=idempotency,
             redis=redis,
         )
-    except Exception:
+    except Exception as exc:
+        exc.add_note("capability=document, operation=provision_cleanup")
         await _close_document_worker_resources(
             engine=engine,
             graphiti=graphiti,

@@ -72,12 +72,6 @@ class WorkerProfile:
             raise ValueError(message)
 
 
-def _canonical_module(module: str) -> str:
-    """Return the public jobs spelling while old decorators remain compatible."""
-
-    return module.replace(".worker.tasks.", ".worker.jobs.")
-
-
 def _profile(
     role: WorkerRole,
     queue: str,
@@ -101,9 +95,7 @@ def _profile(
         concurrency=concurrency,
         pool="prefork",
         max_tasks_per_child=max_tasks_per_child,
-        task_modules=tuple(
-            dict.fromkeys(_canonical_module(d.declaring_module) for d in entries.values())
-        ),
+        task_modules=tuple(dict.fromkeys(d.declaring_module for d in entries.values())),
         task_names=frozenset(entries),
     )
 

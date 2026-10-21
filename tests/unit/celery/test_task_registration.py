@@ -15,7 +15,7 @@ conftest replaces it, and this file's whole subject is what the real one holds.
 import pytest
 
 from app.shared.jobs.names import DOCUMENTS_INGEST
-from app.worker.task_modules import TASK_DECLARING_MODULES
+from app.worker.celery.registration import TASK_DECLARING_MODULES
 
 
 @pytest.fixture(scope="module")
@@ -92,5 +92,5 @@ def test_every_declared_task_name_is_bound_on_the_task_application(all_declaring
 
 def test_the_typed_email_reference_module_is_not_listed(real_celery):
     """The duplicate email module was reconciled to one; listing is single."""
-    assert "app.worker.tasks.auth_typed" not in real_celery.app.conf.include
+    assert "app.worker.jobs.auth_typed" not in real_celery.app.conf.include
     assert list(real_celery.app.conf.include).count("app.worker.jobs.auth") == 1

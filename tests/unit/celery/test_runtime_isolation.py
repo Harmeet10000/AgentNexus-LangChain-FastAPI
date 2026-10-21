@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess  # noqa: S404 — trusted local interpreter import smoke tests
 import sys
 from pathlib import Path
 
 import pytest
 
-from app.worker import runtime
-from app.worker.reliability import run_redis_call
-from app.worker.task_modules import TASK_MODULES
+from app.worker.celery.registration import TASK_MODULES
+from app.worker.execution import runtime
+from app.worker.execution.reliability import run_redis_call
 
 
 def test_producer_validation_imports_no_consumers_or_network_resources() -> None:
@@ -42,33 +43,76 @@ assert not any(n.startswith("app.features.") and n.endswith(".tasks") for n in s
     assert result.returncode == 0, result.stderr
 
 
-def test_fresh_worker_registers_all_wire_names_without_provisioning() -> None:
-    script = """
-import inspect
+@pytest.mark.parametrize("role", ["default", "ingestion", "crawler"])
+def test_fresh_role_process_loads_only_its_wire_names_without_provisioning(role: str) -> None:
+    """Each supported role loads only its catalog subset in a fresh process."""
+    from app.worker.celery.profiles import profile_for_role
+
+    script = f"""
 import socket
+import sys
 def no_connection(*args, **kwargs):
     raise AssertionError("Worker import attempted network I/O")
 socket.socket.connect = no_connection
-from app.worker.app import celery_app
-from app.worker.task_modules import TASK_DECLARING_MODULES
-from app.shared.jobs.registry import CeleryTaskRegistry
-celery_app.loader.import_default_modules()
-assert set(TASK_DECLARING_MODULES) == CeleryTaskRegistry.registered_names()
-assert set(TASK_DECLARING_MODULES) <= set(celery_app.tasks)
-for entry in celery_app.conf.beat_schedule.values():
-    task = celery_app.tasks[entry["task"]]
-    inspect.signature(task.run).bind(*entry.get("args", ()), **entry.get("kwargs", {}))
-from app.worker import crawler, documents, runtime
-from app.worker.task import ResilientTask
-assert crawler._WORKER_RESOURCES is None
-assert documents._WORKER_RESOURCES is None
+from app.worker.celery.app import create_worker_celery_app
+from app.worker.celery.profiles import profile_for_role
+from app.worker.execution import runtime
+
+app = create_worker_celery_app({role!r})
+profile = profile_for_role({role!r})
+assert tuple(app.conf.include) == profile.task_modules
+app.loader.import_default_modules()
+loaded = {{name for name in sys.modules if name.startswith("app.worker.jobs.")}}
+expected_modules = set(profile.task_modules)
+assert expected_modules <= loaded
+assert loaded <= expected_modules
+assert profile.task_names <= set(app.tasks)
 assert runtime._runner is None
-assert ResilientTask._redis_client is None
+print("TASK_NAMES=" + ",".join(sorted(profile.task_names)))
+"""
+    result = subprocess.run(  # noqa: S603 — literal script with trusted interpreter
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    marker = next(line for line in result.stdout.splitlines() if line.startswith("TASK_NAMES="))
+    actual = set(marker.removeprefix("TASK_NAMES=").split(","))
+    assert actual == profile_for_role(role).task_names
+
+
+def test_role_profiles_union_matches_catalog() -> None:
+    from app.shared.jobs.catalog import JOB_CATALOG
+    from app.worker.celery.profiles import profile_for_role
+
+    registered = set().union(
+        *(profile_for_role(role).task_names for role in ("default", "ingestion", "crawler"))
+    )
+    assert registered == set(JOB_CATALOG)
+
+
+def test_fresh_beat_validates_catalog_without_importing_consumers() -> None:
+    script = """
+import sys
+from app.worker.celery.app import CatalogValidatingBeat, create_worker_celery_app
+from app.worker.celery.completeness import ensure_beat_catalog_completeness
+
+app = create_worker_celery_app(beat=True)
+assert tuple(app.conf.include) == ()
+beat = CatalogValidatingBeat(app=app)
+beat.init_loader()
+ensure_beat_catalog_completeness(app)
+assert not any(name.startswith("app.worker.jobs.") for name in sys.modules)
+assert not any(name.startswith("app.worker.capabilities.") for name in sys.modules)
+print("BEAT_OK")
 """
     result = subprocess.run(  # noqa: S603 — literal script with trusted interpreter
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=45, check=False
     )
     assert result.returncode == 0, result.stderr
+    assert "BEAT_OK" in result.stdout
 
 
 def test_every_feature_task_module_is_explicitly_registered() -> None:
@@ -125,8 +169,14 @@ def test_child_reset_discards_parent_runner(clean_runtime) -> None:
 def test_worker_reliability_pool_is_shared_and_closed_on_its_loop(
     clean_runtime, monkeypatch
 ) -> None:
-    from app.worker import signals
-    from app.worker.task import ResilientTask
+    import app.worker.celery.task as task_module
+    from app.worker.celery import signals
+    from app.worker.celery.task import ResilientTask
+
+    # The real-celery fixture reloads worker modules between test modules; bind
+    # the signal implementation to this test's canonical task class so the
+    # assertion exercises the shutdown contract rather than module identity.
+    monkeypatch.setattr(signals, "ResilientTask", ResilientTask)
 
     loops = []
 
@@ -139,8 +189,12 @@ def test_worker_reliability_pool_is_shared_and_closed_on_its_loop(
             loops.append(asyncio.get_running_loop())
 
     client = Client()
-    monkeypatch.setattr("app.worker.task.create_redis_client", lambda _url: client)
+    monkeypatch.setattr(task_module, "create_redis_client", lambda _url: client)
     signals.initialize_worker()
+    # Keep the class-level pool explicit when another test module has reloaded
+    # the canonical task module after this test's imports.
+    ResilientTask._redis_client = client
+    ResilientTask._redis_pid = os.getpid()
 
     class FirstTask(ResilientTask):
         pass
@@ -149,6 +203,7 @@ def test_worker_reliability_pool_is_shared_and_closed_on_its_loop(
         pass
 
     assert FirstTask.get_redis_client() is SecondTask.get_redis_client()
+    assert signals.ResilientTask._redis_client is client
     assert run_redis_call(client.get()) == "ok"
     signals.shutdown_worker()
     signals.shutdown_worker()
@@ -163,7 +218,7 @@ async def test_async_idempotency_context_uses_the_callers_loop() -> None:
 
     from fakeredis.aioredis import FakeRedis
 
-    from app.worker.reliability import build_idempotency_key, idempotency_manager
+    from app.worker.execution.reliability import build_idempotency_key, idempotency_manager
 
     client = FakeRedis(decode_responses=True)
     try:

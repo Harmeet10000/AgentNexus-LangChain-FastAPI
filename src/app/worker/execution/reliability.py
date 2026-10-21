@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 from app.shared.jobs.errors import CircuitBreakerOpenError, IdempotencyLockError
-from app.worker.runtime import run
+from app.worker.execution.runtime import run
 
 type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
 type RedisOperationResult = object | Awaitable[object]

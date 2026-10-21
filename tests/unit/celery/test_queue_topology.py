@@ -41,7 +41,7 @@ from app.shared.jobs.names import (
     SEND_PASSWORD_RESET_EMAIL,
 )
 from app.worker.celery.profiles import profile_for_role
-from app.worker.task_modules import TASK_DECLARING_MODULES
+from app.worker.celery.registration import TASK_DECLARING_MODULES
 
 pytestmark = pytest.mark.unit
 

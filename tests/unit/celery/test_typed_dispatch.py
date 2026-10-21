@@ -17,7 +17,7 @@ import celery.exceptions
 import pytest
 
 from app.shared.jobs.names import DOCUMENTS_INGEST
-from app.worker.task_modules import TASK_DECLARING_MODULES
+from app.worker.celery.registration import TASK_DECLARING_MODULES
 
 _VALID_INGEST_PAYLOAD = {
     "document_id": "doc-1",

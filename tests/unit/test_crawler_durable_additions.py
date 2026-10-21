@@ -63,7 +63,7 @@ async def test_finish_single_result_rejects_private_redirect(
 
 
 def test_worker_browser_is_reused(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.worker import crawler as worker_tasks
+    from app.worker.capabilities import crawler as worker_tasks
 
     calls = {"count": 0}
 

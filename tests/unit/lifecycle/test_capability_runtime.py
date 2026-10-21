@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from app.worker import capability_runtime
+from app.worker.capabilities import owner as capability_runtime
 
 pytestmark = pytest.mark.unit
 

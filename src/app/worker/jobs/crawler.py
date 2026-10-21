@@ -22,8 +22,7 @@ from app.features.crawler.service import CrawlerService
 from app.observability.logging import logger
 from app.shared.jobs.names import CRAWLER_CRAWL
 from app.utils import InfrastructureException, ServiceUnavailableException
-from app.worker.celery.app import get_worker_celery_app
-from app.worker.crawler import (
+from app.worker.capabilities.crawler import (
     aprobe_crawler_browser,
     areset_crawler_worker,
     get_crawler_worker_resources,
@@ -31,7 +30,8 @@ from app.worker.crawler import (
     reset_crawler_worker,
     run_on_crawler_worker_loop,
 )
-from app.worker.task import ResilientTask
+from app.worker.celery.app import get_worker_celery_app
+from app.worker.celery.task import ResilientTask
 
 celery_app = get_worker_celery_app()
 
