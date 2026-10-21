@@ -100,9 +100,17 @@ class Invoice(Base):
         nullable=False,
     )
 
+    # lazy="selectin" (not the global default "select"): services traverse
+    # line_items after the repository's execute() has returned
+    # (_invoice_to_response, pdf render) — a lazy load there is a
+    # MissingGreenlet bomb under the async driver. The back_populates side
+    # keeps the lazy default deliberately: line items are never fetched on
+    # their own, and eager-loading the parent both ways invites loader
+    # recursion for no consumer.
     line_items: Mapped[list["InvoiceLineItem"]] = relationship(
         back_populates="invoice",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
 
