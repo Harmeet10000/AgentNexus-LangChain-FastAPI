@@ -44,6 +44,15 @@ class Plan(Base):
             postgresql_where=text("is_active"),
         ),
         Index("ix_plans_is_active", "is_active"),
+        # Expression indexes for the JSONB idempotency lookups in
+        # repository.find_by_operation_key / find_by_idempotency_scope. A
+        # plain GIN(metadata_) cannot serve `metadata_ ->> 'k' = :p`
+        # equality; only an index on the exact expression does.
+        Index("ix_plans_billing_operation_key", text("(metadata_ ->> 'billing_operation_key')")),
+        Index(
+            "ix_plans_billing_idempotency_scope",
+            text("(metadata_ ->> 'billing_idempotency_scope')"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)

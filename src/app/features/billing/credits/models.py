@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -108,6 +109,10 @@ class UserCredit(Base):
         Index("ix_user_credits_status", "status"),
         Index("ix_user_credits_valid_until", "valid_until"),
         Index("ix_user_credits_created_at", "created_at"),
+        # Expression index for the idempotency lookup in
+        # credits/repository.find_credit_by_operation_key (GIN(metadata_)
+        # cannot serve `->>` equality).
+        Index("ix_user_credits_operation_key", text("(metadata_ ->> 'operation_key')")),
         # CHECK constraints for data integrity
         sa.CheckConstraint("credit_amount > 0", name="ck_user_credits_credit_amount_positive"),
         sa.CheckConstraint(
