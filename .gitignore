@@ -167,6 +167,7 @@ ehthumbs.db
 
 # Project specific
 data/
+/postman/
 tmp/
 temp/
 logs/
