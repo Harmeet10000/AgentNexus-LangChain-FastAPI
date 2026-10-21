@@ -42,7 +42,7 @@ _STATUTE_SEARCH_LIMIT: int = 5
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from app.shared.rag.graphiti.client import BoundGraphitiService as GraphitiService
+    from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
 
 
 def make_search_legal_precedents_tool(

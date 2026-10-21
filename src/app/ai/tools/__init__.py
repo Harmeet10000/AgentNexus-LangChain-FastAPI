@@ -2,7 +2,7 @@
 
 Domain tools live with their data owners (`features/documents/tools`,
 `features/crawler/tools`) and are registered with role agents through
-`app.shared.rag.graphiti.registry` — never re-exported here.
+`app.retrieval.graphiti.registry` — never re-exported here.
 """
 
 from app.resilience.idempotency import IdempotencyGuard, ToolResult

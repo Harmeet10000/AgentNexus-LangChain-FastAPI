@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.shared.rag.graphiti.client import write_clause_episode
-from app.shared.rag.graphiti.schemas import ClauseEpisodeMetadata
+from app.retrieval.graphiti.client import write_clause_episode
+from app.retrieval.graphiti.schemas import ClauseEpisodeMetadata
 
 if TYPE_CHECKING:
     from typing import Any

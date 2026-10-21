@@ -69,7 +69,7 @@ if TYPE_CHECKING:
         LegalMetadataExtraction,
     )
     from app.resilience.idempotency import IdempotencyGuard
-    from app.shared.rag.graphiti.write_clause_episodes import (
+    from app.retrieval.graphiti.write_clause_episodes import (
         GraphitiService as ClauseWriterService,
     )
 
@@ -673,7 +673,7 @@ async def _write_extracted_clause_episodes(
     """Map grounded clause extractions into the existing canonical writer."""
     from app.extraction.langextract.langextract_to_graph import GraphIngestionContext
     from app.features.agent_saul.graph.state import ClauseSegment, ClauseType
-    from app.shared.rag.graphiti.write_clause_episodes import write_clause_episodes_to_graphiti
+    from app.retrieval.graphiti.write_clause_episodes import write_clause_episodes_to_graphiti
 
     segments: list[ClauseSegment] = []
     valid_types = {member.value: member for member in ClauseType}

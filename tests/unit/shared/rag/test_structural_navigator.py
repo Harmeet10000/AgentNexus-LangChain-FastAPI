@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.shared.rag.structural_navigator import navigate_tree
+from app.retrieval.structural_navigator import navigate_tree
 
 
 def _serialized_docling_tree() -> dict[str, object]:

@@ -30,7 +30,7 @@ from app.ai.llm import serialize_to_toon
 from app.extraction.docling.docling_enhanced import create_document_converter, table_markdown
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger
-from app.shared.rag.graphiti.schemas import (
+from app.retrieval.graphiti.schemas import (
     GRAPHITI_EDGE_TYPE_MAP,
     GRAPHITI_EDGE_TYPES,
     GRAPHITI_ENTITY_TYPES,

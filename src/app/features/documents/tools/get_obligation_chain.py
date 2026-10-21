@@ -32,8 +32,8 @@ from app.resilience.idempotency import IdempotencyGuard, ToolResult
 if TYPE_CHECKING:
     from langchain_core.tools.base import BaseTool
 
-    from app.shared.rag.graphiti.client import BoundGraphitiService as GraphitiService
-    from app.shared.rag.graphiti.schemas import GraphitiSearchResult
+    from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
+    from app.retrieval.graphiti.schemas import GraphitiSearchResult
 
 
 def make_get_obligation_chain_tool(

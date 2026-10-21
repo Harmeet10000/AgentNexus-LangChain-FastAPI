@@ -905,9 +905,10 @@ ignore_imports = [
     # engine-owned because WebCrawler itself takes it.
     "app.connections.crawl4ai -> app.features.crawler.config",
     "app.connections.crawl4ai -> app.features.crawler.crawler",
-    # Pre-existing edge preserved through the 4.1 graph move (clause-episode
-    # writer protocol references clause types); consolidation is section 5 work.
-    "app.shared.rag.graphiti.write_clause_episodes -> app.features.agent_saul.graph.state",
+    # Pre-existing edge preserved through the 4.1 graph move and the shared/rag
+    # relocation (clause-episode writer protocol references clause types);
+    # consolidation is section 5 work.
+    "app.retrieval.graphiti.write_clause_episodes -> app.features.agent_saul.graph.state",
 ]
 
 [[tool.importlinter.contracts]]
@@ -915,6 +916,11 @@ name = "Pure contracts stay free of features and workers"
 type = "forbidden"
 source_modules = ["app.retrieval", "app.security"]
 forbidden_modules = ["app.features", "app.worker"]
+# Same scheduled move as above: the clause-episode writer binds its payload
+# types to the agent_saul state protocol; consolidation is section 5 work.
+ignore_imports = [
+    "app.retrieval.graphiti.write_clause_episodes -> app.features.agent_saul.graph.state",
+]
 
 [[tool.importlinter.contracts]]
 name = "Web and producers do not load worker execution"

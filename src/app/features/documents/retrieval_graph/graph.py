@@ -24,7 +24,7 @@ from .state import ContextGrade, GeneratedAnswer, QueryPlan, RetrievalState, Sou
 if TYPE_CHECKING:
     from typing import Any
 
-    from app.shared.rag.token_counter import CountTokens
+    from app.retrieval.token_counter import CountTokens
 
     from .reranker import Reranker
 
@@ -54,7 +54,7 @@ def build_retrieval_graph(
     from app.features.documents.constants import (  # noqa: PLC0415
         DEFAULT_RAG_TOKEN_BUDGET,
     )
-    from app.shared.rag.token_counter import (  # noqa: PLC0415
+    from app.retrieval.token_counter import (  # noqa: PLC0415
         count_tokens as default_count_tokens,
     )
 

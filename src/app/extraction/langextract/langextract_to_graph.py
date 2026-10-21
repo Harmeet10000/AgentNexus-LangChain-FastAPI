@@ -1,4 +1,4 @@
-# src/app/shared/rag/langextract/langextract_to_graph.py
+# src/app/extraction/langextract/langextract_to_graph.py
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
 
-from app.shared.rag.errors import RagValidationError
+from app.retrieval.errors import RagValidationError
 
 if TYPE_CHECKING:
     import langextract as lx
 
-    from app.shared.rag.errors import RagResult
+    from app.retrieval.errors import RagResult
 
 
 class GraphIngestionContext(BaseModel):

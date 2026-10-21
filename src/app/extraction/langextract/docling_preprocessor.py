@@ -8,10 +8,10 @@ from pydantic import BaseModel, Field
 from returns.result import Failure, Success
 
 from app.extraction.docling import create_document_converter
-from app.shared.rag.errors import RagValidationError
+from app.retrieval.errors import RagValidationError
 
 if TYPE_CHECKING:
-    from app.shared.rag.errors import RagResult
+    from app.retrieval.errors import RagResult
 
 
 class DoclingProcessingContext(BaseModel):

@@ -24,7 +24,7 @@ from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 
 if TYPE_CHECKING:
-    from app.shared.rag.graphiti.client import BoundGraphitiService as GraphitiService
+    from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
 
 
 def make_query_knowledge_graph_tool(

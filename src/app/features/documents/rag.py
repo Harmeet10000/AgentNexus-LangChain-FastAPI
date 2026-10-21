@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from app.retrieval.fusion import RankedChunk
-    from app.shared.rag.token_counter import CountTokens
+    from app.retrieval.token_counter import CountTokens
 
 
 class SearchChunkRecord(BaseModel):

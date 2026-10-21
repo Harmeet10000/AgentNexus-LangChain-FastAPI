@@ -26,8 +26,8 @@ from app.resilience.idempotency import IdempotencyGuard, ToolResult
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from app.shared.rag.graphiti.client import BoundGraphitiService as GraphitiService
-    from app.shared.rag.graphiti.subgraph import Neo4jSubgraphConfig
+    from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
+    from app.retrieval.graphiti.subgraph import Neo4jSubgraphConfig
 
 
 def make_hybrid_retrieve_precedents_tool(

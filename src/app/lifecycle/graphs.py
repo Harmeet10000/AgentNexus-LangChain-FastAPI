@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from app.config.settings import Settings
     from app.connections.object_storage import StorageService
     from app.extraction.langextract.service import AsyncExtractionService
-    from app.shared.rag.graphiti.client import BoundGraphitiService as GraphitiService
+    from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
 
     type IngestDocumentFn = Callable[..., Awaitable[Any]]
 
@@ -115,6 +115,6 @@ def provide_saul_graph(
 
 def graphiti_service(graphiti: Graphiti) -> GraphitiService:
     """Bind a raw Graphiti client to the application's canonical operations."""
-    from app.shared.rag.graphiti.client import BoundGraphitiService  # noqa: PLC0415
+    from app.retrieval.graphiti.client import BoundGraphitiService  # noqa: PLC0415
 
     return BoundGraphitiService(graphiti)

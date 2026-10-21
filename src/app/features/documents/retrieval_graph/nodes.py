@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
 
     from app.features.documents.repository import DocumentRepository
-    from app.shared.rag.token_counter import CountTokens
+    from app.retrieval.token_counter import CountTokens
 
     from .reranker import Reranker
 
