@@ -20,7 +20,19 @@ from sqlalchemy import Insert
 from sqlalchemy.dialects import postgresql
 
 from app.events.model import OutboxEvent
-from app.events.writer import OUTBOX_CHANNEL, with_outbox
+from app.events.writer import OUTBOX_CHANNEL, PostgresOutboxAdapter, with_outbox
+from app.shared.jobs import AggregateRef, InMemoryDirectAdapter, JobBus, TypedJob
+from app.shared.jobs.catalog import JOB_CATALOG
+from app.shared.jobs.names import CRAWLER_CRAWL, DOCUMENTS_INGEST
+from app.shared.jobs.registry import TaskPayloadValidationError, UnregisteredTaskError
+
+_DOCUMENT_PAYLOAD = {
+    "document_id": "doc-123",
+    "user_id": "user-123",
+    "filename": "contract.pdf",
+    "content_type": "application/pdf",
+    "object_uri": "s3://documents/contract.pdf",
+}
 
 
 class TestWithOutbox:
@@ -40,8 +52,8 @@ class TestWithOutbox:
                 session=session,
                 aggregate_type="unified_document",
                 aggregate_id="doc-123",
-                event_type="tasks.documents_ingest",
-                payload={"doc_id": "doc-123"},
+                event_type=DOCUMENTS_INGEST,
+                payload=_DOCUMENT_PAYLOAD,
             )
         )
 
@@ -58,7 +70,7 @@ class TestWithOutbox:
         assert insert_params["aggregate_id"] == "doc-123"
         assert insert_params["event_type"] == "tasks.documents_ingest"
         assert insert_params["id"] == event_id
-        assert insert_params["payload"] == {"doc_id": "doc-123"}
+        assert insert_params["payload"] == _DOCUMENT_PAYLOAD
 
         # Second call: pg_notify
         notify_sql = calls[1][0][0].text
@@ -78,7 +90,93 @@ class TestWithOutbox:
                     session=session,
                     aggregate_type="unified_document",
                     aggregate_id="doc-123",
-                    event_type="tasks.documents_ingest",
-                    payload={},
+                    event_type=DOCUMENTS_INGEST,
+                    payload=_DOCUMENT_PAYLOAD,
                 )
             )
+
+
+@pytest.mark.asyncio
+async def test_transactional_job_bus_stages_on_same_session_without_owning_lifecycle() -> None:
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=AsyncMock())
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    session.close = AsyncMock()
+
+    job = JOB_CATALOG[DOCUMENTS_INGEST].prepare(_DOCUMENT_PAYLOAD)
+    bus = JobBus(InMemoryDirectAdapter(), PostgresOutboxAdapter())
+
+    receipt = await bus.in_transaction(session).enqueue(
+        job,
+        aggregate=AggregateRef(aggregate_type="user_document", aggregate_id="doc-123"),
+    )
+
+    assert receipt.event_id
+    assert session.execute.await_count == 2
+    insert_call, notify_call = session.execute.await_args_list
+    insert_stmt = insert_call.args[0]
+    insert_params = insert_stmt.compile(dialect=postgresql.dialect()).params
+    assert insert_params["event_type"] == DOCUMENTS_INGEST
+    assert insert_params["payload"] == _DOCUMENT_PAYLOAD
+    assert insert_params["id"] == receipt.event_id
+    assert notify_call.args[1]["event_id"] == receipt.event_id
+    session.commit.assert_not_awaited()
+    session.rollback.assert_not_awaited()
+    session.close.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_invalid_transactional_job_is_rejected_before_sql() -> None:
+    session = AsyncMock()
+    session.execute = AsyncMock()
+    invalid = TypedJob(
+        definition=JOB_CATALOG[DOCUMENTS_INGEST],
+        payload=JOB_CATALOG[CRAWLER_CRAWL].payload_model(
+            crawl_id="crawl-123", request_payload={"url": "https://example.com"}
+        ),
+    )
+    bus = JobBus(InMemoryDirectAdapter(), PostgresOutboxAdapter())
+
+    with pytest.raises(TaskPayloadValidationError):
+        await bus.in_transaction(session).enqueue(
+            invalid,
+            aggregate=AggregateRef(aggregate_type="user_document", aggregate_id="doc-123"),
+        )
+
+    session.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_facade_rejects_unknown_job_before_sql() -> None:
+    session = AsyncMock()
+
+    with pytest.raises(UnregisteredTaskError):
+        await with_outbox(
+            session=session,
+            aggregate_type="user_document",
+            aggregate_id="doc-123",
+            event_type="tasks.not_in_catalog",
+            payload={},
+        )
+
+    session.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sql_failure_propagates_without_transaction_ownership() -> None:
+    session = AsyncMock()
+    failure = RuntimeError("database unavailable")
+    session.execute = AsyncMock(side_effect=failure)
+    session.rollback = AsyncMock()
+
+    job = JOB_CATALOG[DOCUMENTS_INGEST].prepare(_DOCUMENT_PAYLOAD)
+    bus = JobBus(InMemoryDirectAdapter(), PostgresOutboxAdapter())
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await bus.in_transaction(session).enqueue(
+            job,
+            aggregate=AggregateRef(aggregate_type="user_document", aggregate_id="doc-123"),
+        )
+
+    session.rollback.assert_not_awaited()

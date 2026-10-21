@@ -43,6 +43,8 @@ from app.connections import (
     setup_graphiti_indices,
     teardown_langgraph_checkpointer,
 )
+from app.connections.celery_producer import DirectPublicationAdapter
+from app.events.writer import PostgresOutboxAdapter
 from app.features.auth.models import User
 from app.features.auth.repository import RefreshTokenRepository
 from app.features.auth.token_audit_log import TokenAuditLog
@@ -59,6 +61,7 @@ from app.lifecycle.graphs import (
 from app.middleware import initialize_fastapi_guard
 from app.observability import shutdown_otel
 from app.observability.logging import logger
+from app.shared.jobs import JobBus
 from app.utils import DependencyHealth, ServiceUnavailableException
 
 if TYPE_CHECKING:
@@ -139,8 +142,9 @@ def setup_celery() -> Celery | None:
         conn.ensure_connection(max_retries=1, timeout=2)
         conn.release()
         logger.info("Celery connected to RabbitMQ")
-    except (ServiceUnavailableException, OperationalError, OSError) as e:
-        logger.bind(component="celery", error=str(e)).warning(
+    except (ServiceUnavailableException, OperationalError, OSError) as exc:
+        exc.add_note("component=celery, operation=connection_health_check")
+        logger.bind(component="celery", error=str(exc)).warning(
             "Celery connection failed, tasks will be unavailable"
         )
         return None
@@ -152,9 +156,9 @@ async def _init_object_storage(app: FastAPI, settings: Any) -> None:
     app.state.object_store = await create_object_store(settings)
 
 
-async def _init_outbox_relay(app: FastAPI, celery_app: Celery | None) -> None:
+async def _init_outbox_relay(app: FastAPI, publisher: DirectPublicationAdapter) -> None:
     relay = await create_outbox_relay(
-        celery_app or app.state.celery,
+        publisher,
         app.state.db_session_local,
     )
     app.state.outbox_relay_task = asyncio.create_task(coro=relay.run_listener())
@@ -216,13 +220,29 @@ async def _setup_object_storage_state(app: FastAPI, settings: Any) -> None:
 
 async def _setup_celery_state(app: FastAPI, _settings: Any) -> None:
     """Verify the Celery/RabbitMQ connection without blocking boot."""
-    celery: Celery | None = await asyncio.wait_for(asyncio.to_thread(setup_celery), timeout=3.0)
-    app.state.celery = celery
+    try:
+        celery: Celery | None = await asyncio.wait_for(asyncio.to_thread(setup_celery), timeout=3.0)
+    except (TimeoutError, ServiceUnavailableException) as exc:
+        # Health verification is advisory. Keep the configured producer app and
+        # construct the adapter so route attempts surface the broker error and
+        # the relay can recover durable events after RabbitMQ returns.
+        _report_celery_degraded(exc)
+        celery = None
+
+    producer = celery or celery_app
+    app.state.celery = producer
+    adapter = DirectPublicationAdapter(producer)
+    app.state.direct_publication_adapter = adapter
+    app.state.job_bus = JobBus(adapter, PostgresOutboxAdapter())
 
 
 async def _setup_outbox_relay_state(app: FastAPI, _settings: Any) -> None:
     """Start the outbox relay listener on the existing session factory."""
-    await _init_outbox_relay(app, app.state.celery)
+    publisher = getattr(app.state, "direct_publication_adapter", None)
+    if publisher is None:
+        app.state.outbox_relay = None
+        return
+    await _init_outbox_relay(app, publisher)
 
 
 async def _setup_checkpointer_state(app: FastAPI, _settings: Any) -> None:
@@ -323,6 +343,7 @@ def _report_object_storage_degraded(_exc: BaseException) -> None:
 
 def _report_celery_degraded(exc: BaseException) -> None:
     """Celery degrade path: a slow broker and a refusing broker log differently."""
+    exc.add_note("component=celery, operation=setup_celery_state")
     if isinstance(exc, TimeoutError):
         logger.warning("Celery setup timed out, continuing without task queue")
     else:

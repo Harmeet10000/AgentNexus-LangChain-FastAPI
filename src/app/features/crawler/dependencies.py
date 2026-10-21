@@ -8,6 +8,7 @@ from app.features.crawler.crawler import WebCrawler
 from app.features.crawler.processor import GeminiProcessor
 from app.features.crawler.service import CrawlerService
 from app.resilience.rate_limit import RateLimiter
+from app.shared.jobs import JobBus
 from app.utils import ServiceUnavailableException
 
 from .job_store import CrawlJobStore
@@ -50,3 +51,8 @@ async def get_crawl_job_store(request: Request) -> CrawlJobStore:
         message = "Durable crawler jobs require Redis"
         raise ServiceUnavailableException(message)
     return CrawlJobStore(redis_client)
+
+
+def get_job_bus(request: Request) -> JobBus | None:
+    """Return the lifespan-owned producer bus when the capability is available."""
+    return getattr(request.app.state, "job_bus", None)

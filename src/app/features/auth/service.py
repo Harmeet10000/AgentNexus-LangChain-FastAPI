@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import secrets
+import traceback
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
+from asyncpg.exceptions import PostgresError
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from returns.result import Failure, Success
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.kernel.result import log_expected_failure
@@ -43,6 +46,7 @@ from .exceptions import (
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthConflictError,
+    AuthInfrastructureError,
     AuthNotFoundError,
 )
 from .oauth import fetch_oauth_userinfo, get_oauth_config
@@ -268,6 +272,14 @@ class AuthService:
 
     @trace_layer("service")
     async def resend_verification(self, email: str) -> AuthResult[None]:
+        """Issue a fresh verification intent and stage its email delivery.
+
+        The account/token mutation is committed by MongoDB and the email intent
+        is committed by PostgreSQL; those stores do not participate in one
+        transaction.  If PostgreSQL staging fails, return that typed failure so
+        the caller can retry.  A retry creates a fresh/current token intent, and
+        worker-side delivery remains idempotent for duplicate intents.
+        """
         find_result = await self._account_store.find_by_email(email)
         if isinstance(find_result, Failure):
             return Success(None)  # silent — don't reveal email existence
@@ -288,7 +300,7 @@ class AuthService:
             log_expected_failure(set_result.failure(), operation="set_verification_token")
             return Failure(set_result.failure())
 
-        await self._publish_outbox_event(
+        publish_result = await self._publish_outbox_event(
             aggregate_type="auth_email",
             aggregate_id=account.id,
             event_type="auth.send_verification_email",
@@ -299,10 +311,20 @@ class AuthService:
                 "idempotency_key": f"email-verify:{account.id}:{token_hash}",
             },
         )
+        if isinstance(publish_result, Failure):
+            return Failure(publish_result.failure())
         return Success(None)
 
     @trace_layer("service")
     async def forgot_password(self, email: str) -> AuthResult[None]:
+        """Issue a fresh password-reset intent and stage its email delivery.
+
+        MongoDB token state and the PostgreSQL outbox are separate stores, so a
+        successful token update does not make email staging atomic.  A staging
+        failure is returned to the caller for retry; the next retry replaces the
+        token with a fresh/current intent.  Duplicate delivery is handled by the
+        worker's idempotency contract rather than by this cross-store boundary.
+        """
         find_result = await self._account_store.find_by_email(email)
         if isinstance(find_result, Failure):
             return Success(None)  # silent — identical response regardless of outcome
@@ -321,7 +343,7 @@ class AuthService:
             log_expected_failure(set_result.failure(), operation="set_reset_token")
             return Failure(set_result.failure())
 
-        await self._publish_outbox_event(
+        publish_result = await self._publish_outbox_event(
             aggregate_type="auth_email",
             aggregate_id=account.id,
             event_type="auth.send_password_reset_email",
@@ -332,6 +354,8 @@ class AuthService:
                 "idempotency_key": f"email-reset:{account.id}:{token_hash}",
             },
         )
+        if isinstance(publish_result, Failure):
+            return Failure(publish_result.failure())
         return Success(None)
 
     @trace_layer("service")
@@ -700,41 +724,79 @@ class AuthService:
         aggregate_id: str,
         event_type: str,
         payload: dict[str, object],
-    ) -> None:
+    ) -> AuthResult[None]:
+        """Persist one email intent in an explicit PostgreSQL transaction.
+
+        This is an eventual cross-store submission boundary: MongoDB owns the
+        account/token mutation while PostgreSQL owns the durable outbox row.
+        There is no distributed transaction between them.  The caller receives
+        a typed failure when staging or committing the outbox fails and may
+        retry the operation, which generates a new current token intent.
+        ``with_outbox`` deliberately only stages SQL and notification work; the
+        transaction context below owns commit/rollback.
+        """
         from app.events import (
             with_outbox,
         )
 
-        if self._session_factory is not None:
-            async with self._session_factory() as session:
-                await with_outbox(
-                    session=session,
-                    aggregate_type=aggregate_type,
-                    aggregate_id=aggregate_id,
-                    event_type=event_type,
-                    payload=payload,
-                )
-            return
-
-        from sqlalchemy.ext.asyncio import (
-            AsyncSession,
-            create_async_engine,
-        )
-
-        from app.connections.postgres import (
-            get_database_url,
-        )
-
-        engine: AsyncEngine = create_async_engine(get_database_url())
+        engine: AsyncEngine | None = None
         try:
-            async with engine.begin() as conn:
-                session_ = AsyncSession(bind=conn)
-                await with_outbox(
-                    session=session_,
-                    aggregate_type=aggregate_type,
-                    aggregate_id=aggregate_id,
-                    event_type=event_type,
-                    payload=payload,
+            if self._session_factory is not None:
+                async with self._session_factory() as session, session.begin():
+                    await with_outbox(
+                        session=session,
+                        aggregate_type=aggregate_type,
+                        aggregate_id=aggregate_id,
+                        event_type=event_type,
+                        payload=payload,
+                    )
+            else:
+                from sqlalchemy.ext.asyncio import (
+                    AsyncSession,
+                    create_async_engine,
                 )
+
+                from app.connections.postgres import (
+                    get_database_url,
+                )
+
+                engine = create_async_engine(get_database_url())
+                async with engine.begin() as conn, AsyncSession(bind=conn) as session:
+                    await with_outbox(
+                        session=session,
+                        aggregate_type=aggregate_type,
+                        aggregate_id=aggregate_id,
+                        event_type=event_type,
+                        payload=payload,
+                    )
+            logger.bind(
+                aggregate_type=aggregate_type,
+                aggregate_id=aggregate_id,
+                event_type=event_type,
+                operation="publish_outbox_event",
+            ).info("Auth email intent committed; cross-store submission remains eventual")
+            return Success(None)
+        except (PostgresError, SQLAlchemyError) as exc:
+            exc.add_note(
+                "auth email intent staging failed; MongoDB token mutation and PostgreSQL "
+                "outbox commit are separate transactions"
+            )
+            exc.add_note(traceback.format_exc())
+            logger.bind(
+                aggregate_type=aggregate_type,
+                aggregate_id=aggregate_id,
+                event_type=event_type,
+                operation="publish_outbox_event",
+                error=str(exc),
+                diagnostic_notes=list(getattr(exc, "__notes__", [])),
+            ).exception("Auth email intent could not be committed")
+            error = AuthInfrastructureError(
+                message="Auth email intent could not be persisted",
+                details={"operation": "publish_outbox_event"},
+                source="auth_service",
+            )
+            log_expected_failure(error, operation="publish_outbox_event")
+            return Failure(error)
         finally:
-            await engine.dispose()
+            if engine is not None:
+                await engine.dispose()

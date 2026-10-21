@@ -3,17 +3,30 @@
 import argparse
 import asyncio
 from collections.abc import AsyncGenerator
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from celery.exceptions import CeleryError
+from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.connections.celery_producer import celery_app, dispatch
+from app.connections.celery_producer import (
+    DirectPublicationAdapter as CeleryDirectPublicationAdapter,
+)
+from app.connections.celery_producer import (
+    celery_app,
+)
 from app.connections.postgres import get_database_url
 from app.events.model import DeadLetterEvent
 from app.observability.logging import logger
+from app.shared.jobs import DirectPublicationAdapter as DirectPublicationPort
+from app.shared.jobs import EnqueueOptions, prepare_job, require_direct_receipt
 from app.utils import ServiceUnavailableException
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sqlalchemy.engine.row import RowMapping
 
 
 async def _fetch_dead_letters(
@@ -21,10 +34,10 @@ async def _fetch_dead_letters(
     limit: int,
 ) -> AsyncGenerator[dict[str, Any], None]:
     async with session_factory() as session:
-        rows = (
+        rows: Sequence[RowMapping] = (
             (
                 await session.execute(
-                    select(
+                    statement=select(
                         DeadLetterEvent.original_event_id,
                         DeadLetterEvent.event_type,
                         DeadLetterEvent.payload,
@@ -40,27 +53,42 @@ async def _fetch_dead_letters(
         yield dict(row)
 
 
-async def replay(limit: int = 50) -> int:
+async def replay(
+    limit: int = 50,
+    *,
+    publisher: DirectPublicationPort | None = None,
+) -> int:
     database_url = get_database_url()
     engine = create_async_engine(database_url)
     session_factory = async_sessionmaker(engine)
+    resolved_publisher = (
+        publisher if publisher is not None else CeleryDirectPublicationAdapter(celery_app)
+    )
     replayed = 0
 
     try:
         async for event in _fetch_dead_letters(session_factory, limit=limit):
             try:
-                await dispatch(
-                    celery_app,
-                    event["event_type"],
-                    cast("dict[str, object]", event["payload"]),
-                )
+                try:
+                    job = prepare_job(
+                        event["event_type"],
+                        cast("dict[str, object]", event["payload"]),
+                    )
+                    task_id = await resolved_publisher.publish(job, options=EnqueueOptions())
+                    require_direct_receipt(task_id, operation="outbox_replay_publish")
+                except ValidationError as exc:
+                    exc.add_note(f"event_type={event['event_type']}")
+                    error = ServiceUnavailableException(
+                        "Direct publication returned no valid task id"
+                    )
+                    raise error from exc
             except (CeleryError, ServiceUnavailableException) as exc:
                 exc.add_note(f"event_type={event['event_type']}")
                 logger.error("replay_failed", event_type=event["event_type"], error=str(exc))
                 continue
             async with session_factory.begin() as session:
                 await session.execute(
-                    delete(DeadLetterEvent).where(
+                    statement=delete(DeadLetterEvent).where(
                         DeadLetterEvent.original_event_id == event["original_event_id"]
                     ),
                 )

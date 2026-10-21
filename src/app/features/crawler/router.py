@@ -8,9 +8,10 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 
 from app.config import get_settings
-from app.connections.celery_producer import dispatch
 from app.kernel.result import http_response, render_result
 from app.resilience.rate_limit import RateLimiter, RateLimitScope
+from app.shared.jobs import JobBus
+from app.shared.jobs.catalog import JOB_CATALOG
 from app.shared.jobs.names import CRAWLER_CRAWL
 from app.shared.jobs.payloads import CrawlerJobPayload
 from app.utils import (
@@ -21,7 +22,7 @@ from app.utils import (
 )
 
 from .constants import CRAWLER_PREFIX, CRAWLER_TAG
-from .dependencies import get_crawl_job_store, get_crawler_service, get_rate_limiter
+from .dependencies import get_crawl_job_store, get_crawler_service, get_job_bus, get_rate_limiter
 from .dto import (
     CrawlJob,
     CrawlJobChunkList,
@@ -85,6 +86,7 @@ async def crawl_url(  # noqa: PLR0917
     response: Response,
     rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     job_store: Annotated[CrawlJobStore, Depends(get_crawl_job_store)],
+    job_bus: Annotated[JobBus | None, Depends(get_job_bus)],
     idempotency_key: Annotated[str | None, Header(max_length=128)] = None,
 ) -> APIResponse[CrawlJob]:
     """Create a durable crawl job; execution always happens in a Celery worker."""
@@ -105,19 +107,16 @@ async def crawl_url(  # noqa: PLR0917
         idempotency_key=idempotency_key,
     )
     if created:
-        celery = getattr(request.app.state, "celery", None)
-        if celery is None:
-            message = "Celery is unavailable"
-            await job_store.mark_failed(job.crawl_id, message)
+        if job_bus is None:
+            await job_store.mark_failed(job.crawl_id, "Celery is unavailable")
             message = "Durable crawler workers are unavailable"
             raise ServiceUnavailableException(message)
         try:
-            task_id = await dispatch(
-                celery,
-                CRAWLER_CRAWL,
-                CrawlerJobPayload(crawl_id=job.crawl_id, request_payload=payload),
+            typed_job = JOB_CATALOG[CRAWLER_CRAWL].prepare(
+                CrawlerJobPayload(crawl_id=job.crawl_id, request_payload=payload)
             )
-            await job_store.attach_task_id(job.crawl_id, task_id)
+            receipt = await job_bus.enqueue(typed_job)
+            await job_store.attach_task_id(job.crawl_id, receipt.task_id)
         except ServiceUnavailableException as exc:
             message = "Could not enqueue crawler job"
             await job_store.mark_failed(job.crawl_id, message)

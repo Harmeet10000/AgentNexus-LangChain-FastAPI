@@ -1,44 +1,21 @@
-"""Producer-safe dispatch validation; no consumer imports."""
+"""Compatibility facade over the immutable producer-side job catalog."""
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from celery.exceptions import CeleryError
 from pydantic import ValidationError
 
 from app.observability.logging import logger
+from app.shared.jobs.catalog import JOB_CATALOG, get_job, payload_models, registered_names
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from typing import Any, ClassVar
 
     from app.shared.jobs.payloads import CeleryTaskPayload
-
-
-from app.shared.jobs.names import (
-    AGENT_MEMORY_CONSOLIDATION,
-    BILLING_DUNNING,
-    BILLING_INVOICE_GENERATION,
-    BILLING_PAUSE_RESUME,
-    BILLING_PLAN_RECOVERY,
-    BILLING_RECEIPT_GENERATION,
-    BILLING_RECONCILIATION,
-    BILLING_RENEWAL,
-    CRAWLER_CRAWL,
-    CREDITS_EXPIRE,
-    CREDITS_RECONCILE,
-    DOCUMENTS_INGEST,
-    SEND_PASSWORD_RESET_EMAIL,
-    SEND_VERIFICATION_EMAIL,
-)
-from app.shared.jobs.payloads import (
-    AgentMemoryConsolidationPayload,
-    CrawlerJobPayload,
-    DocumentIngestPayload,
-    NoKwargsPayload,
-    PasswordResetEmailPayload,
-    VerificationEmailPayload,
-)
 
 
 class TaskDispatchError(CeleryError):
@@ -46,7 +23,7 @@ class TaskDispatchError(CeleryError):
 
 
 class UnregisteredTaskError(TaskDispatchError):
-    """A dispatch named a task that has no registered payload model."""
+    """A dispatch named a task that has no catalog payload model."""
 
     def __init__(self, task_name: str, *, known_names: frozenset[str]) -> None:
         self.task_name = task_name
@@ -61,7 +38,7 @@ class UnregisteredTaskError(TaskDispatchError):
 
 
 class TaskPayloadValidationError(TaskDispatchError):
-    """A dispatched payload did not match the model its task declares."""
+    """A dispatched payload did not match the model its catalog entry declares."""
 
     def __init__(self, task_name: str, validation_error: ValidationError) -> None:
         self.task_name = task_name
@@ -74,37 +51,45 @@ class TaskPayloadValidationError(TaskDispatchError):
         super().__init__(message)
 
 
+class TaskRoutingOverrideError(TaskDispatchError):
+    """A legacy dispatch attempted to bypass catalog-owned task routing."""
+
+    def __init__(self, task_name: str, option_names: frozenset[str]) -> None:
+        self.task_name = task_name
+        self.option_names = option_names
+        message = (
+            f"Celery task {task_name!r} was given routing options that are owned by the "
+            f"immutable job catalog: {sorted(option_names)}. Remove those options so the "
+            "catalog-derived Celery route cannot be bypassed."
+        )
+        super().__init__(message)
+
+
 class CeleryTaskRegistry:
-    """Maps task names → Pydantic payload models for validation."""
+    """Legacy class-shaped interface backed by the immutable job catalog.
 
-    _registry: ClassVar[dict[str, type[CeleryTaskPayload]]] = {
-        DOCUMENTS_INGEST: DocumentIngestPayload,
-        CRAWLER_CRAWL: CrawlerJobPayload,
-        SEND_VERIFICATION_EMAIL: VerificationEmailPayload,
-        SEND_PASSWORD_RESET_EMAIL: PasswordResetEmailPayload,
-        BILLING_RENEWAL: NoKwargsPayload,
-        BILLING_DUNNING: NoKwargsPayload,
-        BILLING_INVOICE_GENERATION: NoKwargsPayload,
-        BILLING_RECEIPT_GENERATION: NoKwargsPayload,
-        BILLING_PAUSE_RESUME: NoKwargsPayload,
-        BILLING_RECONCILIATION: NoKwargsPayload,
-        BILLING_PLAN_RECOVERY: NoKwargsPayload,
-        CREDITS_EXPIRE: NoKwargsPayload,
-        CREDITS_RECONCILE: NoKwargsPayload,
-        AGENT_MEMORY_CONSOLIDATION: AgentMemoryConsolidationPayload,
-    }
+    ``register`` intentionally no longer exists: allowing a producer process to
+    mutate its view of a stable wire contract is exactly the split-brain failure
+    this facade is intended to remove.  Existing reads and dispatch exceptions
+    retain their names and semantics.
+    """
 
-    @classmethod
-    def register(cls, task_name: str, payload_model: type[CeleryTaskPayload]) -> None:
-        cls._registry[task_name] = payload_model
+    _registry: ClassVar[Mapping[str, type[CeleryTaskPayload]]] = MappingProxyType(
+        dict(payload_models())
+    )
 
     @classmethod
     def get(cls, task_name: str) -> type[CeleryTaskPayload] | None:
-        return cls._registry.get(task_name)
+        """Return the payload model for a known name without importing consumers."""
+
+        definition = get_job(task_name)
+        return None if definition is None else definition.payload_model
 
     @classmethod
     def registered_names(cls) -> frozenset[str]:
-        return frozenset(cls._registry)
+        """Return all catalog names as an immutable set."""
+
+        return registered_names()
 
     @classmethod
     def typed_send(
@@ -116,33 +101,41 @@ class CeleryTaskRegistry:
         ``app.connections.celery_producer.dispatch`` instead, which also
         publishes off the event loop.
         """
-        from kombu.exceptions import OperationalError  # noqa: PLC0415 — error mapping only
-
-        from app.connections.celery_producer import (  # noqa: PLC0415 — load only for publication
+        from app.connections.celery_producer import (  # noqa: PLC0415 — compatibility adapter
+            DirectPublicationAdapter,
             celery_app,
         )
-        from app.utils import ServiceUnavailableException  # noqa: PLC0415 — error mapping only
+        from app.shared.jobs.bus import prepare_job  # noqa: PLC0415 — compatibility adapter
 
-        cls.validate(task_name, kwargs)
-        try:
-            return celery_app.send_task(task_name, kwargs=kwargs, **send_task_opts)
-        except (CeleryError, ConnectionError, OSError, TimeoutError, OperationalError) as exc:
-            exc.add_note(f"task={task_name}, operation=typed_send")
-            message = "Could not enqueue background work"
-            raise ServiceUnavailableException(message) from exc
+        job = prepare_job(task_name, kwargs)
+        return DirectPublicationAdapter(celery_app).publish_sync_result(
+            job,
+            operation="typed_send",
+            send_options=send_task_opts,
+        )
 
     @classmethod
     def validate(cls, task_name: str, kwargs: dict[str, Any]) -> CeleryTaskPayload:
-        model = cls._registry.get(task_name)
-        if model is None:
-            logger.bind(task=task_name, registered=sorted(cls._registry)).error(
+        """Validate producer kwargs against the immutable catalog entry."""
+        definition = get_job(task_name)
+        if definition is None:
+            logger.bind(task=task_name, registered=sorted(JOB_CATALOG)).error(
                 "Task name is not registered"
             )
             raise UnregisteredTaskError(task_name, known_names=cls.registered_names())
         try:
-            return model.model_validate(kwargs)
+            return definition.payload_model.model_validate(kwargs)
         except ValidationError as exc:
             logger.bind(task=task_name, errors=exc.errors()).exception(
                 "Task payload validation failed"
             )
             raise TaskPayloadValidationError(task_name, exc) from exc
+
+
+__all__ = [
+    "CeleryTaskRegistry",
+    "TaskDispatchError",
+    "TaskPayloadValidationError",
+    "TaskRoutingOverrideError",
+    "UnregisteredTaskError",
+]
