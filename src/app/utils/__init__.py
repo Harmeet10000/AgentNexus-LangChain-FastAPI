@@ -3,7 +3,6 @@
 # Keep kernel.result below logger exports to avoid package-init recursion.
 # ruff: noqa: I001
 
-from .api_features import APIFeatures
 from .exceptions import (
     APIException,
     ConflictException,
@@ -71,7 +70,6 @@ from app.kernel.result import (
 
 __all__ = [  # noqa: RUF022
     "APIException",
-    "APIFeatures",
     "APIResponse",
     "ConflictException",
     "DatabaseException",
