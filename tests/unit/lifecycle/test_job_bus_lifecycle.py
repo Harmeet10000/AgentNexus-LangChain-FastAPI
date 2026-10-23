@@ -47,6 +47,52 @@ async def test_broker_health_failure_keeps_producer_for_recovery(
 
 
 @pytest.mark.asyncio
+async def test_dev_without_broker_publishes_through_in_memory_job_bus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dev runs uvicorn-only; with the broker down the bus falls back to memory.
+
+    Production never takes this branch: a job only recorded in RAM is a job
+    silently lost, so this check also pins the environment distinction.
+    """
+    producer = object()
+    monkeypatch.setattr(lifespan_module, "celery_app", producer)
+    monkeypatch.setattr(lifespan_module, "setup_celery", lambda: None)
+    monkeypatch.setattr(
+        lifespan_module, "get_settings", lambda: SimpleNamespace(ENVIRONMENT="development")
+    )
+    monkeypatch.setattr(lifespan_module, "_dev_environment", lambda _settings: True)
+
+    app = FastAPI()
+    await lifespan_module._setup_celery_state(app, SimpleNamespace(ENVIRONMENT="development"))
+
+    from app.shared.jobs.in_memory import InMemoryJobBus
+
+    assert isinstance(app.state.job_bus, InMemoryJobBus)
+    # The real transport stays on app.state for the outbox relay, which keeps
+    # retrying durable events until RabbitMQ returns.
+    assert app.state.direct_publication_adapter._celery is producer
+
+
+@pytest.mark.asyncio
+async def test_production_without_broker_keeps_the_real_job_bus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never publish into process memory outside development."""
+    producer = object()
+    monkeypatch.setattr(lifespan_module, "celery_app", producer)
+    monkeypatch.setattr(lifespan_module, "setup_celery", lambda: None)
+    monkeypatch.setattr(lifespan_module, "_dev_environment", lambda _settings: False)
+
+    app = FastAPI()
+    await lifespan_module._setup_celery_state(app, SimpleNamespace(ENVIRONMENT="production"))
+
+    adapter = app.state.direct_publication_adapter
+    assert isinstance(app.state.job_bus, lifespan_module.JobBus)
+    assert app.state.job_bus._direct_adapter is adapter
+
+
+@pytest.mark.asyncio
 async def test_broker_health_failure_records_safe_degradation_note(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

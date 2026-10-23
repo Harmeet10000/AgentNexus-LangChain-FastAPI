@@ -1,106 +1,106 @@
-"""generation_with_cb classifies by name: provider failures trip the breaker,
-project defects propagate unwrapped and never count toward the threshold."""
+"""The example endpoint translates the provider-neutral generation result."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-import httpx
 import pytest
+from pydantic import SecretStr
+from returns.result import Failure, Success
+from starlette.requests import Request
 
 import app.examples.generation_with_cb as gen_mod
+import app.lifecycle.lifespan as lifespan_module
+from app.ai.generation import (
+    GeneratedText,
+    InMemoryTextGenerator,
+    TextGenerationProtocolError,
+    TextGenerationRequest,
+)
 from app.utils import ServiceUnavailableException
 
-if TYPE_CHECKING:
-    from typing import Any
+
+async def test_provider_failure_translates_to_service_unavailable() -> None:
+    generator = InMemoryTextGenerator([Failure(TextGenerationProtocolError())])
+
+    with pytest.raises(ServiceUnavailableException, match="External API call failed"):
+        await gen_mod.generate_text(generator)
+    assert generator.calls == (TextGenerationRequest(prompt="Generate text."),)
 
 
-class _RecordingBreaker:
-    """Mimics circuit-breaker call semantics for isolated endpoint tests."""
+def test_dependency_reads_the_lifespan_owned_generator() -> None:
+    generator = InMemoryTextGenerator()
+    app = type("App", (), {"state": type("State", (), {"text_generator": generator})()})()
+    request = Request({"type": "http", "app": app})
 
-    def __init__(self) -> None:
-        self.failures = 0
-
-    async def call(self, name: str, operation: Any) -> Any:
-        _ = name
-        try:
-            return await operation()
-        except Exception:
-            self.failures += 1
-            raise
+    assert gen_mod.get_text_generator(request) is generator
 
 
-class _FakeResponse:
-    def __init__(self, payload: Any) -> None:
-        self._payload = payload
+def test_dependency_rejects_an_unwired_generator() -> None:
+    app = type("App", (), {"state": type("State", (), {})()})()
+    request = Request({"type": "http", "app": app})
 
-    def raise_for_status(self) -> None:
-        return None
-
-    def json(self) -> Any:
-        if isinstance(self._payload, Exception):
-            raise self._payload
-        return self._payload
+    with pytest.raises(ServiceUnavailableException, match="Text generation provider"):
+        gen_mod.get_text_generator(request)
 
 
-class _FakeClient:
-    def __init__(
-        self, response: _FakeResponse | None = None, error: Exception | None = None
-    ) -> None:
-        self._response = response
-        self._error = error
+def test_lifespan_disables_text_generation_without_redis() -> None:
+    app = type("App", (), {"state": type("State", (), {"redis": None})()})()
+    settings = type(
+        "Settings",
+        (),
+        {"GEMINI_API_KEY": SecretStr("configured"), "GEMINI_PRO_MODEL": "gemini-test"},
+    )()
 
-    async def __aenter__(self) -> _FakeClient:
-        return self
+    lifespan_module._setup_text_generator_state(app, settings)
 
-    async def __aexit__(self, *args: Any) -> bool:
-        return False
-
-    async def get(self, url: str) -> _FakeResponse:
-        if self._error is not None:
-            raise self._error
-        assert self._response is not None
-        return self._response
+    assert app.state.text_generator is None
 
 
-async def test_provider_failure_trips_breaker() -> None:
-    breaker = _RecordingBreaker()
-    original = gen_mod.httpx.AsyncClient
-    gen_mod.httpx.AsyncClient = lambda: _FakeClient(  # type: ignore[assignment]
-        error=httpx.ConnectError("down")
-    )
-    try:
-        with pytest.raises(ServiceUnavailableException):
-            await gen_mod.generate_text(breaker)  # type: ignore[arg-type]
-    finally:
-        gen_mod.httpx.AsyncClient = original
-    assert breaker.failures == 1
+def test_lifespan_disables_text_generation_without_provider_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis_client = object()
+    app = type("App", (), {"state": type("State", (), {"redis": redis_client})()})()
+    settings = type(
+        "Settings",
+        (),
+        {"GEMINI_API_KEY": SecretStr(""), "GEMINI_PRO_MODEL": "gemini-test"},
+    )()
+
+    def fail_if_constructed(**_kwargs: object) -> object:
+        pytest.fail("provider construction must not run without an API key")
+
+    monkeypatch.setattr(lifespan_module, "build_chat_model", fail_if_constructed)
+    lifespan_module._setup_text_generator_state(app, settings)
+
+    assert app.state.text_generator is None
 
 
-async def test_type_error_does_not_trip_breaker() -> None:
-    """A TypeError in project code is not relabeled and trips nothing."""
-    breaker = _RecordingBreaker()
-    original = gen_mod.httpx.AsyncClient
-    gen_mod.httpx.AsyncClient = lambda: _FakeClient(  # type: ignore[assignment]
-        response=_FakeResponse(TypeError("project bug"))
-    )
-    try:
-        with pytest.raises(TypeError, match="project bug"):
-            await gen_mod.generate_text(breaker)  # type: ignore[arg-type]
-    finally:
-        gen_mod.httpx.AsyncClient = original
-    assert breaker.failures == 0
+def test_lifespan_degrades_on_expected_provider_configuration_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RedisStub:
+        def register_script(self, _script: str) -> object:
+            return object()
+
+    app = type("App", (), {"state": type("State", (), {"redis": RedisStub()})()})()
+    settings = type(
+        "Settings",
+        (),
+        {"GEMINI_API_KEY": SecretStr("configured"), "GEMINI_PRO_MODEL": "gemini-test"},
+    )()
+
+    def reject_configuration(**_kwargs: object) -> object:
+        msg = "provider configuration is invalid"
+        raise ValueError(msg)
+
+    monkeypatch.setattr(lifespan_module, "build_chat_model", reject_configuration)
+    lifespan_module._setup_text_generator_state(app, settings)
+
+    assert app.state.text_generator is None
 
 
 async def test_success_returns_generated_text() -> None:
-    breaker = _RecordingBreaker()
-    original = gen_mod.httpx.AsyncClient
-    gen_mod.httpx.AsyncClient = lambda: _FakeClient(  # type: ignore[assignment]
-        response=_FakeResponse({"text": "hi"})
-    )
-    try:
-        result = await gen_mod.generate_text(breaker)  # type: ignore[arg-type]
-    finally:
-        gen_mod.httpx.AsyncClient = original
+    generator = InMemoryTextGenerator([Success(GeneratedText(text="hi"))])
+
+    result = await gen_mod.generate_text(generator)
     assert result == {"generated_text": "hi"}
-    assert breaker.failures == 0
