@@ -167,10 +167,7 @@ ehthumbs.db
 
 # Project specific
 data/
-# The sanitized manual-test collection is versioned because docs CI checks it.
-# Keep private Postman environments and any additional exports local.
-/postman/*
-!/postman/agentnexus-local.postman_collection.json
+/postman/
 tmp/
 temp/
 logs/

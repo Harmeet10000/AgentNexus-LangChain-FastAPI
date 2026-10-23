@@ -110,11 +110,10 @@ jobs:
           LOG_LEVEL=DEBUG
           EOF
 
-      - name: Verify generated OpenAPI and Postman artifacts
+      - name: Verify generated OpenAPI snapshot
         run: |
           uv run python docs-site/scripts/extract_openapi.py
-          uv run python docs-site/scripts/sync_postman_collection.py --check
-          git diff --exit-code -- docs-site/openapi.json postman/agentnexus-local.postman_collection.json
+          git diff --exit-code -- docs-site/openapi.json
 
       - name: Wait for services
         run: |

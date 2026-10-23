@@ -5,13 +5,11 @@ on:
     branches: [main]
     paths:
       - "docs-site/**"
-      - "postman/**"
       - ".markdownlint.jsonc"
   pull_request:
     branches: [main]
     paths:
       - "docs-site/**"
-      - "postman/**"
       - ".markdownlint.jsonc"
   workflow_dispatch:
 
@@ -44,9 +42,6 @@ jobs:
 
       - name: Verify docs (broken links, orphans, stubs)
         run: uv run --no-sync --with pyyaml python docs-site/scripts/verify_docs.py
-
-      - name: Check Postman collection against OpenAPI snapshot
-        run: uv run --no-sync python docs-site/scripts/sync_postman_collection.py --check
 
       - name: Set up Node for markdownlint
         uses: actions/setup-node@v4
