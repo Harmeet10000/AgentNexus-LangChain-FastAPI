@@ -5,7 +5,7 @@ import inspect
 import json
 from contextlib import suppress
 from datetime import UTC, datetime
-from time import time
+from time import monotonic, time
 from typing import (
     TYPE_CHECKING,
 )
@@ -169,6 +169,11 @@ class WebSocketSecurityService:
         # Task 3.2: Track last touch time per connection for throttling
         self._last_touch_time: dict[str, float] = {}
         self._presence_score: dict[str, float] = {}
+        # Outbound token streams can emit hundreds of frames per turn. Track
+        # the last completed session check with a monotonic clock so revocation
+        # stays bounded without serializing every token behind Redis.
+        self._last_outbound_session_check: dict[str, float] = {}
+        self._outbound_session_check_locks: dict[str, asyncio.Lock] = {}
         # Task 3.4: live connection registry so a connection id can be closed
         # without holding the WebSocket object at the call site.
         self._live_connections: dict[str, tuple[WebSocket, WebSocketSecurityContext]] = {}
@@ -303,6 +308,13 @@ class WebSocketSecurityService:
 
     async def unregister_connection(self, context: WebSocketSecurityContext) -> None:
         """Task 3.2: Unregister connection from sorted sets."""
+        # In-process state must be cleared even when Redis is absent or the
+        # distributed cleanup below fails.
+        self._last_touch_time.pop(context.connection_id, None)
+        self._presence_score.pop(context.connection_id, None)
+        self._last_outbound_session_check.pop(context.connection_id, None)
+        self._outbound_session_check_locks.pop(context.connection_id, None)
+        self._live_connections.pop(context.connection_id, None)
         if self._redis is None:
             return
 
@@ -321,11 +333,6 @@ class WebSocketSecurityService:
             pipe.delete(_CONNECTION_METADATA_KEY.format(context.connection_id))
 
             await pipe.execute()
-
-        # Clean up touch time tracking and live registry
-        self._last_touch_time.pop(context.connection_id, None)
-        self._presence_score.pop(context.connection_id, None)
-        self._live_connections.pop(context.connection_id, None)
 
     async def touch_connection(self, context: WebSocketSecurityContext) -> None:
         """Task 3.2: Update connection presence with throttling (Finding 1)."""
@@ -412,8 +419,10 @@ class WebSocketSecurityService:
         payload: object,
         context: WebSocketSecurityContext,
     ) -> None:
-        # Task 3.1: Check session validity before sending
-        await self._check_session_validity(context, websocket)
+        # Outbound streams retain a bounded revocation check without putting a
+        # Redis round trip on every token frame. Inbound frames remain checked
+        # unconditionally in receive_json().
+        await self._check_outbound_session_validity_if_due(context, websocket)
 
         await websocket.send_json(payload)
         await self.touch_connection(context)
@@ -562,6 +571,36 @@ class WebSocketSecurityService:
                 user_id=context.user_id,
             )
             raise WebSocketSessionRevokedError
+
+    async def _check_outbound_session_validity_if_due(
+        self,
+        context: WebSocketSecurityContext,
+        websocket: WebSocket,
+    ) -> None:
+        """Check outbound-session validity at most once per configured interval.
+
+        A per-connection lock makes the refresh single-flight: concurrent sends
+        cannot bypass an in-flight check, while followers reuse its result.
+        The timestamp is stored only after a normal return; infrastructure
+        Failures return normally (and are throttled), while revoked sessions
+        raise and never populate the cache.
+        """
+        if self._token_repo is None or context.session_id is None:
+            return
+        check_lock = self._outbound_session_check_locks.get(context.connection_id)
+        if check_lock is None:
+            # No await between lookup and store: creation is atomic with
+            # respect to other tasks on this event loop.
+            check_lock = asyncio.Lock()
+            self._outbound_session_check_locks[context.connection_id] = check_lock
+        async with check_lock:
+            attempted_at = monotonic()
+            last_attempt = self._last_outbound_session_check.get(context.connection_id)
+            interval = self._settings.WEBSOCKET_OUTBOUND_SESSION_CHECK_INTERVAL_SECONDS
+            if last_attempt is not None and attempted_at - last_attempt < interval:
+                return
+            await self._check_session_validity(context, websocket)
+            self._last_outbound_session_check[context.connection_id] = monotonic()
 
     @staticmethod
     async def _acquire_rate(limiter: Limiter, key: str) -> None:

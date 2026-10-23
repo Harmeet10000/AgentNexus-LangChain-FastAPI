@@ -416,6 +416,7 @@ class Settings(BaseSettings):
     WEBSOCKET_CONNECTION_MESSAGE_PERIOD_SECONDS: int = Field(default=10)
     WEBSOCKET_MAX_CONNECTIONS_PER_USER: int = Field(default=3)
     WEBSOCKET_PRESENCE_TTL_SECONDS: int = Field(default=360)
+    WEBSOCKET_OUTBOUND_SESSION_CHECK_INTERVAL_SECONDS: float = Field(default=5, gt=0)
 
     # --- Agent Saul transcript boundaries (§5.2 — hard deadline, configurable) ---
     # Whole-boundary budget (read turn context + snapshot + view + apply).
