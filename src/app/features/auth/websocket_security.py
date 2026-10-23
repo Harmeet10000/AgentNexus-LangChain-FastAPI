@@ -486,8 +486,10 @@ class WebSocketSecurityService:
 
             result = await self._token_repo.get_session(context.session_id)
             if isinstance(result, Failure):
-                # Fail open on infrastructure errors — same policy as the
-                # per-message check in _check_session_validity.
+                # Fail open during the periodic sweep only — the sweep is a
+                # monitor, not a gate; the per-message check (
+                # _check_session_validity) is fail-closed on infrastructure
+                # errors, so an outage still kills connections on next frame.
                 logger.bind(
                     operation="sweep_revoked_connections",
                     layer="websocket",
@@ -517,14 +519,18 @@ class WebSocketSecurityService:
         # Re-read session from Redis to check if it's been revoked
         result = await self._token_repo.get_session(context.session_id)
         if isinstance(result, Failure):
-            # Log but don't crash - infrastructure error, allow connection to continue
+            # Fail-closed on outage: if the session cannot be verified, the
+            # connection dies. Matches agent_saul's resolve_ws_session, which
+            # rejects the handshake on UNAVAILABLE — never fail open.
             logger.bind(
                 operation="check_session_validity",
                 layer="websocket",
+                event="session_check_unavailable",
                 session_id=context.session_id,
+                user_id=context.user_id,
                 error=str(result.failure()),
-            ).warning("Failed to check session validity")
-            return
+            ).warning("Session check unavailable - closing connection (fail-closed)")
+            raise WebSocketSessionRevokedError
 
         session_data = result.unwrap()
         if session_data is None:
@@ -534,6 +540,19 @@ class WebSocketSecurityService:
                 session_id=context.session_id,
                 user_id=context.user_id,
             )
+            raise WebSocketSessionRevokedError
+        if session_data.user_id != context.user_id:
+            # Owner mismatch: the session row belongs to another user. The wire
+            # code stays SESSION_REVOKED; the distinct log event is the
+            # forensic signal (defense-in-depth, fail-closed).
+            logger.bind(
+                operation="check_session_validity",
+                layer="websocket",
+                event="session_owner_mismatch",
+                session_id=context.session_id,
+                user_id=context.user_id,
+                owner_user_id=session_data.user_id,
+            ).warning("Session owner mismatch - closing connection")
             raise WebSocketSessionRevokedError
         # ponytail: expires_at is authoritative; Redis TTL may lag or be 0
         if session_data.expires_at < datetime.now(UTC):
