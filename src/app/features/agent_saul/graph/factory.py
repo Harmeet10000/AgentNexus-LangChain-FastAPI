@@ -3,7 +3,6 @@
 from typing import Any, cast
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import ToolRetryMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict
@@ -143,7 +142,10 @@ def build_agent_registry(
         model=pro_llm,
         tools=risk_tools,
         system_prompt=_RISK_ANALYSIS_SYSTEM_PROMPT,
-        middleware=[ToolRetryMiddleware(max_retries=3)],
+        # LangChain's ToolRetryMiddleware is intentionally absent here: this graph
+        # combines reads, handoffs, and potentially side-effecting tools. A retry
+        # allowlist must be supplied at the application middleware configuration seam.
+        middleware=[],
         response_format=RiskAnalysisOutput,
     )
 
@@ -151,7 +153,7 @@ def build_agent_registry(
         model=pro_llm,
         tools=compliance_tools,
         system_prompt=_COMPLIANCE_SYSTEM_PROMPT,
-        middleware=[ToolRetryMiddleware(max_retries=3)],
+        middleware=[],
         response_format=ComplianceOutput,
     )
 

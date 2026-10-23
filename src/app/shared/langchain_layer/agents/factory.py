@@ -117,6 +117,9 @@ class AgentSpec(BaseModel):
     human_loop_tools: dict[str, bool] | None = None
     max_tokens_before_summary: int = 4000
     messages_to_keep: int = 8
+    safe_tool_names: tuple[str, ...] = ()
+    enable_model_retry: bool = False
+    model_retry_on: Any = None
 
     # Additional middleware to inject
     extra_middleware: list[Any] = Field(default_factory=list)
@@ -156,6 +159,9 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
                 max_tokens_before_summary=spec.max_tokens_before_summary,
                 messages_to_keep=spec.messages_to_keep,
                 human_loop_tools=spec.human_loop_tools,
+                safe_tool_names=spec.safe_tool_names,
+                enable_model_retry=spec.enable_model_retry,
+                model_retry_on=spec.model_retry_on,
             ),
             enable_guardrails=spec.enable_guardrails,
             enable_tool_selector=spec.enable_tool_selector and bool(resolved_tools),

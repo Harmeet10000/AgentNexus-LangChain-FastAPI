@@ -318,6 +318,14 @@ class MiddlewareConfig(BaseModel):
     max_tokens_before_summary: int = 4000
     messages_to_keep: int = 8
     human_loop_tools: dict[str, bool] | None = None
+    # Retrying a tool is safe only when the caller has explicitly classified it as
+    # idempotent.  An empty allowlist means no tool retry middleware is installed.
+    safe_tool_names: tuple[str, ...] = ()
+    # Provider SDKs expose incompatible exception hierarchies.  Keep model retry
+    # disabled unless a caller opts in, and let that caller supply a predicate when
+    # its provider has a stronger transient-error contract than our portable default.
+    enable_model_retry: bool = False
+    model_retry_on: Callable[[Exception], bool] | None = None
 
 
 def build_default_middleware_stack(
@@ -357,13 +365,30 @@ def build_default_middleware_stack(
     if enable_tool_selector:
         stack.append(LLMToolSelectorMiddleware(model=fast_model_name))
 
-    # 3. Tool retry / 4. Model retry
-    stack.extend(
-        [
-            ToolRetryMiddleware(max_retries=2, backoff_factor=1.5, on_failure="error"),
-            LangChainModelRetryMiddleware(max_retries=2, on_failure="error"),
-        ]
-    )
+    # 3. Tool retry is opt-in and allowlisted.  The middleware's default filter is
+    # "all tools", which is unsafe for writes, sends, deletes, and other side effects.
+    if cfg.safe_tool_names:
+        stack.append(
+            ToolRetryMiddleware(
+                tools=list(cfg.safe_tool_names),
+                retry_on=_is_transient_error,
+                max_retries=2,
+                backoff_factor=1.5,
+                on_failure="error",
+            )
+        )
+
+    # 4. Model retry is also opt-in.  The portable predicate intentionally covers only
+    # built-in transport failures; provider-specific callers can provide a narrower,
+    # provider-aware predicate through `model_retry_on`.
+    if cfg.enable_model_retry:
+        stack.append(
+            LangChainModelRetryMiddleware(
+                max_retries=2,
+                retry_on=cfg.model_retry_on or _is_transient_error,
+                on_failure="error",
+            )
+        )
 
     # 5. Human in the loop
     if enable_human_loop:
@@ -384,7 +409,6 @@ def build_minimal_middleware_stack() -> list[Any]:
             trigger=("tokens", 8000),
             keep=("messages", 10),
         ),
-        ToolRetryMiddleware(max_retries=2),
     ]
 
 
@@ -395,3 +419,14 @@ def _provider_model_name(model_name: str) -> str:
     if model_name.startswith("gemini-"):
         return f"google_genai:{model_name}"
     return model_name
+
+
+def _is_transient_error(error: Exception) -> bool:
+    """Return whether a provider-neutral transport error is safe to retry.
+
+    Deliberately do not treat arbitrary exceptions as transient: validation errors,
+    permission failures, malformed requests, and tool-side bugs are not repaired by
+    repeating the operation. Provider integrations may pass a stricter predicate via
+    :class:`MiddlewareConfig` when their SDK exposes a reliable transient hierarchy.
+    """
+    return isinstance(error, (ConnectionError, TimeoutError))

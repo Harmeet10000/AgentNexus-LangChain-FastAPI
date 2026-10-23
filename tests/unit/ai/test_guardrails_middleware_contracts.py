@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
-from langchain.agents.middleware.types import ModelRequest, ModelResponse, Runtime
+from langchain.agents.middleware import ModelRetryMiddleware, ToolRetryMiddleware
+from langchain.agents.middleware.types import ModelRequest, ModelResponse, Runtime, ToolCallRequest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
@@ -16,6 +17,8 @@ from app.ai import guardrails
 
 if TYPE_CHECKING:
     from typing import Any
+
+    from langchain_core.messages import ToolMessage
 
 
 def _request(
@@ -115,6 +118,90 @@ def test_default_stack_uses_current_summarization_constructor(
             "keep": ("messages", 6),
         }
     ]
+
+
+def test_default_stack_does_not_install_broad_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(guardrails, "SummarizationMiddleware", lambda **_kwargs: object())
+    stack = guardrails.build_default_middleware_stack(
+        enable_guardrails=False,
+        enable_tool_selector=False,
+    )
+
+    assert not any(isinstance(item, ToolRetryMiddleware) for item in stack)
+    assert not any(isinstance(item, ModelRetryMiddleware) for item in stack)
+
+
+def test_retry_policy_is_allowlisted_and_uses_error_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(guardrails, "SummarizationMiddleware", lambda **_kwargs: object())
+    stack = guardrails.build_default_middleware_stack(
+        config=guardrails.MiddlewareConfig(safe_tool_names=("safe_lookup",)),
+        enable_guardrails=False,
+        enable_tool_selector=False,
+    )
+
+    retry = next(item for item in stack if isinstance(item, ToolRetryMiddleware))
+    assert retry._tool_filter == ["safe_lookup"]
+    assert retry.on_failure == "error"
+    assert retry.retry_on(ValueError("permanent")) is False
+    assert retry.retry_on(TimeoutError("temporary")) is True
+
+
+@pytest.mark.asyncio
+async def test_unlisted_side_effect_tool_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(guardrails, "SummarizationMiddleware", lambda **_kwargs: object())
+    stack = guardrails.build_default_middleware_stack(
+        config=guardrails.MiddlewareConfig(safe_tool_names=("safe_lookup",)),
+        enable_guardrails=False,
+        enable_tool_selector=False,
+    )
+    retry = next(item for item in stack if isinstance(item, ToolRetryMiddleware))
+    request = ToolCallRequest(
+        tool_call={"name": "delete_record", "args": {}, "id": "call-1"},
+        tool=None,
+        state={},
+        runtime=None,
+    )
+    attempts = 0
+
+    async def handler(_request: ToolCallRequest) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        error_message = "temporary backend outage"
+        raise TimeoutError(error_message)
+
+    with pytest.raises(TimeoutError):
+        await retry.awrap_tool_call(request, handler)
+
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_model_retry_does_not_retry_non_transient_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(guardrails, "SummarizationMiddleware", lambda **_kwargs: object())
+    stack = guardrails.build_default_middleware_stack(
+        config=guardrails.MiddlewareConfig(enable_model_retry=True),
+        enable_guardrails=False,
+        enable_tool_selector=False,
+    )
+    retry = next(item for item in stack if isinstance(item, ModelRetryMiddleware))
+    attempts = 0
+
+    async def handler(_request: ModelRequest[Any]) -> ModelResponse[Any]:
+        nonlocal attempts
+        attempts += 1
+        error_message = "invalid model request"
+        raise ValueError(error_message)
+
+    with pytest.raises(ValueError):
+        await retry.awrap_model_call(_request(), handler)
+
+    assert attempts == 1
 
 
 @pytest.mark.asyncio
