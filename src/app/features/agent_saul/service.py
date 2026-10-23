@@ -60,6 +60,7 @@ from app.features.agent_saul.graph.state import (
     WorkflowStatus,
     hydrate_state,
 )
+from app.features.agent_saul.runtime import thread_owner_violates
 from app.features.agent_saul.thread_lock import ThreadLock
 from app.features.agent_saul.transcript.projection import PAUSE_WINDOW
 from app.features.agent_saul.transcript.recorder import TurnRecorder
@@ -81,6 +82,7 @@ if TYPE_CHECKING:
         WSStartMessage,
     )
     from app.features.agent_saul.exceptions import AgentSaulResult
+    from app.features.agent_saul.runtime import SaulThreadContext
     from app.features.auth.websocket_security import (
         WebSocketSecurityContext,
         WebSocketSecurityService,
@@ -120,7 +122,7 @@ class AgentSaulService:
         self,
         graph: CompiledStateGraph[Any],
         redis: Redis,
-        correlation_id: str,
+        context: SaulThreadContext,
         ws_security: WebSocketSecurityService,
         ws_context: WebSocketSecurityContext,
         *,
@@ -128,11 +130,12 @@ class AgentSaulService:
     ) -> None:
         self._graph = graph
         self._redis = redis
-        self._correlation_id = correlation_id
+        self._context = context
+        self._correlation_id = context.correlation_id
         self._ws_security = ws_security
         self._ws_context = ws_context
         self._session_factory = session_factory
-        self._log = logger.bind(correlation_id=correlation_id)
+        self._log = logger.bind(correlation_id=context.correlation_id)
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -703,7 +706,7 @@ class AgentSaulService:
         # (paused or not) is revealed. Threads with no persisted owner yet
         # (clean checkpoint lineage) gate on acquisition alone.
         state_user = snapshot.values.get("user_id") if snapshot.values else None
-        if state_user is not None and str(state_user) != user_id:
+        if thread_owner_violates(state_user, user_id):
             self._log.bind(thread_id=thread_id).warning("saul_first_frame_identity_refused")
             await self._send_json(
                 ws,

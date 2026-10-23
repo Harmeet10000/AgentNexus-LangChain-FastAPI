@@ -1,13 +1,15 @@
 """
-FastAPI dependencies for agent_saul.
+FastAPI adapters for agent_saul.
 
 All infra clients are read from request.app.state — the single source of
 truth set during lifespan.  No globals.
 
-Lifespan callers must set:
-    app.state.saul_graph            → CompiledStateGraph (built by factory.build_saul_graph)
-    app.state.langgraph_checkpointer → AsyncPostgresSaver
-    app.state.redis                 → redis.asyncio.Redis
+The scope-agnostic implementation (state component reads, the runtime
+bundle, the fail-closed handshake session read, thread context) lives in
+runtime.py. This module adds only the transport plumbing: FastAPI cannot
+inject `Request` inside a websocket scope (and `WebSocket` inside an HTTP
+scope), so each scope exposes a one-line adapter over the same core, and
+every WS handshake keeps exactly the HTTP chain's auth semantics.
 """
 
 from __future__ import annotations
@@ -18,81 +20,60 @@ from uuid import uuid4
 from fastapi import Depends, Request, WebSocket, WebSocketException, status
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 from returns.result import Failure
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.features.agent_saul.runtime import (
+    WS_SESSION_REJECTED_REASON,
+    AgentSaulDeps,
+    SessionStore,
+    WsSessionRejection,
+    build_agent_saul_runtime,
+    require_db_session_local,
+    require_saul_checkpointer,
+    require_saul_graph,
+    require_saul_redis,
+    resolve_ws_session,
+)
 from app.features.agent_saul.transcript.export import TranscriptExporter
 from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
 from app.features.auth.dependencies import WebSocketClaims, get_refresh_token_repository
-from app.features.auth.repository import RefreshTokenRepository
 from app.features.auth.websocket_security import WebSocketSecurityContext, WebSocketSecurityService
-from app.utils import ServiceUnavailableException
+from app.observability.logging import logger
+
+# The `_ws` variants below are WS-scoped siblings of their HTTP twins, not
+# parallel implementations: each body is one call into runtime.py, so a guard
+# can no longer drift on one scope only (the 7aeba9f / 7f04409 split).
+
 
 # ---------------------------------------------------------------------------
-# Individual dependency extractors
+# Scope adapters — HTTP (Request) and WS (WebSocket) one-liners
 # ---------------------------------------------------------------------------
 
 
 async def get_saul_graph(request: Request) -> CompiledStateGraph[Any]:
-    # getattr, not attribute access: Starlette's State *raises* on an unknown
-    # attribute, so a bare read turns "never provisioned" into an unhandled
-    # AttributeError and a 500 instead of the typed 503 below.
-    graph = getattr(request.app.state, "saul_graph", None)
-    if graph is None:
-        msg = "Saul graph is not wired"
-        raise ServiceUnavailableException(msg)
-    return graph
+    return require_saul_graph(request.app.state)
 
 
 async def get_saul_graph_ws(websocket: WebSocket) -> CompiledStateGraph[Any]:
-    """WS-scope sibling of `get_saul_graph`.
-
-    FastAPI cannot inject `Request` inside a websocket scope: the shared
-    state readers below must read the SAME app.state through `WebSocket`
-    or every Saul WS handshake dies with
-    ``get_saul_graph() missing 1 required positional argument 'request'``.
-    """
-    graph = getattr(websocket.app.state, "saul_graph", None)
-    if graph is None:
-        msg = "Saul graph is not wired"
-        raise ServiceUnavailableException(msg)
-    return graph
+    return require_saul_graph(websocket.app.state)
 
 
 async def get_saul_checkpointer(request: Request) -> AsyncPostgresSaver:
-    checkpointer = getattr(request.app.state, "langgraph_checkpointer", None)
-    if checkpointer is None:
-        message = "Persistence layer is unavailable"
-        raise ServiceUnavailableException(message)
-    return checkpointer
+    return require_saul_checkpointer(request.app.state)
 
 
 async def get_saul_checkpointer_ws(websocket: WebSocket) -> AsyncPostgresSaver:
-    """WS-scope sibling of `get_saul_checkpointer` (same `Request` limitation)."""
-    checkpointer = getattr(websocket.app.state, "langgraph_checkpointer", None)
-    if checkpointer is None:
-        message = "Persistence layer is unavailable"
-        raise ServiceUnavailableException(message)
-    return checkpointer
+    return require_saul_checkpointer(websocket.app.state)
 
 
 async def get_redis(request: Request) -> Redis:
-    redis = request.app.state.redis
-    if redis is None:
-        message = "Cache layer is unavailable"
-        raise ServiceUnavailableException(message)
-    return redis
+    return require_saul_redis(request.app.state)
 
 
 async def get_redis_ws(websocket: WebSocket) -> Redis:
-    """WS-scope sibling of `get_redis` (same `Request` limitation)."""
-    redis = websocket.app.state.redis
-    if redis is None:
-        message = "Cache layer is unavailable"
-        raise ServiceUnavailableException(message)
-    return redis
+    return require_saul_redis(websocket.app.state)
 
 
 async def get_db_session_local(
@@ -100,22 +81,13 @@ async def get_db_session_local(
 ) -> async_sessionmaker[AsyncSession]:
     """Sync-side session maker for out-of-request-scope work (the transcript
     projector runs at WS boundaries, not inside a request dependency)."""
-    session_local = getattr(request.app.state, "db_session_local", None)
-    if session_local is None:
-        message = "Database layer is unavailable"
-        raise ServiceUnavailableException(message)
-    return session_local
+    return require_db_session_local(request.app.state)
 
 
 async def get_db_session_local_ws(
     websocket: WebSocket,
 ) -> async_sessionmaker[AsyncSession]:
-    """WS-scope sibling of `get_db_session_local` (same `Request` limitation)."""
-    session_local = getattr(websocket.app.state, "db_session_local", None)
-    if session_local is None:
-        message = "Database layer is unavailable"
-        raise ServiceUnavailableException(message)
-    return session_local
+    return require_db_session_local(websocket.app.state)
 
 
 async def get_websocket_security_service(websocket: WebSocket) -> WebSocketSecurityService:
@@ -137,70 +109,46 @@ async def get_transcript_exporter(
 
 
 # ---------------------------------------------------------------------------
-# Bundled context object — avoids long parameter lists at orchestration layer
+# Runtime bundle — one runtime bundle for both scopes
 # ---------------------------------------------------------------------------
 
 
-class AgentSaulDeps(BaseModel):
-    """Narrow context object for Agent Saul dependencies.
-
-    Typed against infra protocols so nodes remain decoupled from concrete
-    client implementations in tests.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    graph: CompiledStateGraph[Any]
-    checkpointer: AsyncPostgresSaver
-    redis: Redis
-    session_factory: async_sessionmaker[AsyncSession]
+async def get_agent_saul_deps(request: Request) -> AgentSaulDeps:
+    return build_agent_saul_runtime(request.app.state)
 
 
-async def get_agent_saul_deps(
-    graph: Annotated[CompiledStateGraph[Any], Depends(get_saul_graph)],
-    checkpointer: Annotated[AsyncPostgresSaver, Depends(get_saul_checkpointer)],
-    redis: Annotated[Redis, Depends(get_redis)],
-    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_db_session_local)],
-) -> AgentSaulDeps:
-    return AgentSaulDeps(
-        graph=graph, checkpointer=checkpointer, redis=redis, session_factory=session_factory
-    )
-
-
-async def get_agent_saul_deps_ws(
-    graph: Annotated[CompiledStateGraph[Any], Depends(get_saul_graph_ws)],
-    checkpointer: Annotated[AsyncPostgresSaver, Depends(get_saul_checkpointer_ws)],
-    redis: Annotated[Redis, Depends(get_redis_ws)],
-    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_db_session_local_ws)],
-) -> AgentSaulDeps:
-    """WS-scope composition of the same bundle — identical shape, WS readers."""
-    return AgentSaulDeps(
-        graph=graph, checkpointer=checkpointer, redis=redis, session_factory=session_factory
-    )
+async def get_agent_saul_deps_ws(websocket: WebSocket) -> AgentSaulDeps:
+    return build_agent_saul_runtime(websocket.app.state)
 
 
 async def get_agent_saul_ws_security_context(
     websocket: WebSocket,
     claims: WebSocketClaims,
-    token_repo: Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)],
+    token_repo: Annotated[SessionStore, Depends(get_refresh_token_repository)],
     security_service: Annotated[WebSocketSecurityService, Depends(get_websocket_security_service)],
 ) -> WebSocketSecurityContext:
+    """WebSocket handshake adapter over runtime's fail-closed session core.
+
+    Same admission semantics as the HTTP chain: session absent/revoked or
+    owned by another user (or an unreachable Redis) → WS_1008, never open.
+    """
     origin = websocket.headers.get("origin")
     security_service.ensure_origin_allowed(origin)
 
     if claims.sid is not None:
-        session_result = await token_repo.get_session(claims.sid)
+        session_result = await resolve_ws_session(token_repo, claims.sub, claims.sid)
         if isinstance(session_result, Failure):
-            # Fail closed: a Redis outage must not authenticate the handshake.
+            rejection = session_result.failure()
+            if rejection is WsSessionRejection.UNAVAILABLE:
+                # Fail closed: a Redis outage must not authenticate the handshake.
+                logger.bind(session_id=claims.sid, user_id=claims.sub).warning(
+                    "saul_ws_session_check_unavailable"
+                )
+            # Absent and owner-mismatched rejections ride the same wire reason;
+            # the enum distinguishes them for observability only.
             raise WebSocketException(
                 code=status.WS_1008_POLICY_VIOLATION,
-                reason="Session expired or revoked",
-            )
-        session = session_result.unwrap()
-        if session is None or session.user_id != claims.sub:
-            raise WebSocketException(
-                code=status.WS_1008_POLICY_VIOLATION,
-                reason="Session expired or revoked",
+                reason=WS_SESSION_REJECTED_REASON,
             )
 
     await security_service.ensure_connection_capacity(claims.sub)

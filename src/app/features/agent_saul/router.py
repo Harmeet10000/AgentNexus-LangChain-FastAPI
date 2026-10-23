@@ -42,6 +42,7 @@ from .dto import (
     WSStartMessage,
     ws_inbound_adapter,
 )
+from .runtime import SaulThreadContext
 from .service import AgentSaulService
 from .transcript.export import ExportTranscript
 
@@ -178,11 +179,13 @@ async def saul_ws_endpoint(
 
     The router never calls graph methods directly.
     """
-    correlation_id = str(uuid4())
+    # ONE thread-context construction: identity and correlation are built
+    # here (runtime.SaulThreadContext) and consumed by logs and the service.
+    context = SaulThreadContext(user_id=security_context.user_id, thread_id=thread_id)
     log = logger.bind(
-        user_id=security_context.user_id,
-        thread_id=thread_id,
-        correlation_id=correlation_id,
+        user_id=context.user_id,
+        thread_id=context.thread_id,
+        correlation_id=context.correlation_id,
     )
 
     async def _handle_ws_session() -> None:
@@ -249,7 +252,7 @@ async def saul_ws_endpoint(
         service = AgentSaulService(
             graph=deps.graph,
             redis=deps.redis,
-            correlation_id=correlation_id,
+            context=context,
             ws_security=security_service,
             ws_context=security_context,
             session_factory=deps.session_factory,
