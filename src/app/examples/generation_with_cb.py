@@ -1,40 +1,35 @@
-"""FastAPI example showing an async circuit breaker around provider I/O."""
+"""FastAPI example showing the provider-neutral text-generation Seam."""
 
 from __future__ import annotations
 
-import httpx
 from fastapi import APIRouter, Depends, Request
+from returns.result import Failure
 
-from app.resilience.circuit_breaker import (
-    CircuitBreakerBackendError,
-    CircuitBreakerOpenError,
-    CircuitBreakerService,
-    RedisCircuitBreakerStore,
+from app.ai.generation import (  # noqa: TC001 — FastAPI resolves get_type_hints at runtime
+    TextGenerationRequest,
+    TextGenerator,
 )
 from app.utils import ServiceUnavailableException
 
 router = APIRouter()
 
 
-def get_circuit_breaker(request: Request) -> CircuitBreakerService:
-    return CircuitBreakerService(RedisCircuitBreakerStore(request.app.state.redis))
+def get_text_generator(request: Request) -> TextGenerator:
+    """Read the process-scoped generator provisioned by the application lifespan."""
+    generator = getattr(request.app.state, "text_generator", None)
+    if generator is None:
+        msg = "Text generation provider is unavailable"
+        raise ServiceUnavailableException(msg)
+    return generator
 
 
 @router.post("/generate-text")
 async def generate_text(
-    cb_service: CircuitBreakerService = Depends(get_circuit_breaker),
+    generator: TextGenerator = Depends(get_text_generator),
 ) -> dict[str, object]:
-    async def fetch_response() -> httpx.Response:
-        async with httpx.AsyncClient() as client:
-            response = await client.get("https://api.example.com/generate")
-            response.raise_for_status()
-            return response
-
-    try:
-        response = await cb_service.call("text-generation-provider", fetch_response)
-    except (CircuitBreakerBackendError, CircuitBreakerOpenError, httpx.HTTPError) as exc:
+    result = await generator.generate(TextGenerationRequest(prompt="Generate text."))
+    if isinstance(result, Failure):
         msg = "External API call failed"
-        raise ServiceUnavailableException(msg) from exc
+        raise ServiceUnavailableException(msg)
 
-    data = response.json()
-    return {"generated_text": data["text"]}
+    return {"generated_text": result.unwrap().text}

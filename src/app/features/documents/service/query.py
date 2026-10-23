@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple, Protocol, cast, runtime_checkable
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from returns.result import Failure, Success
 
 from app.ai.embeddings import EmbeddingTaskType, embed_text
+from app.ai.generation import TextGenerationRequest
 from app.ai.graph.retry import retry_immediate
 from app.config import get_settings
 from app.features.documents.constants import (
@@ -59,6 +60,7 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
     from ty_extensions import Unknown
 
+    from app.ai.generation import TextGenerationStructuredResult
     from app.config.settings import Settings
     from app.features.documents import dto as documents_dto
     from app.features.documents.classification import QualityWarning
@@ -293,6 +295,20 @@ def lookup_to_rows(
     return rows
 
 
+@runtime_checkable
+class ContextGrader(Protocol):
+    """The narrow slice of the text-generation seam the context grader consumes.
+
+    Structural, so the lifespan-owned ``LangChainTextGenerator`` and any test
+    double with the same single method both satisfy it; documents never import
+    the concrete adapter.
+    """
+
+    def generate_structured(
+        self, request: TextGenerationRequest
+    ) -> Awaitable[TextGenerationStructuredResult]: ...
+
+
 class DocumentQueryService:
     """Unified retrieval and grounded QA service."""
 
@@ -302,6 +318,7 @@ class DocumentQueryService:
         llm_factory: Callable[[], BaseChatModel],
         redis: Redis | None,
         graphiti: Graphiti | None,
+        grader: ContextGrader | None = None,
     ):
         self.repo: DocumentRepository = repo
         # The model client is constructed on first use, not at dependency
@@ -312,6 +329,12 @@ class DocumentQueryService:
         self._llm_factory: Callable[[], BaseChatModel] = llm_factory
         self.redis: Redis | None = redis
         self.graphiti: Graphiti | None = graphiti
+        # Optional structured-grading seam (item 274 reopen pilot): the lifespan
+        # owns `app.state.text_generator`, which text generation disables when
+        # Redis or the provider key is missing. A disabled seam must not take
+        # `ask` down, so ``None`` keeps grading on the legacy inline path below;
+        # every other consumer of `self.llm` is unchanged either way.
+        self.grader: ContextGrader | None = grader
 
     @property
     def llm(self) -> BaseChatModel:
@@ -652,7 +675,10 @@ class DocumentQueryService:
                 plan.rewritten_query, retrieved_chunks, limit=5
             )
             grade = await _grade_context(
-                grader_llm=grader_llm, query=plan.rewritten_query, reranked=reranked
+                grader_llm=grader_llm,
+                grader=self.grader,
+                query=plan.rewritten_query,
+                reranked=reranked,
             )
             response_warnings = _merge_warning_lists([_warnings_from_rows(rows)])
             if grade.sufficient or iteration == 1:
@@ -763,9 +789,17 @@ async def _graphiti_filter_chunk_ids(
 async def _grade_context(
     *,
     grader_llm: Any,
+    grader: ContextGrader | None,
     query: str,
     reranked: Sequence[RetrievedChunk],
 ) -> ContextGrade:
+    """Grade retrieval sufficiency through the structured seam, or its legacy twin.
+
+    Dual paths, deliberate: the injected grader rides the lifespan-owned
+    text-generator seam (retries, breaker, schema-validated output), while
+    ``grader=None`` — the seam disabled at lifespan — replays the prior inline
+    path verbatim so a disabled optional capability cannot change ask() results.
+    """
     if not reranked:
         return ContextGrade(
             sufficient=False, missing_aspects=["No retrieved chunks"], rewrite_suggestion=query
@@ -773,6 +807,30 @@ async def _grade_context(
     payload = serialize_to_toon(
         {"query": query, "chunks": [chunk.model_dump() for chunk in reranked]}
     )
+    if grader is None:
+        return await _grade_context_via_llm(grader_llm=grader_llm, payload=payload)
+
+    request = TextGenerationRequest(
+        prompt=payload,
+        system=_CONTEXT_GRADER_SYSTEM_PROMPT,
+        response_schema=ContextGrade,
+        # Grading is the same near-deterministic call the legacy inline path
+        # made (dependencies.py builds the document LLM at temperature=0.1);
+        # without this override the seam would inherit GEMINI_TEMPERATURE (0.7).
+        temperature=0.1,
+    )
+    result = await grader.generate_structured(request)
+    if isinstance(result, Failure):
+        error = result.failure()
+        log_expected_failure(error, operation="documents_context_grader")
+        # Same degrade the legacy parse-failure path chose: an unavailable grade
+        # proceeds to generation rather than failing the whole ask() loop.
+        return ContextGrade(sufficient=True, missing_aspects=[])
+    return ContextGrade.model_validate(result.unwrap().output)
+
+
+async def _grade_context_via_llm(*, grader_llm: Any, payload: str) -> ContextGrade:
+    """Legacy inline grading path, kept verbatim for the seam-absent degrade."""
     messages = [SystemMessage(content=_CONTEXT_GRADER_SYSTEM_PROMPT), HumanMessage(content=payload)]
     try:
         raw = await retry_immediate(

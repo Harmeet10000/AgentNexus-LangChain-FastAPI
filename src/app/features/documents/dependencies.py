@@ -1,6 +1,6 @@
 """Dependency wiring for unified document feature."""
 
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, cast
 
 from fastapi import Depends, Request
 from langchain_core.language_models import BaseChatModel
@@ -17,6 +17,7 @@ from .repository import DocumentRepository
 from .service import DocumentCommandService, DocumentQueryService
 
 if TYPE_CHECKING:
+    from app.ai.generation import TextGenerator
     from app.config.settings import Settings
 
 
@@ -56,11 +57,16 @@ async def get_document_query_service(
     redis: Annotated[Redis, Depends(dependency=get_redis)],
     request: Request,
 ) -> DocumentQueryService:
+    # The context grader rides the optional text-generation seam the lifespan
+    # provisions. Absence (generation disabled) stays `None`: the service keeps
+    # grading on its legacy inline path, so this injection never raises.
+    grader = cast("TextGenerator | None", getattr(request.app.state, "text_generator", None))
     return DocumentQueryService(
         repo=repo,
         llm_factory=_get_document_llm,
         redis=redis,
         graphiti=getattr(request.app.state, "graphiti", None),
+        grader=grader,
     )
 
 

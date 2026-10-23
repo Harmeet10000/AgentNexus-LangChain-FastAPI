@@ -259,6 +259,12 @@ def _setup_text_generator_state(app: FastAPI, settings: Any) -> None:
         app.state.text_generator = LangChainTextGenerator(
             model=build_chat_model(model_name=settings.GEMINI_PRO_MODEL),
             breaker=breaker,
+            # Request-level temperature/model overrides (e.g. a grader pinning
+            # temperature) rebuild a model here; the unbound default model above
+            # keeps settings.GEMINI_TEMPERATURE as its construction default.
+            model_factory=lambda model_name, temperature: build_chat_model(
+                model_name=model_name, temperature=temperature
+            ),
         )
     except (ImportError, TypeError, ValueError, redis.exceptions.RedisError) as exc:
         exc.add_note("capability=text_generation, operation=lifespan_construct")
