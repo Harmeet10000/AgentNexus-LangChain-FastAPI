@@ -27,6 +27,7 @@ import asyncio
 import contextlib
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
+from traceback import format_exc
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -38,7 +39,6 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
 
 DEFAULT_TTL_SECONDS = 60
-_RENEW_INTERVAL = DEFAULT_TTL_SECONDS / 3  # §5.5 [v3]: renewal every TTL/3
 
 _LOCK_KEY_PREFIX = "saul:thread_lock"
 
@@ -64,12 +64,19 @@ class ThreadLock:
         thread_id: str,
         *,
         ttl_seconds: int = DEFAULT_TTL_SECONDS,
-        renew_interval: float = _RENEW_INTERVAL,
+        renew_interval: float | None = None,
     ) -> None:
+        if ttl_seconds <= 0:
+            msg = "ttl_seconds must be positive"
+            raise ValueError(msg)
+        resolved_renew_interval = ttl_seconds / 3 if renew_interval is None else renew_interval
+        if resolved_renew_interval <= 0:
+            msg = "renew_interval must be positive"
+            raise ValueError(msg)
         self._redis = redis
         self._thread_id = thread_id
         self._ttl = ttl_seconds
-        self._renew_interval = renew_interval
+        self._renew_interval = resolved_renew_interval
         self._held = False
         self._token: str | None = None
         self._renew_task: asyncio.Task[None] | None = None
@@ -97,8 +104,8 @@ class ThreadLock:
             acquired = await self._redis.set(
                 lock_key(self._thread_id), token, nx=True, ex=self._ttl
             )
-        except RedisError:
-            self.log.warning("thread_lock_redis_unavailable")
+        except RedisError as exc:
+            self._log_redis_failure(exc, operation="acquire", event="thread_lock_redis_unavailable")
             self._held = False
             self.heartbeat.fresh = False
             return False
@@ -123,8 +130,8 @@ class ThreadLock:
                 await renew_task
         try:
             await self._compare_and_act("release", delete=True, token=token)
-        except RedisError:
-            self.log.warning("thread_lock_release_lapsed")
+        except RedisError as exc:
+            self._log_redis_failure(exc, operation="release", event="thread_lock_release_lapsed")
 
     def _stop_renew_loop(self) -> None:
         renew_task = self._renew_task
@@ -147,8 +154,12 @@ class ThreadLock:
                     return
                 try:
                     renewed = await self._renew_once()
-                except RedisError:
-                    self.log.warning("thread_lock_renew_failed")
+                except RedisError as exc:
+                    self._log_redis_failure(
+                        exc,
+                        operation="renew",
+                        event="thread_lock_renew_failed",
+                    )
                     self.heartbeat.fresh = False
                     self._held = False  # lease lost: stop renewing, stop aliveness
                     self.lease_lost.set()  # unknowable fence → the run must stop
@@ -207,3 +218,12 @@ class ThreadLock:
                 pipe.pexpire(key, self._ttl * 1000)
             await pipe.execute()
             return True
+
+    def _log_redis_failure(self, exc: RedisError, *, operation: str, event: str) -> None:
+        """Preserve the discarded Redis exception's internal diagnostics."""
+        exc.add_note(f"thread_id={self._thread_id}, operation={operation}")
+        exc.add_note(format_exc())
+        self.log.bind(
+            operation=operation,
+            error_notes=list(getattr(exc, "__notes__", ())),
+        ).warning(event)

@@ -33,7 +33,7 @@ async def test_renew_survives_a_bytes_returning_client() -> None:
             assert lock.is_held is True
         finally:
             await lock.release()
-            client.close()
+            await client.aclose()
 
 
 async def make_lock(test_redis, thread_id: str = "t-1", **kwargs) -> ThreadLock:
@@ -130,3 +130,25 @@ async def test_renew_once_reports_loss_when_key_gone(redis) -> None:
 
 async def test_ttl_default_is_doc_value() -> None:
     assert DEFAULT_TTL_SECONDS == 60
+
+
+async def test_custom_ttl_derives_renewal_interval(redis) -> None:
+    lock = ThreadLock(redis, "t-custom-ttl", ttl_seconds=9)
+    assert lock._renew_interval == 3
+
+
+async def test_explicit_renewal_interval_overrides_ttl_derivation(redis) -> None:
+    lock = ThreadLock(redis, "t-custom-renew", ttl_seconds=9, renew_interval=2.5)
+    assert lock._renew_interval == pytest.approx(2.5)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"ttl_seconds": 0}, "ttl_seconds must be positive"),
+        ({"renew_interval": 0}, "renew_interval must be positive"),
+    ],
+)
+async def test_lock_rejects_non_positive_timing(redis, kwargs, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        ThreadLock(redis, "t-invalid-timing", **kwargs)
