@@ -30,7 +30,13 @@ if TYPE_CHECKING:
 
 class ModelRetryMiddleware(BaseModel):
     """
-    Retries the LLM call on failure with exponential back-off.
+    Legacy local retry adapter retained for public-import compatibility.
+
+    The production stack uses LangChain's prebuilt
+    ``langchain.agents.middleware.ModelRetryMiddleware`` instead. New callers
+    should prefer that implementation so retry failure semantics stay aligned
+    with the agent runtime; this adapter remains available to avoid breaking
+    existing imports.
 
     Built as a @wrap_model_call: intercepts the handler,
     retries up to max_retries on exception.

@@ -15,11 +15,19 @@ Usage::
         model,
         tools=tools,
         middleware=[
-            SummarizationMiddleware(model=fast_llm, max_tokens_before_summary=4000),
+            SummarizationMiddleware(
+                model=fast_llm,
+                trigger=("tokens", 4000),
+                keep=("messages", 20),
+            ),
             HumanInTheLoopMiddleware(interrupt_on={"delete_file": True}),
             LLMToolSelectorMiddleware(model=fast_llm),
             ToolRetryMiddleware(max_retries=3),
-            ModelRetryMiddleware(max_retries=2),
+            # The default stack uses LangChain's prebuilt model retry middleware.
+            langchain.agents.middleware.ModelRetryMiddleware(
+                max_retries=2,
+                on_failure="error",
+            ),
             GuardrailMiddleware(),
         ],
     )

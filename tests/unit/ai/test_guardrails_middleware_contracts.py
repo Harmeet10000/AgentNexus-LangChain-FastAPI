@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import inspect
+from importlib.metadata import version
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse, Runtime
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.ai import guardrails
 
@@ -132,3 +135,19 @@ async def test_guardrail_replaces_unsafe_model_response(monkeypatch: pytest.Monk
 
     assert response.result == [AIMessage(content="blocked")]
     chain.ainvoke.assert_awaited_once_with({"input": "request", "output": "unsafe output"})
+
+
+def test_async_postgres_saver_320_contract_without_database() -> None:
+    """Pin the saver API consumed by the application's pool-owning adapter."""
+    from app.connections.checkpointer import setup_langgraph_checkpointer
+
+    assert version("langgraph-checkpoint-postgres") == "3.2.0"
+    assert inspect.iscoroutinefunction(AsyncPostgresSaver.setup)
+    assert inspect.isasyncgenfunction(AsyncPostgresSaver.from_conn_string.__wrapped__)
+
+    saver_parameters = inspect.signature(AsyncPostgresSaver).parameters
+    assert tuple(saver_parameters)[:2] == ("conn", "pipe")
+
+    setup_parameters = inspect.signature(setup_langgraph_checkpointer).parameters
+    assert tuple(setup_parameters) == ("conn_string",)
+    assert setup_parameters["conn_string"].default is None
