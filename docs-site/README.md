@@ -7,11 +7,14 @@ Mintlify documentation for AgentNexus.
 2. Add the path (without `.mdx`) to `docs-site/docs.json` navigation.
 3. Verify locally: `uv run python docs-site/scripts/validate_frontmatter.py && uv run python docs-site/scripts/check_nav_completeness.py && uv run python docs-site/scripts/verify_docs.py`
 
-## Updating the OpenAPI spec
+## Updating the OpenAPI spec and Postman collection
 ```bash
 uv run python docs-site/scripts/extract_openapi.py
-# Verify rendering: check docs-site/api-reference/overview.mdx references match openapi.json paths
+uv run python docs-site/scripts/sync_postman_collection.py
+uv run python docs-site/scripts/sync_postman_collection.py --check
 ```
+
+The extractor builds the FastAPI app in-process without running its lifespan. The Postman sync preserves curated request descriptions, auth, scripts, and safety settings while reconciling the operation set and schema-owned request details. Commit `openapi.json` and the collection together. CI checks both the checked-in snapshot and the live app-built schema for drift.
 
 ## Deploy
 Docs are hosted on Mintlify Cloud, which builds on push to `main` once the repo is connected — no CI workflow needed. (The Mintlify CLI has no static-build command, so GitHub Pages deployment is not supported; `docs-ci.yml` covers validation on PRs.)
