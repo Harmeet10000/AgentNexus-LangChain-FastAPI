@@ -134,19 +134,43 @@ async def test_due_outbound_check_blocks_revoked_session_before_wire_send() -> N
     assert websocket.send_json.await_count == 1
 
 
-async def test_failed_outbound_check_fails_open_without_retry_storm() -> None:
+async def test_failed_outbound_check_fails_closed_before_wire_send() -> None:
     repo = _TokenRepo(Failure(RuntimeError("redis unavailable")))
     service = _service(repo)
     websocket = AsyncMock()
     context = _context()
     try:
-        await service.send_json(websocket, {"sequence": 1}, context)
-        await service.send_json(websocket, {"sequence": 2}, context)
+        with pytest.raises(WebSocketSessionRevokedError):
+            await service.send_json(websocket, {"sequence": 1}, context)
     finally:
         service.close()
 
     assert repo.calls == 1
-    assert websocket.send_json.await_count == 2
+    assert websocket.send_json.await_count == 0
+    assert context.connection_id not in service._last_outbound_session_check
+
+
+async def test_failed_due_check_does_not_refresh_previous_success_timestamp() -> None:
+    repo = _TokenRepo(Success(_valid_session()), Failure(RuntimeError("redis unavailable")))
+    service = _service(repo)
+    websocket = AsyncMock()
+    context = _context()
+    try:
+        await service.send_json(websocket, {"sequence": 1}, context)
+        previous_check = service._last_outbound_session_check[context.connection_id]
+        service._last_outbound_session_check[context.connection_id] -= (
+            service._settings.WEBSOCKET_OUTBOUND_SESSION_CHECK_INTERVAL_SECONDS + 1
+        )
+        stale_check = service._last_outbound_session_check[context.connection_id]
+        with pytest.raises(WebSocketSessionRevokedError):
+            await service.send_json(websocket, {"sequence": 2}, context)
+    finally:
+        service.close()
+
+    assert repo.calls == 2
+    assert websocket.send_json.await_count == 1
+    assert service._last_outbound_session_check[context.connection_id] == stale_check
+    assert service._last_outbound_session_check[context.connection_id] < previous_check
 
 
 async def test_concurrent_send_cannot_bypass_in_flight_session_check() -> None:

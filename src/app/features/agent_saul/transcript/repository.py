@@ -255,6 +255,7 @@ class ChatTranscriptRepository:
                     return Failure(schema_failure)
                 return Success(inserted_id is not None)
         except SQLAlchemyError as exc:
+            await session.rollback()
             add_database_error_note(
                 exc,
                 table="chat_sessions",

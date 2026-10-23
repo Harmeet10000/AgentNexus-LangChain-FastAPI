@@ -581,9 +581,9 @@ class WebSocketSecurityService:
 
         A per-connection lock makes the refresh single-flight: concurrent sends
         cannot bypass an in-flight check, while followers reuse its result.
-        The timestamp is stored only after a normal return; infrastructure
-        Failures return normally (and are throttled), while revoked sessions
-        raise and never populate the cache.
+        The timestamp is stored only after a successful validity check.
+        Infrastructure failures, revoked sessions, owner mismatches, and
+        expired sessions all raise and never populate or refresh the cache.
         """
         if self._token_repo is None or context.session_id is None:
             return
