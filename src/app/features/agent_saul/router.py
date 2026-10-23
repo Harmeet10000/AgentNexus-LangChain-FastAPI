@@ -29,9 +29,9 @@ from app.resilience.rate_limit import get_rate_limiter
 from app.utils import APIResponse, ErrorCode, ValidationException
 
 from .dependencies import (
-    AgentSaulDepsAnnotated,
     AgentSaulDepsWsAnnotated,
     AgentSaulWebSocketSecurityContextAnnotated,
+    DocumentContentSourceDep,
     TranscriptExporterDep,
 )
 from .dto import (
@@ -94,7 +94,7 @@ def get_websocket_url(request: Request, path: str) -> str:
 )
 async def create_session(
     body: CreateSessionRequest,
-    _deps: AgentSaulDepsAnnotated,
+    document_source: DocumentContentSourceDep,
     claims: CurrentClaims,
     request: Request,
     response: Response,
@@ -104,9 +104,21 @@ async def create_session(
     ws_url = get_websocket_url(request, ws_path)
 
     log = logger.bind(user_id=claims.sub, thread_id=thread_id, doc_id=body.doc_id)
-    log.info("saul_session_created")
 
-    result = AgentSaulService.create_session(websocket_url=ws_url, thread_id=thread_id)
+    result = await AgentSaulService.create_session_for_document(
+        websocket_url=ws_url,
+        thread_id=thread_id,
+        doc_id=body.doc_id,
+        user_id=claims.sub,
+        document_source=document_source,
+    )
+    if isinstance(result, Failure):
+        log.warning(
+            "saul_session_creation_document_rejected",
+            error_code=str(result.failure().code),
+        )
+    else:
+        log.info("saul_session_created")
     return render_result(
         result,
         response,

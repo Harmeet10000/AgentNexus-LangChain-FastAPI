@@ -24,6 +24,10 @@ from redis.asyncio import Redis
 from returns.result import Failure
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.features.agent_saul.document_source import (
+    DocumentContentSource,
+    PostgresDocumentContentSource,
+)
 from app.features.agent_saul.runtime import (
     WS_SESSION_REJECTED_REASON,
     AgentSaulDeps,
@@ -121,6 +125,14 @@ async def get_agent_saul_deps_ws(websocket: WebSocket) -> AgentSaulDeps:
     return build_agent_saul_runtime(websocket.app.state)
 
 
+async def get_document_content_source(
+    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_db_session_local)],
+) -> DocumentContentSource:
+    """Postgres-backed canonical content source: user-scoped reads through the
+    documents feature's repository boundary (see document_source.py)."""
+    return PostgresDocumentContentSource(session_factory)
+
+
 async def get_agent_saul_ws_security_context(
     websocket: WebSocket,
     claims: WebSocketClaims,
@@ -170,3 +182,4 @@ AgentSaulWebSocketSecurityContextAnnotated = Annotated[
     Depends(get_agent_saul_ws_security_context),
 ]
 TranscriptExporterDep = Annotated[TranscriptExporter, Depends(get_transcript_exporter)]
+DocumentContentSourceDep = Annotated[DocumentContentSource, Depends(get_document_content_source)]

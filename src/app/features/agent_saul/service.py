@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, assert_never, cast
 from uuid import uuid4
 
 from fastapi import WebSocket
@@ -38,6 +38,11 @@ from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
 from app.config import get_settings
+from app.features.agent_saul.document_source import (
+    DOCUMENT_SOURCE_CONFIG_KEY,
+    DocumentTextFailureCode,
+    postgres_document_content_source,
+)
 from app.features.agent_saul.dto import (
     CreateSessionResponse,
     WSDoneFrame,
@@ -51,6 +56,11 @@ from app.features.agent_saul.dto import (
     WSStateUpdateFrame,
     WSTokenFrame,
     ws_inbound_adapter,
+)
+from app.features.agent_saul.exceptions import (
+    AgentSaulDocumentNotFoundError,
+    AgentSaulInfrastructureError,
+    AgentSaulValidationError,
 )
 from app.features.agent_saul.graph.state import (
     GRAPH_NODE_NAMES,
@@ -69,6 +79,7 @@ from app.features.auth.websocket_security import (
     WebSocketIdleTimeout,
     WebSocketSecurityViolation,
 )
+from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
 
 if TYPE_CHECKING:
@@ -77,11 +88,15 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from app.features.agent_saul.document_source import (
+        DocumentContentSource,
+        DocumentTextFailure,
+    )
     from app.features.agent_saul.dto import (
         WSOutbound,
         WSStartMessage,
     )
-    from app.features.agent_saul.exceptions import AgentSaulResult
+    from app.features.agent_saul.exceptions import AgentSaulError, AgentSaulResult
     from app.features.agent_saul.runtime import SaulThreadContext
     from app.features.auth.websocket_security import (
         WebSocketSecurityContext,
@@ -108,6 +123,39 @@ _NODE_STATUS_MAP: dict[str, WorkflowStatus] = {
 }
 
 _TOTAL_PIPELINE_STEPS = len(GRAPH_NODE_NAMES)
+
+
+def _document_preflight_error(
+    failure: DocumentTextFailure,
+    *,
+    user_id: str,
+    doc_id: str,
+) -> AgentSaulError:
+    """Document-content source failure → agent_saul's HTTP-facing union.
+
+    Same user-scoping semantics as the WS thread owner gate: a foreign
+    doc_id reads as NOT_FOUND, revealing nothing about other users' rows.
+    """
+    match failure.code:
+        case DocumentTextFailureCode.NOT_FOUND:
+            return AgentSaulDocumentNotFoundError(
+                message=failure.message or "Requested document does not exist for this user",
+                details={"source": "document_content_source"},
+                doc_id=doc_id,
+                user_id=user_id,
+            )
+        case DocumentTextFailureCode.UNAVAILABLE:
+            return AgentSaulInfrastructureError(
+                message="Document content source is unavailable",
+                details={"doc_id": doc_id, "user_id": user_id},
+            )
+        case DocumentTextFailureCode.EMPTY:
+            return AgentSaulValidationError(
+                message="Requested document has no retrievable content",
+                details={"doc_id": doc_id, "user_id": user_id},
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 class AgentSaulService:
@@ -147,6 +195,33 @@ class AgentSaulService:
     ) -> AgentSaulResult[CreateSessionResponse]:
         """Create the HTTP pre-flight response before entering the WS boundary."""
         return Success(CreateSessionResponse(thread_id=thread_id, ws_url=websocket_url))
+
+    @staticmethod
+    async def create_session_for_document(
+        *,
+        websocket_url: str,
+        thread_id: str,
+        doc_id: str,
+        user_id: str,
+        document_source: DocumentContentSource,
+    ) -> AgentSaulResult[CreateSessionResponse]:
+        """HTTP pre-flight with document existence + ownership validation.
+
+        The gateway read style keeps shape-only doc_id checks at WS admission;
+        this endpoint closes the hole where a nonexistent or foreign doc_id
+        sailed through to a turn that fails at ingestion. A rejected doc is a
+        typed failure on the Result, never a raise.
+        """
+        preflight = await document_source.ensure_document(user_id=user_id, doc_id=doc_id)
+        if isinstance(preflight, Failure):
+            failure = preflight.failure()
+            error = _document_preflight_error(failure, user_id=user_id, doc_id=doc_id)
+            log_expected_failure(
+                error,
+                operation="create_session_document_preflight",
+            )
+            return Failure(error)
+        return AgentSaulService.create_session(websocket_url=websocket_url, thread_id=thread_id)
 
     @trace_layer("service")
     async def run_session(
@@ -989,8 +1064,19 @@ class AgentSaulService:
     # ------------------------------------------------------------------
 
     def _build_config(self, thread_id: str) -> RunnableConfig:
+        """Run config for every round of this session's turn loop.
+
+        The document content source is injected through ``configurable``: the
+        Postgres checkpointer repopulates persisted configurable from
+        ``thread_id``/``checkpoint_ns``/``checkpoint_id`` only, so this
+        per-session object stays in-process while every resume round keeps
+        carrying it.
+        """
         return RunnableConfig(
-            configurable={"thread_id": thread_id},
+            configurable={
+                "thread_id": thread_id,
+                DOCUMENT_SOURCE_CONFIG_KEY: postgres_document_content_source(self._session_factory),
+            },
             run_id=uuid4(),
             tags=["agent_saul"],
             metadata={"correlation_id": self._correlation_id},

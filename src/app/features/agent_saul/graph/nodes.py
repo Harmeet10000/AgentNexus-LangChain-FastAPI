@@ -3,15 +3,21 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import Any, Literal, assert_never, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.graph import END
 from langgraph.types import Send, interrupt
 from pydantic import BaseModel, Field
+from returns.result import Failure
 
+from app.features.agent_saul.document_source import (
+    DocumentTextFailure,
+    DocumentTextFailureCode,
+    document_content_source_from_config,
+)
 from app.observability.logging import logger
 from app.shared.langchain_layer.messages import make_delegation_pair
 
@@ -125,6 +131,36 @@ class RelationshipMappingOutput(BaseModel):
 
 
 type StateNode = Callable[[LegalAgentState], Awaitable[dict[str, Any]]]
+
+# Ingestion resolves its content source from the session's invoke config, so
+# its callable is a (state, config) node — LangGraph passes both when the
+# signature declares them.
+type ConfiguredStateNode = Callable[[LegalAgentState, RunnableConfig], Awaitable[dict[str, Any]]]
+
+
+def _ingestion_document_failure(failure: DocumentTextFailure) -> dict[str, Any]:
+    match failure.code:
+        case DocumentTextFailureCode.NOT_FOUND:
+            return _fail(
+                "ingestion",
+                "DOCUMENT_NOT_FOUND",
+                failure.message,
+            )
+        case DocumentTextFailureCode.EMPTY:
+            return _fail(
+                "ingestion",
+                "DOCUMENT_EMPTY_TEXT",
+                failure.message,
+            )
+        case DocumentTextFailureCode.UNAVAILABLE:
+            return _fail(
+                "ingestion",
+                "DOCUMENT_SOURCE_UNAVAILABLE",
+                failure.message,
+                retryable=True,
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def make_state_hydration_node() -> StateNode:
@@ -347,8 +383,16 @@ def make_planner_node(planner_llm: Runnable[list[Any], PlannerOutput]) -> StateN
     return planner_node
 
 
-def make_ingestion_node() -> StateNode:
-    async def ingestion_node(state: LegalAgentState) -> dict[str, Any]:
+def make_ingestion_node() -> ConfiguredStateNode:
+    """The ingestion node feeds normalization from the canonical text source.
+
+    The injected ``DocumentContentSource`` rides the session's
+    ``RunnableConfig.configurable`` (see ``document_source.py``). Expected
+    document-state failures return clean state errors — a node must never
+    raise for them, and must never silently continue with empty text.
+    """
+
+    async def ingestion_node(state: LegalAgentState, config: RunnableConfig) -> dict[str, Any]:
         log = logger.bind(
             node="ingestion",
             doc_id=state["doc_id"],
@@ -364,7 +408,39 @@ def make_ingestion_node() -> StateNode:
                 f"Ingestion failed after {_MAX_RETRIES} attempts",
             )
 
-        text: str = ""
+        source = document_content_source_from_config(config)
+        if source is None:
+            log.error("ingestion_document_source_not_wired")
+            return _fail(
+                "ingestion",
+                "DOCUMENT_SOURCE_NOT_WIRED",
+                "No document content source was injected for this run",
+            )
+
+        try:
+            fetch = await source.fetch_text(user_id=state["user_id"], doc_id=state["doc_id"])
+        except Exception as exc:  # noqa: BLE001 — node boundary: a provider must not abort the WS turn with a raise
+            exc.add_note(f"doc_id={state['doc_id']}, operation=ingestion_fetch_document_text")
+            logger.bind(
+                node="ingestion", doc_id=state["doc_id"], user_id=state["user_id"]
+            ).exception("Document content provider leaked a failure")
+            return _fail(
+                "ingestion",
+                "DOCUMENT_SOURCE_UNAVAILABLE",
+                "Document content provider failed unexpectedly",
+                retryable=True,
+            )
+
+        if isinstance(fetch, Failure):
+            error = fetch.failure()
+            log.warning(
+                "ingestion_document_unreadable",
+                failure_code=str(error.code),
+                failure_message=error.message,
+            )
+            return _ingestion_document_failure(error)
+
+        text: str = fetch.unwrap()
         confidence: float = 1.0
 
         if confidence < _OCR_CONFIDENCE_THRESHOLD:
