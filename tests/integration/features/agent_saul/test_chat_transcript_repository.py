@@ -835,3 +835,89 @@ async def test_turn_recovery_reserves_the_slot(db: _Db) -> None:
             ).scalars()
         ]
         assert sorted(set(seqs)) == seqs  # no reused turn numbers
+
+
+async def test_ensure_session_creates_discoverable_identity_without_messages(db: _Db) -> None:
+    session_id = str(uuid4())
+
+    ensured = await db.repo.ensure_session(session_id=session_id, user_id=USER_ID)
+
+    assert isinstance(ensured, Success)
+    assert ensured.unwrap() is True
+    meta = await db.repo.get_session_meta(session_id=session_id, user_id=USER_ID)
+    assert isinstance(meta, Success)
+    assert meta.unwrap().status == SessionStatus.ACTIVE.value
+    assert meta.unwrap().turn_count == 0
+    assert meta.unwrap().last_checkpoint_id is None
+    rows = await db.repo.read_transcript(session_id=session_id, user_id=USER_ID)
+    assert isinstance(rows, Success)
+    assert rows.unwrap() == ()
+
+
+async def test_ensure_session_replay_never_resets_existing_metadata(db: _Db) -> None:
+    session_id = str(uuid4())
+    first = await db.repo.ensure_session(session_id=session_id, user_id=USER_ID)
+    assert isinstance(first, Success)
+    async with db.factory() as session, session.begin():
+        await session.execute(
+            sa_text(
+                "UPDATE chat_sessions SET title = 'kept', status = 'completed', "
+                "turn_count = 7, last_checkpoint_id = 'cp-kept' WHERE session_id = :sid"
+            ),
+            {"sid": session_id},
+        )
+
+    replay = await db.repo.ensure_session(session_id=session_id, user_id=USER_ID)
+
+    assert isinstance(replay, Success)
+    assert replay.unwrap() is False
+    meta = await db.repo.get_session_meta(session_id=session_id, user_id=USER_ID)
+    assert isinstance(meta, Success)
+    saved = meta.unwrap()
+    assert (saved.title, saved.status, saved.turn_count, saved.last_checkpoint_id) == (
+        "kept",
+        SessionStatus.COMPLETED.value,
+        7,
+        "cp-kept",
+    )
+
+
+async def test_ensure_session_wrong_owner_is_not_found_and_does_not_mutate(db: _Db) -> None:
+    session_id = str(uuid4())
+    created = await db.repo.ensure_session(session_id=session_id, user_id=USER_ID)
+    assert isinstance(created, Success)
+
+    refused = await db.repo.ensure_session(session_id=session_id, user_id="other-user")
+
+    assert isinstance(refused, Failure)
+    assert isinstance(refused.failure(), TranscriptNotFoundError)
+    original = await db.repo.get_session_meta(session_id=session_id, user_id=USER_ID)
+    assert isinstance(original, Success)
+    assert original.unwrap().user_id == USER_ID
+
+
+async def test_ensure_session_unknown_schema_fails_closed_without_rewrite(db: _Db) -> None:
+    session_id = str(uuid4())
+    async with db.factory() as session, session.begin():
+        await session.execute(
+            sa_text(
+                "INSERT INTO chat_sessions (session_id, user_id, schema_version) "
+                "VALUES (:sid, :uid, 99)"
+            ),
+            {"sid": session_id, "uid": USER_ID},
+        )
+
+    refused = await db.repo.ensure_session(session_id=session_id, user_id=USER_ID)
+
+    assert isinstance(refused, Failure)
+    error = refused.failure()
+    assert isinstance(error, TranscriptSchemaError)
+    assert error.operation == "ensure_session"
+    async with db.factory() as session:
+        found = (
+            await session.execute(
+                sa_text("SELECT schema_version FROM chat_sessions WHERE session_id = :sid"),
+                {"sid": session_id},
+            )
+        ).scalar_one()
+    assert found == 99

@@ -1,11 +1,12 @@
 """TurnRecorder — per-turn projection driver (doc §10).
 
-One recorder per connection. Each boundary method (on_first_checkpoint /
-on_pause / on_end / on_abort / reconcile / prepare_resume) does exactly one
-thing: fetch a fresh ``aget_state`` → ``snapshot_to_view`` → ``project`` →
-``repo.apply_projection`` under a hard ``asyncio.timeout`` — the WS loop is
-never waited on (§5.2). An exception is never evidence: no row exists because
-an exception occurred (§1); T3 projects a fresh snapshot and nothing else.
+One recorder per connection. ``bootstrap_session`` establishes only the
+owner-bound discovery anchor. Each later boundary method (on_pause / on_end /
+on_abort / reconcile / prepare_resume) fetches a fresh ``aget_state`` →
+``snapshot_to_view`` → ``project`` → ``repo.apply_projection`` under a hard
+deadline (§5.2). An exception is never evidence: no projection row exists
+because an exception occurred (§1); T3 projects a fresh snapshot and nothing
+else.
 
 Usage is a live side-input (§7): a segment-scoped collector aggregates
 ``usage_metadata`` from every LLM call and attaches per-segment totals to that
@@ -156,8 +157,6 @@ class TurnRecorder:
         self._lock = lock
         self._timeout = timeout_ms / 1000
         self._usage = SegmentUsageCollector()
-        self._t0_task: asyncio.Task[TranscriptResult[ApplyOutcome]] | None = None
-        self._t0_result: TranscriptResult[ApplyOutcome] | None = None
         self._paused_plan: tuple[dict[str, object], ...] = ()
         self.log = logger.bind(session_id=thread_id, component="turn_recorder")
 
@@ -170,27 +169,20 @@ class TurnRecorder:
     # Boundaries (§5.1)
     # ------------------------------------------------------------------
 
-    async def on_first_checkpoint(self) -> TranscriptResult[ApplyOutcome] | None:
-        """T0 — the session row exists BEFORE the first checkpoint lands.
+    async def bootstrap_session(self) -> TranscriptResult[bool]:
+        """T0 — create only the owner-bound discovery anchor.
 
-        Previously this fired as a background task AFTER the first stream
-        round completed; a process death during a later model call left
-        durable checkpoints with no ``chat_sessions`` row — discovery scans
-        start from that table, so the turn stayed invisible. The caller now
-        awaits T0 BEFORE the first round starts (§5.1); the task bookkeeping
-        stays so every later boundary still joins on the same result.
+        Bootstrap deliberately does not read LangGraph state or invoke the
+        projector. A pre-first-step snapshot is a valid projector no-op, while
+        discovery still needs a durable session row before graph execution.
         """
-        if self._t0_task is None or self._t0_task.done():
-            self._t0_task = asyncio.create_task(
-                self._project(stage="t0_first_checkpoint"),
-                name=f"saul-recorder-t0-{self._thread_id}",
-            )
-        await self._await_t0()
-        return self._t0_result
+        return await self._repo.ensure_session(
+            session_id=self._thread_id,
+            user_id=self._user_id,
+        )
 
     async def on_pause(self) -> TranscriptResult[ApplyOutcome]:
         """T1 — paused on an interrupt; capture the plan the user was shown."""
-        await self._await_t0()
         # Project FIRST, then read the plan the user was shown: the pause this
         # projection emits may also carry the previous turn's plan decision,
         # which needs the PRE-resume plan preserved — the new interrupt's
@@ -202,14 +194,12 @@ class TurnRecorder:
 
     async def on_end(self) -> TranscriptResult[ApplyOutcome]:
         """T2 — run reached END; segment totals attach to the final row."""
-        await self._await_t0()
         result = await self._project(stage="t2_end", attach_usage=True)
         self._usage.reset()
         return result
 
     async def on_abort(self) -> TranscriptResult[ApplyOutcome]:
-        """T3 — WS drop or exception: await T0, then project fresh, nothing else."""
-        await self._await_t0()
+        """T3 — WS drop or exception: project fresh, nothing else."""
         result = await self._project(stage="t3_abort")
         self._usage.reset()
         return result
@@ -219,7 +209,6 @@ class TurnRecorder:
         preceded by the §6 hole-fill (missing prompt row ⇒ recover from
         ``aget_state_history``). The recovery replay rides the same hard
         deadline as a projection (§5.2) — recovery must never wedge a turn."""
-        await self._await_t0()
         try:
             await asyncio.wait_for(self._fill_prompt_holes(), self._timeout)
         except TimeoutError:
@@ -322,7 +311,6 @@ class TurnRecorder:
     async def prepare_resume(self) -> TranscriptResult[ApplyOutcome]:
         """Project-before-resume (§5.2): retry once on failure; then proceed
         fail-open and register the reconcile hint."""
-        await self._await_t0()
         first = await self._project(stage="t1p_before_resume")
         failure = _as_infra_failure(first)
         if failure is None:
@@ -335,12 +323,6 @@ class TurnRecorder:
     # ------------------------------------------------------------------
     # One projection cycle — shared by every boundary
     # ------------------------------------------------------------------
-
-    async def _await_t0(self) -> None:
-        if self._t0_task is not None and not self._t0_task.done():
-            self.log.debug("t0_awaited_at_later_boundary")
-            await asyncio.wait({self._t0_task})
-        self._t0_result = self._t0_task.result() if self._t0_task is not None else None
 
     async def _capture_paused_plan(self) -> None:
         """Snapshot the plan shown at the CURRENT interrupt, after projecting.

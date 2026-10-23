@@ -16,6 +16,7 @@ from __future__ import annotations
 # Runtime-required: pydantic field annotations resolve at class definition
 # (SessionMeta/TranscriptMessage) — do NOT move these to TYPE_CHECKING.
 from datetime import datetime
+from traceback import format_exc
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -199,6 +200,80 @@ class ChatTranscriptRepository:
     # ------------------------------------------------------------------
     # Writers
     # ------------------------------------------------------------------
+
+    @trace_layer("repository")
+    async def ensure_session(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+    ) -> TranscriptResult[bool]:
+        """Ensure the owner-bound discovery anchor exists.
+
+        This is intentionally narrower than :meth:`apply_projection`: it may
+        create only the identity/discovery row and never derives status,
+        advances a checkpoint watermark, or writes transcript messages.
+        Returns ``True`` only when this call inserted the row.
+        """
+        sid = session_id[:_SESSION_ID_LEN]
+        uid = user_id[:_USER_ID_LEN]
+        try:
+            async with self._session_factory() as session, session.begin():
+                inserted_id = (
+                    await session.execute(
+                        pg_insert(ChatSession)
+                        .values(
+                            session_id=sid,
+                            user_id=uid,
+                            schema_version=TRANSCRIPT_SCHEMA_VERSION,
+                            status=SessionStatus.ACTIVE.value,
+                        )
+                        .on_conflict_do_nothing(index_elements=[ChatSession.session_id])
+                        .returning(ChatSession.id)
+                    )
+                ).scalar_one_or_none()
+                session_row = (
+                    await session.execute(
+                        select(ChatSession)
+                        .where(ChatSession.session_id == sid)
+                        .with_for_update()
+                    )
+                ).scalar_one()
+                if session_row.user_id != uid:
+                    logger.bind(session_id=sid).warning("transcript_owner_mismatch_refused")
+                    return Failure(
+                        TranscriptNotFoundError(
+                            message="transcript session not found",
+                            session_id=session_id,
+                        )
+                    )
+                schema_failure = _schema_gate(
+                    session_row.schema_version,
+                    operation="ensure_session",
+                )
+                if schema_failure is not None:
+                    return Failure(schema_failure)
+                return Success(inserted_id is not None)
+        except SQLAlchemyError as exc:
+            add_database_error_note(
+                exc,
+                table="chat_sessions",
+                operation="ensure_session",
+                context={"session_id": sid},
+            )
+            exc.add_note(format_exc())
+            logger.bind(
+                operation="ensure_session",
+                session_id=sid,
+                error_notes=list(getattr(exc, "__notes__", ())),
+            ).warning("transcript_repository_failed")
+            return Failure(
+                TranscriptInfrastructureError(
+                    message="transcript storage operation failed",
+                    source="chat_transcript_repository",
+                    operation="ensure_session",
+                )
+            )
 
     @trace_layer("repository")
     async def apply_projection(
@@ -837,7 +912,10 @@ class ChatTranscriptRepository:
                 # mixed-version/rollback deployment must modify nothing it
                 # refuses to export, and the turn context is the projector's
                 # write-planning input.
-                gate = _schema_gate(session_row.schema_version)
+                gate = _schema_gate(
+                    session_row.schema_version,
+                    operation="get_turn_context",
+                )
                 if gate is not None:
                     return Failure(gate)
                 latest_turn = (
@@ -900,7 +978,10 @@ class ChatTranscriptRepository:
                             session_id=session_id,
                         )
                     )
-                version_failure = _schema_gate(session_row.schema_version)
+                version_failure = _schema_gate(
+                    session_row.schema_version,
+                    operation="get_session_meta",
+                )
                 if version_failure is not None:
                     return Failure(version_failure)
                 return Success(_session_meta_of(session_row))
@@ -928,7 +1009,10 @@ class ChatTranscriptRepository:
                     statement = statement.where(ChatSession.updated_at < cursor_updated_at)
                 rows = (await session.execute(statement)).scalars().all()
                 for session_row in rows:
-                    version_failure = _schema_gate(session_row.schema_version)
+                    version_failure = _schema_gate(
+                        session_row.schema_version,
+                        operation="list_sessions",
+                    )
                     if version_failure is not None:
                         return Failure(version_failure)
                 return Success(tuple(_session_meta_of(row) for row in rows))
@@ -965,7 +1049,10 @@ class ChatTranscriptRepository:
                             session_id=session_id,
                         )
                     )
-                version_failure = _schema_gate(session_row.schema_version)
+                version_failure = _schema_gate(
+                    session_row.schema_version,
+                    operation="read_transcript",
+                )
                 if version_failure is not None:
                     return Failure(version_failure)
                 key = (after_turn_seq, after_ordinal, after_id)
@@ -1012,8 +1099,12 @@ class ChatTranscriptRepository:
 
 
 def _sanitize_db_error(exc: SQLAlchemyError, operation: str) -> Failure[TranscriptError]:
-    add_database_error_note(exc, table="chat_messages")
-    logger.bind(operation=operation).warning("transcript_repository_failed")
+    add_database_error_note(exc, table="chat_messages", operation=operation)
+    exc.add_note(format_exc())
+    logger.bind(
+        operation=operation,
+        error_notes=list(getattr(exc, "__notes__", ())),
+    ).warning("transcript_repository_failed")
     return Failure(
         TranscriptInfrastructureError(
             message="transcript storage operation failed",
@@ -1029,6 +1120,8 @@ def row_checkpoint(projection: Projection) -> str:
 
 def _schema_gate(
     found: int | None,
+    *,
+    operation: str,
 ) -> TranscriptSchemaError | None:
     """Unknown transcript version ⇒ refuse at the read boundary (§9)."""
     if found == TRANSCRIPT_SCHEMA_VERSION:
@@ -1036,7 +1129,7 @@ def _schema_gate(
     return TranscriptSchemaError(
         message="unrecognized transcript schema version",
         source="chat_transcript_repository",
-        operation="read_transcript",
+        operation=operation,
         expected_version=TRANSCRIPT_SCHEMA_VERSION,
         found_version=found,
     )

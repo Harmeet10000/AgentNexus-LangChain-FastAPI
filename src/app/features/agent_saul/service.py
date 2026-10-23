@@ -234,10 +234,11 @@ class AgentSaulService:
     ) -> None:
         """Main session loop.  Runs until graph completes or WS closes.
 
-        Connection-lifetime discipline (doc §12.5): lock acquisition → hydrate
-        gate → reconcile → (paused-thread refusal / expiry) → run loop. Every
-        boundary update rides the recorder; ``finally`` runs T3 and releases
-        the lock — the TTL fence is only for process death.
+        Connection-lifetime discipline (doc §12.5): lock acquisition → persisted
+        owner gate → reconcile → discovery bootstrap → hydrate/input gate → run
+        loop. Every boundary update rides the recorder; ``finally`` runs T3 only
+        after bootstrap and always releases the lock — the TTL fence is only
+        for process death.
 
         ``first_resume`` carries a reconnect-resume (§6): the client's first
         frame is a resume for a paused thread; the gate re-derives the saved
@@ -247,9 +248,8 @@ class AgentSaulService:
         config = self._build_config(thread_id)
 
         lock = ThreadLock(self._redis, thread_id)
-        repo = ChatTranscriptRepository(self._session_factory)
         recorder = TurnRecorder(
-            repo=repo,
+            repo=ChatTranscriptRepository(self._session_factory),
             graph=self._graph,
             config=config,
             thread_id=thread_id,
@@ -265,6 +265,7 @@ class AgentSaulService:
             await self._refuse_thread(ws, thread_id)
             return
 
+        transcript_ready = False
         try:
             gated = await self._gate_and_reconcile(
                 ws=ws,
@@ -276,6 +277,25 @@ class AgentSaulService:
             )
             if not gated:
                 return
+            bootstrap = await recorder.bootstrap_session()
+            if isinstance(bootstrap, Failure):
+                error = bootstrap.failure()
+                await self._send_json(
+                    ws,
+                    WSErrorFrame(
+                        node=None,
+                        code="SESSION_BOOT_FAILED",
+                        message="Transcript could not be initialised; run refused",
+                        retryable=True,
+                    ).model_dump(),
+                )
+                self._log.bind(
+                    thread_id=thread_id,
+                    error_code=str(error.code),
+                    error_operation=getattr(error, "operation", None),
+                ).warning("saul_t0_refused_run")
+                return
+            transcript_ready = True
             # Reconnect-resume frames carry their own reply; start frames run
             # the graph from hydrated state (§6 / D2 split).
             setup = await self._session_first_input(
@@ -292,36 +312,15 @@ class AgentSaulService:
             # current_input alternates between:
             #   - dict (LegalAgentState subset) on first run
             #   - Command(resume=...) on each HITL resume
-            current_input, has_initial_stream = setup
+            current_input = setup[0]
 
             step = 0
-            first_stream_done = has_initial_stream
             while True:
                 # Lease-loss guard between rounds (§5.5): a lost lock means
                 # another connection may own this thread — stop before any
                 # further writes. Mid-round loss is handled by the
                 # lease_lost race inside each round below.
                 # --- Stream graph events → WS frames ----------------------------
-                # T0 fires BEFORE the first round (§5.1): the session row
-                # must exist for any checkpoint to be discoverable — firing
-                # after the round leaves a crash window (dying during a
-                # later model call) in which checkpoints exist but no row
-                # references them. Fail-closed: a failed T0 refuses the run.
-                if not first_stream_done:
-                    t0 = await recorder.on_first_checkpoint()
-                    if not isinstance(t0, Success):
-                        await self._send_json(
-                            ws,
-                            WSErrorFrame(
-                                node=None,
-                                code="SESSION_BOOT_FAILED",
-                                message="Transcript could not be initialised; run refused",
-                                retryable=True,
-                            ).model_dump(),
-                        )
-                        self._log.bind(thread_id=thread_id).warning("saul_t0_refused_run")
-                        break
-                    first_stream_done = True
                 if await self._stream_round_guarded(
                     ws=ws,
                     lock=lock,
@@ -331,9 +330,6 @@ class AgentSaulService:
                     thread_id=thread_id,
                 ):
                     break
-                # (T0 fires before the first round above; later rounds need
-                # no boundary registration.)
-
                 # --- Inspect post-stream graph state ----------------------------
                 outcome, state_snapshot = await self._assess_round(
                     ws=ws, recorder=recorder, thread_id=thread_id, config=config
@@ -357,12 +353,19 @@ class AgentSaulService:
                     # Client sent an invalid resume or disconnected
                     break
         finally:
-            # T3 — WS drop or exception: await T0, project fresh, nothing else
-            # (§5.2); the recorder is exception-native but the boundary is not.
-            try:
-                await recorder.on_abort()
-            except Exception:  # noqa: BLE001 — cleanup must not mask the session error
-                self._log.bind(thread_id=thread_id).warning("saul_t3_abort_failed")
+            # T3 may only project after the owner-bound discovery anchor is
+            # established. A refused foreign orphan must not be claimed by
+            # cleanup (§5.2 / §9).
+            if transcript_ready:
+                try:
+                    await recorder.on_abort()
+                except Exception as exc:  # noqa: BLE001 — cleanup must not mask session error
+                    exc.add_note(f"thread_id={thread_id}, operation=t3_abort")
+                    self._log.bind(
+                        thread_id=thread_id,
+                        error=str(exc),
+                        error_notes=list(getattr(exc, "__notes__", ())),
+                    ).warning("saul_t3_abort_failed")
             await lock.release()
 
     # ------------------------------------------------------------------
@@ -755,7 +758,7 @@ class AgentSaulService:
         user_id: str,
         first_resume: WSResumeMessage | None = None,
     ) -> bool:
-        """Connect-time discipline (doc §12.5 / §6): reconcile then expiry.
+        """Connect-time discipline (doc §12.5 / §6): owner gate, reconcile, expiry.
 
         Reconcile projects whatever the checkpoint holds *before* anything new
         runs, so a crash mid-turn heals via the lineage keys, not replay. On a
@@ -773,7 +776,6 @@ class AgentSaulService:
         - anything else on a paused thread → refused. The OWNER identity is
           gated for EVERY first frame above, start and resume alike (§9).
         """
-        await recorder.reconcile()
         snapshot = await self._graph.aget_state(config)
 
         # Identity gate — EVERY first frame (§9): the state's owner is the
@@ -793,6 +795,13 @@ class AgentSaulService:
                 ).model_dump(),
             )
             return False
+
+        # Only an authenticated owner may let checkpoint evidence reach the
+        # transcript repository. In particular, an orphan checkpoint owned by
+        # another user must be refused before reconciliation can create its
+        # discovery row under the connecting user's identity.
+        await recorder.reconcile()
+        snapshot = await self._graph.aget_state(config)
 
         paused = [interrupt for task in snapshot.tasks for interrupt in task.interrupts]
         if not paused:
