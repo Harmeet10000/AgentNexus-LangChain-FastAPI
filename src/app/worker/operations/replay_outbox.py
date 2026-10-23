@@ -18,9 +18,10 @@ from app.connections.celery_producer import (
 )
 from app.connections.postgres import get_database_url
 from app.events.model import DeadLetterEvent
+from app.events.outbox_adapter import PostgresOutboxAdapter
 from app.observability.logging import logger
 from app.shared.jobs import DirectPublicationAdapter as DirectPublicationPort
-from app.shared.jobs import EnqueueOptions, prepare_job, require_direct_receipt
+from app.shared.jobs import EnqueueOptions, JobBus, prepare_job, require_direct_receipt
 from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
@@ -56,13 +57,20 @@ async def _fetch_dead_letters(
 async def replay(
     limit: int = 50,
     *,
-    publisher: DirectPublicationPort | None = None,
+    publisher: DirectPublicationPort | JobBus | None = None,
 ) -> int:
     database_url = get_database_url()
     engine = create_async_engine(database_url)
     session_factory = async_sessionmaker(engine)
+    # One publication entrypoint: default to the catalog-validated JobBus; a
+    # bare direct adapter (test doubles) keeps working through its publish call.
     resolved_publisher = (
-        publisher if publisher is not None else CeleryDirectPublicationAdapter(celery_app)
+        publisher
+        if publisher is not None
+        else JobBus(
+            CeleryDirectPublicationAdapter(celery_app),
+            PostgresOutboxAdapter(),
+        )
     )
     replayed = 0
 
@@ -74,8 +82,11 @@ async def replay(
                         event["event_type"],
                         cast("dict[str, object]", event["payload"]),
                     )
-                    task_id = await resolved_publisher.publish(job, options=EnqueueOptions())
-                    require_direct_receipt(task_id, operation="outbox_replay_publish")
+                    if isinstance(resolved_publisher, JobBus):
+                        receipt = await resolved_publisher.enqueue(job, EnqueueOptions())
+                    else:
+                        receipt = await resolved_publisher.publish(job, options=EnqueueOptions())
+                    require_direct_receipt(receipt, operation="outbox_replay_publish")
                 except ValidationError as exc:
                     exc.add_note(f"event_type={event['event_type']}")
                     error = ServiceUnavailableException(

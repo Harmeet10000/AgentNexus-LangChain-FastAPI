@@ -17,6 +17,8 @@ from redis.asyncio import Redis
 from redis_fastapi import get_async_redis
 from starlette.requests import Request
 
+from app.ai.generation import LangChainTextGenerator
+from app.ai.llm import build_chat_model
 from app.config import get_settings
 from app.connections import (
     CogneeDimensionMismatchError,
@@ -61,6 +63,7 @@ from app.lifecycle.graphs import (
 from app.middleware import initialize_fastapi_guard
 from app.observability import shutdown_otel
 from app.observability.logging import logger
+from app.resilience.circuit_breaker import CircuitBreakerService, RedisCircuitBreakerStore
 from app.shared.jobs import JobBus
 from app.utils import DependencyHealth, ServiceUnavailableException
 
@@ -156,6 +159,21 @@ async def _init_object_storage(app: FastAPI, settings: Any) -> None:
     app.state.object_store = await create_object_store(settings)
 
 
+def _dev_environment(settings: Any) -> bool:
+    """True when publication may fall back to the in-memory JobBus.
+
+    Production never publishes into process memory: a job only recorded in RAM
+    is a job silently lost.  Outside production the README's uvicorn-only dev
+    loop has no broker, so the in-memory bus keeps the single publication
+    entrypoint usable.  Startup policy substitutes a bare SimpleNamespace in
+    tests, which carries no environment and resolves to the real settings.
+    """
+    environment = getattr(settings, "ENVIRONMENT", None)
+    if not environment:
+        environment = get_settings().ENVIRONMENT
+    return environment != "production"
+
+
 async def _init_outbox_relay(app: FastAPI, publisher: DirectPublicationAdapter) -> None:
     relay = await create_outbox_relay(
         publisher,
@@ -218,6 +236,40 @@ async def _setup_object_storage_state(app: FastAPI, settings: Any) -> None:
     await _init_object_storage(app, settings)
 
 
+def _setup_text_generator_state(app: FastAPI, settings: Any) -> None:
+    """Construct the process-scoped text generator from lifespan-owned resources."""
+    redis_client = getattr(app.state, "redis", None)
+    if redis_client is None:
+        app.state.text_generator = None
+        logger.bind(component="text_generation", reason="redis_unavailable").warning(
+            "Optional text generation disabled"
+        )
+        return
+
+    api_key = settings.GEMINI_API_KEY.get_secret_value()
+    if not api_key:
+        app.state.text_generator = None
+        logger.bind(component="text_generation", reason="provider_not_configured").warning(
+            "Optional text generation disabled"
+        )
+        return
+
+    try:
+        breaker = CircuitBreakerService(RedisCircuitBreakerStore(redis_client))
+        app.state.text_generator = LangChainTextGenerator(
+            model=build_chat_model(model_name=settings.GEMINI_PRO_MODEL),
+            breaker=breaker,
+        )
+    except (ImportError, TypeError, ValueError, redis.exceptions.RedisError) as exc:
+        exc.add_note("capability=text_generation, operation=lifespan_construct")
+        app.state.text_generator = None
+        logger.bind(
+            component="text_generation",
+            reason="construction_failed",
+            error_type=type(exc).__name__,
+        ).warning("Optional text generation disabled")
+
+
 async def _setup_celery_state(app: FastAPI, _settings: Any) -> None:
     """Verify the Celery/RabbitMQ connection without blocking boot."""
     try:
@@ -233,7 +285,19 @@ async def _setup_celery_state(app: FastAPI, _settings: Any) -> None:
     app.state.celery = producer
     adapter = DirectPublicationAdapter(producer)
     app.state.direct_publication_adapter = adapter
-    app.state.job_bus = JobBus(adapter, PostgresOutboxAdapter())
+    if celery is None and _dev_environment(_settings):
+        # Dev runs uvicorn-only with zero broker (see README). In that mode
+        # publication continues through an in-memory JobBus so every producer
+        # path keeps a single entrypoint; the real adapter stays on app.state
+        # for the outbox relay, which keeps retrying recoverable events.
+        from app.shared.jobs.in_memory import InMemoryJobBus
+
+        app.state.job_bus = InMemoryJobBus()
+        logger.bind(component="job_bus", mode="in_memory").info(
+            "Broker unavailable outside production; dev publication uses the in-memory JobBus"
+        )
+    else:
+        app.state.job_bus = JobBus(adapter, PostgresOutboxAdapter())
 
 
 async def _setup_outbox_relay_state(app: FastAPI, _settings: Any) -> None:
@@ -600,6 +664,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
         app.state.redis = redis_result
     else:
         app.state.redis = None
+
+    _setup_text_generator_state(app, settings)
 
     if neo_task is not None:
         neo_result = neo_task.result()

@@ -1,4 +1,10 @@
-"""Tests for the concrete Celery direct-publication adapter seam."""
+"""Tests for the concrete Celery direct-publication adapter seam.
+
+The legacy ``typed_send``/``dispatch`` direct-entry facade was removed: every
+publication goes through :class:`app.shared.jobs.bus.JobBus`, whose
+``enqueue`` reaches the broker through this adapter. These tests pin the
+transport behavior that survives the consolidation.
+"""
 
 from __future__ import annotations
 
@@ -10,11 +16,7 @@ from kombu.exceptions import OperationalError
 from app.connections import celery_producer
 from app.shared.jobs import EnqueueOptions, prepare_job
 from app.shared.jobs.names import DOCUMENTS_INGEST
-from app.shared.jobs.registry import (
-    CeleryTaskRegistry,
-    TaskPayloadValidationError,
-    TaskRoutingOverrideError,
-)
+from app.shared.jobs.registry import TaskPayloadValidationError
 from app.utils import ServiceUnavailableException
 
 _PAYLOAD = {
@@ -83,84 +85,3 @@ async def test_broker_error_is_mapped_with_cause_and_note() -> None:
 
     assert isinstance(exc_info.value.__cause__, OperationalError)
     assert "operation=celery_dispatch" in exc_info.value.__cause__.__notes__[0]
-
-
-def test_legacy_typed_send_delegates_to_the_same_adapter_algorithm(monkeypatch) -> None:
-    broker = _Broker()
-    monkeypatch.setattr(celery_producer, "celery_app", broker)
-
-    result = CeleryTaskRegistry.typed_send(
-        DOCUMENTS_INGEST,
-        dict(_PAYLOAD),
-        expires=45,
-        countdown=3,
-    )
-
-    assert result.id == "broker-task-1"
-    assert broker.calls == [(DOCUMENTS_INGEST, _PAYLOAD, {"expires": 45, "countdown": 3})]
-
-
-def test_legacy_typed_send_preserves_non_routing_options(monkeypatch) -> None:
-    broker = _Broker()
-    monkeypatch.setattr(celery_producer, "celery_app", broker)
-
-    result = CeleryTaskRegistry.typed_send(
-        DOCUMENTS_INGEST,
-        dict(_PAYLOAD),
-        expires=45,
-        countdown=3,
-        headers={"trace_id": "trace-1"},
-        priority=7,
-    )
-
-    assert result.id == "broker-task-1"
-    assert broker.calls == [
-        (
-            DOCUMENTS_INGEST,
-            _PAYLOAD,
-            {
-                "expires": 45,
-                "countdown": 3,
-                "headers": {"trace_id": "trace-1"},
-                "priority": 7,
-            },
-        )
-    ]
-
-
-@pytest.mark.parametrize(
-    "routing_option",
-    ["queue", "routing_key", "exchange", "exchange_type", "route_name", "router"],
-)
-def test_legacy_typed_send_rejects_catalog_routing_overrides(
-    monkeypatch, routing_option: str
-) -> None:
-    broker = _Broker()
-    monkeypatch.setattr(celery_producer, "celery_app", broker)
-
-    with pytest.raises(TaskRoutingOverrideError) as exc_info:
-        CeleryTaskRegistry.typed_send(
-            DOCUMENTS_INGEST,
-            dict(_PAYLOAD),
-            **{routing_option: "caller-controlled"},
-        )
-
-    assert exc_info.value.task_name == DOCUMENTS_INGEST
-    assert exc_info.value.option_names == {routing_option}
-    assert routing_option in str(exc_info.value)
-    assert broker.calls == []
-
-
-@pytest.mark.asyncio
-async def test_dispatch_compatibility_wrapper_uses_direct_adapter(monkeypatch) -> None:
-    broker = _Broker()
-    monkeypatch.setattr(
-        celery_producer, "DirectPublicationAdapter", celery_producer.DirectPublicationAdapter
-    )
-
-    result = await celery_producer.dispatch(
-        broker, DOCUMENTS_INGEST, dict(_PAYLOAD), expires=60, countdown=1
-    )
-
-    assert result == "broker-task-1"
-    assert broker.calls == [(DOCUMENTS_INGEST, _PAYLOAD, {"expires": 60, "countdown": 1})]

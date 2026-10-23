@@ -51,27 +51,17 @@ class TaskPayloadValidationError(TaskDispatchError):
         super().__init__(message)
 
 
-class TaskRoutingOverrideError(TaskDispatchError):
-    """A legacy dispatch attempted to bypass catalog-owned task routing."""
-
-    def __init__(self, task_name: str, option_names: frozenset[str]) -> None:
-        self.task_name = task_name
-        self.option_names = option_names
-        message = (
-            f"Celery task {task_name!r} was given routing options that are owned by the "
-            f"immutable job catalog: {sorted(option_names)}. Remove those options so the "
-            "catalog-derived Celery route cannot be bypassed."
-        )
-        super().__init__(message)
-
-
 class CeleryTaskRegistry:
-    """Legacy class-shaped interface backed by the immutable job catalog.
+    """Validate-only facade over the immutable job catalog.
 
-    ``register`` intentionally no longer exists: allowing a producer process to
-    mutate its view of a stable wire contract is exactly the split-brain failure
-    this facade is intended to remove.  Existing reads and dispatch exceptions
-    retain their names and semantics.
+    This registry publishes nothing: producers enqueue through
+    :class:`app.shared.jobs.bus.JobBus` (or the transactional JobBus seam), and
+    this class only validates a payload against its catalog entry. Publication
+    methods were removed on purpose — a second send path is a second failure
+    mode under incident. ``register`` no longer exists either: allowing a
+    producer process to mutate its view of a stable wire contract was the
+    split-brain failure this facade removed. Existing reads and validation
+    exceptions retain their names and semantics.
     """
 
     _registry: ClassVar[Mapping[str, type[CeleryTaskPayload]]] = MappingProxyType(
@@ -90,29 +80,6 @@ class CeleryTaskRegistry:
         """Return all catalog names as an immutable set."""
 
         return registered_names()
-
-    @classmethod
-    def typed_send(
-        cls, task_name: str, kwargs: dict[str, object], **send_task_opts: object
-    ) -> object:
-        """Validate and publish synchronously, mapping broker errors to 503.
-
-        Sync legacy path: async producers must use
-        ``app.connections.celery_producer.dispatch`` instead, which also
-        publishes off the event loop.
-        """
-        from app.connections.celery_producer import (  # noqa: PLC0415 — compatibility adapter
-            DirectPublicationAdapter,
-            celery_app,
-        )
-        from app.shared.jobs.bus import prepare_job  # noqa: PLC0415 — compatibility adapter
-
-        job = prepare_job(task_name, kwargs)
-        return DirectPublicationAdapter(celery_app).publish_sync_result(
-            job,
-            operation="typed_send",
-            send_options=send_task_opts,
-        )
 
     @classmethod
     def validate(cls, task_name: str, kwargs: dict[str, Any]) -> CeleryTaskPayload:
@@ -136,6 +103,5 @@ __all__ = [
     "CeleryTaskRegistry",
     "TaskDispatchError",
     "TaskPayloadValidationError",
-    "TaskRoutingOverrideError",
     "UnregisteredTaskError",
 ]
