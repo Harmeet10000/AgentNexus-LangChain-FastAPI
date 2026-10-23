@@ -2,7 +2,7 @@
 
 Graph-backed, human-verified legal intelligence for Indian contracts.
 
-📚 **Documentation:** Mintlify site at [`docs-site/`](docs-site/README.md) (run `npx mintlify dev` locally).
+📚 **Documentation:** Mintlify site in [`docs-site/`](docs-site/README.md) — `cd docs-site` and run `npx mintlify dev` locally.
 
 This project is built with FastAPI, LangChain, LangGraph, LangSmith, Gemini, TigerData-backed Postgres, Neo4j, and Graphiti. It is not a generic agent sandbox. It is a stateful legal reasoning system designed around resumability, memory discipline, human review, and deterministic execution.
 
@@ -148,7 +148,8 @@ The same pattern shows up across domains:
 - Neo4j + Graphiti for graph-backed memory, precedent chains, and relationship traversal
 - Document ingestion and parsing with Docling
 - Web research and crawling with Crawl4AI and Tavily-backed tools
-- FastAPI APIs for ingestion, search, crawling, chat, knowledge base, and Agent Saul workflows
+- FastAPI APIs (v1 + v2) for ingestion, search, crawling, documents, billing,
+  and Agent Saul workflows
 - LangSmith tracing for execution visibility and debugging
 - Redis, Celery, and durable checkpoints for retries, resumability, and background work
 
@@ -164,7 +165,9 @@ The same pattern shows up across domains:
 
 ![Search system architecture overview](docs/diagrams/search_system_architecture_overview.svg)
 
-The architecture notes that drive this repo live in [tests/performance/Saul_agent_Arch.md](/home/harmeet/Desktop/Projects/langchain-fastapi-production/tests/performance/Saul_agent_Arch.md).
+The architecture notes that drive this repo live in [`docs-site/`](docs-site/README.md)
+(architecture section) and in the diagrams above. `docs/` holds working notes,
+not user documentation.
 
 ## Stack
 
@@ -242,10 +245,13 @@ Practical rules:
 - `uv`
 - `ruff`
 - `ty`
-- PostgreSQL or TigerData Postgres
-- Neo4j
-- Redis
-- MongoDB
+- PostgreSQL or TigerData Postgres (**required** — the app answers 503 without it,
+  and the schema needs the `vector`, `vectorscale`, `pg_trgm`, and `pg_textsearch`
+  extensions, which revision `0001` installs itself)
+- Neo4j (optional at boot — graph features stay disabled without it)
+- Redis (optional at boot — caching/idempotency helpers degrade without it)
+- MongoDB (optional at boot — document store stays disabled without it)
+- RabbitMQ for Celery (`docker compose up -d rabbitmq` covers local use)
 - Google Gemini API key
 - LangSmith API key for tracing, if you want observability enabled
 
@@ -254,11 +260,42 @@ Practical rules:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/Harmeet10000/langchain-fastapi-production.git
-cd langchain-fastapi-production
+git clone https://github.com/Harmeet10000/AgentNexus-LangChain-FastAPI.git
+cd AgentNexus-LangChain-FastAPI
 ```
 
-### 3. Install dependencies
+### 2. Configure the environment
+
+```bash
+cp .env.example .env.development
+```
+
+Settings load from `.env.development` (see `src/app/config/settings.py`). At minimum
+set `POSTGRES_URL`, `RABBITMQ_URL`, `GEMINI_API_KEY`, and the object-storage
+credentials; everything else degrades: without Redis/MongoDB/Neo4j the app boots
+with those features disabled, but **without PostgreSQL it refuses to start**
+(lifespan answers 503).
+
+### 3. Start local infrastructure
+
+```bash
+docker compose up -d rabbitmq timescale
+```
+
+This provides RabbitMQ and PostgreSQL. Revision `0001` installs the required
+extensions itself (`vector`, `vectorscale`, `pg_trgm`, `pg_textsearch`), then:
+
+```bash
+uv run alembic upgrade head
+```
+
+Note: the migration chain assumes the provisioned lineage — a brand-new database
+stops at revisions whose tables predate the chain (documented in
+`src/alembic/versions/0012_*` and `0014_*`). If `upgrade head` fails past the
+extensions, you are past what a fresh database can reach; use a provisioned
+snapshot instead.
+
+### 4. Install dependencies
 
 ```bash
 uv venv
@@ -267,10 +304,10 @@ uv sync
 uv sync --extra dev
 ```
 
-### 4. Run the app
+### 5. Run the app
 
 ```bash
-uv run uvicorn src.app.main:app --reload --reload-dir src --host 0.0.0.0 --port 5000 --no-access-log
+uv run uvicorn app.main:app --reload --reload-dir src --host 0.0.0.0 --port 5000 --no-access-log
 uv run python src/app/server.py
 ```
 
@@ -308,48 +345,40 @@ so a single shared pool makes those wait behind ingestion whenever every slot is
 ```text
 .
 ├── README.md
-├── docs/
-│   ├── README.md
-│   ├── CAP for AI Agents.md
-│   └── LANGGRAPH_COMPLETE_GUIDE.md
+├── docs/                       # working notes; user docs live in docs-site/
+│   └── diagrams/               # architecture SVGs rendered above
+├── docs-site/                  # Mintlify site (docs.json); run `npx mintlify dev` inside it
 ├── tests/
-│   ├── performance/
-│   │   ├── Saul_agent_Arch.md
-│   │   ├── agent_saul_full_architecture.svg
-│   │   └── python_memory_optimization_cheatsheet.md
+│   ├── unit/
 │   ├── integration/
 │   ├── e2e/
-│   └── unit/
+│   ├── property/
+│   └── performance/
 ├── src/
 │   ├── app/
-│   │   ├── api/
-│   │   ├── config/
-│   │   ├── connections/
-│   │   ├── features/
-│   │   │   ├── agent_saul/
-│   │   │   ├── ingestion/
-│   │   │   ├── knowledge_base/
-│   │   │   ├── search/
-│   │   │   └── web_scraping/
-│   │   ├── lifecycle/
-│   │   ├── middleware/
-│   │   ├── shared/
-│   │   │   ├── agents/
-│   │   │   ├── document_processing/
-│   │   │   ├── langchain_layer/
-│   │   │   ├── langgraph_layer/
-│   │   │   │   └── agent_saul/
-│   │   │   ├── mcp/
-│   │   │   ├── rag/
-│   │   │   │   └── graphiti/
-│   │   │   └── vectorstore/
-│   │   └── utils/
-│   ├── database/
-│   │   ├── schemas/
-│   │   └── seeders/
-│   └── tasks/
-├── infra/
-│   └── gcp/
+│   │   ├── api/                # v1 + v2 router composition, response envelope
+│   │   ├── features/           # auth, users, profile, documents, ingestion,
+│   │   │                       # crawler, agent_saul, billing, health, audit
+│   │   ├── connections/        # postgres, redis, mongo, neo4j, celery, s3, mailer
+│   │   ├── worker/             # role profiles, celery runtime, jobs, child lifecycle
+│   │   ├── events/             # transactional outbox model, writer, relay
+│   │   ├── lifecycle/          # startup/shutdown wiring (lifespan)
+│   │   ├── shared/             # cross-feature helpers, jobs contracts, rag
+│   │   ├── kernel/             # pure domain primitives, error vocabulary
+│   │   ├── extraction/         # docling, langextract engines
+│   │   ├── retrieval/          # ranking, chunk policy, context assembly
+│   │   ├── ai/                 # embeddings, agent runtime helpers
+│   │   ├── observability/      # logging, OTEL setup
+│   │   ├── security/           # auth primitives (see features/auth for policy)
+│   │   ├── resilience/         # retries, idempotency, rate limiting
+│   │   ├── mcp/                # FastMCP server
+│   │   ├── middleware/         # global exception handler
+│   │   ├── main.py             # `create_app()` factory; `app` instance
+│   │   └── server.py           # `uv run python src/app/server.py` entrypoint
+│   ├── alembic/                # migrations (see setup note about fresh databases)
+│   └── database/               # Base, registry, schemas, seeders
+├── docker-compose.yml          # rabbitmq, timescale, caddy, workers, beat
+├── infra/gcp/
 ├── docker/
 ├── caddy/
 ├── pyproject.toml
