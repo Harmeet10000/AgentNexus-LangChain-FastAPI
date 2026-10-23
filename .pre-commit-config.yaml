@@ -29,7 +29,7 @@ repos:
     hooks:
       - id: check-yaml
       # - id: check-added-large-files
-        # args: ["--maxkb=2000"]
+      # args: ["--maxkb=2000"]
       - id: check-json
       - id: check-toml
       - id: check-merge-conflict
@@ -37,14 +37,14 @@ repos:
       - id: detect-private-key
       - id: mixed-line-ending
         args: ["--fix=lf"]
-#   # Python-specific checks
-#   - repo: https://github.com/pre-commit/pygrep-hooks
-#     rev: v1.10.0
-#     hooks:
-#       - id: python-check-blanket-
-#       - id: python-check-blanket-type-ignore
-#       - id: python-no-eval
-#       - id: python-use-type-annotations
+  #   # Python-specific checks
+  #   - repo: https://github.com/pre-commit/pygrep-hooks
+  #     rev: v1.10.0
+  #     hooks:
+  #       - id: python-check-blanket-
+  #       - id: python-check-blanket-type-ignore
+  #       - id: python-no-eval
+  #       - id: python-use-type-annotations
 
   # Project-local checks
   # - repo: local
@@ -55,3 +55,12 @@ repos:
   #       language: system
   #       pass_filenames: false
   #       always_run: true
+  - repo: local
+    hooks:
+      - id: warn-large-staged-files
+        name: Warn about large staged files
+        entry: python scripts/warn_large_staged_files.py
+        language: system
+        types: [file]
+        exclude: '(?i)(^|/)(uv\.lock|poetry\.lock|Pipfile\.lock|package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lock(?:b)?|Cargo\.lock|Gemfile\.lock|composer\.lock|.*(?:\.generated|_generated|\.gen|_gen|\.min)\.[^/]+|.*_pb2\.py|.*\.pb\.go)$|(^|/)(?:generated|codegen|vendor|dist|build)/'
+        verbose: true
