@@ -128,7 +128,7 @@ local ttl = redis.call('TTL', KEYS[1])
 if ttl > 0 then
     redis.call('SETEX', KEYS[1], ttl, encoded)
 else
-    redis.call('SET', KEYS[1], encoded)
+    redis.call('SET', KEYS[1], encoded, 'KEEPTTL')
 end
 return 1
 """
