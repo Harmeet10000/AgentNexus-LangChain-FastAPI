@@ -109,6 +109,7 @@ jobs:
           POSTGRES_USER=test
           POSTGRES_PASSWORD=test
           POSTGRES_DB=test_db
+          POSTGRES_URL=postgresql://test:test@localhost:5432/test_db
           REDIS_URL=redis://localhost:6379
           LOG_LEVEL=DEBUG
           EOF
