@@ -15,7 +15,12 @@ from returns.result import Failure, Success
 
 from app.connections.redis import get_redis
 from app.features.auth.account_store import InMemoryAuthAccountStore, NewAuthAccount
-from app.features.auth.dependencies import get_token_claims, require_permission, require_role
+from app.features.auth.dependencies import (
+    get_optional_refresh_token_repository,
+    get_token_claims,
+    require_permission,
+    require_role,
+)
 from app.features.auth.dto import SessionResponse
 from app.features.auth.exceptions import AuthAuthenticationError, AuthInfrastructureError
 from app.features.auth.models import Permission, UserRole
@@ -91,6 +96,31 @@ async def test_http_claims_skip_redis_for_stateless_impersonation() -> None:
         result = await get_token_claims("raw-token", repo)
     assert result.sid is None
     repo.get_session.assert_not_awaited()
+
+
+async def test_stateless_impersonation_survives_missing_redis_dependency() -> None:
+    with patch("app.features.auth.dependencies.decode_token", return_value=_claims(sid=None)):
+        result = await get_token_claims("raw-token", None)
+
+    assert result.sid is None
+
+
+async def test_optional_session_repository_is_none_when_redis_failed_startup() -> None:
+    connection = type(
+        "Connection",
+        (),
+        {"app": type("App", (), {"state": type("State", (), {"redis": None})()})()},
+    )()
+
+    assert await get_optional_refresh_token_repository(connection) is None
+
+
+async def test_stateful_claims_fail_retryably_when_redis_dependency_is_missing() -> None:
+    with (
+        patch("app.features.auth.dependencies.decode_token", return_value=_claims()),
+        pytest.raises(InfrastructureException, match="Session store unavailable"),
+    ):
+        await get_token_claims("raw-token", None)
 
 
 async def test_http_claims_fail_closed_when_redis_verification_fails() -> None:

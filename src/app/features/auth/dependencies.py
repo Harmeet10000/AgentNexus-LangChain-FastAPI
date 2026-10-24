@@ -55,6 +55,20 @@ async def get_refresh_token_repository(
     return RefreshTokenRepository(redis)
 
 
+async def get_optional_refresh_token_repository(
+    connection: HTTPConnection,
+) -> RefreshTokenRepository | None:
+    """Build the session repository when Redis is available.
+
+    Token claims decode before deciding whether a Redis session lookup is
+    needed.  This preserves the intentional stateless ``sid=None``
+    impersonation path during a Redis startup outage while stateful tokens
+    still fail closed in ``get_token_claims``.
+    """
+    redis = getattr(connection.app.state, "redis", None)
+    return RefreshTokenRepository(redis) if redis is not None else None
+
+
 async def get_auth_service(
     account_store: Annotated[AuthAccountStore, Depends(get_account_store)],
     token_repo: Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)],
@@ -108,7 +122,9 @@ def extract_raw_token_from_connection(connection: HTTPConnection) -> str:
 
 async def get_token_claims(
     raw_token: Annotated[str, Depends(_extract_raw_token)],
-    token_repo: Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)],
+    token_repo: Annotated[
+        RefreshTokenRepository | None, Depends(get_optional_refresh_token_repository)
+    ],
 ) -> TokenClaims:
     """Decode claims and verify the Redis-backed session before user hydration.
 
@@ -120,6 +136,12 @@ async def get_token_claims(
         msg = "Expected an access token"
         raise UnauthorizedException(msg)
     if claims.sid is not None:
+        if token_repo is None:
+            raise InfrastructureException(
+                detail="Session store unavailable",
+                retryable=True,
+                data={"operation": "session_verification"},
+            )
         session_result = await token_repo.get_session(claims.sid)
         if isinstance(session_result, Failure):
             error = session_result.failure()
