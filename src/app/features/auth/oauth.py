@@ -68,6 +68,7 @@ class OAuthUserInfo(BaseModel):
     email: str
     provider_user_id: str
     full_name: str | None = None
+    email_verified: bool = False
 
 
 async def fetch_oauth_userinfo(
@@ -98,6 +99,7 @@ async def fetch_oauth_userinfo(
                 email=data["email"],
                 provider_user_id=data["sub"],
                 full_name=data.get("name"),
+                email_verified=data.get("email_verified", False) is True,
             )
 
         # GitHub: primary email may not be public — requires separate emails endpoint
@@ -106,17 +108,18 @@ async def fetch_oauth_userinfo(
             headers={"Accept": "application/vnd.github+json"},
         )
         user_data: dict[str, Any] = resp.json()
-        email: str | None = user_data.get("email")
-
-        if not email:
-            emails_resp = await client.get(
-                "https://api.github.com/user/emails",
-                headers={"Accept": "application/vnd.github+json"},
-            )
-            email = next(
-                (e["email"] for e in emails_resp.json() if e.get("primary") and e.get("verified")),
-                None,
-            )
+        emails_resp = await client.get(
+            "https://api.github.com/user/emails",
+            headers={"Accept": "application/vnd.github+json"},
+        )
+        email = next(
+            (
+                item["email"]
+                for item in emails_resp.json()
+                if item.get("primary") and item.get("verified") and item.get("email")
+            ),
+            None,
+        )
 
         if not email:
             msg = "GitHub account has no verified primary email"
@@ -126,4 +129,5 @@ async def fetch_oauth_userinfo(
             email=email,
             provider_user_id=str(user_data["id"]),
             full_name=user_data.get("name"),
+            email_verified=True,
         )

@@ -726,7 +726,7 @@ class BeanieAuthAccountStore:
                             provider_email=provider_email,
                         ).model_dump(mode="python")
                     },
-                    "$set": {"is_verified": True, "updated_at": now},
+                    "$set": {"updated_at": now},
                 },
                 return_document=ReturnDocument.AFTER,
             )

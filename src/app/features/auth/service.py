@@ -454,6 +454,18 @@ class AuthService:
                 return Failure(
                     AuthAuthenticationError(message="Account is disabled", source="auth_service")
                 )
+            if not userinfo.email_verified:
+                return Failure(
+                    AuthAuthenticationError(
+                        message="OAuth email is not verified", source="auth_service"
+                    )
+                )
+            if not account.is_verified:
+                return Failure(
+                    AuthAuthenticationError(
+                        message="Local account email is not verified", source="auth_service"
+                    )
+                )
             link_result = await self._account_store.link_oauth_account(
                 account.id,
                 provider,
@@ -474,6 +486,12 @@ class AuthService:
             )
 
         # Create new OAuth user
+        if not userinfo.email_verified:
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth email is not verified", source="auth_service"
+                )
+            )
         new_account = NewAuthAccount(
             email=userinfo.email.lower(),
             password_hash=None,  # OAuth-only account
@@ -521,6 +539,7 @@ class AuthService:
                     device_id=s.device_id,
                     device_name=s.device_name,
                     ip_address=s.ip_address,
+                    user_agent=s.user_agent,
                     created_at=s.created_at,
                     expires_at=s.expires_at,
                     is_current=s.session_id == current_session_id,
