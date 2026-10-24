@@ -126,6 +126,9 @@ async def test_link_callback_requires_confirmation_and_consumes_action_once() ->
     candidate = callback_result.unwrap()
     assert candidate.provider_email == "provider@example.com"
     assert (await store.find_by_id(account_id)).unwrap().oauth_accounts == ()
+    replay_callback = await service.oauth_callback("google", "code", state, "signed")
+    assert isinstance(replay_callback, Failure)
+    assert isinstance(replay_callback.failure(), AuthAuthenticationError)
     preview = await service.oauth_link_preview(
         candidate.action_token, user_id=account_id, session_id=session_id
     )
@@ -183,6 +186,36 @@ async def test_link_preview_rejects_wrong_session_and_expired_state() -> None:
     )
     assert isinstance(expired, Failure)
     assert isinstance(expired.failure(), AuthAuthenticationError)
+
+
+async def test_link_callback_requires_provider_email_verification() -> None:
+    store, repo, account_id, session_id = await _account_and_session()
+    service = AuthService(store, repo)
+    await repo.create_oauth_link_intent(
+        user_id=account_id,
+        session_id=session_id,
+        provider="google",
+        authz_revision=0,
+        state="unverified-provider-state",
+    )
+    with (
+        patch("app.features.auth.service.verify_oauth_state", return_value=True),
+        patch("app.features.auth.service.get_oauth_config"),
+        patch(
+            "app.features.auth.service.fetch_oauth_userinfo",
+            return_value=OAuthUserInfo(
+                email="provider@example.com",
+                provider_user_id="google-subject",
+                email_verified=False,
+            ),
+        ),
+    ):
+        result = await service.oauth_callback(
+            "google", "code", "unverified-provider-state", "signed"
+        )
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), AuthAuthenticationError)
+    assert (await store.find_by_id(account_id)).unwrap().oauth_accounts == ()
 
 
 async def test_link_callback_rejects_provider_mixup_and_old_session() -> None:
