@@ -122,11 +122,11 @@ async def test_link_callback_requires_confirmation_and_consumes_action_once() ->
         ),
     ):
         callback_result = await service.oauth_callback("google", "code", state, "signed")
+        replay_callback = await service.oauth_callback("google", "code", state, "signed")
     assert isinstance(callback_result, Success)
     candidate = callback_result.unwrap()
     assert candidate.provider_email == "provider@example.com"
     assert (await store.find_by_id(account_id)).unwrap().oauth_accounts == ()
-    replay_callback = await service.oauth_callback("google", "code", state, "signed")
     assert isinstance(replay_callback, Failure)
     assert isinstance(replay_callback.failure(), AuthAuthenticationError)
     preview = await service.oauth_link_preview(

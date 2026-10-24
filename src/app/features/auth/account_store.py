@@ -837,7 +837,11 @@ class BeanieAuthAccountStore:
                     },
                     "$or": [
                         {"hashed_password": {"$ne": None}},
-                        {"$expr": {"$gt": [{"$size": "$oauth_accounts"}, 1]}},
+                        {
+                            "oauth_accounts": {
+                                "$elemMatch": {"provider": {"$ne": provider}}
+                            }
+                        },
                     ],
                 },
                 {
@@ -1046,7 +1050,9 @@ class InMemoryAuthAccountStore:
                     source="auth_account_store",
                 )
             )
-        if account.password_hash is None and len(account.oauth_accounts) <= 1:
+        if account.password_hash is None and not any(
+            linked.provider != provider for linked in account.oauth_accounts
+        ):
             return Failure(
                 AuthConflictError(
                     message="Cannot remove the last sign-in method",

@@ -458,22 +458,23 @@ class RefreshTokenRepository:
         provider_user_id: str,
         provider_email: str,
         full_name: str | None,
-        ttl: int = 300,
     ) -> AuthResult[tuple[OAuthLinkIntent, str]]:
         intent_result = await self.get_oauth_link_intent(state)
         if isinstance(intent_result, Failure):
             return Failure(intent_result.failure())
         intent = intent_result.unwrap()
-        if intent is None or intent.ready_for_confirmation:
+        now = datetime.now(UTC)
+        if intent is None or intent.ready_for_confirmation or intent.expires_at <= now:
             return Failure(
                 AuthAuthenticationError(
                     message="OAuth link transaction is invalid or already completed",
                     source="auth_repository",
                 )
             )
+        remaining_ttl = max(1, int((intent.expires_at - now).total_seconds()))
         completion_key = _OAUTH_LINK_COMPLETE_KEY.format(intent.state_digest)
         try:
-            claimed = await self._redis.set(completion_key, "1", ex=ttl, nx=True)
+            claimed = await self._redis.set(completion_key, "1", ex=remaining_ttl, nx=True)
         except RedisError as exc:
             exc.add_note("auth_repository operation=claim_oauth_link_intent")
             return Failure(
@@ -504,12 +505,12 @@ class RefreshTokenRepository:
             await self._redis.set(
                 _OAUTH_LINK_STATE_KEY.format(intent.state_digest),
                 completed.model_dump_json(),
-                ex=ttl,
+                ex=remaining_ttl,
             )
             await self._redis.set(
                 _OAUTH_LINK_ACTION_KEY.format(action_digest),
                 completed.model_dump_json(),
-                ex=ttl,
+                ex=remaining_ttl,
             )
             return Success((completed, action_token))
         except RedisError as exc:

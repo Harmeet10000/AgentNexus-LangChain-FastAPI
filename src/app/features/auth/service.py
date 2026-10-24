@@ -547,7 +547,11 @@ class AuthService:
         if isinstance(candidate_result, Failure):
             return Failure(candidate_result.failure())
         candidate = candidate_result.unwrap()
-        if candidate is None or not candidate.ready_for_confirmation:
+        if (
+            candidate is None
+            or not candidate.ready_for_confirmation
+            or candidate.expires_at <= datetime.now(UTC)
+        ):
             await self._emit_oauth_link_security_event(
                 "auth.oauth_link_replayed",
                 user_id,
@@ -614,7 +618,11 @@ class AuthService:
         if isinstance(candidate_result, Failure):
             return Failure(candidate_result.failure())
         candidate = candidate_result.unwrap()
-        if candidate is None or not candidate.ready_for_confirmation:
+        if (
+            candidate is None
+            or not candidate.ready_for_confirmation
+            or candidate.expires_at <= datetime.now(UTC)
+        ):
             await self._emit_oauth_link_security_event(
                 "auth.oauth_link_replayed",
                 user_id,
