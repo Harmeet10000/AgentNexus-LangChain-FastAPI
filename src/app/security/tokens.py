@@ -6,8 +6,10 @@ callers pass `.value`. The default role below is the token contract's default,
 not auth policy.
 """
 
+import hmac
 import time
 from datetime import timedelta
+from hashlib import sha256
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -42,6 +44,11 @@ class TokenClaims(BaseModel):
     authz_revision: int | None = None
     device_id: str | None = None
     impersonated_by: str | None = None  # ← new
+    audience: str | None = None
+    family_id: str | None = None
+    parent_jti: str | None = None
+    refresh_generation: int | None = None
+    refresh_secret: str | None = None
 
 
 def _jwt_key() -> bytes:
@@ -78,6 +85,7 @@ def create_access_token(
         "role": role,
         "permissions": list(permissions),
         "authz_revision": authz_revision,
+        "aud": "auth",
         "type": "access",
     }
     token = jwt_encode(_JWT_HEADER, claims, _jwt_oct_key())
@@ -89,24 +97,53 @@ def create_refresh_token(
     session_id: str,
     device_id: str,
     expire_days: int | None = None,
+    *,
+    family_id: str | None = None,
+    token_id: str | None = None,
+    token_secret: str | None = None,
+    generation: int | None = None,
+    parent_jti: str | None = None,
+    expire_seconds: int | None = None,
+    authz_revision: int | None = None,
 ) -> tuple[str, int]:
-    """Return (encoded_jwt, expires_in_seconds). session_id is stored as jti."""
+    """Create a legacy or family-bound refresh token."""
     settings = get_settings()
     expire_d = expire_days or settings.REFRESH_TOKEN_EXPIRE_DAYS
     now = int(time.time())
-    expire_secs = int(timedelta(days=expire_d).total_seconds())
+    expire_secs = expire_seconds or int(timedelta(days=expire_d).total_seconds())
 
     claims = {
         "sub": user_id,
         "iss": settings.JWT_ISSUER,
         "iat": now,
         "exp": now + expire_secs,
-        "jti": session_id,
+        "jti": token_id or session_id,
+        "sid": session_id if family_id is not None else None,
         "device_id": device_id,
+        "aud": "auth",
         "type": "refresh",
     }
+    if family_id is not None:
+        claims.update(
+            {
+                "family_id": family_id,
+                "parent_jti": parent_jti,
+                "refresh_generation": generation,
+                "refresh_secret": token_secret,
+                "authz_revision": authz_revision,
+            }
+        )
     token = jwt_encode(_JWT_HEADER, claims, _jwt_oct_key())
     return token, expire_secs
+
+
+def derive_refresh_token_material(family_id: str, generation: int) -> tuple[str, str]:
+    """Derive token id/secret without persisting raw token material."""
+    key = _jwt_key()
+    context = f"refresh-family:{family_id}:{generation}".encode()
+    secret = hmac.new(key, context, sha256).hexdigest()
+    token_id = hmac.new(key, b"id:" + context, sha256).hexdigest()
+    return token_id, secret
 
 
 def create_impersonation_token(
@@ -153,6 +190,15 @@ def decode_token(token: str) -> TokenClaims:
         msg = "Invalid token"
         raise UnauthorizedException(msg) from exc
 
+    settings = get_settings()
+    if token_obj.claims.get("iss") != settings.JWT_ISSUER:
+        issuer_error = "Invalid token issuer"
+        raise UnauthorizedException(issuer_error)
+    audience = token_obj.claims.get("aud")
+    if audience is not None and audience != "auth":
+        audience_error = "Invalid token audience"
+        raise UnauthorizedException(audience_error)
+
     return TokenClaims(
         sub=token_obj.claims["sub"],
         jti=token_obj.claims["jti"],
@@ -163,6 +209,11 @@ def decode_token(token: str) -> TokenClaims:
         authz_revision=token_obj.claims.get("authz_revision"),
         device_id=token_obj.claims.get("device_id"),
         impersonated_by=token_obj.claims.get("impersonated_by"),  # ← new
+        audience=audience,
+        family_id=token_obj.claims.get("family_id"),
+        parent_jti=token_obj.claims.get("parent_jti"),
+        refresh_generation=token_obj.claims.get("refresh_generation"),
+        refresh_secret=token_obj.claims.get("refresh_secret"),
     )
 
 
