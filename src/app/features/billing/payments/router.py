@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header, Path, Query, Response, status
 from returns.result import Failure
 
-from app.features.auth.dependencies import CurrentClaims, CurrentVerifiedUser
+from app.features.auth.dependencies import CurrentVerifiedUser
 from app.features.billing.subscriptions.dependencies import SubscriptionServiceDep
 from app.kernel.result import render_result
 from app.utils import APIResponse
@@ -68,7 +68,7 @@ async def refund_payment(  # noqa: PLR0917 - endpoint needs path payload, servic
     payload: RefundRequestDTO,
     service: PaymentServiceDep,
     sub_service: SubscriptionServiceDep,
-    claims: CurrentClaims,
+    user: CurrentVerifiedUser,
     response: Response,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> APIResponse[RefundResponse]:
@@ -77,7 +77,8 @@ async def refund_payment(  # noqa: PLR0917 - endpoint needs path payload, servic
         return render_result(
             resolved, response, message="Refund issued", success_status=status.HTTP_200_OK
         )
-    ownership = await sub_service.get_subscription(claims.sub, resolved.unwrap().subscription_id)
+    user_id = str(user.id)
+    ownership = await sub_service.get_subscription(user_id, resolved.unwrap().subscription_id)
     if isinstance(ownership, Failure):
         error = ownership.failure()
         return render_result(
@@ -89,7 +90,7 @@ async def refund_payment(  # noqa: PLR0917 - endpoint needs path payload, servic
     refund = await service.refund(
         payment_id,
         payload,
-        user_id=claims.sub,
+        user_id=user_id,
         idempotency_key=idempotency_key,
     )
     return render_result(
