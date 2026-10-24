@@ -77,6 +77,14 @@ jobs:
           docker restart "$container_id"
           timeout 30 bash -c 'until redis-cli -h localhost -p 6379 ping | grep -qx PONG; do sleep 1; done'
 
+      - name: Verify session store after Redis restart
+        run: >-
+          uv run pytest tests/integration/features/auth/test_live_redis_session_store.py
+          -m integration -k test_real_redis_refusal_is_typed_and_recovery_succeeds
+          -v --tb=short
+        env:
+          ENVIRONMENT: test
+
       - name: Upload Redis diagnostics
         if: failure()
         run: |
