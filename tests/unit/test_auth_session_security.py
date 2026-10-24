@@ -13,6 +13,7 @@ from fakeredis.aioredis import FakeRedis
 from fastapi import Response
 from returns.result import Failure, Success
 
+from app.connections.redis import get_redis
 from app.features.auth.account_store import InMemoryAuthAccountStore, NewAuthAccount
 from app.features.auth.dependencies import get_token_claims, require_permission, require_role
 from app.features.auth.dto import SessionResponse
@@ -68,6 +69,20 @@ async def test_http_claims_fail_closed_when_redis_session_is_missing() -> None:
         pytest.raises(UnauthorizedException, match="Session expired or revoked"),
     ):
         await get_token_claims("raw-token", repo)
+
+
+async def test_redis_dependency_reports_retryable_startup_failure() -> None:
+    connection = type(
+        "Connection",
+        (),
+        {"app": type("App", (), {"state": type("State", (), {"redis": None})()})()},
+    )()
+
+    with pytest.raises(InfrastructureException) as raised:
+        await get_redis(connection)
+
+    assert raised.value.status_code == 503
+    assert raised.value.detail["data"]["operation"] == "redis_dependency"
 
 
 async def test_http_claims_skip_redis_for_stateless_impersonation() -> None:

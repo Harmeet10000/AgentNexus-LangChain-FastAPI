@@ -4,6 +4,8 @@ from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
 from starlette.requests import HTTPConnection
 
+from app.utils import InfrastructureException
+
 # from tenacity import retry, stop_after_attempt, wait_exponential
 
 
@@ -59,4 +61,11 @@ async def close_redis_client(client: Redis | None) -> None:
 
 
 async def get_redis(connection: HTTPConnection) -> Redis:
-    return connection.app.state.redis
+    redis = getattr(connection.app.state, "redis", None)
+    if redis is None:
+        raise InfrastructureException(
+            detail="Redis session store unavailable",
+            retryable=True,
+            data={"operation": "redis_dependency"},
+        )
+    return redis
