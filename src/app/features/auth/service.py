@@ -67,6 +67,7 @@ _REFRESH_ROTATIONS = _REFRESH_METER.create_counter("auth.refresh.rotations")
 _REFRESH_REPLAYS = _REFRESH_METER.create_counter("auth.refresh.replays")
 _REFRESH_GRACE_RETRIES = _REFRESH_METER.create_counter("auth.refresh.grace_retries")
 _REFRESH_FAILURES = _REFRESH_METER.create_counter("auth.refresh.failures")
+_REFRESH_FAMILY_REVOKES = _REFRESH_METER.create_counter("auth.refresh.family_revocations")
 
 # Dummy hash used in the constant-time negative path during login.
 # Prevents timing attacks that would reveal whether an email is registered.
@@ -220,6 +221,7 @@ class AuthService:
             )
             if isinstance(family_result, Failure):
                 return Failure(family_result.failure())
+            _REFRESH_FAMILY_REVOKES.add(1, {"reason": "logout"})
         revoke_result = await self._token_repo.revoke_session(
             session_id=session_id,
             user_id=claims.sub,
@@ -323,6 +325,7 @@ class AuthService:
         rotation = rotation_result.unwrap()
         if rotation.status == "reused":
             _REFRESH_REPLAYS.add(1, {"reason": "family_reuse"})
+            _REFRESH_FAMILY_REVOKES.add(1, {"reason": "refresh_reuse"})
             await self._emit_security_event(
                 "auth.refresh_token_reuse_detected",
                 account.id,
@@ -1206,6 +1209,7 @@ class AuthService:
             if isinstance(family_result, Failure):
                 log_expected_failure(family_result.failure(), operation="revoke_refresh_family")
                 return Failure(family_result.failure())
+            _REFRESH_FAMILY_REVOKES.add(1, {"reason": "manual_revoke"})
         revoke_result = await self._token_repo.revoke_session(
             session_id=session_id,
             user_id=user_id,
@@ -1230,6 +1234,7 @@ class AuthService:
         if isinstance(revoke_result, Failure):
             log_expected_failure(revoke_result.failure(), operation="revoke_all_user_sessions")
             return Failure(revoke_result.failure())
+        _REFRESH_FAMILY_REVOKES.add(1, {"reason": "revoke_all"})
         return Success(None)
 
     @trace_layer("service")
@@ -1289,6 +1294,7 @@ class AuthService:
             if isinstance(family_result, Failure):
                 log_expected_failure(family_result.failure(), operation="revoke_refresh_family")
                 return Failure(family_result.failure())
+            _REFRESH_FAMILY_REVOKES.add(1, {"reason": reason})
 
         # Revoke the session
         revoke_result = await self._token_repo.revoke_session(

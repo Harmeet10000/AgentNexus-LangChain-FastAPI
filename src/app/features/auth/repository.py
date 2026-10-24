@@ -71,7 +71,7 @@ for _, session_id in ipairs(session_ids) do
         if session_raw then
             local ok, session = pcall(cjson.decode, session_raw)
             if ok and type(session.family_id) == 'string' then
-                local family_key = 'auth:refresh_family:' .. session.family_id
+                local family_key = (ARGV[6] or 'auth:refresh_family:') .. session.family_id
                 if redis.call('EXISTS', family_key) == 1 then
                     redis.call('HSET', family_key,
                         'status', 'revoked', 'revoke_reason', ARGV[4], 'revoked_at', ARGV[5])
@@ -110,6 +110,8 @@ redis.call('HSET', KEYS[1],
     'previous_generation', '',
     'previous_grace_until', '',
     'legacy', ARGV[11],
+    'session_key', ARGV[12],
+    'user_sessions_key', ARGV[13],
     'status', 'active')
 redis.call('EXPIREAT', KEYS[1], ARGV[10])
 return 1
@@ -128,10 +130,11 @@ local current_generation = tonumber(redis.call('HGET', KEYS[1], 'generation'))
 if ARGV[1] == current_id then
     if ARGV[2] ~= current_secret then
         redis.call('HSET', KEYS[1], 'status', 'revoked', 'revoke_reason', 'refresh_secret_mismatch', 'revoked_at', ARGV[6])
+        local session_key = redis.call('HGET', KEYS[1], 'session_key')
+        local user_sessions_key = redis.call('HGET', KEYS[1], 'user_sessions_key')
         local session_id = redis.call('HGET', KEYS[1], 'session_id')
-        local user_id = redis.call('HGET', KEYS[1], 'user_id')
-        redis.call('DEL', 'auth:session:' .. session_id)
-        redis.call('SREM', 'auth:user_sessions:' .. user_id, session_id)
+        redis.call('DEL', session_key)
+        redis.call('SREM', user_sessions_key, session_id)
         return {'reused'}
     end
     redis.call('HSET', KEYS[1],
@@ -154,10 +157,11 @@ if ARGV[1] == previous_id and ARGV[2] == previous_secret and tonumber(ARGV[6]) <
 end
 if ARGV[1] == previous_id or ARGV[1] == current_id then
     redis.call('HSET', KEYS[1], 'status', 'revoked', 'revoke_reason', 'refresh_reuse', 'revoked_at', ARGV[6])
+    local session_key = redis.call('HGET', KEYS[1], 'session_key')
+    local user_sessions_key = redis.call('HGET', KEYS[1], 'user_sessions_key')
     local session_id = redis.call('HGET', KEYS[1], 'session_id')
-    local user_id = redis.call('HGET', KEYS[1], 'user_id')
-    redis.call('DEL', 'auth:session:' .. session_id)
-    redis.call('SREM', 'auth:user_sessions:' .. user_id, session_id)
+    redis.call('DEL', session_key)
+    redis.call('SREM', user_sessions_key, session_id)
     return {'reused'}
 end
 return {'invalid'}
@@ -166,8 +170,10 @@ return {'invalid'}
 _REVOKE_REFRESH_FAMILY_SCRIPT = """
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 redis.call('HSET', KEYS[1], 'status', 'revoked', 'revoke_reason', ARGV[1], 'revoked_at', ARGV[2])
-redis.call('DEL', 'auth:session:' .. ARGV[4])
-redis.call('SREM', 'auth:user_sessions:' .. ARGV[3], ARGV[4])
+local session_key = redis.call('HGET', KEYS[1], 'session_key')
+local user_sessions_key = redis.call('HGET', KEYS[1], 'user_sessions_key')
+redis.call('DEL', session_key)
+redis.call('SREM', user_sessions_key, ARGV[4])
 return 1
 """
 
@@ -507,6 +513,12 @@ class RefreshTokenRepository:
     def _session_key_prefix(self) -> str:
         return f"{self._key_prefix}auth:session:"
 
+    def _refresh_family_key(self, family_id: str) -> str:
+        return f"{self._key_prefix}{_REFRESH_FAMILY_KEY.format(family_id)}"
+
+    def _refresh_family_key_prefix(self) -> str:
+        return f"{self._key_prefix}auth:refresh_family:"
+
     @staticmethod
     def _digest(value: str) -> str:
         return sha256(value.encode()).hexdigest()
@@ -709,7 +721,7 @@ class RefreshTokenRepository:
             created = await self._redis.eval(
                 _CREATE_REFRESH_FAMILY_SCRIPT,
                 1,
-                _REFRESH_FAMILY_KEY.format(family_id),
+                self._refresh_family_key(family_id),
                 family_id,
                 user_id,
                 session_id,
@@ -721,6 +733,8 @@ class RefreshTokenRepository:
                 int(issued_at.timestamp()),
                 int(expires_at.timestamp()),
                 "1" if legacy else "0",
+                self._session_key(session_id),
+                self._user_sessions_key(user_id),
             )
             if int(created) == 0:
                 return Success(None)
@@ -749,7 +763,7 @@ class RefreshTokenRepository:
         grace_seconds: int,
     ) -> AuthResult[RefreshRotationOutcome]:
         """Atomically rotate a family and classify benign retry versus reuse."""
-        family_key = _REFRESH_FAMILY_KEY.format(family_id)
+        family_key = self._refresh_family_key(family_id)
         try:
             result = await self._redis.eval(
                 _ROTATE_REFRESH_TOKEN_SCRIPT,
@@ -800,7 +814,7 @@ class RefreshTokenRepository:
             await self._redis.eval(
                 _REVOKE_REFRESH_FAMILY_SCRIPT,
                 1,
-                _REFRESH_FAMILY_KEY.format(family_id),
+                self._refresh_family_key(family_id),
                 reason,
                 int(datetime.now(UTC).timestamp()),
                 user_id,
@@ -923,6 +937,7 @@ class RefreshTokenRepository:
             "" if authz_revision is None else authz_revision,
             reason,
             int(datetime.now(UTC).timestamp()),
+            self._refresh_family_key_prefix(),
         )
         revoked_ids = [item.decode() if isinstance(item, bytes) else str(item) for item in raw_ids]
         if revoked_ids:
