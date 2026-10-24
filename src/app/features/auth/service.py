@@ -488,6 +488,7 @@ class AuthService:
             provider=provider,
             authz_revision=account.role_revision,
             state=state,
+            account_email=account.email,
         )
         if isinstance(intent_result, Failure):
             return Failure(intent_result.failure())
@@ -517,14 +518,20 @@ class AuthService:
         if isinstance(session_result, Failure):
             return Failure(session_result.failure())
         session = session_result.unwrap()
-        if (
-            session is None
-            or session.user_id != intent.user_id
-            or session.authz_revision != account.role_revision
-            or account.role_revision != intent.authz_revision
-            or session.created_at
-            < datetime.now(UTC) - timedelta(seconds=_OAUTH_LINK_RECENT_AUTH_SECONDS)
-        ):
+        email_unchanged = (
+            intent.account_email is None
+            or account.email.lower() == intent.account_email.lower()
+        )
+        session_valid = (
+            session is not None
+            and session.user_id == intent.user_id
+            and email_unchanged
+            and session.authz_revision == account.role_revision
+            and account.role_revision == intent.authz_revision
+            and session.created_at
+            >= datetime.now(UTC) - timedelta(seconds=_OAUTH_LINK_RECENT_AUTH_SECONDS)
+        )
+        if not session_valid:
             return Failure(
                 AuthAuthenticationError(
                     message="OAuth link authorization is stale; authenticate again",

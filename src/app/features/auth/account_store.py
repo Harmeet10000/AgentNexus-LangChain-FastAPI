@@ -829,20 +829,16 @@ class BeanieAuthAccountStore:
                         source="auth_account_store",
                     )
                 )
-            if user.hashed_password is None and len(user.oauth_accounts) <= 1:
-                return Failure(
-                    AuthConflictError(
-                        message="Cannot remove the last sign-in method",
-                        details={"provider": provider},
-                        source="auth_account_store",
-                    )
-                )
-            await self._User.get_pymongo_collection().find_one_and_update(
+            updated = await self._User.get_pymongo_collection().find_one_and_update(
                 {
                     "_id": BsonObjectId(account_id),
                     "oauth_accounts": {
                         "$elemMatch": {"provider": provider},
                     },
+                    "$or": [
+                        {"hashed_password": {"$ne": None}},
+                        {"$expr": {"$gt": [{"$size": "$oauth_accounts"}, 1]}},
+                    ],
                 },
                 {
                     "$pull": {"oauth_accounts": {"provider": provider}},
@@ -850,7 +846,31 @@ class BeanieAuthAccountStore:
                 },
                 return_document=ReturnDocument.AFTER,
             )
-            return Success(None)
+            if updated is not None:
+                return Success(None)
+
+            # The conditional update is the ownership/last-method guard.  A
+            # second read only classifies a failed update; it is deliberately
+            # not used as a precondition, so concurrent unlink requests cannot
+            # both pass a read-then-write check.
+            current = await self._User.get(BsonObjectId(account_id))
+            if current is None:
+                return Failure(
+                    AuthNotFoundError(
+                        message="User not found",
+                        details={"user_id": account_id},
+                        source="auth_account_store",
+                    )
+                )
+            if not any(linked.provider == provider for linked in current.oauth_accounts):
+                return Success(None)
+            return Failure(
+                AuthConflictError(
+                    message="Cannot remove the last sign-in method",
+                    details={"provider": provider},
+                    source="auth_account_store",
+                )
+            )
         except PyMongoError as exc:
             exc.add_note("auth_account_store operation=unlink_oauth_account")
             return Failure(

@@ -128,6 +128,10 @@ class OAuthLinkIntent(BaseModel):
     user_id: str
     session_id: str
     provider: str
+    # The local email at link start is part of the transaction binding.  It
+    # prevents an account-email change between callback and confirmation from
+    # silently changing which local identity the provider assertion applies to.
+    account_email: str | None = None
     authz_revision: int
     created_at: datetime
     expires_at: datetime
@@ -392,6 +396,7 @@ class RefreshTokenRepository:
         provider: str,
         authz_revision: int,
         state: str,
+        account_email: str | None = None,
         ttl: int = 300,
     ) -> AuthResult[None]:
         now = datetime.now(UTC)
@@ -400,6 +405,7 @@ class RefreshTokenRepository:
             user_id=user_id,
             session_id=session_id,
             provider=provider,
+            account_email=account_email.lower() if account_email is not None else None,
             authz_revision=authz_revision,
             created_at=now,
             expires_at=now + timedelta(seconds=ttl),
