@@ -250,7 +250,7 @@ class InvocationPolicy(AgentMiddleware):
         self, state: AgentState, runtime: Runtime
     ) -> dict[str, Any] | None:
         context = runtime.context
-        if not context.tenant_id or not context.user_id:
+        if context is None or not context.tenant_id or not context.user_id:
             raise PermissionError("Missing trusted invocation identity")
         return None
 ```
@@ -272,6 +272,17 @@ class ToolObservation(AgentMiddleware):
         except Exception:
             self.metrics.finish_tool(started, "error")
             raise
+
+    async def awrap_tool_call(self, request, handler):
+        # Keep the async path instrumented for astream()/ainvoke() callers.
+        started = self.metrics.start_tool(request)
+        try:
+            result = await handler(request)
+            self.metrics.finish_tool(started, "ok")
+            return result
+        except Exception:
+            self.metrics.finish_tool(started, "error")
+            raise
 ```
 
 Use only request attributes confirmed by the installed API, keep middleware instances stateless or concurrency-safe, and put tenant-specific services in invocation runtime/context rather than mutable class fields. Async hooks and wrappers exist, but sync/async execution behavior is adapter-dependent; do not block an event loop with synchronous I/O. The docs recommend graceful error handling and independent middleware testing; application policy should define whether an exception propagates, becomes an error result, or stops the run. [5] [5]
@@ -288,7 +299,7 @@ WebSocket request
   -> acquire/validate Redis ownership token
   -> construct trusted runtime context and request-scoped providers
   -> compile graph with checkpointer=Postgres
-       -> graph.invoke(input, config={"configurable": {"thread_id": server_owned_thread}})
+       -> graph.astream(input, config={"configurable": {"thread_id": server_owned_thread}})
        -> before_agent: tenant/run policy validation
        -> before_model: input policy / optional PII transform
        -> model limit
