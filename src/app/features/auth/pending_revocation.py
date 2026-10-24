@@ -280,7 +280,17 @@ class PendingRevocationReconciler:
                 poisoned=report.poisoned + result.get("poisoned", 0),
             )
         if user_id is None and not dry_run:
-            next_offset = offset + len(users) if len(users) >= self._config.batch_size else 0
+            # Mongo ``skip`` is not a stable cursor while successful users are
+            # removed from the queue. Advance only through a page that made
+            # no progress (for example, all users are in backoff); otherwise
+            # restart at the head so a deletion cannot skip later users.
+            next_offset = (
+                offset + len(users)
+                if len(users) >= self._config.batch_size
+                and report.succeeded == 0
+                and report.stale_revision == 0
+                else 0
+            )
             try:
                 await self._await_budget(
                     self._redis.set(
