@@ -234,9 +234,7 @@ class ChatTranscriptRepository:
                 ).scalar_one_or_none()
                 session_row = (
                     await session.execute(
-                        select(ChatSession)
-                        .where(ChatSession.session_id == sid)
-                        .with_for_update()
+                        select(ChatSession).where(ChatSession.session_id == sid).with_for_update()
                     )
                 ).scalar_one()
                 if session_row.user_id != uid:
