@@ -554,8 +554,7 @@ class WebSocketSecurityService:
                 )
                 delay = base_delay
                 if self._revocation_needs_gap_check:
-                    await self._check_revocation_stream_gap()
-                    self._revocation_needs_gap_check = False
+                    self._revocation_needs_gap_check = not await self._check_revocation_stream_gap()
                 for _stream, entries in records or []:
                     stream_entries = cast("list[tuple[object, object]]", entries)
                     for stream_id, fields in stream_entries:
@@ -583,14 +582,14 @@ class WebSocketSecurityService:
     def _decode_stream_id(value: object) -> str:
         return value.decode() if isinstance(value, bytes) else str(value)
 
-    async def _check_revocation_stream_gap(self) -> None:
+    async def _check_revocation_stream_gap(self) -> bool:
         if self._redis is None or self._revocation_last_id == "$":
-            return
+            return True
         try:
             info = await self._redis.xinfo_stream(REVOCATION_STREAM_KEY)
             first_entry = info.get("first-entry") or info.get(b"first-entry")
             if not first_entry:
-                return
+                return True
             first_id = self._decode_stream_id(first_entry[0])
             if self._stream_id_tuple(self._revocation_last_id) < self._stream_id_tuple(first_id):
                 REVOCATION_STREAM_GAPS.add(1)
@@ -599,10 +598,14 @@ class WebSocketSecurityService:
                     cursor=self._revocation_last_id,
                     first_available=first_id,
                 ).warning("WebSocket revocation stream entries were trimmed during outage")
+            else:
+                return True
+            return True  # noqa: TRY300
         except Exception as exc:  # noqa: BLE001 — diagnostics cannot stop reconnect
             logger.bind(operation="websocket_revocation_stream_gap_check", error=str(exc)).warning(
                 "Unable to check WebSocket revocation stream continuity"
             )
+            return False
 
     @staticmethod
     def _stream_id_tuple(value: str) -> tuple[int, int]:
