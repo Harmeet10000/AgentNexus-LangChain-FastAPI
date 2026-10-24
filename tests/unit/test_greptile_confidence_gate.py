@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 
 SCRIPT = Path(__file__).parents[2] / ".github" / "scripts" / "greptile_confidence_gate.py"
 SPEC = importlib.util.spec_from_file_location("greptile_confidence_gate", SCRIPT)
-assert SPEC is not None and SPEC.loader is not None
+if SPEC is None or SPEC.loader is None:
+    raise RuntimeError("unable to load Greptile gate module")
 GATE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = GATE
 SPEC.loader.exec_module(GATE)
