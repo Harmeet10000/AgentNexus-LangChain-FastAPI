@@ -50,6 +50,10 @@ return 1
 
 _REVOKE_ALL_SESSIONS_SCRIPT = """
 if ARGV[3] ~= '' then
+    local current_revision = redis.call('GET', KEYS[2])
+    if current_revision and tonumber(current_revision) > tonumber(ARGV[3]) then
+        return {}
+    end
     redis.call('SET', KEYS[2], ARGV[3])
 end
 local session_ids = redis.call('SMEMBERS', KEYS[1])
