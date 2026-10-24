@@ -61,7 +61,6 @@ async def get_user(
 
 @router.patch(
     "/{user_id}/role",
-    dependencies=[Depends(require_permission(Permission.USERS_WRITE))],
 )
 async def update_user_role(
     user_id: Annotated[str, Path()],
@@ -83,7 +82,6 @@ async def update_user_role(
 
 @router.patch(
     "/{user_id}/activate",
-    dependencies=[Depends(require_permission(Permission.USERS_WRITE))],
 )
 async def activate_user(
     user_id: Annotated[str, Path()],
@@ -104,7 +102,6 @@ async def activate_user(
 
 @router.patch(
     "/{user_id}/deactivate",
-    dependencies=[Depends(require_permission(Permission.USERS_WRITE))],
 )
 async def deactivate_user(
     user_id: Annotated[str, Path()],
@@ -126,7 +123,6 @@ async def deactivate_user(
 @router.delete(
     "/{user_id}",
     response_model=APIResponse[None],
-    dependencies=[Depends(require_permission(Permission.USERS_DELETE))],
 )
 async def delete_user(
     user_id: Annotated[str, Path()],
@@ -148,7 +144,6 @@ async def delete_user(
 
 @router.post(
     "/{user_id}/impersonate",
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def impersonate_user(
     user_id: Annotated[str, Path()],

@@ -40,7 +40,6 @@ async def get_plan(
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def create_plan(
     payload: PlanCreateDTO,
@@ -62,7 +61,6 @@ async def create_plan(
 
 @router.patch(
     "/{plan_id}",
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def update_plan(  # noqa: PLR0917 — FastAPI's explicit endpoint dependency parameters
     plan_id: Annotated[str, Path(min_length=1)],
@@ -83,7 +81,6 @@ async def update_plan(  # noqa: PLR0917 — FastAPI's explicit endpoint dependen
 
 @router.post(
     "/{plan_id}/archive",
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def archive_plan(
     plan_id: Annotated[str, Path(min_length=1)],

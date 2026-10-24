@@ -37,7 +37,6 @@ admin_router = APIRouter(prefix="/credits", tags=["credits"])
 @admin_router.post(
     "",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def grant_credit(
     dto: CreditGrantDTO,

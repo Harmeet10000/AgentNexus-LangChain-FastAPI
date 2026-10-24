@@ -61,7 +61,8 @@ and session selectors, not privilege decisions.
 
 `scripts/check_claims_authority.py` parses `src/app` and rejects direct reads
 of `role` or `permissions` from claim-like variables, including dictionary
-access and common aliases. It also rejects serializing claim-like objects in
+access, `.get(...)`, assigned aliases, and common claim-like names. It also
+rejects serializing claim-like objects in
 application code so a future model-dump/DTO conversion cannot become an
 unreviewed authority channel. The token wire serializer is the only explicit
 exception. The unit test runs this check on every test suite. If a future
