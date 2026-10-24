@@ -63,7 +63,25 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Verify Redis health
-        run: timeout 30 bash -c 'until redis-cli -h localhost -p 6379 ping | grep -qx PONG; do sleep 1; done'
+        run: |
+          uv run python - <<'PY'
+          import asyncio
+          from redis.asyncio import Redis
+
+          async def wait_for_redis() -> None:
+              for _ in range(30):
+                  client = Redis.from_url("redis://localhost:6379", socket_connect_timeout=1)
+                  try:
+                      if await client.ping():
+                          return
+                  except Exception:
+                      await asyncio.sleep(1)
+                  finally:
+                      await client.aclose()
+              raise RuntimeError("Redis did not become healthy within 30 seconds")
+
+          asyncio.run(wait_for_redis())
+          PY
 
       - name: Run live Redis failure and recovery tests
         run: uv run pytest tests/integration/features/auth/test_live_redis_session_store.py -m integration -v --tb=short
@@ -75,7 +93,24 @@ jobs:
           container_id=$(docker ps --filter 'ancestor=redis:7.4.2-alpine' --format '{{.ID}}' | head -n 1)
           test -n "$container_id"
           docker restart "$container_id"
-          timeout 30 bash -c 'until redis-cli -h localhost -p 6379 ping | grep -qx PONG; do sleep 1; done'
+          uv run python - <<'PY'
+          import asyncio
+          from redis.asyncio import Redis
+
+          async def wait_for_redis() -> None:
+              for _ in range(30):
+                  client = Redis.from_url("redis://localhost:6379", socket_connect_timeout=1)
+                  try:
+                      if await client.ping():
+                          return
+                  except Exception:
+                      await asyncio.sleep(1)
+                  finally:
+                      await client.aclose()
+              raise RuntimeError("Redis did not recover within 30 seconds")
+
+          asyncio.run(wait_for_redis())
+          PY
 
       - name: Verify session store after Redis restart
         run: >-
@@ -88,7 +123,19 @@ jobs:
       - name: Upload Redis diagnostics
         if: failure()
         run: |
-          redis-cli -h localhost -p 6379 INFO server > redis-info.txt || true
+          uv run python - <<'PY' > redis-info.txt || true
+          import asyncio
+          from redis.asyncio import Redis
+
+          async def dump_info() -> None:
+              client = Redis.from_url("redis://localhost:6379", socket_connect_timeout=1)
+              try:
+                  print(await client.info("server"))
+              finally:
+                  await client.aclose()
+
+          asyncio.run(dump_info())
+          PY
           container_id=$(docker ps -a --filter 'ancestor=redis:7.4.2-alpine' --format '{{.ID}}' | head -n 1)
           if test -n "$container_id"; then docker logs "$container_id" >> redis-info.txt 2>&1 || true; fi
 
