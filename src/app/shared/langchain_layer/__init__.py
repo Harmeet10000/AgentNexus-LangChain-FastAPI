@@ -15,11 +15,24 @@ Usage::
         model,
         tools=tools,
         middleware=[
-            SummarizationMiddleware(model=fast_llm, max_tokens_before_summary=4000),
+            SummarizationMiddleware(
+                model=fast_llm,
+                trigger=("tokens", 4000),
+                keep=("messages", 20),
+            ),
             HumanInTheLoopMiddleware(interrupt_on={"delete_file": True}),
             LLMToolSelectorMiddleware(model=fast_llm),
-            ToolRetryMiddleware(max_retries=3),
-            ModelRetryMiddleware(max_retries=2),
+            ToolRetryMiddleware(
+                tools=["safe_lookup"],  # idempotent tools only
+                max_retries=2,
+                retry_on=lambda error: isinstance(error, (ConnectionError, TimeoutError)),
+                on_failure="error",
+            ),
+            # The default stack uses LangChain's prebuilt model retry middleware.
+            LangChainModelRetryMiddleware(
+                max_retries=2,
+                on_failure="error",
+            ),
             GuardrailMiddleware(),
         ],
     )
@@ -31,6 +44,7 @@ from langchain.agents.middleware import (
     SummarizationMiddleware,
     ToolRetryMiddleware,
 )
+from langchain.agents.middleware import ModelRetryMiddleware as LangChainModelRetryMiddleware
 
 from app.ai.callbacks import LatencyCallbackHandler, TokenUsageCallbackHandler, configure_langsmith
 from app.ai.guardrails import (
@@ -53,6 +67,7 @@ __all__ = [
     "GuardrailMiddleware",
     "HumanInTheLoopMiddleware",
     "LLMToolSelectorMiddleware",
+    "LangChainModelRetryMiddleware",
     "MiddlewareConfig",
     "ModelRetryMiddleware",
     "SummarizationMiddleware",

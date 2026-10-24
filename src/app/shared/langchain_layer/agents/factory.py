@@ -46,7 +46,11 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.ai.guardrails import MiddlewareConfig, build_default_middleware_stack
+from app.ai.guardrails import (
+    MiddlewareConfig,
+    TodoAgentState,
+    build_default_middleware_stack,
+)
 from app.ai.llm import build_chat_model
 from app.ai.tools.registry import get_tool_registry
 from app.config import get_settings
@@ -102,6 +106,8 @@ class AgentSpec(BaseModel):
 
     # Context schema
     context_schema: type | None = None
+    # The default includes the optional slot used by TodoListMiddleware.
+    state_schema: type | None = None
 
     # Structured output schema (Pydantic model), or None for text
     response_format: type | None = None
@@ -117,6 +123,9 @@ class AgentSpec(BaseModel):
     human_loop_tools: dict[str, bool] | None = None
     max_tokens_before_summary: int = 4000
     messages_to_keep: int = 8
+    safe_tool_names: tuple[str, ...] = ()
+    enable_model_retry: bool = False
+    model_retry_on: Any = None
 
     # Additional middleware to inject
     extra_middleware: list[Any] = Field(default_factory=list)
@@ -156,6 +165,9 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
                 max_tokens_before_summary=spec.max_tokens_before_summary,
                 messages_to_keep=spec.messages_to_keep,
                 human_loop_tools=spec.human_loop_tools,
+                safe_tool_names=spec.safe_tool_names,
+                enable_model_retry=spec.enable_model_retry,
+                model_retry_on=spec.model_retry_on,
             ),
             enable_guardrails=spec.enable_guardrails,
             enable_tool_selector=spec.enable_tool_selector and bool(resolved_tools),
@@ -193,6 +205,7 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
         middleware=middleware,
         response_format=spec.response_format,
         context_schema=spec.context_schema,
+        state_schema=spec.state_schema or TodoAgentState,
         checkpointer=memory.checkpointer,
         debug=spec.debug,
         name=spec.name,

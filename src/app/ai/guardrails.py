@@ -5,23 +5,31 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from langchain.agents.middleware import (
+    AgentState,
     HumanInTheLoopMiddleware,
     LLMToolSelectorMiddleware,
     SummarizationMiddleware,
     ToolRetryMiddleware,
     after_model,
-    before_model,
     wrap_model_call,
 )
+from langchain.agents.middleware import ModelRetryMiddleware as LangChainModelRetryMiddleware
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.exceptions import LangChainException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.observability.logging import logger
-from app.shared.langchain_layer.chains import build_guardrail_chain
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
+
+
+class TodoAgentState(AgentState[Any], total=False):
+    """Agent state that gives the to-do middleware a persisted state slot."""
+
+    todo_list: list[str]
+
 
 # ---------------------------------------------------------------------------
 # Model retry middleware
@@ -30,7 +38,13 @@ if TYPE_CHECKING:
 
 class ModelRetryMiddleware(BaseModel):
     """
-    Retries the LLM call on failure with exponential back-off.
+    Legacy local retry adapter retained for public-import compatibility.
+
+    The production stack uses LangChain's prebuilt
+    ``langchain.agents.middleware.ModelRetryMiddleware`` instead. New callers
+    should prefer that implementation so retry failure semantics stay aligned
+    with the agent runtime; this adapter remains available to avoid breaking
+    existing imports.
 
     Built as a @wrap_model_call: intercepts the handler,
     retries up to max_retries on exception.
@@ -45,9 +59,9 @@ class ModelRetryMiddleware(BaseModel):
     def build(self) -> Any:
         @wrap_model_call
         async def _retry_wrapper(
-            request: Any,
-            handler: Callable[[Any], Awaitable[Any]],
-        ) -> Any:
+            request: ModelRequest[Any],
+            handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+        ) -> ModelResponse[Any]:
             for attempt in range(self.max_retries + 1):
                 try:
                     return await handler(request)
@@ -62,7 +76,8 @@ class ModelRetryMiddleware(BaseModel):
                         error=str(exc),
                     ).warning("Model call failed, retrying")
                     await asyncio.sleep(delay)
-            return None
+            msg = "Model retry loop exhausted without returning"
+            raise RuntimeError(msg)
 
         return _retry_wrapper
 
@@ -87,31 +102,35 @@ class TodoListMiddleware(BaseModel):
     todo_header: str = "## Current To-Do List"
 
     def build(self) -> list[Any]:
-        @before_model
-        def inject_todos(state, request) -> Any:
-            todos = state.get("todo_list", [])
+        @wrap_model_call(state_schema=TodoAgentState)
+        async def inject_todos(
+            request: ModelRequest[Any],
+            handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+        ) -> ModelResponse[Any]:
+            todos = request.state.get("todo_list", [])
             if not todos:
-                return request
+                return await handler(request)
 
             todo_text = "\n".join(f"- [ ] {t}" for t in todos)
             todo_block = f"\n\n{self.todo_header}\n{todo_text}"
 
-            # Inject into the last system message or prepend
-            msgs = list(request.messages)
-            for i, msg in enumerate(msgs):
-                if isinstance(msg, SystemMessage):
-                    msgs[i] = SystemMessage(content=msg.content + todo_block)
-                    break
+            system_message = request.system_message
+            if system_message is not None:
+                system_message = SystemMessage(content=f"{system_message.content}{todo_block}")
             else:
-                msgs.insert(0, SystemMessage(content=todo_block))
+                system_message = SystemMessage(content=todo_block)
 
-            return request.override(messages=msgs)
+            return await handler(request.override(system_message=system_message))
 
-        @after_model
-        def parse_todo_commands(state, response) -> Any:
-            ai_msg = response.message
-            if not isinstance(ai_msg.content, str):
-                return response
+        @after_model(state_schema=TodoAgentState)
+        def parse_todo_commands(state: dict[str, Any], _runtime: Any) -> dict[str, Any] | None:
+            messages = state.get("messages", [])
+            ai_msg = next(
+                (message for message in reversed(messages) if isinstance(message, AIMessage)),
+                None,
+            )
+            if ai_msg is None or not isinstance(ai_msg.content, str):
+                return None
 
             todos = list(state.get("todo_list", []))
             content = ai_msg.content
@@ -127,7 +146,7 @@ class TodoListMiddleware(BaseModel):
                     item = stripped[len(prefix) :].strip()
                     todos = [t for t in todos if t != item]
 
-            return response.override(state_update={"todo_list": todos})
+            return {"todo_list": todos}
 
         return [inject_todos, parse_todo_commands]
 
@@ -153,8 +172,11 @@ class ContextEditingMiddleware(BaseModel):
         inject_fn = self.inject_context_fn
 
         @wrap_model_call
-        async def edit_context(request: object, handler: object) -> Any:
-            msgs = list(request.messages)  # ty: ignore[unresolved-attribute]
+        async def edit_context(
+            request: ModelRequest[Any],
+            handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+        ) -> ModelResponse[Any]:
+            msgs = list(request.messages)
 
             # Redact PII
             if patterns:
@@ -164,26 +186,22 @@ class ContextEditingMiddleware(BaseModel):
                         content = msg.content
                         for pat in patterns:
                             content = pat.sub("[REDACTED]", content)
-                        new_msgs.append(msg.__class__(content=content))
+                        new_msgs.append(msg.model_copy(update={"content": content}))
                     else:
                         new_msgs.append(msg)
                 msgs = new_msgs
 
+            system_message = request.system_message
             # Inject runtime context into system prompt
-            if inject_fn and request.runtime and request.runtime.context:  # ty: ignore[unresolved-attribute]
-                ctx_vars = inject_fn(request.runtime.context)  # ty: ignore[unresolved-attribute]
+            if inject_fn and request.runtime and request.runtime.context:
+                ctx_vars = inject_fn(request.runtime.context)
                 from string import Template
 
-                new_msgs = []
-                for msg in msgs:
-                    if isinstance(msg, SystemMessage) and isinstance(msg.content, str):
-                        content = Template(msg.content).safe_substitute(ctx_vars)
-                        new_msgs.append(SystemMessage(content=content))
-                    else:
-                        new_msgs.append(msg)
-                msgs = new_msgs
+                if system_message is not None and isinstance(system_message.content, str):
+                    content = Template(system_message.content).safe_substitute(ctx_vars)
+                    system_message = SystemMessage(content=content)
 
-            return await handler(request.override(messages=msgs))  # ty: ignore[unresolved-attribute, call-non-callable]
+            return await handler(request.override(messages=msgs, system_message=system_message))
 
         return edit_context
 
@@ -203,18 +221,32 @@ class GuardrailMiddleware(BaseModel):
     raise_on_violation: bool = False
 
     def build(self) -> Any:
+        # Keep this import local: importing the chains submodule imports the
+        # langchain_layer package, whose public exports include this module.
+        from app.shared.langchain_layer.chains import build_guardrail_chain
 
         guardrail_chain = build_guardrail_chain()
         fallback = self.fallback_message
         raise_on = self.raise_on_violation
 
-        @after_model
-        async def check_safety(state: object, response: object) -> Any:
-            ai_msg = response.message  # ty: ignore[unresolved-attribute]
-            if not isinstance(ai_msg.content, str):
+        @wrap_model_call
+        async def check_safety(
+            request: ModelRequest[Any],
+            handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+        ) -> ModelResponse[Any]:
+            response = await handler(request)
+            ai_msg = next(
+                (
+                    message
+                    for message in reversed(response.result)
+                    if isinstance(message, AIMessage)
+                ),
+                None,
+            )
+            if ai_msg is None or not isinstance(ai_msg.content, str):
                 return response
 
-            messages = state.get("messages", [])  # ty: ignore[unresolved-attribute]
+            messages = request.messages
             last_human = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
             user_input = last_human.content if last_human else ""
 
@@ -241,12 +273,9 @@ class GuardrailMiddleware(BaseModel):
                     raise ValueError(msg)
 
                 safe_response = AIMessage(content=fallback)
-                return response.override(  # ty: ignore[unresolved-attribute]
-                    message=safe_response,
-                    state_update={
-                        "blocked": True,
-                        "block_reason": result.get("reason"),
-                    },
+                return ModelResponse(
+                    result=[safe_response],
+                    structured_response=response.structured_response,
                 )
 
             return response
@@ -271,23 +300,14 @@ class DynamicSystemPromptMiddleware(BaseModel):
     def build(self) -> Any:
         fn = self.prompt_fn
 
-        @before_model
-        def inject_dynamic_prompt(state, request) -> Any:
+        @wrap_model_call
+        async def inject_dynamic_prompt(
+            request: ModelRequest[Any],
+            handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+        ) -> ModelResponse[Any]:
             ctx = request.runtime.context if request.runtime else None
-            new_system = fn(state, ctx)
-            msgs = list(request.messages)
-
-            # Replace existing system message or prepend
-            has_system = False
-            for i, msg in enumerate(msgs):
-                if isinstance(msg, SystemMessage):
-                    msgs[i] = SystemMessage(content=new_system)
-                    has_system = True
-                    break
-            if not has_system:
-                msgs.insert(0, SystemMessage(content=new_system))
-
-            return request.override(messages=msgs)
+            new_system = fn(request.state, ctx)
+            return await handler(request.override(system_message=SystemMessage(content=new_system)))
 
         return inject_dynamic_prompt
 
@@ -302,10 +322,18 @@ class MiddlewareConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    fast_model_name: str = "gemini-2.0-flash"
+    fast_model_name: str = "google_genai:gemini-3.6-flash"
     max_tokens_before_summary: int = 4000
     messages_to_keep: int = 8
     human_loop_tools: dict[str, bool] | None = None
+    # Retrying a tool is safe only when the caller has explicitly classified it as
+    # idempotent.  An empty allowlist means no tool retry middleware is installed.
+    safe_tool_names: tuple[str, ...] = ()
+    # Provider SDKs expose incompatible exception hierarchies.  Keep model retry
+    # disabled unless a caller opts in, and let that caller supply a predicate when
+    # its provider has a stronger transient-error contract than our portable default.
+    enable_model_retry: bool = False
+    model_retry_on: Callable[[Exception], bool] | None = None
 
 
 def build_default_middleware_stack(
@@ -330,27 +358,45 @@ def build_default_middleware_stack(
     """
     stack: list[Any] = []
     cfg = config or MiddlewareConfig()
+    fast_model_name = _provider_model_name(cfg.fast_model_name)
 
     # 1. Summarization (context management)
     stack.append(
         SummarizationMiddleware(
-            model=cfg.fast_model_name,
-            max_tokens_before_summary=cfg.max_tokens_before_summary,
-            messages_to_keep=cfg.messages_to_keep,
+            model=fast_model_name,
+            trigger=("tokens", cfg.max_tokens_before_summary),
+            keep=("messages", cfg.messages_to_keep),
         )
     )
 
     # 2. Tool selector (reduces tool-call noise)
     if enable_tool_selector:
-        stack.append(LLMToolSelectorMiddleware(model=cfg.fast_model_name))
+        stack.append(LLMToolSelectorMiddleware(model=fast_model_name))
 
-    # 3. Tool retry / 4. Model retry
-    stack.extend(
-        [
-            ToolRetryMiddleware(max_retries=3, backoff_factor=1.5),
-            ModelRetryMiddleware(max_retries=2).build(),
-        ]
-    )
+    # 3. Tool retry is opt-in and allowlisted.  The middleware's default filter is
+    # "all tools", which is unsafe for writes, sends, deletes, and other side effects.
+    if cfg.safe_tool_names:
+        stack.append(
+            ToolRetryMiddleware(
+                tools=list(cfg.safe_tool_names),
+                retry_on=_is_transient_error,
+                max_retries=2,
+                backoff_factor=1.5,
+                on_failure="error",
+            )
+        )
+
+    # 4. Model retry is also opt-in.  The portable predicate intentionally covers only
+    # built-in transport failures; provider-specific callers can provide a narrower,
+    # provider-aware predicate through `model_retry_on`.
+    if cfg.enable_model_retry:
+        stack.append(
+            LangChainModelRetryMiddleware(
+                max_retries=2,
+                retry_on=cfg.model_retry_on or _is_transient_error,
+                on_failure="error",
+            )
+        )
 
     # 5. Human in the loop
     if enable_human_loop:
@@ -358,7 +404,7 @@ def build_default_middleware_stack(
 
     # 6. Guardrails (after_model — runs last in after-model chain)
     if enable_guardrails:
-        stack.append(GuardrailMiddleware())
+        stack.append(GuardrailMiddleware().build())
 
     return stack
 
@@ -367,9 +413,28 @@ def build_minimal_middleware_stack() -> list[Any]:
     """Lightweight stack for development / testing."""
     return [
         SummarizationMiddleware(
-            model="gemini-2.0-flash",
-            max_tokens_before_summary=8000,
-            messages_to_keep=10,
+            model="google_genai:gemini-3.6-flash",
+            trigger=("tokens", 8000),
+            keep=("messages", 10),
         ),
-        ToolRetryMiddleware(max_retries=2),
     ]
+
+
+def _provider_model_name(model_name: str) -> str:
+    """Make Gemini middleware model names explicit about their provider."""
+    if ":" in model_name:
+        return model_name
+    if model_name.startswith("gemini-"):
+        return f"google_genai:{model_name}"
+    return model_name
+
+
+def _is_transient_error(error: Exception) -> bool:
+    """Return whether a provider-neutral transport error is safe to retry.
+
+    Deliberately do not treat arbitrary exceptions as transient: validation errors,
+    permission failures, malformed requests, and tool-side bugs are not repaired by
+    repeating the operation. Provider integrations may pass a stricter predicate via
+    :class:`MiddlewareConfig` when their SDK exposes a reliable transient hierarchy.
+    """
+    return isinstance(error, (ConnectionError, TimeoutError))
