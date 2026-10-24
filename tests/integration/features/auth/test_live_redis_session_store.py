@@ -96,7 +96,7 @@ def _session(user_id: str, *, ttl: int = 120) -> SessionData:
 
 
 def _user_id() -> str:
-    return f"live-user-{uuid4()}"
+    return uuid4().hex[:24]
 
 
 @pytest.mark.asyncio
