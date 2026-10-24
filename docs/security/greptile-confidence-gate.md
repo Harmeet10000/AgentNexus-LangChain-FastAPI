@@ -28,6 +28,14 @@ Every trusted comment that names the current head must be a complete 5/5
 summary; a conflicting current-head summary fails closed even if another
 comment is valid.
 
+Each run first moves the named check for its event SHA to `in_progress` and
+then updates that same check run to `success` or `failure`. This prevents a
+stale successful check from surviving a deleted or downgraded review, and
+prevents retries from creating competing check runs. Runs for different pull
+requests have independent concurrency groups. A run whose head changes while
+it is reading comments completes only the old event-SHA check as failed; the
+new head must receive its own event and verification.
+
 The workflow uses only `contents: read`, `pull-requests: read`, and
 `checks: write`. It checks out the default branch with credentials disabled and
 never checks out or executes pull-request code. API failures, malformed

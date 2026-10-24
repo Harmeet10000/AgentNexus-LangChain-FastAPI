@@ -2,7 +2,7 @@ name: Greptile 5/5 confidence gate
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
     branches: [main]
   issue_comment:
     types: [created, edited, deleted]
@@ -19,7 +19,7 @@ permissions:
   checks: write
 
 concurrency:
-  group: greptile-confidence-gate-${{ github.event.pull_request.number || inputs.pull_request_number }}
+  group: greptile-confidence-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pull_request_number }}
   cancel-in-progress: true
 
 jobs:

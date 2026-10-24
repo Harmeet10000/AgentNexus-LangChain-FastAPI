@@ -23,14 +23,18 @@ GATE_NAME = "Greptile 5/5 confidence gate"
 GREPTILE_BOT_LOGIN = "greptile-apps[bot]"
 GREPTILE_BOT_ID = 165735046
 SHA_RE = re.compile(r"(?<![0-9a-f])([0-9a-f]{40})(?![0-9a-f])", re.IGNORECASE)
-CONFIDENCE_RE = re.compile(
-    r"\bconfidence\s+score\s*:?[ \t]*(?P<numerator>\d+)\s*/\s*(?P<denominator>\d+)\b",
+CONFIDENCE_LABEL_RE = re.compile(r"\bconfidence\s+score\b", re.IGNORECASE)
+CONFIDENCE_VALUE_RE = re.compile(
+    r"\s*:?\s*(?P<numerator>\d+)\s*/\s*(?P<denominator>\d+)(?![\w.])",
     re.IGNORECASE,
 )
-LAST_REVIEWED_RE = re.compile(
-    r"\blast\s+reviewed\s+commit\s*:\s*(?P<context>.{0,600})",
-    re.IGNORECASE | re.DOTALL,
+LAST_REVIEWED_LABEL_RE = re.compile(
+    r"\blast\s+reviewed\s+commit\s*:\s*",
+    re.IGNORECASE,
 )
+BACKTICK_SHA_RE = re.compile(r"`(?P<sha>[0-9a-f]{40})`", re.IGNORECASE)
+BARE_SHA_RE = re.compile(r"(?P<sha>[0-9a-f]{40})(?![\w])", re.IGNORECASE)
+COMMIT_LINK_SHA_RE = re.compile(r"\]\([^)]*/commit/(?P<sha>[0-9a-f]{40})\)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -59,18 +63,34 @@ def _is_trusted_author(comment: Comment) -> bool:
     )
 
 
-def _confidence_scores(body: str) -> tuple[tuple[int, int], ...]:
-    return tuple(
-        (int(match.group("numerator")), int(match.group("denominator")))
-        for match in CONFIDENCE_RE.finditer(body)
-    )
+def _confidence_scores(body: str) -> tuple[tuple[int, int], ...] | None:
+    """Parse every confidence field, returning ``None`` for malformed fields."""
+
+    scores: list[tuple[int, int]] = []
+    labels = tuple(CONFIDENCE_LABEL_RE.finditer(body))
+    for label in labels:
+        match = CONFIDENCE_VALUE_RE.match(body, label.end())
+        if match is None:
+            return None
+        scores.append((int(match.group("numerator")), int(match.group("denominator"))))
+    return tuple(scores)
 
 
-def _reviewed_shas(body: str) -> tuple[str, ...]:
+def _reviewed_shas(body: str) -> tuple[str, ...] | None:
+    """Extract only SHAs syntactically used as a reviewed-commit value."""
+
+    labels = tuple(LAST_REVIEWED_LABEL_RE.finditer(body))
     reviewed_shas: list[str] = []
-    for match in LAST_REVIEWED_RE.finditer(body):
-        reviewed_shas.extend(SHA_RE.findall(match.group("context")))
-    return tuple(dict.fromkeys(sha.lower() for sha in reviewed_shas))
+    for index, label in enumerate(labels):
+        end = labels[index + 1].start() if index + 1 < len(labels) else len(body)
+        value = body[label.end() : end].splitlines()[0].strip()
+        match = COMMIT_LINK_SHA_RE.search(value) or BACKTICK_SHA_RE.fullmatch(value)
+        if match is None:
+            match = BARE_SHA_RE.fullmatch(value)
+        if match is None:
+            return None
+        reviewed_shas.append(match.group("sha").lower())
+    return tuple(dict.fromkeys(reviewed_shas))
 
 
 def evaluate_comments(comments: list[Comment], head_sha: str) -> Decision:
@@ -95,9 +115,13 @@ def evaluate_comments(comments: list[Comment], head_sha: str) -> Decision:
     for comment in trusted_comments:
         scores = _confidence_scores(comment.body)
         reviewed_shas = _reviewed_shas(comment.body)
+        if scores is None or reviewed_shas is None:
+            return Decision(False, "a trusted Greptile review contains malformed score or commit fields")
         refers_to_current_head = normalized_head in reviewed_shas
         if refers_to_current_head and (
-            not scores or any(score != (5, 5) for score in scores) or len(reviewed_shas) != 1
+            not scores
+            or any(score != (5, 5) for score in scores)
+            or len(reviewed_shas) != 1
         ):
             return Decision(False, "a trusted Greptile review for the current head is conflicting or malformed")
         if not scores or any(score != (5, 5) for score in scores):
@@ -157,7 +181,7 @@ class GitHubClient:
 
     def issue_comments(self, number: int) -> list[Comment]:
         comments: list[Comment] = []
-        for page in range(1, 11):
+        for page in range(1, 12):
             query = urllib.parse.urlencode({"per_page": 100, "page": page})
             value = self.request("GET", f"/issues/{number}/comments?{query}")
             if not isinstance(value, list):
@@ -185,14 +209,58 @@ class GitHubClient:
             raise GitHubApiError("issue comments exceeded the 1,000-comment safety limit")
         return comments
 
-    def create_check(self, head_sha: str, decision: Decision) -> None:
+    def _find_check_run(self, head_sha: str) -> int | None:
+        query = urllib.parse.urlencode({"check_name": GATE_NAME, "per_page": 100})
+        value = self.request("GET", f"/commits/{head_sha}/check-runs?{query}")
+        if not isinstance(value, dict) or not isinstance(value.get("check_runs"), list):
+            raise GitHubApiError("check runs response was not an object")
+        matching = [
+            item
+            for item in value["check_runs"]
+            if isinstance(item, dict) and item.get("name") == GATE_NAME and isinstance(item.get("id"), int)
+        ]
+        if not matching:
+            return None
+        return max(item["id"] for item in matching)
+
+    def begin_check(self, head_sha: str) -> int:
+        check_id = self._find_check_run(head_sha)
+        if check_id is None:
+            value = self.request(
+                "POST",
+                "/check-runs",
+                {
+                    "name": GATE_NAME,
+                    "head_sha": head_sha,
+                    "status": "in_progress",
+                    "output": {
+                        "title": "Verifying Greptile review",
+                        "summary": "Review data is being read.",
+                    },
+                },
+            )
+        else:
+            value = self.request(
+                "PATCH",
+                f"/check-runs/{check_id}",
+                {
+                    "status": "in_progress",
+                    "output": {
+                        "title": "Verifying Greptile review",
+                        "summary": "Review data is being read.",
+                    },
+                },
+            )
+        if not isinstance(value, dict) or not isinstance(value.get("id"), int):
+            raise GitHubApiError("check run response did not contain an ID")
+        return value["id"]
+
+    def complete_check(self, check_id: int, decision: Decision) -> None:
         conclusion = "success" if decision.passed else "failure"
         self.request(
-            "POST",
-            "/check-runs",
+            "PATCH",
+            f"/check-runs/{check_id}",
             {
-                "name": GATE_NAME,
-                "head_sha": head_sha,
                 "status": "completed",
                 "conclusion": conclusion,
                 "output": {
@@ -240,29 +308,62 @@ def run(event: dict[str, Any], client: GitHubClient, manual_number: int | None =
     if not isinstance(event_sha, str):
         event_sha = None
 
-    initial_pr = client.pull_request(number)
+    check_id: int | None = None
+    if event_sha is not None:
+        check_id = client.begin_check(event_sha)
+
+    def complete_failure_best_effort(reason: str) -> None:
+        if check_id is None:
+            return
+        try:
+            client.complete_check(check_id, Decision(False, reason))
+        except GitHubApiError:
+            pass
+
+    try:
+        initial_pr = client.pull_request(number)
+    except GitHubApiError:
+        complete_failure_best_effort("unable to read current pull-request metadata")
+        raise
     initial_head = initial_pr.get("head")
     current_sha = initial_head.get("sha") if isinstance(initial_head, dict) else None
     if not isinstance(current_sha, str):
         raise GitHubApiError("GitHub did not return a pull-request head SHA")
     if event_sha is None:
         event_sha = current_sha
+        check_id = client.begin_check(event_sha)
+    if check_id is None:
+        raise GitHubApiError("could not create the Greptile confidence check")
+    initial_base = initial_pr.get("base")
+    if not isinstance(initial_base, dict) or initial_base.get("ref") != "main":
+        decision = Decision(False, "pull request does not target main")
+        client.complete_check(check_id, decision)
+        return 1
     if current_sha != event_sha:
         decision = Decision(False, "pull-request head changed while this workflow was starting")
-        client.create_check(current_sha if isinstance(current_sha, str) else event_sha, decision)
+        client.complete_check(check_id, decision)
         return 1
 
-    comments = client.issue_comments(number)
-    final_pr = client.pull_request(number)
+    try:
+        comments = client.issue_comments(number)
+        final_pr = client.pull_request(number)
+    except GitHubApiError:
+        complete_failure_best_effort("review data was unavailable")
+        raise
     final_head = final_pr.get("head")
     final_sha = final_head.get("sha") if isinstance(final_head, dict) else None
     if final_sha != event_sha:
         decision = Decision(False, "pull-request head changed while the review was being checked")
-        client.create_check(final_sha if isinstance(final_sha, str) else event_sha, decision)
+        client.complete_check(check_id, decision)
+        return 1
+    final_base = final_pr.get("base")
+    if not isinstance(final_base, dict) or final_base.get("ref") != "main":
+        decision = Decision(False, "pull request no longer targets main")
+        client.complete_check(check_id, decision)
         return 1
 
     decision = evaluate_comments(comments, event_sha)
-    client.create_check(event_sha, decision)
+    client.complete_check(check_id, decision)
     print(decision.reason)
     return 0 if decision.passed else 1
 
