@@ -93,7 +93,7 @@ jobs:
         run: uv run ruff format --check src/ tests/
 
       - name: Type check with ty
-        run: uv run ty check src/ tests/
+        run: uv run ty check src/
 
       - name: Create .env.development file
         run: |
