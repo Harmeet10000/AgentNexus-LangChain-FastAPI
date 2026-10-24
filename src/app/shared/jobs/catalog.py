@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict
 from app.shared.jobs.names import (
     AGENT_MEMORY_CONSOLIDATION,
     AGENT_SAUL_TRANSCRIPT_SWEEP,
+    AUTH_PENDING_REVOCATION_RECONCILE,
     BILLING_DUNNING,
     BILLING_INVOICE_GENERATION,
     BILLING_PAUSE_RESUME,
@@ -67,6 +68,7 @@ class JobCapability(StrEnum):
     DOCUMENT_INGESTION = "document_ingestion"
     EMAIL = "email"
     TRANSCRIPT_SWEEP = "transcript_sweep"
+    AUTH_SECURITY = "auth_security"
 
 
 class JobDefinition[T: CeleryTaskPayload](BaseModel):
@@ -204,6 +206,13 @@ _CATALOG: dict[str, JobDefinition[CeleryTaskPayload]] = {
         PasswordResetEmailPayload,
         queue=JobQueue.DEFAULT,
         capability=JobCapability.EMAIL,
+        declaring_module="app.worker.jobs.auth",
+    ),
+    AUTH_PENDING_REVOCATION_RECONCILE: _job(
+        AUTH_PENDING_REVOCATION_RECONCILE,
+        NoKwargsPayload,
+        queue=JobQueue.DEFAULT,
+        capability=JobCapability.AUTH_SECURITY,
         declaring_module="app.worker.jobs.auth",
     ),
     BILLING_RENEWAL: _job(

@@ -27,8 +27,12 @@ from returns.result import Failure, Success
 
 from app.features.auth import repository as repository_module
 from app.features.auth.dependencies import get_token_claims
-from app.features.auth.exceptions import AuthAuthenticationError
+from app.features.auth.exceptions import AuthAuthenticationError, AuthInfrastructureError
 from app.features.auth.models import UserRole
+from app.features.auth.pending_revocation import (
+    PendingRevocationConfig,
+    PendingRevocationReconciler,
+)
 from app.features.auth.repository import RefreshTokenRepository, SessionData
 from app.features.users.exceptions import UsersInfrastructureError
 from app.features.users.service import UserAdminService
@@ -527,3 +531,70 @@ async def test_real_redis_refresh_rotation_replay_and_grace(
     family_key = f"{store._key_prefix}auth:refresh_family:{family_id}"
     assert await harness.client.hget(family_key, "status") == "revoked"
     assert await harness.client.exists(store._session_key(session.session_id)) == 0
+
+
+async def test_pending_revocation_lease_and_retry_use_real_redis(
+    redis_harness: _RedisHarness,
+) -> None:
+    """A real Redis server fences duplicate workers and retains retry state."""
+    user = SimpleNamespace(
+        id=_user_id(),
+        role_revision=7,
+        session_revocation_pending=True,
+        updated_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    attempts = 0
+
+    async def list_pending(_limit: int, _offset: int) -> list[SimpleNamespace]:
+        return [user]
+
+    async def get_user(_user_id: str) -> SimpleNamespace:
+        return user
+
+    async def revoke(_user_id: str, _revision: int):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return Failure(AuthInfrastructureError(message="Redis outage"))
+        return Success(user)
+
+    async def clear(current: SimpleNamespace, _revision: int):
+        current.session_revocation_pending = False
+        return Success(current)
+
+    config = PendingRevocationConfig(
+        backoff_base_seconds=60,
+        backoff_max_seconds=60,
+        jitter_seconds=0,
+        lease_seconds=30,
+    )
+    first = PendingRevocationReconciler(
+        redis_harness.client,
+        list_pending=list_pending,
+        get_user=get_user,
+        revoke_sessions=revoke,
+        clear_marker=clear,
+        config=config,
+        monotonic=lambda: 0.0,
+        random=lambda _upper: 0,
+    )
+    second = PendingRevocationReconciler(
+        redis_harness.client,
+        list_pending=list_pending,
+        get_user=get_user,
+        revoke_sessions=revoke,
+        clear_marker=clear,
+        config=config,
+        monotonic=lambda: 0.0,
+        random=lambda _upper: 0,
+    )
+
+    failed = await first.run()
+    deferred = await second.run()
+    recovered = await second.run(force=True)
+
+    assert failed["retryable_failure"] == 1
+    assert deferred["skipped"] == 1
+    assert recovered["succeeded"] == 1
+    assert attempts == 2
+    assert user.session_revocation_pending is False

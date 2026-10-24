@@ -2,6 +2,7 @@
 
 from celery.signals import worker_process_init, worker_process_shutdown, worker_shutdown
 
+from app.features.auth.pending_revocation import close_production_resources
 from app.observability.logging import logger
 from app.worker.celery.task import ResilientTask
 from app.worker.execution import runtime
@@ -28,4 +29,5 @@ def shutdown_worker(**_kwargs: object) -> None:
         exc.add_note("operation=shutdown_worker, resource=reliability_redis")
         logger.bind(error_type=type(exc).__name__).warning("worker_reliability_redis_close_failed")
     finally:
+        close_production_resources()
         runtime.close()

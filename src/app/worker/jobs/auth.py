@@ -25,13 +25,19 @@ from app.connections.mailer import (
     config_from_settings,
     send_template,
 )
+from app.features.auth.pending_revocation import build_production_reconciler
 from app.observability.logging import logger
-from app.shared.jobs.names import SEND_PASSWORD_RESET_EMAIL, SEND_VERIFICATION_EMAIL
+from app.shared.jobs.names import (
+    AUTH_PENDING_REVOCATION_RECONCILE,
+    SEND_PASSWORD_RESET_EMAIL,
+    SEND_VERIFICATION_EMAIL,
+)
 from app.shared.jobs.payloads import PasswordResetEmailPayload, VerificationEmailPayload
 from app.utils import ExternalServiceException
 from app.worker.celery.app import get_worker_celery_app
 from app.worker.celery.task import ResilientTask
 from app.worker.execution.reliability import CircuitBreakerOpenError, IdempotencyLockError
+from app.worker.execution.runtime import run
 
 celery_app = get_worker_celery_app()
 
@@ -222,3 +228,18 @@ def send_password_reset_email(
         raise
     else:
         return result
+
+
+@celery_app.task(name=AUTH_PENDING_REVOCATION_RECONCILE, bind=True, base=ResilientTask)
+def reconcile_pending_revocations(_self: ResilientTask) -> dict[str, object]:
+    """Run one bounded pass; the next beat retries after outages or poison records."""
+    settings = get_settings()
+    if not settings.AUTH_PENDING_REVOCATION_ENABLED:
+        logger.info("auth_pending_revocation_reconciliation_disabled")
+        return {"status": "disabled"}
+
+    async def _run() -> dict[str, object]:
+        reconciler = await build_production_reconciler(_self.get_redis_client(), settings)
+        return {"status": "ok", **await reconciler.run()}
+
+    return run(_run())

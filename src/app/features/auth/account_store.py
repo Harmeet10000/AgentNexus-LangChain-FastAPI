@@ -62,6 +62,7 @@ class AuthAccount(BaseModel):
     permissions: frozenset[str]
     role_revision: int = 0
     session_revocation_pending: bool = False
+    session_revocation_pending_at: datetime | None = None
     avatar_url: str | None = None
     oauth_accounts: tuple[OAuthAccountInput, ...] = ()
     oauth_providers: tuple[str, ...] = ()
@@ -246,6 +247,7 @@ class BeanieAuthAccountStore:
             permissions=frozenset(p.value for p in user.get_permissions()),
             role_revision=user.role_revision,
             session_revocation_pending=user.session_revocation_pending,
+            session_revocation_pending_at=user.session_revocation_pending_at,
             verification_token_hash=user.verification_token_hash,
             reset_token_hash=user.reset_token_hash,
             reset_token_expires_at=user.reset_token_expires_at,

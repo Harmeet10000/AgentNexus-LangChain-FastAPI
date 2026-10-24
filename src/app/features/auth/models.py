@@ -72,6 +72,10 @@ class User(Document):
     # session invalidation so stale tokens can never regain privileges.
     role_revision: int = Field(default=0, ge=0)
     session_revocation_pending: bool = Field(default=False)
+    # Set once when a role-change invalidation begins. It is intentionally
+    # separate from updated_at, which profile/account edits may advance while
+    # a Redis outage leaves this marker pending.
+    session_revocation_pending_at: datetime | None = None
     oauth_accounts: list[OAuthAccount] = Field(default_factory=list)
 
     # Raw tokens are transmitted via email only; only SHA-256 hashes live here.
