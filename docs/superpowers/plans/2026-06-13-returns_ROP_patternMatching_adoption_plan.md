@@ -123,8 +123,13 @@ If rollback semantics depend on exceptions, keep raising inside the transaction 
 
 This is especially important in:
 
-- `src/app/shared/langgraph_layer/ingestion_kb/pipeline_node.py`
-- `src/app/shared/langgraph_layer/reconciliation`
+- `src/app/shared/langgraph_layer/ingestion_kb/nodes.py`
+- `src/app/features/agent_saul/reconcile.py`
+
+The former `src/app/shared/langgraph_layer/reconciliation` package was removed
+during the LangGraph package split and is not an active target in this
+checkout. Keep this plan aligned with the modules that actually exist; create
+a new reconciliation package plan if that workflow is reintroduced.
 
 ## Async And Pattern Matching Guidance
 
@@ -219,7 +224,7 @@ Goals:
 
 Target files:
 
-- `src/app/shared/langgraph_layer/ingestion_kb/pipeline_node.py`
+- `src/app/shared/langgraph_layer/ingestion_kb/nodes.py`
 - `src/app/features/ingestion/service.py`
 
 Goals:
@@ -228,19 +233,30 @@ Goals:
 - keep LangGraph node signatures unchanged and compatible with LangGraph
 - keep `DocumentUploadResponse` unchanged unless an explicit contract change is approved later
 - map final `Failure` values to project exceptions at the service boundary so upload failures continue through `global_exception_handler`
-- use the actual active ingestion node module in this checkout (`nodes.py`) if `pipeline_node.py` is stale or absent
+- use the active ingestion node module in this checkout (`nodes.py`)
 
 ### Phase 3: Reconciliation Vertical Slice
 
 Target area:
 
-- `src/app/shared/langgraph_layer/reconciliation`
+- `src/app/features/agent_saul/reconcile.py` (transcript/checkpoint sweep)
+
+The old `src/app/shared/langgraph_layer/reconciliation` path is historical and
+must not be used as an implementation target.
 
 Goals:
 
-- replace `fetch_error`, `reconcile_error`, and `apply_error` plumbing internally with typed failures
-- keep graph-state and task-summary outer contracts stable unless explicitly changed later
-- preserve exception-based rollback behavior inside SQLAlchemy transaction-sensitive sections
+- keep repository `Failure` values inside the sweep boundary and translate them
+  into the explicit `_ThreadReconcileOutcome` states (`failed`, `clean`, or a
+  derived status) rather than inventing ad-hoc error fields
+- keep the bounded `SweepReport` contract stable, including the
+  `redis_unavailable` fail-closed outcome and its counters
+- preserve public LangGraph checkpoint reads, monotonic projection guards, and
+  retry-safe GC audit semantics while changing internal error handling
+
+This phase is an audit/maintenance boundary, not a request to redesign the
+already typed sweep outcome model; future changes should add a focused test
+before expanding its error taxonomy.
 
 ### Phase 4: Repository Ambiguity Cleanup
 
@@ -300,7 +316,7 @@ Keep these contracts unchanged unless a separate contract decision approves a ch
 
 This file is the canonical migration plan. Do not maintain a second `returns` adoption plan with conflicting paths, checklist state, or policy wording.
 
-If older notes are useful, fold their durable guidance into this document and delete or archive the duplicate. Stale paths such as `pipeline_node.py` or `pipeline (1).py` must be reconciled against the current repository layout before implementation.
+If older notes are useful, fold their durable guidance into this document and delete or archive the duplicate. Historical paths such as the removed reconciliation package must not be copied into new implementation tasks; target the active modules listed above.
 
 ## Test And Verification Plan
 
@@ -347,7 +363,8 @@ If older notes are useful, fold their durable guidance into this document and de
 - [ ] Add a structured logging helper for expected failures.
 - [ ] Start using `trace_layer(...)` or equivalent only where it materially improves orchestration diagnostics.
 - [ ] Convert the ingestion slice.
-- [ ] Convert the reconciliation slice.
+- [ ] Convert the active transcript reconciliation slice in
+      `src/app/features/agent_saul/reconcile.py`.
 - [ ] Clean up repository ambiguity paths.
 - [ ] Expand only where Result improves clarity more than it adds abstraction.
 - [ ] Remove `result` after migration confirms no runtime usage.
