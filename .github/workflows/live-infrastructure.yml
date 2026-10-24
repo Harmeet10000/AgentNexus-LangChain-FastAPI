@@ -89,6 +89,12 @@ jobs:
           ENVIRONMENT: test
           LIVE_REDIS_ALLOW_DOCKER_RESTART: "1"
 
+      - name: Run deterministic real-Redis concurrency tests
+        run: uv run pytest tests/integration/features/auth/test_real_redis_concurrency.py -m real_redis -v --tb=short
+        env:
+          ENVIRONMENT: test
+          REAL_REDIS_RACE_ROUNDS: "16"
+
       - name: Upload Redis diagnostics
         if: failure()
         run: |

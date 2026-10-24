@@ -490,8 +490,22 @@ class UserRepository:
 class RefreshTokenRepository:
     """Redis-primary, MongoDB-audit session store."""
 
-    def __init__(self, redis: Redis) -> None:
+    def __init__(self, redis: Redis, *, key_prefix: str = "") -> None:
+        """Create a session store, optionally isolating all keys under ``key_prefix``."""
         self._redis = redis
+        self._key_prefix = key_prefix
+
+    def _session_key(self, session_id: str) -> str:
+        return f"{self._key_prefix}{_SESSION_KEY.format(session_id)}"
+
+    def _user_sessions_key(self, user_id: str) -> str:
+        return f"{self._key_prefix}{_USER_SESSIONS_KEY.format(user_id)}"
+
+    def _authz_revision_key(self, user_id: str) -> str:
+        return f"{self._key_prefix}{_USER_AUTHZ_REVISION_KEY.format(user_id)}"
+
+    def _session_key_prefix(self) -> str:
+        return f"{self._key_prefix}auth:session:"
 
     @staticmethod
     def _digest(value: str) -> str:
@@ -836,7 +850,7 @@ class RefreshTokenRepository:
             3,
             session_key,
             user_key,
-            _USER_AUTHZ_REVISION_KEY.format(session.user_id),
+            self._authz_revision_key(session.user_id),
             session.authz_revision,
             session.ttl,
             session.model_dump_json(),
@@ -872,14 +886,14 @@ class RefreshTokenRepository:
     async def _do_get_user_sessions(self, user_id: str) -> AuthResult[list[SessionData]]:
         raw_ids: set[str] = await cast(
             "Awaitable[set[str]]",
-            self._redis.smembers(_USER_SESSIONS_KEY.format(user_id)),
+            self._redis.smembers(self._user_sessions_key(user_id)),
         )
         if not raw_ids:
             return Success([])
         sid_list = list(raw_ids)
         async with self._redis.pipeline() as pipe:
             for sid in sid_list:
-                pipe.get(_SESSION_KEY.format(sid))
+                pipe.get(self._session_key(sid))
             results: list[bytes | None] = await pipe.execute()
         sessions: list[SessionData] = []
         dead: list[str] = []
@@ -889,7 +903,7 @@ class RefreshTokenRepository:
             else:
                 sessions.append(SessionData.model_validate_json(raw))
         if dead:
-            await self._redis.srem(_USER_SESSIONS_KEY.format(user_id), *dead)
+            await self._redis.srem(self._user_sessions_key(user_id), *dead)
         return Success(sessions)
 
     async def _do_revoke_all_user_sessions(
@@ -902,10 +916,10 @@ class RefreshTokenRepository:
         raw_ids = await self._redis.eval(
             _REVOKE_ALL_SESSIONS_SCRIPT,
             2,
-            _USER_SESSIONS_KEY.format(user_id),
-            _USER_AUTHZ_REVISION_KEY.format(user_id),
+            self._user_sessions_key(user_id),
+            self._authz_revision_key(user_id),
             except_session_id or "",
-            "auth:session:",
+            self._session_key_prefix(),
             "" if authz_revision is None else authz_revision,
             reason,
             int(datetime.now(UTC).timestamp()),
@@ -934,8 +948,8 @@ class RefreshTokenRepository:
 
     @trace_layer("repository")
     async def store_session(self, session: SessionData) -> AuthResult[None]:
-        session_key = _SESSION_KEY.format(session.session_id)
-        user_key = _USER_SESSIONS_KEY.format(session.user_id)
+        session_key = self._session_key(session.session_id)
+        user_key = self._user_sessions_key(session.user_id)
         try:
             return await self._do_store_session(session, session_key, user_key)
         except RedisError as exc:
@@ -951,7 +965,7 @@ class RefreshTokenRepository:
     @trace_layer("repository")
     async def get_session(self, session_id: str) -> AuthResult[SessionData | None]:
         try:
-            raw = await self._redis.get(_SESSION_KEY.format(session_id))
+            raw = await self._redis.get(self._session_key(session_id))
             if raw is None:
                 return Success(None)
             return Success(SessionData.model_validate_json(raw))
@@ -974,8 +988,8 @@ class RefreshTokenRepository:
     ) -> AuthResult[None]:
         try:
             async with self._redis.pipeline(transaction=True) as pipe:
-                pipe.delete(_SESSION_KEY.format(session_id))
-                pipe.srem(_USER_SESSIONS_KEY.format(user_id), session_id)
+                pipe.delete(self._session_key(session_id))
+                pipe.srem(self._user_sessions_key(user_id), session_id)
                 await pipe.execute()
         except RedisError as exc:
             exc.add_note("auth_repository operation=revoke_session")

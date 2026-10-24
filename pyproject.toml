@@ -848,6 +848,7 @@ asyncio_default_fixture_loop_scope = "function"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "real_redis: marks tests that require a disposable real Redis server",
     "unit: marks tests as unit tests",
     "requires_db: marks tests that need a live database (deselect with -m 'not requires_db')",
     "property: marks property-based tests",
