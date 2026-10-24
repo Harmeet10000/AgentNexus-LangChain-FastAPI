@@ -87,55 +87,12 @@ jobs:
         run: uv run pytest tests/integration/features/auth/test_live_redis_session_store.py -m integration -v --tb=short
         env:
           ENVIRONMENT: test
-
-      - name: Verify Redis service restart and recovery
-        run: |
-          container_id=$(docker ps --filter 'ancestor=redis:7.4.2-alpine' --format '{{.ID}}' | head -n 1)
-          test -n "$container_id"
-          docker restart "$container_id"
-          uv run python - <<'PY'
-          import asyncio
-          from redis.asyncio import Redis
-
-          async def wait_for_redis() -> None:
-              for _ in range(30):
-                  client = Redis.from_url("redis://localhost:6379", socket_connect_timeout=1)
-                  try:
-                      if await client.ping():
-                          return
-                  except Exception:
-                      await asyncio.sleep(1)
-                  finally:
-                      await client.aclose()
-              raise RuntimeError("Redis did not recover within 30 seconds")
-
-          asyncio.run(wait_for_redis())
-          PY
-
-      - name: Verify session store after Redis restart
-        run: >-
-          uv run pytest tests/integration/features/auth/test_live_redis_session_store.py
-          -m integration -k test_real_redis_refusal_is_typed_and_recovery_succeeds
-          -v --tb=short
-        env:
-          ENVIRONMENT: test
+          LIVE_REDIS_ALLOW_DOCKER_RESTART: "1"
 
       - name: Upload Redis diagnostics
         if: failure()
         run: |
-          uv run python - <<'PY' > redis-info.txt || true
-          import asyncio
-          from redis.asyncio import Redis
-
-          async def dump_info() -> None:
-              client = Redis.from_url("redis://localhost:6379", socket_connect_timeout=1)
-              try:
-                  print(await client.info("server"))
-              finally:
-                  await client.aclose()
-
-          asyncio.run(dump_info())
-          PY
+          uv run python -c 'import asyncio; from redis.asyncio import Redis; c=Redis.from_url("redis://localhost:6379"); print(asyncio.run(c.info("server"))); asyncio.run(c.aclose())' > redis-info.txt || true
           container_id=$(docker ps -a --filter 'ancestor=redis:7.4.2-alpine' --format '{{.ID}}' | head -n 1)
           if test -n "$container_id"; then docker logs "$container_id" >> redis-info.txt 2>&1 || true; fi
 

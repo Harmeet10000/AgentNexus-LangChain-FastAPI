@@ -25,7 +25,7 @@ from app.features.auth.exceptions import AuthInfrastructureError
 from app.features.auth.repository import RefreshTokenRepository, SessionData
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
 pytestmark = pytest.mark.integration
 
@@ -64,14 +64,22 @@ async def live_redis() -> AsyncIterator[Redis]:
     try:
         yield client
     finally:
-        await client.flushdb()
         await client.aclose()
 
 
 @pytest.fixture
-def session_store(monkeypatch: pytest.MonkeyPatch) -> None:
+async def session_store(
+    live_redis: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[Callable[[SessionData], None]]:
     monkeypatch.setattr(repository_module.TokenAuditLog, "insert", _noop_audit_insert)
     monkeypatch.setattr(repository_module.TokenAuditLog, "find", _noop_audit_find)
+    created: list[SessionData] = []
+    yield created.append
+    for session in created:
+        await live_redis.delete(f"auth:session:{session.session_id}")
+        await live_redis.srem(f"auth:user_sessions:{session.user_id}", session.session_id)
+        await live_redis.delete(f"auth:user_authz_revision:{session.user_id}")
 
 
 def _session(user_id: str, *, ttl: int = 120) -> SessionData:
@@ -90,7 +98,7 @@ def _session(user_id: str, *, ttl: int = 120) -> SessionData:
 @pytest.mark.asyncio
 async def test_real_redis_store_revoke_all_and_index_ttl(
     live_redis: Redis,
-    session_store: None,
+    session_store: Callable[[SessionData], None],
 ) -> None:
     store = RefreshTokenRepository(live_redis)
     first = _session("507f1f77bcf86cd799439011", ttl=120)
@@ -98,8 +106,11 @@ async def test_real_redis_store_revoke_all_and_index_ttl(
 
     assert isinstance(await store.store_session(first), Success)
     assert isinstance(await store.store_session(second), Success)
+    session_store(first)
+    session_store(second)
     before = await live_redis.ttl("auth:user_sessions:507f1f77bcf86cd799439011")
     assert before > 0
+    assert before >= 110
 
     result = await store.revoke_all_user_sessions("507f1f77bcf86cd799439011", authz_revision=5)
 
@@ -110,13 +121,12 @@ async def test_real_redis_store_revoke_all_and_index_ttl(
     assert await live_redis.exists(f"auth:session:{second.session_id}") == 0
     assert await live_redis.exists("auth:user_sessions:507f1f77bcf86cd799439011") == 0
     assert await live_redis.get("auth:user_authz_revision:507f1f77bcf86cd799439011") == "5"
-    assert before >= 1
 
 
 @pytest.mark.asyncio
 async def test_real_redis_refusal_is_typed_and_recovery_succeeds(
     live_redis: Redis,
-    session_store: None,
+    session_store: Callable[[SessionData], None],
 ) -> None:
     refused = Redis.from_url(
         "redis://127.0.0.1:1/15",
@@ -137,17 +147,19 @@ async def test_real_redis_refusal_is_typed_and_recovery_succeeds(
     recovered = RefreshTokenRepository(live_redis)
     session = _session("507f1f77bcf86cd799439012")
     assert isinstance(await recovered.store_session(session), Success)
+    session_store(session)
     assert await recovered.get_session(session.session_id) == Success(session)
 
 
 @pytest.mark.asyncio
 async def test_real_redis_timeout_and_client_reconnect_recover(
     live_redis: Redis,
-    session_store: None,
+    session_store: Callable[[SessionData], None],
 ) -> None:
     session = _session("507f1f77bcf86cd799439013")
     store = RefreshTokenRepository(live_redis)
     assert isinstance(await store.store_session(session), Success)
+    session_store(session)
 
     control = Redis.from_url(os.environ["LIVE_REDIS_URL"], decode_responses=True)
     timed = Redis.from_url(
@@ -178,3 +190,51 @@ async def test_real_redis_timeout_and_client_reconnect_recover(
         )
     finally:
         await reconnected.aclose()
+
+
+@pytest.mark.asyncio
+async def test_real_redis_session_survives_service_restart(
+    live_redis: Redis,
+    session_store: Callable[[SessionData], None],
+) -> None:
+    if os.getenv("LIVE_REDIS_ALLOW_DOCKER_RESTART") != "1":
+        pytest.skip("LIVE_REDIS_ALLOW_DOCKER_RESTART=1 is required for the CI-only restart test")
+
+    list_process = await asyncio.create_subprocess_exec(
+        "/usr/bin/docker",
+        "ps",
+        "--filter",
+        "ancestor=redis:7.4.2-alpine",
+        "--format",
+        "{{.ID}}",
+        stdout=asyncio.subprocess.PIPE,
+    )
+    list_stdout, _ = await list_process.communicate()
+    if list_process.returncode != 0 or list_stdout is None:
+        pytest.fail("Unable to locate the disposable Redis service container")
+    container_ids = list_stdout.decode().strip().splitlines()
+    if not container_ids:
+        pytest.fail("Unable to locate the disposable Redis service container")
+    container_id = container_ids[0]
+    session = _session("507f1f77bcf86cd799439014")
+    assert isinstance(await RefreshTokenRepository(live_redis).store_session(session), Success)
+    session_store(session)
+
+    restart_process = await asyncio.create_subprocess_exec(
+        "/usr/bin/docker",
+        "restart",
+        container_id,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    await restart_process.communicate()
+    if restart_process.returncode != 0:
+        pytest.fail("Unable to restart the disposable Redis service container")
+    store = RefreshTokenRepository(live_redis)
+    for _ in range(30):
+        await asyncio.sleep(1)
+        recovered = await store.get_session(session.session_id)
+        if recovered == Success(session):
+            break
+    else:
+        pytest.fail("Redis session was not readable after the service restart")
