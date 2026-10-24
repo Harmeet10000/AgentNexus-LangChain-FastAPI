@@ -13,6 +13,7 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
+from app.features.auth.websocket_revocation import new_event, publish_event
 from app.observability.logging import logger, trace_layer
 
 from .exceptions import (
@@ -890,6 +891,10 @@ class RefreshTokenRepository:
                 user_id,
                 session_id,
             )
+            await publish_event(
+                self._redis,
+                new_event(scope="session", user_id=user_id, session_id=session_id, reason=reason),
+            )
             return Success(None)
         except RedisError as exc:
             exc.add_note("auth_repository operation=revoke_refresh_family")
@@ -1016,6 +1021,15 @@ class RefreshTokenRepository:
             self._refresh_family_key_prefix(),
         )
         revoked_ids = [item.decode() if isinstance(item, bytes) else str(item) for item in raw_ids]
+        await publish_event(
+            self._redis,
+            new_event(
+                scope="user",
+                user_id=user_id,
+                except_session_id=except_session_id,
+                reason=reason,
+            ),
+        )
         if revoked_ids:
             try:
                 await TokenAuditLog.find(In(TokenAuditLog.session_id, revoked_ids)).update(
@@ -1091,6 +1105,11 @@ class RefreshTokenRepository:
                     source="auth_repository",
                 )
             )
+
+        await publish_event(
+            self._redis,
+            new_event(scope="session", user_id=user_id, session_id=session_id, reason=reason),
+        )
 
         try:
             await TokenAuditLog.find_one(TokenAuditLog.session_id == session_id).update(

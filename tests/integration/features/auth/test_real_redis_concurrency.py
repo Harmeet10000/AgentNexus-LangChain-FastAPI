@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
+from pyrate_limiter import Limiter, Rate
+from pyrate_limiter.buckets import InMemoryBucket
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
@@ -34,6 +36,12 @@ from app.features.auth.pending_revocation import (
     PendingRevocationReconciler,
 )
 from app.features.auth.repository import RefreshTokenRepository, SessionData
+from app.features.auth.websocket_revocation import (
+    REVOCATION_STREAM_KEY,
+    new_event,
+    publish_event,
+)
+from app.features.auth.websocket_security import WebSocketSecurityService
 from app.features.users.exceptions import UsersInfrastructureError
 from app.features.users.service import UserAdminService
 from app.security.tokens import TokenClaims, derive_refresh_token_material
@@ -204,6 +212,167 @@ def _claims(*, user_id: str, session_id: str, revision: int) -> TokenClaims:
 async def _rendezvous[T](barrier: asyncio.Barrier, operation: Awaitable[T]) -> T:
     await barrier.wait()
     return await operation
+
+
+class _WebSocketProbe:
+    def __init__(self) -> None:
+        self.closed = asyncio.Event()
+        self.close_count = 0
+
+    async def send_json(self, _payload: object) -> None:
+        return None
+
+    async def close(self, **_kwargs: object) -> None:
+        self.close_count += 1
+        self.closed.set()
+
+
+def _revocation_service(redis: Redis) -> WebSocketSecurityService:
+    settings = SimpleNamespace(
+        WEBSOCKET_REVOCATION_ENABLED=True,
+        WEBSOCKET_REVOCATION_BATCH_SIZE=32,
+        WEBSOCKET_REVOCATION_RECONNECT_BASE_SECONDS=0.01,
+        WEBSOCKET_REVOCATION_RECONNECT_MAX_SECONDS=0.05,
+        WEBSOCKET_PRESENCE_TTL_SECONDS=360,
+    )
+    limiter = Limiter(InMemoryBucket([Rate(1000, 1000)]))
+    return WebSocketSecurityService(
+        redis=redis,
+        settings=settings,
+        user_limiter=limiter,
+        connection_limiter=Limiter(InMemoryBucket([Rate(1000, 1000)])),
+    )
+
+
+async def _seed_stream_cursor(redis: Redis) -> str:
+    return str(
+        await redis.xadd(
+            REVOCATION_STREAM_KEY,
+            {"version": "1", "event_id": f"marker-{uuid4().hex}"},
+        )
+    )
+
+
+async def test_distributed_revocation_reaches_two_workers_and_scopes_connections(
+    redis_harness: _RedisHarness,
+) -> None:
+    """Two independent listeners close only their matching local sockets."""
+    redis = redis_harness.client
+    worker_a = _revocation_service(redis)
+    worker_b = _revocation_service(redis)
+    marker = await _seed_stream_cursor(redis)
+    worker_a._revocation_last_id = marker
+    worker_b._revocation_last_id = marker
+
+    user_id = _user_id()
+    target_a = _WebSocketProbe()
+    unrelated_a = _WebSocketProbe()
+    wildcard_target = _WebSocketProbe()
+    target_b = _WebSocketProbe()
+    claims_a = _claims(user_id=user_id, session_id="session-target", revision=0)
+    claims_other = _claims(user_id=user_id, session_id="session-other", revision=0)
+    worker_a._live_connections["a-target"] = (
+        target_a,
+        worker_a.build_context(claims=claims_a, origin=None, connection_id="a-target"),
+    )
+    worker_a._live_connections["a-other"] = (
+        unrelated_a,
+        worker_a.build_context(claims=claims_other, origin=None, connection_id="a-other"),
+    )
+    claims_wildcard = _claims(user_id=user_id, session_id="session-wildcard", revision=0)
+    worker_a._live_connections["a-wildcard"] = (
+        wildcard_target,
+        worker_a.build_context(
+            claims=claims_wildcard,
+            origin=None,
+            connection_id="a-wildcard",
+        ),
+    )
+    worker_b._live_connections["b-target"] = (
+        target_b,
+        worker_b.build_context(claims=claims_a, origin=None, connection_id="b-target"),
+    )
+    listeners = [
+        asyncio.create_task(worker_a.run_revocation_listener()),
+        asyncio.create_task(worker_b.run_revocation_listener()),
+    ]
+    try:
+        await publish_event(
+            redis,
+            new_event(
+                scope="session",
+                user_id=user_id,
+                session_id="session-target",
+                reason="role_changed",
+            ),
+        )
+        await asyncio.wait_for(
+            asyncio.gather(target_a.closed.wait(), target_b.closed.wait()), timeout=2
+        )
+        assert target_a.close_count == target_b.close_count == 1
+        assert not unrelated_a.closed.is_set()
+        await worker_a._handle_revocation_event(
+            new_event(
+                scope="user",
+                user_id=user_id,
+                except_session_id="session-other",
+                reason="deactivation",
+            )
+        )
+        assert wildcard_target.close_count == 1
+        assert not unrelated_a.closed.is_set()
+    finally:
+        for listener in listeners:
+            listener.cancel()
+        await asyncio.gather(*listeners, return_exceptions=True)
+        worker_a.close()
+        worker_b.close()
+
+
+async def test_distributed_revocation_rejects_spoofed_and_malformed_events_and_deduplicates(
+    redis_harness: _RedisHarness,
+) -> None:
+    redis = redis_harness.client
+    worker = _revocation_service(redis)
+    marker = await _seed_stream_cursor(redis)
+    worker._revocation_last_id = marker
+    user_id = _user_id()
+    probe = _WebSocketProbe()
+    claims = _claims(user_id=user_id, session_id="session-valid", revision=0)
+    worker._live_connections["connection"] = (
+        probe,
+        worker.build_context(claims=claims, origin=None, connection_id="connection"),
+    )
+    listeners = [asyncio.create_task(worker.run_revocation_listener())]
+    try:
+        await redis.xadd(REVOCATION_STREAM_KEY, {"version": "1", "scope": "session"})
+        spoofed = new_event(
+            scope="session",
+            user_id="another-user",
+            session_id="session-valid",
+            reason="spoof",
+        )
+        await publish_event(redis, spoofed)
+        await publish_event(redis, spoofed)
+        await asyncio.wait_for(worker._revocation_activity.wait(), timeout=2)
+        worker._revocation_activity.clear()
+        assert not probe.closed.is_set()
+
+        valid = new_event(
+            scope="session",
+            user_id=user_id,
+            session_id="session-valid",
+            reason="logout",
+        )
+        await publish_event(redis, valid)
+        await publish_event(redis, valid)
+        await asyncio.wait_for(probe.closed.wait(), timeout=2)
+        assert probe.close_count == 1
+    finally:
+        for listener in listeners:
+            listener.cancel()
+        await asyncio.gather(*listeners, return_exceptions=True)
+        worker.close()
 
 
 async def test_concurrent_creation_and_role_revoke_has_no_stale_survivor(

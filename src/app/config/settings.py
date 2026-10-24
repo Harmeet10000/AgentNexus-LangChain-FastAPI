@@ -430,6 +430,10 @@ class Settings(BaseSettings):
     WEBSOCKET_MAX_CONNECTIONS_PER_USER: int = Field(default=3)
     WEBSOCKET_PRESENCE_TTL_SECONDS: int = Field(default=360)
     WEBSOCKET_OUTBOUND_SESSION_CHECK_INTERVAL_SECONDS: float = Field(default=5, gt=0)
+    WEBSOCKET_REVOCATION_ENABLED: bool = Field(default=True)
+    WEBSOCKET_REVOCATION_BATCH_SIZE: int = Field(default=100, ge=1, le=1000)
+    WEBSOCKET_REVOCATION_RECONNECT_BASE_SECONDS: float = Field(default=0.25, gt=0)
+    WEBSOCKET_REVOCATION_RECONNECT_MAX_SECONDS: float = Field(default=5.0, gt=0)
 
     # --- Agent Saul transcript boundaries (§5.2 — hard deadline, configurable) ---
     # Whole-boundary budget (read turn context + snapshot + view + apply).
