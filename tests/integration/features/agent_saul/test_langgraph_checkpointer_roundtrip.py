@@ -79,3 +79,28 @@ async def test_application_pool_saver_writes_reads_and_resumes_state(
     assert resumed_state is not None
     assert resumed_state.checkpoint["channel_values"]["state"] == "after-resume"
     assert resumed_state.parent_config == first_config
+
+
+async def test_application_pool_saver_keeps_threads_isolated(
+    saver: tuple[AsyncPostgresSaver, str],
+) -> None:
+    checkpointer, thread_id = saver
+    other_thread_id = f"langgraph-isolation-{uuid4()}"
+    checkpoint = empty_checkpoint()
+    checkpoint["channel_values"] = {"state": "only-first-thread"}
+    checkpoint["channel_versions"] = {"state": 1}
+    config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+    other_config = {"configurable": {"thread_id": other_thread_id, "checkpoint_ns": ""}}
+
+    try:
+        await checkpointer.aput(
+            config,
+            checkpoint,
+            {"source": "input", "step": 1, "parents": {}},
+            {"state": 1},
+        )
+
+        assert await checkpointer.aget_tuple(config) is not None
+        assert await checkpointer.aget_tuple(other_config) is None
+    finally:
+        await checkpointer.adelete_thread(other_thread_id)
