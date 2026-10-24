@@ -234,7 +234,9 @@ class AuthService:
         return Success(None)
 
     @trace_layer("service")
-    async def refresh(self, refresh_token: str) -> AuthResult[TokenResponse]:  # noqa: PLR0912, PLR0914
+    async def refresh(  # noqa: PLR0912, PLR0914, PLR0915
+        self, refresh_token: str
+    ) -> AuthResult[TokenResponse]:
         claims = decode_token(refresh_token)
         if claims.token_type != "refresh":
             return Failure(
@@ -293,21 +295,21 @@ class AuthService:
                     message="Refresh token binding is invalid", source="auth_service"
                 )
             )
-        family_result = await self._token_repo.create_refresh_family(
-            family_id=family_id,
-            user_id=account.id,
-            session_id=session_id,
-            device_id=session.device_id,
-            authz_revision=account.role_revision,
-            token_id=claims.jti,
-            token_secret=token_secret,
-            issued_at=session.created_at,
-            expires_at=session.expires_at,
-            legacy=claims.family_id is None,
-        )
-        if isinstance(family_result, Failure):
-            return Failure(family_result.failure())
         if claims.family_id is None:
+            family_result = await self._token_repo.create_refresh_family(
+                family_id=family_id,
+                user_id=account.id,
+                session_id=session_id,
+                device_id=session.device_id,
+                authz_revision=account.role_revision,
+                token_id=claims.jti,
+                token_secret=token_secret,
+                issued_at=session.created_at,
+                expires_at=session.expires_at,
+                legacy=True,
+            )
+            if isinstance(family_result, Failure):
+                return Failure(family_result.failure())
             attach_result = await self._token_repo.attach_refresh_family(
                 session_id=session_id,
                 family_id=family_id,
@@ -340,6 +342,14 @@ class AuthService:
         if rotation.status == "reused":
             _REFRESH_REPLAYS.add(1, {"reason": "family_reuse"})
             _REFRESH_FAMILY_REVOKES.add(1, {"reason": "refresh_reuse"})
+            audit_result = await self._token_repo.revoke_refresh_family(
+                family_id=family_id,
+                reason="refresh_reuse",
+                user_id=account.id,
+                session_id=session_id,
+            )
+            if isinstance(audit_result, Failure):
+                log_expected_failure(audit_result.failure(), operation="audit_refresh_reuse")
             await self._emit_security_event(
                 "auth.refresh_token_reuse_detected",
                 account.id,
