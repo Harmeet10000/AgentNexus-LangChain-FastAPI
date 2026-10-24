@@ -353,7 +353,7 @@ class SessionIndexRepair:
                 logger.bind(error=str(exc), cursor=current).warning(
                     "auth_session_index_orphan_page_failed"
                 )
-                continue
+                return
             for _key, raw in zip(keys, raw_values, strict=True):
                 checked += 1
                 if raw is None:
