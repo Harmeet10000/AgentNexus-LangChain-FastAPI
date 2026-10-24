@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
@@ -45,6 +46,7 @@ class WebSocketRevocationEvent(BaseModel):
     tenant_id: str | None = Field(default=None, min_length=1, max_length=128)
     user_id: str = Field(min_length=1, max_length=256)
     session_id: str | None = Field(default=None, min_length=1, max_length=256)
+    session_ids: list[str] | None = Field(default=None, max_length=1000)
     except_session_id: str | None = Field(default=None, min_length=1, max_length=256)
     reason: str = Field(min_length=1, max_length=128)
     occurred_at: float = Field(ge=0)
@@ -59,6 +61,9 @@ class WebSocketRevocationEvent(BaseModel):
         if self.scope == "session" and self.except_session_id is not None:
             msg = "session revocation cannot exclude a session"
             raise ValueError(msg)
+        if self.scope == "session" and self.session_ids is not None:
+            msg = "session revocation cannot include session_ids"
+            raise ValueError(msg)
         if self.scope == "user" and self.session_id is not None:
             msg = "user revocation cannot target session_id"
             raise ValueError(msg)
@@ -70,6 +75,7 @@ def new_event(
     scope: Literal["session", "user"],
     user_id: str,
     session_id: str | None = None,
+    session_ids: list[str] | None = None,
     except_session_id: str | None = None,
     reason: str,
     tenant_id: str | None = None,
@@ -83,6 +89,7 @@ def new_event(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=session_id,
+        session_ids=session_ids,
         except_session_id=except_session_id,
         reason=reason,
         occurred_at=time.time(),
@@ -99,6 +106,8 @@ async def publish_event(redis: Redis, event: WebSocketRevocationEvent) -> bool:
             for key, value in event.model_dump(mode="json").items()
             if value is not None
         }
+        if event.session_ids is not None:
+            fields["session_ids"] = json.dumps(event.session_ids, separators=(",", ":"))
         await redis.xadd(
             REVOCATION_STREAM_KEY,
             fields,
@@ -145,6 +154,11 @@ def parse_event(fields: object) -> WebSocketRevocationEvent | None:
             try:
                 decoded = int(str(decoded))
             except (TypeError, ValueError):
+                return None
+        elif name == "session_ids" and isinstance(decoded, str):
+            try:
+                decoded = json.loads(decoded)
+            except json.JSONDecodeError:
                 return None
         normalized[name] = decoded
     try:

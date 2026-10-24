@@ -297,6 +297,10 @@ async def test_distributed_revocation_reaches_two_workers_and_scopes_connections
         asyncio.create_task(worker_b.run_revocation_listener()),
     ]
     try:
+        await asyncio.gather(
+            worker_a._revocation_cursor_ready.wait(),
+            worker_b._revocation_cursor_ready.wait(),
+        )
         await publish_event(
             redis,
             new_event(
@@ -387,6 +391,7 @@ async def test_distributed_revocation_rejects_spoofed_and_malformed_events_and_d
     )
     listeners = [asyncio.create_task(worker.run_revocation_listener())]
     try:
+        await worker._revocation_cursor_ready.wait()
         await redis.xadd(REVOCATION_STREAM_KEY, {"version": "1", "scope": "session"})
         spoofed = new_event(
             scope="session",
@@ -394,9 +399,10 @@ async def test_distributed_revocation_rejects_spoofed_and_malformed_events_and_d
             session_id="session-valid",
             reason="spoof",
         )
-        await publish_event(redis, spoofed)
-        await publish_event(redis, spoofed)
-        await asyncio.wait_for(worker._revocation_activity.wait(), timeout=2)
+        for _ in range(2):
+            worker._revocation_activity.clear()
+            await publish_event(redis, spoofed)
+            await asyncio.wait_for(worker._revocation_activity.wait(), timeout=2)
         worker._revocation_activity.clear()
         assert not probe.closed.is_set()
 
@@ -406,10 +412,24 @@ async def test_distributed_revocation_rejects_spoofed_and_malformed_events_and_d
             session_id="session-valid",
             reason="logout",
         )
-        await publish_event(redis, valid)
+        worker._revocation_activity.clear()
         await publish_event(redis, valid)
         await asyncio.wait_for(probe.closed.wait(), timeout=2)
         assert probe.close_count == 1
+
+        duplicate_probe = _WebSocketProbe()
+        worker._live_connections["connection-duplicate"] = (
+            duplicate_probe,
+            worker.build_context(
+                claims=claims,
+                origin=None,
+                connection_id="connection-duplicate",
+            ),
+        )
+        worker._revocation_activity.clear()
+        await publish_event(redis, valid)
+        await asyncio.wait_for(worker._revocation_activity.wait(), timeout=2)
+        assert duplicate_probe.close_count == 0
     finally:
         for listener in listeners:
             listener.cancel()
@@ -433,6 +453,7 @@ async def test_distributed_listener_reconnects_after_redis_connection_drop(
     )
     listener = asyncio.create_task(worker.run_revocation_listener())
     try:
+        await worker._revocation_cursor_ready.wait()
         # Drop the listener's active blocking connection. It must reconnect
         # and continue from the cursor without relying on a new subscription.
         await redis.connection_pool.disconnect()

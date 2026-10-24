@@ -43,6 +43,7 @@ _SESSION_PRESENCE_KEY = "ws:session:{}"  # Sorted set: member=connection_id, sco
 _CONNECTION_METADATA_KEY = "ws:connection:{}"  # Hash: connection metadata
 _REVOCATION_REVISION_TTL_SECONDS = 3600.0
 _REVOCATION_CLOSE_CONCURRENCY = 20
+_REVOCATION_CLOSE_TIMEOUT_SECONDS = 1.0
 
 
 class WebSocketSecurityContext(BaseModel):
@@ -196,10 +197,13 @@ class WebSocketSecurityService:
         # New workers tail from now. Replaying retained events could revoke a
         # socket created after the revocation; reconnects resume their cursor.
         self._revocation_last_id = "$"
+        self._revocation_cursor_initialized = False
+        self._revocation_cursor_ready = asyncio.Event()
         self._revocation_activity = asyncio.Event()
         self._seen_revocation_events: dict[str, None] = {}
         self._latest_revocation_revisions: dict[str, tuple[int, float]] = {}
         self._max_seen_revocation_events = 4096
+        self._max_revocation_revisions = 4096
         self._revocation_close_semaphore = asyncio.Semaphore(_REVOCATION_CLOSE_CONCURRENCY)
         self._revocation_needs_gap_check = False
 
@@ -490,11 +494,14 @@ class WebSocketSecurityService:
             message=f"Connection closed: {safe_reason}",
             retryable=False,
         )
-        with suppress(Exception):
-            await websocket.send_json(self._violation_frame(violation))
-        with suppress(Exception):
-            await websocket.close(code=violation.close_code, reason=safe_reason)
-        await self.unregister_connection(context)
+        try:
+            with suppress(Exception):
+                await websocket.send_json(self._violation_frame(violation))
+            with suppress(Exception):
+                await websocket.close(code=violation.close_code, reason=safe_reason)
+        finally:
+            with suppress(Exception):
+                await self.unregister_connection(context)
 
     @staticmethod
     def _safe_close_reason(reason: str) -> str:
@@ -545,6 +552,12 @@ class WebSocketSecurityService:
         delay = base_delay
         while True:
             try:
+                if not self._revocation_cursor_initialized:
+                    tail = await self._redis.xrevrange(REVOCATION_STREAM_KEY, count=1)
+                    if tail:
+                        self._revocation_last_id = self._decode_stream_id(tail[0][0])
+                    self._revocation_cursor_initialized = True
+                    self._revocation_cursor_ready.set()
                 records = await self._redis.xread(
                     {REVOCATION_STREAM_KEY: self._revocation_last_id},
                     # Keep the blocking interval below the default Redis
@@ -565,6 +578,11 @@ class WebSocketSecurityService:
                             REVOCATION_MALFORMED.add(1)
                             self._revocation_activity.set()
                             continue
+                        subscriber_lag_ms = max(0.0, (time() - event.occurred_at) * 1000)
+                        REVOCATION_SUBSCRIBER_LAG.record(
+                            subscriber_lag_ms,
+                            {"scope": event.scope},
+                        )
                         await self._handle_revocation_event(event)
                         self._revocation_activity.set()
             except asyncio.CancelledError:
@@ -617,6 +635,15 @@ class WebSocketSecurityService:
         if event.event_id in self._seen_revocation_events:
             return
         now_monotonic = monotonic()
+        expired_users = [
+            user_id
+            for user_id, (_revision, expires_at) in self._latest_revocation_revisions.items()
+            if expires_at <= now_monotonic
+        ]
+        for user_id in expired_users:
+            self._latest_revocation_revisions.pop(user_id, None)
+        while len(self._latest_revocation_revisions) >= self._max_revocation_revisions:
+            self._latest_revocation_revisions.pop(next(iter(self._latest_revocation_revisions)))
         if event.authz_revision is not None:
             previous_revision_entry = self._latest_revocation_revisions.get(event.user_id)
             if previous_revision_entry is not None and now_monotonic >= previous_revision_entry[1]:
@@ -648,19 +675,38 @@ class WebSocketSecurityService:
             if event.scope == "session":
                 if event.session_id == context.session_id:
                     matching.append(connection_id)
-            elif context.session_id != event.except_session_id:
+            elif (
+                context.session_id != event.except_session_id
+                and (event.session_ids is None or context.session_id in event.session_ids)
+            ):
                 matching.append(connection_id)
 
         async def close_one(connection_id: str) -> None:
             async with self._revocation_close_semaphore:
-                await self.close_connection(connection_id, reason=event.reason)
+                try:
+                    await asyncio.wait_for(
+                        self.close_connection(connection_id, reason=event.reason),
+                        timeout=_REVOCATION_CLOSE_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    logger.bind(
+                        operation="websocket_revocation_close",
+                        event_id=event.event_id,
+                        connection_id=connection_id,
+                    ).warning("Timed out closing revoked WebSocket connection")
+                except Exception as exc:  # noqa: BLE001 — continue other closes
+                    logger.bind(
+                        operation="websocket_revocation_close",
+                        event_id=event.event_id,
+                        connection_id=connection_id,
+                        error_type=type(exc).__name__,
+                    ).warning("Failed to close revoked WebSocket connection")
 
         await asyncio.gather(*(close_one(connection_id) for connection_id in matching))
         if matching:
             REVOCATION_CLOSED.add(len(matching), {"scope": event.scope})
             close_latency_ms = max(0.0, (time() - event.occurred_at) * 1000)
             REVOCATION_CLOSE_LATENCY.record(close_latency_ms, {"scope": event.scope})
-            REVOCATION_SUBSCRIBER_LAG.record(close_latency_ms, {"scope": event.scope})
             logger.bind(
                 operation="websocket_revocation_close",
                 event_id=event.event_id,

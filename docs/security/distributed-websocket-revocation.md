@@ -19,8 +19,9 @@ outage.
 
 The stream uses approximate trimming at 10,000 entries. The listener reads at
 most `WEBSOCKET_REVOCATION_BATCH_SIZE` entries per call and maintains a bounded
-in-memory event-ID deduplication set. A newly started worker tails from `$`
-rather than replaying retained history; a reconnect resumes its last ID.
+in-memory event-ID deduplication set. A newly started worker resolves the
+current stream tail rather than replaying retained history; a reconnect resumes
+its last ID.
 Duplicate and out-of-order events are safe because closing a local socket is
 idempotent, and per-user authorization revisions make lower revisions no-ops
 after a higher revision is observed. Connections also carry their creation
