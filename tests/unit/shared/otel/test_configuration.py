@@ -70,6 +70,7 @@ def test_otlp_reader_receives_exporter_as_named_argument(monkeypatch) -> None:
 
     class FakeExporter:
         def __init__(self, **kwargs: object) -> None:
+            captured["exporter_instance"] = self
             captured["exporter_kwargs"] = kwargs
 
     class FakePeriodicReader:
@@ -90,6 +91,7 @@ def test_otlp_reader_receives_exporter_as_named_argument(monkeypatch) -> None:
         metrics_module, "PeriodicExportingMetricReader", FakePeriodicReader
     )
     monkeypatch.setattr(metrics_module, "PrometheusMetricReader", FakePrometheusReader)
+    monkeypatch.setattr(metrics_module, "_otel_prometheus_reader", None)
     monkeypatch.setattr(metrics_module, "MeterProvider", FakeMeterProvider)
     monkeypatch.setattr(otel_metrics, "set_meter_provider", lambda _provider: None)
 
@@ -100,7 +102,7 @@ def test_otlp_reader_receives_exporter_as_named_argument(monkeypatch) -> None:
     )
 
     assert captured["exporter_kwargs"] == {"endpoint": "http://collector:4317"}
-    assert captured["reader_exporter"] is not None
+    assert captured["reader_exporter"] is captured["exporter_instance"]
     assert captured["reader_interval"] == 321
 
 
