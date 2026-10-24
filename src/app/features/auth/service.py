@@ -548,12 +548,23 @@ class AuthService:
             return Failure(candidate_result.failure())
         candidate = candidate_result.unwrap()
         if candidate is None or not candidate.ready_for_confirmation:
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_replayed",
+                user_id,
+                reason="missing_or_expired_action",
+            )
             return Failure(
                 AuthAuthenticationError(
                     message="OAuth link confirmation is invalid or expired", source="auth_service"
                 )
             )
         if candidate.user_id != user_id or candidate.session_id != session_id:
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_rejected",
+                user_id,
+                reason="wrong_user_or_session",
+                provider=candidate.provider,
+            )
             return Failure(
                 AuthAuthorizationError(
                     message="OAuth link confirmation belongs to another session",
@@ -591,6 +602,9 @@ class AuthService:
         confirm: bool,
     ) -> AuthResult[None]:
         if not confirm:
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_rejected", user_id, reason="confirmation_not_explicit"
+            )
             return Failure(
                 AuthValidationError(
                     message="Explicit confirmation is required", source="auth_service"
@@ -601,6 +615,11 @@ class AuthService:
             return Failure(candidate_result.failure())
         candidate = candidate_result.unwrap()
         if candidate is None or not candidate.ready_for_confirmation:
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_replayed",
+                user_id,
+                reason="missing_or_expired_action",
+            )
             return Failure(
                 AuthAuthenticationError(
                     message="OAuth link confirmation is invalid or expired", source="auth_service"
@@ -611,6 +630,12 @@ class AuthService:
             or candidate.session_id != session_id
             or candidate.authz_revision != authz_revision
         ):
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_rejected",
+                user_id,
+                reason="wrong_user_session_or_authorization_revision",
+                provider=candidate.provider,
+            )
             return Failure(
                 AuthAuthorizationError(
                     message="OAuth link confirmation belongs to another session",
@@ -634,6 +659,12 @@ class AuthService:
             return Failure(owner_result.failure())
         owner = owner_result.unwrap()
         if owner is not None and owner.id != account.id:
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_rejected",
+                account.id,
+                reason="provider_identity_already_owned",
+                provider=candidate.provider,
+            )
             return Failure(
                 AuthConflictError(
                     message="OAuth identity is already linked to another account",
@@ -644,6 +675,12 @@ class AuthService:
         if isinstance(consumed_result, Failure):
             return Failure(consumed_result.failure())
         if consumed_result.unwrap() is None:
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_replayed",
+                account.id,
+                reason="action_already_consumed",
+                provider=candidate.provider,
+            )
             return Failure(
                 AuthAuthenticationError(
                     message="OAuth link confirmation was already used", source="auth_service"
@@ -677,10 +714,19 @@ class AuthService:
             return Failure(account_result.failure())
         account = account_result.unwrap()
         if account is None:
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_rejected",
+                user_id,
+                reason="account_not_found",
+                provider=provider,
+            )
             return Failure(
                 AuthAuthenticationError(message="Account not found", source="auth_service")
             )
         if session_id is None or authz_revision != account.role_revision:
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_rejected", user_id, reason="reauthentication_required", provider=provider
+            )
             return Failure(
                 AuthAuthenticationError(
                     message="Recent reauthentication is required", source="auth_service"
@@ -693,6 +739,9 @@ class AuthService:
         if session is None or session.created_at < datetime.now(UTC) - timedelta(
             seconds=_OAUTH_LINK_RECENT_AUTH_SECONDS
         ):
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_rejected", user_id, reason="stale_or_missing_session", provider=provider
+            )
             return Failure(
                 AuthAuthenticationError(
                     message="Recent reauthentication is required", source="auth_service"
@@ -700,6 +749,9 @@ class AuthService:
             )
         result = await self._account_store.unlink_oauth_account(user_id, provider)
         if isinstance(result, Failure):
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_rejected", user_id, reason="unlink_rejected", provider=provider
+            )
             return Failure(result.failure())
         await self._emit_security_event("auth.oauth_unlinked", user_id, {"provider": provider})
         return Success(None)
@@ -752,6 +804,12 @@ class AuthService:
         link_intent = intent_result.unwrap()
         if link_intent is not None:
             if link_intent.provider != provider:
+                await self._emit_oauth_link_security_event(
+                    "auth.oauth_link_rejected",
+                    link_intent.user_id,
+                    reason="provider_state_mixup",
+                    provider=provider,
+                )
                 return Failure(
                     AuthAuthenticationError(
                         message="OAuth link provider does not match the requested provider",
@@ -763,6 +821,12 @@ class AuthService:
                 return Failure(account_result.failure())
             account = account_result.unwrap()
             if not userinfo.email_verified:
+                await self._emit_oauth_link_security_event(
+                    "auth.oauth_link_rejected",
+                    account.id,
+                    reason="provider_email_unverified",
+                    provider=provider,
+                )
                 return Failure(
                     AuthAuthenticationError(
                         message="OAuth email is not verified", source="auth_service"
@@ -775,6 +839,12 @@ class AuthService:
                 return Failure(owner_result.failure())
             owner = owner_result.unwrap()
             if owner is not None and owner.id != account.id:
+                await self._emit_oauth_link_security_event(
+                    "auth.oauth_link_rejected",
+                    account.id,
+                    reason="provider_identity_already_owned",
+                    provider=provider,
+                )
                 return Failure(
                     AuthConflictError(
                         message="OAuth identity is already linked to another account",
@@ -786,6 +856,12 @@ class AuthService:
                 return Failure(email_result.failure())
             email_owner = email_result.unwrap()
             if email_owner is not None and email_owner.id != account.id:
+                await self._emit_oauth_link_security_event(
+                    "auth.oauth_link_rejected",
+                    account.id,
+                    reason="provider_email_belongs_to_another_account",
+                    provider=provider,
+                )
                 return Failure(
                     AuthConflictError(
                         message="OAuth email belongs to another account",
@@ -799,6 +875,12 @@ class AuthService:
                 full_name=userinfo.full_name,
             )
             if isinstance(completed_result, Failure):
+                await self._emit_oauth_link_security_event(
+                    "auth.oauth_link_rejected",
+                    account.id,
+                    reason="callback_replay_or_expired_state",
+                    provider=provider,
+                )
                 return Failure(completed_result.failure())
             candidate, action_token = completed_result.unwrap()
             if candidate.provider_user_id is None or candidate.provider_email is None:
@@ -878,6 +960,12 @@ class AuthService:
                         message="Local account email is not verified", source="auth_service"
                     )
                 )
+            await self._emit_oauth_link_security_event(
+                "auth.oauth_link_rejected",
+                account.id,
+                reason="email_only_auto_link_blocked",
+                provider=provider,
+            )
             return Failure(
                 AuthConflictError(
                     message="OAuth identity is not linked; start an explicit account-link transaction",
@@ -1166,6 +1254,27 @@ class AuthService:
             logger.bind(event_type=event_type, user_id=user_id).error(
                 "auth_security_event_persistence_failed"
             )
+
+    async def _emit_oauth_link_security_event(
+        self,
+        event_type: str,
+        user_id: str,
+        *,
+        reason: str,
+        **details: object,
+    ) -> None:
+        """Record link rejection/replay and hand off notification metadata.
+
+        The current application has no dedicated auth-notification service.  A
+        durable outbox event is therefore the notification seam when
+        PostgreSQL is configured; the ``notify_user`` marker lets a future
+        delivery worker distinguish these events from audit-only records.
+        """
+        await self._emit_security_event(
+            event_type,
+            user_id,
+            {"reason": reason, "notify_user": True, **details},
+        )
 
     async def _publish_outbox_event(
         self,
