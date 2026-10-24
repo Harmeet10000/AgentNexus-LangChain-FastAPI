@@ -355,7 +355,7 @@ class PendingRevocationReconciler:
                 try:
                     user = await self._get_user_with_deadline(user_id, deadline)
                     if user is None or not user.session_revocation_pending:
-                        await self._await_budget(
+                        deleted = await self._await_budget(
                             self._redis.eval(
                                 _DELETE_RETRY_IF_OWNER_SCRIPT,
                                 2,
@@ -365,7 +365,7 @@ class PendingRevocationReconciler:
                             ),
                             deadline,
                         )
-                        cleaned += 1
+                        cleaned += int(bool(deleted))
                 except Exception as exc:  # noqa: BLE001 — never delete on lookup outage
                     exc.add_note("operation=pending_reconcile, stage=retry_gc_lookup")
                 finally:
