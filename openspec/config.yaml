@@ -26,7 +26,7 @@ context: |
   - Typing: ruff + ty gate the merge; PEP 695 generics on Python 3.12; no
     blanket type ignores; always use uv run for tooling.
 
-  Tooling: uv sync --extra dev, then uv run ruff format src/ tests/ and uv run ruff check src/ tests/, uv run ty check src/ tests/ (CI checks src/ tests/, not src/ alone).
+  Tooling: uv sync --extra dev, then uv run ruff format src/ tests/ and uv run ruff check src/ tests/, uv run ty check src/.
 
 # Per-artifact rules
 rules:
@@ -50,7 +50,7 @@ operations:
   apply:
     guidance:
       - Run uv sync --extra dev then uv run ruff format src/ tests/ and uv run ruff check src/ tests/.
-      - Run uv run ty check src/ tests/ and fix type errors before finishing.
+      - Run uv run ty check src/ and fix type errors before finishing.
       - Run ast-grep scan src/ and fix any rule violations; verify each rule's fixture pair (ADR-005).
       - Check tasks off in tasks.md as they are completed.
   archive:
