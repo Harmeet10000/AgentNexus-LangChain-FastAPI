@@ -246,9 +246,13 @@ must not be used as an implementation target.
 
 Goals:
 
-- replace `fetch_error`, `reconcile_error`, and `apply_error` plumbing internally with typed failures
-- keep graph-state and task-summary outer contracts stable unless explicitly changed later
-- preserve exception-based rollback behavior inside SQLAlchemy transaction-sensitive sections
+- keep repository `Failure` values inside the sweep boundary and translate them
+  into the explicit `_ThreadReconcileOutcome` states (`failed`, `clean`, or a
+  derived status) rather than inventing ad-hoc error fields
+- keep the bounded `SweepReport` contract stable, including the
+  `redis_unavailable` fail-closed outcome and its counters
+- preserve public LangGraph checkpoint reads, monotonic projection guards, and
+  retry-safe GC audit semantics while changing internal error handling
 
 ### Phase 4: Repository Ambiguity Cleanup
 
