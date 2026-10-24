@@ -123,7 +123,7 @@ class TodoListMiddleware(BaseModel):
             return await handler(request.override(system_message=system_message))
 
         @after_model(state_schema=TodoAgentState)
-        def parse_todo_commands(state: dict[str, Any], _runtime: Any) -> dict[str, Any] | None:
+        def parse_todo_commands(state: TodoAgentState, _runtime: Any) -> dict[str, Any] | None:
             messages = state.get("messages", [])
             ai_msg = next(
                 (message for message in reversed(messages) if isinstance(message, AIMessage)),
