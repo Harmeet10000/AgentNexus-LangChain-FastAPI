@@ -218,6 +218,11 @@ celerybeat-schedule.db
 
 # Mintlify docs build artifacts (docs-site/ source is committed; builds are not)
 docs-site/.mintlify/
+
+# Local research artifacts; keep report source out of commits while retaining
+# the directory for reproducible local investigations.
+/reports/langchain-langgraph-middleware-*.json
+/reports/langchain-langgraph-middleware-*.md
 docs-site/node_modules/
 
 # Local tool configs/backups may embed live API keys — never commit them
