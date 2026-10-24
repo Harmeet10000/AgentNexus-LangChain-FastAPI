@@ -64,6 +64,7 @@ async def set_user_role(user: User, role: UserRole) -> AuthResult[User]:
                 {
                     User.role: role,
                     User.session_revocation_pending: True,
+                    User.session_revocation_pending_at: datetime.now(UTC),
                     User.updated_at: datetime.now(UTC),
                 }
             ),
@@ -101,7 +102,13 @@ async def clear_session_revocation_pending(
     try:
         if expected_revision is None:
             await user.update(
-                Set({User.session_revocation_pending: False, User.updated_at: datetime.now(UTC)})
+                Set(
+                    {
+                        User.session_revocation_pending: False,
+                        User.session_revocation_pending_at: None,
+                        User.updated_at: datetime.now(UTC),
+                    }
+                )
             )
             user.session_revocation_pending = False
             return Success(user)
@@ -111,7 +118,13 @@ async def clear_session_revocation_pending(
             User.role_revision == expected_revision,
             User.session_revocation_pending == True,  # noqa: E712 — Mongo predicate
         ).update(
-            Set({User.session_revocation_pending: False, User.updated_at: datetime.now(UTC)}),
+            Set(
+                {
+                    User.session_revocation_pending: False,
+                    User.session_revocation_pending_at: None,
+                    User.updated_at: datetime.now(UTC),
+                }
+            ),
             response_type=UpdateResponse.NEW_DOCUMENT,
         )
         if updated is not None:

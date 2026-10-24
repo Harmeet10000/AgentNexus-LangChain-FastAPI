@@ -228,6 +228,18 @@ class Settings(BaseSettings):
     CELERY_IDEMPOTENCY_TTL_SECONDS: int = Field(default=86400)
     CELERY_CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = Field(default=5)
     CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT: int = Field(default=60)
+    # Pending role-change revocations are eventual cleanup, never the request
+    # authorization decision.  The kill switch pauses cleanup without
+    # weakening epoch checks or the existing per-request validation.
+    AUTH_PENDING_REVOCATION_ENABLED: bool = Field(default=True)
+    AUTH_PENDING_REVOCATION_BATCH_SIZE: int = Field(default=50, ge=1, le=500)
+    AUTH_PENDING_REVOCATION_LEASE_SECONDS: int = Field(default=120, ge=15, le=900)
+    AUTH_PENDING_REVOCATION_MAX_ATTEMPTS: int = Field(default=8, ge=1, le=100)
+    AUTH_PENDING_REVOCATION_BACKOFF_BASE_SECONDS: int = Field(default=15, ge=1, le=3600)
+    AUTH_PENDING_REVOCATION_BACKOFF_MAX_SECONDS: int = Field(default=900, ge=1, le=86_400)
+    AUTH_PENDING_REVOCATION_BACKOFF_JITTER_SECONDS: int = Field(default=5, ge=0, le=300)
+    AUTH_PENDING_REVOCATION_OLDEST_ALERT_SECONDS: int = Field(default=300, ge=1)
+    AUTH_PENDING_REVOCATION_MAX_RUNTIME_SECONDS: int = Field(default=45, ge=1, le=270)
     CRAWL_JOB_TTL_SECONDS: int = Field(default=86_400, ge=300, le=7_776_000)
     CRAWL_JOB_MAX_RESULT_BYTES: int = Field(default=8_000_000, ge=100_000, le=50_000_000)
 
