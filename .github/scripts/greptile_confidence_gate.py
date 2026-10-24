@@ -84,9 +84,14 @@ def _reviewed_shas(body: str) -> tuple[str, ...] | None:
     for index, label in enumerate(labels):
         end = labels[index + 1].start() if index + 1 < len(labels) else len(body)
         value = body[label.end() : end].splitlines()[0].strip()
-        match = COMMIT_LINK_SHA_RE.search(value) or BACKTICK_SHA_RE.fullmatch(value)
-        if match is None:
-            match = BARE_SHA_RE.fullmatch(value)
+        link_shas = COMMIT_LINK_SHA_RE.findall(value)
+        if link_shas:
+            reviewed_shas.extend(sha.lower() for sha in link_shas)
+            backtick_match = BACKTICK_SHA_RE.search(value)
+            if backtick_match is not None:
+                reviewed_shas.append(backtick_match.group("sha").lower())
+            continue
+        match = BACKTICK_SHA_RE.fullmatch(value) or BARE_SHA_RE.fullmatch(value)
         if match is None:
             return None
         reviewed_shas.append(match.group("sha").lower())
@@ -116,14 +121,16 @@ def evaluate_comments(comments: list[Comment], head_sha: str) -> Decision:
         scores = _confidence_scores(comment.body)
         reviewed_shas = _reviewed_shas(comment.body)
         if scores is None or reviewed_shas is None:
-            return Decision(False, "a trusted Greptile review contains malformed score or commit fields")
+            return Decision(
+                False, "a trusted Greptile review contains malformed score or commit fields"
+            )
         refers_to_current_head = normalized_head in reviewed_shas
         if refers_to_current_head and (
-            not scores
-            or any(score != (5, 5) for score in scores)
-            or len(reviewed_shas) != 1
+            not scores or any(score != (5, 5) for score in scores) or len(reviewed_shas) != 1
         ):
-            return Decision(False, "a trusted Greptile review for the current head is conflicting or malformed")
+            return Decision(
+                False, "a trusted Greptile review for the current head is conflicting or malformed"
+            )
         if not scores or any(score != (5, 5) for score in scores):
             continue
         if len(reviewed_shas) != 1 or reviewed_shas[0] != normalized_head:
@@ -217,14 +224,19 @@ class GitHubClient:
         matching = [
             item
             for item in value["check_runs"]
-            if isinstance(item, dict) and item.get("name") == GATE_NAME and isinstance(item.get("id"), int)
+            if isinstance(item, dict)
+            and item.get("name") == GATE_NAME
+            and isinstance(item.get("id"), int)
         ]
         if not matching:
             return None
         return max(item["id"] for item in matching)
 
     def begin_check(self, head_sha: str) -> int:
-        check_id = self._find_check_run(head_sha)
+        try:
+            check_id = self._find_check_run(head_sha)
+        except GitHubApiError:
+            check_id = None
         if check_id is None:
             value = self.request(
                 "POST",

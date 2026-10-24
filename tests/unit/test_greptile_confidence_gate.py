@@ -104,6 +104,20 @@ def test_rejects_missing_or_ambiguous_reviewed_commit() -> None:
     assert not ambiguous.passed
 
 
+def test_rejects_conflicting_commit_links() -> None:
+    other = "b" * 40
+    result = GATE.evaluate_comments(
+        [
+            comment(
+                f"Confidence Score: 5/5\nLast reviewed commit: [current](https://example/commit/{HEAD}) "
+                f"[other](https://example/commit/{other})"
+            )
+        ],
+        HEAD,
+    )
+    assert not result.passed
+
+
 def test_rejects_score_that_only_prefix_matches() -> None:
     result = GATE.evaluate_comments(
         [comment(f"Confidence Score: 5/50\nLast reviewed commit: {HEAD}")], HEAD
@@ -138,10 +152,15 @@ def test_rejects_malformed_head() -> None:
 
 
 class FakeClient:
-    def __init__(self, pull_requests: list[dict[str, object]], comments: list[object]) -> None:
+    def __init__(
+        self,
+        pull_requests: list[dict[str, object]],
+        comments: list[object],
+        completed: list[tuple[int, GATE.Decision]] | None = None,
+    ) -> None:
         self.pull_requests = iter(pull_requests)
         self.comments = comments
-        self.completed: list[tuple[int, GATE.Decision]] = []
+        self.completed = completed or []
         self.begun: list[str] = []
 
     def pull_request(self, _number: int) -> dict[str, object]:
@@ -155,6 +174,10 @@ class FakeClient:
         return 1
 
     def complete_check(self, check_id: int, decision: GATE.Decision) -> None:
+        for index, (existing_id, _existing_decision) in enumerate(self.completed):
+            if existing_id == check_id:
+                self.completed[index] = (check_id, decision)
+                return
         self.completed.append((check_id, decision))
 
 
@@ -202,7 +225,11 @@ def test_run_fails_old_event_when_head_changes_after_comment_read() -> None:
 
 
 def test_run_replaces_existing_success_when_comment_read_fails() -> None:
-    client = FailingCommentClient([pull_request_payload(HEAD), pull_request_payload(HEAD)], [])
+    client = FailingCommentClient(
+        [pull_request_payload(HEAD), pull_request_payload(HEAD)],
+        [],
+        completed=[(1, GATE.Decision(True, "old success"))],
+    )
     event = {"pull_request": {"number": 1, "head": {"sha": HEAD}}}
 
     with pytest.raises(GATE.GitHubApiError):
