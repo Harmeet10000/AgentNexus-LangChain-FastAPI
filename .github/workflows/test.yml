@@ -129,6 +129,25 @@ jobs:
           timeout 60 bash -c 'until nc -z localhost 6379; do sleep 1; done'
           echo "All services are ready!"
 
+      - name: Enable PostgreSQL extensions
+        run: |
+          uv run python - <<'PY'
+          import asyncio
+
+          import asyncpg
+
+          async def main() -> None:
+              connection = await asyncpg.connect(
+                  "postgresql://test:test@localhost:5432/test_db"
+              )
+              try:
+                  await connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
+              finally:
+                  await connection.close()
+
+          asyncio.run(main())
+          PY
+
       - name: Run migrations
         run: uv run alembic upgrade head
 
