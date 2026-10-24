@@ -46,12 +46,12 @@ limit_resend_verification = get_rate_limiter(burst=2, rate=2, period=300)
 
 # Read this before you read the code: The auth router is the most complex part of the codebase, so it's worth a high-level overview before diving in. The main goals here are:
 # 1. Handle all authentication-related routes: registration, login, logout, token refresh, email verification, password reset, and OAuth2.
-# 2. Implement robust RBAC guards using JWT claims to avoid unnecessary database hits on protected routes.
+# 2. Implement robust RBAC guards against live account state on protected routes.
 # 3. Apply rate limiting to sensitive endpoints to mitigate abuse (e.g. login, registration, password reset).
 # The code is organized into three main sections:
 # 1. Dependencies: Wiring up repositories and services, plus token extraction and claims decoding.
 # 2. Public routes: Registration, login, email verification, password reset, and OAuth2 endpoints that don't require authentication.
-# 3. Protected routes: Endpoints that require a valid JWT and appropriate permissions, with the guards implemented as dependencies that decode claims without hitting the
+# 3. Protected routes: Endpoints that require a valid JWT and appropriate permissions, with the guards implemented as dependencies that hydrate live account state.
 
 # Protected Routes
 # Everything chains through FastAPI's dependency injection. The base chain is:
@@ -69,30 +69,28 @@ limit_resend_verification = get_rate_limiter(burst=2, rate=2, period=300)
 # CurrentClaims, CurrentVerifiedUser etc. are just Annotated aliases — they make the chain invisible at the call site.
 
 # RBAC
-# Two dependency factories — require_permission and require_role. Both validate live account state after JWT/session checks:
+# Two dependency factories — require_permission and require_role. Both validate live account state after JWT/session checks and return AuthorizationContext:
 # def require_permission(*permissions: Permission):
-#     async def _guard(claims: Annotated[TokenClaims, Depends(get_token_claims)]) -> TokenClaims:
-#         user_perms = set(claims.permissions)
+#     async def _guard(...) -> AuthorizationContext:
+#         user_perms = set(account.permissions)
 #         for perm in permissions:
 #             if perm.value not in user_perms:
 #                 raise ForbiddenException(...)
-#         return claims
+#         return AuthorizationContext(claims=claims, account=account)
 #     return _guard
-# require_role does the same but checks claims.role. You attach them at the route level in two ways:
+# require_role does the same but checks account.role. Use a typed context parameter when the handler needs the authenticated subject:
 # python# Via dependencies= (no return value needed in handler)
 # @router.get("/", dependencies=[Depends(require_permission(Permission.USERS_READ))])
 
-# # Via parameter (when handler needs the claims object)
+# # Via parameter (when handler needs the live-authorized subject)
 # async def update_role(
-#     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))]
+#     authorization: Annotated[AuthorizationContext, Depends(require_permission(Permission.USERS_WRITE))]
 # ):
-#     await service.update_role(..., requesting_admin_id=claims.sub)
+#     await service.update_role(..., requesting_admin_id=authorization.user_id)
 # Permissions remain embedded in the JWT for context, but live account state is authoritative for privileged routes. This ensures role changes and deactivation take effect after session invalidation.
 
 
-# ⬛ FOR THE CHOSEN ONES
-# The dual-attach pattern on admin routes is intentional redundancy, not a mistake. On routes like update_role you'll notice require_permission appears both in dependencies=[] and as a typed parameter. This is because FastAPI treats dependencies=[] as fire-and-forget — the return value is discarded. If you need claims.sub inside the handler, you must declare it as a parameter too. Two calls to the same dependency with the same arguments hit FastAPI's dependency cache within a single request — the guard runs exactly once, not twice. This is FastAPI's use_cache=True default behavior at work.
-# Live RBAC costs a MongoDB account lookup, but closes the stale-claims window for privileged routes. FastAPI dependency caching avoids repeating that chain within one request.
+# Live RBAC costs a MongoDB account lookup, but closes the stale-claims window for privileged routes. FastAPI dependency caching avoids repeating that chain within one request. Keep route-level dependencies for handlers that do not need the returned context; use the typed context alone when the handler needs the requester identity.
 
 
 # ── Registration and login ─────────────────────────────────────────────────────
