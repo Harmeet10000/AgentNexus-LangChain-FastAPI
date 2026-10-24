@@ -11,7 +11,8 @@ import pytest
 SCRIPT = Path(__file__).parents[2] / ".github" / "scripts" / "greptile_confidence_gate.py"
 SPEC = importlib.util.spec_from_file_location("greptile_confidence_gate", SCRIPT)
 if SPEC is None or SPEC.loader is None:
-    raise RuntimeError("unable to load Greptile gate module")
+    _MODULE_LOAD_ERROR = "unable to load Greptile gate module"
+    raise RuntimeError(_MODULE_LOAD_ERROR)
 GATE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = GATE
 SPEC.loader.exec_module(GATE)
