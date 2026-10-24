@@ -38,20 +38,35 @@ The canonical policy seams are:
 | `features/agent_saul/router.py` | `sub` | Resource ownership | Session-validated subject is passed to transcript/session ownership checks. |
 | `features/agent_saul/dependencies.py` | `sub`, `sid` | WebSocket admission | Redis session owner/expiry is authoritative; no role/permission decision. |
 | `features/auth/websocket_security.py` | `sub`, `sid` | WebSocket identity/revocation | Live Redis session checks on handshake and frames; no privilege fields. |
+| `features/auth/oauth.py` / `auth/service.py` OAuth callback | provider identity/email | OAuth identity establishment | No JWT role/permission claims are consumed. Verified provider identity and the persisted account/link policy are authoritative; step-up/link confirmation is tracked separately in #81. |
+| `worker/` jobs and task entry points | none | Worker authorization surface | No `TokenClaims`, `claims.role`, or `claims.permissions` consumer exists in worker code; jobs use persisted job/tenant ownership and provider boundaries. |
 | `features/documents/dependencies.py` | `sub` | Identity scoping | User ID only; no authorization decision from role/permissions. |
 | `features/ingestion/dependencies.py` | `sub` | Identity scoping | User ID only; no authorization decision from role/permissions. |
 | `mcp/server/middleware.py` | `sub` | Rate-limit identity | Subject keys throttling only; MCP catalog is read-only and has no role/permission gate. |
 | `security/tokens.py` | role/permissions serialization | Token compatibility | Emits and parses wire fields; never decides authorization. |
 | `features/auth/service.py` / `users/service.py` | live account role/permissions | Token issuance | Copies current account state into newly issued tokens; revision binds state. |
 
+## Search coverage
+
+The audit used CodeGraph symbol exploration followed by repository-wide searches
+for direct attributes, dictionary access, `TokenClaims`/DTO construction,
+`model_dump`/mapping conversion, authorization literals, WebSocket and worker
+entry points, and OAuth link paths. The result is intentionally explicit about
+negative findings: the only role/permission dictionary keys are token wire
+serialization, and no worker/OAuth/WebSocket path uses JWT role or permission
+fields as authority. `claims.sub`/`claims.sid` uses remain documented identity
+and session selectors, not privilege decisions.
+
 ## Static guard
 
 `scripts/check_claims_authority.py` parses `src/app` and rejects direct reads
 of `role` or `permissions` from claim-like variables, including dictionary
-access and common aliases. The unit test runs this check on every test suite.
-If a future endpoint needs a privileged decision, add or reuse a live policy
-dependency and update this matrix; do not add an allowlist entry for stale JWT
-authority.
+access and common aliases. It also rejects serializing claim-like objects in
+application code so a future model-dump/DTO conversion cannot become an
+unreviewed authority channel. The token wire serializer is the only explicit
+exception. The unit test runs this check on every test suite. If a future
+endpoint needs a privileged decision, add or reuse a live policy dependency
+and update this matrix; do not add an allowlist entry for stale JWT authority.
 
 ## Rollout and exceptions
 

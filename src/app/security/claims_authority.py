@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 _CLAIM_NAMES = {"claims", "token_claims", "jwt_claims", "raw_claims"}
 _PRIVILEGE_FIELDS = {"role", "permissions"}
+_CLAIM_SERIALIZERS = {"dict", "model_dump", "model_dump_json"}
 
 
 def _is_claim_expression(node: ast.expr) -> bool:
@@ -40,6 +41,17 @@ def find_claim_privilege_violations(source_root: Path) -> list[str]:
                 key = node.slice
                 if isinstance(key, ast.Constant) and key.value in _PRIVILEGE_FIELDS:
                     field, base = str(key.value), node.value
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr in _CLAIM_SERIALIZERS and _is_claim_expression(node.func.value):
+                    field, base = "serialization", node.func.value
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "dict"
+                and node.args
+                and _is_claim_expression(node.args[0])
+            ):
+                field, base = "serialization", node.args[0]
             if field is not None and base is not None and _is_claim_expression(base):
                 line_no = getattr(node, "lineno", 0)
                 violations.append(f"{path}:{line_no}: claims.{field} is not authority")
