@@ -1240,6 +1240,12 @@ class AuthService:
         user_id: str,
         except_session_id: str | None = None,
     ) -> AuthResult[None]:
+        family_count = 0
+        sessions_result = await self._token_repo.get_user_sessions(user_id)
+        if isinstance(sessions_result, Success):
+            family_count = len(
+                {session.family_id for session in sessions_result.unwrap() if session.family_id}
+            )
         revoke_result = await self._token_repo.revoke_all_user_sessions(
             user_id=user_id,
             except_session_id=except_session_id,
@@ -1248,7 +1254,8 @@ class AuthService:
         if isinstance(revoke_result, Failure):
             log_expected_failure(revoke_result.failure(), operation="revoke_all_user_sessions")
             return Failure(revoke_result.failure())
-        _REFRESH_FAMILY_REVOKES.add(1, {"reason": "revoke_all"})
+        if family_count:
+            _REFRESH_FAMILY_REVOKES.add(family_count, {"reason": "revoke_all"})
         return Success(None)
 
     @trace_layer("service")
