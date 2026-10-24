@@ -567,7 +567,14 @@ async def _shutdown_resources(app: FastAPI) -> None:
         revocation_task = getattr(app.state, "websocket_revocation_task", None)
         if revocation_task is not None:
             revocation_task.cancel()
+            await asyncio.gather(revocation_task, return_exceptions=True)
             logger.info("WebSocket revocation loop stopped")
+
+        revocation_listener_task = getattr(app.state, "websocket_revocation_listener_task", None)
+        if revocation_listener_task is not None:
+            revocation_listener_task.cancel()
+            await asyncio.gather(revocation_listener_task, return_exceptions=True)
+            logger.info("WebSocket revocation listener stopped")
 
         websocket_security = getattr(app.state, "websocket_security", None)
         if websocket_security is not None:
@@ -689,6 +696,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
     )
     app.state.websocket_revocation_task = asyncio.create_task(
         coro=app.state.websocket_security.run_revocation_loop(),
+    )
+    app.state.websocket_revocation_listener_task = asyncio.create_task(
+        coro=app.state.websocket_security.run_revocation_listener(),
     )
 
     # Optional dependencies boot through the policy registry in order. The

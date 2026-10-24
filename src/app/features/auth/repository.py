@@ -13,6 +13,11 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
+from app.features.auth.websocket_revocation import (
+    new_event,
+    publish_event,
+    publish_user_revocation_events,
+)
 from app.observability.logging import logger, trace_layer
 
 from .exceptions import (
@@ -59,7 +64,7 @@ _REVOKE_ALL_SESSIONS_SCRIPT = """
 if ARGV[3] ~= '' then
     local current_revision = redis.call('GET', KEYS[2])
     if current_revision and tonumber(current_revision) > tonumber(ARGV[3]) then
-        return {}
+        return {0}
     end
     redis.call('SET', KEYS[2], ARGV[3])
 end
@@ -87,6 +92,7 @@ end
 if ARGV[1] == '' then
     redis.call('DEL', KEYS[1])
 end
+table.insert(revoked, 1, 1)
 return revoked
 """
 
@@ -890,6 +896,16 @@ class RefreshTokenRepository:
                 user_id,
                 session_id,
             )
+            await publish_event(
+                self._redis,
+                new_event(
+                    scope="session",
+                    user_id=user_id,
+                    session_id=session_id,
+                    reason=reason,
+                    origin="revoke_refresh_family",
+                ),
+            )
             return Success(None)
         except RedisError as exc:
             exc.add_note("auth_repository operation=revoke_refresh_family")
@@ -1003,7 +1019,7 @@ class RefreshTokenRepository:
         reason: str,
         authz_revision: int | None,
     ) -> AuthResult[list[str]]:
-        raw_ids = await self._redis.eval(
+        raw_result = await self._redis.eval(
             _REVOKE_ALL_SESSIONS_SCRIPT,
             2,
             self._user_sessions_key(user_id),
@@ -1015,7 +1031,20 @@ class RefreshTokenRepository:
             int(datetime.now(UTC).timestamp()),
             self._refresh_family_key_prefix(),
         )
-        revoked_ids = [item.decode() if isinstance(item, bytes) else str(item) for item in raw_ids]
+        if not raw_result or int(raw_result[0]) == 0:
+            return Success([])
+        revoked_ids = [
+            item.decode() if isinstance(item, bytes) else str(item) for item in raw_result[1:]
+        ]
+        await publish_user_revocation_events(
+            self._redis,
+            user_id=user_id,
+            except_session_id=except_session_id,
+            session_ids=revoked_ids,
+            reason=reason,
+            authz_revision=authz_revision,
+            origin="revoke_all_user_sessions",
+        )
         if revoked_ids:
             try:
                 await TokenAuditLog.find(In(TokenAuditLog.session_id, revoked_ids)).update(
@@ -1091,6 +1120,17 @@ class RefreshTokenRepository:
                     source="auth_repository",
                 )
             )
+
+        await publish_event(
+            self._redis,
+            new_event(
+                scope="session",
+                user_id=user_id,
+                session_id=session_id,
+                reason=reason,
+                origin="revoke_session",
+            ),
+        )
 
         try:
             await TokenAuditLog.find_one(TokenAuditLog.session_id == session_id).update(
