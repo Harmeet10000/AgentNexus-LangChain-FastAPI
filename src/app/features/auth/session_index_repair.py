@@ -56,6 +56,25 @@ end
 return {removed, 1, redis.call('TTL', KEYS[1])}
 """
 
+_REPAIR_ORPHAN_SCRIPT = """
+local current = redis.call('GET', KEYS[1])
+if not current or current ~= ARGV[1] then
+    return {0, -1}
+end
+local key_type = redis.call('TYPE', KEYS[2]).ok
+if key_type ~= 'none' and key_type ~= 'set' then
+    return {0, -3}
+end
+redis.call('SADD', KEYS[2], ARGV[2])
+local desired_ttl = tonumber(ARGV[3])
+local current_ttl = redis.call('TTL', KEYS[2])
+if current_ttl < desired_ttl then
+    redis.call('EXPIRE', KEYS[2], desired_ttl)
+    current_ttl = desired_ttl
+end
+return {1, current_ttl}
+"""
+
 
 @dataclass(frozen=True)
 class IndexRepair:
@@ -85,6 +104,7 @@ class RepairSummary:
     deferred_indexes: int = 0
     ttl_violations: int = 0
     memberships_removed: int = 0
+    orphan_memberships_restored: int = 0
     malformed_records: int = 0
     orphan_sessions: int = 0
     failures: int = 0
@@ -104,6 +124,7 @@ class RepairSummary:
             "deferred_indexes": self.deferred_indexes,
             "ttl_violations": self.ttl_violations,
             "memberships_removed": self.memberships_removed,
+            "orphan_memberships_restored": self.orphan_memberships_restored,
             "malformed_records": self.malformed_records,
             "orphan_sessions": self.orphan_sessions,
             "failures": self.failures,
@@ -265,11 +286,12 @@ class SessionIndexRepair:
                 error=repair.error,
             )
 
-    async def _scan_orphans(
+    async def _scan_orphans(  # noqa: PLR0912
         self,
         *,
         cursor: int,
         limit: int,
+        dry_run: bool,
         summary: RepairSummary,
     ) -> None:
         current = cursor
@@ -293,13 +315,49 @@ class SessionIndexRepair:
                 if raw is None:
                     continue
                 try:
-                    session = SessionData.model_validate_json(self._text(raw))
+                    raw_text = self._text(raw)
+                    session = SessionData.model_validate_json(raw_text)
                 except ValidationError:
                     continue
-                if not await self._redis.sismember(self._user_index_key(session.user_id), session.session_id):
+                remaining = self._remaining_ttl(session, datetime.now(UTC))
+                if remaining == 0:
+                    continue
+                index_key = self._user_index_key(session.user_id)
+                try:
+                    indexed = await self._redis.sismember(index_key, session.session_id)
+                except RedisError as exc:
+                    summary.failures += 1
+                    logger.bind(key=index_key, error=str(exc)).warning(
+                        "auth_session_index_orphan_check_failed"
+                    )
+                    continue
+                if not indexed:
                     summary.orphan_sessions += 1
                     if len(summary.orphan_session_ids) < 100:
                         summary.orphan_session_ids.append(session.session_id)
+                    if dry_run:
+                        continue
+                    try:
+                        async with asyncio.timeout(self._operation_timeout):
+                            restored, _ttl = await self._redis.eval(
+                                _REPAIR_ORPHAN_SCRIPT,
+                                2,
+                                self._session_key(session.session_id),
+                                index_key,
+                                raw_text,
+                                session.session_id,
+                                remaining,
+                            )
+                        if int(restored) == 1:
+                            summary.orphan_memberships_restored += 1
+                    except TimeoutError:
+                        summary.timed_out += 1
+                        summary.failures += 1
+                    except RedisError as exc:
+                        summary.failures += 1
+                        logger.bind(key=index_key, error=str(exc)).warning(
+                            "auth_session_index_orphan_repair_failed"
+                        )
             if current == 0 or checked >= limit:
                 break
         summary.next_orphan_cursor = int(current)
@@ -375,7 +433,12 @@ class SessionIndexRepair:
             summary.next_cursor = int(current)
             summary.complete = current == 0
             if orphan_limit:
-                await self._scan_orphans(cursor=orphan_cursor, limit=orphan_limit, summary=summary)
+                await self._scan_orphans(
+                    cursor=orphan_cursor,
+                    limit=orphan_limit,
+                    dry_run=dry_run,
+                    summary=summary,
+                )
         except (TimeoutError, RedisError) as exc:
             summary.failures += 1
             logger.bind(error=str(exc), dry_run=dry_run).warning("auth_session_index_repair_failed")

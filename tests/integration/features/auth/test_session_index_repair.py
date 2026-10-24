@@ -175,7 +175,7 @@ async def test_removes_missing_and_malformed_members_but_not_records(
     assert await client.get(malformed_key) == "not-json"
 
 
-async def test_reports_orphan_and_does_not_recreate_disappeared_index(
+async def test_repairs_orphan_and_recreates_disappeared_index(
     repair_context: tuple[Redis, str, RefreshTokenRepository, SessionIndexRepair],
 ) -> None:
     client, _prefix, store, repair = repair_context
@@ -183,7 +183,9 @@ async def test_reports_orphan_and_does_not_recreate_disappeared_index(
     await client.set(store._session_key(session.session_id), session.model_dump_json(), ex=session.ttl)
     report = await repair.run(dry_run=False, orphan_limit=100)
     assert report.orphan_sessions == 1
-    assert await client.exists(store._user_sessions_key(session.user_id)) == 0
+    assert report.orphan_memberships_restored == 1
+    assert await client.sismember(store._user_sessions_key(session.user_id), session.session_id) == 1
+    assert await client.ttl(store._user_sessions_key(session.user_id)) >= 110
 
 
 async def test_cursor_batch_and_wrong_type_failure_do_not_block_other_indexes(

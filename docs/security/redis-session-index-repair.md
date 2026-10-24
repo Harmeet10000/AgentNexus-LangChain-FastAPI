@@ -43,9 +43,12 @@ still exists and is never applied to a session key.
 - A malformed record is reported and its membership is removed only when the
   exact malformed value is still present. The malformed session key itself is
   left for separate investigation.
-- An orphaned live session (a session key with no membership) is reported only;
-  the tool does not recreate an index, because doing so could widen the set of
-  sessions affected by a future revoke-all operation.
+- An orphaned live session (a valid, unexpired session key with no membership)
+  is reported and, in apply mode, reattached to its user index with the same
+  exact-value guard and TTL rule. This restores the membership that the normal
+  session-store operation would have created; it does not create a session or
+  widen session authority. Malformed or logically expired records remain
+  report-only.
 - An index larger than `--member-limit` is deferred unchanged. Increase the
   limit and rerun that namespace rather than repairing an incomplete view.
 - A non-set index, Redis timeout, or other per-index failure is reported and
