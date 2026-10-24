@@ -36,7 +36,9 @@ def valid_body(sha: str = HEAD) -> str:
 
 def test_accepts_html_summary_and_exact_current_head() -> None:
     result = GATE.evaluate_comments([comment(valid_body())], HEAD)
-    assert result == GATE.Decision(True, "trusted Greptile summary is 5/5 and reviewed the current head")
+    assert result == GATE.Decision(
+        True, "trusted Greptile summary is 5/5 and reviewed the current head"
+    )
 
 
 def test_accepts_plain_markdown_summary() -> None:
@@ -65,7 +67,10 @@ def test_rejects_lookalike_author(overrides: dict[str, object]) -> None:
 
 
 def test_rejects_conflicting_scores_in_same_comment() -> None:
-    result = GATE.evaluate_comments([comment(f"Confidence Score: 5/5 and Confidence Score: 4/5\nLast reviewed commit: {HEAD}")], HEAD)
+    result = GATE.evaluate_comments(
+        [comment(f"Confidence Score: 5/5 and Confidence Score: 4/5\nLast reviewed commit: {HEAD}")],
+        HEAD,
+    )
     assert not result.passed
 
 
@@ -90,14 +95,14 @@ def test_rejects_missing_or_ambiguous_reviewed_commit() -> None:
 
 
 def test_rejects_score_that_only_prefix_matches() -> None:
-    result = GATE.evaluate_comments([comment(f"Confidence Score: 5/50\nLast reviewed commit: {HEAD}")], HEAD)
+    result = GATE.evaluate_comments(
+        [comment(f"Confidence Score: 5/50\nLast reviewed commit: {HEAD}")], HEAD
+    )
     assert not result.passed
 
 
 def test_current_valid_comment_can_coexist_with_stale_comment() -> None:
-    result = GATE.evaluate_comments(
-        [comment(valid_body("b" * 40)), comment(valid_body())], HEAD
-    )
+    result = GATE.evaluate_comments([comment(valid_body("b" * 40)), comment(valid_body())], HEAD)
     assert result.passed
 
 

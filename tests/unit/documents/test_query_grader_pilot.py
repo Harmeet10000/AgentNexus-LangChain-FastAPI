@@ -72,7 +72,9 @@ async def test_grade_context_routes_through_the_structured_seam() -> None:
     assert request.response_schema is ContextGrade
     assert request.system == _CONTEXT_GRADER_SYSTEM_PROMPT
     assert "payment terms" in request.prompt  # the TOON payload, not a message object
-    assert math.isclose(request.temperature, 0.1)  # parity with the legacy grader (0.1 in dependencies.py), not the 0.7 default
+    assert math.isclose(
+        request.temperature, 0.1
+    )  # parity with the legacy grader (0.1 in dependencies.py), not the 0.7 default
 
 
 async def test_grade_context_degrades_like_the_legacy_parse_failure() -> None:
