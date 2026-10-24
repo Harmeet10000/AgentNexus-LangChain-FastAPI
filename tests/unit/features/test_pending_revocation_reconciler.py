@@ -140,7 +140,7 @@ async def test_newer_revision_never_gets_cleared_by_stale_worker() -> None:
     async def get_user(_user_id: str):
         nonlocal lookups
         lookups += 1
-        return discovered if lookups == 1 else current
+        return current
 
     reconciler = PendingRevocationReconciler(
         redis,

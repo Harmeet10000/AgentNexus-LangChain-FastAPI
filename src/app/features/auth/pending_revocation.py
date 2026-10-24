@@ -15,7 +15,7 @@ import time
 from asyncio import timeout
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, cast
 
 from beanie import PydanticObjectId
@@ -29,7 +29,6 @@ from app.features.users.repository import UserAdminRepository
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
-    from datetime import datetime
     from typing import Any
 
     from motor.motor_asyncio import AsyncIOMotorClient
@@ -61,6 +60,18 @@ _RETRY_PREFIX = "auth:session_revocation:retry:"
 _RELEASE_LEASE_SCRIPT = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then
     return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+_SET_RETRY_IF_OWNER_SCRIPT = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+    return 0
+end
+return redis.call('SET', KEYS[2], ARGV[2])
+"""
+_DELETE_RETRY_IF_OWNER_SCRIPT = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[2])
 end
 return 0
 """
@@ -184,7 +195,7 @@ class PendingRevocationReconciler:
         self._monotonic = monotonic
         self._random = random
 
-    async def run(  # noqa: PLR0912 — bounded orchestration handles explicit failure states
+    async def run(
         self,
         *,
         user_id: str | None = None,
@@ -229,14 +240,11 @@ class PendingRevocationReconciler:
                 break
             if not user.session_revocation_pending:
                 continue
-            current = await self._get_user_with_deadline(str(user.id), deadline)
-            if current is None or not current.session_revocation_pending:
-                continue
             if dry_run:
-                state = await self._read_retry_state(str(current.id), current.role_revision, deadline)
+                state = await self._read_retry_state(str(user.id), user.role_revision, deadline)
                 preview = (*report.preview, {
-                    "user_id": str(current.id),
-                    "revision": current.role_revision,
+                    "user_id": str(user.id),
+                    "revision": user.role_revision,
                     "action": (
                         "deferred"
                         if (state.poisoned or state.next_attempt_at > self._clock()) and not force
@@ -245,7 +253,7 @@ class PendingRevocationReconciler:
                 })
                 report = replace(report, preview=preview)
             result = await self._process_user(
-                current, dry_run=dry_run, force=force, deadline=deadline
+                user, dry_run=dry_run, force=force, deadline=deadline
             )
             report = replace(
                 report,
@@ -271,8 +279,11 @@ class PendingRevocationReconciler:
         return report.as_dict()
 
     def _oldest_age(self, users: list[_UserLike]) -> float:
+        # A legacy marker has no timestamp. Treat it as oldest rather than
+        # silently allowing it to disappear from the operational alert.
         pending = [
-            getattr(u, "session_revocation_pending_at", None) or u.updated_at
+            getattr(u, "session_revocation_pending_at", None)
+            or datetime.fromtimestamp(0, UTC)
             for u in users
             if u.session_revocation_pending
         ]
@@ -322,7 +333,14 @@ class PendingRevocationReconciler:
                 try:
                     current = await self._get_user_with_deadline(user_id, deadline)
                 except Exception as exc:  # noqa: BLE001 — retry policy handles Mongo outage
-                    return await self._record_exception(retry_key, state, exc, deadline)
+                    return await self._record_exception(
+                        retry_key,
+                        state,
+                        exc,
+                        lease_key=lease_key,
+                        lease_token=lease_token,
+                        deadline=deadline,
+                    )
                 if (
                     current is None
                     or not current.session_revocation_pending
@@ -335,24 +353,42 @@ class PendingRevocationReconciler:
                 try:
                     revoke = await self._revoke_sessions_with_deadline(user_id, revision, deadline)
                 except Exception as exc:  # noqa: BLE001 — adapter boundary
-                    return await self._record_exception(retry_key, state, exc, deadline)
+                    return await self._record_exception(
+                        retry_key,
+                        state,
+                        exc,
+                        lease_key=lease_key,
+                        lease_token=lease_token,
+                        deadline=deadline,
+                    )
                 if isinstance(revoke, Failure):
                     return await self._record_failure(
                         retry_key,
                         state,
                         revoke.failure(),
-                        deadline,
+                        lease_key=lease_key,
+                        lease_token=lease_token,
+                        deadline=deadline,
                     )
                 try:
                     cleared = await self._clear_marker_with_deadline(current, revision, deadline)
                 except Exception as exc:  # noqa: BLE001 — adapter boundary
-                    return await self._record_exception(retry_key, state, exc, deadline)
+                    return await self._record_exception(
+                        retry_key,
+                        state,
+                        exc,
+                        lease_key=lease_key,
+                        lease_token=lease_token,
+                        deadline=deadline,
+                    )
                 if isinstance(cleared, Failure):
                     return await self._record_failure(
                         retry_key,
                         state,
                         cleared.failure(),
-                        deadline,
+                        lease_key=lease_key,
+                        lease_token=lease_token,
+                        deadline=deadline,
                     )
                 after = cleared.unwrap()
                 if after.session_revocation_pending or after.role_revision != revision:
@@ -360,7 +396,16 @@ class PendingRevocationReconciler:
                         "auth_pending_revocation_stale_revision"
                     )
                     return {"stale_revision": 1}
-                await self._await_budget(self._redis.delete(retry_key), deadline)
+                await self._await_budget(
+                    self._redis.eval(
+                        _DELETE_RETRY_IF_OWNER_SCRIPT,
+                        2,
+                        lease_key,
+                        retry_key,
+                        lease_token,
+                    ),
+                    deadline,
+                )
                 logger.bind(user_id=user_id, revision=revision).info(
                     "auth_pending_revocation_succeeded"
                 )
@@ -420,6 +465,9 @@ class PendingRevocationReconciler:
         retry_key: str,
         state: RetryState,
         error: AuthError | UsersError,
+        *,
+        lease_key: str,
+        lease_token: str,
         deadline: float,
     ) -> dict[str, int]:
         return await self._record_failure_details(
@@ -427,7 +475,9 @@ class PendingRevocationReconciler:
             state,
             type(error).__name__,
             bool(getattr(error, "retryable", True)),
-            deadline,
+            lease_key=lease_key,
+            lease_token=lease_token,
+            deadline=deadline,
         )
 
     async def _record_exception(
@@ -435,11 +485,20 @@ class PendingRevocationReconciler:
         retry_key: str,
         state: RetryState,
         error: Exception,
+        *,
+        lease_key: str,
+        lease_token: str,
         deadline: float,
     ) -> dict[str, int]:
         try:
             return await self._record_failure_details(
-                retry_key, state, type(error).__name__, True, deadline
+                retry_key,
+                state,
+                type(error).__name__,
+                True,
+                lease_key=lease_key,
+                lease_token=lease_token,
+                deadline=deadline,
             )
         except Exception as record_error:  # noqa: BLE001 — Redis may be the failed dependency
             record_error.add_note("operation=pending_reconcile, stage=retry_state_write")
@@ -454,6 +513,9 @@ class PendingRevocationReconciler:
         state: RetryState,
         category: str,
         retryable: bool,
+        *,
+        lease_key: str,
+        lease_token: str,
         deadline: float,
     ) -> dict[str, int]:
         attempts = state.attempts + 1
@@ -476,17 +538,26 @@ class PendingRevocationReconciler:
             last_error_category=category,
             poisoned=poisoned,
         )
-        if poisoned:
-            await self._await_budget(self._redis.set(retry_key, next_state.encode()), deadline)
-        else:
-            await self._await_budget(
-                self._redis.set(
-                    retry_key,
-                    next_state.encode(),
-                    ex=self._config.backoff_max_seconds * 4,
-                ),
-                deadline,
+        # Retry state is durable until success. More importantly, the lease
+        # token fences a slow worker whose lease expired and was reacquired by
+        # another worker; it must never overwrite the newer worker's retry
+        # budget or poison state.
+        saved = await self._await_budget(
+            self._redis.eval(
+                _SET_RETRY_IF_OWNER_SCRIPT,
+                2,
+                lease_key,
+                retry_key,
+                lease_token,
+                next_state.encode(),
+            ),
+            deadline,
+        )
+        if not saved:
+            logger.bind(user_id=retry_key.removeprefix(_RETRY_PREFIX)).info(
+                "auth_pending_revocation_lease_lost_before_retry_write"
             )
+            return {"attempted": 1, "retryable_failure": 1}
         logger.bind(
             error_category=category,
             attempts=attempts,
