@@ -131,7 +131,7 @@ def test_default_stack_uses_current_summarization_constructor(
 
     guardrails.build_default_middleware_stack(
         config=guardrails.MiddlewareConfig(
-            fast_model_name="gemini-2.0-flash",
+            fast_model_name="gemini-3.6-flash",
             max_tokens_before_summary=1234,
             messages_to_keep=6,
         ),
@@ -141,7 +141,7 @@ def test_default_stack_uses_current_summarization_constructor(
 
     assert summary_calls == [
         {
-            "model": "google_genai:gemini-2.0-flash",
+            "model": "google_genai:gemini-3.6-flash",
             "trigger": ("tokens", 1234),
             "keep": ("messages", 6),
         }

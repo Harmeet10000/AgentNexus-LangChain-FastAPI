@@ -22,7 +22,12 @@ Usage::
             ),
             HumanInTheLoopMiddleware(interrupt_on={"delete_file": True}),
             LLMToolSelectorMiddleware(model=fast_llm),
-            ToolRetryMiddleware(max_retries=3),
+            ToolRetryMiddleware(
+                tools=["safe_lookup"],  # idempotent tools only
+                max_retries=2,
+                retry_on=lambda error: isinstance(error, (ConnectionError, TimeoutError)),
+                on_failure="error",
+            ),
             # The default stack uses LangChain's prebuilt model retry middleware.
             LangChainModelRetryMiddleware(
                 max_retries=2,

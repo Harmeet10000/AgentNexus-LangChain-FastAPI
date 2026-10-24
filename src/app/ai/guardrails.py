@@ -322,7 +322,7 @@ class MiddlewareConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    fast_model_name: str = "google_genai:gemini-2.0-flash"
+    fast_model_name: str = "google_genai:gemini-3.6-flash"
     max_tokens_before_summary: int = 4000
     messages_to_keep: int = 8
     human_loop_tools: dict[str, bool] | None = None
@@ -413,7 +413,7 @@ def build_minimal_middleware_stack() -> list[Any]:
     """Lightweight stack for development / testing."""
     return [
         SummarizationMiddleware(
-            model="google_genai:gemini-2.0-flash",
+            model="google_genai:gemini-3.6-flash",
             trigger=("tokens", 8000),
             keep=("messages", 10),
         ),
