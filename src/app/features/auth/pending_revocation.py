@@ -57,6 +57,7 @@ type CountUsers = Callable[[], Awaitable[int]]
 
 _LEASE_PREFIX = "auth:session_revocation:lease:"
 _RETRY_PREFIX = "auth:session_revocation:retry:"
+_RETRY_GC_CURSOR = "auth:session_revocation:retry_gc_cursor"
 _RELEASE_LEASE_SCRIPT = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then
     return redis.call('DEL', KEYS[1])
@@ -316,22 +317,65 @@ class PendingRevocationReconciler:
         """
         cleaned = 0
         try:
-            keys = self._redis.scan_iter(
-                match=_RETRY_PREFIX + "*", count=self._config.batch_size
+            cursor_raw = await self._await_budget(self._redis.get(_RETRY_GC_CURSOR), deadline)
+            cursor = int(cast("str | bytes | None", cursor_raw) or 0)
+            scan_result = await self._await_budget(
+                self._redis.scan(
+                    cursor=cursor,
+                    match=_RETRY_PREFIX + "*",
+                    count=self._config.batch_size,
+                ),
+                deadline,
             )
-            async for raw_key in keys:
-                if cleaned >= self._config.batch_size or self._monotonic() >= deadline:
-                    break
+            next_cursor, raw_keys = cast("tuple[int, list[str | bytes]]", scan_result)
+            await self._await_budget(
+                self._redis.set(
+                    _RETRY_GC_CURSOR,
+                    str(next_cursor),
+                    ex=self._config.backoff_max_seconds * 4,
+                ),
+                deadline,
+            )
+            for raw_key in raw_keys[: self._config.batch_size]:
                 key = str(raw_key)
                 user_id = key.removeprefix(_RETRY_PREFIX)
+                lease_key = _LEASE_PREFIX + user_id
+                lease_token = secrets.token_urlsafe(18)
+                claimed = await self._await_budget(
+                    self._redis.set(
+                        lease_key,
+                        lease_token,
+                        nx=True,
+                        ex=self._config.lease_seconds,
+                    ),
+                    deadline,
+                )
+                if not claimed:
+                    continue
                 try:
                     user = await self._get_user_with_deadline(user_id, deadline)
+                    if user is None or not user.session_revocation_pending:
+                        await self._await_budget(
+                            self._redis.eval(
+                                _DELETE_RETRY_IF_OWNER_SCRIPT,
+                                2,
+                                lease_key,
+                                key,
+                                lease_token,
+                            ),
+                            deadline,
+                        )
+                        cleaned += 1
                 except Exception as exc:  # noqa: BLE001 — never delete on lookup outage
                     exc.add_note("operation=pending_reconcile, stage=retry_gc_lookup")
-                    continue
-                if user is None or not user.session_revocation_pending:
-                    await self._await_budget(self._redis.delete(key), deadline)
-                    cleaned += 1
+                finally:
+                    try:
+                        await self._await_budget(
+                            self._redis.eval(_RELEASE_LEASE_SCRIPT, 1, lease_key, lease_token),
+                            deadline,
+                        )
+                    except Exception as exc:  # noqa: BLE001 — lease TTL is the final fence
+                        exc.add_note("operation=pending_reconcile, stage=retry_gc_lease_release")
         except Exception as exc:  # noqa: BLE001 — retry GC is advisory
             exc.add_note("operation=pending_reconcile, stage=retry_gc")
         if cleaned:
