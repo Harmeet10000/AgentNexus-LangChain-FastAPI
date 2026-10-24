@@ -102,7 +102,7 @@ class TodoListMiddleware(BaseModel):
     todo_header: str = "## Current To-Do List"
 
     def build(self) -> list[Any]:
-        @wrap_model_call
+        @wrap_model_call(state_schema=TodoAgentState)
         async def inject_todos(
             request: ModelRequest[Any],
             handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
@@ -122,7 +122,7 @@ class TodoListMiddleware(BaseModel):
 
             return await handler(request.override(system_message=system_message))
 
-        @after_model
+        @after_model(state_schema=TodoAgentState)
         def parse_todo_commands(state: dict[str, Any], _runtime: Any) -> dict[str, Any] | None:
             messages = state.get("messages", [])
             ai_msg = next(
