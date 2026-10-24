@@ -31,6 +31,7 @@ REVOCATION_CLOSE_LATENCY = _REVOCATION_METER.create_histogram(
 REVOCATION_SUBSCRIBER_LAG = _REVOCATION_METER.create_histogram(
     "websocket.revocation.subscriber_lag_ms"
 )
+REVOCATION_STREAM_GAPS = _REVOCATION_METER.create_counter("websocket.revocation.stream_gaps")
 
 
 class WebSocketRevocationEvent(BaseModel):

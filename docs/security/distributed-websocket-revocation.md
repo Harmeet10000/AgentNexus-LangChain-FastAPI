@@ -19,8 +19,13 @@ outage.
 
 The stream uses approximate trimming at 10,000 entries. The listener reads at
 most `WEBSOCKET_REVOCATION_BATCH_SIZE` entries per call and maintains a bounded
-in-memory event-ID deduplication set. Duplicate and out-of-order events are
-safe because closing a local socket is idempotent.
+in-memory event-ID deduplication set. A newly started worker tails from `$`
+rather than replaying retained history; a reconnect resumes its last ID.
+Duplicate and out-of-order events are safe because closing a local socket is
+idempotent, and per-user authorization revisions make lower revisions no-ops
+after a higher revision is observed. Connections also carry their creation
+timestamp, so an event older than the connection cannot close a newly
+established socket.
 
 ## Event contract and matching
 
@@ -49,7 +54,7 @@ investigating. Re-enable it after Redis health is restored. Disabling the
 listener does not disable revocation enforcement.
 
 Use the application metrics/logs for publication failures, malformed events,
-listener reconnects, subscriber lag, local close counts, and close latency. The
+listener reconnects, stream gaps, subscriber lag, local close counts, and close latency. The
 convergence SLO is event-to-local-close p99 under 2 seconds while Redis is
 healthy; alert when the close-latency histogram or subscriber lag exceeds that
 target for five minutes, or when reconnects continuously back off. A Redis

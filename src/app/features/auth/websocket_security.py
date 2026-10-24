@@ -12,7 +12,7 @@ from typing import (
 )
 
 from fastapi import WebSocket, WebSocketException, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pyrate_limiter import BucketFullException, Limiter, Rate
 from pyrate_limiter.buckets import InMemoryBucket, RedisBucket
 from returns.result import Failure
@@ -22,6 +22,7 @@ from app.features.auth.websocket_revocation import (
     REVOCATION_CLOSED,
     REVOCATION_MALFORMED,
     REVOCATION_RECONNECTS,
+    REVOCATION_STREAM_GAPS,
     REVOCATION_STREAM_KEY,
     REVOCATION_SUBSCRIBER_LAG,
     parse_event,
@@ -40,6 +41,8 @@ if TYPE_CHECKING:
 _USER_PRESENCE_KEY = "ws:user:{}"  # Sorted set: member=connection_id, score=last_touch_epoch
 _SESSION_PRESENCE_KEY = "ws:session:{}"  # Sorted set: member=connection_id, score=last_touch_epoch
 _CONNECTION_METADATA_KEY = "ws:connection:{}"  # Hash: connection metadata
+_REVOCATION_REVISION_TTL_SECONDS = 3600.0
+_REVOCATION_CLOSE_CONCURRENCY = 20
 
 
 class WebSocketSecurityContext(BaseModel):
@@ -53,6 +56,7 @@ class WebSocketSecurityContext(BaseModel):
     user_rate_limit_key: str
     connection_rate_limit_key: str
     tenant_id: str | None = None
+    connected_at: float = Field(default_factory=time, ge=0)
 
 
 class WebSocketSecurityViolationError(Exception):
@@ -189,11 +193,15 @@ class WebSocketSecurityService:
         # Task 3.4: live connection registry so a connection id can be closed
         # without holding the WebSocket object at the call site.
         self._live_connections: dict[str, tuple[WebSocket, WebSocketSecurityContext]] = {}
-        self._revocation_last_id = "0-0"
+        # New workers tail from now. Replaying retained events could revoke a
+        # socket created after the revocation; reconnects resume their cursor.
+        self._revocation_last_id = "$"
         self._revocation_activity = asyncio.Event()
         self._seen_revocation_events: dict[str, None] = {}
-        self._latest_revocation_revisions: dict[str, int] = {}
+        self._latest_revocation_revisions: dict[str, tuple[int, float]] = {}
         self._max_seen_revocation_events = 4096
+        self._revocation_close_semaphore = asyncio.Semaphore(_REVOCATION_CLOSE_CONCURRENCY)
+        self._revocation_needs_gap_check = False
 
     def close(self) -> None:
         """Dispose rate-limit buckets and stop pyrate's background leak tasks."""
@@ -476,16 +484,28 @@ class WebSocketSecurityService:
             return
 
         websocket, context = entry
+        safe_reason = self._safe_close_reason(reason)
         violation = WebSocketSecurityViolationError(
             error_code="SESSION_REVOKED",
-            message=f"Connection closed: {reason}",
+            message=f"Connection closed: {safe_reason}",
             retryable=False,
         )
         with suppress(Exception):
             await websocket.send_json(self._violation_frame(violation))
         with suppress(Exception):
-            await websocket.close(code=violation.close_code, reason=reason)
+            await websocket.close(code=violation.close_code, reason=safe_reason)
         await self.unregister_connection(context)
+
+    @staticmethod
+    def _safe_close_reason(reason: str) -> str:
+        """Keep untrusted stream text valid and bounded for WebSocket close."""
+        cleaned = "".join(" " if ord(char) < 32 or ord(char) == 127 else char for char in reason)
+        encoded = cleaned.encode("utf-8")[:123]
+        while True:
+            try:
+                return encoded.decode("utf-8")
+            except UnicodeDecodeError:
+                encoded = encoded[:-1]
 
     async def run_revocation_loop(self, interval_seconds: float = 30.0) -> None:
         """Task 3.1: Periodic pull-based revocation sweep over live connections.
@@ -533,6 +553,9 @@ class WebSocketSecurityService:
                     count=batch_size,
                 )
                 delay = base_delay
+                if self._revocation_needs_gap_check:
+                    await self._check_revocation_stream_gap()
+                    self._revocation_needs_gap_check = False
                 for _stream, entries in records or []:
                     stream_entries = cast("list[tuple[object, object]]", entries)
                     for stream_id, fields in stream_entries:
@@ -549,6 +572,7 @@ class WebSocketSecurityService:
                 raise
             except Exception as exc:  # noqa: BLE001 — listener must reconnect
                 REVOCATION_RECONNECTS.add(1)
+                self._revocation_needs_gap_check = True
                 logger.bind(operation="websocket_revocation_listener", error=str(exc)).warning(
                     "WebSocket revocation stream unavailable; pull checks remain active"
                 )
@@ -559,15 +583,51 @@ class WebSocketSecurityService:
     def _decode_stream_id(value: object) -> str:
         return value.decode() if isinstance(value, bytes) else str(value)
 
-    async def _handle_revocation_event(self, event: WebSocketRevocationEvent) -> None:
+    async def _check_revocation_stream_gap(self) -> None:
+        if self._redis is None or self._revocation_last_id == "$":
+            return
+        try:
+            info = await self._redis.xinfo_stream(REVOCATION_STREAM_KEY)
+            first_entry = info.get("first-entry") or info.get(b"first-entry")
+            if not first_entry:
+                return
+            first_id = self._decode_stream_id(first_entry[0])
+            if self._stream_id_tuple(self._revocation_last_id) < self._stream_id_tuple(first_id):
+                REVOCATION_STREAM_GAPS.add(1)
+                logger.bind(
+                    operation="websocket_revocation_stream_gap",
+                    cursor=self._revocation_last_id,
+                    first_available=first_id,
+                ).warning("WebSocket revocation stream entries were trimmed during outage")
+        except Exception as exc:  # noqa: BLE001 — diagnostics cannot stop reconnect
+            logger.bind(operation="websocket_revocation_stream_gap_check", error=str(exc)).warning(
+                "Unable to check WebSocket revocation stream continuity"
+            )
+
+    @staticmethod
+    def _stream_id_tuple(value: str) -> tuple[int, int]:
+        major, minor = value.split("-", maxsplit=1)
+        return int(major), int(minor)
+
+    async def _handle_revocation_event(self, event: WebSocketRevocationEvent) -> None:  # noqa: PLR0912
         """Apply one validated event only to matching local sockets."""
         if event.event_id in self._seen_revocation_events:
             return
+        now_monotonic = monotonic()
         if event.authz_revision is not None:
-            previous_revision = self._latest_revocation_revisions.get(event.user_id)
+            previous_revision_entry = self._latest_revocation_revisions.get(event.user_id)
+            if previous_revision_entry is not None and now_monotonic >= previous_revision_entry[1]:
+                self._latest_revocation_revisions.pop(event.user_id, None)
+                previous_revision_entry = None
+            previous_revision = (
+                previous_revision_entry[0] if previous_revision_entry is not None else None
+            )
             if previous_revision is not None and event.authz_revision < previous_revision:
                 return
-            self._latest_revocation_revisions[event.user_id] = event.authz_revision
+            self._latest_revocation_revisions[event.user_id] = (
+                event.authz_revision,
+                now_monotonic + _REVOCATION_REVISION_TTL_SECONDS,
+            )
         self._seen_revocation_events[event.event_id] = None
         if len(self._seen_revocation_events) > self._max_seen_revocation_events:
             self._seen_revocation_events.pop(next(iter(self._seen_revocation_events)))
@@ -576,13 +636,23 @@ class WebSocketSecurityService:
         for connection_id, (_websocket, context) in list(self._live_connections.items()):
             if event.user_id != context.user_id or event.tenant_id != context.tenant_id:
                 continue
+            if event.occurred_at <= context.connected_at:
+                continue
+            event_revision = event.authz_revision
+            context_revision = context.claims.authz_revision
+            if event_revision is not None and context_revision is not None and context_revision > event_revision:
+                continue
             if event.scope == "session":
                 if event.session_id == context.session_id:
                     matching.append(connection_id)
             elif context.session_id != event.except_session_id:
                 matching.append(connection_id)
-        for connection_id in matching:
-            await self.close_connection(connection_id, reason=event.reason)
+
+        async def close_one(connection_id: str) -> None:
+            async with self._revocation_close_semaphore:
+                await self.close_connection(connection_id, reason=event.reason)
+
+        await asyncio.gather(*(close_one(connection_id) for connection_id in matching))
         if matching:
             REVOCATION_CLOSED.add(len(matching), {"scope": event.scope})
             close_latency_ms = max(0.0, (time() - event.occurred_at) * 1000)
