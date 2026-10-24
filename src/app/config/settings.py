@@ -228,6 +228,18 @@ class Settings(BaseSettings):
     CELERY_IDEMPOTENCY_TTL_SECONDS: int = Field(default=86400)
     CELERY_CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = Field(default=5)
     CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT: int = Field(default=60)
+    # Pending role-change revocations are eventual cleanup, never the request
+    # authorization decision.  The kill switch pauses cleanup without
+    # weakening epoch checks or the existing per-request validation.
+    AUTH_PENDING_REVOCATION_ENABLED: bool = Field(default=True)
+    AUTH_PENDING_REVOCATION_BATCH_SIZE: int = Field(default=50, ge=1, le=500)
+    AUTH_PENDING_REVOCATION_LEASE_SECONDS: int = Field(default=120, ge=15, le=900)
+    AUTH_PENDING_REVOCATION_MAX_ATTEMPTS: int = Field(default=8, ge=1, le=100)
+    AUTH_PENDING_REVOCATION_BACKOFF_BASE_SECONDS: int = Field(default=15, ge=1, le=3600)
+    AUTH_PENDING_REVOCATION_BACKOFF_MAX_SECONDS: int = Field(default=900, ge=1, le=86_400)
+    AUTH_PENDING_REVOCATION_BACKOFF_JITTER_SECONDS: int = Field(default=5, ge=0, le=300)
+    AUTH_PENDING_REVOCATION_OLDEST_ALERT_SECONDS: int = Field(default=300, ge=1)
+    AUTH_PENDING_REVOCATION_MAX_RUNTIME_SECONDS: int = Field(default=45, ge=1, le=270)
     CRAWL_JOB_TTL_SECONDS: int = Field(default=86_400, ge=300, le=7_776_000)
     CRAWL_JOB_MAX_RESULT_BYTES: int = Field(default=8_000_000, ge=100_000, le=50_000_000)
 
@@ -392,6 +404,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = Field(default="HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15)
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=30)
+    REFRESH_TOKEN_ROTATION_GRACE_SECONDS: int = Field(default=10, ge=0, le=60)
     PASSWORD_RESET_EXPIRE_MINUTES: int = Field(default=30)
 
     # --- OAuth Configuration ---
@@ -417,6 +430,10 @@ class Settings(BaseSettings):
     WEBSOCKET_MAX_CONNECTIONS_PER_USER: int = Field(default=3)
     WEBSOCKET_PRESENCE_TTL_SECONDS: int = Field(default=360)
     WEBSOCKET_OUTBOUND_SESSION_CHECK_INTERVAL_SECONDS: float = Field(default=5, gt=0)
+    WEBSOCKET_REVOCATION_ENABLED: bool = Field(default=True)
+    WEBSOCKET_REVOCATION_BATCH_SIZE: int = Field(default=100, ge=1, le=1000)
+    WEBSOCKET_REVOCATION_RECONNECT_BASE_SECONDS: float = Field(default=0.25, gt=0)
+    WEBSOCKET_REVOCATION_RECONNECT_MAX_SECONDS: float = Field(default=5.0, gt=0)
 
     # --- Agent Saul transcript boundaries (§5.2 — hard deadline, configurable) ---
     # Whole-boundary budget (read turn context + snapshot + view + apply).

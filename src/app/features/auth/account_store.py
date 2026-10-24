@@ -62,6 +62,7 @@ class AuthAccount(BaseModel):
     permissions: frozenset[str]
     role_revision: int = 0
     session_revocation_pending: bool = False
+    session_revocation_pending_at: datetime | None = None
     avatar_url: str | None = None
     oauth_accounts: tuple[OAuthAccountInput, ...] = ()
     oauth_providers: tuple[str, ...] = ()
@@ -210,6 +211,16 @@ class AuthAccountStore(Protocol):
         """
         ...
 
+    async def find_by_oauth_identity(
+        self, provider: str, provider_user_id: str
+    ) -> Result[AuthAccount | None, AuthError]:
+        """Find the account that owns one provider subject, if any."""
+        ...
+
+    async def unlink_oauth_account(self, account_id: str, provider: str) -> Result[None, AuthError]:
+        """Remove a provider identity when another sign-in method remains."""
+        ...
+
 
 # Implementation below (not in TYPE_CHECKING to avoid circular imports)
 # -----------------------------------------------------------------------------
@@ -236,6 +247,7 @@ class BeanieAuthAccountStore:
             permissions=frozenset(p.value for p in user.get_permissions()),
             role_revision=user.role_revision,
             session_revocation_pending=user.session_revocation_pending,
+            session_revocation_pending_at=user.session_revocation_pending_at,
             verification_token_hash=user.verification_token_hash,
             reset_token_hash=user.reset_token_hash,
             reset_token_expires_at=user.reset_token_expires_at,
@@ -734,6 +746,15 @@ class BeanieAuthAccountStore:
                 },
                 return_document=ReturnDocument.AFTER,
             )
+        except DuplicateKeyError as exc:
+            exc.add_note("auth_account_store operation=link_oauth_account duplicate_identity")
+            return Failure(
+                AuthConflictError(
+                    message="OAuth identity is already linked to another account",
+                    details={"provider": provider},
+                    source="auth_account_store",
+                )
+            )
         except PyMongoError as exc:
             exc.add_note("auth_account_store operation=link_oauth_account")
             return Failure(
@@ -765,6 +786,106 @@ class BeanieAuthAccountStore:
                 )
             )
         return Success(None)
+
+    async def find_by_oauth_identity(
+        self, provider: str, provider_user_id: str
+    ) -> Result[AuthAccount | None, AuthError]:
+        try:
+            user = await self._User.find_one(
+                {
+                    "oauth_accounts": {
+                        "$elemMatch": {
+                            "provider": provider,
+                            "provider_user_id": provider_user_id,
+                        }
+                    }
+                }
+            )
+            return Success(None if user is None else self._to_auth_account(user))
+        except PyMongoError as exc:
+            exc.add_note("auth_account_store operation=find_by_oauth_identity")
+            return Failure(
+                AuthInfrastructureError(
+                    message="Database error while finding OAuth identity",
+                    details={"provider": provider, "error": str(exc)},
+                    source="auth_account_store",
+                )
+            )
+
+    async def unlink_oauth_account(self, account_id: str, provider: str) -> Result[None, AuthError]:
+        if not BsonObjectId.is_valid(account_id):
+            return Failure(
+                AuthValidationError(
+                    message="Invalid user identifier",
+                    details={"user_id": account_id},
+                    source="auth_account_store",
+                )
+            )
+        try:
+            user = await self._User.get(BsonObjectId(account_id))
+            if user is None:
+                return Failure(
+                    AuthNotFoundError(
+                        message="User not found",
+                        details={"user_id": account_id},
+                        source="auth_account_store",
+                    )
+                )
+            updated = await self._User.get_pymongo_collection().find_one_and_update(
+                {
+                    "_id": BsonObjectId(account_id),
+                    "oauth_accounts": {
+                        "$elemMatch": {"provider": provider},
+                    },
+                    "$or": [
+                        {"hashed_password": {"$ne": None}},
+                        {
+                            "oauth_accounts": {
+                                "$elemMatch": {"provider": {"$ne": provider}}
+                            }
+                        },
+                    ],
+                },
+                {
+                    "$pull": {"oauth_accounts": {"provider": provider}},
+                    "$set": {"updated_at": datetime.now(UTC)},
+                },
+                return_document=ReturnDocument.AFTER,
+            )
+            if updated is not None:
+                return Success(None)
+
+            # The conditional update is the ownership/last-method guard.  A
+            # second read only classifies a failed update; it is deliberately
+            # not used as a precondition, so concurrent unlink requests cannot
+            # both pass a read-then-write check.
+            current = await self._User.get(BsonObjectId(account_id))
+            if current is None:
+                return Failure(
+                    AuthNotFoundError(
+                        message="User not found",
+                        details={"user_id": account_id},
+                        source="auth_account_store",
+                    )
+                )
+            if not any(linked.provider == provider for linked in current.oauth_accounts):
+                return Success(None)
+            return Failure(
+                AuthConflictError(
+                    message="Cannot remove the last sign-in method",
+                    details={"provider": provider},
+                    source="auth_account_store",
+                )
+            )
+        except PyMongoError as exc:
+            exc.add_note("auth_account_store operation=unlink_oauth_account")
+            return Failure(
+                AuthInfrastructureError(
+                    message="Database error while unlinking OAuth account",
+                    details={"user_id": account_id, "provider": provider, "error": str(exc)},
+                    source="auth_account_store",
+                )
+            )
 
     async def _get_user(self, account_id: str) -> Result[User, AuthError]:
         if not BsonObjectId.is_valid(account_id):
@@ -905,6 +1026,55 @@ class InMemoryAuthAccountStore:
         updated = AuthAccount(
             **data,
             password_hash=password_hash,
+            updated_at=datetime.now(UTC),
+        )
+        self._index_account(updated)
+        return Success(None)
+
+    async def find_by_oauth_identity(
+        self, provider: str, provider_user_id: str
+    ) -> Result[AuthAccount | None, AuthError]:
+        for account in self._accounts.values():
+            if any(
+                linked.provider == provider and linked.provider_user_id == provider_user_id
+                for linked in account.oauth_accounts
+            ):
+                return Success(account)
+        return Success(None)
+
+    async def unlink_oauth_account(self, account_id: str, provider: str) -> Result[None, AuthError]:
+        account = self._accounts.get(account_id)
+        if account is None:
+            return Failure(
+                AuthNotFoundError(
+                    message="User not found",
+                    details={"user_id": account_id},
+                    source="auth_account_store",
+                )
+            )
+        if account.password_hash is None and not any(
+            linked.provider != provider for linked in account.oauth_accounts
+        ):
+            return Failure(
+                AuthConflictError(
+                    message="Cannot remove the last sign-in method",
+                    details={"provider": provider},
+                    source="auth_account_store",
+                )
+            )
+        if not any(linked.provider == provider for linked in account.oauth_accounts):
+            return Success(None)
+        self._unindex_account(account)
+        data = account.model_dump()
+        data.pop("oauth_accounts", None)
+        data.pop("oauth_providers", None)
+        data.pop("updated_at", None)
+        updated = AuthAccount(
+            **data,
+            oauth_providers=tuple(p for p in account.oauth_providers if p != provider),
+            oauth_accounts=tuple(
+                linked for linked in account.oauth_accounts if linked.provider != provider
+            ),
             updated_at=datetime.now(UTC),
         )
         self._index_account(updated)
@@ -1125,6 +1295,24 @@ class InMemoryAuthAccountStore:
                 AuthNotFoundError(
                     message="User not found",
                     details={"user_id": account_id},
+                    source="auth_account_store",
+                )
+            )
+        owner = next(
+            (
+                existing
+                for existing in self._accounts.values()
+                if any(
+                    linked.provider == provider and linked.provider_user_id == provider_user_id
+                    for linked in existing.oauth_accounts
+                )
+            ),
+            None,
+        )
+        if owner is not None and owner.id != account_id:
+            return Failure(
+                AuthConflictError(
+                    message="OAuth identity is already linked to another account",
                     source="auth_account_store",
                 )
             )

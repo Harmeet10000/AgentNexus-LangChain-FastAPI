@@ -131,6 +131,15 @@ Details on [LLM models](/configuration/llm-models).
 | `CELERY_IDEMPOTENCY_TTL_SECONDS` | int | `86400` | Task deduplication window (seconds) |
 | `CELERY_CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int | `5` | Failures before breaker opens |
 | `CELERY_CIRCUIT_BREAKER_RECOVERY_TIMEOUT` | int | `60` | Breaker recovery wait (seconds) |
+| `AUTH_PENDING_REVOCATION_ENABLED` | bool | `true` | Kill switch for eventual cleanup; does not disable request-time authorization epochs |
+| `AUTH_PENDING_REVOCATION_BATCH_SIZE` | int | `50` | Maximum pending users inspected per beat pass |
+| `AUTH_PENDING_REVOCATION_LEASE_SECONDS` | int | `120` | Per-user Redis lease duration |
+| `AUTH_PENDING_REVOCATION_MAX_ATTEMPTS` | int | `8` | Attempts before a marker is marked poison for operator recovery |
+| `AUTH_PENDING_REVOCATION_BACKOFF_BASE_SECONDS` | int | `15` | Initial retry delay |
+| `AUTH_PENDING_REVOCATION_BACKOFF_MAX_SECONDS` | int | `900` | Maximum retry delay |
+| `AUTH_PENDING_REVOCATION_BACKOFF_JITTER_SECONDS` | int | `5` | Retry jitter bound |
+| `AUTH_PENDING_REVOCATION_OLDEST_ALERT_SECONDS` | int | `300` | Oldest-marker alert threshold |
+| `AUTH_PENDING_REVOCATION_MAX_RUNTIME_SECONDS` | int | `45` | Per-pass runtime budget |
 
 Celery uses RabbitMQ for transport and `rpc://` for task results. The RPC backend is ephemeral and is not durable application state. Worker startup is through `uv run worker --role default|ingestion|crawler`; role profiles own queue, prefork pool, concurrency, and recycling. Beat is a separate singleton publisher and persists its schedule at `CELERY_BEAT_SCHEDULE_FILE`; this is an operational singleton requirement, not leader election.
 

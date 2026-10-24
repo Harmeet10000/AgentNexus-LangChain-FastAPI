@@ -7,7 +7,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, Response, status
 from returns.result import Failure, Success
 
-from app.features.auth.dependencies import CurrentClaims, CurrentVerifiedUser, require_role
+from app.features.auth.dependencies import (
+    AuthorizationContext,
+    CurrentVerifiedUser,
+    require_role,
+)
 from app.features.auth.models import UserRole
 from app.kernel.result import render_result
 from app.utils import APIResponse
@@ -33,15 +37,21 @@ admin_router = APIRouter(prefix="/credits", tags=["credits"])
 @admin_router.post(
     "",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def grant_credit(
     dto: CreditGrantDTO,
     service: CreditServiceDep,
-    claims: CurrentClaims,  # noqa: ARG001 — FastAPI DI dependency
+    authorization: Annotated[
+        AuthorizationContext,
+        Depends(require_role(UserRole.ADMIN)),
+    ],
     response: Response,
 ) -> APIResponse[CreditGrantResponse]:
     """Grant credit to a user (Requirement 49). Admin only."""
+    # ``authorization`` is intentionally resolved even though the target is
+    # supplied in the payload: it is the live-account authority gate for this
+    # privileged mutation, not a JWT role/permission check.
+    _ = authorization
     target_user_id = dto.metadata_.get("target_user_id")
     if not target_user_id:
         return render_result(

@@ -22,6 +22,8 @@ from .dto import (
     LoginRequest,
     LogoutRequest,
     OAuthAuthorizeResponse,
+    OAuthLinkConfirmationResponse,
+    OAuthLinkConfirmRequest,
     RefreshRequest,
     RegisterRequest,
     ResendVerificationRequest,
@@ -46,12 +48,12 @@ limit_resend_verification = get_rate_limiter(burst=2, rate=2, period=300)
 
 # Read this before you read the code: The auth router is the most complex part of the codebase, so it's worth a high-level overview before diving in. The main goals here are:
 # 1. Handle all authentication-related routes: registration, login, logout, token refresh, email verification, password reset, and OAuth2.
-# 2. Implement robust RBAC guards using JWT claims to avoid unnecessary database hits on protected routes.
+# 2. Implement robust RBAC guards against live account state on protected routes.
 # 3. Apply rate limiting to sensitive endpoints to mitigate abuse (e.g. login, registration, password reset).
 # The code is organized into three main sections:
 # 1. Dependencies: Wiring up repositories and services, plus token extraction and claims decoding.
 # 2. Public routes: Registration, login, email verification, password reset, and OAuth2 endpoints that don't require authentication.
-# 3. Protected routes: Endpoints that require a valid JWT and appropriate permissions, with the guards implemented as dependencies that decode claims without hitting the
+# 3. Protected routes: Endpoints that require a valid JWT and appropriate permissions, with the guards implemented as dependencies that hydrate live account state.
 
 # Protected Routes
 # Everything chains through FastAPI's dependency injection. The base chain is:
@@ -69,30 +71,28 @@ limit_resend_verification = get_rate_limiter(burst=2, rate=2, period=300)
 # CurrentClaims, CurrentVerifiedUser etc. are just Annotated aliases — they make the chain invisible at the call site.
 
 # RBAC
-# Two dependency factories — require_permission and require_role. Both validate live account state after JWT/session checks:
+# Two dependency factories — require_permission and require_role. Both validate live account state after JWT/session checks and return AuthorizationContext:
 # def require_permission(*permissions: Permission):
-#     async def _guard(claims: Annotated[TokenClaims, Depends(get_token_claims)]) -> TokenClaims:
-#         user_perms = set(claims.permissions)
+#     async def _guard(...) -> AuthorizationContext:
+#         user_perms = set(account.permissions)
 #         for perm in permissions:
 #             if perm.value not in user_perms:
 #                 raise ForbiddenException(...)
-#         return claims
+#         return AuthorizationContext(claims=claims, account=account)
 #     return _guard
-# require_role does the same but checks claims.role. You attach them at the route level in two ways:
+# require_role does the same but checks account.role. Use a typed context parameter when the handler needs the authenticated subject:
 # python# Via dependencies= (no return value needed in handler)
 # @router.get("/", dependencies=[Depends(require_permission(Permission.USERS_READ))])
 
-# # Via parameter (when handler needs the claims object)
+# # Via parameter (when handler needs the live-authorized subject)
 # async def update_role(
-#     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))]
+#     authorization: Annotated[AuthorizationContext, Depends(require_permission(Permission.USERS_WRITE))]
 # ):
-#     await service.update_role(..., requesting_admin_id=claims.sub)
+#     await service.update_role(..., requesting_admin_id=authorization.user_id)
 # Permissions remain embedded in the JWT for context, but live account state is authoritative for privileged routes. This ensures role changes and deactivation take effect after session invalidation.
 
 
-# ⬛ FOR THE CHOSEN ONES
-# The dual-attach pattern on admin routes is intentional redundancy, not a mistake. On routes like update_role you'll notice require_permission appears both in dependencies=[] and as a typed parameter. This is because FastAPI treats dependencies=[] as fire-and-forget — the return value is discarded. If you need claims.sub inside the handler, you must declare it as a parameter too. Two calls to the same dependency with the same arguments hit FastAPI's dependency cache within a single request — the guard runs exactly once, not twice. This is FastAPI's use_cache=True default behavior at work.
-# Live RBAC costs a MongoDB account lookup, but closes the stale-claims window for privileged routes. FastAPI dependency caching avoids repeating that chain within one request.
+# Live RBAC costs a MongoDB account lookup, but closes the stale-claims window for privileged routes. FastAPI dependency caching avoids repeating that chain within one request. Keep route-level dependencies for handlers that do not need the returned context; use the typed context alone when the handler needs the requester identity.
 
 
 # ── Registration and login ─────────────────────────────────────────────────────
@@ -264,6 +264,37 @@ async def oauth_authorize(
     )
 
 
+@router.get("/oauth/{provider}/link/authorize")
+async def oauth_link_authorize(
+    provider: Annotated[str, Path()],
+    claims: CurrentClaims,
+    response: Response,
+    service: AuthServiceDep,
+) -> APIResponse[OAuthAuthorizeResponse]:
+    """Start linking a provider to the already authenticated account."""
+    result = await service.oauth_link_get_authorization_url(
+        provider,
+        user_id=claims.sub,
+        session_id=claims.sid,
+        authz_revision=claims.authz_revision,
+    )
+    if isinstance(result, Failure):
+        return render_result(result, response, message="OAuth account linking could not start")
+    url, signed_state = result.unwrap()
+    response.set_cookie(
+        OAUTH_STATE_COOKIE,
+        signed_state,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=300,
+    )
+    return http_response(
+        "OAuth account-link authorization URL generated",
+        data=OAuthAuthorizeResponse(authorization_url=url, provider=provider),
+    )
+
+
 @router.get("/oauth/{provider}/callback", response_model=None)
 async def oauth_callback(
     provider: Annotated[str, Path()],
@@ -273,7 +304,7 @@ async def oauth_callback(
     code: Annotated[str | None, Query()] = None,
     state: Annotated[str | None, Query()] = None,
     error: Annotated[str | None, Query()] = None,
-) -> Response | APIResponse[TokenResponse | None]:
+) -> Response | APIResponse[TokenResponse | OAuthLinkConfirmationResponse | None]:
     settings = get_settings()
     frontend_url = settings.FRONTEND_URL.rstrip("/")
 
@@ -320,7 +351,17 @@ async def oauth_callback(
     )
     if isinstance(result, Failure):
         return render_result(result, response, message="OAuth callback failed")
-    tokens = result.unwrap()
+    payload = result.unwrap()
+    if isinstance(payload, OAuthLinkConfirmationResponse):
+        redirect = RedirectResponse(
+            # Keep the bearer-like confirmation token out of server-side
+            # request logs and Referer headers; the frontend reads the hash.
+            url=f"{frontend_url}/auth/link/confirm#action_token={payload.action_token}",
+            status_code=302,
+        )
+        redirect.delete_cookie(OAUTH_STATE_COOKIE)
+        return redirect
+    tokens = payload
 
     # Refresh token travels in the URL fragment — never hits the server, stays in browser memory
     redirect = RedirectResponse(
@@ -337,6 +378,55 @@ async def oauth_callback(
         max_age=tokens.expires_in,
     )
     return redirect
+
+
+@router.get("/oauth/link/{action_token}")
+async def oauth_link_preview(
+    action_token: Annotated[str, Path()],
+    claims: CurrentClaims,
+    service: AuthServiceDep,
+    response: Response,
+) -> APIResponse[OAuthLinkConfirmationResponse]:
+    result = await service.oauth_link_preview(
+        action_token,
+        user_id=claims.sub,
+        session_id=claims.sid,
+    )
+    return render_result(result, response, message="OAuth identity ready for confirmation")
+
+
+@router.post("/oauth/link/{action_token}/confirm")
+async def oauth_link_confirm(
+    action_token: Annotated[str, Path()],
+    body: OAuthLinkConfirmRequest,
+    claims: CurrentClaims,
+    service: AuthServiceDep,
+    response: Response,
+) -> APIResponse[None]:
+    result = await service.oauth_link_confirm(
+        action_token,
+        user_id=claims.sub,
+        session_id=claims.sid,
+        authz_revision=claims.authz_revision,
+        confirm=body.confirm,
+    )
+    return render_result(result, response, message="OAuth account linked")
+
+
+@router.delete("/oauth/{provider}/link")
+async def oauth_unlink(
+    provider: Annotated[str, Path()],
+    claims: CurrentClaims,
+    service: AuthServiceDep,
+    response: Response,
+) -> APIResponse[None]:
+    result = await service.oauth_unlink(
+        provider,
+        user_id=claims.sub,
+        session_id=claims.sid,
+        authz_revision=claims.authz_revision,
+    )
+    return render_result(result, response, message="OAuth account unlinked")
 
 
 # ── Protected endpoints ────────────────────────────────────────────────────────

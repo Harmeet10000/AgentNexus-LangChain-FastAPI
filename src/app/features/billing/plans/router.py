@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Path, Query, Response, status
 
-from app.features.auth.dependencies import CurrentClaims, require_role
+from app.features.auth.dependencies import AuthorizationContext, require_role
 from app.features.auth.models import UserRole
 from app.kernel.result import render_result
 from app.utils import APIResponse
@@ -40,16 +40,20 @@ async def get_plan(
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def create_plan(
     payload: PlanCreateDTO,
     service: PlanServiceDep,
-    claims: CurrentClaims,
+    authorization: Annotated[
+        AuthorizationContext,
+        Depends(require_role(UserRole.ADMIN)),
+    ],
     response: Response,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> APIResponse[PlanResponse]:
-    result = await service.create_plan(payload, user_id=claims.sub, idempotency_key=idempotency_key)
+    result = await service.create_plan(
+        payload, user_id=authorization.user_id, idempotency_key=idempotency_key
+    )
     return render_result(
         result, response, message="Plan created", success_status=status.HTTP_201_CREATED
     )
@@ -57,31 +61,35 @@ async def create_plan(
 
 @router.patch(
     "/{plan_id}",
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def update_plan(  # noqa: PLR0917 — FastAPI's explicit endpoint dependency parameters
     plan_id: Annotated[str, Path(min_length=1)],
     payload: PlanUpdateDTO,
     service: PlanServiceDep,
-    claims: CurrentClaims,
+    authorization: Annotated[
+        AuthorizationContext,
+        Depends(require_role(UserRole.ADMIN)),
+    ],
     response: Response,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> APIResponse[PlanResponse]:
     result = await service.update_plan(
-        plan_id, payload, user_id=claims.sub, idempotency_key=idempotency_key
+        plan_id, payload, user_id=authorization.user_id, idempotency_key=idempotency_key
     )
     return render_result(result, response, message="Plan updated")
 
 
 @router.post(
     "/{plan_id}/archive",
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def archive_plan(
     plan_id: Annotated[str, Path(min_length=1)],
     service: PlanServiceDep,
-    claims: CurrentClaims,
+    authorization: Annotated[
+        AuthorizationContext,
+        Depends(require_role(UserRole.ADMIN)),
+    ],
     response: Response,
 ) -> APIResponse[PlanResponse]:
-    result = await service.archive_plan(plan_id, user_id=claims.sub)
+    result = await service.archive_plan(plan_id, user_id=authorization.user_id)
     return render_result(result, response, message="Plan archived")

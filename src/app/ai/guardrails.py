@@ -8,6 +8,7 @@ from langchain.agents.middleware import (
     AgentState,
     HumanInTheLoopMiddleware,
     LLMToolSelectorMiddleware,
+    Runtime,
     SummarizationMiddleware,
     ToolRetryMiddleware,
     after_model,
@@ -17,6 +18,7 @@ from langchain.agents.middleware import ModelRetryMiddleware as LangChainModelRe
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.exceptions import LangChainException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.observability.logging import logger
@@ -123,7 +125,9 @@ class TodoListMiddleware(BaseModel):
             return await handler(request.override(system_message=system_message))
 
         @after_model(state_schema=TodoAgentState)
-        def parse_todo_commands(state: dict[str, Any], _runtime: Any) -> dict[str, Any] | None:
+        def parse_todo_commands(
+            state: TodoAgentState, _runtime: Runtime[None]
+        ) -> dict[str, Any] | Command[Any] | None:
             messages = state.get("messages", [])
             ai_msg = next(
                 (message for message in reversed(messages) if isinstance(message, AIMessage)),

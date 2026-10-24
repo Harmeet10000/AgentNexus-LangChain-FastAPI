@@ -248,7 +248,17 @@ class TestAuthRefresh:
         session = session_result.unwrap()
 
         assert session.access_token is not None
-        assert session.refresh_token == tokens.refresh_token
+        assert session.refresh_token != tokens.refresh_token
+        original_claims = decode_token(tokens.refresh_token)
+        rotated_claims = decode_token(session.refresh_token)
+        assert rotated_claims.family_id == original_claims.family_id
+        assert rotated_claims.refresh_generation == 1
+        assert rotated_claims.parent_jti == original_claims.jti
+        second_result = await auth_service.refresh(session.refresh_token)
+        second_claims = decode_token(second_result.unwrap().refresh_token)
+        assert second_claims.family_id == original_claims.family_id
+        assert second_claims.refresh_generation == 2
+        assert second_claims.parent_jti == rotated_claims.jti
         assert session.token_type == "bearer"
         assert session.expires_in > 0
 
@@ -342,8 +352,8 @@ class TestAuthSessions:
         account = account.unwrap()
 
         # Decode refresh tokens to get session IDs (jti claim)
-        session_id1 = decode_token(tokens1.refresh_token).jti
-        session_id2 = decode_token(tokens2.refresh_token).jti
+        session_id1 = decode_token(tokens1.refresh_token).sid
+        session_id2 = decode_token(tokens2.refresh_token).sid
 
         # Revoke all except first session
         await auth_service.revoke_all_sessions(account.id, except_session_id=session_id1)
