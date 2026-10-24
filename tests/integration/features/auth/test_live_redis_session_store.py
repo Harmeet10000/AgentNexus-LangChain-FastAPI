@@ -95,32 +95,37 @@ def _session(user_id: str, *, ttl: int = 120) -> SessionData:
     )
 
 
+def _user_id() -> str:
+    return f"live-user-{uuid4()}"
+
+
 @pytest.mark.asyncio
 async def test_real_redis_store_revoke_all_and_index_ttl(
     live_redis: Redis,
     session_store: Callable[[SessionData], None],
 ) -> None:
     store = RefreshTokenRepository(live_redis)
-    first = _session("507f1f77bcf86cd799439011", ttl=120)
-    second = _session("507f1f77bcf86cd799439011", ttl=30)
+    user_id = _user_id()
+    first = _session(user_id, ttl=120)
+    second = _session(user_id, ttl=30)
 
     assert isinstance(await store.store_session(first), Success)
     assert isinstance(await store.store_session(second), Success)
     session_store(first)
     session_store(second)
-    before = await live_redis.ttl("auth:user_sessions:507f1f77bcf86cd799439011")
+    before = await live_redis.ttl(f"auth:user_sessions:{user_id}")
     assert before > 0
     assert before >= 110
 
-    result = await store.revoke_all_user_sessions("507f1f77bcf86cd799439011", authz_revision=5)
+    result = await store.revoke_all_user_sessions(user_id, authz_revision=5)
 
     assert result == Success([first.session_id, second.session_id]) or result == Success(
         [second.session_id, first.session_id]
     )
     assert await live_redis.exists(f"auth:session:{first.session_id}") == 0
     assert await live_redis.exists(f"auth:session:{second.session_id}") == 0
-    assert await live_redis.exists("auth:user_sessions:507f1f77bcf86cd799439011") == 0
-    assert await live_redis.get("auth:user_authz_revision:507f1f77bcf86cd799439011") == "5"
+    assert await live_redis.exists(f"auth:user_sessions:{user_id}") == 0
+    assert await live_redis.get(f"auth:user_authz_revision:{user_id}") == "5"
 
 
 @pytest.mark.asyncio
@@ -145,7 +150,7 @@ async def test_real_redis_refusal_is_typed_and_recovery_succeeds(
     assert failed.failure().retryable is True
 
     recovered = RefreshTokenRepository(live_redis)
-    session = _session("507f1f77bcf86cd799439012")
+    session = _session(_user_id())
     assert isinstance(await recovered.store_session(session), Success)
     session_store(session)
     assert await recovered.get_session(session.session_id) == Success(session)
@@ -156,7 +161,7 @@ async def test_real_redis_timeout_and_client_reconnect_recover(
     live_redis: Redis,
     session_store: Callable[[SessionData], None],
 ) -> None:
-    session = _session("507f1f77bcf86cd799439013")
+    session = _session(_user_id())
     store = RefreshTokenRepository(live_redis)
     assert isinstance(await store.store_session(session), Success)
     session_store(session)
@@ -216,7 +221,7 @@ async def test_real_redis_session_survives_service_restart(
     if not container_ids:
         pytest.fail("Unable to locate the disposable Redis service container")
     container_id = container_ids[0]
-    session = _session("507f1f77bcf86cd799439014")
+    session = _session(_user_id())
     assert isinstance(await RefreshTokenRepository(live_redis).store_session(session), Success)
     session_store(session)
 
