@@ -1,8 +1,9 @@
 """Repair Redis auth session indexes in bounded, resumable batches.
 
-Dry-run is the default.  Apply changes explicitly with ``--apply``.  The
-command never recreates an index or deletes a session record; it only removes
-stale memberships and extends an existing index to the longest live session.
+Dry-run is the default. Apply changes explicitly with ``--apply``. The command
+never deletes a session record. Apply mode may restore a valid orphan
+membership, remove stale memberships, and extend an existing index to the
+longest live session.
 """
 
 from __future__ import annotations

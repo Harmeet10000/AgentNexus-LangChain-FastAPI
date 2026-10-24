@@ -1,10 +1,10 @@
 """Bounded, idempotent repair of Redis session membership indexes.
 
-The session key is authoritative.  An index is only a revocation/discovery
-accelerator, so this repair deliberately never creates an index and never
-deletes a session record.  Every membership removal is guarded in Lua by an
-exact value comparison; a concurrent login that replaces the record therefore
-cannot be removed by an older repair observation.
+The session key is authoritative. An index is only a revocation/discovery
+accelerator, so this repair never deletes a session record. Apply mode may
+restore a valid orphan membership, while every membership removal is guarded
+in Lua by an exact value comparison; a concurrent login that replaces the
+record therefore cannot be removed by an older repair observation.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
-from redis.exceptions import RedisError
+from redis.exceptions import RedisError, ResponseError
 
 from app.observability.logging import logger
 
@@ -47,7 +47,7 @@ end
 local desired_ttl = tonumber(ARGV[#ARGV])
 if desired_ttl > 0 then
     local current_ttl = redis.call('TTL', KEYS[1])
-    if current_ttl < desired_ttl then
+if current_ttl >= 0 and current_ttl < desired_ttl then
         redis.call('EXPIRE', KEYS[1], desired_ttl)
         current_ttl = desired_ttl
     end
@@ -65,10 +65,11 @@ local key_type = redis.call('TYPE', KEYS[2]).ok
 if key_type ~= 'none' and key_type ~= 'set' then
     return {0, -3}
 end
+local index_existed = key_type ~= 'none'
 redis.call('SADD', KEYS[2], ARGV[2])
 local desired_ttl = tonumber(ARGV[3])
 local current_ttl = redis.call('TTL', KEYS[2])
-if current_ttl < desired_ttl then
+if (not index_existed and current_ttl < desired_ttl) or (index_existed and current_ttl >= 0 and current_ttl < desired_ttl) then
     redis.call('EXPIRE', KEYS[2], desired_ttl)
     current_ttl = desired_ttl
 end
@@ -191,23 +192,50 @@ class SessionIndexRepair:
             expires_at = expires_at.replace(tzinfo=UTC)
         return max(0, math.ceil((expires_at - now).total_seconds()))
 
-    async def _inspect_index(self, key: str, *, dry_run: bool) -> IndexRepair:  # noqa: PLR0914
+    async def _inspect_index(  # noqa: PLR0914, PLR0915
+        self, key: str, *, dry_run: bool
+    ) -> IndexRepair:
         async with asyncio.timeout(self._operation_timeout):
             ttl_before = int(await self._redis.ttl(key))
-            raw_ids = sorted(self._text(item) for item in await self._redis.smembers(key))
             user_id = key.rsplit(":", 1)[-1]
-            if len(raw_ids) > self._member_limit:
+            member_count = int(await self._redis.scard(key))
+            if member_count > self._member_limit:
                 return IndexRepair(
                     key=key,
                     user_id=user_id,
                     ttl_before=ttl_before,
                     ttl_after=ttl_before,
-                    members_before=len(raw_ids),
+                    members_before=member_count,
                     live_members=0,
                     stale_members=0,
                     malformed_members=0,
                     deferred=True,
                 )
+
+            raw_ids: list[str] = []
+            member_cursor = 0
+            while True:
+                member_cursor, page = await self._redis.sscan(
+                    key,
+                    cursor=member_cursor,
+                    count=min(self._scan_count, self._member_limit - len(raw_ids) + 1),
+                )
+                raw_ids.extend(self._text(item) for item in page)
+                if len(raw_ids) > self._member_limit:
+                    return IndexRepair(
+                        key=key,
+                        user_id=user_id,
+                        ttl_before=ttl_before,
+                        ttl_after=ttl_before,
+                        members_before=len(raw_ids),
+                        live_members=0,
+                        stale_members=0,
+                        malformed_members=0,
+                        deferred=True,
+                    )
+                if member_cursor == 0:
+                    break
+            raw_ids.sort()
 
             async with self._redis.pipeline(transaction=False) as pipe:
                 for session_id in raw_ids:
@@ -242,7 +270,7 @@ class SessionIndexRepair:
                 live_members += 1
                 max_ttl = max(max_ttl, remaining)
 
-            ttl_after = max(ttl_before, max_ttl)
+            ttl_after = ttl_before if ttl_before == -1 else max(ttl_before, max_ttl)
             repair = IndexRepair(
                 key=key,
                 user_id=user_id,
@@ -252,7 +280,7 @@ class SessionIndexRepair:
                 live_members=live_members,
                 stale_members=len(stale_pairs),
                 malformed_members=malformed_members,
-                extended=max_ttl > max(0, ttl_before),
+                extended=ttl_before >= 0 and max_ttl > ttl_before,
             )
             if dry_run:
                 return repair
@@ -297,22 +325,41 @@ class SessionIndexRepair:
         current = cursor
         checked = 0
         while checked < limit:
-            current, keys = await self._redis.scan(
-                cursor=current,
-                match=self.session_pattern,
-                count=min(self._scan_count, limit - checked),
-            )
+            try:
+                current, keys = await self._redis.scan(
+                    cursor=current,
+                    match=self.session_pattern,
+                    count=min(self._scan_count, limit - checked),
+                )
+            except RedisError as exc:
+                summary.failures += 1
+                summary.next_orphan_cursor = int(current)
+                logger.bind(error=str(exc), cursor=current).warning(
+                    "auth_session_index_orphan_scan_failed"
+                )
+                return
             if not keys:
                 if current == 0:
                     break
                 continue
-            async with self._redis.pipeline(transaction=False) as pipe:
-                for key in keys:
-                    pipe.get(key)
-                raw_values = await pipe.execute()
+            try:
+                async with self._redis.pipeline(transaction=False) as pipe:
+                    for key in keys:
+                        pipe.get(key)
+                    raw_values = await pipe.execute(raise_on_error=False)
+            except RedisError as exc:
+                summary.failures += 1
+                summary.next_orphan_cursor = int(current)
+                logger.bind(error=str(exc), cursor=current).warning(
+                    "auth_session_index_orphan_page_failed"
+                )
+                continue
             for _key, raw in zip(keys, raw_values, strict=True):
                 checked += 1
                 if raw is None:
+                    continue
+                if isinstance(raw, ResponseError):
+                    summary.failures += 1
                     continue
                 try:
                     raw_text = self._text(raw)
@@ -421,9 +468,7 @@ class SessionIndexRepair:
                     summary.indexes.append(repair)
                     summary.malformed_records += repair.malformed_members
                     summary.memberships_removed += repair.removed_members
-                    if repair.ttl_before == -1 or (
-                        repair.ttl_before >= 0 and repair.ttl_after > repair.ttl_before
-                    ):
+                    if repair.ttl_before >= 0 and repair.ttl_after > repair.ttl_before:
                         summary.ttl_violations += 1
                     if repair.deferred:
                         summary.deferred_indexes += 1

@@ -212,6 +212,50 @@ async def test_cursor_batch_and_wrong_type_failure_do_not_block_other_indexes(
     assert failures == 1
 
 
+async def test_large_index_is_deferred_before_member_fetch(
+    repair_context: tuple[Redis, str, RefreshTokenRepository, SessionIndexRepair],
+) -> None:
+    client, _prefix, store, _repair = repair_context
+    index_key = store._user_sessions_key(_user_id())
+    await client.sadd(index_key, *(f"large-{number}" for number in range(20)))
+    bounded = SessionIndexRepair(client, key_prefix=store._key_prefix, member_limit=3)
+    report = await bounded.run(dry_run=True)
+    assert report.deferred_indexes == 1
+    assert report.indexes[0].members_before == 20
+    assert await client.scard(index_key) == 20
+
+
+async def test_orphan_page_continues_after_wrong_type_session_key(
+    repair_context: tuple[Redis, str, RefreshTokenRepository, SessionIndexRepair],
+) -> None:
+    client, _prefix, store, repair = repair_context
+    valid = _session(_user_id(), ttl=120)
+    await client.set(store._session_key(valid.session_id), valid.model_dump_json(), ex=valid.ttl)
+    wrong_type_id = "wrong-type-session"
+    await client.lpush(store._session_key(wrong_type_id), "not-a-string")
+    report = await repair.run(dry_run=False, orphan_limit=100)
+    assert report.orphan_memberships_restored == 1
+    assert report.malformed_records == 0
+    assert report.failures == 1
+    assert await client.sismember(store._user_sessions_key(valid.user_id), valid.session_id) == 1
+
+
+async def test_orphan_attach_preserves_existing_persistent_index(
+    repair_context: tuple[Redis, str, RefreshTokenRepository, SessionIndexRepair],
+) -> None:
+    client, _prefix, store, repair = repair_context
+    user_id = _user_id()
+    indexed = _session(user_id, ttl=180)
+    orphan = _session(user_id, ttl=120)
+    assert isinstance(await store.store_session(indexed), Success)
+    index_key = store._user_sessions_key(user_id)
+    await client.persist(index_key)
+    await client.set(store._session_key(orphan.session_id), orphan.model_dump_json(), ex=orphan.ttl)
+    report = await repair.run(dry_run=False, orphan_limit=100)
+    assert report.orphan_memberships_restored == 1
+    assert await client.ttl(index_key) == -1
+
+
 async def test_concurrent_replacement_wins_over_stale_repair_observation(
     repair_context: tuple[Redis, str, RefreshTokenRepository, SessionIndexRepair],
 ) -> None:

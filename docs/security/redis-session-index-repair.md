@@ -43,10 +43,11 @@ uv run python scripts/repair_auth_session_indexes.py \
 ```
 
 The apply path is idempotent and concurrency-safe. A Lua compare-and-remove
-checks the current session value before removing a membership. If a login
-replaces a malformed, expired, or missing observation while repair is running,
-the replacement is not removed. TTL extension is performed only when the index
-still exists and is never applied to a session key.
+checks the current session value before removing a membership or restoring an
+orphan. If a login replaces a malformed, expired, or missing observation while
+repair is running, the replacement is not removed. A persistent existing index
+keeps its persistent TTL; only a missing index or an expiring index is assigned
+the verified session lifetime. TTL extension is never applied to a session key.
 
 ## Policies and failure handling
 
