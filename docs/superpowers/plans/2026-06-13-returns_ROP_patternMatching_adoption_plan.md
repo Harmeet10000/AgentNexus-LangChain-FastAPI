@@ -254,6 +254,10 @@ Goals:
 - preserve public LangGraph checkpoint reads, monotonic projection guards, and
   retry-safe GC audit semantics while changing internal error handling
 
+This phase is an audit/maintenance boundary, not a request to redesign the
+already typed sweep outcome model; future changes should add a focused test
+before expanding its error taxonomy.
+
 ### Phase 4: Repository Ambiguity Cleanup
 
 Target files:
