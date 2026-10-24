@@ -177,7 +177,7 @@ end
 local previous_id = redis.call('HGET', KEYS[1], 'previous_id_hash')
 local previous_secret = redis.call('HGET', KEYS[1], 'previous_secret_hash')
 local grace_until = tonumber(redis.call('HGET', KEYS[1], 'previous_grace_until') or '0')
-if ARGV[1] == previous_id and ARGV[2] == previous_secret and tonumber(ARGV[6]) <= grace_until then
+if tonumber(ARGV[7]) > 0 and ARGV[1] == previous_id and ARGV[2] == previous_secret and tonumber(ARGV[6]) <= grace_until then
     return {'grace', tostring(current_generation)}
 end
 if ARGV[1] == previous_id or ARGV[1] == current_id then

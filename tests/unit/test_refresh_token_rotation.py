@@ -122,6 +122,54 @@ async def test_concurrent_refresh_has_one_rotation_and_one_idempotent_grace(
 
 
 @pytest.mark.asyncio
+async def test_zero_grace_replay_is_not_accepted_within_same_second(
+    redis: FakeRedis,
+) -> None:
+    repo = RefreshTokenRepository(redis)
+    family_id = "family-zero-grace"
+    token_id, token_secret = derive_refresh_token_material(family_id, 0)
+    child_id, child_secret = derive_refresh_token_material(family_id, 1)
+    session = _session(family_id=family_id)
+    await repo.store_session(session)
+    await repo.create_refresh_family(
+        family_id=family_id,
+        user_id=session.user_id,
+        session_id=session.session_id,
+        device_id=session.device_id,
+        authz_revision=session.authz_revision,
+        token_id=token_id,
+        token_secret=token_secret,
+        issued_at=session.created_at,
+        expires_at=session.expires_at,
+    )
+    rotated = await repo.rotate_refresh_token(
+        family_id=family_id,
+        token_id=token_id,
+        token_secret=token_secret,
+        child_token_id=child_id,
+        child_token_secret=child_secret,
+        child_generation=1,
+        expected_authz_revision=4,
+        now=session.created_at,
+        grace_seconds=0,
+    )
+    assert isinstance(rotated, Success)
+    replay = await repo.rotate_refresh_token(
+        family_id=family_id,
+        token_id=token_id,
+        token_secret=token_secret,
+        child_token_id=child_id,
+        child_token_secret=child_secret,
+        child_generation=1,
+        expected_authz_revision=4,
+        now=session.created_at,
+        grace_seconds=0,
+    )
+    assert isinstance(replay, Success)
+    assert replay.unwrap().status == "reused"
+
+
+@pytest.mark.asyncio
 async def test_replay_after_grace_revokes_family_and_session(redis: FakeRedis) -> None:
     repo = RefreshTokenRepository(redis)
     family_id = "family-replay"
