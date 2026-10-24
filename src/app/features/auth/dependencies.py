@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, assert_never
 
@@ -39,6 +40,28 @@ from .service import AuthService
 
 _http_bearer = HTTPBearer(auto_error=False)
 _ACCESS_TOKEN_TYPE = "access"  # noqa: S105 — token type constant, not a password
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizationContext:
+    """Live authorization state paired with the authenticated token.
+
+    ``TokenClaims`` remains useful for identity and session correlation, but
+    its role/permission fields are historical token context.  Privileged
+    dependencies return this wrapper so handlers cannot accidentally treat
+    those stale fields as current authority.
+    """
+
+    claims: TokenClaims
+    account: AuthAccount
+
+    @property
+    def user_id(self) -> str:
+        return self.account.id
+
+    @property
+    def session_id(self) -> str | None:
+        return self.claims.sid
 
 
 # ── Repository and service wiring ─────────────────────────────────────────────
@@ -266,8 +289,12 @@ async def get_current_verified_user(
 # ── RBAC guards (live account state) ─────────────────────────────────────────
 
 
-def require_permission(*permissions: Permission) -> Callable[..., Awaitable[TokenClaims]]:
+def require_permission(*permissions: Permission) -> Callable[..., Awaitable[AuthorizationContext]]:
     """Dependency factory that checks live permissions after session validation.
+
+    The returned context deliberately exposes live account state separately
+    from token claims. Handlers needing identity should use ``context.user_id``
+    rather than reaching into claim role/permission fields.
 
     Usage: Depends(require_permission(Permission.USERS_READ, Permission.USERS_WRITE))
     """
@@ -275,7 +302,7 @@ def require_permission(*permissions: Permission) -> Callable[..., Awaitable[Toke
     async def _guard(
         claims: Annotated[TokenClaims, Depends(get_token_claims)],
         account: Annotated[AuthAccount, Depends(get_current_active_user)],
-    ) -> TokenClaims:
+    ) -> AuthorizationContext:
         if claims.authz_revision is not None and account.role_revision != claims.authz_revision:
             msg = "Authorization changed; please authenticate again"
             raise ForbiddenException(msg)
@@ -283,12 +310,12 @@ def require_permission(*permissions: Permission) -> Callable[..., Awaitable[Toke
             if perm.value not in account.permissions:
                 msg = f"Missing required permission: {perm.value}"
                 raise ForbiddenException(msg)
-        return claims
+        return AuthorizationContext(claims=claims, account=account)
 
     return _guard
 
 
-def require_role(*roles: UserRole) -> Callable[..., Awaitable[TokenClaims]]:
+def require_role(*roles: UserRole) -> Callable[..., Awaitable[AuthorizationContext]]:
     """Dependency factory that checks the live account role after session validation.
 
     Usage: Depends(require_role(UserRole.ADMIN, UserRole.MODERATOR))
@@ -297,14 +324,14 @@ def require_role(*roles: UserRole) -> Callable[..., Awaitable[TokenClaims]]:
     async def _guard(
         claims: Annotated[TokenClaims, Depends(get_token_claims)],
         account: Annotated[AuthAccount, Depends(get_current_active_user)],
-    ) -> TokenClaims:
+    ) -> AuthorizationContext:
         if claims.authz_revision is not None and account.role_revision != claims.authz_revision:
             msg = "Authorization changed; please authenticate again"
             raise ForbiddenException(msg)
         if account.role not in roles:
             msg = "Insufficient role for this operation"
             raise ForbiddenException(msg)
-        return claims
+        return AuthorizationContext(claims=claims, account=account)
 
     return _guard
 

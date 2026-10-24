@@ -2,10 +2,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Response, status
 
-from app.features.auth.dependencies import require_permission, require_role
+from app.features.auth.dependencies import AuthorizationContext, require_permission, require_role
 from app.features.auth.models import Permission, UserRole
 from app.kernel.result import render_result
-from app.security.tokens import TokenClaims
 from app.utils import APIResponse
 
 from .dependencies import UserAdminServiceDep
@@ -68,13 +67,16 @@ async def update_user_role(
     user_id: Annotated[str, Path()],
     body: UpdateUserRoleRequest,
     service: UserAdminServiceDep,
-    claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
+    authorization: Annotated[
+        AuthorizationContext,
+        Depends(require_permission(Permission.USERS_WRITE)),
+    ],
     response: Response,
 ) -> APIResponse[UserAdminResponse]:
     result = await service.update_role(
         user_id=user_id,
         new_role=body.role,
-        requesting_admin_id=claims.sub,
+        requesting_admin_id=authorization.user_id,
     )
     return render_result(result, response, message="User role updated")
 
@@ -86,13 +88,16 @@ async def update_user_role(
 async def activate_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
-    claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
+    authorization: Annotated[
+        AuthorizationContext,
+        Depends(require_permission(Permission.USERS_WRITE)),
+    ],
     response: Response,
 ) -> APIResponse[UserAdminResponse]:
     result = await service.set_active(
         user_id=user_id,
         is_active=True,
-        requesting_admin_id=claims.sub,
+        requesting_admin_id=authorization.user_id,
     )
     return render_result(result, response, message="User activated")
 
@@ -104,13 +109,16 @@ async def activate_user(
 async def deactivate_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
-    claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))],
+    authorization: Annotated[
+        AuthorizationContext,
+        Depends(require_permission(Permission.USERS_WRITE)),
+    ],
     response: Response,
 ) -> APIResponse[UserAdminResponse]:
     result = await service.set_active(
         user_id=user_id,
         is_active=False,
-        requesting_admin_id=claims.sub,
+        requesting_admin_id=authorization.user_id,
     )
     return render_result(result, response, message="User deactivated")
 
@@ -123,12 +131,15 @@ async def deactivate_user(
 async def delete_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
-    claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_DELETE))],
+    authorization: Annotated[
+        AuthorizationContext,
+        Depends(require_permission(Permission.USERS_DELETE)),
+    ],
     response: Response,
 ) -> APIResponse[None]:
     result = await service.hard_delete(
         user_id=user_id,
-        requesting_admin_id=claims.sub,
+        requesting_admin_id=authorization.user_id,
     )
     return render_result(
         result, response, message="User permanently deleted", success_status=status.HTTP_200_OK
@@ -142,11 +153,14 @@ async def delete_user(
 async def impersonate_user(
     user_id: Annotated[str, Path()],
     service: UserAdminServiceDep,
-    claims: Annotated[TokenClaims, Depends(require_role(UserRole.ADMIN))],
+    authorization: Annotated[
+        AuthorizationContext,
+        Depends(require_role(UserRole.ADMIN)),
+    ],
     response: Response,
 ) -> APIResponse[ImpersonateResponse]:
     result = await service.impersonate(
         target_user_id=user_id,
-        admin_user_id=claims.sub,
+        admin_user_id=authorization.user_id,
     )
     return render_result(result, response, message="Impersonation token issued")

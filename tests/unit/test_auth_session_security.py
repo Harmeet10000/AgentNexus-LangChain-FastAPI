@@ -16,6 +16,7 @@ from returns.result import Failure, Success
 from app.connections.redis import get_redis
 from app.features.auth.account_store import InMemoryAuthAccountStore, NewAuthAccount
 from app.features.auth.dependencies import (
+    AuthorizationContext,
     get_optional_refresh_token_repository,
     get_token_claims,
     require_permission,
@@ -688,6 +689,30 @@ async def test_rbac_guards_use_live_account_permissions_and_role() -> None:
         await require_permission(Permission.USERS_WRITE)(stale_admin_claims, account)
     with pytest.raises(ForbiddenException):
         await require_role(UserRole.ADMIN)(stale_admin_claims, account)
+
+
+async def test_rbac_returns_live_authorization_context_not_claim_authority() -> None:
+    account = type(
+        "Account",
+        (),
+        {
+            "id": "live-admin",
+            "is_active": True,
+            "permissions": frozenset({Permission.USERS_WRITE.value}),
+            "role": UserRole.ADMIN,
+            "role_revision": 0,
+        },
+    )()
+    stale_claims = _claims(authz_revision=0).model_copy(
+        update={"role": UserRole.USER.value, "permissions": []}
+    )
+
+    context = await require_role(UserRole.ADMIN)(stale_claims, account)
+
+    assert isinstance(context, AuthorizationContext)
+    assert context.user_id == "live-admin"
+    assert context.account.role is UserRole.ADMIN
+    assert context.claims.role == UserRole.USER.value
 
 
 @pytest.mark.parametrize("endpoint", [get_credit_balance, get_credit_history])
