@@ -166,3 +166,63 @@ async def test_replay_after_grace_revokes_family_and_session(redis: FakeRedis) -
     assert replay.unwrap().status == "reused"
     assert await redis.exists(f"auth:session:{session.session_id}") == 0
     assert (await redis.hget(f"auth:refresh_family:{family_id}", "status")) == "revoked"
+
+
+@pytest.mark.asyncio
+async def test_older_generation_replay_revokes_after_family_advances(redis: FakeRedis) -> None:
+    repo = RefreshTokenRepository(redis)
+    family_id = "family-older-replay"
+    session = _session(family_id=family_id)
+    token_id, token_secret = derive_refresh_token_material(family_id, 0)
+    child_id, child_secret = derive_refresh_token_material(family_id, 1)
+    grandchild_id, grandchild_secret = derive_refresh_token_material(family_id, 2)
+    await repo.store_session(session)
+    await repo.create_refresh_family(
+        family_id=family_id,
+        user_id=session.user_id,
+        session_id=session.session_id,
+        device_id=session.device_id,
+        authz_revision=4,
+        token_id=token_id,
+        token_secret=token_secret,
+        issued_at=session.created_at,
+        expires_at=session.expires_at,
+    )
+    await repo.rotate_refresh_token(
+        family_id=family_id,
+        token_id=token_id,
+        token_secret=token_secret,
+        child_token_id=child_id,
+        child_token_secret=child_secret,
+        child_generation=1,
+        presented_generation=0,
+        expected_authz_revision=4,
+        now=session.created_at,
+        grace_seconds=1,
+    )
+    await repo.rotate_refresh_token(
+        family_id=family_id,
+        token_id=child_id,
+        token_secret=child_secret,
+        child_token_id=grandchild_id,
+        child_token_secret=grandchild_secret,
+        child_generation=2,
+        presented_generation=1,
+        expected_authz_revision=4,
+        now=session.created_at,
+        grace_seconds=1,
+    )
+    replay = await repo.rotate_refresh_token(
+        family_id=family_id,
+        token_id=token_id,
+        token_secret=token_secret,
+        child_token_id=child_id,
+        child_token_secret=child_secret,
+        child_generation=1,
+        presented_generation=0,
+        expected_authz_revision=4,
+        now=session.created_at + timedelta(seconds=2),
+        grace_seconds=1,
+    )
+    assert isinstance(replay, Success)
+    assert replay.unwrap().status == "reused"

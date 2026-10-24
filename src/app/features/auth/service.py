@@ -307,6 +307,19 @@ class AuthService:
         )
         if isinstance(family_result, Failure):
             return Failure(family_result.failure())
+        if claims.family_id is None:
+            attach_result = await self._token_repo.attach_refresh_family(
+                session_id=session_id,
+                family_id=family_id,
+            )
+            if isinstance(attach_result, Failure):
+                await self._token_repo.revoke_refresh_family(
+                    family_id=family_id,
+                    reason="refresh_migration_failed",
+                    user_id=account.id,
+                    session_id=session_id,
+                )
+                return Failure(attach_result.failure())
         child_id, child_secret = derive_refresh_token_material(family_id, generation + 1)
         rotation_result = await self._token_repo.rotate_refresh_token(
             family_id=family_id,
@@ -318,6 +331,7 @@ class AuthService:
             expected_authz_revision=account.role_revision,
             now=datetime.now(UTC),
             grace_seconds=get_settings().REFRESH_TOKEN_ROTATION_GRACE_SECONDS,
+            presented_generation=generation,
         )
         if isinstance(rotation_result, Failure):
             _REFRESH_FAILURES.add(1, {"reason": "infrastructure"})

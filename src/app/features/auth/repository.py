@@ -117,6 +117,22 @@ redis.call('EXPIREAT', KEYS[1], ARGV[10])
 return 1
 """
 
+_ATTACH_REFRESH_FAMILY_SCRIPT = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local ok, session = pcall(cjson.decode, raw)
+if not ok then return 0 end
+session.family_id = ARGV[1]
+local encoded = cjson.encode(session)
+local ttl = redis.call('TTL', KEYS[1])
+if ttl > 0 then
+    redis.call('SETEX', KEYS[1], ttl, encoded)
+else
+    redis.call('SET', KEYS[1], encoded)
+end
+return 1
+"""
+
 _ROTATE_REFRESH_TOKEN_SCRIPT = """
 local status = redis.call('HGET', KEYS[1], 'status')
 if not status then return {'missing'} end
@@ -127,6 +143,15 @@ end
 local current_id = redis.call('HGET', KEYS[1], 'current_id_hash')
 local current_secret = redis.call('HGET', KEYS[1], 'current_secret_hash')
 local current_generation = tonumber(redis.call('HGET', KEYS[1], 'generation'))
+if ARGV[9] ~= '' and tonumber(ARGV[9]) < current_generation - 1 then
+    redis.call('HSET', KEYS[1], 'status', 'revoked', 'revoke_reason', 'refresh_reuse', 'revoked_at', ARGV[6])
+    local session_key = redis.call('HGET', KEYS[1], 'session_key')
+    local user_sessions_key = redis.call('HGET', KEYS[1], 'user_sessions_key')
+    local session_id = redis.call('HGET', KEYS[1], 'session_id')
+    redis.call('DEL', session_key)
+    redis.call('SREM', user_sessions_key, session_id)
+    return {'reused'}
+end
 if ARGV[1] == current_id then
     if ARGV[2] ~= current_secret then
         redis.call('HSET', KEYS[1], 'status', 'revoked', 'revoke_reason', 'refresh_secret_mismatch', 'revoked_at', ARGV[6])
@@ -749,6 +774,33 @@ class RefreshTokenRepository:
                 )
             )
 
+    async def attach_refresh_family(self, *, session_id: str, family_id: str) -> AuthResult[None]:
+        """Bind a migrated legacy session to its newly-created family."""
+        try:
+            attached = await self._redis.eval(
+                _ATTACH_REFRESH_FAMILY_SCRIPT,
+                1,
+                self._session_key(session_id),
+                family_id,
+            )
+            if int(attached) != 1:
+                return Failure(
+                    AuthAuthenticationError(
+                        message="Session disappeared during refresh migration",
+                        source="auth_repository",
+                    )
+                )
+            return Success(None)
+        except RedisError as exc:
+            exc.add_note("auth_repository operation=attach_refresh_family")
+            return Failure(
+                AuthInfrastructureError(
+                    message="Failed to bind legacy session to refresh family",
+                    details={"session_id": session_id, "family_id": family_id, "error": str(exc)},
+                    source="auth_repository",
+                )
+            )
+
     async def rotate_refresh_token(
         self,
         *,
@@ -761,6 +813,7 @@ class RefreshTokenRepository:
         expected_authz_revision: int,
         now: datetime,
         grace_seconds: int,
+        presented_generation: int | None = None,
     ) -> AuthResult[RefreshRotationOutcome]:
         """Atomically rotate a family and classify benign retry versus reuse."""
         family_key = self._refresh_family_key(family_id)
@@ -777,6 +830,7 @@ class RefreshTokenRepository:
                 int(now.timestamp()),
                 grace_seconds,
                 expected_authz_revision,
+                "" if presented_generation is None else presented_generation,
             )
             values = [item.decode() if isinstance(item, bytes) else str(item) for item in result]
             status = values[0]
