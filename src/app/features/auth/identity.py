@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from beanie import PydanticObjectId
-from beanie.operators import Set
+from beanie.operators import Inc, Set
 from pymongo.errors import PyMongoError
 from returns.result import Failure, Success
 
@@ -58,9 +58,26 @@ async def get_user_document(user_id: str) -> AuthResult[User | None]:
 async def set_user_role(user: User, role: UserRole) -> AuthResult[User]:
     """Apply an administrative role change plus `updated_at`, preserving identity."""
     try:
-        await user.update(Set({User.role: role, User.updated_at: datetime.now(UTC)}))
-        user.role = role
-        return Success(user)
+        await user.update(
+            Set(
+                {
+                    User.role: role,
+                    User.session_revocation_pending: True,
+                    User.updated_at: datetime.now(UTC),
+                }
+            ),
+            Inc({User.role_revision: 1}),
+        )
+        updated = await User.get(user.id)
+        if updated is None:
+            return Failure(
+                AuthInfrastructureError(
+                    message="User disappeared after role update",
+                    details={"user_id": str(user.id)},
+                    source="auth_identity",
+                )
+            )
+        return Success(updated)
     except PyMongoError as exc:
         exc.add_note(f"user_id={user.id}, operation=set_user_role")
         logger.bind(operation="set_user_role", user_id=str(user.id), error=str(exc)).exception(
@@ -69,6 +86,29 @@ async def set_user_role(user: User, role: UserRole) -> AuthResult[User]:
         return Failure(
             AuthInfrastructureError(
                 message="User role update failed",
+                details={"user_id": str(user.id), "error": str(exc)},
+                source="auth_identity",
+            )
+        )
+
+
+@trace_layer("repository")
+async def clear_session_revocation_pending(user: User) -> AuthResult[User]:
+    """Mark role-change session invalidation complete after Redis commits."""
+    try:
+        await user.update(
+            Set({User.session_revocation_pending: False, User.updated_at: datetime.now(UTC)})
+        )
+        user.session_revocation_pending = False
+        return Success(user)
+    except PyMongoError as exc:
+        exc.add_note(f"user_id={user.id}, operation=clear_session_revocation_pending")
+        logger.bind(
+            operation="clear_session_revocation_pending", user_id=str(user.id), error=str(exc)
+        ).exception("auth_identity_failed")
+        return Failure(
+            AuthInfrastructureError(
+                message="Session revocation state update failed",
                 details={"user_id": str(user.id), "error": str(exc)},
                 source="auth_identity",
             )

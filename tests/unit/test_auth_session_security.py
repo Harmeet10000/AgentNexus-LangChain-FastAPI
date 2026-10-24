@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from authlib.integrations.base_client.errors import AuthlibBaseError
 from fakeredis.aioredis import FakeRedis
 from returns.result import Failure, Success
 
@@ -26,7 +27,9 @@ from app.utils import ForbiddenException, InfrastructureException, UnauthorizedE
 pytestmark = pytest.mark.unit
 
 
-def _claims(*, sid: str | None = "session-1", sub: str = "user-1") -> TokenClaims:
+def _claims(
+    *, sid: str | None = "session-1", sub: str = "user-1", authz_revision: int | None = None
+) -> TokenClaims:
     return TokenClaims(
         sub=sub,
         jti="jti-1",
@@ -34,6 +37,7 @@ def _claims(*, sid: str | None = "session-1", sub: str = "user-1") -> TokenClaim
         role="user",
         permissions=[],
         token_type="access",
+        authz_revision=authz_revision,
     )
 
 
@@ -100,6 +104,17 @@ async def test_malformed_redis_session_fails_closed() -> None:
     assert isinstance(result, Failure)
 
 
+async def test_malformed_session_listing_returns_typed_failure() -> None:
+    redis = FakeRedis(decode_responses=True)
+    repo = RefreshTokenRepository(redis)
+    await redis.sadd("auth:user_sessions:user-1", "bad")
+    await redis.set("auth:session:bad", "not-json")
+
+    result = await repo.get_user_sessions("user-1")
+
+    assert isinstance(result, Failure)
+
+
 @pytest.mark.parametrize(
     ("session", "message"),
     [
@@ -126,6 +141,20 @@ async def test_http_claims_validate_session_owner_and_expiry(
     with (
         patch("app.features.auth.dependencies.decode_token", return_value=_claims()),
         pytest.raises(UnauthorizedException, match=message),
+    ):
+        await get_token_claims("raw-token", repo)
+
+
+async def test_http_claims_reject_authorization_revision_mismatch() -> None:
+    repo = AsyncMock()
+    repo.get_session.return_value = Success(
+        _session("session-1").model_copy(update={"authz_revision": 1})
+    )
+    with (
+        patch(
+            "app.features.auth.dependencies.decode_token", return_value=_claims(authz_revision=0)
+        ),
+        pytest.raises(UnauthorizedException, match="Session expired or revoked"),
     ):
         await get_token_claims("raw-token", repo)
 
@@ -236,6 +265,18 @@ async def test_session_index_ttl_never_shrinks_for_shorter_session(
     assert short_ttl > 30
 
 
+async def test_session_store_rejects_stale_authorization_revision() -> None:
+    redis = FakeRedis(decode_responses=True)
+    repo = RefreshTokenRepository(redis)
+    await redis.set("auth:user_authz_revision:user-1", "1")
+
+    result = await repo.store_session(_session("stale").model_copy(update={"authz_revision": 0}))
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), AuthAuthenticationError)
+    assert await redis.get("auth:session:stale") is None
+
+
 async def test_mongo_single_revoke_audit_failure_does_not_report_failed_redis_revoke(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -334,6 +375,23 @@ async def test_google_unverified_email_cannot_create_account() -> None:
         result = await service.oauth_callback("google", "code", "state", "signed")
     assert isinstance(result, Failure)
     assert (await account_store.find_by_email("new@example.com")).unwrap() is None
+
+
+async def test_oauth_authlib_failure_is_handled() -> None:
+    account_store = InMemoryAuthAccountStore()
+    service = AuthService(account_store, AsyncMock())
+    with (
+        patch("app.features.auth.service.verify_oauth_state", return_value=True),
+        patch("app.features.auth.service.get_oauth_config"),
+        patch(
+            "app.features.auth.service.fetch_oauth_userinfo",
+            side_effect=AuthlibBaseError(description="provider unavailable"),
+        ),
+    ):
+        result = await service.oauth_callback("google", "code", "state", "signed")
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), AuthAuthenticationError)
 
 
 async def test_github_userinfo_uses_primary_verified_email_endpoint(
@@ -438,7 +496,7 @@ async def test_role_change_revokes_target_sessions() -> None:
 
     assert isinstance(result, Success)
     token_repo.revoke_all_user_sessions.assert_awaited_once_with(
-        user_id="target", reason="role_changed"
+        user_id="target", reason="role_changed", authz_revision=0
     )
 
 
@@ -480,6 +538,51 @@ async def test_noop_role_change_does_not_revoke_sessions() -> None:
     token_repo.revoke_all_user_sessions.assert_not_awaited()
 
 
+async def test_pending_role_revocation_retries_and_clears_marker() -> None:
+    user = type(
+        "User",
+        (),
+        {
+            "id": "target",
+            "email": "target@example.com",
+            "full_name": None,
+            "role": UserRole.ADMIN,
+            "role_revision": 4,
+            "session_revocation_pending": True,
+            "is_verified": True,
+            "is_active": True,
+            "created_at": datetime.now(UTC),
+            "updated_at": datetime.now(UTC),
+            "oauth_accounts": [],
+        },
+    )()
+    clear_pending = AsyncMock(return_value=Success(user))
+    user_repo = type(
+        "UserRepo",
+        (),
+        {
+            "find_by_id": AsyncMock(return_value=Success(user)),
+            "clear_session_revocation_pending": clear_pending,
+            "update_role": AsyncMock(),
+        },
+    )()
+    token_repo = type(
+        "TokenRepo",
+        (),
+        {"revoke_all_user_sessions": AsyncMock(return_value=Success(["session-1"]))},
+    )()
+
+    result = await UserAdminService(user_repo, token_repo).update_role(
+        "target", UserRole.ADMIN, "admin-user"
+    )
+
+    assert isinstance(result, Success)
+    token_repo.revoke_all_user_sessions.assert_awaited_once_with(
+        user_id="target", reason="role_changed", authz_revision=4
+    )
+    clear_pending.assert_awaited_once_with(user)
+
+
 async def test_rbac_guards_use_live_account_permissions_and_role() -> None:
     account = type(
         "Account",
@@ -488,10 +591,14 @@ async def test_rbac_guards_use_live_account_permissions_and_role() -> None:
             "is_active": True,
             "permissions": frozenset(),
             "role": UserRole.USER,
+            "role_revision": 0,
         },
     )()
+    stale_admin_claims = _claims(authz_revision=0).model_copy(
+        update={"role": UserRole.ADMIN.value, "permissions": [Permission.USERS_WRITE.value]}
+    )
 
     with pytest.raises(ForbiddenException):
-        await require_permission(Permission.USERS_WRITE)(_claims(), account)
+        await require_permission(Permission.USERS_WRITE)(stale_admin_claims, account)
     with pytest.raises(ForbiddenException):
-        await require_role(UserRole.ADMIN)(_claims(), account)
+        await require_role(UserRole.ADMIN)(stale_admin_claims, account)

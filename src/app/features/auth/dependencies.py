@@ -137,6 +137,10 @@ async def get_token_claims(
             session is None
             or session.user_id != claims.sub
             or session.expires_at <= datetime.now(UTC)
+            or (
+                claims.authz_revision is not None
+                and session.authz_revision != claims.authz_revision
+            )
         ):
             msg = "Session expired or revoked"
             raise UnauthorizedException(msg)
@@ -250,6 +254,9 @@ def require_permission(*permissions: Permission) -> Callable[..., Awaitable[Toke
         claims: Annotated[TokenClaims, Depends(get_token_claims)],
         account: Annotated[AuthAccount, Depends(get_current_active_user)],
     ) -> TokenClaims:
+        if claims.authz_revision is not None and account.role_revision != claims.authz_revision:
+            msg = "Authorization changed; please authenticate again"
+            raise ForbiddenException(msg)
         for perm in permissions:
             if perm.value not in account.permissions:
                 msg = f"Missing required permission: {perm.value}"
@@ -269,6 +276,9 @@ def require_role(*roles: UserRole) -> Callable[..., Awaitable[TokenClaims]]:
         claims: Annotated[TokenClaims, Depends(get_token_claims)],
         account: Annotated[AuthAccount, Depends(get_current_active_user)],
     ) -> TokenClaims:
+        if claims.authz_revision is not None and account.role_revision != claims.authz_revision:
+            msg = "Authorization changed; please authenticate again"
+            raise ForbiddenException(msg)
         if account.role not in roles:
             msg = "Insufficient role for this operation"
             raise ForbiddenException(msg)

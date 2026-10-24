@@ -13,6 +13,7 @@ from returns.result import Failure, Success
 from app.observability.logging import logger, trace_layer
 
 from .exceptions import (
+    AuthAuthenticationError,
     AuthConflictError,
     AuthInfrastructureError,
     AuthNotFoundError,
@@ -27,17 +28,30 @@ if TYPE_CHECKING:
 
 _SESSION_KEY = "auth:session:{}"
 _USER_SESSIONS_KEY = "auth:user_sessions:{}"
+_USER_AUTHZ_REVISION_KEY = "auth:user_authz_revision:{}"
 
-_EXTEND_SESSION_INDEX_TTL_SCRIPT = """
-local current_ttl = redis.call('TTL', KEYS[1])
-local requested_ttl = tonumber(ARGV[1])
-if current_ttl < requested_ttl then
-    redis.call('EXPIRE', KEYS[1], requested_ttl)
+_STORE_SESSION_SCRIPT = """
+local current_revision = redis.call('GET', KEYS[3])
+local expected_revision = ARGV[1]
+if current_revision and current_revision ~= expected_revision then
+    return 0
 end
-return current_ttl
+if not current_revision then
+    redis.call('SET', KEYS[3], expected_revision)
+end
+redis.call('SETEX', KEYS[1], ARGV[2], ARGV[3])
+redis.call('SADD', KEYS[2], ARGV[4])
+local current_ttl = redis.call('TTL', KEYS[2])
+if current_ttl < tonumber(ARGV[2]) then
+    redis.call('EXPIRE', KEYS[2], ARGV[2])
+end
+return 1
 """
 
 _REVOKE_ALL_SESSIONS_SCRIPT = """
+if ARGV[3] ~= '' then
+    redis.call('SET', KEYS[2], ARGV[3])
+end
 local session_ids = redis.call('SMEMBERS', KEYS[1])
 local revoked = {}
 for _, session_id in ipairs(session_ids) do
@@ -85,6 +99,7 @@ class SessionData(BaseModel):
     created_at: datetime
     expires_at: datetime
     ttl: int  # seconds — used for Redis SETEX
+    authz_revision: int = 0
     device_name: str | None = None
     ip_address: str | None = None
     user_agent: str | None = None
@@ -99,6 +114,13 @@ async def _do_find_or_create_oauth_user(
 ) -> AuthResult[tuple[User, bool]]:
     user = await User.find_one(User.email == email.lower())
     if user is not None:
+        if not user.is_verified:
+            return Failure(
+                AuthAuthenticationError(
+                    message="Local account email is not verified",
+                    source="auth_repository",
+                )
+            )
         already_linked = any(
             a.provider == provider and a.provider_user_id == provider_user_id
             for a in user.oauth_accounts
@@ -331,13 +353,24 @@ class RefreshTokenRepository:
         session_key: str,
         user_key: str,
     ) -> AuthResult[None]:
-        async with self._redis.pipeline(transaction=True) as pipe:
-            pipe.setex(session_key, session.ttl, session.model_dump_json())
-            pipe.sadd(user_key, session.session_id)
-            # Session indexes are shared by all sessions for a user.  Never let
-            # a short-lived session shorten the index TTL for a longer one.
-            pipe.eval(_EXTEND_SESSION_INDEX_TTL_SCRIPT, 1, user_key, session.ttl)
-            await pipe.execute()
+        stored = await self._redis.eval(
+            _STORE_SESSION_SCRIPT,
+            3,
+            session_key,
+            user_key,
+            _USER_AUTHZ_REVISION_KEY.format(session.user_id),
+            session.authz_revision,
+            session.ttl,
+            session.model_dump_json(),
+            session.session_id,
+        )
+        if int(stored) != 1:
+            return Failure(
+                AuthAuthenticationError(
+                    message="Authorization changed during session creation",
+                    source="auth_repository",
+                )
+            )
         try:
             await TokenAuditLog(
                 session_id=session.session_id,
@@ -386,13 +419,16 @@ class RefreshTokenRepository:
         user_id: str,
         except_session_id: str | None,
         reason: str,
+        authz_revision: int | None,
     ) -> AuthResult[list[str]]:
         raw_ids = await self._redis.eval(
             _REVOKE_ALL_SESSIONS_SCRIPT,
-            1,
+            2,
             _USER_SESSIONS_KEY.format(user_id),
+            _USER_AUTHZ_REVISION_KEY.format(user_id),
             except_session_id or "",
             "auth:session:",
+            "" if authz_revision is None else authz_revision,
         )
         revoked_ids = [item.decode() if isinstance(item, bytes) else str(item) for item in raw_ids]
         if revoked_ids:
@@ -495,7 +531,7 @@ class RefreshTokenRepository:
     async def get_user_sessions(self, user_id: str) -> AuthResult[list[SessionData]]:
         try:
             return await self._do_get_user_sessions(user_id)
-        except RedisError as exc:
+        except (RedisError, ValidationError) as exc:
             exc.add_note("auth_repository operation=get_user_sessions")
             return Failure(
                 AuthInfrastructureError(
@@ -511,9 +547,12 @@ class RefreshTokenRepository:
         user_id: str,
         except_session_id: str | None = None,
         reason: str = "revoke_all",
+        authz_revision: int | None = None,
     ) -> AuthResult[list[str]]:
         try:
-            return await self._do_revoke_all_user_sessions(user_id, except_session_id, reason)
+            return await self._do_revoke_all_user_sessions(
+                user_id, except_session_id, reason, authz_revision
+            )
         except RedisError as exc:
             exc.add_note("auth_repository operation=revoke_all_user_sessions")
             return Failure(

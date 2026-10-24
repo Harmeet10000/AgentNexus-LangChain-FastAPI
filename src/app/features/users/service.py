@@ -118,14 +118,18 @@ class UserAdminService:
             return lookup
         current = lookup.unwrap()
         if current.role == new_role:
-            return Success(_to_admin_response(current))
-        updated = await self._user_repo.update_role(current, new_role)
-        if isinstance(updated, Failure):
-            return updated
-        user = updated.unwrap()
+            if not getattr(current, "session_revocation_pending", False):
+                return Success(_to_admin_response(current))
+            user = current
+        else:
+            updated = await self._user_repo.update_role(current, new_role)
+            if isinstance(updated, Failure):
+                return updated
+            user = updated.unwrap()
         revoked = await self._token_repo.revoke_all_user_sessions(
             user_id=user_id,
             reason="role_changed",
+            authz_revision=getattr(user, "role_revision", 0),
         )
         if isinstance(revoked, Failure):
             error = revoked.failure()
@@ -137,6 +141,11 @@ class UserAdminService:
                     operation="revoke_sessions",
                 )
             )
+        if getattr(user, "session_revocation_pending", False):
+            cleared = await self._user_repo.clear_session_revocation_pending(user)
+            if isinstance(cleared, Failure):
+                return cleared
+            user = cleared.unwrap()
         logger.bind(
             target_user_id=user_id,
             new_role=new_role,

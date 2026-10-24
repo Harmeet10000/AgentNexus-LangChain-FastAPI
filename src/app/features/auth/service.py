@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
 from asyncpg.exceptions import PostgresError
+from authlib.integrations.base_client.errors import AuthlibBaseError
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from httpx import HTTPError
 from returns.result import Failure, Success
@@ -183,6 +184,7 @@ class AuthService:
             user_id=account.id,
             role=account.role,
             permissions=account.permissions,
+            role_revision=account.role_revision,
             device_name=dto.device_name,
             ip=ip,
             user_agent=user_agent,
@@ -234,12 +236,20 @@ class AuthService:
             return Failure(
                 AuthAuthenticationError(message="User not found or disabled", source="auth_service")
             )
+        if session.authz_revision != account.role_revision:
+            return Failure(
+                AuthAuthenticationError(
+                    message="Session authorization is stale",
+                    source="auth_service",
+                )
+            )
 
         access_token, expires_in = create_access_token(
             user_id=account.id,
             session_id=claims.jti,
             role=account.role,
             permissions=account.permissions,
+            authz_revision=account.role_revision,
         )
         return Success(
             TokenResponse(
@@ -442,7 +452,14 @@ class AuthService:
         config = get_oauth_config(provider)
         try:
             userinfo = await fetch_oauth_userinfo(provider, config, code)
-        except (HTTPError, ValidationException, KeyError, TypeError, ValueError) as exc:
+        except (
+            AuthlibBaseError,
+            HTTPError,
+            ValidationException,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as exc:
             logger.bind(provider=provider, error=str(exc)).warning("OAuth identity lookup failed")
             return Failure(
                 AuthAuthenticationError(
@@ -492,6 +509,7 @@ class AuthService:
                 user_id=account.id,
                 role=account.role.value,
                 permissions=account.permissions,
+                role_revision=account.role_revision,
                 ip=ip,
                 user_agent=user_agent,
             )
@@ -527,6 +545,7 @@ class AuthService:
             user_id=account.id,
             role=account.role.value,
             permissions=account.permissions,
+            role_revision=account.role_revision,
             ip=ip,
             user_agent=user_agent,
         )
@@ -703,6 +722,7 @@ class AuthService:
         user_id: str,
         role: str,
         permissions: frozenset[str],
+        role_revision: int,
         device_name: str | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -717,6 +737,7 @@ class AuthService:
             session_id=session_id,
             role=role,
             permissions=permissions,
+            authz_revision=role_revision,
         )
         refresh_token, refresh_ttl = create_refresh_token(
             user_id=user_id,
@@ -734,6 +755,7 @@ class AuthService:
                 created_at=now,
                 expires_at=now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
                 ttl=refresh_ttl,
+                authz_revision=role_revision,
             )
         )
         if isinstance(store_result, Failure):

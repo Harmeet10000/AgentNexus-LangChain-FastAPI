@@ -68,6 +68,10 @@ class User(Document):
     is_verified: bool = Field(default=False)
     is_active: bool = Field(default=True)
     role: UserRole = Field(default=UserRole.USER)
+    # Monotonic authorization generation.  Role changes advance it before
+    # session invalidation so stale tokens can never regain privileges.
+    role_revision: int = Field(default=0, ge=0)
+    session_revocation_pending: bool = Field(default=False)
     oauth_accounts: list[OAuthAccount] = Field(default_factory=list)
 
     # Raw tokens are transmitted via email only; only SHA-256 hashes live here.
