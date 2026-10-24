@@ -28,7 +28,7 @@ def _setup_meter_provider(
     if exporter_enabled(exporter):
         readers.append(
             PeriodicExportingMetricReader(
-                OTLPMetricExporter(endpoint=endpoint),
+                exporter=OTLPMetricExporter(endpoint=endpoint),
                 export_interval_millis=export_interval_ms,
             )
         )
