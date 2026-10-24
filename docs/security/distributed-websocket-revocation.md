@@ -25,11 +25,13 @@ safe because closing a local socket is idempotent.
 ## Event contract and matching
 
 Events contain `version`, `event_id`, `scope` (`session` or `user`),
-`user_id`, an optional `session_id` or `except_session_id`, `reason`, and
-`occurred_at`. Unknown fields, invalid versions, missing scope identity, and
-malformed values are ignored. A tenant ID, when present, must match the local
-connection context exactly. A session event closes one session; a user event
-closes all sessions except the explicitly excluded session.
+`user_id`, an optional `session_id` or `except_session_id`, `reason`,
+`occurred_at`, `authz_revision`, and the non-secret operation `origin`.
+Unknown fields, invalid versions, missing scope identity, and malformed values
+are ignored. A tenant ID, when present, must match the local connection context
+exactly. A session event closes one session; a user event closes all sessions
+except the explicitly excluded session. Per-user revision tracking makes a
+delayed lower-revision event a no-op after a higher revision has been seen.
 
 Publication is best-effort after the authoritative Redis mutation. A stream
 write failure must not turn a successful revoke into an API failure, because
@@ -47,6 +49,16 @@ investigating. Re-enable it after Redis health is restored. Disabling the
 listener does not disable revocation enforcement.
 
 Use the application metrics/logs for publication failures, malformed events,
-listener reconnects, and local close counts. A Redis outage or an unexpectedly
-old stream last-generated ID should be treated as a latency/degradation alert,
-not as permission to allow a revoked session to continue indefinitely.
+listener reconnects, subscriber lag, local close counts, and close latency. The
+convergence SLO is event-to-local-close p99 under 2 seconds while Redis is
+healthy; alert when the close-latency histogram or subscriber lag exceeds that
+target for five minutes, or when reconnects continuously back off. A Redis
+outage or an unexpectedly old stream last-generated ID should be treated as a
+latency/degradation alert, not as permission to allow a revoked session to
+continue indefinitely.
+
+Deploy listeners before publishers when introducing a new event version. Mixed
+versions are safe because the parser rejects unsupported versions and the
+periodic/pull checks cover workers that cannot consume the event. Rollback can
+disable the listener flag without disabling authorization checks; retain the
+stream until all workers have converged.

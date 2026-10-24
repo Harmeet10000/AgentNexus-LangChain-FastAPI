@@ -25,6 +25,12 @@ REVOCATION_PUBLISH_FAILURES = _REVOCATION_METER.create_counter(
 REVOCATION_MALFORMED = _REVOCATION_METER.create_counter("websocket.revocation.malformed")
 REVOCATION_RECONNECTS = _REVOCATION_METER.create_counter("websocket.revocation.reconnects")
 REVOCATION_CLOSED = _REVOCATION_METER.create_counter("websocket.revocation.closed")
+REVOCATION_CLOSE_LATENCY = _REVOCATION_METER.create_histogram(
+    "websocket.revocation.close_latency_ms"
+)
+REVOCATION_SUBSCRIBER_LAG = _REVOCATION_METER.create_histogram(
+    "websocket.revocation.subscriber_lag_ms"
+)
 
 
 class WebSocketRevocationEvent(BaseModel):
@@ -40,7 +46,9 @@ class WebSocketRevocationEvent(BaseModel):
     session_id: str | None = Field(default=None, min_length=1, max_length=256)
     except_session_id: str | None = Field(default=None, min_length=1, max_length=256)
     reason: str = Field(min_length=1, max_length=128)
-    occurred_at: int = Field(ge=0)
+    occurred_at: float = Field(ge=0)
+    authz_revision: int | None = Field(default=None, ge=0)
+    origin: str = Field(min_length=1, max_length=128)
 
     @model_validator(mode="after")
     def validate_scope(self) -> WebSocketRevocationEvent:
@@ -64,6 +72,8 @@ def new_event(
     except_session_id: str | None = None,
     reason: str,
     tenant_id: str | None = None,
+    authz_revision: int | None = None,
+    origin: str = "auth_repository",
 ) -> WebSocketRevocationEvent:
     return WebSocketRevocationEvent(
         version=REVOCATION_EVENT_VERSION,
@@ -74,7 +84,9 @@ def new_event(
         session_id=session_id,
         except_session_id=except_session_id,
         reason=reason,
-        occurred_at=int(time.time()),
+        occurred_at=time.time(),
+        authz_revision=authz_revision,
+        origin=origin,
     )
 
 
@@ -118,7 +130,17 @@ def parse_event(fields: object) -> WebSocketRevocationEvent | None:
     for key, value in fields.items():
         name = key.decode() if isinstance(key, bytes) else str(key)
         decoded = value.decode() if isinstance(value, bytes) else value
-        if name in {"version", "occurred_at"}:
+        if name == "version":
+            try:
+                decoded = int(str(decoded))
+            except (TypeError, ValueError):
+                return None
+        elif name == "occurred_at":
+            try:
+                decoded = float(str(decoded))
+            except (TypeError, ValueError):
+                return None
+        elif name == "authz_revision" and decoded not in {None, "", b""}:
             try:
                 decoded = int(str(decoded))
             except (TypeError, ValueError):

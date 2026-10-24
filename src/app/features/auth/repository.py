@@ -893,7 +893,13 @@ class RefreshTokenRepository:
             )
             await publish_event(
                 self._redis,
-                new_event(scope="session", user_id=user_id, session_id=session_id, reason=reason),
+                new_event(
+                    scope="session",
+                    user_id=user_id,
+                    session_id=session_id,
+                    reason=reason,
+                    origin="revoke_refresh_family",
+                ),
             )
             return Success(None)
         except RedisError as exc:
@@ -1028,6 +1034,8 @@ class RefreshTokenRepository:
                 user_id=user_id,
                 except_session_id=except_session_id,
                 reason=reason,
+                authz_revision=authz_revision,
+                origin="revoke_all_user_sessions",
             ),
         )
         if revoked_ids:
@@ -1108,7 +1116,13 @@ class RefreshTokenRepository:
 
         await publish_event(
             self._redis,
-            new_event(scope="session", user_id=user_id, session_id=session_id, reason=reason),
+            new_event(
+                scope="session",
+                user_id=user_id,
+                session_id=session_id,
+                reason=reason,
+                origin="revoke_session",
+            ),
         )
 
         try:

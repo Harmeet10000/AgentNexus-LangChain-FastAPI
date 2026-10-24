@@ -321,6 +321,48 @@ async def test_distributed_revocation_reaches_two_workers_and_scopes_connections
         )
         assert wildcard_target.close_count == 1
         assert not unrelated_a.closed.is_set()
+
+        revision_probe = _WebSocketProbe()
+        revision_claims = _claims(
+            user_id=user_id,
+            session_id="session-revision-excluded",
+            revision=2,
+        )
+        worker_a._live_connections["a-revision"] = (
+            revision_probe,
+            worker_a.build_context(
+                claims=revision_claims,
+                origin=None,
+                connection_id="a-revision",
+            ),
+        )
+        await worker_a._handle_revocation_event(
+            new_event(
+                scope="user",
+                user_id=user_id,
+                except_session_id="session-revision-excluded",
+                authz_revision=2,
+                reason="role_changed",
+            )
+        )
+        await worker_a._handle_revocation_event(
+            new_event(
+                scope="user",
+                user_id=user_id,
+                authz_revision=1,
+                reason="stale_role_change",
+            )
+        )
+        assert not revision_probe.closed.is_set()
+        await worker_a._handle_revocation_event(
+            new_event(
+                scope="user",
+                user_id=user_id,
+                authz_revision=3,
+                reason="new_role_change",
+            )
+        )
+        assert revision_probe.close_count == 1
     finally:
         for listener in listeners:
             listener.cancel()

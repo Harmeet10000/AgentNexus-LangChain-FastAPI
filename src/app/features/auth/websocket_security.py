@@ -18,10 +18,12 @@ from pyrate_limiter.buckets import InMemoryBucket, RedisBucket
 from returns.result import Failure
 
 from app.features.auth.websocket_revocation import (
+    REVOCATION_CLOSE_LATENCY,
     REVOCATION_CLOSED,
     REVOCATION_MALFORMED,
     REVOCATION_RECONNECTS,
     REVOCATION_STREAM_KEY,
+    REVOCATION_SUBSCRIBER_LAG,
     parse_event,
 )
 from app.observability.logging import logger
@@ -190,6 +192,7 @@ class WebSocketSecurityService:
         self._revocation_last_id = "0-0"
         self._revocation_activity = asyncio.Event()
         self._seen_revocation_events: dict[str, None] = {}
+        self._latest_revocation_revisions: dict[str, int] = {}
         self._max_seen_revocation_events = 4096
 
     def close(self) -> None:
@@ -560,6 +563,11 @@ class WebSocketSecurityService:
         """Apply one validated event only to matching local sockets."""
         if event.event_id in self._seen_revocation_events:
             return
+        if event.authz_revision is not None:
+            previous_revision = self._latest_revocation_revisions.get(event.user_id)
+            if previous_revision is not None and event.authz_revision < previous_revision:
+                return
+            self._latest_revocation_revisions[event.user_id] = event.authz_revision
         self._seen_revocation_events[event.event_id] = None
         if len(self._seen_revocation_events) > self._max_seen_revocation_events:
             self._seen_revocation_events.pop(next(iter(self._seen_revocation_events)))
@@ -577,6 +585,16 @@ class WebSocketSecurityService:
             await self.close_connection(connection_id, reason=event.reason)
         if matching:
             REVOCATION_CLOSED.add(len(matching), {"scope": event.scope})
+            close_latency_ms = max(0.0, (time() - event.occurred_at) * 1000)
+            REVOCATION_CLOSE_LATENCY.record(close_latency_ms, {"scope": event.scope})
+            REVOCATION_SUBSCRIBER_LAG.record(close_latency_ms, {"scope": event.scope})
+            logger.bind(
+                operation="websocket_revocation_close",
+                event_id=event.event_id,
+                origin=event.origin,
+                scope=event.scope,
+                close_latency_ms=round(close_latency_ms, 2),
+            ).info("WebSocket revocation applied locally")
 
     async def _sweep_revoked_connections(self) -> None:
         if self._token_repo is None:
