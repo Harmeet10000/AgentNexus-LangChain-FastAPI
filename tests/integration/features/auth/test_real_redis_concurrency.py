@@ -229,6 +229,8 @@ async def test_concurrent_creation_and_role_revoke_has_no_stale_survivor(
         assert all(isinstance(result, (Success, Failure)) for result in results)
         assert await redis.client.get(store._authz_revision_key(user_id)) == "1"
         assert await store.get_user_sessions(user_id) == Success([])
+        for session in sessions:
+            assert await store.get_session(session.session_id) == Success(None)
 
 
 async def test_overlapping_role_revisions_are_monotonic(
@@ -267,7 +269,7 @@ async def test_overlapping_role_revisions_are_monotonic(
 async def test_revoke_all_and_current_epoch_login_have_no_omitted_index_entry(
     repository: tuple[RefreshTokenRepository, _RedisHarness],
 ) -> None:
-    store, _redis = repository
+    store, redis = repository
     rounds = int(os.getenv("REAL_REDIS_RACE_ROUNDS", "16"))
 
     for _ in range(rounds):
@@ -289,6 +291,10 @@ async def test_revoke_all_and_current_epoch_login_have_no_omitted_index_entry(
         sessions = listed.unwrap()
         assert all(session.session_id == fresh.session_id for session in sessions)
         assert all(session.authz_revision == 1 for session in sessions)
+        index_ids = await redis.client.smembers(store._user_sessions_key(user_id))
+        fresh_result = await store.get_session(fresh.session_id)
+        assert (fresh_result == Success(fresh)) is (fresh.session_id in index_ids)
+        assert index_ids in (set(), {fresh.session_id})
         for session in sessions:
             assert await store.get_session(session.session_id) == Success(session)
 
@@ -326,7 +332,7 @@ async def test_multiple_clients_observe_atomic_revoke_state(
 
         _, observations = await asyncio.gather(revoke(), observe())
         for ids, values, revision in observations:
-            assert (revision is None and ids and all(value is not None for value in values)) or (
+            assert (revision == "0" and ids and all(value is not None for value in values)) or (
                 revision == "1" and not ids and not values
             )
     finally:
@@ -395,8 +401,9 @@ async def test_session_index_ttl_and_expired_member_repair_use_real_redis(
 
 
 async def test_pending_marker_survives_redis_outage_and_clears_after_recovery(
-    redis_harness: _RedisHarness,
+    repository: tuple[RefreshTokenRepository, _RedisHarness],
 ) -> None:
+    recovered_store, redis_harness = repository
     user_id = _user_id()
     now = datetime.now(UTC)
     user = SimpleNamespace(
@@ -449,9 +456,6 @@ async def test_pending_marker_survives_redis_outage_and_clears_after_recovery(
     assert failed.failure().retryable is True
     assert user.session_revocation_pending is True
 
-    recovered_store = RefreshTokenRepository(
-        redis_harness.client, key_prefix=f"test:{uuid4().hex}:"
-    )
     recovered_service = UserAdminService(UserRepo(), recovered_store)
     recovered = await recovered_service.update_role(user_id, UserRole.MODERATOR, "admin-id")
     assert isinstance(recovered, Success)
