@@ -91,7 +91,13 @@ def _reviewed_shas(body: str) -> tuple[str, ...] | None:
             if backtick_match is not None:
                 reviewed_shas.append(backtick_match.group("sha").lower())
             continue
-        match = BACKTICK_SHA_RE.fullmatch(value) or BARE_SHA_RE.fullmatch(value)
+        # Greptile's Markdown summaries may terminate the reviewed-commit
+        # sentence with ordinary punctuation outside the SHA/code span. Keep
+        # the value strict while accepting that presentation detail.
+        normalized_value = value.rstrip(".,;:!?")
+        match = BACKTICK_SHA_RE.fullmatch(normalized_value) or BARE_SHA_RE.fullmatch(
+            normalized_value
+        )
         if match is None:
             return None
         reviewed_shas.append(match.group("sha").lower())
