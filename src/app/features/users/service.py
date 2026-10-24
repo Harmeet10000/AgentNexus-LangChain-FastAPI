@@ -120,6 +120,20 @@ class UserAdminService:
         if isinstance(updated, Failure):
             return updated
         user = updated.unwrap()
+        revoked = await self._token_repo.revoke_all_user_sessions(
+            user_id=user_id,
+            reason="role_changed",
+        )
+        if isinstance(revoked, Failure):
+            error = revoked.failure()
+            return Failure(
+                UsersInfrastructureError(
+                    message=error.message,
+                    details=error.details,
+                    source="users_service",
+                    operation="revoke_sessions",
+                )
+            )
         logger.bind(
             target_user_id=user_id,
             new_role=new_role,
