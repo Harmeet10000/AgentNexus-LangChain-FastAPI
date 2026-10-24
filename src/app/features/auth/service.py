@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from .account_store import AuthAccount, AuthAccountStore
     from .dto import LoginRequest, RegisterRequest
     from .exceptions import AuthResult
-    from .repository import RefreshTokenRepository
+    from .repository import OAuthLinkIntent, RefreshTokenRepository
 
 from app.security.passwords import (
     generate_token,
@@ -44,16 +44,19 @@ from app.security.tokens import (
 )
 
 from .account_store import NewAuthAccount, OAuthAccountInput
-from .dto import SessionResponse, TokenResponse, UserResponse
+from .dto import OAuthLinkConfirmationResponse, SessionResponse, TokenResponse, UserResponse
 from .exceptions import (
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthConflictError,
     AuthInfrastructureError,
     AuthNotFoundError,
+    AuthValidationError,
 )
 from .oauth import fetch_oauth_userinfo, get_oauth_config
 from .repository import SessionData
+
+_OAUTH_LINK_RECENT_AUTH_SECONDS = 15 * 60
 
 # Dummy hash used in the constant-time negative path during login.
 # Prevents timing attacks that would reveal whether an email is registered.
@@ -432,7 +435,270 @@ class AuthService:
         return Success((str(url), sign_oauth_state(state, provider)))
 
     @trace_layer("service")
-    async def oauth_callback(
+    async def oauth_link_get_authorization_url(
+        self,
+        provider: str,
+        *,
+        user_id: str,
+        session_id: str | None,
+        authz_revision: int | None,
+    ) -> AuthResult[tuple[str, str]]:
+        """Start an explicit link transaction for a recently authenticated session."""
+        if session_id is None or authz_revision is None:
+            return Failure(
+                AuthAuthenticationError(
+                    message="A stateful authenticated session is required",
+                    source="auth_service",
+                )
+            )
+        account_result = await self._account_store.find_by_id(user_id)
+        if isinstance(account_result, Failure):
+            return Failure(account_result.failure())
+        account = account_result.unwrap()
+        if account is None or not account.is_active or not account.is_verified:
+            return Failure(
+                AuthAuthenticationError(
+                    message="Account cannot link OAuth identities", source="auth_service"
+                )
+            )
+        session_result = await self._token_repo.get_session(session_id)
+        if isinstance(session_result, Failure):
+            return Failure(session_result.failure())
+        session = session_result.unwrap()
+        if (
+            session is None
+            or session.user_id != user_id
+            or session.authz_revision != account.role_revision
+            or account.role_revision != authz_revision
+            or session.created_at
+            < datetime.now(UTC) - timedelta(seconds=_OAUTH_LINK_RECENT_AUTH_SECONDS)
+        ):
+            return Failure(
+                AuthAuthenticationError(
+                    message="Recent reauthentication is required before linking an account",
+                    source="auth_service",
+                )
+            )
+
+        config = get_oauth_config(provider)
+        state = secrets.token_urlsafe(32)
+        intent_result = await self._token_repo.create_oauth_link_intent(
+            user_id=user_id,
+            session_id=session_id,
+            provider=provider,
+            authz_revision=account.role_revision,
+            state=state,
+        )
+        if isinstance(intent_result, Failure):
+            return Failure(intent_result.failure())
+        async with AsyncOAuth2Client(client_id=config.client_id) as client:
+            url, _ = client.create_authorization_url(
+                config.authorization_endpoint,
+                redirect_uri=config.redirect_uri,
+                state=state,
+                scope=config.scope,
+            )
+        return Success((str(url), sign_oauth_state(state, provider)))
+
+    async def _validate_oauth_link_session(
+        self, intent: OAuthLinkIntent
+    ) -> AuthResult[AuthAccount]:
+        account_result = await self._account_store.find_by_id(intent.user_id)
+        if isinstance(account_result, Failure):
+            return Failure(account_result.failure())
+        account = account_result.unwrap()
+        if account is None or not account.is_active or not account.is_verified:
+            return Failure(
+                AuthAuthenticationError(
+                    message="Account cannot link OAuth identities", source="auth_service"
+                )
+            )
+        session_result = await self._token_repo.get_session(intent.session_id)
+        if isinstance(session_result, Failure):
+            return Failure(session_result.failure())
+        session = session_result.unwrap()
+        if (
+            session is None
+            or session.user_id != intent.user_id
+            or session.authz_revision != account.role_revision
+            or account.role_revision != intent.authz_revision
+            or session.created_at
+            < datetime.now(UTC) - timedelta(seconds=_OAUTH_LINK_RECENT_AUTH_SECONDS)
+        ):
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth link authorization is stale; authenticate again",
+                    source="auth_service",
+                )
+            )
+        return Success(account)
+
+    async def oauth_link_preview(
+        self, action_token: str, *, user_id: str, session_id: str | None
+    ) -> AuthResult[OAuthLinkConfirmationResponse]:
+        candidate_result = await self._token_repo.get_oauth_link_candidate(action_token)
+        if isinstance(candidate_result, Failure):
+            return Failure(candidate_result.failure())
+        candidate = candidate_result.unwrap()
+        if candidate is None or not candidate.ready_for_confirmation:
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth link confirmation is invalid or expired", source="auth_service"
+                )
+            )
+        if candidate.user_id != user_id or candidate.session_id != session_id:
+            return Failure(
+                AuthAuthorizationError(
+                    message="OAuth link confirmation belongs to another session",
+                    source="auth_service",
+                )
+            )
+        account_result = await self._validate_oauth_link_session(candidate)
+        if isinstance(account_result, Failure):
+            return Failure(account_result.failure())
+        if candidate.provider_user_id is None or candidate.provider_email is None:
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth link confirmation is malformed", source="auth_service"
+                )
+            )
+        return Success(
+            OAuthLinkConfirmationResponse(
+                action_token=action_token,
+                provider=candidate.provider,
+                provider_email=candidate.provider_email,
+                provider_user_id=candidate.provider_user_id,
+                full_name=candidate.full_name,
+                expires_at=candidate.expires_at,
+            )
+        )
+
+    @trace_layer("service")
+    async def oauth_link_confirm(
+        self,
+        action_token: str,
+        *,
+        user_id: str,
+        session_id: str | None,
+        authz_revision: int | None,
+        confirm: bool,
+    ) -> AuthResult[None]:
+        if not confirm:
+            return Failure(
+                AuthValidationError(
+                    message="Explicit confirmation is required", source="auth_service"
+                )
+            )
+        candidate_result = await self._token_repo.get_oauth_link_candidate(action_token)
+        if isinstance(candidate_result, Failure):
+            return Failure(candidate_result.failure())
+        candidate = candidate_result.unwrap()
+        if candidate is None or not candidate.ready_for_confirmation:
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth link confirmation is invalid or expired", source="auth_service"
+                )
+            )
+        if (
+            candidate.user_id != user_id
+            or candidate.session_id != session_id
+            or candidate.authz_revision != authz_revision
+        ):
+            return Failure(
+                AuthAuthorizationError(
+                    message="OAuth link confirmation belongs to another session",
+                    source="auth_service",
+                )
+            )
+        account_result = await self._validate_oauth_link_session(candidate)
+        if isinstance(account_result, Failure):
+            return Failure(account_result.failure())
+        account = account_result.unwrap()
+        if candidate.provider_user_id is None or candidate.provider_email is None:
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth link confirmation is malformed", source="auth_service"
+                )
+            )
+        owner_result = await self._account_store.find_by_oauth_identity(
+            candidate.provider, candidate.provider_user_id
+        )
+        if isinstance(owner_result, Failure):
+            return Failure(owner_result.failure())
+        owner = owner_result.unwrap()
+        if owner is not None and owner.id != account.id:
+            return Failure(
+                AuthConflictError(
+                    message="OAuth identity is already linked to another account",
+                    source="auth_service",
+                )
+            )
+        consumed_result = await self._token_repo.consume_oauth_link_candidate(action_token)
+        if isinstance(consumed_result, Failure):
+            return Failure(consumed_result.failure())
+        if consumed_result.unwrap() is None:
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth link confirmation was already used", source="auth_service"
+                )
+            )
+        link_result = await self._account_store.link_oauth_account(
+            account.id,
+            candidate.provider,
+            candidate.provider_user_id,
+            candidate.provider_email,
+        )
+        if isinstance(link_result, Failure):
+            return Failure(link_result.failure())
+        await self._emit_security_event(
+            "auth.oauth_linked",
+            account.id,
+            {
+                "provider": candidate.provider,
+                "provider_user_id": candidate.provider_user_id,
+                "provider_email": candidate.provider_email,
+            },
+        )
+        return Success(None)
+
+    @trace_layer("service")
+    async def oauth_unlink(
+        self, provider: str, *, user_id: str, session_id: str | None, authz_revision: int | None
+    ) -> AuthResult[None]:
+        account_result = await self._account_store.find_by_id(user_id)
+        if isinstance(account_result, Failure):
+            return Failure(account_result.failure())
+        account = account_result.unwrap()
+        if account is None:
+            return Failure(
+                AuthAuthenticationError(message="Account not found", source="auth_service")
+            )
+        if session_id is None or authz_revision != account.role_revision:
+            return Failure(
+                AuthAuthenticationError(
+                    message="Recent reauthentication is required", source="auth_service"
+                )
+            )
+        session_result = await self._token_repo.get_session(session_id)
+        if isinstance(session_result, Failure):
+            return Failure(session_result.failure())
+        session = session_result.unwrap()
+        if session is None or session.created_at < datetime.now(UTC) - timedelta(
+            seconds=_OAUTH_LINK_RECENT_AUTH_SECONDS
+        ):
+            return Failure(
+                AuthAuthenticationError(
+                    message="Recent reauthentication is required", source="auth_service"
+                )
+            )
+        result = await self._account_store.unlink_oauth_account(user_id, provider)
+        if isinstance(result, Failure):
+            return Failure(result.failure())
+        await self._emit_security_event("auth.oauth_unlinked", user_id, {"provider": provider})
+        return Success(None)
+
+    @trace_layer("service")
+    async def oauth_callback(  # noqa: PLR0912, PLR0914, PLR0915
         self,
         provider: str,
         code: str,
@@ -441,7 +707,7 @@ class AuthService:
         *,
         ip: str | None = None,
         user_agent: str | None = None,
-    ) -> AuthResult[TokenResponse]:
+    ) -> AuthResult[TokenResponse | OAuthLinkConfirmationResponse]:
         if not verify_oauth_state(signed_state, state, provider):
             return Failure(
                 AuthAuthenticationError(
@@ -468,7 +734,118 @@ class AuthService:
                 )
             )
 
-        # Check if user exists by email
+        intent_result = await self._token_repo.get_oauth_link_intent(state)
+        if not isinstance(intent_result, (Success, Failure)):
+            # Compatibility with older injected test doubles that predate the
+            # explicit-link repository contract; production repositories always
+            # return a typed Result.
+            intent_result = Success(None)
+        if isinstance(intent_result, Failure):
+            return Failure(intent_result.failure())
+        link_intent = intent_result.unwrap()
+        if link_intent is not None:
+            if link_intent.provider != provider:
+                return Failure(
+                    AuthAuthenticationError(
+                        message="OAuth link provider does not match the requested provider",
+                        source="auth_service",
+                    )
+                )
+            account_result = await self._validate_oauth_link_session(link_intent)
+            if isinstance(account_result, Failure):
+                return Failure(account_result.failure())
+            account = account_result.unwrap()
+            if not userinfo.email_verified:
+                return Failure(
+                    AuthAuthenticationError(
+                        message="OAuth email is not verified", source="auth_service"
+                    )
+                )
+            owner_result = await self._account_store.find_by_oauth_identity(
+                provider, userinfo.provider_user_id
+            )
+            if isinstance(owner_result, Failure):
+                return Failure(owner_result.failure())
+            owner = owner_result.unwrap()
+            if owner is not None and owner.id != account.id:
+                return Failure(
+                    AuthConflictError(
+                        message="OAuth identity is already linked to another account",
+                        source="auth_service",
+                    )
+                )
+            email_result = await self._account_store.find_by_email(userinfo.email)
+            if isinstance(email_result, Failure):
+                return Failure(email_result.failure())
+            email_owner = email_result.unwrap()
+            if email_owner is not None and email_owner.id != account.id:
+                return Failure(
+                    AuthConflictError(
+                        message="OAuth email belongs to another account",
+                        source="auth_service",
+                    )
+                )
+            completed_result = await self._token_repo.complete_oauth_link_intent(
+                state=state,
+                provider_user_id=userinfo.provider_user_id,
+                provider_email=userinfo.email.lower(),
+                full_name=userinfo.full_name,
+            )
+            if isinstance(completed_result, Failure):
+                return Failure(completed_result.failure())
+            candidate, action_token = completed_result.unwrap()
+            if candidate.provider_user_id is None or candidate.provider_email is None:
+                return Failure(
+                    AuthAuthenticationError(
+                        message="OAuth link confirmation is malformed", source="auth_service"
+                    )
+                )
+            return Success(
+                OAuthLinkConfirmationResponse(
+                    action_token=action_token,
+                    provider=provider,
+                    provider_email=candidate.provider_email,
+                    provider_user_id=candidate.provider_user_id,
+                    full_name=candidate.full_name,
+                    expires_at=candidate.expires_at,
+                )
+            )
+
+        # Provider subject is the login identity.  Email is never sufficient to
+        # attach a new provider to an existing local account.
+        identity_result = await self._account_store.find_by_oauth_identity(
+            provider, userinfo.provider_user_id
+        )
+        if not isinstance(identity_result, (Success, Failure)):
+            identity_result = Success(None)
+        if isinstance(identity_result, Failure):
+            return Failure(identity_result.failure())
+        identity_owner = identity_result.unwrap()
+        if identity_owner is not None:
+            if not identity_owner.is_active or not identity_owner.is_verified:
+                return Failure(
+                    AuthAuthenticationError(
+                        message="Account is disabled or unverified", source="auth_service"
+                    )
+                )
+            if not userinfo.email_verified:
+                return Failure(
+                    AuthAuthenticationError(
+                        message="OAuth email is not verified", source="auth_service"
+                    )
+                )
+            logger.bind(user_id=identity_owner.id, provider=provider, created=False).info(
+                "OAuth login"
+            )
+            return await self._create_session(
+                user_id=identity_owner.id,
+                role=identity_owner.role.value,
+                permissions=identity_owner.permissions,
+                role_revision=identity_owner.role_revision,
+                ip=ip,
+                user_agent=user_agent,
+            )
+
         find_result = await self._account_store.find_by_email(userinfo.email)
         if isinstance(find_result, Failure):
             error = find_result.failure()
@@ -494,24 +871,11 @@ class AuthService:
                         message="Local account email is not verified", source="auth_service"
                     )
                 )
-            link_result = await self._account_store.link_oauth_account(
-                account.id,
-                provider,
-                userinfo.provider_user_id,
-                userinfo.email,
-            )
-            if isinstance(link_result, Failure):
-                error = link_result.failure()
-                log_expected_failure(error, operation="oauth_link_user")
-                return Failure(error)
-            logger.bind(user_id=account.id, provider=provider, created=False).info("OAuth login")
-            return await self._create_session(
-                user_id=account.id,
-                role=account.role.value,
-                permissions=account.permissions,
-                role_revision=account.role_revision,
-                ip=ip,
-                user_agent=user_agent,
+            return Failure(
+                AuthConflictError(
+                    message="OAuth identity is not linked; start an explicit account-link transaction",
+                    source="auth_service",
+                )
             )
 
         # Create new OAuth user
@@ -769,6 +1133,32 @@ class AuthService:
                 expires_in=expires_in,
             )
         )
+
+    async def _emit_security_event(
+        self,
+        event_type: str,
+        user_id: str,
+        payload: dict[str, object],
+    ) -> None:
+        """Emit an immutable security event through the available event seam."""
+        logger.bind(
+            event_type=event_type,
+            user_id=user_id,
+            payload=payload,
+            immutable=True,
+        ).info("auth_security_event")
+        if self._session_factory is None:
+            return
+        result = await self._publish_outbox_event(
+            aggregate_type="auth_security",
+            aggregate_id=user_id,
+            event_type=event_type,
+            payload={"user_id": user_id, **payload},
+        )
+        if isinstance(result, Failure):
+            logger.bind(event_type=event_type, user_id=user_id).error(
+                "auth_security_event_persistence_failed"
+            )
 
     async def _publish_outbox_event(
         self,

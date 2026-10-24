@@ -22,6 +22,8 @@ from .dto import (
     LoginRequest,
     LogoutRequest,
     OAuthAuthorizeResponse,
+    OAuthLinkConfirmationResponse,
+    OAuthLinkConfirmRequest,
     RefreshRequest,
     RegisterRequest,
     ResendVerificationRequest,
@@ -262,6 +264,37 @@ async def oauth_authorize(
     )
 
 
+@router.get("/oauth/{provider}/link/authorize")
+async def oauth_link_authorize(
+    provider: Annotated[str, Path()],
+    claims: CurrentClaims,
+    response: Response,
+    service: AuthServiceDep,
+) -> APIResponse[OAuthAuthorizeResponse]:
+    """Start linking a provider to the already authenticated account."""
+    result = await service.oauth_link_get_authorization_url(
+        provider,
+        user_id=claims.sub,
+        session_id=claims.sid,
+        authz_revision=claims.authz_revision,
+    )
+    if isinstance(result, Failure):
+        return render_result(result, response, message="OAuth account linking could not start")
+    url, signed_state = result.unwrap()
+    response.set_cookie(
+        OAUTH_STATE_COOKIE,
+        signed_state,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=300,
+    )
+    return http_response(
+        "OAuth account-link authorization URL generated",
+        data=OAuthAuthorizeResponse(authorization_url=url, provider=provider),
+    )
+
+
 @router.get("/oauth/{provider}/callback", response_model=None)
 async def oauth_callback(
     provider: Annotated[str, Path()],
@@ -271,7 +304,7 @@ async def oauth_callback(
     code: Annotated[str | None, Query()] = None,
     state: Annotated[str | None, Query()] = None,
     error: Annotated[str | None, Query()] = None,
-) -> Response | APIResponse[TokenResponse | None]:
+) -> Response | APIResponse[TokenResponse | OAuthLinkConfirmationResponse | None]:
     settings = get_settings()
     frontend_url = settings.FRONTEND_URL.rstrip("/")
 
@@ -318,7 +351,17 @@ async def oauth_callback(
     )
     if isinstance(result, Failure):
         return render_result(result, response, message="OAuth callback failed")
-    tokens = result.unwrap()
+    payload = result.unwrap()
+    if isinstance(payload, OAuthLinkConfirmationResponse):
+        redirect = RedirectResponse(
+            # Keep the bearer-like confirmation token out of server-side
+            # request logs and Referer headers; the frontend reads the hash.
+            url=f"{frontend_url}/auth/link/confirm#action_token={payload.action_token}",
+            status_code=302,
+        )
+        redirect.delete_cookie(OAUTH_STATE_COOKIE)
+        return redirect
+    tokens = payload
 
     # Refresh token travels in the URL fragment — never hits the server, stays in browser memory
     redirect = RedirectResponse(
@@ -335,6 +378,55 @@ async def oauth_callback(
         max_age=tokens.expires_in,
     )
     return redirect
+
+
+@router.get("/oauth/link/{action_token}")
+async def oauth_link_preview(
+    action_token: Annotated[str, Path()],
+    claims: CurrentClaims,
+    service: AuthServiceDep,
+    response: Response,
+) -> APIResponse[OAuthLinkConfirmationResponse]:
+    result = await service.oauth_link_preview(
+        action_token,
+        user_id=claims.sub,
+        session_id=claims.sid,
+    )
+    return render_result(result, response, message="OAuth identity ready for confirmation")
+
+
+@router.post("/oauth/link/{action_token}/confirm")
+async def oauth_link_confirm(
+    action_token: Annotated[str, Path()],
+    body: OAuthLinkConfirmRequest,
+    claims: CurrentClaims,
+    service: AuthServiceDep,
+    response: Response,
+) -> APIResponse[None]:
+    result = await service.oauth_link_confirm(
+        action_token,
+        user_id=claims.sub,
+        session_id=claims.sid,
+        authz_revision=claims.authz_revision,
+        confirm=body.confirm,
+    )
+    return render_result(result, response, message="OAuth account linked")
+
+
+@router.delete("/oauth/{provider}/link")
+async def oauth_unlink(
+    provider: Annotated[str, Path()],
+    claims: CurrentClaims,
+    service: AuthServiceDep,
+    response: Response,
+) -> APIResponse[None]:
+    result = await service.oauth_unlink(
+        provider,
+        user_id=claims.sub,
+        session_id=claims.sid,
+        authz_revision=claims.authz_revision,
+    )
+    return render_result(result, response, message="OAuth account unlinked")
 
 
 # ── Protected endpoints ────────────────────────────────────────────────────────
