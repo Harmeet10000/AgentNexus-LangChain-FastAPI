@@ -58,9 +58,10 @@ def test_accepts_plain_markdown_summary() -> None:
     assert result.passed
 
 
-def test_accepts_terminal_sentence_punctuation_after_reviewed_commit() -> None:
+@pytest.mark.parametrize("punctuation", [".", "!", "?"])
+def test_accepts_terminal_sentence_punctuation_after_reviewed_commit(punctuation: str) -> None:
     result = GATE.evaluate_comments(
-        [comment(f"Confidence Score: 5/5\nLast reviewed commit: `{HEAD}`.")], HEAD
+        [comment(f"Confidence Score: 5/5\nLast reviewed commit: `{HEAD}`{punctuation}")], HEAD
     )
     assert result.passed
 

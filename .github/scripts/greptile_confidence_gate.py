@@ -94,8 +94,9 @@ def _reviewed_shas(body: str) -> tuple[str, ...] | None:
         # Greptile's Markdown summaries may terminate the reviewed-commit
         # sentence with ordinary punctuation outside the SHA/code span. Keep
         # the value strict while accepting that presentation detail.
-        match = BACKTICK_SHA_RE.fullmatch(value.rstrip(".,;:")) or BARE_SHA_RE.fullmatch(
-            value.rstrip(".,;:")
+        normalized_value = value.rstrip(".,;:!?")
+        match = BACKTICK_SHA_RE.fullmatch(normalized_value) or BARE_SHA_RE.fullmatch(
+            normalized_value
         )
         if match is None:
             return None
