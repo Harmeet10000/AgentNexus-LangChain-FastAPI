@@ -195,7 +195,7 @@ class PendingRevocationReconciler:
         self._monotonic = monotonic
         self._random = random
 
-    async def run(
+    async def run(  # noqa: PLR0912 — bounded orchestration handles explicit failure states
         self,
         *,
         user_id: str | None = None,
@@ -222,7 +222,16 @@ class PendingRevocationReconciler:
                 queue_depth = await self._count_with_deadline(deadline)
             except Exception as exc:  # noqa: BLE001 — depth is advisory; cleanup can continue
                 exc.add_note("operation=pending_reconcile, stage=queue_depth")
-        oldest = self._oldest_age(users)
+        # The work page can start after the oldest entries because the cursor
+        # deliberately advances past deferred/poisoned users. Read the head
+        # separately so the alert describes the queue, not just this page.
+        oldest_users = users if offset == 0 else []
+        if not oldest_users and user_id is None and self._monotonic() < deadline:
+            try:
+                oldest_users = await self._list_pending_with_deadline(1, 0, deadline)
+            except Exception as exc:  # noqa: BLE001 — alerting is advisory
+                exc.add_note("operation=pending_reconcile, stage=oldest_pending_read")
+        oldest = self._oldest_age(oldest_users)
         report = ReconciliationReport(
             scanned=len(users),
             oldest_pending_age_seconds=oldest,
@@ -265,7 +274,7 @@ class PendingRevocationReconciler:
                 permanent_failure=report.permanent_failure + result.get("permanent_failure", 0),
                 poisoned=report.poisoned + result.get("poisoned", 0),
             )
-        if user_id is None:
+        if user_id is None and not dry_run:
             next_offset = offset + len(users) if len(users) >= self._config.batch_size else 0
             try:
                 await self._redis.set(
