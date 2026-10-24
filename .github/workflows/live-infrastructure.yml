@@ -1,0 +1,161 @@
+name: Live Infrastructure Tests
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: live-infrastructure-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_CACHE_DIR: ~/.cache/uv
+  LIVE_REDIS_URL: redis://localhost:6379/15
+  LANGGRAPH_POSTGRES_TEST_DSN: postgresql://ci_langgraph:ci_langgraph_password@localhost:5432/langgraph_ci
+
+jobs:
+  redis-integration:
+    name: Redis failure and recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      redis:
+        image: redis:7.4.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "latest"
+
+      - name: Cache uv dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: ${{ runner.os }}-uv-live-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-live-
+            ${{ runner.os }}-uv-
+
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Verify Redis health
+        run: timeout 30 bash -c 'until redis-cli -h localhost -p 6379 ping | grep -qx PONG; do sleep 1; done'
+
+      - name: Run live Redis failure and recovery tests
+        run: uv run pytest tests/integration/features/auth/test_live_redis_session_store.py -m integration -v --tb=short
+        env:
+          ENVIRONMENT: test
+
+      - name: Verify Redis service restart and recovery
+        run: |
+          container_id=$(docker ps --filter 'ancestor=redis:7.4.2-alpine' --format '{{.ID}}' | head -n 1)
+          test -n "$container_id"
+          docker restart "$container_id"
+          timeout 30 bash -c 'until redis-cli -h localhost -p 6379 ping | grep -qx PONG; do sleep 1; done'
+
+      - name: Upload Redis diagnostics
+        if: failure()
+        run: |
+          redis-cli -h localhost -p 6379 INFO server > redis-info.txt || true
+          container_id=$(docker ps -a --filter 'ancestor=redis:7.4.2-alpine' --format '{{.ID}}' | head -n 1)
+          if test -n "$container_id"; then docker logs "$container_id" >> redis-info.txt 2>&1 || true; fi
+
+      - name: Archive Redis diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redis-live-test-diagnostics
+          path: redis-info.txt
+          retention-days: 7
+
+  langgraph-postgres:
+    name: LangGraph PostgreSQL saver round trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.6
+        env:
+          POSTGRES_USER: ci_langgraph
+          POSTGRES_PASSWORD: ci_langgraph_password
+          POSTGRES_DB: langgraph_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_langgraph -d langgraph_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "latest"
+
+      - name: Cache uv dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: ${{ runner.os }}-uv-live-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-live-
+            ${{ runner.os }}-uv-
+
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Verify PostgreSQL health
+        run: timeout 30 bash -c 'until pg_isready -h localhost -p 5432 -U ci_langgraph -d langgraph_ci; do sleep 1; done'
+
+      - name: Run live LangGraph saver round trip
+        run: uv run pytest tests/integration/features/agent_saul/test_langgraph_checkpointer_roundtrip.py -m integration -v --tb=short
+        env:
+          ENVIRONMENT: test
+
+      - name: Archive PostgreSQL diagnostics
+        if: failure()
+        run: |
+          PGPASSWORD=ci_langgraph_password pg_isready -h localhost -p 5432 -U ci_langgraph -d langgraph_ci > postgres-info.txt || true
+          container_id=$(docker ps -a --filter 'ancestor=postgres:16.6' --format '{{.ID}}' | head -n 1)
+          if test -n "$container_id"; then docker logs "$container_id" >> postgres-info.txt 2>&1 || true; fi
+
+      - name: Upload PostgreSQL diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-live-test-diagnostics
+          path: postgres-info.txt
+          retention-days: 7
