@@ -11245,6 +11245,17 @@
             ],
             "title": "Ipaddress"
           },
+          "userAgent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Useragent"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",

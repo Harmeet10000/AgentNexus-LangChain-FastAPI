@@ -4,6 +4,8 @@ from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
 from starlette.requests import HTTPConnection
 
+from app.utils import InfrastructureException
+
 # from tenacity import retry, stop_after_attempt, wait_exponential
 
 
@@ -33,7 +35,8 @@ def create_redis_client(url: str) -> Redis:
         url,
         db=0,
         # Connection & command timeouts
-        socket_connect_timeout=120.0,  # connectTimeout (ms → sec)
+        # Keep an unavailable Redis from pinning request workers for minutes.
+        socket_connect_timeout=5.0,  # connectTimeout (ms → sec)
         socket_timeout=5.0,  # commandTimeout (ms → sec)
         # TCP keepalive
         socket_keepalive=True,
@@ -58,4 +61,11 @@ async def close_redis_client(client: Redis | None) -> None:
 
 
 async def get_redis(connection: HTTPConnection) -> Redis:
-    return connection.app.state.redis
+    redis = getattr(connection.app.state, "redis", None)
+    if redis is None:
+        raise InfrastructureException(
+            detail="Redis session store unavailable",
+            retryable=True,
+            data={"operation": "redis_dependency"},
+        )
+    return redis

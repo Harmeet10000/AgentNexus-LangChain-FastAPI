@@ -7,13 +7,16 @@ from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
 from asyncpg.exceptions import PostgresError
+from authlib.integrations.base_client.errors import AuthlibBaseError
 from authlib.integrations.httpx_client import AsyncOAuth2Client
+from httpx import HTTPError
 from returns.result import Failure, Success
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
+from app.utils import ValidationException
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -181,6 +184,7 @@ class AuthService:
             user_id=account.id,
             role=account.role,
             permissions=account.permissions,
+            role_revision=account.role_revision,
             device_name=dto.device_name,
             ip=ip,
             user_agent=user_agent,
@@ -232,12 +236,20 @@ class AuthService:
             return Failure(
                 AuthAuthenticationError(message="User not found or disabled", source="auth_service")
             )
+        if session.authz_revision != account.role_revision:
+            return Failure(
+                AuthAuthenticationError(
+                    message="Session authorization is stale",
+                    source="auth_service",
+                )
+            )
 
         access_token, expires_in = create_access_token(
             user_id=account.id,
             session_id=claims.jti,
             role=account.role,
             permissions=account.permissions,
+            authz_revision=account.role_revision,
         )
         return Success(
             TokenResponse(
@@ -438,7 +450,23 @@ class AuthService:
             )
 
         config = get_oauth_config(provider)
-        userinfo = await fetch_oauth_userinfo(provider, config, code)
+        try:
+            userinfo = await fetch_oauth_userinfo(provider, config, code)
+        except (
+            AuthlibBaseError,
+            HTTPError,
+            ValidationException,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            logger.bind(provider=provider, error=str(exc)).warning("OAuth identity lookup failed")
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth provider could not verify the account",
+                    source="auth_service",
+                )
+            )
 
         # Check if user exists by email
         find_result = await self._account_store.find_by_email(userinfo.email)
@@ -453,6 +481,18 @@ class AuthService:
             if not account.is_active:
                 return Failure(
                     AuthAuthenticationError(message="Account is disabled", source="auth_service")
+                )
+            if not userinfo.email_verified:
+                return Failure(
+                    AuthAuthenticationError(
+                        message="OAuth email is not verified", source="auth_service"
+                    )
+                )
+            if not account.is_verified:
+                return Failure(
+                    AuthAuthenticationError(
+                        message="Local account email is not verified", source="auth_service"
+                    )
                 )
             link_result = await self._account_store.link_oauth_account(
                 account.id,
@@ -469,11 +509,18 @@ class AuthService:
                 user_id=account.id,
                 role=account.role.value,
                 permissions=account.permissions,
+                role_revision=account.role_revision,
                 ip=ip,
                 user_agent=user_agent,
             )
 
         # Create new OAuth user
+        if not userinfo.email_verified:
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth email is not verified", source="auth_service"
+                )
+            )
         new_account = NewAuthAccount(
             email=userinfo.email.lower(),
             password_hash=None,  # OAuth-only account
@@ -498,6 +545,7 @@ class AuthService:
             user_id=account.id,
             role=account.role.value,
             permissions=account.permissions,
+            role_revision=account.role_revision,
             ip=ip,
             user_agent=user_agent,
         )
@@ -521,6 +569,7 @@ class AuthService:
                     device_id=s.device_id,
                     device_name=s.device_name,
                     ip_address=s.ip_address,
+                    user_agent=s.user_agent,
                     created_at=s.created_at,
                     expires_at=s.expires_at,
                     is_current=s.session_id == current_session_id,
@@ -673,6 +722,7 @@ class AuthService:
         user_id: str,
         role: str,
         permissions: frozenset[str],
+        role_revision: int,
         device_name: str | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -687,6 +737,7 @@ class AuthService:
             session_id=session_id,
             role=role,
             permissions=permissions,
+            authz_revision=role_revision,
         )
         refresh_token, refresh_ttl = create_refresh_token(
             user_id=user_id,
@@ -704,6 +755,7 @@ class AuthService:
                 created_at=now,
                 expires_at=now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
                 ttl=refresh_ttl,
+                authz_revision=role_revision,
             )
         )
         if isinstance(store_result, Failure):

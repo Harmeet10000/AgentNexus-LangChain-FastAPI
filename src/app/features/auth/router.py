@@ -56,12 +56,12 @@ limit_resend_verification = get_rate_limiter(burst=2, rate=2, period=300)
 # Protected Routes
 # Everything chains through FastAPI's dependency injection. The base chain is:
 # _extract_raw_token          # Bearer header OR cookie fallback
-#     → get_token_claims      # decode + validate JWT (zero DB hits)
+#     → get_token_claims      # decode + validate JWT + Redis session
 #         → get_current_user  # MongoDB lookup for live user state
 #             → get_current_active_user
 #                 → get_current_verified_user
 # Each step is a dependency that calls the one above it. You pick the right entry point for how much validation a route needs:
-# python# Only needs a valid JWT — no DB hit
+# python# Only needs a valid JWT and live Redis session
 # async def endpoint(claims: CurrentClaims): ...
 
 # # Needs live user object + active check
@@ -69,7 +69,7 @@ limit_resend_verification = get_rate_limiter(burst=2, rate=2, period=300)
 # CurrentClaims, CurrentVerifiedUser etc. are just Annotated aliases — they make the chain invisible at the call site.
 
 # RBAC
-# Two dependency factories — require_permission and require_role. Both validate from JWT claims only, no DB round trip:
+# Two dependency factories — require_permission and require_role. Both validate live account state after JWT/session checks:
 # def require_permission(*permissions: Permission):
 #     async def _guard(claims: Annotated[TokenClaims, Depends(get_token_claims)]) -> TokenClaims:
 #         user_perms = set(claims.permissions)
@@ -87,12 +87,12 @@ limit_resend_verification = get_rate_limiter(burst=2, rate=2, period=300)
 #     claims: Annotated[TokenClaims, Depends(require_permission(Permission.USERS_WRITE))]
 # ):
 #     await service.update_role(..., requesting_admin_id=claims.sub)
-# The permissions themselves are embedded into the JWT at login time via ROLE_PERMISSIONS[user.role] — so the token is self-describing. No database lookup needed to answer "can this user do X."
+# Permissions remain embedded in the JWT for context, but live account state is authoritative for privileged routes. This ensures role changes and deactivation take effect after session invalidation.
 
 
 # ⬛ FOR THE CHOSEN ONES
 # The dual-attach pattern on admin routes is intentional redundancy, not a mistake. On routes like update_role you'll notice require_permission appears both in dependencies=[] and as a typed parameter. This is because FastAPI treats dependencies=[] as fire-and-forget — the return value is discarded. If you need claims.sub inside the handler, you must declare it as a parameter too. Two calls to the same dependency with the same arguments hit FastAPI's dependency cache within a single request — the guard runs exactly once, not twice. This is FastAPI's use_cache=True default behavior at work.
-# Why claims-based RBAC instead of DB-based. The alternative — fetching the user on every request and checking user.role live — costs one MongoDB round trip per request. At 1000 req/s that's 1000 extra DB reads per second for pure authorization logic. Claims-based shifts that cost entirely to login time. The tradeoff is stale permissions: if you revoke a role, the user's existing access tokens remain valid until expiry (max 15 min with your config). For most SaaS products that's acceptable. If it's not — say, you're building a financial platform — the fix is a Redis permission cache keyed by user_id with an explicit invalidation call on role change, not a raw DB hit on every request.
+# Live RBAC costs a MongoDB account lookup, but closes the stale-claims window for privileged routes. FastAPI dependency caching avoids repeating that chain within one request.
 
 
 # ── Registration and login ─────────────────────────────────────────────────────

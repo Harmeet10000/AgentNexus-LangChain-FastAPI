@@ -14,6 +14,9 @@ from app.features.auth.exceptions import (
     AuthValidationError,
 )
 from app.features.auth.identity import (
+    clear_session_revocation_pending as clear_identity_session_revocation_pending,
+)
+from app.features.auth.identity import (
     delete_user_document,
     get_user_document,
     set_user_active,
@@ -137,6 +140,24 @@ class UserAdminRepository:
             return Failure(
                 _translate_identity_error(
                     result.failure(), operation="update_role", user_id=str(user.id)
+                )
+            )
+        return Success(result.unwrap())
+
+    @staticmethod
+    @trace_layer("repository")
+    async def clear_session_revocation_pending(
+        user: User, *, expected_revision: int | None = None
+    ) -> UsersResult[User]:
+        result = await clear_identity_session_revocation_pending(
+            user, expected_revision=expected_revision
+        )
+        if isinstance(result, Failure):
+            return Failure(
+                _translate_identity_error(
+                    result.failure(),
+                    operation="clear_session_revocation_pending",
+                    user_id=str(user.id),
                 )
             )
         return Success(result.unwrap())

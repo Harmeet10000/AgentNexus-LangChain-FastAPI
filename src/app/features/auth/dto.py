@@ -113,6 +113,7 @@ class SessionResponse(BaseModel):
     device_id: str = Field(serialization_alias="deviceId")
     device_name: str | None = Field(default=None, serialization_alias="deviceName")
     ip_address: str | None = Field(default=None, serialization_alias="ipAddress")
+    user_agent: str | None = Field(default=None, serialization_alias="userAgent")
     created_at: datetime = Field(serialization_alias="createdAt")
     expires_at: datetime = Field(serialization_alias="expiresAt")
     is_current: bool = Field(default=False, serialization_alias="isCurrent")

@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Annotated, assert_never
 
 from fastapi import Depends, Request, WebSocket
@@ -54,6 +55,20 @@ async def get_refresh_token_repository(
     return RefreshTokenRepository(redis)
 
 
+async def get_optional_refresh_token_repository(
+    connection: HTTPConnection,
+) -> RefreshTokenRepository | None:
+    """Build the session repository when Redis is available.
+
+    Token claims decode before deciding whether a Redis session lookup is
+    needed.  This preserves the intentional stateless ``sid=None``
+    impersonation path during a Redis startup outage while stateful tokens
+    still fail closed in ``get_token_claims``.
+    """
+    redis = getattr(connection.app.state, "redis", None)
+    return RefreshTokenRepository(redis) if redis is not None else None
+
+
 async def get_auth_service(
     account_store: Annotated[AuthAccountStore, Depends(get_account_store)],
     token_repo: Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)],
@@ -107,12 +122,50 @@ def extract_raw_token_from_connection(connection: HTTPConnection) -> str:
 
 async def get_token_claims(
     raw_token: Annotated[str, Depends(_extract_raw_token)],
+    token_repo: Annotated[
+        RefreshTokenRepository | None, Depends(get_optional_refresh_token_repository)
+    ],
 ) -> TokenClaims:
-    """Decode and validate JWT claims. Zero database round trips."""
+    """Decode claims and verify the Redis-backed session before user hydration.
+
+    ``sid=None`` is reserved for short-lived stateless impersonation tokens,
+    which intentionally use their JWT expiry as the revocation boundary.
+    """
     claims: TokenClaims = decode_token(raw_token)
     if claims.token_type != _ACCESS_TOKEN_TYPE:
         msg = "Expected an access token"
         raise UnauthorizedException(msg)
+    if claims.sid is not None:
+        if token_repo is None:
+            raise InfrastructureException(
+                detail="Session store unavailable",
+                retryable=True,
+                data={"operation": "session_verification"},
+            )
+        session_result = await token_repo.get_session(claims.sid)
+        if isinstance(session_result, Failure):
+            error = session_result.failure()
+            if isinstance(error, AuthInfrastructureError):
+                raise InfrastructureException(
+                    detail="Session store unavailable",
+                    error_code=error.code,
+                    retryable=error.retryable,
+                    data=error.details,
+                )
+            msg = "Unable to verify session"
+            raise UnauthorizedException(msg)
+        session = session_result.unwrap()
+        if (
+            session is None
+            or session.user_id != claims.sub
+            or session.expires_at <= datetime.now(UTC)
+            or (
+                claims.authz_revision is not None
+                and session.authz_revision != claims.authz_revision
+            )
+        ):
+            msg = "Session expired or revoked"
+            raise UnauthorizedException(msg)
     set_request_actor(claims.sub)
     return claims
 
@@ -210,21 +263,24 @@ async def get_current_verified_user(
     return account
 
 
-# ── RBAC guards (claims-based — no DB hit) ────────────────────────────────────
+# ── RBAC guards (live account state) ─────────────────────────────────────────
 
 
-def require_permission(*permissions: Permission) -> Callable[[TokenClaims], Awaitable[TokenClaims]]:
-    """Dependency factory. Validates permissions from JWT claims without a DB round trip.
+def require_permission(*permissions: Permission) -> Callable[..., Awaitable[TokenClaims]]:
+    """Dependency factory that checks live permissions after session validation.
 
     Usage: Depends(require_permission(Permission.USERS_READ, Permission.USERS_WRITE))
     """
 
     async def _guard(
         claims: Annotated[TokenClaims, Depends(get_token_claims)],
+        account: Annotated[AuthAccount, Depends(get_current_active_user)],
     ) -> TokenClaims:
-        user_perms = set(claims.permissions)
+        if claims.authz_revision is not None and account.role_revision != claims.authz_revision:
+            msg = "Authorization changed; please authenticate again"
+            raise ForbiddenException(msg)
         for perm in permissions:
-            if perm.value not in user_perms:
+            if perm.value not in account.permissions:
                 msg = f"Missing required permission: {perm.value}"
                 raise ForbiddenException(msg)
         return claims
@@ -232,16 +288,20 @@ def require_permission(*permissions: Permission) -> Callable[[TokenClaims], Awai
     return _guard
 
 
-def require_role(*roles: UserRole) -> Callable[[TokenClaims], Awaitable[TokenClaims]]:
-    """Dependency factory. Validates role from JWT claims without a DB round trip.
+def require_role(*roles: UserRole) -> Callable[..., Awaitable[TokenClaims]]:
+    """Dependency factory that checks the live account role after session validation.
 
     Usage: Depends(require_role(UserRole.ADMIN, UserRole.MODERATOR))
     """
 
     async def _guard(
         claims: Annotated[TokenClaims, Depends(get_token_claims)],
+        account: Annotated[AuthAccount, Depends(get_current_active_user)],
     ) -> TokenClaims:
-        if claims.role not in {r.value for r in roles}:
+        if claims.authz_revision is not None and account.role_revision != claims.authz_revision:
+            msg = "Authorization changed; please authenticate again"
+            raise ForbiddenException(msg)
+        if account.role not in roles:
             msg = "Insufficient role for this operation"
             raise ForbiddenException(msg)
         return claims

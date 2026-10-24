@@ -39,6 +39,7 @@ class TokenClaims(BaseModel):
     role: str
     permissions: list[str]
     token_type: str
+    authz_revision: int | None = None
     device_id: str | None = None
     impersonated_by: str | None = None  # ← new
 
@@ -57,6 +58,8 @@ def create_access_token(
     session_id: str,
     role: str,
     permissions: frozenset[str],
+    *,
+    authz_revision: int = 0,
     expire_minutes: int | None = None,
 ) -> tuple[str, int]:
     """Return (encoded_jwt, expires_in_seconds)."""
@@ -74,6 +77,7 @@ def create_access_token(
         "sid": session_id,  # session_id for /sessions listing without a DB hit
         "role": role,
         "permissions": list(permissions),
+        "authz_revision": authz_revision,
         "type": "access",
     }
     token = jwt_encode(_JWT_HEADER, claims, _jwt_oct_key())
@@ -156,6 +160,7 @@ def decode_token(token: str) -> TokenClaims:
         role=token_obj.claims.get("role", _DEFAULT_ROLE),
         permissions=token_obj.claims.get("permissions", []),
         token_type=token_obj.claims.get("type", "access"),
+        authz_revision=token_obj.claims.get("authz_revision"),
         device_id=token_obj.claims.get("device_id"),
         impersonated_by=token_obj.claims.get("impersonated_by"),  # ← new
     )
