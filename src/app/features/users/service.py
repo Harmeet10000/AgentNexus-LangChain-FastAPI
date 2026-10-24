@@ -142,7 +142,9 @@ class UserAdminService:
                 )
             )
         if getattr(user, "session_revocation_pending", False):
-            cleared = await self._user_repo.clear_session_revocation_pending(user)
+            cleared = await self._user_repo.clear_session_revocation_pending(
+                user, expected_revision=getattr(user, "role_revision", 0)
+            )
             if isinstance(cleared, Failure):
                 return cleared
             user = cleared.unwrap()

@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from beanie import PydanticObjectId
+from beanie.odm.queries.update import UpdateResponse
 from beanie.operators import Inc, Set
 from pymongo.errors import PyMongoError
 from returns.result import Failure, Success
@@ -93,14 +94,40 @@ async def set_user_role(user: User, role: UserRole) -> AuthResult[User]:
 
 
 @trace_layer("repository")
-async def clear_session_revocation_pending(user: User) -> AuthResult[User]:
+async def clear_session_revocation_pending(
+    user: User, *, expected_revision: int | None = None
+) -> AuthResult[User]:
     """Mark role-change session invalidation complete after Redis commits."""
     try:
-        await user.update(
-            Set({User.session_revocation_pending: False, User.updated_at: datetime.now(UTC)})
+        if expected_revision is None:
+            await user.update(
+                Set({User.session_revocation_pending: False, User.updated_at: datetime.now(UTC)})
+            )
+            user.session_revocation_pending = False
+            return Success(user)
+
+        updated = await User.find_one(
+            User.id == user.id,
+            User.role_revision == expected_revision,
+            User.session_revocation_pending == True,  # noqa: E712 — Mongo predicate
+        ).update(
+            Set({User.session_revocation_pending: False, User.updated_at: datetime.now(UTC)}),
+            response_type=UpdateResponse.NEW_DOCUMENT,
         )
-        user.session_revocation_pending = False
-        return Success(user)
+        if updated is not None:
+            return Success(updated)
+        # A newer role change won the race; preserve its pending marker so the
+        # newer revision's session invalidation remains retryable.
+        current = await User.get(user.id)
+        if current is None:
+            return Failure(
+                AuthInfrastructureError(
+                    message="User disappeared while clearing session revocation state",
+                    details={"user_id": str(user.id)},
+                    source="auth_identity",
+                )
+            )
+        return Success(current)
     except PyMongoError as exc:
         exc.add_note(f"user_id={user.id}, operation=clear_session_revocation_pending")
         logger.bind(

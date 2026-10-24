@@ -580,7 +580,7 @@ async def test_pending_role_revocation_retries_and_clears_marker() -> None:
     token_repo.revoke_all_user_sessions.assert_awaited_once_with(
         user_id="target", reason="role_changed", authz_revision=4
     )
-    clear_pending.assert_awaited_once_with(user)
+    clear_pending.assert_awaited_once_with(user, expected_revision=4)
 
 
 async def test_rbac_guards_use_live_account_permissions_and_role() -> None:
