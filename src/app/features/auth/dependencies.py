@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Annotated, assert_never
 
 from fastapi import Depends, Request, WebSocket
@@ -107,12 +108,30 @@ def extract_raw_token_from_connection(connection: HTTPConnection) -> str:
 
 async def get_token_claims(
     raw_token: Annotated[str, Depends(_extract_raw_token)],
+    token_repo: Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)],
 ) -> TokenClaims:
-    """Decode and validate JWT claims. Zero database round trips."""
+    """Decode claims and verify the Redis-backed session before user hydration.
+
+    ``sid=None`` is reserved for short-lived stateless impersonation tokens,
+    which intentionally use their JWT expiry as the revocation boundary.
+    """
     claims: TokenClaims = decode_token(raw_token)
     if claims.token_type != _ACCESS_TOKEN_TYPE:
         msg = "Expected an access token"
         raise UnauthorizedException(msg)
+    if claims.sid is not None:
+        session_result = await token_repo.get_session(claims.sid)
+        if isinstance(session_result, Failure):
+            msg = "Unable to verify session"
+            raise UnauthorizedException(msg)
+        session = session_result.unwrap()
+        if (
+            session is None
+            or session.user_id != claims.sub
+            or session.expires_at <= datetime.now(UTC)
+        ):
+            msg = "Session expired or revoked"
+            raise UnauthorizedException(msg)
     set_request_actor(claims.sub)
     return claims
 
