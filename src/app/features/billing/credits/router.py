@@ -59,12 +59,12 @@ async def grant_credit(
 async def get_credit_balance(
     user_id: Annotated[str, Path(min_length=1)],
     service: CreditServiceDep,
-    claims: CurrentClaims,
+    user: CurrentVerifiedUser,
     response: Response,
 ) -> APIResponse[CreditBalanceResponse]:
     """Get user's total available credit balance (Requirement 52.1)."""
     msg = "Cannot view other users' credit balances"
-    if claims.sub != user_id and claims.role != UserRole.ADMIN.value:
+    if str(user.id) != user_id and user.role != UserRole.ADMIN:
         return render_result(
             Failure(CreditAuthorizationError(message=msg)), response, message="Credit access denied"
         )
@@ -76,7 +76,7 @@ async def get_credit_balance(
 async def get_credit_history(
     user_id: Annotated[str, Path(min_length=1)],
     service: CreditServiceDep,
-    claims: CurrentClaims,
+    user: CurrentVerifiedUser,
     response: Response,
     *,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -84,7 +84,7 @@ async def get_credit_history(
 ) -> APIResponse[CreditHistoryResponse]:
     """Get user's credit and consumption history (Requirement 52.2)."""
     msg = "Cannot view other users' credit history"
-    if claims.sub != user_id and claims.role != UserRole.ADMIN.value:
+    if str(user.id) != user_id and user.role != UserRole.ADMIN:
         return render_result(
             Failure(CreditAuthorizationError(message=msg)), response, message="Credit access denied"
         )

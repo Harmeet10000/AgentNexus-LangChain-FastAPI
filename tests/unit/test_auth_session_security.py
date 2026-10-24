@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from authlib.integrations.base_client.errors import AuthlibBaseError
 from fakeredis.aioredis import FakeRedis
+from fastapi import Response
 from returns.result import Failure, Success
 
 from app.features.auth.account_store import InMemoryAuthAccountStore, NewAuthAccount
@@ -20,11 +22,15 @@ from app.features.auth.oauth import OAuthProviderConfig, OAuthUserInfo, fetch_oa
 from app.features.auth.repository import RefreshTokenRepository, SessionData
 from app.features.auth.service import AuthService
 from app.features.auth.token_audit_log import TokenAuditLog
+from app.features.billing.credits.router import get_credit_balance, get_credit_history
 from app.features.users.service import UserAdminService
 from app.security.tokens import TokenClaims
 from app.utils import ForbiddenException, InfrastructureException, UnauthorizedException
 
 pytestmark = pytest.mark.unit
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 
 def _claims(
@@ -623,3 +629,16 @@ async def test_rbac_guards_use_live_account_permissions_and_role() -> None:
         await require_permission(Permission.USERS_WRITE)(stale_admin_claims, account)
     with pytest.raises(ForbiddenException):
         await require_role(UserRole.ADMIN)(stale_admin_claims, account)
+
+
+@pytest.mark.parametrize("endpoint", [get_credit_balance, get_credit_history])
+async def test_credit_routes_use_live_role_for_cross_user_access(
+    endpoint: Callable[..., Awaitable[object]],
+) -> None:
+    service = AsyncMock()
+    live_account = type("Account", (), {"id": "live-user", "role": UserRole.USER})()
+
+    await endpoint("other-user", service, live_account, Response())
+
+    service.get_credit_balance.assert_not_awaited()
+    service.get_credit_history.assert_not_awaited()
