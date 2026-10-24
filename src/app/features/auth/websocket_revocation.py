@@ -18,6 +18,11 @@ if TYPE_CHECKING:
 REVOCATION_STREAM_KEY = "ws:revocation:events"
 REVOCATION_EVENT_VERSION = 1
 REVOCATION_STREAM_MAXLEN = 10_000
+# Keep each user-wide event small enough for Redis and for bounded listener
+# work.  A large user can still be represented by multiple events; consumers
+# treat each event as an exact revoked-session set.
+REVOCATION_SESSION_ID_BATCH_SIZE = 500
+REVOCATION_CURSOR_MARKER_FIELD = "_cursor_marker"
 _REVOCATION_METER = metrics.get_meter("app.auth.websocket_revocation")
 REVOCATION_PUBLISHED = _REVOCATION_METER.create_counter("websocket.revocation.published")
 REVOCATION_PUBLISH_FAILURES = _REVOCATION_METER.create_counter(
@@ -131,6 +136,51 @@ async def publish_event(redis: Redis, event: WebSocketRevocationEvent) -> bool:
     ).info("WebSocket revocation event published")
     REVOCATION_PUBLISHED.add(1, {"scope": event.scope})
     return True
+
+
+async def publish_user_revocation_events(
+    redis: Redis,
+    *,
+    user_id: str,
+    session_ids: list[str],
+    except_session_id: str | None,
+    reason: str,
+    tenant_id: str | None = None,
+    authz_revision: int | None = None,
+    origin: str = "auth_repository",
+) -> None:
+    """Publish bounded exact-session batches without affecting the caller.
+
+    The revocation mutation is authoritative and has already committed when
+    this helper runs.  Event construction and publication are therefore both
+    best effort: a malformed/oversized event must never turn a successful
+    revoke into an error or prevent later batches from being attempted.
+    """
+    batches = [
+        session_ids[offset : offset + REVOCATION_SESSION_ID_BATCH_SIZE]
+        for offset in range(0, len(session_ids), REVOCATION_SESSION_ID_BATCH_SIZE)
+    ] or [[]]
+    for batch in batches:
+        try:
+            event = new_event(
+                scope="user",
+                user_id=user_id,
+                except_session_id=except_session_id,
+                session_ids=batch,
+                reason=reason,
+                tenant_id=tenant_id,
+                authz_revision=authz_revision,
+                origin=origin,
+            )
+        except Exception as exc:  # noqa: BLE001 — publication is best effort
+            REVOCATION_PUBLISH_FAILURES.add(1)
+            logger.bind(
+                operation="build_websocket_revocation",
+                user_id=user_id,
+                error_type=type(exc).__name__,
+            ).warning("Unable to build WebSocket revocation event")
+            continue
+        await publish_event(redis, event)
 
 
 def parse_event(fields: object) -> WebSocketRevocationEvent | None:

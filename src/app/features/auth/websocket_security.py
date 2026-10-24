@@ -20,10 +20,12 @@ from returns.result import Failure
 from app.features.auth.websocket_revocation import (
     REVOCATION_CLOSE_LATENCY,
     REVOCATION_CLOSED,
+    REVOCATION_CURSOR_MARKER_FIELD,
     REVOCATION_MALFORMED,
     REVOCATION_RECONNECTS,
     REVOCATION_STREAM_GAPS,
     REVOCATION_STREAM_KEY,
+    REVOCATION_STREAM_MAXLEN,
     REVOCATION_SUBSCRIBER_LAG,
     parse_event,
 )
@@ -499,6 +501,14 @@ class WebSocketSecurityService:
                 await websocket.send_json(self._violation_frame(violation))
             with suppress(Exception):
                 await websocket.close(code=violation.close_code, reason=safe_reason)
+        except asyncio.CancelledError:
+            # The listener applies a per-socket deadline. Cancellation while a
+            # client is stuck in send_json must still get a best-effort close;
+            # otherwise the registry removal below makes that socket
+            # impossible for later sweeps to find.
+            with suppress(BaseException):
+                await asyncio.shield(websocket.close(code=violation.close_code, reason=safe_reason))
+            raise
         finally:
             with suppress(Exception):
                 await self.unregister_connection(context)
@@ -556,6 +566,18 @@ class WebSocketSecurityService:
                     tail = await self._redis.xrevrange(REVOCATION_STREAM_KEY, count=1)
                     if tail:
                         self._revocation_last_id = self._decode_stream_id(tail[0][0])
+                    else:
+                        # An empty stream has no concrete "future" ID.  A
+                        # private marker establishes one so an outage between
+                        # the initial read and the first event cannot be
+                        # hidden by a subsequent XREAD from ``$``.
+                        marker_id = await self._redis.xadd(
+                            REVOCATION_STREAM_KEY,
+                            {REVOCATION_CURSOR_MARKER_FIELD: "1"},
+                            maxlen=REVOCATION_STREAM_MAXLEN,
+                            approximate=True,
+                        )
+                        self._revocation_last_id = self._decode_stream_id(marker_id)
                     self._revocation_cursor_initialized = True
                     self._revocation_cursor_ready.set()
                 records = await self._redis.xread(
@@ -572,6 +594,13 @@ class WebSocketSecurityService:
                     stream_entries = cast("list[tuple[object, object]]", entries)
                     for stream_id, fields in stream_entries:
                         self._revocation_last_id = self._decode_stream_id(stream_id)
+                        if isinstance(fields, dict) and any(
+                            (key.decode() if isinstance(key, bytes) else str(key))
+                            == REVOCATION_CURSOR_MARKER_FIELD
+                            for key in fields
+                        ):
+                            self._revocation_activity.set()
+                            continue
                         event = parse_event(fields)
                         if event is None:
                             logger.warning("Ignoring malformed WebSocket revocation event")

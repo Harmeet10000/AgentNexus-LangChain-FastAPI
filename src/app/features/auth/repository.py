@@ -13,7 +13,11 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
-from app.features.auth.websocket_revocation import new_event, publish_event
+from app.features.auth.websocket_revocation import (
+    new_event,
+    publish_event,
+    publish_user_revocation_events,
+)
 from app.observability.logging import logger, trace_layer
 
 from .exceptions import (
@@ -1032,17 +1036,14 @@ class RefreshTokenRepository:
         revoked_ids = [
             item.decode() if isinstance(item, bytes) else str(item) for item in raw_result[1:]
         ]
-        await publish_event(
+        await publish_user_revocation_events(
             self._redis,
-            new_event(
-                scope="user",
-                user_id=user_id,
-                except_session_id=except_session_id,
-                session_ids=revoked_ids,
-                reason=reason,
-                authz_revision=authz_revision,
-                origin="revoke_all_user_sessions",
-            ),
+            user_id=user_id,
+            except_session_id=except_session_id,
+            session_ids=revoked_ids,
+            reason=reason,
+            authz_revision=authz_revision,
+            origin="revoke_all_user_sessions",
         )
         if revoked_ids:
             try:

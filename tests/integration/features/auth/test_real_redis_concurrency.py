@@ -10,6 +10,7 @@ instance receives a unique key prefix, so the suite never flushes a shared datab
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import socket
@@ -40,6 +41,7 @@ from app.features.auth.websocket_revocation import (
     REVOCATION_STREAM_KEY,
     new_event,
     publish_event,
+    publish_user_revocation_events,
 )
 from app.features.auth.websocket_security import WebSocketSecurityService
 from app.features.users.exceptions import UsersInfrastructureError
@@ -227,6 +229,17 @@ class _WebSocketProbe:
         self.closed.set()
 
 
+class _BlockingWebSocketProbe(_WebSocketProbe):
+    def __init__(self) -> None:
+        super().__init__()
+        self.send_started = asyncio.Event()
+        self.release_send = asyncio.Event()
+
+    async def send_json(self, _payload: object) -> None:
+        self.send_started.set()
+        await self.release_send.wait()
+
+
 def _revocation_service(redis: Redis) -> WebSocketSecurityService:
     settings = SimpleNamespace(
         WEBSOCKET_REVOCATION_ENABLED=True,
@@ -373,6 +386,97 @@ async def test_distributed_revocation_reaches_two_workers_and_scopes_connections
         await asyncio.gather(*listeners, return_exceptions=True)
         worker_a.close()
         worker_b.close()
+
+
+async def test_distributed_listener_starts_from_empty_stream_without_a_cursor_gap(
+    redis_harness: _RedisHarness,
+) -> None:
+    redis = redis_harness.client
+    await redis.delete(REVOCATION_STREAM_KEY)
+    worker = _revocation_service(redis)
+    user_id = _user_id()
+    probe = _WebSocketProbe()
+    claims = _claims(user_id=user_id, session_id="session-empty-stream", revision=0)
+    worker._live_connections["empty-stream"] = (
+        probe,
+        worker.build_context(claims=claims, origin=None, connection_id="empty-stream"),
+    )
+    listener = asyncio.create_task(worker.run_revocation_listener())
+    try:
+        await asyncio.wait_for(worker._revocation_cursor_ready.wait(), timeout=2)
+        await publish_event(
+            redis,
+            new_event(
+                scope="session",
+                user_id=user_id,
+                session_id="session-empty-stream",
+                reason="logout",
+            ),
+        )
+        await asyncio.wait_for(probe.closed.wait(), timeout=2)
+        assert probe.close_count == 1
+    finally:
+        listener.cancel()
+        await asyncio.gather(listener, return_exceptions=True)
+        worker.close()
+
+
+async def test_user_revocation_batches_large_exact_session_sets(
+    redis_harness: _RedisHarness,
+) -> None:
+    redis = redis_harness.client
+    await redis.delete(REVOCATION_STREAM_KEY)
+    session_ids = [f"session-{index}" for index in range(1_001)]
+    await publish_user_revocation_events(
+        redis,
+        user_id="large-user",
+        session_ids=session_ids,
+        except_session_id=None,
+        reason="deactivation",
+    )
+    entries = await redis.xrange(REVOCATION_STREAM_KEY)
+    assert entries is not None
+    assert len(entries) == 3
+    parsed_ids: list[str] = []
+    for _stream_id, fields in entries:
+        # The real parser is exercised by the listener tests; here the stream
+        # fields are intentionally inspected to prove no IDs were dropped.
+        raw_ids = fields["session_ids"]
+        parsed_ids.extend(json.loads(raw_ids))
+    assert parsed_ids == session_ids
+
+
+async def test_revocation_timeout_still_closes_a_stuck_socket(
+    redis_harness: _RedisHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.features.auth import websocket_security as websocket_security_module
+
+    monkeypatch.setattr(websocket_security_module, "_REVOCATION_CLOSE_TIMEOUT_SECONDS", 0.01)
+    worker = _revocation_service(redis_harness.client)
+    probe = _BlockingWebSocketProbe()
+    user_id = _user_id()
+    claims = _claims(user_id=user_id, session_id="session-stuck", revision=0)
+    worker._live_connections["stuck"] = (
+        probe,
+        worker.build_context(claims=claims, origin=None, connection_id="stuck"),
+    )
+    try:
+        await asyncio.wait_for(
+            worker._handle_revocation_event(
+                new_event(
+                    scope="session",
+                    user_id=user_id,
+                    session_id="session-stuck",
+                    reason="logout",
+                )
+            ),
+            timeout=1,
+        )
+        assert probe.send_started.is_set()
+        assert probe.close_count == 1
+    finally:
+        worker.close()
 
 
 async def test_distributed_revocation_rejects_spoofed_and_malformed_events_and_deduplicates(
