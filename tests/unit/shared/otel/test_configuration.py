@@ -59,6 +59,51 @@ def test_otel_attributes_are_normalized_to_exportable_values() -> None:
     assert isinstance(attributes["object"], str)
 
 
+def test_otlp_reader_receives_exporter_as_named_argument(monkeypatch) -> None:
+    """Keep the reader/exporter contract compatible with current OTel SDKs."""
+    from opentelemetry import metrics as otel_metrics
+    from opentelemetry.sdk.resources import Resource
+
+    from app.observability import metrics as metrics_module
+
+    captured: dict[str, object] = {}
+
+    class FakeExporter:
+        def __init__(self, **kwargs: object) -> None:
+            captured["exporter_kwargs"] = kwargs
+
+    class FakePeriodicReader:
+        def __init__(self, *, exporter: object, export_interval_millis: int) -> None:
+            captured["reader_exporter"] = exporter
+            captured["reader_interval"] = export_interval_millis
+
+    class FakePrometheusReader:
+        pass
+
+    class FakeMeterProvider:
+        def __init__(self, *, resource: object, metric_readers: list[object]) -> None:
+            captured["resource"] = resource
+            captured["readers"] = metric_readers
+
+    monkeypatch.setattr(metrics_module, "OTLPMetricExporter", FakeExporter)
+    monkeypatch.setattr(
+        metrics_module, "PeriodicExportingMetricReader", FakePeriodicReader
+    )
+    monkeypatch.setattr(metrics_module, "PrometheusMetricReader", FakePrometheusReader)
+    monkeypatch.setattr(metrics_module, "MeterProvider", FakeMeterProvider)
+    monkeypatch.setattr(otel_metrics, "set_meter_provider", lambda _provider: None)
+
+    metrics_module._setup_meter_provider(
+        Resource.create({"service.name": "test"}),
+        export_interval_ms=321,
+        endpoint="http://collector:4317",
+    )
+
+    assert captured["exporter_kwargs"] == {"endpoint": "http://collector:4317"}
+    assert captured["reader_exporter"] is not None
+    assert captured["reader_interval"] == 321
+
+
 def test_shutdown_otel_clears_provider_references() -> None:
     import importlib
 
