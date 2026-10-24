@@ -32,12 +32,12 @@ _USER_AUTHZ_REVISION_KEY = "auth:user_authz_revision:{}"
 
 _STORE_SESSION_SCRIPT = """
 local current_revision = redis.call('GET', KEYS[3])
-local expected_revision = ARGV[1]
-if current_revision and current_revision ~= expected_revision then
+local expected_revision = tonumber(ARGV[1])
+if current_revision and tonumber(current_revision) > expected_revision then
     return 0
 end
-if not current_revision then
-    redis.call('SET', KEYS[3], expected_revision)
+if not current_revision or expected_revision > tonumber(current_revision) then
+    redis.call('SET', KEYS[3], ARGV[1])
 end
 redis.call('SETEX', KEYS[1], ARGV[2], ARGV[3])
 redis.call('SADD', KEYS[2], ARGV[4])

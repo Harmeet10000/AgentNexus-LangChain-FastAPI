@@ -283,6 +283,20 @@ async def test_session_store_rejects_stale_authorization_revision() -> None:
     assert await redis.get("auth:session:stale") is None
 
 
+async def test_session_store_advances_authorization_revision() -> None:
+    redis = FakeRedis(decode_responses=True)
+    repo = RefreshTokenRepository(redis)
+    user_id = "507f1f77bcf86cd799439011"
+    await redis.set(f"auth:user_authz_revision:{user_id}", "1")
+
+    result = await repo.store_session(
+        _session("new", user_id=user_id).model_copy(update={"authz_revision": 2})
+    )
+
+    assert isinstance(result, Success)
+    assert await redis.get(f"auth:user_authz_revision:{user_id}") == "2"
+
+
 async def test_older_role_revocation_cannot_undo_newer_revision() -> None:
     redis = FakeRedis(decode_responses=True)
     repo = RefreshTokenRepository(redis)
