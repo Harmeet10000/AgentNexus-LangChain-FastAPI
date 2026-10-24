@@ -392,6 +392,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = Field(default="HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15)
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=30)
+    REFRESH_TOKEN_ROTATION_GRACE_SECONDS: int = Field(default=10, ge=0, le=60)
     PASSWORD_RESET_EXPIRE_MINUTES: int = Field(default=30)
 
     # --- OAuth Configuration ---

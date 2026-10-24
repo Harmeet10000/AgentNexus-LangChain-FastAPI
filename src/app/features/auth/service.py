@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import secrets
+import time
 import traceback
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
@@ -10,6 +12,7 @@ from asyncpg.exceptions import PostgresError
 from authlib.integrations.base_client.errors import AuthlibBaseError
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from httpx import HTTPError
+from opentelemetry import metrics
 from returns.result import Failure, Success
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -39,6 +42,7 @@ from app.security.tokens import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    derive_refresh_token_material,
     sign_oauth_state,
     verify_oauth_state,
 )
@@ -57,6 +61,13 @@ from .oauth import fetch_oauth_userinfo, get_oauth_config
 from .repository import SessionData
 
 _OAUTH_LINK_RECENT_AUTH_SECONDS = 15 * 60
+_REFRESH_FAMILY_GRACE_SECONDS = 10
+_REFRESH_METER = metrics.get_meter("app.auth.refresh")
+_REFRESH_ROTATIONS = _REFRESH_METER.create_counter("auth.refresh.rotations")
+_REFRESH_REPLAYS = _REFRESH_METER.create_counter("auth.refresh.replays")
+_REFRESH_GRACE_RETRIES = _REFRESH_METER.create_counter("auth.refresh.grace_retries")
+_REFRESH_FAILURES = _REFRESH_METER.create_counter("auth.refresh.failures")
+_REFRESH_FAMILY_REVOKES = _REFRESH_METER.create_counter("auth.refresh.family_revocations")
 
 # Dummy hash used in the constant-time negative path during login.
 # Prevents timing attacks that would reveal whether an email is registered.
@@ -200,31 +211,45 @@ class AuthService:
             return Failure(
                 AuthAuthenticationError(message="Not a refresh token", source="auth_service")
             )
+        session_id = claims.sid or claims.jti
+        if claims.family_id is not None:
+            family_result = await self._token_repo.revoke_refresh_family(
+                claims.family_id,
+                reason="logout",
+                user_id=claims.sub,
+                session_id=session_id,
+            )
+            if isinstance(family_result, Failure):
+                return Failure(family_result.failure())
+            _REFRESH_FAMILY_REVOKES.add(1, {"reason": "logout"})
         revoke_result = await self._token_repo.revoke_session(
-            session_id=claims.jti,
+            session_id=session_id,
             user_id=claims.sub,
             reason="logout",
         )
         if isinstance(revoke_result, Failure):
             log_expected_failure(revoke_result.failure(), operation="revoke_session")
             return Failure(revoke_result.failure())
-        logger.bind(user_id=claims.sub, session_id=claims.jti).info("Session revoked")
+        logger.bind(user_id=claims.sub, session_id=session_id).info("Session revoked")
         return Success(None)
 
     @trace_layer("service")
-    async def refresh(self, refresh_token: str) -> AuthResult[TokenResponse]:
+    async def refresh(  # noqa: PLR0912, PLR0914
+        self, refresh_token: str
+    ) -> AuthResult[TokenResponse]:
         claims = decode_token(refresh_token)
         if claims.token_type != "refresh":
             return Failure(
                 AuthAuthenticationError(message="Not a refresh token", source="auth_service")
             )
 
-        # Redis lookup is the revocation gate — if the session was deleted, deny
-        session_result = await self._token_repo.get_session(claims.jti)
+        session_id = claims.sid or claims.jti
+        # Redis lookup is the revocation gate — if the session was deleted, deny.
+        session_result = await self._token_repo.get_session(session_id)
         if isinstance(session_result, Failure):
             return Failure(session_result.failure())
         session = session_result.unwrap()
-        if session is None:
+        if session is None or session.user_id != claims.sub:
             return Failure(
                 AuthAuthenticationError(message="Session expired or revoked", source="auth_service")
             )
@@ -236,10 +261,24 @@ class AuthService:
             return Failure(error)
         account = user_result.unwrap()
         if account is None or not account.is_active:
+            if claims.family_id:
+                await self._token_repo.revoke_refresh_family(
+                    family_id=claims.family_id,
+                    reason="account_disabled",
+                    user_id=claims.sub,
+                    session_id=session_id,
+                )
             return Failure(
                 AuthAuthenticationError(message="User not found or disabled", source="auth_service")
             )
         if session.authz_revision != account.role_revision:
+            if claims.family_id:
+                await self._token_repo.revoke_refresh_family(
+                    family_id=claims.family_id,
+                    reason="authz_revision_changed",
+                    user_id=claims.sub,
+                    session_id=session_id,
+                )
             return Failure(
                 AuthAuthenticationError(
                     message="Session authorization is stale",
@@ -247,9 +286,114 @@ class AuthService:
                 )
             )
 
+        family_id = claims.family_id or f"legacy-{sha256(session_id.encode()).hexdigest()[:32]}"
+        token_secret = claims.refresh_secret or claims.jti
+        generation = claims.refresh_generation if claims.refresh_generation is not None else 0
+        if claims.device_id is not None and claims.device_id != session.device_id:
+            return Failure(
+                AuthAuthenticationError(
+                    message="Refresh token binding is invalid", source="auth_service"
+                )
+            )
+        if claims.family_id is None:
+            family_result = await self._token_repo.create_refresh_family(
+                family_id=family_id,
+                user_id=account.id,
+                session_id=session_id,
+                device_id=session.device_id,
+                authz_revision=account.role_revision,
+                token_id=claims.jti,
+                token_secret=token_secret,
+                issued_at=session.created_at,
+                expires_at=session.expires_at,
+                legacy=True,
+            )
+            if isinstance(family_result, Failure):
+                return Failure(family_result.failure())
+            attach_result = await self._token_repo.attach_refresh_family(
+                session_id=session_id,
+                family_id=family_id,
+            )
+            if isinstance(attach_result, Failure):
+                await self._token_repo.revoke_refresh_family(
+                    family_id=family_id,
+                    reason="refresh_migration_failed",
+                    user_id=account.id,
+                    session_id=session_id,
+                )
+                return Failure(attach_result.failure())
+        child_id, child_secret = derive_refresh_token_material(family_id, generation + 1)
+        rotation_result = await self._token_repo.rotate_refresh_token(
+            family_id=family_id,
+            token_id=claims.jti,
+            token_secret=token_secret,
+            child_token_id=child_id,
+            child_token_secret=child_secret,
+            child_generation=generation + 1,
+            expected_authz_revision=account.role_revision,
+            now=datetime.now(UTC),
+            grace_seconds=get_settings().REFRESH_TOKEN_ROTATION_GRACE_SECONDS,
+            presented_generation=generation,
+        )
+        if isinstance(rotation_result, Failure):
+            _REFRESH_FAILURES.add(1, {"reason": "infrastructure"})
+            return Failure(rotation_result.failure())
+        rotation = rotation_result.unwrap()
+        if rotation.status == "reused":
+            _REFRESH_REPLAYS.add(1, {"reason": "family_reuse"})
+            _REFRESH_FAMILY_REVOKES.add(1, {"reason": "refresh_reuse"})
+            await self._emit_security_event(
+                "auth.refresh_token_reuse_detected",
+                account.id,
+                {"family_id": family_id, "session_id": session_id},
+            )
+            return Failure(
+                AuthAuthenticationError(
+                    message="Refresh token reuse detected; session revoked",
+                    source="auth_service",
+                )
+            )
+        if rotation.status in {"missing", "revoked", "stale", "invalid"}:
+            if rotation.status == "stale":
+                await self._token_repo.revoke_refresh_family(
+                    family_id=family_id,
+                    reason="authz_revision_changed",
+                    user_id=account.id,
+                    session_id=session_id,
+                )
+            _REFRESH_FAILURES.add(1, {"reason": rotation.status})
+            return Failure(
+                AuthAuthenticationError(
+                    message="Refresh token is invalid or revoked", source="auth_service"
+                )
+            )
+        if rotation.generation is None:
+            return Failure(
+                AuthInfrastructureError(
+                    message="Refresh rotation returned no successor generation",
+                    source="auth_service",
+                )
+            )
+        child_id, child_secret = derive_refresh_token_material(family_id, rotation.generation)
+        remaining_seconds = max(1, int(session.expires_at.timestamp() - time.time()))
+        refresh_token, _ = create_refresh_token(
+            user_id=account.id,
+            session_id=session_id,
+            device_id=session.device_id,
+            family_id=family_id,
+            token_id=child_id,
+            token_secret=child_secret,
+            generation=rotation.generation,
+            parent_jti=claims.jti,
+            expire_seconds=remaining_seconds,
+        )
+        if rotation.status == "grace":
+            _REFRESH_GRACE_RETRIES.add(1, {"reason": "concurrent_retry"})
+        else:
+            _REFRESH_ROTATIONS.add(1, {"outcome": "rotated"})
         access_token, expires_in = create_access_token(
             user_id=account.id,
-            session_id=claims.jti,
+            session_id=session_id,
             role=account.role,
             permissions=account.permissions,
             authz_revision=account.role_revision,
@@ -257,7 +401,7 @@ class AuthService:
         return Success(
             TokenResponse(
                 access_token=access_token,
-                refresh_token=refresh_token,  # no rotation per config
+                refresh_token=refresh_token,
                 token_type="bearer",
                 expires_in=expires_in,
             )
@@ -519,8 +663,7 @@ class AuthService:
             return Failure(session_result.failure())
         session = session_result.unwrap()
         email_unchanged = (
-            intent.account_email is None
-            or account.email.lower() == intent.account_email.lower()
+            intent.account_email is None or account.email.lower() == intent.account_email.lower()
         )
         session_valid = (
             session is not None
@@ -733,7 +876,10 @@ class AuthService:
             )
         if session_id is None or authz_revision != account.role_revision:
             await self._emit_oauth_link_security_event(
-                "auth.oauth_link_rejected", user_id, reason="reauthentication_required", provider=provider
+                "auth.oauth_link_rejected",
+                user_id,
+                reason="reauthentication_required",
+                provider=provider,
             )
             return Failure(
                 AuthAuthenticationError(
@@ -748,7 +894,10 @@ class AuthService:
             seconds=_OAUTH_LINK_RECENT_AUTH_SECONDS
         ):
             await self._emit_oauth_link_security_event(
-                "auth.oauth_link_rejected", user_id, reason="stale_or_missing_session", provider=provider
+                "auth.oauth_link_rejected",
+                user_id,
+                reason="stale_or_missing_session",
+                provider=provider,
             )
             return Failure(
                 AuthAuthenticationError(
@@ -1065,6 +1214,18 @@ class AuthService:
                     message="Cannot revoke another user's session", source="auth_service"
                 )
             )
+        family_id = resolved_session.family_id
+        if family_id:
+            family_result = await self._token_repo.revoke_refresh_family(
+                family_id=family_id,
+                reason="manual_revoke",
+                user_id=user_id,
+                session_id=session_id,
+            )
+            if isinstance(family_result, Failure):
+                log_expected_failure(family_result.failure(), operation="revoke_refresh_family")
+                return Failure(family_result.failure())
+            _REFRESH_FAMILY_REVOKES.add(1, {"reason": "manual_revoke"})
         revoke_result = await self._token_repo.revoke_session(
             session_id=session_id,
             user_id=user_id,
@@ -1081,6 +1242,12 @@ class AuthService:
         user_id: str,
         except_session_id: str | None = None,
     ) -> AuthResult[None]:
+        family_count = 0
+        sessions_result = await self._token_repo.get_user_sessions(user_id)
+        if isinstance(sessions_result, Success):
+            family_count = len(
+                {session.family_id for session in sessions_result.unwrap() if session.family_id}
+            )
         revoke_result = await self._token_repo.revoke_all_user_sessions(
             user_id=user_id,
             except_session_id=except_session_id,
@@ -1089,6 +1256,8 @@ class AuthService:
         if isinstance(revoke_result, Failure):
             log_expected_failure(revoke_result.failure(), operation="revoke_all_user_sessions")
             return Failure(revoke_result.failure())
+        if family_count:
+            _REFRESH_FAMILY_REVOKES.add(family_count, {"reason": "revoke_all"})
         return Success(None)
 
     @trace_layer("service")
@@ -1137,6 +1306,18 @@ class AuthService:
                     message="Cannot revoke another user's session", source="auth_service"
                 )
             )
+
+        if resolved_session.family_id:
+            family_result = await self._token_repo.revoke_refresh_family(
+                family_id=resolved_session.family_id,
+                reason=reason,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            if isinstance(family_result, Failure):
+                log_expected_failure(family_result.failure(), operation="revoke_refresh_family")
+                return Failure(family_result.failure())
+            _REFRESH_FAMILY_REVOKES.add(1, {"reason": reason})
 
         # Revoke the session
         revoke_result = await self._token_repo.revoke_session(
@@ -1197,7 +1378,9 @@ class AuthService:
         settings = get_settings()
         session_id = str(uuid4())
         device_id = str(uuid4())
+        family_id = str(uuid4())
         now = datetime.now(UTC)
+        token_id, token_secret = derive_refresh_token_material(family_id, 0)
 
         access_token, expires_in = create_access_token(
             user_id=user_id,
@@ -1210,6 +1393,11 @@ class AuthService:
             user_id=user_id,
             session_id=session_id,
             device_id=device_id,
+            family_id=family_id,
+            token_id=token_id,
+            token_secret=token_secret,
+            generation=0,
+            authz_revision=role_revision,
         )
         store_result = await self._token_repo.store_session(
             SessionData(
@@ -1223,11 +1411,29 @@ class AuthService:
                 expires_at=now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
                 ttl=refresh_ttl,
                 authz_revision=role_revision,
+                family_id=family_id,
             )
         )
         if isinstance(store_result, Failure):
             log_expected_failure(store_result.failure(), operation="store_session")
             return Failure(store_result.failure())
+        family_result = await self._token_repo.create_refresh_family(
+            family_id=family_id,
+            user_id=user_id,
+            session_id=session_id,
+            device_id=device_id,
+            authz_revision=role_revision,
+            token_id=token_id,
+            token_secret=token_secret,
+            issued_at=now,
+            expires_at=now + timedelta(seconds=refresh_ttl),
+        )
+        if isinstance(family_result, Failure):
+            await self._token_repo.revoke_session(
+                session_id, user_id, reason="family_create_failed"
+            )
+            log_expected_failure(family_result.failure(), operation="create_refresh_family")
+            return Failure(family_result.failure())
         return Success(
             TokenResponse(
                 access_token=access_token,

@@ -32,7 +32,7 @@ from app.features.auth.models import UserRole
 from app.features.auth.repository import RefreshTokenRepository, SessionData
 from app.features.users.exceptions import UsersInfrastructureError
 from app.features.users.service import UserAdminService
-from app.security.tokens import TokenClaims
+from app.security.tokens import TokenClaims, derive_refresh_token_material
 from app.utils import UnauthorizedException
 
 if TYPE_CHECKING:
@@ -461,3 +461,69 @@ async def test_pending_marker_survives_redis_outage_and_clears_after_recovery(
     assert isinstance(recovered, Success)
     assert user.session_revocation_pending is False
     assert await redis_harness.client.get(recovered_store._authz_revision_key(user_id)) == "2"
+
+
+@pytest.mark.asyncio
+async def test_real_redis_refresh_rotation_replay_and_grace(
+    repository: tuple[RefreshTokenRepository, _RedisHarness],
+) -> None:
+    """Actual Redis proves CAS rotation, bounded grace, and post-grace replay."""
+    store, harness = repository
+    user_id = _user_id()
+    family_id = f"family-{uuid4().hex}"
+    session = _session(user_id, revision=4)
+    session = session.model_copy(update={"family_id": family_id})
+    token_id, token_secret = derive_refresh_token_material(family_id, 0)
+    child_id, child_secret = derive_refresh_token_material(family_id, 1)
+    assert isinstance(await store.store_session(session), Success)
+    assert isinstance(
+        await store.create_refresh_family(
+            family_id=family_id,
+            user_id=user_id,
+            session_id=session.session_id,
+            device_id=session.device_id,
+            authz_revision=session.authz_revision,
+            token_id=token_id,
+            token_secret=token_secret,
+            issued_at=session.created_at,
+            expires_at=session.expires_at,
+        ),
+        Success,
+    )
+
+    results = await asyncio.gather(
+        *(
+            store.rotate_refresh_token(
+                family_id=family_id,
+                token_id=token_id,
+                token_secret=token_secret,
+                child_token_id=child_id,
+                child_token_secret=child_secret,
+                child_generation=1,
+                expected_authz_revision=session.authz_revision,
+                now=session.created_at,
+                grace_seconds=10,
+            )
+            for _ in range(2)
+        )
+    )
+    outcomes = [result.unwrap() for result in results]
+    assert sorted(outcome.status for outcome in outcomes) == ["grace", "rotated"]
+    assert {outcome.generation for outcome in outcomes} == {1}
+
+    replay = await store.rotate_refresh_token(
+        family_id=family_id,
+        token_id=token_id,
+        token_secret=token_secret,
+        child_token_id=child_id,
+        child_token_secret=child_secret,
+        child_generation=1,
+        expected_authz_revision=session.authz_revision,
+        now=session.created_at + timedelta(seconds=11),
+        grace_seconds=10,
+    )
+    assert isinstance(replay, Success)
+    assert replay.unwrap().status == "reused"
+    family_key = f"{store._key_prefix}auth:refresh_family:{family_id}"
+    assert await harness.client.hget(family_key, "status") == "revoked"
+    assert await harness.client.exists(store._session_key(session.session_id)) == 0

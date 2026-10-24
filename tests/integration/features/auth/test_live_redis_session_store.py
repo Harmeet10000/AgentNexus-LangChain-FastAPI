@@ -23,6 +23,7 @@ from returns.result import Failure, Success
 from app.features.auth import repository as repository_module
 from app.features.auth.exceptions import AuthInfrastructureError
 from app.features.auth.repository import RefreshTokenRepository, SessionData
+from app.security.tokens import derive_refresh_token_material
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -243,3 +244,55 @@ async def test_real_redis_session_survives_service_restart(
             break
     else:
         pytest.fail("Redis session was not readable after the service restart")
+
+
+@pytest.mark.asyncio
+async def test_real_redis_refresh_rotation_concurrent_requests(
+    live_redis: Redis,
+) -> None:
+    """The Lua CAS permits one rotation and one bounded idempotent retry."""
+    repo = RefreshTokenRepository(live_redis)
+    user_id = _user_id()
+    family_id = f"live-family-{uuid4().hex}"
+    session = _session(user_id, ttl=120).model_copy(update={"family_id": family_id})
+    token_id, token_secret = derive_refresh_token_material(family_id, 0)
+    child_id, child_secret = derive_refresh_token_material(family_id, 1)
+    try:
+        assert isinstance(await repo.store_session(session), Success)
+        assert isinstance(
+            await repo.create_refresh_family(
+                family_id=family_id,
+                user_id=user_id,
+                session_id=session.session_id,
+                device_id=session.device_id,
+                authz_revision=session.authz_revision,
+                token_id=token_id,
+                token_secret=token_secret,
+                issued_at=session.created_at,
+                expires_at=session.expires_at,
+            ),
+            Success,
+        )
+        results = await asyncio.gather(
+            *(
+                repo.rotate_refresh_token(
+                    family_id=family_id,
+                    token_id=token_id,
+                    token_secret=token_secret,
+                    child_token_id=child_id,
+                    child_token_secret=child_secret,
+                    child_generation=1,
+                    expected_authz_revision=session.authz_revision,
+                    now=session.created_at,
+                    grace_seconds=10,
+                )
+                for _ in range(2)
+            )
+        )
+        outcomes = [result.unwrap() for result in results]
+        assert sorted(outcome.status for outcome in outcomes) == ["grace", "rotated"]
+        assert {outcome.generation for outcome in outcomes} == {1}
+    finally:
+        await live_redis.delete(f"auth:refresh_family:{family_id}")
+        await live_redis.delete(f"auth:session:{session.session_id}")
+        await live_redis.srem(f"auth:user_sessions:{user_id}", session.session_id)
