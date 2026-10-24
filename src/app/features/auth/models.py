@@ -86,6 +86,14 @@ class User(Document):
         name = "users"
         indexes: ClassVar[list[IndexModel]] = [
             IndexModel([("email", ASCENDING)], unique=True),
+            IndexModel(
+                [
+                    ("oauth_accounts.provider", ASCENDING),
+                    ("oauth_accounts.provider_user_id", ASCENDING),
+                ],
+                unique=True,
+                sparse=True,
+            ),
             IndexModel([("reset_token_hash", ASCENDING)], sparse=True),
             IndexModel([("verification_token_hash", ASCENDING)], sparse=True),
         ]

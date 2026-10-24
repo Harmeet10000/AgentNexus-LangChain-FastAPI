@@ -1,4 +1,6 @@
-from datetime import UTC, datetime
+import secrets
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from typing import TYPE_CHECKING, Any, cast
 
 from beanie import PydanticObjectId
@@ -29,6 +31,9 @@ if TYPE_CHECKING:
 _SESSION_KEY = "auth:session:{}"
 _USER_SESSIONS_KEY = "auth:user_sessions:{}"
 _USER_AUTHZ_REVISION_KEY = "auth:user_authz_revision:{}"
+_OAUTH_LINK_STATE_KEY = "auth:oauth_link_state:{}"
+_OAUTH_LINK_ACTION_KEY = "auth:oauth_link_action:{}"
+_OAUTH_LINK_COMPLETE_KEY = "auth:oauth_link_completed:{}"
 
 _STORE_SESSION_SCRIPT = """
 local current_revision = redis.call('GET', KEYS[3])
@@ -109,6 +114,37 @@ class SessionData(BaseModel):
     user_agent: str | None = None
 
 
+class OAuthLinkIntent(BaseModel):
+    """Short-lived, Redis-backed account-link transaction.
+
+    The raw OAuth state and action token are never persisted.  The state key
+    and action key are SHA-256 digests, while this value binds the provider
+    callback to the authenticated session and authorization generation.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    state_digest: str
+    user_id: str
+    session_id: str
+    provider: str
+    # The local email at link start is part of the transaction binding.  It
+    # prevents an account-email change between callback and confirmation from
+    # silently changing which local identity the provider assertion applies to.
+    account_email: str | None = None
+    authz_revision: int
+    created_at: datetime
+    expires_at: datetime
+    action_digest: str | None = None
+    provider_user_id: str | None = None
+    provider_email: str | None = None
+    full_name: str | None = None
+
+    @property
+    def ready_for_confirmation(self) -> bool:
+        return self.action_digest is not None and self.provider_user_id is not None
+
+
 async def _do_find_or_create_oauth_user(
     email: str,
     provider: str,
@@ -130,15 +166,12 @@ async def _do_find_or_create_oauth_user(
             for a in user.oauth_accounts
         )
         if not already_linked:
-            user.oauth_accounts.append(
-                OAuthAccount(
-                    provider=provider,
-                    provider_user_id=provider_user_id,
-                    provider_email=provider_email,
+            return Failure(
+                AuthConflictError(
+                    message="OAuth identity must be explicitly linked",
+                    source="auth_repository",
                 )
             )
-            user.is_verified = True
-            await user.save()
         return Success((user, False))
 
     new_user = User(
@@ -350,6 +383,189 @@ class RefreshTokenRepository:
 
     def __init__(self, redis: Redis) -> None:
         self._redis = redis
+
+    @staticmethod
+    def _digest(value: str) -> str:
+        return sha256(value.encode()).hexdigest()
+
+    async def create_oauth_link_intent(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        provider: str,
+        authz_revision: int,
+        state: str,
+        account_email: str | None = None,
+        ttl: int = 300,
+    ) -> AuthResult[None]:
+        now = datetime.now(UTC)
+        intent = OAuthLinkIntent(
+            state_digest=self._digest(state),
+            user_id=user_id,
+            session_id=session_id,
+            provider=provider,
+            account_email=account_email.lower() if account_email is not None else None,
+            authz_revision=authz_revision,
+            created_at=now,
+            expires_at=now + timedelta(seconds=ttl),
+        )
+        try:
+            created = await self._redis.set(
+                _OAUTH_LINK_STATE_KEY.format(intent.state_digest),
+                intent.model_dump_json(),
+                ex=ttl,
+                nx=True,
+            )
+            if not created:
+                return Failure(
+                    AuthConflictError(
+                        message="OAuth link transaction already exists",
+                        source="auth_repository",
+                    )
+                )
+            return Success(None)
+        except RedisError as exc:
+            exc.add_note("auth_repository operation=create_oauth_link_intent")
+            return Failure(
+                AuthInfrastructureError(
+                    message="Failed to start OAuth account linking",
+                    details={"operation": "create_oauth_link_intent", "error": str(exc)},
+                    source="auth_repository",
+                )
+            )
+
+    async def get_oauth_link_intent(self, state: str) -> AuthResult[OAuthLinkIntent | None]:
+        try:
+            raw = await self._redis.get(_OAUTH_LINK_STATE_KEY.format(self._digest(state)))
+            if raw is None:
+                return Success(None)
+            return Success(OAuthLinkIntent.model_validate_json(raw))
+        except (RedisError, ValidationError) as exc:
+            exc.add_note("auth_repository operation=get_oauth_link_intent")
+            return Failure(
+                AuthInfrastructureError(
+                    message="Failed to retrieve OAuth link transaction",
+                    details={"operation": "get_oauth_link_intent", "error": str(exc)},
+                    source="auth_repository",
+                )
+            )
+
+    async def complete_oauth_link_intent(
+        self,
+        *,
+        state: str,
+        provider_user_id: str,
+        provider_email: str,
+        full_name: str | None,
+    ) -> AuthResult[tuple[OAuthLinkIntent, str]]:
+        intent_result = await self.get_oauth_link_intent(state)
+        if isinstance(intent_result, Failure):
+            return Failure(intent_result.failure())
+        intent = intent_result.unwrap()
+        now = datetime.now(UTC)
+        if intent is None or intent.ready_for_confirmation or intent.expires_at <= now:
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth link transaction is invalid or already completed",
+                    source="auth_repository",
+                )
+            )
+        remaining_ttl = max(1, int((intent.expires_at - now).total_seconds()))
+        completion_key = _OAUTH_LINK_COMPLETE_KEY.format(intent.state_digest)
+        try:
+            claimed = await self._redis.set(completion_key, "1", ex=remaining_ttl, nx=True)
+        except RedisError as exc:
+            exc.add_note("auth_repository operation=claim_oauth_link_intent")
+            return Failure(
+                AuthInfrastructureError(
+                    message="Failed to claim OAuth link transaction",
+                    details={"operation": "claim_oauth_link_intent", "error": str(exc)},
+                    source="auth_repository",
+                )
+            )
+        if not claimed:
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth link transaction is invalid or already completed",
+                    source="auth_repository",
+                )
+            )
+        action_token = secrets.token_urlsafe(32)
+        action_digest = self._digest(action_token)
+        completed = intent.model_copy(
+            update={
+                "action_digest": action_digest,
+                "provider_user_id": provider_user_id,
+                "provider_email": provider_email,
+                "full_name": full_name,
+            }
+        )
+        try:
+            await self._redis.set(
+                _OAUTH_LINK_STATE_KEY.format(intent.state_digest),
+                completed.model_dump_json(),
+                ex=remaining_ttl,
+            )
+            await self._redis.set(
+                _OAUTH_LINK_ACTION_KEY.format(action_digest),
+                completed.model_dump_json(),
+                ex=remaining_ttl,
+            )
+            return Success((completed, action_token))
+        except RedisError as exc:
+            try:
+                await self._redis.delete(completion_key)
+            except RedisError:
+                logger.bind(operation="complete_oauth_link_intent").warning(
+                    "oauth_link_completion_claim_cleanup_failed"
+                )
+            exc.add_note("auth_repository operation=complete_oauth_link_intent")
+            return Failure(
+                AuthInfrastructureError(
+                    message="Failed to prepare OAuth account link confirmation",
+                    details={"operation": "complete_oauth_link_intent", "error": str(exc)},
+                    source="auth_repository",
+                )
+            )
+
+    async def get_oauth_link_candidate(
+        self, action_token: str
+    ) -> AuthResult[OAuthLinkIntent | None]:
+        try:
+            raw = await self._redis.get(_OAUTH_LINK_ACTION_KEY.format(self._digest(action_token)))
+            if raw is None:
+                return Success(None)
+            return Success(OAuthLinkIntent.model_validate_json(raw))
+        except (RedisError, ValidationError) as exc:
+            exc.add_note("auth_repository operation=get_oauth_link_candidate")
+            return Failure(
+                AuthInfrastructureError(
+                    message="Failed to retrieve OAuth link confirmation",
+                    details={"operation": "get_oauth_link_candidate", "error": str(exc)},
+                    source="auth_repository",
+                )
+            )
+
+    async def consume_oauth_link_candidate(
+        self, action_token: str
+    ) -> AuthResult[OAuthLinkIntent | None]:
+        """Atomically consume a confirmation token; the first confirmer wins."""
+        key = _OAUTH_LINK_ACTION_KEY.format(self._digest(action_token))
+        try:
+            raw = await self._redis.getdel(key)
+            if raw is None:
+                return Success(None)
+            return Success(OAuthLinkIntent.model_validate_json(raw))
+        except (RedisError, ValidationError) as exc:
+            exc.add_note("auth_repository operation=consume_oauth_link_candidate")
+            return Failure(
+                AuthInfrastructureError(
+                    message="Failed to consume OAuth link confirmation",
+                    details={"operation": "consume_oauth_link_candidate", "error": str(exc)},
+                    source="auth_repository",
+                )
+            )
 
     async def _do_store_session(
         self,

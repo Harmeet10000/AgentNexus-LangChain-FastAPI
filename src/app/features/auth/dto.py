@@ -124,3 +124,20 @@ class OAuthAuthorizeResponse(BaseModel):
 
     authorization_url: str = Field(serialization_alias="authorizationUrl")
     provider: str
+
+
+class OAuthLinkConfirmationResponse(BaseModel):
+    model_config = ConfigDict(frozen=True, populate_by_name=True, serialize_by_alias=True)
+
+    action_token: str = Field(serialization_alias="actionToken")
+    provider: str
+    provider_email: str = Field(serialization_alias="providerEmail")
+    provider_user_id: str = Field(serialization_alias="providerUserId")
+    full_name: str | None = Field(default=None, serialization_alias="fullName")
+    expires_at: datetime = Field(serialization_alias="expiresAt")
+
+
+class OAuthLinkConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm: bool
