@@ -78,6 +78,36 @@ async def test_http_claims_fail_closed_when_redis_verification_fails() -> None:
         await get_token_claims("raw-token", repo)
 
 
+@pytest.mark.parametrize(
+    ("session", "message"),
+    [
+        (_session("session-1", user_id="other-user"), "Session expired or revoked"),
+        (
+            SessionData(
+                session_id="session-1",
+                user_id="user-1",
+                device_id="device-1",
+                created_at=datetime.now(UTC) - timedelta(hours=2),
+                expires_at=datetime.now(UTC) - timedelta(seconds=1),
+                ttl=3600,
+            ),
+            "Session expired or revoked",
+        ),
+    ],
+)
+async def test_http_claims_validate_session_owner_and_expiry(
+    session: SessionData,
+    message: str,
+) -> None:
+    repo = AsyncMock()
+    repo.get_session.return_value = Success(session)
+    with (
+        patch("app.features.auth.dependencies.decode_token", return_value=_claims()),
+        pytest.raises(UnauthorizedException, match=message),
+    ):
+        await get_token_claims("raw-token", repo)
+
+
 async def test_revoke_all_is_atomic_and_returns_exact_ids(monkeypatch: pytest.MonkeyPatch) -> None:
     redis = FakeRedis(decode_responses=True)
     repo = RefreshTokenRepository(redis)
@@ -125,6 +155,48 @@ async def test_mongo_audit_failure_does_not_report_failed_redis_revoke(
 
     assert isinstance(result, Success)
     assert result.unwrap() == ["session-1"]
+    assert await redis.get("auth:session:session-1") is None
+
+
+async def test_mongo_store_audit_failure_does_not_report_failed_redis_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = FakeRedis(decode_responses=True)
+    repo = RefreshTokenRepository(redis)
+
+    async def fail_insert(_self: object) -> None:
+        from pymongo.errors import PyMongoError
+
+        msg = "mongo unavailable"
+        raise PyMongoError(msg)
+
+    monkeypatch.setattr(TokenAuditLog, "insert", fail_insert)
+    session = _session("session-1", user_id="507f1f77bcf86cd799439011")
+    result = await repo.store_session(session)
+
+    assert isinstance(result, Success)
+    assert await redis.get("auth:session:session-1") is not None
+
+
+async def test_mongo_single_revoke_audit_failure_does_not_report_failed_redis_revoke(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = FakeRedis(decode_responses=True)
+    repo = RefreshTokenRepository(redis)
+    await redis.sadd("auth:user_sessions:user-1", "session-1")
+    await redis.set("auth:session:session-1", "active")
+
+    class _AuditQuery:
+        async def update(self, _update: object) -> None:
+            from pymongo.errors import PyMongoError
+
+            msg = "mongo unavailable"
+            raise PyMongoError(msg)
+
+    monkeypatch.setattr(TokenAuditLog, "find_one", lambda *_args: _AuditQuery())
+    result = await repo.revoke_session("session-1", "user-1", reason="test")
+
+    assert isinstance(result, Success)
     assert await redis.get("auth:session:session-1") is None
 
 
