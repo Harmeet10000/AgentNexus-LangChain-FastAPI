@@ -22,6 +22,12 @@ Old checks are attached to their old SHA and cannot satisfy a required check on
 a later head. The workflow also cancels an in-progress run when a newer push
 arrives for the same pull request.
 
+The workflow also runs for pull-request issue-comment creation, edits, and
+deletions, so a Greptile publication or correction causes a fresh decision.
+Every trusted comment that names the current head must be a complete 5/5
+summary; a conflicting current-head summary fails closed even if another
+comment is valid.
+
 The workflow uses only `contents: read`, `pull-requests: read`, and
 `checks: write`. It checks out the default branch with credentials disabled and
 never checks out or executes pull-request code. API failures, malformed

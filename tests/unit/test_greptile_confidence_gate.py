@@ -69,6 +69,17 @@ def test_rejects_conflicting_scores_in_same_comment() -> None:
     assert not result.passed
 
 
+def test_rejects_conflicting_current_head_comments() -> None:
+    result = GATE.evaluate_comments(
+        [
+            comment(valid_body()),
+            comment(f"Confidence Score: 4/5\nLast reviewed commit: `{HEAD}`"),
+        ],
+        HEAD,
+    )
+    assert not result.passed
+
+
 def test_rejects_missing_or_ambiguous_reviewed_commit() -> None:
     missing = GATE.evaluate_comments([comment("Confidence Score: 5/5")], HEAD)
     ambiguous = GATE.evaluate_comments(

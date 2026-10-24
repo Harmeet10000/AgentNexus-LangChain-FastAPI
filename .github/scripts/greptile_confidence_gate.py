@@ -95,12 +95,16 @@ def evaluate_comments(comments: list[Comment], head_sha: str) -> Decision:
     for comment in trusted_comments:
         scores = _confidence_scores(comment.body)
         reviewed_shas = _reviewed_shas(comment.body)
+        refers_to_current_head = normalized_head in reviewed_shas
+        if refers_to_current_head and (
+            not scores or any(score != (5, 5) for score in scores) or len(reviewed_shas) != 1
+        ):
+            return Decision(False, "a trusted Greptile review for the current head is conflicting or malformed")
         if not scores or any(score != (5, 5) for score in scores):
             continue
         if len(reviewed_shas) != 1 or reviewed_shas[0] != normalized_head:
             continue
         saw_current_review = True
-        break
 
     if saw_current_review:
         return Decision(True, "trusted Greptile summary is 5/5 and reviewed the current head")
@@ -219,9 +223,14 @@ def _comment_from_event(value: Any) -> Comment:
 def run(event: dict[str, Any], client: GitHubClient, manual_number: int | None = None) -> int:
     pull_request = event.get("pull_request")
     if not isinstance(pull_request, dict):
+        issue = event.get("issue")
+        if isinstance(issue, dict) and isinstance(issue.get("pull_request"), dict):
+            pull_request = client.pull_request(issue["number"])
         if manual_number is None:
-            raise GitHubApiError("workflow event did not contain a pull request")
-        pull_request = client.pull_request(manual_number)
+            if not isinstance(pull_request, dict):
+                raise GitHubApiError("workflow event did not contain a pull request")
+        else:
+            pull_request = client.pull_request(manual_number)
         event = {"pull_request": pull_request}
     number = pull_request.get("number")
     event_head = pull_request.get("head")
@@ -229,11 +238,15 @@ def run(event: dict[str, Any], client: GitHubClient, manual_number: int | None =
         raise GitHubApiError("workflow event pull request metadata was malformed")
     event_sha = event_head.get("sha")
     if not isinstance(event_sha, str):
-        raise GitHubApiError("workflow event did not contain a pull request head SHA")
+        event_sha = None
 
     initial_pr = client.pull_request(number)
     initial_head = initial_pr.get("head")
     current_sha = initial_head.get("sha") if isinstance(initial_head, dict) else None
+    if not isinstance(current_sha, str):
+        raise GitHubApiError("GitHub did not return a pull-request head SHA")
+    if event_sha is None:
+        event_sha = current_sha
     if current_sha != event_sha:
         decision = Decision(False, "pull-request head changed while this workflow was starting")
         client.create_check(current_sha if isinstance(current_sha, str) else event_sha, decision)

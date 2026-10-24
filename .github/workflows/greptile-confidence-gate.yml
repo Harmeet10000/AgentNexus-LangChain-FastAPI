@@ -4,6 +4,8 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
+  issue_comment:
+    types: [created, edited, deleted]
   workflow_dispatch:
     inputs:
       pull_request_number:
@@ -23,6 +25,7 @@ concurrency:
 jobs:
   verify:
     name: verify
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request != null
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -36,4 +39,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          INPUT_PULL_REQUEST_NUMBER: ${{ inputs.pull_request_number }}
         run: python .github/scripts/greptile_confidence_gate.py
