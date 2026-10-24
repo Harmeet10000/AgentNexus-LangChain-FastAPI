@@ -207,8 +207,11 @@ class PendingRevocationReconciler:
         deadline = started + self._config.max_runtime_seconds
         offset = 0
         try:
-            offset_raw = await self._redis.get("auth:session_revocation:cursor")
-            offset = max(0, int(offset_raw or 0))
+            offset_raw = await self._await_budget(
+                self._redis.get("auth:session_revocation:cursor"), deadline
+            )
+            offset_value = cast("str | bytes | None", offset_raw)
+            offset = max(0, int(offset_value or 0))
         except Exception as exc:  # noqa: BLE001 — Redis outage must not clear markers
             exc.add_note("operation=pending_reconcile, stage=cursor_read")
         if user_id is not None:
@@ -277,10 +280,13 @@ class PendingRevocationReconciler:
         if user_id is None and not dry_run:
             next_offset = offset + len(users) if len(users) >= self._config.batch_size else 0
             try:
-                await self._redis.set(
-                    "auth:session_revocation:cursor",
-                    str(next_offset),
-                    ex=self._config.backoff_max_seconds * 4,
+                await self._await_budget(
+                    self._redis.set(
+                        "auth:session_revocation:cursor",
+                        str(next_offset),
+                        ex=self._config.backoff_max_seconds * 4,
+                    ),
+                    deadline,
                 )
             except Exception as exc:  # noqa: BLE001 — cursor is advisory only
                 exc.add_note("operation=pending_reconcile, stage=cursor_write")
@@ -420,7 +426,16 @@ class PendingRevocationReconciler:
                 )
                 return {"attempted": 1, "succeeded": 1}
             finally:
-                await self._redis.eval(_RELEASE_LEASE_SCRIPT, 1, lease_key, lease_token)
+                try:
+                    await self._await_budget(
+                        self._redis.eval(_RELEASE_LEASE_SCRIPT, 1, lease_key, lease_token),
+                        deadline,
+                    )
+                except Exception as exc:  # noqa: BLE001 — lease TTL is the final fence
+                    exc.add_note("operation=pending_reconcile, stage=lease_release")
+                    logger.bind(user_id=user_id).warning(
+                        "auth_pending_revocation_lease_release_deferred"
+                    )
         except Exception as exc:  # noqa: BLE001 — Redis/Mongo boundary; marker remains set
             exc.add_note(f"user_id={user_id}, revision={revision}, operation=pending_reconcile")
             logger.bind(
