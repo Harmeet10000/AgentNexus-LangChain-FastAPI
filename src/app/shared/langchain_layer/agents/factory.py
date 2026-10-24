@@ -46,7 +46,11 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.ai.guardrails import MiddlewareConfig, build_default_middleware_stack
+from app.ai.guardrails import (
+    MiddlewareConfig,
+    TodoAgentState,
+    build_default_middleware_stack,
+)
 from app.ai.llm import build_chat_model
 from app.ai.tools.registry import get_tool_registry
 from app.config import get_settings
@@ -102,6 +106,8 @@ class AgentSpec(BaseModel):
 
     # Context schema
     context_schema: type | None = None
+    # The default includes the optional slot used by TodoListMiddleware.
+    state_schema: type | None = None
 
     # Structured output schema (Pydantic model), or None for text
     response_format: type | None = None
@@ -199,6 +205,7 @@ def create_production_agent(spec: AgentSpec) -> ProductionAgent:
         middleware=middleware,
         response_format=spec.response_format,
         context_schema=spec.context_schema,
+        state_schema=spec.state_schema or TodoAgentState,
         checkpointer=memory.checkpointer,
         debug=spec.debug,
         name=spec.name,

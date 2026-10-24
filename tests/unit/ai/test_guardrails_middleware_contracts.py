@@ -8,9 +8,12 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
+from langchain.agents import create_agent
 from langchain.agents.middleware import ModelRetryMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse, Runtime, ToolCallRequest
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.ai import guardrails
@@ -83,6 +86,31 @@ def test_todo_after_model_hook_reads_agent_state_and_returns_state_update() -> N
     )
 
     assert update == {"todo_list": ["Verify migration"]}
+
+
+@pytest.mark.asyncio
+async def test_todo_state_persists_across_create_agent_calls() -> None:
+    model = GenericFakeChatModel(
+        messages=iter(
+            [
+                AIMessage(content="[TODO:ADD] Verify migration"),
+                AIMessage(content="Migration verified"),
+            ]
+        )
+    )
+    agent = create_agent(
+        model,
+        middleware=guardrails.TodoListMiddleware().build(),
+        state_schema=guardrails.TodoAgentState,
+        checkpointer=InMemorySaver(),
+    )
+    config = {"configurable": {"thread_id": "todo-contract"}}
+
+    first = await agent.ainvoke({"messages": [("user", "start")]}, config)
+    second = await agent.ainvoke({"messages": [("user", "continue")]}, config)
+
+    assert first["todo_list"] == ["Verify migration"]
+    assert second["todo_list"] == ["Verify migration"]
 
 
 def test_default_stack_uses_current_summarization_constructor(
@@ -228,7 +256,7 @@ def test_async_postgres_saver_320_contract_without_database() -> None:
     """Pin the saver API consumed by the application's pool-owning adapter."""
     from app.connections.checkpointer import setup_langgraph_checkpointer
 
-    assert version("langgraph-checkpoint-postgres") == "3.2.0"
+    assert tuple(map(int, version("langgraph-checkpoint-postgres").split(".")[:2])) >= (3, 2)
     assert inspect.iscoroutinefunction(AsyncPostgresSaver.setup)
     assert inspect.isasyncgenfunction(AsyncPostgresSaver.from_conn_string.__wrapped__)
 

@@ -24,7 +24,7 @@ Usage::
             LLMToolSelectorMiddleware(model=fast_llm),
             ToolRetryMiddleware(max_retries=3),
             # The default stack uses LangChain's prebuilt model retry middleware.
-            langchain.agents.middleware.ModelRetryMiddleware(
+            LangChainModelRetryMiddleware(
                 max_retries=2,
                 on_failure="error",
             ),
@@ -39,6 +39,7 @@ from langchain.agents.middleware import (
     SummarizationMiddleware,
     ToolRetryMiddleware,
 )
+from langchain.agents.middleware import ModelRetryMiddleware as LangChainModelRetryMiddleware
 
 from app.ai.callbacks import LatencyCallbackHandler, TokenUsageCallbackHandler, configure_langsmith
 from app.ai.guardrails import (
@@ -61,6 +62,7 @@ __all__ = [
     "GuardrailMiddleware",
     "HumanInTheLoopMiddleware",
     "LLMToolSelectorMiddleware",
+    "LangChainModelRetryMiddleware",
     "MiddlewareConfig",
     "ModelRetryMiddleware",
     "SummarizationMiddleware",

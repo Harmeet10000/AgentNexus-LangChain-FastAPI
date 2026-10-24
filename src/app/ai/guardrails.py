@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from langchain.agents.middleware import (
+    AgentState,
     HumanInTheLoopMiddleware,
     LLMToolSelectorMiddleware,
     SummarizationMiddleware,
@@ -22,6 +23,13 @@ from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
+
+
+class TodoAgentState(AgentState[Any], total=False):
+    """Agent state that gives the to-do middleware a persisted state slot."""
+
+    todo_list: list[str]
+
 
 # ---------------------------------------------------------------------------
 # Model retry middleware
