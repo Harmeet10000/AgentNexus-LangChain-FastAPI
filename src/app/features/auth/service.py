@@ -234,7 +234,7 @@ class AuthService:
         return Success(None)
 
     @trace_layer("service")
-    async def refresh(  # noqa: PLR0912, PLR0914, PLR0915
+    async def refresh(  # noqa: PLR0912, PLR0914
         self, refresh_token: str
     ) -> AuthResult[TokenResponse]:
         claims = decode_token(refresh_token)
@@ -342,14 +342,6 @@ class AuthService:
         if rotation.status == "reused":
             _REFRESH_REPLAYS.add(1, {"reason": "family_reuse"})
             _REFRESH_FAMILY_REVOKES.add(1, {"reason": "refresh_reuse"})
-            audit_result = await self._token_repo.revoke_refresh_family(
-                family_id=family_id,
-                reason="refresh_reuse",
-                user_id=account.id,
-                session_id=session_id,
-            )
-            if isinstance(audit_result, Failure):
-                log_expected_failure(audit_result.failure(), operation="audit_refresh_reuse")
             await self._emit_security_event(
                 "auth.refresh_token_reuse_detected",
                 account.id,

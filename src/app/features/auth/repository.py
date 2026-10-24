@@ -1,4 +1,5 @@
 import secrets
+import traceback
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, cast
@@ -766,6 +767,11 @@ class RefreshTokenRepository:
             return Success(None)
         except RedisError as exc:
             exc.add_note("auth_repository operation=create_refresh_family")
+            exc.add_note(traceback.format_exc())
+            logger.bind(
+                operation="create_refresh_family",
+                diagnostic_notes=list(getattr(exc, "__notes__", [])),
+            ).warning("auth_repository infrastructure failure")
             return Failure(
                 AuthInfrastructureError(
                     message="Failed to create refresh-token family",
@@ -793,6 +799,11 @@ class RefreshTokenRepository:
             return Success(None)
         except RedisError as exc:
             exc.add_note("auth_repository operation=attach_refresh_family")
+            exc.add_note(traceback.format_exc())
+            logger.bind(
+                operation="attach_refresh_family",
+                diagnostic_notes=list(getattr(exc, "__notes__", [])),
+            ).warning("auth_repository infrastructure failure")
             return Failure(
                 AuthInfrastructureError(
                     message="Failed to bind legacy session to refresh family",
@@ -850,8 +861,13 @@ class RefreshTokenRepository:
                 )
             return Success(RefreshRotationOutcome(status=status, family_id=family_id))
         except (RedisError, ValidationError, ValueError) as exc:
-            if isinstance(exc, RedisError):
-                exc.add_note("auth_repository operation=rotate_refresh_token")
+            exc.add_note("auth_repository operation=rotate_refresh_token")
+            exc.add_note(traceback.format_exc())
+            logger.bind(
+                operation="rotate_refresh_token",
+                family_id=family_id,
+                diagnostic_notes=list(getattr(exc, "__notes__", [])),
+            ).warning("auth_repository infrastructure failure")
             return Failure(
                 AuthInfrastructureError(
                     message="Failed to rotate refresh token",
@@ -877,6 +893,12 @@ class RefreshTokenRepository:
             return Success(None)
         except RedisError as exc:
             exc.add_note("auth_repository operation=revoke_refresh_family")
+            exc.add_note(traceback.format_exc())
+            logger.bind(
+                operation="revoke_refresh_family",
+                family_id=family_id,
+                diagnostic_notes=list(getattr(exc, "__notes__", [])),
+            ).warning("auth_repository infrastructure failure")
             return Failure(
                 AuthInfrastructureError(
                     message="Failed to revoke refresh-token family",
