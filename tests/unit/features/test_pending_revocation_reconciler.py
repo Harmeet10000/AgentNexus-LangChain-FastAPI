@@ -190,3 +190,23 @@ async def test_duplicate_workers_are_bounded_by_per_user_lease() -> None:
     assert first_report["succeeded"] == 1
     assert revokes == 1
     await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cleared_users_do_not_leave_retry_records_forever() -> None:
+    redis = FakeRedis(decode_responses=True)
+    user = _user(pending=False)
+    retry_key = "auth:session_revocation:retry:" + str(user.id)
+    await redis.set(retry_key, '{"revision":3,"attempts":2}')
+
+    reconciler = _reconciler(
+        redis,
+        user,
+        revoke=lambda *_args: _async_return(Success(user)),
+        clear=lambda *_args: _async_return(Success(user)),
+    )
+    report = await reconciler.run()
+
+    assert report["cleaned_retry_records"] == 1
+    assert await redis.get(retry_key) is None
+    await redis.aclose()

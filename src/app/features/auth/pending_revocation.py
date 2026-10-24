@@ -148,6 +148,7 @@ class ReconciliationReport:
     oldest_pending_age_seconds: float = 0
     alert_oldest_pending: bool = False
     queue_depth: int = 0
+    cleaned_retry_records: int = 0
     preview: tuple[dict[str, object], ...] = ()
 
     def as_dict(self) -> dict[str, object]:
@@ -163,6 +164,7 @@ class ReconciliationReport:
             "oldest_pending_age_seconds": self.oldest_pending_age_seconds,
             "alert_oldest_pending": self.alert_oldest_pending,
             "queue_depth": self.queue_depth,
+            "cleaned_retry_records": self.cleaned_retry_records,
             "preview": list(self.preview),
         }
 
@@ -195,7 +197,7 @@ class PendingRevocationReconciler:
         self._monotonic = monotonic
         self._random = random
 
-    async def run(  # noqa: PLR0912 — bounded orchestration handles explicit failure states
+    async def run(  # noqa: PLR0912, PLR0914 — bounded orchestration has explicit states
         self,
         *,
         user_id: str | None = None,
@@ -290,8 +292,43 @@ class PendingRevocationReconciler:
                 )
             except Exception as exc:  # noqa: BLE001 — cursor is advisory only
                 exc.add_note("operation=pending_reconcile, stage=cursor_write")
+            cleaned = await self._cleanup_abandoned_retry_records(deadline)
+            report = replace(report, cleaned_retry_records=cleaned)
         logger.bind(**report.as_dict()).info("auth_pending_revocation_reconciliation_finished")
         return report.as_dict()
+
+    async def _cleanup_abandoned_retry_records(self, deadline: float) -> int:
+        """Bounded garbage collection for users cleared outside this worker.
+
+        The normal success path deletes its retry key. This sweep handles an
+        administrator completing the role change through another path or a
+        user being deleted, while leaving records for pending users untouched.
+        """
+        cleaned = 0
+        try:
+            keys = self._redis.scan_iter(
+                match=_RETRY_PREFIX + "*", count=self._config.batch_size
+            )
+            async for raw_key in keys:
+                if cleaned >= self._config.batch_size or self._monotonic() >= deadline:
+                    break
+                key = str(raw_key)
+                user_id = key.removeprefix(_RETRY_PREFIX)
+                try:
+                    user = await self._get_user_with_deadline(user_id, deadline)
+                except Exception as exc:  # noqa: BLE001 — never delete on lookup outage
+                    exc.add_note("operation=pending_reconcile, stage=retry_gc_lookup")
+                    continue
+                if user is None or not user.session_revocation_pending:
+                    await self._await_budget(self._redis.delete(key), deadline)
+                    cleaned += 1
+        except Exception as exc:  # noqa: BLE001 — retry GC is advisory
+            exc.add_note("operation=pending_reconcile, stage=retry_gc")
+        if cleaned:
+            logger.bind(cleaned_retry_records=cleaned).info(
+                "auth_pending_revocation_retry_records_cleaned"
+            )
+        return cleaned
 
     def _oldest_age(self, users: list[_UserLike]) -> float:
         # A legacy marker has no timestamp. Treat it as oldest rather than
