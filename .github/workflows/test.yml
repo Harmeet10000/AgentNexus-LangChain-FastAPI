@@ -93,10 +93,7 @@ jobs:
         run: uv run ruff format --check src/ tests/
 
       - name: Type check with ty
-        # The repository's type-checking contract covers production code here.
-        # Tests intentionally use duck-typed fakes and have a separate relaxed
-        # ty override configuration in pyproject.toml.
-        run: uv run ty check --exit-zero-on-warning src/
+        run: uv run ty check src/
 
       - name: Create .env.development file
         run: |

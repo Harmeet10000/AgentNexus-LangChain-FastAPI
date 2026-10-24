@@ -12,7 +12,8 @@ from __future__ import annotations
 import re
 from typing import (
     TYPE_CHECKING,
-    Any,  # noqa: TC003 — used in method bodies at runtime
+    Protocol,
+    cast,
 )
 
 import cognee
@@ -21,6 +22,15 @@ from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
+    from typing import Any, LiteralString
+
+
+class Neo4jQueryDriver(Protocol):
+    """Small protocol for the single Neo4j operation used by this service."""
+
+    def execute_query(
+        self, query: LiteralString, *args: Any, **kwargs: Any
+    ) -> Awaitable[tuple[list[Any], Any, list[str]]]: ...
 
 
 #: Tenant and kind identifiers may only contain these characters. The separator
@@ -98,12 +108,13 @@ def make_neo4j_procedures_probe(
     async def probe() -> bool:
         if driver is None:
             return False
+        neo4j_driver = cast("Neo4jQueryDriver", driver)
         try:
             # The same graph-procedure precondition the health surface reports
             # as ``graphProceduresAvailable``. Inlined as a literal: the driver
             # types the query as ``LiteralString``, which a variable does not
             # satisfy.
-            records, _, _ = await driver.execute_query(
+            records, _, _ = await neo4j_driver.execute_query(
                 "SHOW PROCEDURES YIELD name WHERE name STARTS WITH 'apoc.' "
                 "OR name STARTS WITH 'gds.' RETURN count(name) AS n"
             )

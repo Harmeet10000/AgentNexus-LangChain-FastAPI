@@ -1,7 +1,7 @@
 # src/app/extraction/langextract/langextract_to_graph.py
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
@@ -9,6 +9,9 @@ from returns.result import Failure, Success
 from app.retrieval.errors import RagValidationError
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Mapping
+    from typing import Any
+
     import langextract as lx
 
     from app.retrieval.errors import RagResult
@@ -27,6 +30,12 @@ class GraphIngestionContext(BaseModel):
     jurisdiction: str = "unspecified"
     document_type: str = "generic"
     human_reviewed: bool = False
+
+
+class GraphWriter(Protocol):
+    """Minimal graph writer contract required by the ingestion adapter."""
+
+    def merge_node(self, node_label: str, properties: Mapping[str, Any]) -> Awaitable[Any]: ...
 
 
 async def ingest_extractions_to_graph(
@@ -48,6 +57,8 @@ async def ingest_extractions_to_graph(
         )
     ingested = 0
 
+    graph_writer = cast("GraphWriter", ctx.neo4j_client)
+
     for doc in annotated_docs:
         for extraction in doc.extractions:
             if extraction.char_interval is None:
@@ -67,7 +78,7 @@ async def ingest_extractions_to_graph(
             }
 
             # Merge node
-            await ctx.neo4j_client.merge_node(node_label, node_props)
+            await graph_writer.merge_node(node_label, node_props)
 
             # Extract relationships from attributes or multi-pass LangExtract
             # (Better: Do a dedicated relationship extraction pass in LangExtract prompt)

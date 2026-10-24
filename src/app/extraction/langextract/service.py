@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import traceback
 from enum import StrEnum
+from typing import Protocol
 
 import asyncer
 import langextract as lx
@@ -21,6 +22,12 @@ class ExtractionRequest(BaseModel):
     model_id: str = "gemini-2.5-flash"
     extraction_passes: int = 3
     max_workers: int = 12
+
+
+class ExtractionProvider(Protocol):
+    """Synchronous provider contract dispatched outside the event loop."""
+
+    def extract(self, request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]: ...
 
 
 class ExtractionFailureCode(StrEnum):
@@ -84,7 +91,7 @@ class AsyncExtractionService:
 
     __slots__ = ("_provider",)
 
-    def __init__(self, provider: object | None) -> None:
+    def __init__(self, provider: ExtractionProvider | None) -> None:
         self._provider = provider
 
     @classmethod
