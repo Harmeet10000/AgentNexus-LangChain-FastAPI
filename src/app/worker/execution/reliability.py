@@ -506,17 +506,13 @@ class RateLimiter:
         rate: int,
         period_seconds: int,
         burst: int | None = None,
-        settings: Settings | None = None,
+        settings: Settings,
     ) -> None:
         self._redis = redis_client
         self._scope = scope
         self._rate = rate
         self._period = period_seconds
         self._burst = burst if burst is not None else rate
-        if settings is None:
-            from app.config.settings import get_settings  # noqa: PLC0415
-
-            settings = get_settings()
         self._trusted_proxies = settings.FASTAPI_GUARD_TRUSTED_PROXIES
         self._proxy_depth = settings.FASTAPI_GUARD_TRUSTED_PROXY_DEPTH
         self._validate_config()

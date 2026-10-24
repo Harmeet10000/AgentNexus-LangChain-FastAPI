@@ -227,6 +227,11 @@ class TestIdempotencyManager:
 
 
 class TestRateLimiterConfig:
+    def test_constructor_requires_explicit_settings_dependency(self):
+        mock_redis = MagicMock()
+        with pytest.raises(TypeError, match="missing 1 required keyword-only argument: 'settings'"):
+            RateLimiter(mock_redis, scope="x", rate=1, period_seconds=60)
+
     def test_build_key_format(self):
         mock_redis = MagicMock()
         mock_redis.get.return_value = None
