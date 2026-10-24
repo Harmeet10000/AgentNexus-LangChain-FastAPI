@@ -122,6 +122,14 @@ async def get_token_claims(
     if claims.sid is not None:
         session_result = await token_repo.get_session(claims.sid)
         if isinstance(session_result, Failure):
+            error = session_result.failure()
+            if isinstance(error, AuthInfrastructureError):
+                raise InfrastructureException(
+                    detail="Session store unavailable",
+                    error_code=error.code,
+                    retryable=error.retryable,
+                    data=error.details,
+                )
             msg = "Unable to verify session"
             raise UnauthorizedException(msg)
         session = session_result.unwrap()

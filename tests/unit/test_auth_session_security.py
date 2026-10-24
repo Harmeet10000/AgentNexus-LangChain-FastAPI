@@ -11,17 +11,17 @@ from fakeredis.aioredis import FakeRedis
 from returns.result import Failure, Success
 
 from app.features.auth.account_store import InMemoryAuthAccountStore, NewAuthAccount
-from app.features.auth.dependencies import get_token_claims
+from app.features.auth.dependencies import get_token_claims, require_permission, require_role
 from app.features.auth.dto import SessionResponse
-from app.features.auth.exceptions import AuthAuthenticationError
-from app.features.auth.models import UserRole
+from app.features.auth.exceptions import AuthAuthenticationError, AuthInfrastructureError
+from app.features.auth.models import Permission, UserRole
 from app.features.auth.oauth import OAuthProviderConfig, OAuthUserInfo, fetch_oauth_userinfo
 from app.features.auth.repository import RefreshTokenRepository, SessionData
 from app.features.auth.service import AuthService
 from app.features.auth.token_audit_log import TokenAuditLog
 from app.features.users.service import UserAdminService
 from app.security.tokens import TokenClaims
-from app.utils import UnauthorizedException
+from app.utils import ForbiddenException, InfrastructureException, UnauthorizedException
 
 pytestmark = pytest.mark.unit
 
@@ -74,6 +74,18 @@ async def test_http_claims_fail_closed_when_redis_verification_fails() -> None:
     with (
         patch("app.features.auth.dependencies.decode_token", return_value=_claims()),
         pytest.raises(UnauthorizedException, match="Unable to verify session"),
+    ):
+        await get_token_claims("raw-token", repo)
+
+
+async def test_http_claims_surfaces_redis_outage_as_retryable_failure() -> None:
+    repo = AsyncMock()
+    repo.get_session.return_value = Failure(
+        AuthInfrastructureError(message="redis unavailable", source="test")
+    )
+    with (
+        patch("app.features.auth.dependencies.decode_token", return_value=_claims()),
+        pytest.raises(InfrastructureException, match="Session store unavailable"),
     ):
         await get_token_claims("raw-token", repo)
 
@@ -190,18 +202,20 @@ async def test_mongo_store_audit_failure_does_not_report_failed_redis_store(
     redis = FakeRedis(decode_responses=True)
     repo = RefreshTokenRepository(redis)
 
-    async def fail_insert(_self: object) -> None:
+    async def fail_insert() -> None:
         from pymongo.errors import PyMongoError
 
         msg = "mongo unavailable"
         raise PyMongoError(msg)
 
-    monkeypatch.setattr(TokenAuditLog, "insert", fail_insert)
+    audit_insert = AsyncMock(side_effect=fail_insert)
+    monkeypatch.setattr(TokenAuditLog.return_value, "insert", audit_insert)
     session = _session("session-1", user_id="507f1f77bcf86cd799439011")
     result = await repo.store_session(session)
 
     assert isinstance(result, Success)
     assert await redis.get("auth:session:session-1") is not None
+    audit_insert.assert_awaited_once()
 
 
 async def test_session_index_ttl_never_shrinks_for_shorter_session(
@@ -209,7 +223,7 @@ async def test_session_index_ttl_never_shrinks_for_shorter_session(
 ) -> None:
     redis = FakeRedis(decode_responses=True)
     repo = RefreshTokenRepository(redis)
-    monkeypatch.setattr(TokenAuditLog, "insert", AsyncMock(return_value=None))
+    monkeypatch.setattr(TokenAuditLog.return_value, "insert", AsyncMock(return_value=None))
     long_session = _session("long", user_id="507f1f77bcf86cd799439011")
     short_session = long_session.model_copy(update={"session_id": "short", "ttl": 30}, deep=True)
 
@@ -464,3 +478,20 @@ async def test_noop_role_change_does_not_revoke_sessions() -> None:
     assert isinstance(result, Success)
     user_repo.update_role.assert_not_awaited()
     token_repo.revoke_all_user_sessions.assert_not_awaited()
+
+
+async def test_rbac_guards_use_live_account_permissions_and_role() -> None:
+    account = type(
+        "Account",
+        (),
+        {
+            "is_active": True,
+            "permissions": frozenset(),
+            "role": UserRole.USER,
+        },
+    )()
+
+    with pytest.raises(ForbiddenException):
+        await require_permission(Permission.USERS_WRITE)(_claims(), account)
+    with pytest.raises(ForbiddenException):
+        await require_role(UserRole.ADMIN)(_claims(), account)
