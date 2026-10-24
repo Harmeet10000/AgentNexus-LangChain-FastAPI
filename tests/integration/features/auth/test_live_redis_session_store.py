@@ -93,23 +93,23 @@ async def test_real_redis_store_revoke_all_and_index_ttl(
     session_store: None,
 ) -> None:
     store = RefreshTokenRepository(live_redis)
-    first = _session("live-user", ttl=120)
-    second = _session("live-user", ttl=30)
+    first = _session("507f1f77bcf86cd799439011", ttl=120)
+    second = _session("507f1f77bcf86cd799439011", ttl=30)
 
     assert isinstance(await store.store_session(first), Success)
     assert isinstance(await store.store_session(second), Success)
-    before = await live_redis.ttl("auth:user_sessions:live-user")
+    before = await live_redis.ttl("auth:user_sessions:507f1f77bcf86cd799439011")
     assert before > 0
 
-    result = await store.revoke_all_user_sessions("live-user", authz_revision=5)
+    result = await store.revoke_all_user_sessions("507f1f77bcf86cd799439011", authz_revision=5)
 
     assert result == Success([first.session_id, second.session_id]) or result == Success(
         [second.session_id, first.session_id]
     )
     assert await live_redis.exists(f"auth:session:{first.session_id}") == 0
     assert await live_redis.exists(f"auth:session:{second.session_id}") == 0
-    assert await live_redis.exists("auth:user_sessions:live-user") == 0
-    assert await live_redis.get("auth:user_authz_revision:live-user") == "5"
+    assert await live_redis.exists("auth:user_sessions:507f1f77bcf86cd799439011") == 0
+    assert await live_redis.get("auth:user_authz_revision:507f1f77bcf86cd799439011") == "5"
     assert before >= 1
 
 
@@ -135,7 +135,7 @@ async def test_real_redis_refusal_is_typed_and_recovery_succeeds(
     assert failed.failure().retryable is True
 
     recovered = RefreshTokenRepository(live_redis)
-    session = _session("recovered-user")
+    session = _session("507f1f77bcf86cd799439012")
     assert isinstance(await recovered.store_session(session), Success)
     assert await recovered.get_session(session.session_id) == Success(session)
 
@@ -145,7 +145,7 @@ async def test_real_redis_timeout_and_client_reconnect_recover(
     live_redis: Redis,
     session_store: None,
 ) -> None:
-    session = _session("timeout-user")
+    session = _session("507f1f77bcf86cd799439013")
     store = RefreshTokenRepository(live_redis)
     assert isinstance(await store.store_session(session), Success)
 
