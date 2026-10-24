@@ -229,21 +229,21 @@ async def get_current_verified_user(
     return account
 
 
-# ── RBAC guards (claims-based — no DB hit) ────────────────────────────────────
+# ── RBAC guards (live account state) ─────────────────────────────────────────
 
 
-def require_permission(*permissions: Permission) -> Callable[[TokenClaims], Awaitable[TokenClaims]]:
-    """Dependency factory. Validates permissions from JWT claims without a DB round trip.
+def require_permission(*permissions: Permission) -> Callable[..., Awaitable[TokenClaims]]:
+    """Dependency factory that checks live permissions after session validation.
 
     Usage: Depends(require_permission(Permission.USERS_READ, Permission.USERS_WRITE))
     """
 
     async def _guard(
         claims: Annotated[TokenClaims, Depends(get_token_claims)],
+        account: Annotated[AuthAccount, Depends(get_current_active_user)],
     ) -> TokenClaims:
-        user_perms = set(claims.permissions)
         for perm in permissions:
-            if perm.value not in user_perms:
+            if perm.value not in account.permissions:
                 msg = f"Missing required permission: {perm.value}"
                 raise ForbiddenException(msg)
         return claims
@@ -251,16 +251,17 @@ def require_permission(*permissions: Permission) -> Callable[[TokenClaims], Awai
     return _guard
 
 
-def require_role(*roles: UserRole) -> Callable[[TokenClaims], Awaitable[TokenClaims]]:
-    """Dependency factory. Validates role from JWT claims without a DB round trip.
+def require_role(*roles: UserRole) -> Callable[..., Awaitable[TokenClaims]]:
+    """Dependency factory that checks the live account role after session validation.
 
     Usage: Depends(require_role(UserRole.ADMIN, UserRole.MODERATOR))
     """
 
     async def _guard(
         claims: Annotated[TokenClaims, Depends(get_token_claims)],
+        account: Annotated[AuthAccount, Depends(get_current_active_user)],
     ) -> TokenClaims:
-        if claims.role not in {r.value for r in roles}:
+        if account.role not in roles:
             msg = "Insufficient role for this operation"
             raise ForbiddenException(msg)
         return claims

@@ -94,7 +94,11 @@ async def fetch_oauth_userinfo(
 
         if provider == "google":
             resp = await client.get("https://openidconnect.googleapis.com/v1/userinfo")
-            data: dict[str, Any] = resp.json()
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict) or not data.get("email") or not data.get("sub"):
+                msg = "OAuth provider returned an invalid identity"
+                raise ValidationException(msg)
             return OAuthUserInfo(
                 email=data["email"],
                 provider_user_id=data["sub"],
@@ -107,15 +111,26 @@ async def fetch_oauth_userinfo(
             "https://api.github.com/user",
             headers={"Accept": "application/vnd.github+json"},
         )
-        user_data: dict[str, Any] = resp.json()
+        resp.raise_for_status()
+        user_data = resp.json()
+        if not isinstance(user_data, dict) or not user_data.get("id"):
+            msg = "OAuth provider returned an invalid identity"
+            raise ValidationException(msg)
         emails_resp = await client.get(
             "https://api.github.com/user/emails",
             headers={"Accept": "application/vnd.github+json"},
         )
+        emails_resp.raise_for_status()
+        emails_payload = emails_resp.json()
+        if not isinstance(emails_payload, list) or not all(
+            isinstance(item, dict) for item in emails_payload
+        ):
+            msg = "GitHub returned an invalid email list"
+            raise ValidationException(msg)
         email = next(
             (
                 item["email"]
-                for item in emails_resp.json()
+                for item in emails_payload
                 if item.get("primary") and item.get("verified") and item.get("email")
             ),
             None,

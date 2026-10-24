@@ -33,7 +33,8 @@ def create_redis_client(url: str) -> Redis:
         url,
         db=0,
         # Connection & command timeouts
-        socket_connect_timeout=120.0,  # connectTimeout (ms → sec)
+        # Keep an unavailable Redis from pinning request workers for minutes.
+        socket_connect_timeout=5.0,  # connectTimeout (ms → sec)
         socket_timeout=5.0,  # commandTimeout (ms → sec)
         # TCP keepalive
         socket_keepalive=True,

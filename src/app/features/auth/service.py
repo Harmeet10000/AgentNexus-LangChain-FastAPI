@@ -8,12 +8,14 @@ from uuid import uuid4
 
 from asyncpg.exceptions import PostgresError
 from authlib.integrations.httpx_client import AsyncOAuth2Client
+from httpx import HTTPError
 from returns.result import Failure, Success
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
+from app.utils import ValidationException
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -438,7 +440,16 @@ class AuthService:
             )
 
         config = get_oauth_config(provider)
-        userinfo = await fetch_oauth_userinfo(provider, config, code)
+        try:
+            userinfo = await fetch_oauth_userinfo(provider, config, code)
+        except (HTTPError, ValidationException, KeyError, TypeError, ValueError) as exc:
+            logger.bind(provider=provider, error=str(exc)).warning("OAuth identity lookup failed")
+            return Failure(
+                AuthAuthenticationError(
+                    message="OAuth provider could not verify the account",
+                    source="auth_service",
+                )
+            )
 
         # Check if user exists by email
         find_result = await self._account_store.find_by_email(userinfo.email)

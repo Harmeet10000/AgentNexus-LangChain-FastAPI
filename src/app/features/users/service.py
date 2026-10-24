@@ -116,7 +116,10 @@ class UserAdminService:
         lookup = await self._get_user(user_id)
         if isinstance(lookup, Failure):
             return lookup
-        updated = await self._user_repo.update_role(lookup.unwrap(), new_role)
+        current = lookup.unwrap()
+        if current.role == new_role:
+            return Success(_to_admin_response(current))
+        updated = await self._user_repo.update_role(current, new_role)
         if isinstance(updated, Failure):
             return updated
         user = updated.unwrap()

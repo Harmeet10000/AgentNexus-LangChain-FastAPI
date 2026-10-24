@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, cast
 from beanie import PydanticObjectId
 from beanie.operators import In, Set
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -27,6 +27,15 @@ if TYPE_CHECKING:
 
 _SESSION_KEY = "auth:session:{}"
 _USER_SESSIONS_KEY = "auth:user_sessions:{}"
+
+_EXTEND_SESSION_INDEX_TTL_SCRIPT = """
+local current_ttl = redis.call('TTL', KEYS[1])
+local requested_ttl = tonumber(ARGV[1])
+if current_ttl < requested_ttl then
+    redis.call('EXPIRE', KEYS[1], requested_ttl)
+end
+return current_ttl
+"""
 
 _REVOKE_ALL_SESSIONS_SCRIPT = """
 local session_ids = redis.call('SMEMBERS', KEYS[1])
@@ -325,7 +334,9 @@ class RefreshTokenRepository:
         async with self._redis.pipeline(transaction=True) as pipe:
             pipe.setex(session_key, session.ttl, session.model_dump_json())
             pipe.sadd(user_key, session.session_id)
-            pipe.expire(user_key, session.ttl)
+            # Session indexes are shared by all sessions for a user.  Never let
+            # a short-lived session shorten the index TTL for a longer one.
+            pipe.eval(_EXTEND_SESSION_INDEX_TTL_SCRIPT, 1, user_key, session.ttl)
             await pipe.execute()
         try:
             await TokenAuditLog(
@@ -428,7 +439,7 @@ class RefreshTokenRepository:
             if raw is None:
                 return Success(None)
             return Success(SessionData.model_validate_json(raw))
-        except RedisError as exc:
+        except (RedisError, ValidationError) as exc:
             exc.add_note("auth_repository operation=get_session")
             return Failure(
                 AuthInfrastructureError(
