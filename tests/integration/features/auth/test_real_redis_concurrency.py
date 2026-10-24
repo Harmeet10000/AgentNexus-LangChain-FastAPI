@@ -417,6 +417,42 @@ async def test_distributed_revocation_rejects_spoofed_and_malformed_events_and_d
         worker.close()
 
 
+async def test_distributed_listener_reconnects_after_redis_connection_drop(
+    redis_harness: _RedisHarness,
+) -> None:
+    redis = redis_harness.client
+    worker = _revocation_service(redis)
+    marker = await _seed_stream_cursor(redis)
+    worker._revocation_last_id = marker
+    user_id = _user_id()
+    probe = _WebSocketProbe()
+    claims = _claims(user_id=user_id, session_id="session-reconnect", revision=0)
+    worker._live_connections["reconnect"] = (
+        probe,
+        worker.build_context(claims=claims, origin=None, connection_id="reconnect"),
+    )
+    listener = asyncio.create_task(worker.run_revocation_listener())
+    try:
+        # Drop the listener's active blocking connection. It must reconnect
+        # and continue from the cursor without relying on a new subscription.
+        await redis.connection_pool.disconnect()
+        await publish_event(
+            redis,
+            new_event(
+                scope="session",
+                user_id=user_id,
+                session_id="session-reconnect",
+                reason="outage_recovery",
+            ),
+        )
+        await asyncio.wait_for(probe.closed.wait(), timeout=3)
+        assert probe.close_count == 1
+    finally:
+        listener.cancel()
+        await asyncio.gather(listener, return_exceptions=True)
+        worker.close()
+
+
 async def test_concurrent_creation_and_role_revoke_has_no_stale_survivor(
     repository: tuple[RefreshTokenRepository, _RedisHarness],
 ) -> None:
