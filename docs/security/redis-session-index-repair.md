@@ -7,6 +7,18 @@ every live session it references. The normal session-store Lua script enforces
 that invariant for new writes; this bounded repair handles indexes created by
 older versions or manually shortened in Redis.
 
+## Key-format inventory
+
+The current namespace has three relevant key families: `auth:session:<id>`
+(JSON `SessionData` with `expires_at`), `auth:user_sessions:<user_id>` (a Redis
+set of session IDs), and `auth:user_authz_revision:<user_id>` (the monotonic
+authorization epoch). There is no historical schema-version marker in these
+keys, so mixed-version deployments are identified by the dry-run counters and
+the index TTL observed by the command. The repair only matches the exact first
+two families under the configured prefix; it never scans unrelated Redis keys.
+Roll out the normal writer invariant before applying repairs, then run one
+dry-run per namespace and retain its JSON report as the migration checkpoint.
+
 ## Safe operating procedure
 
 The command uses Redis `SCAN`, never `KEYS`, and processes a finite number of

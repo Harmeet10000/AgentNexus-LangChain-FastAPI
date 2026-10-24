@@ -286,7 +286,7 @@ class SessionIndexRepair:
                 error=repair.error,
             )
 
-    async def _scan_orphans(  # noqa: PLR0912
+    async def _scan_orphans(  # noqa: PLR0912, PLR0915
         self,
         *,
         cursor: int,
@@ -318,6 +318,7 @@ class SessionIndexRepair:
                     raw_text = self._text(raw)
                     session = SessionData.model_validate_json(raw_text)
                 except ValidationError:
+                    summary.malformed_records += 1
                     continue
                 remaining = self._remaining_ttl(session, datetime.now(UTC))
                 if remaining == 0:
