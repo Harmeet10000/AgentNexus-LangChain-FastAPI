@@ -15,13 +15,16 @@ instead of a plain vector search: context + connections, not just similarity.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.tools import tool
+from langchain.tools import ToolRuntime
+from langchain_core.tools import InjectedToolArg, tool
 from langchain_core.tools.base import BaseTool
 
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
+
+from .authorization import trusted_tool_context
 
 if TYPE_CHECKING:
     from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
@@ -35,11 +38,12 @@ def make_query_knowledge_graph_tool(
     @tool
     async def query_knowledge_graph(
         query: str,
-        user_id: str,
-        doc_id: str,
-        thread_id: str,
-        step_id: str,
         *,
+        runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
+        user_id: Annotated[str | None, InjectedToolArg] = None,
+        doc_id: Annotated[str | None, InjectedToolArg] = None,
+        thread_id: Annotated[str | None, InjectedToolArg] = None,
+        step_id: Annotated[str | None, InjectedToolArg] = None,
         num_results: int = 8,
     ) -> dict[str, Any]:
         """Query the legal knowledge graph for risk-relevant context.
@@ -54,19 +58,39 @@ def make_query_knowledge_graph_tool(
 
         Args:
             query: Risk-focused search query
-            user_id: For Graphiti namespace scoping
-            doc_id: Current document ID (scopes to this doc + user history)
-            thread_id: For idempotency audit
-            step_id: Plan step ID for idempotency key
+            Identity and document scope are injected from trusted graph runtime.
             num_results: Max results to return (default: 8)
         """
+        authz = trusted_tool_context(
+            runtime,
+            legacy_user_id=user_id,
+            legacy_doc_id=doc_id,
+            legacy_thread_id=thread_id,
+            legacy_step_id=step_id,
+        )
+        authz.require_operation("document.read")
+        if not authz.allowed_doc_ids:
+            return ToolResult.fail(
+                "No authorized documents were supplied for this analysis.",
+                tool="query_knowledge_graph",
+            ).model_dump()
+        doc_id = authz.allowed_doc_ids[0] if authz.allowed_doc_ids else ""
+        authz.require_document(doc_id)
         log = logger.bind(tool="query_knowledge_graph", doc_id=doc_id)
 
         idem_key = IdempotencyGuard.make_key(
-            step_id=step_id,
+            step_id=authz.step_id,
             structural={"doc_id": doc_id, "num_results": num_results},
             content={"query": query},
-            user_id=user_id,
+            user_id=authz.user_id,
+            tool_name="query_knowledge_graph",
+            tenant_id=authz.tenant_id,
+            allowed_doc_ids=authz.allowed_doc_ids,
+            evidence_policy="mechanically_verified",
+            document_versions=authz.document_versions,
+            thread_id=authz.thread_id,
+            run_id=authz.run_id,
+            checkpoint_id=authz.checkpoint_id,
         )
         cached = await idempotency.get(idem_key)
         if cached is not None:
@@ -75,9 +99,10 @@ def make_query_knowledge_graph_tool(
 
         results = await graphiti_service.search_for_risk_context(
             query=query,
-            user_id=user_id,
+            user_id=authz.tenant_id,
             doc_id=doc_id,
             num_results=num_results,
+            allowed_doc_ids=authz.allowed_doc_ids,
         )
 
         # Sort by multi-objective score descending
@@ -106,9 +131,9 @@ def make_query_knowledge_graph_tool(
             key=idem_key,
             result=result,
             tool_name="query_knowledge_graph",
-            user_id=user_id,
-            thread_id=thread_id,
-            step_id=step_id,
+            user_id=authz.tenant_id,
+            thread_id=authz.thread_id,
+            step_id=authz.step_id,
         )
         log.info("knowledge_graph_queried", results=len(sorted_results))
         return result.model_dump()

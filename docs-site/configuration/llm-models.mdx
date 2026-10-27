@@ -13,8 +13,13 @@ All model behavior is configured through environment variables in `src/app/confi
 | Deep reasoning | `GEMINI_PRO_MODEL` | `gemini-3.1-pro` | Planning, risk analysis, synthesis |
 | Vision | `GEMINI_VISION_MODEL` | `gemini-2.5-flash-image` | Image understanding |
 | Embedding | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-2-preview` | Document and query embeddings |
+| Structured extraction | `LANGEXTRACT_MODEL` | `gemini-3.5-flash-lite` | LangExtract document/entity extraction |
 
 Swap any role by setting the variable — e.g. `GEMINI_PRO_MODEL=gemini-3.5-pro` — with no code change.
+
+`LANGEXTRACT_MODEL` is intentionally constrained to `gemini-3.5-flash-lite`. LangExtract routes
+Gemini using its `model_id` argument, so accepting an arbitrary override here could silently
+select a weaker or unsupported extraction model.
 
 ## Sampling defaults
 

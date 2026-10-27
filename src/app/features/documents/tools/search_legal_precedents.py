@@ -19,9 +19,10 @@ result from a live retrieval — nor should it.  Determinism is the goal.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.tools import tool
+from langchain.tools import ToolRuntime
+from langchain_core.tools import InjectedToolArg, tool
 from langchain_core.tools.base import BaseTool
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -35,6 +36,8 @@ from app.kernel.result import add_database_error_note
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
+
+from .authorization import trusted_tool_context
 
 _MIN_SOURCE_THRESHOLD: int = 2
 _STATUTE_SEARCH_LIMIT: int = 5
@@ -61,9 +64,10 @@ def make_search_legal_precedents_tool(
         clause_id: str,
         jurisdiction: str,
         *,
-        user_id: str,
-        thread_id: str,
-        step_id: str,
+        runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
+        user_id: Annotated[str | None, InjectedToolArg] = None,
+        thread_id: Annotated[str | None, InjectedToolArg] = None,
+        step_id: Annotated[str | None, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Search for legal precedents and statutes relevant to a clause.
 
@@ -78,17 +82,31 @@ def make_search_legal_precedents_tool(
             query: Natural language search query (e.g. 'limitation of liability India')
             clause_id: Clause being analysed (for idempotency key)
             jurisdiction: Target jurisdiction (default: India)
-            user_id: Current user ID (for Graphiti namespace scoping)
-            thread_id: Current thread ID (for idempotency audit)
-            step_id: Plan step ID (for idempotency key)
+            Runtime identity and document scope are injected by LangGraph and
+            are intentionally absent from the model-facing schema.
         """
+        authz = trusted_tool_context(
+            runtime,
+            legacy_user_id=user_id,
+            legacy_thread_id=thread_id,
+            legacy_step_id=step_id,
+        )
+        authz.require_operation("evidence.search")
         log = logger.bind(tool="search_legal_precedents", clause_id=clause_id)
 
         idem_key = IdempotencyGuard.make_key(
-            step_id=step_id,
+            step_id=authz.step_id,
             structural={"clause_id": clause_id, "jurisdiction": jurisdiction},
             content={"query": query},
-            user_id=user_id,
+            user_id=authz.user_id,
+            tool_name="search_legal_precedents",
+            tenant_id=authz.tenant_id,
+            allowed_doc_ids=authz.allowed_doc_ids,
+            evidence_policy="mechanically_verified",
+            document_versions=authz.document_versions,
+            thread_id=authz.thread_id,
+            run_id=authz.run_id,
+            checkpoint_id=authz.checkpoint_id,
         )
         cached = await idempotency.get(idem_key)
         if cached is not None:
@@ -98,7 +116,8 @@ def make_search_legal_precedents_tool(
         # --- Graphiti: precedent chains from prior reviewed documents -------
         graphiti_results = await graphiti_service.search_for_precedent_chains(
             query=query,
-            user_id=user_id,
+            user_id=authz.user_id,
+            allowed_doc_ids=authz.allowed_doc_ids,
             jurisdiction=jurisdiction,
             num_results=5,
         )
@@ -114,6 +133,8 @@ def make_search_legal_precedents_tool(
                 query=query,
                 jurisdiction=jurisdiction,
                 limit=_STATUTE_SEARCH_LIMIT,
+                tenant_id=authz.tenant_id,
+                allowed_doc_ids=authz.allowed_doc_ids,
             )
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="statute_sections", operation="search_statutes")
@@ -169,9 +190,9 @@ def make_search_legal_precedents_tool(
             key=idem_key,
             result=result,
             tool_name="search_legal_precedents",
-            user_id=user_id,
-            thread_id=thread_id,
-            step_id=step_id,
+            user_id=authz.tenant_id,
+            thread_id=authz.thread_id,
+            step_id=authz.step_id,
         )
 
         log.info(
@@ -189,6 +210,9 @@ async def _search_statutes_postgres(
     query: str,
     jurisdiction: str,  # noqa: ARG001 — kept in the tool's contract; the statute corpus is jurisdiction-agnostic until change 2 annotates it
     limit: int,
+    *,
+    tenant_id: str,
+    allowed_doc_ids: tuple[str, ...],
 ) -> list[dict[str, Any]]:
     """Full-text statute search over the unified chunk corpus.
 
@@ -207,11 +231,15 @@ async def _search_statutes_postgres(
       ``reciprocal_rank_fusion`` (``k=RRF_K``), the same function
       ``DocumentService`` fuses its branches with.
 
-    Both branches scope to statute chunks (``instrument_name IS NOT NULL``).
+    Both branches scope to statute chunks and the server-issued document
+    allowlist. An empty allowlist fails closed.
     ``SQLAlchemyError`` propagates to the caller, which maps it onto
     ``ToolResult.unavailable_result`` / ``basis_unknown`` — this helper never
     swallows reachability into an empty list.
     """
+    if not allowed_doc_ids:
+        return []
+
     bm25_sql = text(
         """
         SELECT
@@ -222,6 +250,8 @@ async def _search_statutes_postgres(
         FROM chunks AS c
         WHERE
             c.instrument_name IS NOT NULL
+            AND c.tenant_id = :tenant_id
+            AND c.document_id = ANY(CAST(:allowed_doc_ids AS uuid[]))
             AND (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')) < 0
         ORDER BY c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')
         LIMIT :candidate_limit
@@ -235,6 +265,8 @@ async def _search_statutes_postgres(
         FROM chunks AS c
         WHERE
             c.instrument_name IS NOT NULL
+            AND c.tenant_id = :tenant_id
+            AND c.document_id = ANY(CAST(:allowed_doc_ids AS uuid[]))
             AND c.search_text % :query
             AND similarity(c.search_text, :query) >= :similarity_threshold
         ORDER BY similarity(c.search_text, :query) DESC
@@ -253,13 +285,20 @@ async def _search_statutes_postgres(
             instrument_year AS year
         FROM chunks
         WHERE id = ANY(CAST(:chunk_ids AS uuid[]))
+          AND tenant_id = :tenant_id
+          AND document_id = ANY(CAST(:allowed_doc_ids AS uuid[]))
         """
     )
     async with db_engine.connect() as conn:
         bm25_rows = (
             await conn.execute(
                 bm25_sql,
-                {"query": query, "candidate_limit": HYBRID_CANDIDATE_LIMIT},
+                {
+                    "query": query,
+                    "candidate_limit": HYBRID_CANDIDATE_LIMIT,
+                    "tenant_id": tenant_id,
+                    "allowed_doc_ids": list(allowed_doc_ids),
+                },
             )
         ).fetchall()
         trigram_rows = (
@@ -269,6 +308,8 @@ async def _search_statutes_postgres(
                     "query": query,
                     "candidate_limit": HYBRID_CANDIDATE_LIMIT,
                     "similarity_threshold": TRIGRAM_SIMILARITY_THRESHOLD,
+                    "tenant_id": tenant_id,
+                    "allowed_doc_ids": list(allowed_doc_ids),
                 },
             )
         ).fetchall()
@@ -292,7 +333,11 @@ async def _search_statutes_postgres(
         details = (
             await conn.execute(
                 detail_sql,
-                {"chunk_ids": [item.chunk_id for item in fused]},
+                {
+                    "chunk_ids": [item.chunk_id for item in fused],
+                    "tenant_id": tenant_id,
+                    "allowed_doc_ids": list(allowed_doc_ids),
+                },
             )
         ).fetchall()
         by_id = {str(row[0]): row for row in details}

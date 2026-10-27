@@ -36,21 +36,41 @@ def register_default_tools() -> ToolRegistry:
     tool tagged ``handoff`` so the orchestrator is genuinely tool-using and
     tag-based selection is real, not decorative. The five shell/filesystem
     tools are registered here explicitly (D-1(c)) — importing this module
-    registers nothing; only calling this entry point populates the registry.
+    registers nothing; only calling this entry point populates the registry —
+    and they enforce their capability grants at execution time regardless of
+    how they are bound (PLAN-agent-tools.md D0). The ``side-effect:*`` and
+    ``capability:*`` tags are authority metadata for the capability catalog;
+    web-search grant enforcement lands with that catalog (D4), so its tags
+    describe, but do not yet gate.
     """
     r = get_tool_registry()
-    r.register(get_web_search_tool(), tags=["web", "search"])
+    r.register(get_web_search_tool(), tags=["web", "search", "side-effect:egress"])
     for tool in make_handoff_tools():
         r.register(tool, tags=["handoff", tool.name.removeprefix("transfer_to_")])
     from . import (  # noqa: PLC0415 — D-1(c): entry-point import keeps package import side-effect free
         shell as _shell,
     )
 
-    r.register(_shell.shell_tool, tags=["system", "shell"])
-    r.register(_shell.read_file, tags=["filesystem", "read"])
-    r.register(_shell.write_file, tags=["filesystem", "write"])
-    r.register(_shell.list_directory, tags=["filesystem", "list"])
-    r.register(_shell.file_search, tags=["filesystem", "search"])
+    r.register(
+        _shell.shell_tool,
+        tags=["system", "shell", "side-effect:write", "capability:system.shell.execute"],
+    )
+    r.register(
+        _shell.read_file,
+        tags=["filesystem", "read", "side-effect:read", "capability:filesystem.read"],
+    )
+    r.register(
+        _shell.write_file,
+        tags=["filesystem", "write", "side-effect:write", "capability:filesystem.write"],
+    )
+    r.register(
+        _shell.list_directory,
+        tags=["filesystem", "list", "side-effect:read", "capability:filesystem.read"],
+    )
+    r.register(
+        _shell.file_search,
+        tags=["filesystem", "search", "side-effect:read", "capability:filesystem.read"],
+    )
     return r
 
 

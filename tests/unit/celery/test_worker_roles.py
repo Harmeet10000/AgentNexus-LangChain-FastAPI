@@ -58,6 +58,7 @@ def test_jobs_namespace_registers_once() -> None:
     importlib.import_module("app.worker.jobs.auth")
     names = [name for name in celery_app.tasks if name.startswith("auth.")]
     assert sorted(names) == [
+        "auth.pending_revocation_reconcile",
         "auth.send_password_reset_email",
         "auth.send_verification_email",
     ]

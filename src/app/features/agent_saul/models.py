@@ -19,6 +19,7 @@ from typing import Any  # noqa: TC003 — ORM mapper resolves at runtime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     Enum,
     Index,
@@ -54,12 +55,13 @@ MESSAGE_KIND_VALUES = (
     "clarification_reply",
     "plan_prompt",
     "plan_decision",
+    "review_decision",
     "final_summary",
     "turn_closed",
 )
 _KIND_CHECK_SQL = (
     "kind IN ('query', 'clarification_prompt', 'clarification_reply', "
-    "'plan_prompt', 'plan_decision', 'final_summary', 'turn_closed')"
+    "'plan_prompt', 'plan_decision', 'review_decision', 'final_summary', 'turn_closed')"
 )
 
 SESSION_STATUS_VALUES: tuple[str, ...] = _SESSION_STATUS_VALUES
@@ -96,6 +98,11 @@ class ChatSession(Base):
     turn_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     last_checkpoint_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_checkpoint_ts: Mapped[datetime | None] = mapped_column(nullable=True)
+    # Validated resume evidence, written before Command(resume=...) and
+    # cleared in the same transaction that inserts its plan_decision row.
+    pending_plan_decision_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pending_plan_decision_modified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    pending_plan_decision_checkpoint_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

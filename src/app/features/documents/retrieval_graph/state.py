@@ -54,6 +54,8 @@ class RetrievedChunk(BaseModel):
     clause_type: str
     parent_doc_id: str
     chunk_index: int = 0
+    # NULL means legacy ingestion or an unknown contract boundary.
+    contract_index: int | None = Field(default=None, ge=0)
     metadata_: dict[str, object]
     custom_metadata: dict[str, object]
     score: float
@@ -65,6 +67,7 @@ class Citation(BaseModel):
     chunk_id: str
     clause_type: str
     claim: str
+    contract_index: int | None = Field(default=None, ge=0)
 
 
 class ContextGrade(BaseModel):
@@ -85,8 +88,12 @@ class GeneratedAnswer(BaseModel):
 
 class RetrievalState(MessagesState, total=False):
     user_id: str
+    tenant_id: str
+    allowed_doc_ids: list[str]
+    scope_bound: bool
     query: str
     doc_ids_filter: list[str]
+    contract_index: int | None
     query_plan: QueryPlan
     graph_chunk_ids: list[str]
     retrieved_chunks: list[RetrievedChunk]

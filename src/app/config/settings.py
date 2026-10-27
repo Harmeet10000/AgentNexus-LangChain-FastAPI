@@ -184,6 +184,8 @@ class Settings(BaseSettings):
     # Note: REDIS_DB and CACHE_TTL were not in your ENV, so they remain as defaults
     REDIS_DB: int = Field(default=0)
     CACHE_TTL: int = Field(default=3600)
+    # Handles must survive the documented 24-hour HITL pause window.
+    EVIDENCE_HANDLE_TTL_SECONDS: int = Field(default=86_400, ge=86_400, le=7 * 86_400)
 
     # ---RabbitMQ Configuration---
     RABBITMQ_URL: str = Field(default="amqp://guest:guest@localhost:5672//")
@@ -271,9 +273,10 @@ class Settings(BaseSettings):
     GEMINI_TOP_K: int = Field(default=20, gt=0)
     GEMINI_MAX_TOKENS: int = Field(default=2048)
     GEMINI_CONTEXT_CACHE_TTL: str = Field(default="3600s", min_length=1)
-    LANGEXTRACT_API_KEY: SecretStr = Field(
-        default=SecretStr("empty-langextract-api-key")
-    )  # Added this missing field
+    LANGEXTRACT_API_KEY: SecretStr = Field(default=SecretStr("empty-langextract-api-key"))
+    # LangExtract's model_id is provider-routed; keep this exact and validated
+    # so stale settings cannot silently downgrade document extraction.
+    LANGEXTRACT_MODEL: Literal["gemini-3.5-flash-lite"] = Field(default="gemini-3.5-flash-lite")
 
     # --- Pinecone Vector Database ---
     PINECONE_API_KEY: SecretStr = Field(default=SecretStr(""))
@@ -440,6 +443,19 @@ class Settings(BaseSettings):
     # 750ms assumes DB co-location; raise for dev against WAN Postgres
     # (each round trip was measured at 237-681ms, so several per boundary).
     SAUL_PROJECTION_TIMEOUT_MS: float = Field(default=750)
+    SAUL_MAX_MODEL_CALLS: int = Field(default=32, ge=0)
+    SAUL_MAX_RETRIEVAL_CALLS: int = Field(default=30, ge=0)
+    SAUL_MAX_TOOL_CALLS: int = Field(default=50, ge=0)
+    SAUL_MAX_DEEP_RESEARCH_FANOUT: int = Field(default=4, ge=0)
+    SAUL_MAX_TOKEN_USAGE: int = Field(default=100_000, ge=0)
+    SAUL_MAX_WALL_CLOCK_SECONDS: int = Field(default=1_800, ge=1)
+
+    # --- Agent tool workspace jail (PLAN-agent-tools.md D0) ---
+    # Every path taken by the shell/filesystem tools must resolve inside one of
+    # these roots; symlinks are resolved before the check. Empty means the
+    # tools refuse — deny-by-default. Env form is a JSON array, e.g.
+    # TOOL_WORKSPACE_ROOTS='["/srv/tool-workspace"]'.
+    TOOL_WORKSPACE_ROOTS: tuple[str, ...] = Field(default_factory=tuple)
 
     # --- Uvicorn WebSocket Transport ---
     UVICORN_WS_MAX_SIZE: int = Field(default=1_048_576)
@@ -463,9 +479,22 @@ class Settings(BaseSettings):
     S3_PUBLIC_URL: str = Field(default="")
 
     # --- File Upload ---
-    MAX_UPLOAD_SIZE: int = Field(default=10485760)  # 10MB
+    # Benchmark decision (scripts/benchmark_upload_pipeline.py): retain a 10 MiB
+    # cap. The request path reads at most cap+1 bytes, while Docling can expand
+    # a compact PDF substantially during OCR/table inference. Operators may
+    # lower or raise this within the hard 25 MiB safety ceiling after rerunning
+    # the benchmark on the production worker image.
+    MAX_UPLOAD_SIZE: int = Field(default=10 * 1024 * 1024, gt=0, le=25 * 1024 * 1024)
+    DOCUMENT_EXTRACTION_TIMEOUT_SECONDS: float = Field(default=120.0, gt=0, le=900.0)
+    DOCUMENT_EXTRACTION_MAX_PAGES: int = Field(default=250, ge=1, le=2_000)
+    DOCUMENT_EXTRACTION_MAX_OUTPUT_BYTES: int = Field(
+        default=50 * 1024 * 1024,
+        gt=0,
+        le=250 * 1024 * 1024,
+    )
     ALLOWED_EXTENSIONS: list[str] = Field(
-        default_factory=lambda: ["pdf", "txt", "docx", "xlsx", "pptx", "md", "html"]
+        default_factory=lambda: ["pdf", "txt", "docx", "xlsx", "pptx", "md", "html"],
+        min_length=1,
     )
 
     # --- Razorpay Billing ---

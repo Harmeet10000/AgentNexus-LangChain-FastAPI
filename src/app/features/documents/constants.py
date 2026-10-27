@@ -41,6 +41,11 @@ DISKANN_QUERY_RESCORE = 50
 INGEST_EMBEDDING_BATCH_SIZE = 200
 ANALYZE_THRESHOLD_CHUNKS = 10_000
 
+# Explicit provenance for the canonical chunk pipeline.  This is kept in the
+# schema (rather than inferred from JSON metadata) so cache keys and durable
+# evidence handles can reject stale bytes deterministically.
+CANONICAL_PIPELINE_VERSION = "documents-v1"
+
 # --- schema identifiers (asserted by the gate; see the module docstring) ------
 
 CHUNKS_BM25_INDEX_NAME = "chunks_bm25_idx"

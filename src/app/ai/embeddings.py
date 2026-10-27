@@ -5,10 +5,11 @@ Six paths existed before this module. Four of them are named by task B1; two are
 1. ``features/search/embeddings.build_embedding_client`` — a fresh provider client per call.
 2. ``features/documents/service`` — imported that same builder, so two features were already
    one path, and it was the only caller that declared a task type at all.
-3. ``langgraph_layer/ingestion_kb/nodes._call_embedding_fn`` — duck-typed the callable through
-   three candidate method names, embedded one text per call, declared no task type.
-4. ``langgraph_layer/retrieval_kb/nodes._call_embedding_fn`` — **byte-identical** to (3), and
-   sharing its Redis keyspace. B1 counts (3) and (4) as one path; they are two files.
+3. The superseded shared ingestion graph — duck-typed the callable through three candidate
+   method names, embedded one text per call, and declared no task type.
+4. The retrieval graph's equivalent helper — **byte-identical** to the superseded ingestion
+   helper, and sharing its Redis keyspace. B1 counted both as one path; both legacy helpers are
+   now gone.
 5. ``rag/docling/embedder`` — the batch carve-out, fixed under A2/A3. Decision 15
    keeps it batch-only, so it is deliberately **not** folded in here.
 6. ``langchain_layer/models.aembed_text`` / ``aembed_batch`` — dead: nothing imported them, and

@@ -70,3 +70,49 @@ async def test_graph_retrieval_degrades_on_exhausted_retry(
         }
     )
     assert result == {"graph_chunk_ids": []}
+
+
+async def test_graph_retrieval_uses_only_server_document_scope() -> None:
+    calls: list[dict[str, object]] = []
+
+    class _ScopedGraphiti:
+        async def search(self, **kwargs: object) -> list[object]:
+            calls.append(kwargs)
+            return []
+
+    node = make_graph_retrieval_node(_ScopedGraphiti())
+    await node(
+        {
+            "user_id": "user-1",
+            "allowed_doc_ids": ["doc-authorized"],
+            "scope_bound": True,
+            "query_plan": QueryPlan(rewritten_query="who may terminate?"),
+            "doc_ids_filter": ["doc-authorized", "doc-requested-but-unauthorized"],
+        }
+    )
+
+    assert calls == [
+        {
+            "query": "who may terminate?",
+            "group_ids": ["doc-authorized"],
+            "num_results": 20,
+        }
+    ]
+
+
+async def test_graph_retrieval_fails_closed_without_server_scope() -> None:
+    class _MustNotSearch:
+        async def search(self, **_: object) -> list[object]:
+            message = "graph retrieval widened an absent document scope"
+            raise AssertionError(message)
+
+    node = make_graph_retrieval_node(_MustNotSearch())
+    result = await node(
+        {
+            "user_id": "user-1",
+            "query_plan": QueryPlan(rewritten_query="who may terminate?"),
+            "doc_ids_filter": ["doc-requested"],
+        }
+    )
+
+    assert result == {"graph_chunk_ids": []}

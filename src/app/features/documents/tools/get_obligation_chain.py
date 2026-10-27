@@ -22,12 +22,15 @@ That's multi-hop legal reasoning.  Most RAG systems can't do step 3.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
-from langchain_core.tools import tool
+from langchain.tools import ToolRuntime
+from langchain_core.tools import InjectedToolArg, tool
 
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
+
+from .authorization import trusted_tool_context
 
 if TYPE_CHECKING:
     from langchain_core.tools.base import BaseTool
@@ -45,11 +48,12 @@ def make_get_obligation_chain_tool(
     @tool
     async def get_obligation_chain(
         entity_name: str,
-        user_id: str,
-        doc_id: str,
-        thread_id: str,
-        step_id: str,
         *,
+        runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
+        user_id: Annotated[str | None, InjectedToolArg] = None,
+        doc_id: Annotated[str | None, InjectedToolArg] = None,
+        thread_id: Annotated[str | None, InjectedToolArg] = None,
+        step_id: Annotated[str | None, InjectedToolArg] = None,
         depth: int = 3,
     ) -> dict[str, object]:
         """Trace obligations and consequences connected to a named entity.
@@ -57,6 +61,21 @@ def make_get_obligation_chain_tool(
         Use this when the agent needs forward-chained legal consequences such
         as liability propagation, triggered penalties, or downstream duties.
         """
+        authz = trusted_tool_context(
+            runtime,
+            legacy_user_id=user_id,
+            legacy_doc_id=doc_id,
+            legacy_thread_id=thread_id,
+            legacy_step_id=step_id,
+        )
+        authz.require_operation("document.read")
+        if not authz.allowed_doc_ids:
+            return ToolResult.fail(
+                "No authorized documents were supplied for this analysis.",
+                tool="get_obligation_chain",
+            ).model_dump()
+        doc_id = authz.allowed_doc_ids[0] if authz.allowed_doc_ids else ""
+        authz.require_document(doc_id)
         log = logger.bind(
             tool="get_obligation_chain",
             entity_name=entity_name,
@@ -65,10 +84,18 @@ def make_get_obligation_chain_tool(
         )
 
         idempotency_key = IdempotencyGuard.make_key(
-            step_id=step_id,
+            step_id=authz.step_id,
             structural={"doc_id": doc_id, "depth": depth},
             content={"entity_name": entity_name},
-            user_id=user_id,
+            user_id=authz.user_id,
+            tool_name="get_obligation_chain",
+            tenant_id=authz.tenant_id,
+            allowed_doc_ids=authz.allowed_doc_ids,
+            evidence_policy="mechanically_verified",
+            document_versions=authz.document_versions,
+            thread_id=authz.thread_id,
+            run_id=authz.run_id,
+            checkpoint_id=authz.checkpoint_id,
         )
 
         cached_result = await idempotency.get(idempotency_key)
@@ -78,9 +105,10 @@ def make_get_obligation_chain_tool(
 
         graph_results = await graphiti_service.get_obligation_chain(
             entity_name=entity_name,
-            user_id=user_id,
+            user_id=authz.tenant_id,
             doc_id=doc_id,
             depth=depth,
+            allowed_doc_ids=authz.allowed_doc_ids,
         )
         sorted_results = sorted(
             graph_results,
@@ -102,9 +130,9 @@ def make_get_obligation_chain_tool(
             key=idempotency_key,
             result=tool_result,
             tool_name="get_obligation_chain",
-            user_id=user_id,
-            thread_id=thread_id,
-            step_id=step_id,
+            user_id=authz.tenant_id,
+            thread_id=authz.thread_id,
+            step_id=authz.step_id,
         )
 
         log.info("obligation_chain_traced", hop_count=len(sorted_results))

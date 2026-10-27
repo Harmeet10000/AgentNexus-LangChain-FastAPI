@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from io import BytesIO
 from typing import TYPE_CHECKING
 
@@ -18,7 +19,24 @@ if TYPE_CHECKING:
     from docling_core.types.doc.document import DoclingDocument
 
 
-async def parse_document(*, raw_bytes: bytes, filename: str, content_type: str) -> ParsedDocument:
+DEFAULT_EXTRACTION_TIMEOUT_SECONDS = 120.0
+DEFAULT_EXTRACTION_MAX_PAGES = 250
+DEFAULT_EXTRACTION_MAX_OUTPUT_BYTES = 50 * 1024 * 1024
+
+
+class DocumentExtractionBudgetError(RuntimeError):
+    """Raised when parsing exceeds a bounded production resource budget."""
+
+
+async def parse_document(
+    *,
+    raw_bytes: bytes,
+    filename: str,
+    content_type: str,
+    extraction_timeout_seconds: float = DEFAULT_EXTRACTION_TIMEOUT_SECONDS,
+    max_pages: int = DEFAULT_EXTRACTION_MAX_PAGES,
+    max_output_bytes: int = DEFAULT_EXTRACTION_MAX_OUTPUT_BYTES,
+) -> ParsedDocument:
     """Parse an uploaded document into markdown, off the event loop.
 
     The conversion runs in a worker thread. Docling's ``convert`` is synchronous and CPU-bound —
@@ -28,10 +46,9 @@ async def parse_document(*, raw_bytes: bytes, filename: str, content_type: str) 
     database round trip, not a websocket heartbeat. It is the kind of defect no gate can see,
     because the code is correct in isolation and only wrong about where it runs.
 
-    ``asyncer.asyncify`` rather than ``asyncio.to_thread``, matching
-    ``ingestion_kb/nodes._parse_document_with_docling`` — the same offload for the same converter
-    in the other ingestion path. Change 2 consolidates these two; arriving there with two
-    different offload idioms would make that a reconciliation instead of a deletion.
+    ``asyncer.asyncify`` rather than ``asyncio.to_thread`` keeps the canonical
+    document-ingestion path explicit and avoids the superseded shared ingestion
+    graph's former duplicate parser helper.
 
     The converter is built **inside** the offloaded function, so it is still one per call. That is
     deliberate rather than overlooked: making it a cached singleton is the obvious next
@@ -41,6 +58,9 @@ async def parse_document(*, raw_bytes: bytes, filename: str, content_type: str) 
     that, which this task does not have.
     """
     del content_type
+    if extraction_timeout_seconds <= 0 or max_pages < 1 or max_output_bytes < 1:
+        message = "document extraction budgets must be positive"
+        raise ValueError(message)
     if not raw_bytes:
         return ParsedDocument(title=filename or "uploaded-document", markdown="", page_count=0)
 
@@ -51,10 +71,18 @@ async def parse_document(*, raw_bytes: bytes, filename: str, content_type: str) 
         )
         document: DoclingDocument = result.document
         markdown: str = document.export_to_markdown()
+        page_count = len(getattr(document, "pages", []) or [])
+        if page_count > max_pages:
+            message = f"document has {page_count} pages; limit is {max_pages}"
+            raise DocumentExtractionBudgetError(message)
+        output_size = len(markdown.encode("utf-8"))
+        if output_size > max_output_bytes:
+            message = f"extracted output is {output_size} bytes; limit is {max_output_bytes}"
+            raise DocumentExtractionBudgetError(message)
         return ParsedDocument(
             title=_extract_title(markdown, filename),
             markdown=markdown,
-            page_count=len(getattr(document, "pages", []) or []),
+            page_count=page_count,
             # This field used to be built as an empty literal. The converter is configured with
             # `do_table_structure = True` (`docling_enhanced.py:67`), so every table was being
             # detected, laid out, and then dropped one line later — paid for on every upload and
@@ -64,7 +92,12 @@ async def parse_document(*, raw_bytes: bytes, filename: str, content_type: str) 
             structural_tree=_serialize_structural_tree(document),
         )
 
-    return await asyncer.asyncify(function=_sync_parse)()
+    try:
+        async with asyncio.timeout(extraction_timeout_seconds):
+            return await asyncer.asyncify(function=_sync_parse)()
+    except TimeoutError as exc:
+        message = f"document extraction exceeded {extraction_timeout_seconds:g}s wall-clock budget"
+        raise DocumentExtractionBudgetError(message) from exc
 
 
 def _serialize_structural_tree(document: DoclingDocument) -> dict[str, object]:

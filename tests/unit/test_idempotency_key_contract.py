@@ -8,7 +8,9 @@ canonicalised free-text ``content`` (None for writes), one prefix generation.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
+import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
@@ -74,6 +76,42 @@ def test_content_none_differs_from_content_present() -> None:
         step_id="s", structural={"d": 1}, user_id="u", content={"query": "q"}
     )
     assert write != read
+
+
+def test_unscoped_key_keeps_v1_digest_for_in_flight_continuations() -> None:
+    payload = json.dumps(
+        {
+            "step_id": "s",
+            "structural": {"d": 1},
+            "content": None,
+            "user_id": "u",
+        },
+        sort_keys=True,
+        default=str,
+    )
+    expected = hashlib.sha256(payload.encode()).hexdigest()
+    assert (
+        IdempotencyGuard.make_key(step_id="s", structural={"d": 1}, user_id="u", content=None)
+        == expected
+    )
+
+
+def test_scoped_key_isolated_by_tenant_and_document_capability() -> None:
+    first = IdempotencyGuard.make_key(
+        step_id="s",
+        structural={"doc_id": "d"},
+        user_id="u",
+        tenant_id="tenant-a",
+        allowed_doc_ids=("d",),
+    )
+    second = IdempotencyGuard.make_key(
+        step_id="s",
+        structural={"doc_id": "d"},
+        user_id="u",
+        tenant_id="tenant-b",
+        allowed_doc_ids=("d",),
+    )
+    assert first != second
 
 
 @pytest.mark.asyncio

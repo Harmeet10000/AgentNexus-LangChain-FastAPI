@@ -14,6 +14,7 @@ from app.connections.checkpointer import (
     setup_langgraph_checkpointer,
 )
 from app.features.agent_saul.graph import build_saul_graph
+from app.features.documents.service.evidence import build_evidence_service
 from app.features.documents.tools.bundle import build_tool_bundle
 from app.resilience.idempotency import (
     IdempotencyGuard,
@@ -28,11 +29,12 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     from langgraph.graph.state import CompiledStateGraph
     from redis.asyncio import Redis
-    from sqlalchemy.ext.asyncio import AsyncEngine
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
     from app.config.settings import Settings
     from app.connections.object_storage import StorageService
     from app.extraction.langextract.service import AsyncExtractionService
+    from app.features.documents.service.evidence import EvidenceService
     from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
 
     type IngestDocumentFn = Callable[..., Awaitable[Any]]
@@ -91,16 +93,25 @@ def provide_saul_graph(
     checkpointer: AsyncPostgresSaver,
     redis: Redis,
     db_engine: AsyncEngine,
+    session_factory: async_sessionmaker[AsyncSession],
     graphiti: GraphitiService,
+    evidence_service: EvidenceService | None = None,
 ) -> CompiledStateGraph[Any]:
     """Compile Agent Saul once from already-provisioned process resources."""
 
     memory_service = provide_agent_memory_service(settings)
     idempotency = IdempotencyGuard(redis=redis, db_engine=db_engine)
+    if evidence_service is None:
+        evidence_service = build_evidence_service(
+            session_factory=session_factory,
+            redis=redis,
+            handle_ttl_seconds=settings.EVIDENCE_HANDLE_TTL_SECONDS,
+        )
     tool_bundle = build_tool_bundle(
         graphiti_service=graphiti,
         db_engine=db_engine,
         idempotency=idempotency,
+        evidence_service=evidence_service,
     )
     pro_llm = build_chat_model(model_name=settings.GEMINI_PRO_MODEL)
     flash_llm = build_chat_model(model_name=settings.GEMINI_FLASH_MODEL)

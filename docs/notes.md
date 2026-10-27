@@ -138,4 +138,198 @@ t keeps you from hearing it. Delete those 20 lines, watch what explodes, and the
 ※ recap: Your goal was analysing AGENTS.md and building a four-agent workflow; both are done, with nine files 
   created under .claude/ plus a CLAUDE.md port. Next: restart Claude Code so they load, then try /relay on a 
   task. (disable recaps in /config)
-  
+
+
+
+  Ask User
+Completed with input: {
+  "question": "Ready to proceed: how should I start executing the plan?",
+  "choices": [
+    "Draft the changes and open a feature branch + PR (Recommended)",
+    "Implement the integration directly on main/branch now",
+    "Hold — I want to discuss details first"
+  ]
+}
+
+Search for `class .*DocumentRepository|def .*save_clause|def .*write_clause|DocumentRepos...`
+
+Read
+Completed with input: {
+  "path": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/documents/repository.py"
+}
+
+Read , lines 1 to 220
+Completed with input: {
+  "path": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/documents/repository.py",
+  "view_range": [
+    1,
+    220
+  ]
+}
+
+Read , lines 220 to 520
+Completed with input: {
+  "path": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/documents/repository.py",
+  "view_range": [
+    220,
+    520
+  ]
+}
+
+Read , lines 520 to 864
+Completed with input: {
+  "path": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/documents/repository.py",
+  "view_range": [
+    520,
+    864
+  ]
+}
+
+Search for `clause`
+
+Search for `write_clause|write_clause_episode|write_clause_episodes|upsert_clause|clauses`
+
+Read
+Tool execution failed: rg: regex parse error:
+    (?:INSERT INTO clauses|upsert_clause|clauses ()
+    ^
+error: unclosed group
+
+Search for `INSERT INTO clauses|upsert_clause|upsert_clauses|write_clause`
+
+Read , lines 620 to 780
+Completed with input: {
+  "path": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/documents/service/ingest.py",
+  "view_range": [
+    620,
+    780
+  ]
+}
+
+Great — below is a concrete, actionable list of the files the integration will touch or add, with exactly what to change in each and why. This is suitable to hand to another agent (or use to open a feature branch/PR).
+
+High-level summary of what the agent you hand this to should do
+- Implement a side-effect-free “contract enrichment” stage set (schema extraction, clause segmentation, contextualization, entity extraction) re-using B’s logic but exported as callable functions.
+- Call those stages from A’s ingestion path only for contract documents (classifier gating).
+- Keep A the only persistence/writer: map enrichment outputs to the existing clause writer/graph writer and A’s repository methods (do not let B perform its own persistence).
+- Add config feature flag and tests; keep behavior backward-compatible and fail-open (enrichment errors → log + continue with baseline ingestion).
+
+Files to change or add
+1) Modify (A): src/app/features/documents/service/ingest.py
+- Why: This is A’s ingestion workflow and already contains _extract_document_knowledge and clause write helpers.
+- Change:
+  - Add gating (config-driven) to run contract-enrichment only when classifier identifies a contract (use existing classified.document_kind or classified.contract_type).
+  - Replace or extend the current call site so enrichment runs in place of (or in addition to) current extraction only for contract docs:
+    - If enrichment is enabled and doc is contract: call the new enrichment adapter function (see new files).
+    - Map enrichment results to the existing _write_extracted_clause_episodes (or a new adapter that converts the enrichment output into ClauseSegment objects).
+  - Ensure idempotency and error-handling: enrichment failures do not mark whole ingestion failed; record enrichment_incomplete flag or similar.
+  - Add unit tests references and docstrings.
+- Files / locations referenced in code:
+  - call into src/app/shared/langgraph_layer/ingestion_kb/stages.py (new)
+  - call into src/app/features/documents/service/enrichment_adapter.py (new)
+
+2) New (B-stage extraction wrapper): src/app/shared/langgraph_layer/ingestion_kb/stages.py  (NEW)
+- Why: Export B’s LLM stages as pure/callable functions so A can call them without invoking B’s full graph or persistence wiring.
+- Contents:
+  - extract_schema(markdown: str, llm: BaseChatModel, ... ) -> ContractMetadata (typed)
+  - segment_document(markdown: str, llm: BaseChatModel, ...) -> list[ClauseSegmentLike]
+  - contextualize_chunks(segments: list[ClauseSegmentLike], llm: BaseChatModel, ...) -> list[ContextualizedChunkLike]
+  - extract_entities(contextualized_chunks, llm, ...) -> Entities/Relationships structure
+- Implementation approach:
+  - Reuse and factor out logic from src/app/shared/langgraph_layer/ingestion_kb/nodes.py where possible.
+  - Keep these functions side-effect free (no DB, no Graphiti writes, no embedding).
+  - Make the functions accept configuration (temperature, model, prompt variants) and a small context object.
+- Tests:
+  - Add unit tests to validate outputs for small synthetic Markdown inputs.
+
+3) Modify (small refactor): src/app/shared/langgraph_layer/ingestion_kb/nodes.py
+- Why: nodes.py currently returns node factories for the graph. Keep the graph node factories but refactor to call stages.py functions. That allows the graph to keep working as before but provides a reusable API for A.
+- Change:
+  - Move pure LLM logic into stages.py and have the node factories call those functions inside the node implementations.
+  - Minimal API-stable changes so existing tests for the graph still pass.
+
+4) New (adapter): src/app/features/documents/service/enrichment_adapter.py (NEW)
+- Why: Convert B-stage typed outputs into the types/writers A already uses (ClauseSegment, GraphIngestionContext, etc).
+- Contents:
+  - adapter function map_enrichment_to_clause_segments(enrichment_output, document_id, user_id, jurisdiction, document_type) -> list[app.features.agent_saul.graph.state.ClauseSegment]
+  - optional helper: convert contextualized chunk -> chunk_rows for A’s upsert_chunks path if you want DB clause rows
+  - Use the same ClauseSegment dataclass/enums used by write_clause_episodes_to_graphiti so existing writers can be reused without changes.
+- Failure handling:
+  - If mapping fails, raise a handled FeatureError or return a structured failure object so ingest.py can mark enrichment_incomplete but continue.
+
+5) Existing writer reuse (no new persistence): src/app/shared/rag/graphiti/write_clause_episodes.py and src/app/shared/rag/graphiti/client.py
+- Why: A already uses write_clause_episodes_to_graphiti in ingest.py. Keep using it — adapter will create the ClauseSegment list for it.
+- Change:
+  - No change required usually, but confirm idempotency usage and API signatures; update if adapter fields differ.
+
+6) Possibly modify repository if clause rows needed: src/app/features/documents/repository.py
+- Why: If you want to persist clause rows into the DB (clauses table) in addition to Graphiti, repository should have methods to upsert clause rows and manage chunk-clause relationships.
+- Change (if chosen):
+  - Add upsert_clauses(clause_rows: list[dict]) style method that uses existing transaction/session patterns as upsert_chunks does.
+  - Add/extend helper build_clause_rows(...) if necessary.
+- Note: The DB already has migrations creating a clauses table; prefer using repository APIs rather than writing raw SQL from the enrichment adapter.
+
+7) Config: src/app/config/settings.py (or your project’s settings module)
+- Why: Add a feature flag to enable/disable enrichment and a small config for allowed document types.
+- Add:
+  - ENRICH_CONTRACTS_ENABLED: bool (default False)
+  - ENRICH_DOCUMENT_KINDS: list[str] (default ["contract", "agreement", ...]) or use classifier outputs
+  - ENRICH_LLAMA_MODEL or ENRICH_LLM_MODEL override if needed (optional)
+- Use existing settings patterns.
+
+8) Ingestion graph / worker wiring (minimal): src/app/worker/documents.py & src/app/lifecycle/graphs.py
+- Why: If enrichment requires the process-scoped LLM instance or other process-only collaborators, ensure those collaborators are available in the worker’s ingestion_graph runtime (the worker already calls provide_document_ingestion_graph).
+- Change:
+  - Ensure the worker constructs/builds the LLM model (it already does when providing the graph).
+  - If stages.py needs a model instance, either pass runtime.llm (already in runtime) or let stages instantiate via build_chat_model if necessary.
+- Likely only minor parameter wiring changes.
+
+9) Tests:
+- Add unit tests and integration tests:
+  - tests/unit/features/documents/test_enrichment_adapter.py — validate adapter maps staged outputs to ClauseSegment and GraphIngestionContext.
+  - tests/unit/shared/langgraph_layer/test_stages.py — tests for pure LLM stage wrappers (mock LLM responses).
+  - tests/integration/test_contract_flow.py — end-to-end: upload a contract fixture via the worker path with enrichment enabled and assert clauses persisted and persisted only once on retry.
+- Run commands:
+  - uv run ruff check --fix src/
+  - uv run ty check src/
+  - uv run pytest tests/unit/... (start with focused tests)
+
+10) Docs / operational runbook
+- Update the architecture note and add an entry describing the contract-enrichment feature, config flags, and failure policy.
+  - File: docs/ingestion/CONTRACT-ENRICHMENT.md or an appropriate repo docs area.
+
+11) CI & local validation steps (hand-off instructions)
+- After code changes, run:
+  - codegraph sync .
+  - uv run ruff check --fix src/
+  - uv run ty check src/
+  - uv run pytest tests/unit/features/documents/test_enrichment_adapter.py
+  - uv run pytest tests/integration/test_contract_flow.py (or run targeted integration)
+- When ready, open a feature branch and PR with tests & CI passing.
+
+Notes and important decisions for the implementing agent
+- Keep enrichment side-effect-free: do not perform DB inserts or Graphiti writes inside stages.py. That makes the new stages composable and easier to test.
+- Mapping / canonical writer: A remains the single writer. The enrichment adapter must produce the exact ClauseSegment shape expected by write_clause_episodes_to_graphiti (already used in A).
+- Idempotency: reuse the existing IdempotencyGuard used by the ingestion worker; ensure adapter/writer uses the same idempotency keys to avoid duplicate Graphiti writes on retries.
+- Failure policy: enrichment errors should not mark the ingestion as failed—mark enrichment_incomplete, log, and move on to baseline ingestion.
+- Feature flag: gate the change with ENRICH_CONTRACTS_ENABLED to allow staged rollout and easy rollback.
+- Tests: test the gating, mapping, idempotency on retry, and failure fallback behavior.
+
+Suggested branch/PR naming and commit plan
+- Branch name: feat/ingest-contract-enrichment
+- Commit 1: add config flag + tests skeleton
+- Commit 2: add stages.py with minimal implementations (happy-path mocks)
+- Commit 3: add enrichment_adapter.py and unit tests
+- Commit 4: wire ingestion.py to call adapter, add gating
+- Commit 5: integration tests, CI fixes, docs
+- PR body: include the implementation plan, test run outputs, and an explicit rollback procedure (disable ENRICH_CONTRACTS_ENABLED)
+
+Estimated effort & risk
+- Effort (implementation-only): small-to-moderate (2–4 dev days) depending on test coverage & mocking strategy for LLM responses.
+- Risk: medium — domain model differences between B’s outputs and A’s writers may require small schema adapters. Mitigation: iterative approach with a feature flag and focused tests.
+
+Would you like:
+- a) A ready-to-hand manifest (this list packaged into a JSON/TOML manifest and a small skeleton of the new files) to hand to the executor agent, or
+- b) I can start implementing the minimal refactor now (create stages.py with small wrappers + adapter + gating) in a feature branch?
+
+(If you want the manifest/skeleton, say which format you prefer: JSON, markdown checklist, or a small patch with new files skeletons.)

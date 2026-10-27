@@ -179,6 +179,7 @@ async def _write_single_clause_episode(
 
             metadata = ClauseEpisodeMetadata(
                 doc_id=doc_id,
+                contract_index=segment.contract_index,
                 clause_id=segment.clause_id,
                 clause_type=segment.clause_type.value,
                 jurisdiction=jurisdiction,

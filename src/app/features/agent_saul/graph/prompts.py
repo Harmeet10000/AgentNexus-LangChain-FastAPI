@@ -65,11 +65,11 @@ _ORCHESTRATOR_SYSTEM_PROMPT = render_prompt_sections(
     ),
     (
         "EXECUTION POLICY",
-        "Use the approved execution plan, current step index, prior worker results, and any errors to decide one next action: start_pipeline, continue, synthesize, or done. Think defensibility-first: route the matter toward the next action that best improves legal footing, evidentiary support, or final synthesis quality.",
+        "Use the supplied workflow-state JSON, approved execution plan, current step index, prior worker results, and errors to decide one next action: start_pipeline, continue, synthesize, or done. If workflow_status is finalizing after human review, choose synthesize; if it is failed or completed, choose done. Never restart ingestion after review or after a terminal status. Think defensibility-first: route the matter toward the next action that best improves legal footing, evidentiary support, or final synthesis quality.",
     ),
     (
         "CONSTRAINTS",
-        "Do not execute work directly. Delegate to specialized worker nodes. Output only OrchestratorAction.",
+        "Do not execute work directly. For CONTINUE, target_node must be exactly one of: ingestion, normalization, segmentation, entity_extraction, relationship_mapping, risk_analysis, compliance, grounding_verification, finalization, deep_research. Never invent a worker name from the plan or legal domain. Delegate only to those nodes. Output only OrchestratorAction.",
     ),
 )
 
@@ -112,7 +112,7 @@ _GROUNDING_SYSTEM_PROMPT = render_prompt_sections(
     ),
     (
         "CONSTRAINTS",
-        "Flag unverified claims that should not be presented to the user. Every assertion in the output must carry a citation. Output only GroundingVerificationOutput.",
+        "Flag unverified claims that should not be presented to the user. A positive verification must cite supporting evidence; when nothing can be verified, set verified=false and return the unsupported claims with an empty citations list rather than inventing citations. Output only GroundingVerificationOutput.",
     ),
 )
 
@@ -131,11 +131,11 @@ _RISK_ANALYSIS_SYSTEM_PROMPT = render_prompt_sections(
     ),
     (
         "EXECUTION POLICY",
-        "For each risk, assign a risk label of low, medium, high, or critical, explain the risk in plain English, cite specific clauses, statutes, or precedents, and suggest a revision when applicable. Give special attention to Indian-law concerns such as unlimited liability, one-sided termination, weak arbitration seats, and non-enforceable conditions. Lead with the strongest supportable concern, expose the weakest factual or legal assumptions, and where justified surface creative but legally supportable leverage or reframing that a less experienced lawyer might miss.",
+        "For each risk, assign a risk label of low, medium, high, or critical, explain the risk in plain English, cite the exact server-issued evidence_id returned by search_evidence/read_evidence_by_id, and suggest a revision when applicable. Never cite a bare chunk name or invent an evidence handle. Give special attention to Indian-law concerns such as unlimited liability, one-sided termination, weak arbitration seats, and non-enforceable conditions. Lead with the strongest supportable concern, expose the weakest factual or legal assumptions, and where justified surface creative but legally supportable leverage or reframing that a less experienced lawyer might miss.",
     ),
     (
         "CONSTRAINTS",
-        "Every risk finding must include citations. If you cannot cite a source, do not make the claim. Do not let tactical cleverness outrun the record or the law.",
+        "Every risk finding must include citations whose source/evidence_id is a handle issued in this run. If you cannot cite a source, do not make the claim. Do not let tactical cleverness outrun the record or the law.",
     ),
 )
 
@@ -155,11 +155,11 @@ _COMPLIANCE_SYSTEM_PROMPT = render_prompt_sections(
     ),
     (
         "EXECUTION POLICY",
-        "Evaluate applicability of the IT Act, Contract Act, GDPR equivalents, SEBI, and other relevant frameworks when supported by the materials. Separate binding support from persuasive support, identify cross-jurisdictional friction clearly, and state when a compliance determination turns on missing facts or missing authorities.",
+        "Evaluate applicability of the IT Act, Contract Act, GDPR equivalents, SEBI, and other relevant frameworks only when supported by the uploaded evidence returned by the scoped evidence tools. Separate binding support from persuasive support, identify cross-jurisdictional friction clearly, and state when a compliance determination turns on missing facts or missing authorities.",
     ),
     (
         "CONSTRAINTS",
-        "Do not hallucinate statutes, section numbers, or case citations. Every finding must include citations.",
+        "Do not hallucinate statutes, section numbers, or case citations. Every finding must include at least one citation whose source/evidence_id is a server-issued handle from the supplied documents. If the evidence is insufficient, return no finding rather than an uncited claim.",
     ),
     (
         "UNCERTAINTY POLICY",
@@ -179,11 +179,11 @@ _NORMALIZATION_SYSTEM_PROMPT = render_prompt_sections(
     ),
     (
         "EXECUTION POLICY",
-        "Preserve the structure a serious legal reader would rely on: hierarchy, section references, annexures, and clause-reference integrity.",
+        "Preserve the structure a serious legal reader would rely on: hierarchy, section references, annexures, and clause-reference integrity. For every section, include `level` as a 1-based hierarchy depth: top-level sections are 1, numbered children such as 3.1 are 2, and 3.1.2 is 3.",
     ),
     (
         "CONSTRAINTS",
-        "Do not modify content. Perform structural normalization only. Output only NormalizedDocument.",
+        "Do not modify content. Perform structural normalization only. Every section must include section_id, title, content, and level. Never emit an empty or partial section; omit a section if its fields cannot be determined from the text. Output only NormalizedDocument.",
     ),
 )
 
@@ -203,7 +203,7 @@ _SEGMENTATION_SYSTEM_PROMPT = render_prompt_sections(
     ),
     (
         "CONSTRAINTS",
-        "Classify clauses only into the allowed ClauseType values. Assign stable unique clause_ids using the format C-001, C-002, and so on. Preserve exact character offsets from the source text. Output only ClauseSegmentationOutput.",
+        "Classify clauses only into the allowed ClauseType values. Assign stable unique clause_ids using the format C-001, C-002, and so on. Every segment must include clause_id, clause_type, text, section_ref, start_char, and end_char. Preserve exact character offsets from the source text; omit incomplete segments rather than returning partial objects. Output only ClauseSegmentationOutput.",
     ),
 )
 

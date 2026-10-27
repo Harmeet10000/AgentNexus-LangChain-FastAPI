@@ -34,9 +34,17 @@ def test_legacy_version_zero_is_upgraded_with_missing_keys() -> None:
     assert hydrated["permissions"] == {}
     assert hydrated["retry_count"] == 0
     assert hydrated["long_term_refs"] == []
+    assert hydrated["plan_rejection_feedback"] is None
     assert hydrated["user_id"] == "u1", "existing values must win over defaults"
     assert hydrated["status"] == "completed"
     assert legacy.keys() == {"schema_version", "user_id", "status"}, "input not mutated"
+
+
+def test_previous_current_version_is_upgraded_after_planner_state_addition() -> None:
+    hydrated = hydrate_state({"schema_version": 1, "plan": []})
+
+    assert hydrated["schema_version"] == STATE_SCHEMA_VERSION
+    assert hydrated["plan_rejection_feedback"] is None
 
 
 def test_absent_version_key_treated_as_legacy_and_upgraded() -> None:

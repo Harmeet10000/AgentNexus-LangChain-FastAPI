@@ -31,6 +31,17 @@ class TestSettingsProductionValidation:
         settings = Settings(ENVIRONMENT="development")
         assert settings.ENVIRONMENT == "development"
 
+    def test_langextract_uses_the_validated_production_model(self) -> None:
+        settings = Settings(ENVIRONMENT="development")
+        assert settings.LANGEXTRACT_MODEL == "gemini-3.5-flash-lite"
+
+    def test_langextract_rejects_unsupported_model_override(self) -> None:
+        with pytest.raises(ValueError, match="LANGEXTRACT_MODEL"):
+            Settings(
+                ENVIRONMENT="development",
+                LANGEXTRACT_MODEL="gemini-2.5-flash",
+            )
+
     def test_error_lists_all_bad_field_names(self) -> None:
         with pytest.raises(
             ValueError, match="The following secret fields have default/insecure values"

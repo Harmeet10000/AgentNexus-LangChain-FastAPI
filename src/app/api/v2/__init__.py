@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.envelope import StrictEnvelopeAPIRouter
 from app.features.agent_saul.router import router as agent_saul_router
 from app.features.auth.router import router as auth_router
+from app.features.auth.tenant_router import router as tenant_router
 from app.features.billing.credits.router import admin_router as credit_admin_router
 from app.features.billing.credits.router import internal_router as credit_internal_router
 from app.features.billing.dunning.router import router as dunning_router
@@ -35,6 +36,7 @@ for _router in (
 
 v2_router = StrictEnvelopeAPIRouter(prefix="/api/v2")
 v2_router.include_router(auth_router)
+v2_router.include_router(tenant_router)
 v2_router.include_router(crawler_router)
 v2_router.include_router(health_router)
 v2_router.include_router(ingestion_router)

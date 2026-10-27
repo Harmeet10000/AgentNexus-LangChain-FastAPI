@@ -1,168 +1,26 @@
-"""
-Precedent agent tools: hybrid retrieval combining pgvector + Neo4j subgraph expansion.
+"""Optional graph-structure tools for legal analysis.
 
-This implements the "Subgraph Retrieval > Vector Retrieval" pattern:
-  seed_nodes = vector.search(query)       ← pgvector cosine similarity on clauses
-  subgraph   = expand_neighbors(seeds)    ← Neo4j Cypher depth-N traversal
-
-The combination gives REASONING, not just recall:
-  Vector finds semantically similar clauses.
-  Subgraph follows their obligation chains to uncover connected risks.
-
-scope=PRECEDENT_SCOPE enforced: all entity types, all sources, depth=3, all time.
+The former ``hybrid_retrieve_precedents`` tool lived here, but its vector leg
+was a permanent stub and it was not bound to any live agent.  Precedent and
+statute discovery now belongs to the scoped evidence service; this module only
+retains the distinct graph-conflict operation.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.tools import tool
+from langchain.tools import ToolRuntime
+from langchain_core.tools import InjectedToolArg, tool
 from langchain_core.tools.base import BaseTool
 
-from app.ai.memory.memory_scope import PRECEDENT_SCOPE
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 
+from .authorization import trusted_tool_context
+
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncEngine
-
-    from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
     from app.retrieval.graphiti.subgraph import Neo4jSubgraphConfig
-
-
-def make_hybrid_retrieve_precedents_tool(
-    graphiti_service: GraphitiService,
-    subgraph_expander: Neo4jSubgraphConfig,
-    db_engine: AsyncEngine,
-    idempotency: IdempotencyGuard,
-) -> BaseTool:
-    """Factory: hybrid precedent retrieval tool.
-
-    Step 1: pgvector — find N most similar clauses from user's history
-    Step 2: Graphiti — semantic entity search scoped to user
-    Step 3: Neo4j subgraph — expand from seed entities (depth=PRECEDENT_SCOPE.graph_depth=3)
-    Step 4: Merge + deduplicate results
-    """
-
-    @tool
-    async def hybrid_retrieve_precedents(
-        query: str,
-        user_id: str,
-        doc_id: str,
-        thread_id: str,
-        step_id: str,
-        *,
-        num_results: int = 5,
-    ) -> dict[str, Any]:
-        """Retrieve legal precedents using hybrid vector + knowledge graph search.
-
-        Combines:
-          1. pgvector semantic clause search (user's historical clauses)
-          2. Graphiti knowledge graph search (cross-document entity patterns)
-          3. Neo4j subgraph expansion from seed entities (depth=3 hop traversal)
-
-        Returns structured precedents with similarity scores and obligation chains.
-        Scope: PRECEDENT_SCOPE — all entity types, all sources, all time.
-
-        Args:
-            query: Precedent search query (e.g., 'unlimited liability NDA India')
-            user_id: For memory namespace scoping
-            doc_id: Current document (included in scope for context)
-            thread_id: For idempotency audit
-            step_id: Plan step ID
-            num_results: Max precedents to return
-        """
-        log = logger.bind(tool="hybrid_retrieve_precedents", user_id=user_id)
-        scope = PRECEDENT_SCOPE
-
-        idem_key = IdempotencyGuard.make_key(
-            step_id=step_id,
-            structural={"num_results": num_results},
-            content={"query": query},
-            user_id=user_id,
-        )
-        cached = await idempotency.get(idem_key)
-        if cached is not None:
-            log.debug("precedent_hybrid_cache_hit")
-            return cached.model_dump()
-
-        # Layer 1: pgvector clause similarity — may be genuinely unavailable.
-        unavailable_layers: list[str] = []
-        try:
-            vector_results = await _vector_search_clauses(
-                _db_engine=db_engine,
-                _user_id=user_id,
-                _query=query,
-                _num_results=num_results,
-                _time_filter="all",
-            )
-        except RuntimeError:
-            unavailable_layers.append("pgvector_clauses")
-            vector_results = []
-
-        # Layer 2: Graphiti semantic entity search
-        graphiti_results = await graphiti_service.search_for_precedent_chains(
-            query=query,
-            user_id=user_id,
-            num_results=scope.top_k,
-        )
-
-        # Layer 3: Subgraph expansion from Graphiti seed entities
-        seed_uuids = [r.uuid for r in graphiti_results if r.uuid]
-        group_ids = [user_id, doc_id]
-        subgraph = await subgraph_expander.expand_from_seeds(  # ty: ignore[unresolved-attribute]
-            seed_uuids=seed_uuids,
-            scope=scope,
-            group_ids=group_ids,
-        )
-
-        if unavailable_layers and not graphiti_results:
-            # Nothing answered: report unavailability, never a fabricated empty answer.
-            unavailable = ToolResult.unavailable_result(
-                reason="no precedent layer available: " + ", ".join(unavailable_layers),
-                tool="hybrid_retrieve_precedents",
-            )
-            return unavailable.model_dump()
-
-        result = ToolResult.ok(
-            data={
-                "unavailable_layers": unavailable_layers,
-                "basis_unknown": bool(unavailable_layers),
-                "vector_clauses": vector_results[:num_results],
-                "graphiti_precedents": [
-                    {
-                        "name": r.name,
-                        "content": r.content,
-                        "relevance_score": r.relevance_score,
-                        "source": "graphiti",
-                    }
-                    for r in graphiti_results
-                ],
-                "subgraph_context": subgraph.to_context_text(),
-                "subgraph_node_count": len(subgraph.nodes),
-                "subgraph_edge_count": len(subgraph.edges),
-                "total_sources": len(vector_results) + len(graphiti_results),
-            },
-            tool="hybrid_retrieve_precedents",
-        )
-
-        await idempotency.set(
-            key=idem_key,
-            result=result,
-            tool_name="hybrid_retrieve_precedents",
-            user_id=user_id,
-            thread_id=thread_id,
-            step_id=step_id,
-        )
-        log.info(
-            "hybrid_precedent_done",
-            vector=len(vector_results),
-            graphiti=len(graphiti_results),
-            subgraph_nodes=len(subgraph.nodes),
-        )
-        return result.model_dump()
-
-    return hybrid_retrieve_precedents
 
 
 def make_detect_graph_conflicts_tool(
@@ -178,10 +36,8 @@ def make_detect_graph_conflicts_tool(
 
     @tool
     async def detect_graph_conflicts(
-        user_id: str,
-        doc_id: str,
-        thread_id: str,
-        step_id: str,
+        *,
+        runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Detect contradicting obligation patterns in the legal knowledge graph.
 
@@ -193,23 +49,37 @@ def make_detect_graph_conflicts_tool(
         Use this during risk analysis when relationships are complex.
 
         Args:
-            user_id: For graph namespace scoping
-            doc_id: Current document
-            thread_id: For idempotency audit
-            step_id: Plan step ID
+            Runtime identity and document scope are injected by LangGraph.
         """
+        authz = trusted_tool_context(runtime)
+        if not authz.allowed_doc_ids:
+            return ToolResult.fail(
+                "No authorized documents were supplied for this analysis.",
+                tool="detect_graph_conflicts",
+            ).model_dump()
+        doc_id = authz.allowed_doc_ids[0]
         log = logger.bind(tool="detect_graph_conflicts", doc_id=doc_id)
         idem_key = IdempotencyGuard.make_key(
-            step_id=step_id,
+            step_id=authz.step_id,
             structural={"doc_id": doc_id},
             content=None,
-            user_id=user_id,
+            user_id=authz.user_id,
+            tool_name="detect_graph_conflicts",
+            tenant_id=authz.tenant_id,
+            allowed_doc_ids=authz.allowed_doc_ids,
+            evidence_policy="graph_indexed_only",
+            document_versions=authz.document_versions,
+            thread_id=authz.thread_id,
+            run_id=authz.run_id,
+            checkpoint_id=authz.checkpoint_id,
         )
         cached = await idempotency.get(idem_key)
         if cached is not None:
             return cached.model_dump()
 
-        conflicts = await subgraph_expander.detect_conflicts(group_ids=[user_id, doc_id])  # ty: ignore[unresolved-attribute]
+        # The only groups accepted are server-issued document ids.  The old
+        # user/tenant group widened this operation to historical corpus data.
+        conflicts = await subgraph_expander.detect_conflicts(group_ids=list(authz.allowed_doc_ids))  # ty: ignore[unresolved-attribute]
 
         result = ToolResult.ok(
             data={
@@ -223,31 +93,11 @@ def make_detect_graph_conflicts_tool(
             key=idem_key,
             result=result,
             tool_name="detect_graph_conflicts",
-            user_id=user_id,
-            thread_id=thread_id,
-            step_id=step_id,
+            user_id=authz.user_id,
+            thread_id=authz.thread_id,
+            step_id=authz.step_id,
         )
         log.info("conflict_detection_done", conflicts=len(conflicts))
         return result.model_dump()
 
     return detect_graph_conflicts
-
-
-async def _vector_search_clauses(
-    _db_engine: AsyncEngine,
-    _user_id: str,
-    _query: str,
-    _num_results: int,
-    _time_filter: str,
-) -> list[dict[str, Any]]:
-    """pgvector cosine similarity search on clauses table.
-
-    Time filter: "recent" = last 90 days; "all" = no constraint.
-
-    Raises:
-        RuntimeError: always, until the query embedding lands. The caller
-            reports this layer as UNAVAILABLE instead of folding a silent empty
-            list into results that read as "no precedents exist".
-    """
-    msg = "pgvector clause layer not provisioned: query embedding not implemented"
-    raise RuntimeError(msg)

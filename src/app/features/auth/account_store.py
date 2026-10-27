@@ -22,9 +22,9 @@ if TYPE_CHECKING:
     from returns.result import Result
 
     from .exceptions import AuthError
-    from .models import User, UserRole
+    from .models import LegalRole, User, UserRole
 else:
-    from .models import ROLE_PERMISSIONS, OAuthAccount, User, UserRole
+    from .models import ROLE_PERMISSIONS, LegalRole, OAuthAccount, User, UserRole
 
 from .exceptions import (
     AuthConflictError,
@@ -59,8 +59,13 @@ class AuthAccount(BaseModel):
     is_active: bool
     is_verified: bool
     role: UserRole
+    tenant_id: str = ""
+    legal_roles: tuple[LegalRole, ...] = (LegalRole.ANALYST,)
     permissions: frozenset[str]
+    # Platform/session authorization generation.  Kept separate from the SQL
+    # tenant membership generation below.
     role_revision: int = 0
+    tenant_role_revision: int = 0
     session_revocation_pending: bool = False
     session_revocation_pending_at: datetime | None = None
     avatar_url: str | None = None
@@ -82,6 +87,9 @@ class NewAuthAccount(BaseModel):
     password_hash: str | None
     full_name: str | None = None
     role: UserRole = UserRole.USER
+    tenant_id: str | None = None
+    legal_roles: tuple[LegalRole, ...] = (LegalRole.ANALYST,)
+    tenant_role_revision: int = 0
     is_verified: bool = False
     is_active: bool = True
     verification_token_hash: str | None = None
@@ -221,6 +229,18 @@ class AuthAccountStore(Protocol):
         """Remove a provider identity when another sign-in method remains."""
         ...
 
+    async def set_tenant_binding(
+        self,
+        account_id: str,
+        *,
+        tenant_id: str,
+        legal_roles: tuple[LegalRole, ...],
+        tenant_role_revision: int | None = None,
+        role_revision: int | None = None,
+    ) -> Result[None, AuthError]:
+        """Synchronize the SQL-authoritative tenant membership mirror."""
+        ...
+
 
 # Implementation below (not in TYPE_CHECKING to avoid circular imports)
 # -----------------------------------------------------------------------------
@@ -235,6 +255,11 @@ class BeanieAuthAccountStore:
     @staticmethod
     def _to_auth_account(user: User) -> AuthAccount:
         """Convert Beanie User document to immutable AuthAccount."""
+        tenant_role_revision = getattr(user, "tenant_role_revision", None)
+        if tenant_role_revision is None:
+            # Rolling-deploy compatibility for documents without the mirror
+            # field.  The next SQL-authoritative sync replaces this value.
+            tenant_role_revision = user.role_revision
         return AuthAccount(
             id=str(user.id),
             email=user.email,
@@ -244,8 +269,18 @@ class BeanieAuthAccountStore:
             is_active=user.is_active,
             is_verified=user.is_verified,
             role=user.role,
+            # A missing tenant is an authorization failure until the explicit
+            # tenant migration/reconciliation adapter repairs it.  Never mint
+            # a production tenant from an auth read.
+            tenant_id=user.tenant_id or "",
+            legal_roles=user.legal_roles,
             permissions=frozenset(p.value for p in user.get_permissions()),
             role_revision=user.role_revision,
+            # ``None`` means this Mongo document predates the mirror field.
+            # Preserve the legacy value until SQL reconciliation supplies the
+            # authoritative tenant revision; do not use it to advance the
+            # platform/session revision on a tenant-binding write.
+            tenant_role_revision=tenant_role_revision,
             session_revocation_pending=user.session_revocation_pending,
             session_revocation_pending_at=user.session_revocation_pending_at,
             verification_token_hash=user.verification_token_hash,
@@ -347,6 +382,9 @@ class BeanieAuthAccountStore:
                 hashed_password=account.password_hash,
                 full_name=account.full_name,
                 role=account.role,
+                tenant_id=account.tenant_id,
+                legal_roles=account.legal_roles,
+                tenant_role_revision=account.tenant_role_revision,
                 is_verified=account.is_verified,
                 is_active=account.is_active,
                 verification_token_hash=account.verification_token_hash,
@@ -674,6 +712,43 @@ class BeanieAuthAccountStore:
                 )
             )
 
+    async def set_tenant_binding(
+        self,
+        account_id: str,
+        *,
+        tenant_id: str,
+        legal_roles: tuple[LegalRole, ...],
+        tenant_role_revision: int | None = None,
+        role_revision: int | None = None,
+    ) -> Result[None, AuthError]:
+        revision = tenant_role_revision if tenant_role_revision is not None else role_revision
+        if revision is None:
+            message = "tenant_role_revision is required"
+            raise ValueError(message)
+        user_result = await self._get_user(account_id)
+        if isinstance(user_result, Failure):
+            return Failure(user_result.failure())
+        user = user_result.unwrap()
+        try:
+            user.tenant_id = tenant_id
+            user.legal_roles = legal_roles
+            # SQL membership revision is authoritative for tenant roles.  It
+            # must not be folded into ``role_revision``, which fences platform
+            # authorization and session tokens.
+            user.tenant_role_revision = revision
+            user.updated_at = datetime.now(UTC)
+            await user.save()
+            return Success(None)
+        except PyMongoError as exc:
+            exc.add_note("auth_account_store operation=set_tenant_binding")
+            return Failure(
+                AuthInfrastructureError(
+                    message="Database error while synchronizing tenant membership",
+                    details={"user_id": account_id, "operation": "set_tenant_binding"},
+                    source="auth_account_store",
+                )
+            )
+
     async def link_oauth_account(
         self,
         account_id: str,
@@ -839,11 +914,7 @@ class BeanieAuthAccountStore:
                     },
                     "$or": [
                         {"hashed_password": {"$ne": None}},
-                        {
-                            "oauth_accounts": {
-                                "$elemMatch": {"provider": {"$ne": provider}}
-                            }
-                        },
+                        {"oauth_accounts": {"$elemMatch": {"provider": {"$ne": provider}}}},
                     ],
                 },
                 {
@@ -987,14 +1058,18 @@ class InMemoryAuthAccountStore:
             )
 
         now = datetime.now(UTC)
+        account_id = self._next_id()
         new_account = AuthAccount(
-            id=self._next_id(),
+            id=account_id,
             email=account.email.lower(),
             full_name=account.full_name,
             password_hash=account.password_hash,
             is_active=account.is_active,
             is_verified=account.is_verified,
             role=account.role,
+            tenant_id=account.tenant_id or "",
+            legal_roles=account.legal_roles,
+            tenant_role_revision=account.tenant_role_revision,
             permissions=frozenset(p.value for p in ROLE_PERMISSIONS[account.role]),
             oauth_accounts=((account.oauth_account,) if account.oauth_account is not None else ()),
             oauth_providers=(
@@ -1277,6 +1352,44 @@ class InMemoryAuthAccountStore:
         updated = AuthAccount(
             **data,
             avatar_url=avatar_url,
+            updated_at=datetime.now(UTC),
+        )
+        self._index_account(updated)
+        return Success(None)
+
+    async def set_tenant_binding(
+        self,
+        account_id: str,
+        *,
+        tenant_id: str,
+        legal_roles: tuple[LegalRole, ...],
+        tenant_role_revision: int | None = None,
+        role_revision: int | None = None,
+    ) -> Result[None, AuthError]:
+        revision = tenant_role_revision if tenant_role_revision is not None else role_revision
+        if revision is None:
+            message = "tenant_role_revision is required"
+            raise ValueError(message)
+        account = self._accounts.get(account_id)
+        if account is None:
+            return Failure(
+                AuthNotFoundError(
+                    message="User not found",
+                    details={"user_id": account_id},
+                    source="auth_account_store",
+                )
+            )
+        self._unindex_account(account)
+        data = account.model_dump()
+        data.pop("tenant_id", None)
+        data.pop("legal_roles", None)
+        data.pop("tenant_role_revision", None)
+        data.pop("updated_at", None)
+        updated = AuthAccount(
+            **data,
+            tenant_id=tenant_id,
+            legal_roles=legal_roles,
+            tenant_role_revision=revision,
             updated_at=datetime.now(UTC),
         )
         self._index_account(updated)

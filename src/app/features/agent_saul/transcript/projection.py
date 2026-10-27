@@ -51,6 +51,7 @@ MESSAGE_KINDS: tuple[str, ...] = (
     "clarification_reply",
     "plan_prompt",
     "plan_decision",
+    "review_decision",
     "final_summary",
     "turn_closed",
 )
@@ -91,7 +92,7 @@ class ContentRole(StrEnum):
     @classmethod
     def for_kind(cls, kind: str) -> ContentRole:
         match kind:
-            case "query" | "clarification_reply" | "plan_decision":
+            case "query" | "clarification_reply" | "plan_decision" | "review_decision":
                 return cls.USER
             case "clarification_prompt" | "plan_prompt" | "final_summary":
                 return cls.ASSISTANT
@@ -160,6 +161,10 @@ class SnapshotView(BaseModel):
     # (plan_approved, plan) — these two carry exactly that, as plain data.
     plan: tuple[dict[str, Any], ...] = ()
     plan_approved: bool = False
+    review_decision: str | None = None
+    reviewer_id: str | None = None
+    reviewer_role: str | None = None
+    self_reviewed: bool = False
     # doc_id feeds `report_ref` (`legal::{user_id}::reports#{doc_id}`).
     doc_id: str | None = None
     schema_version: int = STATE_SCHEMA_VERSION
@@ -188,6 +193,9 @@ class TurnRows(BaseModel):
 
     rows: tuple[TurnRow, ...] = ()
     paused_plan: tuple[dict[str, Any], ...] = ()
+    pending_plan_decision_key: str | None = None
+    pending_plan_decision_modified: bool | None = None
+    pending_plan_decision_checkpoint_id: str | None = None
 
     @property
     def query_key(self) -> str | None:
@@ -267,18 +275,29 @@ def _message_text(message: HumanMessage) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def snapshot_to_view(snapshot: StateSnapshot) -> SnapshotView:
+def snapshot_to_view(
+    snapshot: StateSnapshot,
+    *,
+    allow_legacy_paused: bool = False,
+) -> SnapshotView:
     """Read one ``StateSnapshot`` into a frozen view; the designed chokepoint.
 
     Unknown persisted state schema versions fail closed here (§9): the caller
     maps the typed error to a ``STATE_SCHEMA_INCOMPATIBLE`` refusal and never
-    projects. Legacy shapes (version 0 / missing key) arrive already
-    normalized by ``hydrate_state``, which the doc requires to have run.
+    projects. Legacy version 1 is accepted only when an explicit recovery
+    caller opts into paused-interrupt compatibility and the snapshot still
+    carries a supported HITL interrupt. Missing/zero versions and every other
+    legacy shape fail closed at this evidence boundary.
     """
     values = snapshot.values if isinstance(snapshot.values, dict) else {}
 
     recorded_version = values.get("schema_version")
-    if recorded_version not in {None, 0, STATE_SCHEMA_VERSION}:
+    legacy_paused = (
+        allow_legacy_paused
+        and recorded_version in {1, STATE_SCHEMA_VERSION - 1}
+        and _has_supported_interrupt(snapshot)
+    )
+    if recorded_version != STATE_SCHEMA_VERSION and not legacy_paused:
         msg = (
             f"refusing snapshot: schema_version={recorded_version!r} "
             f"cannot be projected by this runtime (expected {STATE_SCHEMA_VERSION!r})"
@@ -291,6 +310,7 @@ def snapshot_to_view(snapshot: StateSnapshot) -> SnapshotView:
     created = _coerce_checkpoint_ts(snapshot.created_at)
 
     doc_id = values.get("doc_id")
+    review_decision, reviewer_id, reviewer_role = _review_fields(values)
     return SnapshotView(
         user_id=str(values.get("user_id") or ""),
         checkpoint_id=str(configurable.get("checkpoint_id") or ""),
@@ -304,9 +324,38 @@ def snapshot_to_view(snapshot: StateSnapshot) -> SnapshotView:
         errors=_error_markers_of(values),
         plan=_plan_of(values),
         plan_approved=bool(values.get("plan_approved", False)),
+        review_decision=review_decision,
+        reviewer_id=reviewer_id,
+        reviewer_role=reviewer_role,
+        self_reviewed=bool(values.get("self_reviewed", False)),
         doc_id=str(doc_id) if doc_id else None,
         schema_version=STATE_SCHEMA_VERSION,
     )
+
+
+def _has_supported_interrupt(snapshot: StateSnapshot) -> bool:
+    for task in snapshot.tasks or ():
+        raw_interrupts = (
+            task.get("interrupts")
+            if isinstance(task, Mapping)
+            else getattr(task, "interrupts", None)
+        )
+        if not isinstance(raw_interrupts, list | tuple):
+            continue
+        for interrupt in raw_interrupts:
+            value = (
+                interrupt.get("value", interrupt)
+                if isinstance(interrupt, Mapping)
+                else getattr(interrupt, "value", None)
+            )
+            if not isinstance(value, Mapping):
+                continue
+            interrupt_type = value.get("type")
+            if isinstance(interrupt_type, str) and interrupt_type in {
+                member.value for member in HITLInterruptType
+            }:
+                return True
+    return False
 
 
 def _messages_of(values: Mapping[str, Any]) -> tuple[HumanMessage, ...]:
@@ -329,6 +378,37 @@ def _error_markers_of(values: Mapping[str, Any]) -> tuple[ErrorMarker, ...]:
         )
         if isinstance(raw_errors, list)
         else ()
+    )
+
+
+def _review_fields(values: Mapping[str, Any]) -> tuple[str | None, str | None, str | None]:
+    review = values.get("human_review")
+    if isinstance(review, Mapping):
+        action = review.get("action")
+        approved = review.get("approved")
+        decision = (
+            str(action)
+            if isinstance(action, str)
+            else "approve"
+            if approved is True
+            else "reject"
+            if approved is False
+            else None
+        )
+        reviewer_id = review.get("reviewer_id")
+        reviewer_role = review.get("reviewer_role")
+        return (
+            decision,
+            str(reviewer_id) if reviewer_id else None,
+            str(reviewer_role) if reviewer_role else None,
+        )
+    reviewer_id = getattr(review, "reviewer_id", None)
+    reviewer_role = getattr(review, "reviewer_role", None)
+    approved = getattr(review, "approved", None)
+    return (
+        "approve" if approved is True else "reject" if approved is False else None,
+        str(reviewer_id) if reviewer_id else None,
+        str(reviewer_role) if reviewer_role else None,
     )
 
 
@@ -550,7 +630,14 @@ def _decision_row(
     decision_key = f"decision:{last_prompt.source_key.removeprefix('interrupt:')}"
     if decision_key in existing_keys:
         return None
-    was_modified = bool(turn_rows.paused_plan) and (tuple(turn_rows.paused_plan) != view.plan)
+    if turn_rows.pending_plan_decision_key != last_prompt.source_key:
+        # Existing rows (or a crash before the validated resume fact was
+        # recorded) cannot prove approval versus modification.  Omitting the
+        # row is safer than fabricating approval.
+        return None
+    was_modified = turn_rows.pending_plan_decision_modified
+    if was_modified is None:
+        return None
     return ProjectedRow(
         kind="plan_decision",
         role=ContentRole.USER,
@@ -561,6 +648,36 @@ def _decision_row(
         extra_metadata={
             "hitl": {"answers_prompt": last_prompt.source_key},
             "modified": was_modified,
+        },
+    )
+
+
+def _review_decision_row(
+    view: SnapshotView,
+    *,
+    query_id: str,
+    existing_keys: frozenset[str],
+    next_ordinal: int,
+) -> ProjectedRow | None:
+    """Emit one append-only, server-derived review decision audit fact."""
+    if view.review_decision not in {"approve", "reject", "modify"}:
+        return None
+    reviewer_id = view.reviewer_id
+    if not reviewer_id:
+        return None
+    source_key = f"review:{query_id}:{reviewer_id}:{view.review_decision}"
+    if source_key in existing_keys:
+        return None
+    return ProjectedRow(
+        kind="review_decision",
+        role=ContentRole.USER,
+        ordinal=next_ordinal + 1,
+        source_key=source_key,
+        content=view.review_decision,
+        extra_metadata={
+            "reviewer_id": reviewer_id,
+            "reviewer_role": view.reviewer_role,
+            "self_reviewed": view.self_reviewed,
         },
     )
 
@@ -690,17 +807,29 @@ def project(
         view, query_index=query_index, existing_keys=existing_keys, turn_rows=turn_rows
     )
     decision = _decision_row(view, existing_keys=existing_keys, turn_rows=turn_rows)
+    review_decision = _review_decision_row(
+        view,
+        query_id=query_id,
+        existing_keys=existing_keys,
+        next_ordinal=max((turn_rows.max_ordinal, *(row.ordinal for row in replies))),
+    )
     occupied = [
         turn_rows.max_ordinal,
         *(row.ordinal for row in replies),
         *((decision.ordinal,) if decision is not None else ()),
+        *((review_decision.ordinal,) if review_decision is not None else ()),
     ]
     prompt_rows = _pending_prompt_rows(
         view,
         existing_keys=existing_keys,
         next_slot=max(occupied),
     )
-    candidates = (*replies, *prompt_rows, *(() if decision is None else (decision,)))
+    candidates = (
+        *replies,
+        *prompt_rows,
+        *(() if decision is None else (decision,)),
+        *(() if review_decision is None else (review_decision,)),
+    )
     for row in candidates:
         add_row(row)
 
@@ -715,6 +844,9 @@ def project(
             *(_turn_row_of(row) for row in rows),
         ),
         paused_plan=turn_rows.paused_plan,
+        pending_plan_decision_key=turn_rows.pending_plan_decision_key,
+        pending_plan_decision_modified=turn_rows.pending_plan_decision_modified,
+        pending_plan_decision_checkpoint_id=turn_rows.pending_plan_decision_checkpoint_id,
     )
     status = derive_status(view, enhanced_rows, now, aliveness)
     if isinstance(status, NoOp):

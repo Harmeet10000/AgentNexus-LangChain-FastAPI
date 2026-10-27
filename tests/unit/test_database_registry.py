@@ -37,6 +37,8 @@ _EXPECTED_TABLES = frozenset(
         "plans",
         "reports",
         "subscriptions",
+        "app_tenants",
+        "app_tenant_memberships",
         "trial_extensions",
         "user_credits",
         "webhook_events",

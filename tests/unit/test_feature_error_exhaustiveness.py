@@ -63,6 +63,7 @@ from app.features.ingestion.exceptions import (
     IngestionGraphError,
     IngestionInternalError,
     IngestionPipelineError,
+    IngestionValidationError,
     ingestion_error_to_http_status,
 )
 from app.features.profile.exceptions import (
@@ -164,6 +165,7 @@ def _error(error_type: type[FeatureError], **fields: object) -> FeatureError:
                     IngestionGraphError,
                     IngestionPipelineError,
                     IngestionInternalError,
+                    IngestionValidationError,
                 )
             ],
         ),

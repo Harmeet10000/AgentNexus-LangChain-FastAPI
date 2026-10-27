@@ -17,14 +17,17 @@ fail-open (under-bills only, never double-bills).
 from __future__ import annotations
 
 import asyncio
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, override
 
 from langchain_core.callbacks import BaseCallbackHandler
-from returns.result import Failure
+from returns.result import Failure, Success
 
+from app.features.agent_saul.graph.state import HITLInterruptType
 from app.features.agent_saul.transcript.errors import (
     TranscriptInfrastructureError,
 )
@@ -34,6 +37,7 @@ from app.features.agent_saul.transcript.projection import (
     project,
     snapshot_to_view,
 )
+from app.features.agent_saul.transcript.sync import apply_snapshot, prepare_snapshot
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -58,6 +62,109 @@ if TYPE_CHECKING:
     )
 DEFAULT_PROJECTION_TIMEOUT_MS = 750  # §5.2 hard timeout, configurable
 _RECONCILE_HINT_KEY = "saul:reconcile"
+_INVALID_EVIDENCE_TYPE = "prepare_resume requires PlanResumeEvidence"
+_INVALID_EVIDENCE_BOOL = "plan resume evidence.modified must be a bool"
+_INVALID_EVIDENCE_KEY = "plan resume evidence key must identify an interrupt"
+_INVALID_EVIDENCE_CHECKPOINT = "plan resume evidence checkpoint is invalid"
+_CHECKPOINT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
+_EVIDENCE_TOKEN = object()
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class PlanResumeEvidence:
+    """Content-free proof that a resume answers the current plan prompt.
+
+    The private construction path is :meth:`_from_interrupt`, which checks
+    the fresh checkpoint interrupt before a fact can reach SQL. Runtime
+    checks are intentionally strict because this value crosses the
+    service/recorder boundary and must never accept truthy strings or
+    arbitrary source keys.
+    """
+
+    decision_key: str
+    modified: bool
+    checkpoint_id: str
+    _token: object
+
+    def __init__(
+        self,
+        *,
+        decision_key: str,
+        modified: bool,
+        checkpoint_id: str,
+        _token: object,
+    ) -> None:
+        if _token is not _EVIDENCE_TOKEN:
+            raise TypeError(_INVALID_EVIDENCE_TYPE)
+        object.__setattr__(self, "decision_key", decision_key)
+        object.__setattr__(self, "modified", modified)
+        object.__setattr__(self, "checkpoint_id", checkpoint_id)
+        object.__setattr__(self, "_token", _token)
+        self.__post_init__()
+
+    def __post_init__(self) -> None:
+        if type(self.modified) is not bool:
+            raise TypeError(_INVALID_EVIDENCE_BOOL)
+        if not self.decision_key.startswith("interrupt:") or len(self.decision_key) <= len(
+            "interrupt:"
+        ):
+            raise ValueError(_INVALID_EVIDENCE_KEY)
+        if _CHECKPOINT_ID_RE.fullmatch(self.checkpoint_id) is None:
+            raise ValueError(_INVALID_EVIDENCE_CHECKPOINT)
+
+    @classmethod
+    def _from_interrupt(
+        cls,
+        interrupt: object,
+        *,
+        modified: bool,
+        checkpoint_id: str,
+    ) -> PlanResumeEvidence | None:
+        """Build evidence only for a pending plan-approval interrupt."""
+        if type(modified) is not bool:
+            return None
+        interrupt_id = (
+            interrupt.get("id")
+            if isinstance(interrupt, Mapping)
+            else getattr(interrupt, "id", None)
+        )
+        value = (
+            interrupt.get("value", interrupt)
+            if isinstance(interrupt, Mapping)
+            else getattr(interrupt, "value", None)
+        )
+        if not isinstance(interrupt_id, str) or not interrupt_id:
+            return None
+        if _CHECKPOINT_ID_RE.fullmatch(checkpoint_id) is None:
+            return None
+        if not isinstance(value, Mapping):
+            return None
+        interrupt_type = value.get("type")
+        if not any(
+            interrupt_type == allowed
+            for allowed in (
+                HITLInterruptType.PLAN_APPROVAL,
+                HITLInterruptType.PLAN_APPROVAL.value,
+            )
+        ):
+            return None
+        return cls(
+            decision_key=f"interrupt:{interrupt_id}",
+            modified=modified,
+            checkpoint_id=checkpoint_id,
+            _token=_EVIDENCE_TOKEN,
+        )
+
+
+def _interrupts_of(snapshot: object) -> tuple[object, ...]:
+    """Read pending interrupts without importing the service orchestration."""
+    interrupts: list[object] = []
+    for task in getattr(snapshot, "tasks", ()) or ():
+        raw = (
+            task.get("interrupts") if isinstance(task, Mapping) else getattr(task, "interrupts", ())
+        )
+        interrupts.extend(raw or ())
+    return tuple(interrupts)
 
 
 @dataclass
@@ -250,7 +357,7 @@ class TurnRecorder:
         paused_plan = self._paused_plan  # the plan this connection knows about
         for state in reversed(history):  # oldest → newest; watermark stays latest-first
             try:
-                view = snapshot_to_view(state)
+                view = snapshot_to_view(state, allow_legacy_paused=True)
                 projection = project(
                     view,
                     existing_keys=turn_context.existing_keys,
@@ -308,17 +415,118 @@ class TurnRecorder:
             return TurnRows()
         return context_result.unwrap().turn_rows
 
-    async def prepare_resume(self) -> TranscriptResult[ApplyOutcome]:
+    async def prepare_resume(
+        self,
+        *,
+        plan_resume: PlanResumeEvidence | None = None,
+    ) -> TranscriptResult[ApplyOutcome]:
         """Project-before-resume (§5.2): retry once on failure; then proceed
-        fail-open and register the reconcile hint."""
+        fail-open and register the reconcile hint.
+
+        A validated plan resume also records its content-free decision fact
+        before the caller issues ``Command(resume=...)``. This closes the
+        crash window between resume and the next checkpoint projection.
+        """
+        if plan_resume is not None and not isinstance(plan_resume, PlanResumeEvidence):
+            raise TypeError(_INVALID_EVIDENCE_TYPE)
+        if not self.resume_is_allowed():
+            self.log.warning("plan_resume_lock_lost_before_projection")
+            return Failure(
+                TranscriptInfrastructureError(
+                    message="thread exclusion was lost before resume",
+                    source="chat_transcript_recorder",
+                    operation="prepare_resume",
+                )
+            )
         first = await self._project(stage="t1p_before_resume")
         failure = _as_infra_failure(first)
         if failure is None:
-            return first
-        retry = await self._project(stage="t1p_before_resume_retry")
-        if _as_infra_failure(retry) is not None:
-            await self._register_reconcile_hint()
-        return retry
+            result = first
+        else:
+            result = await self._project(stage="t1p_before_resume_retry")
+            if _as_infra_failure(result) is not None:
+                await self._register_reconcile_hint()
+        if plan_resume is not None:
+            if not self.resume_is_allowed():
+                self.log.warning("plan_resume_lock_lost_before_fact")
+                return result
+            try:
+                current_interrupt = next(
+                    (
+                        interrupt
+                        for interrupt in _interrupts_of(await self._system_snapshot())
+                        if PlanResumeEvidence._from_interrupt(
+                            interrupt,
+                            modified=plan_resume.modified,
+                            checkpoint_id=plan_resume.checkpoint_id,
+                        )
+                        is not None
+                    ),
+                    None,
+                )
+            except Exception as exc:  # noqa: BLE001 — resume evidence is fail-open
+                exc.add_note(f"thread_id={self._thread_id}")
+                self.log.warning("plan_resume_evidence_check_failed")
+                await self._register_reconcile_hint()
+                return result
+            current_evidence = (
+                PlanResumeEvidence._from_interrupt(
+                    current_interrupt,
+                    modified=plan_resume.modified,
+                    checkpoint_id=plan_resume.checkpoint_id,
+                )
+                if current_interrupt is not None
+                else None
+            )
+            if (
+                current_evidence is None
+                or current_evidence.decision_key != plan_resume.decision_key
+                or current_evidence.checkpoint_id != plan_resume.checkpoint_id
+            ):
+                self.log.warning("plan_resume_evidence_stale")
+                await self._register_reconcile_hint()
+                return result
+            if not self.resume_is_allowed():
+                self.log.warning("plan_resume_lock_lost_before_fact")
+                return result
+            fact = await self._repo.record_plan_decision_fact(
+                session_id=self._thread_id,
+                user_id=self._user_id,
+                decision_key=plan_resume.decision_key,
+                modified=plan_resume.modified,
+                checkpoint_id=plan_resume.checkpoint_id,
+            )
+            if not self.resume_is_allowed():
+                self.log.warning("plan_resume_lock_lost_after_fact")
+                return result
+            if isinstance(fact, Failure) or (isinstance(fact, Success) and not fact.unwrap()):
+                self.log.warning("plan_decision_fact_not_recorded")
+                await self._register_reconcile_hint()
+        return result
+
+    def resume_is_allowed(self) -> bool:
+        """Return the current lease fence immediately before resume writes."""
+        return self._lock.is_alive()
+
+    async def record_review_decision(
+        self,
+        *,
+        action: str,
+        reviewer_id: str,
+        reviewer_role: str,
+        self_reviewed: bool,
+        checkpoint_id: str | None,
+    ) -> TranscriptResult[bool]:
+        """Append the server-authorized approve/reject audit fact."""
+        return await self._repo.record_review_decision_fact(
+            session_id=self._thread_id,
+            user_id=self._user_id,
+            action=action,
+            reviewer_id=reviewer_id,
+            reviewer_role=reviewer_role,
+            self_reviewed=self_reviewed,
+            checkpoint_id=checkpoint_id,
+        )
 
     # ------------------------------------------------------------------
     # One projection cycle — shared by every boundary
@@ -378,52 +586,49 @@ class TurnRecorder:
         # 2. Fresh snapshot + view (§4.1: the single LangGraph evidence boundary).
         try:
             snapshot = await self._system_snapshot()
-            view: SnapshotView = snapshot_to_view(snapshot)
+            view: SnapshotView = snapshot_to_view(snapshot, allow_legacy_paused=True)
         except Exception:  # noqa: BLE001 — §9 'projector bug' stays inside the boundary
             self.log.bind(stage=stage).warning("transcript_projection_refused")
             return _infra_failure_for(stage, "snapshot could not be viewed")
 
         # 3. Pure projection with injected time and aliveness (§4.1 [v2]).
+        # Keep this catch narrower than persistence: projector/schema failures
+        # degrade transcript capture, while unexpected repository bugs must
+        # still escape to the owning boundary with their traceback intact.
         try:
-            projection = project(
-                view,
+            prepared = prepare_snapshot(
+                view=view,
                 existing_keys=context.existing_keys,
                 turn_rows=context.turn_rows.model_copy(update={"paused_plan": self._paused_plan}),
                 now=datetime.now(tz=UTC),
                 aliveness=self._lock.is_alive(),
+                usage_total=self._usage.usage.total if attach_usage else 0,
+                usage_metadata=self._usage.usage.as_metadata() if attach_usage else None,
             )
-        except Exception:  # noqa: BLE001 — see above
+        except Exception:  # noqa: BLE001 — projector/schema degradation boundary (§9)
             self.log.bind(stage=stage).warning("transcript_projection_refused")
             return _infra_failure_for(stage, "projection could not run")
+        projection = prepared.projection
         if projection.is_no_op and projection.no_op is not None:
-            noop = projection.no_op
-            self.log.bind(stage=stage, reason=noop.reason).info("transcript_projection_noop")
+            self.log.bind(stage=stage, reason=projection.no_op.reason).info(
+                "transcript_projection_noop"
+            )
 
-        # 4. Apply (sub-step of the bounded boundary; the WS loop never waits
-        # longer than the boundary deadline, §5.2).
-        usage_map: dict[str, int] = {}
-        last_key: str | None = None
-        if attach_usage and self._usage.usage.total:
-            # §7 target: this projection's last assistant row; when the
-            # projector deduped it away (row already exists), the saved turn
-            # rows resolve the target and the repository fills usage-only.
-            last_key = _segment_row_key(projection, context.turn_rows)
-            if last_key is not None:
-                usage_map[last_key] = self._usage.usage.total
-        applied = await self._repo.apply_projection(
-            projection,
+        # 4. Apply stays inside the hard deadline in `_project`, but outside
+        # the projection degradation catch above. Repository Failure values
+        # remain expected; unexpected exceptions remain visible as bugs.
+        applied = await apply_snapshot(
+            repo=self._repo,
+            prepared=prepared,
             user_id=self._user_id,
             session_id=self._thread_id,
-            usage=usage_map,
-            usage_metadata=(
-                {last_key: self._usage.usage.as_metadata()} if last_key is not None else None
-            ),
             prior_checkpoint_id=context.last_checkpoint_id,
         )
 
         if isinstance(applied, Failure):
             await self._register_reconcile_hint()
-        return applied
+            return applied
+        return Success(applied.unwrap().applied)
 
     async def _system_snapshot(self) -> StateSnapshot:
         return await self._graph.aget_state(self._config)
@@ -451,27 +656,6 @@ def _infra_failure_for(stage: str, what: str) -> TranscriptResult[ApplyOutcome]:
     return Failure(
         TranscriptInfrastructureError(message=what, source="turn_recorder", operation=stage)
     )
-
-
-_ASSISTANT_PROMPT_KINDS = frozenset({"plan_prompt", "clarification_prompt", "final_summary"})
-
-
-def _segment_row_key(projection: object, saved_turn_rows: object | None = None) -> str | None:
-    """Segment totals attach to that segment's LAST assistant row (§7).
-
-    The projector drops rows keyed in the saved turn context, so when this
-    projection carries no assistant row the saved rows resolve the target
-    instead — the repository then fills usage on the existing row, once.
-    """
-    emitted = [r for r in getattr(projection, "rows", ()) if r.kind in _ASSISTANT_PROMPT_KINDS]
-    if emitted:
-        return str(emitted[-1].source_key)
-    saved = [
-        r
-        for r in getattr(saved_turn_rows, "rows", ()) or ()
-        if getattr(r, "kind", None) in _ASSISTANT_PROMPT_KINDS
-    ]
-    return str(saved[-1].source_key) if saved else None
 
 
 def _paused_plan_of(snapshot: StateSnapshot | None) -> tuple[dict[str, object], ...]:

@@ -13,6 +13,8 @@ this edge and never cross to the service (§10).
 
 from __future__ import annotations
 
+import re
+
 # Runtime-required: pydantic field annotations resolve at class definition
 # (SessionMeta/TranscriptMessage) — do NOT move these to TYPE_CHECKING.
 from datetime import datetime
@@ -67,6 +69,9 @@ _USER_ID_LEN = 100
 _GC_STAMP_KEY = "gc_swept_at"  # §8 GC audit stamp (extra_metadata)
 _GC_PENDING_KEY = "gc_pending"  # true ⇒ deletion stamped but not yet confirmed
 _GC_PENDING_RETRY_MINS = 15  # a pending stamp older than this re-enters the list
+_PLAN_DECISION_KEY_RE = re.compile(r"^interrupt:[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
+_CHECKPOINT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
+_REVIEWER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@-]{0,199}$")
 
 
 class ApplyOutcome(BaseModel):
@@ -177,7 +182,35 @@ def _session_set_values(
     if turn_opened:
         values["turn_count"] = session_row.turn_count + 1
     values["status"] = status
+    if any(
+        _plan_decision_prompt_key(row.source_key) == session_row.pending_plan_decision_key
+        for row in projection.rows
+    ):
+        values["pending_plan_decision_key"] = None
+        values["pending_plan_decision_modified"] = None
+        values["pending_plan_decision_checkpoint_id"] = None
     return values
+
+
+def _plan_decision_prompt_key(source_key: str) -> str | None:
+    """Return the pending-fact key proven by a decision row, if well formed."""
+    prefix = "decision:"
+    if not source_key.startswith(prefix):
+        return None
+    interrupt_id = source_key.removeprefix(prefix)
+    if not interrupt_id:
+        return None
+    return f"interrupt:{interrupt_id}"
+
+
+def _valid_plan_decision_key(decision_key: object) -> bool:
+    return (
+        isinstance(decision_key, str) and _PLAN_DECISION_KEY_RE.fullmatch(decision_key) is not None
+    )
+
+
+def _valid_checkpoint_id(checkpoint_id: object) -> bool:
+    return isinstance(checkpoint_id, str) and _CHECKPOINT_ID_RE.fullmatch(checkpoint_id) is not None
 
 
 async def _load_session(session: AsyncSession, session_id: str, user_id: str) -> ChatSession | None:
@@ -187,6 +220,23 @@ async def _load_session(session: AsyncSession, session_id: str, user_id: str) ->
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == user_id,
             )
+        )
+    ).scalar_one_or_none()
+
+
+async def _load_session_for_update(
+    session: AsyncSession,
+    session_id: str,
+    user_id: str,
+) -> ChatSession | None:
+    return (
+        await session.execute(
+            select(ChatSession)
+            .where(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == user_id,
+            )
+            .with_for_update()
         )
     ).scalar_one_or_none()
 
@@ -275,6 +325,190 @@ class ChatTranscriptRepository:
             )
 
     @trace_layer("repository")
+    async def record_plan_decision_fact(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        decision_key: str,
+        modified: bool,
+        checkpoint_id: str | None = None,
+    ) -> TranscriptResult[bool]:
+        """Durably record validated resume intent before graph resumption.
+
+        The prompt source key is supplied by the fresh checkpoint and written
+        under the session lock. No plan text enters SQL; wrong owner fails
+        closed. The prompt row may still be a recoverable hole.
+        """
+        if (
+            not _valid_plan_decision_key(decision_key)
+            or type(modified) is not bool
+            or (checkpoint_id is not None and not _valid_checkpoint_id(checkpoint_id))
+        ):
+            return Failure(
+                TranscriptSchemaError(
+                    message="invalid plan decision evidence",
+                    source="chat_transcript_repository",
+                    operation="record_plan_decision_fact",
+                    expected_version=TRANSCRIPT_SCHEMA_VERSION,
+                    found_version=None,
+                )
+            )
+        try:
+            async with self._session_factory() as session, session.begin():
+                session_row = await _load_session_for_update(session, session_id, user_id)
+                if session_row is None:
+                    return Failure(
+                        TranscriptNotFoundError(
+                            message="transcript session not found",
+                            session_id=session_id,
+                        )
+                    )
+                schema_failure = _schema_gate(
+                    session_row.schema_version,
+                    operation="record_plan_decision_fact",
+                )
+                if schema_failure is not None:
+                    return Failure(schema_failure)
+                latest_prompt = (
+                    await session.execute(
+                        select(ChatMessage.source_key)
+                        .where(
+                            ChatMessage.session_id == session_id,
+                            ChatMessage.user_id == session_row.user_id,
+                            ChatMessage.kind == "plan_prompt",
+                        )
+                        .order_by(
+                            ChatMessage.turn_seq.desc(),
+                            ChatMessage.ordinal.desc(),
+                            ChatMessage.id.desc(),
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if latest_prompt != decision_key and checkpoint_id is None:
+                    return Failure(
+                        TranscriptNotFoundError(
+                            message="current plan prompt not found",
+                            session_id=session_id,
+                        )
+                    )
+                decision_source_key = f"decision:{decision_key.removeprefix('interrupt:')}"
+                existing_decision = (
+                    await session.execute(
+                        select(ChatMessage.id).where(
+                            ChatMessage.session_id == session_id,
+                            ChatMessage.source_key == decision_source_key,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing_decision is not None:
+                    return Success(True)
+                if session_row.pending_plan_decision_key is not None:
+                    if (
+                        session_row.pending_plan_decision_key == decision_key
+                        and session_row.pending_plan_decision_modified == modified
+                        and (
+                            checkpoint_id is None
+                            or session_row.pending_plan_decision_checkpoint_id == checkpoint_id
+                        )
+                    ):
+                        return Success(True)
+                    return Failure(
+                        TranscriptNotFoundError(
+                            message="plan decision evidence is already claimed",
+                            session_id=session_id,
+                        )
+                    )
+                session_row.pending_plan_decision_key = decision_key
+                session_row.pending_plan_decision_modified = modified
+                session_row.pending_plan_decision_checkpoint_id = checkpoint_id
+                return Success(True)
+        except SQLAlchemyError as exc:
+            return _sanitize_db_error(exc, "record_plan_decision_fact")
+
+    @trace_layer("repository")
+    async def record_review_decision_fact(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        action: str,
+        reviewer_id: str,
+        reviewer_role: str,
+        self_reviewed: bool,
+        checkpoint_id: str | None = None,
+    ) -> TranscriptResult[bool]:
+        """Append one idempotent, content-free review decision audit fact."""
+        if (
+            action not in {"approve", "reject", "modify"}
+            or not _REVIEWER_ID_RE.fullmatch(reviewer_id)
+            or not reviewer_role
+            or type(self_reviewed) is not bool
+        ):
+            return Failure(
+                TranscriptSchemaError(
+                    message="invalid review decision evidence",
+                    source="chat_transcript_repository",
+                    operation="record_review_decision_fact",
+                    expected_version=TRANSCRIPT_SCHEMA_VERSION,
+                    found_version=None,
+                )
+            )
+        try:
+            async with self._session_factory() as session, session.begin():
+                session_row = await _load_session_for_update(session, session_id, user_id)
+                if session_row is None:
+                    return Failure(
+                        TranscriptNotFoundError(
+                            message="transcript session not found",
+                            session_id=session_id,
+                        )
+                    )
+                schema_failure = _schema_gate(
+                    session_row.schema_version,
+                    operation="record_review_decision_fact",
+                )
+                if schema_failure is not None:
+                    return Failure(schema_failure)
+                turn_seq = session_row.turn_count or 1
+                max_ordinal = (
+                    await session.execute(
+                        select(func.max(ChatMessage.ordinal)).where(
+                            ChatMessage.session_id == session_id,
+                            ChatMessage.turn_seq == turn_seq,
+                        )
+                    )
+                ).scalar_one()
+                source_key = f"review:{turn_seq}:{action}:{reviewer_id}"
+                result = await session.execute(
+                    pg_insert(ChatMessage)
+                    .values(
+                        session_id=session_id,
+                        user_id=user_id,
+                        role="user",
+                        content=action,
+                        turn_seq=turn_seq,
+                        ordinal=int(max_ordinal or 0) + 1,
+                        kind="review_decision",
+                        source_key=source_key,
+                        source_checkpoint_id=checkpoint_id or "review",
+                        extra_metadata={
+                            "reviewer_id": reviewer_id,
+                            "reviewer_role": reviewer_role,
+                            "self_reviewed": self_reviewed,
+                        },
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=[ChatMessage.session_id, ChatMessage.source_key]
+                    )
+                    .returning(ChatMessage.id)
+                )
+                return Success(result.scalar_one_or_none() is not None)
+        except SQLAlchemyError as exc:
+            return _sanitize_db_error(exc, "record_review_decision_fact")
+
+    @trace_layer("repository")
     async def apply_projection(
         self,
         projection: Projection,
@@ -361,8 +595,13 @@ class ChatTranscriptRepository:
                             session_id=session_id,
                         )
                     )
+                schema_failure = _schema_gate(
+                    session_row.schema_version,
+                    operation="apply_projection",
+                )
+                if schema_failure is not None:
+                    return Failure(schema_failure)
 
-                checkpoint_id = projection.watermark_checkpoint_id
                 # Stale-projection guard (§5.3): the locked row's watermark
                 # must still be the one this caller OBSERVED before
                 # projecting — a mismatch means a newer writer landed between
@@ -381,11 +620,30 @@ class ChatTranscriptRepository:
                 # still allowed through (item level) when this projection has
                 # rows, so crash-healing replays of the same checkpoint heal.
                 if (
-                    checkpoint_id is not None
-                    and session_row.last_checkpoint_id == checkpoint_id
+                    projection.watermark_checkpoint_id is not None
+                    and session_row.last_checkpoint_id == projection.watermark_checkpoint_id
                     and not projection.rows
+                    and not (tokens_for or metadata_for)
                 ):
                     return Success(ApplyOutcome(applied=False, reason="same_checkpoint"))
+                if (
+                    projection.watermark_checkpoint_id is not None
+                    and session_row.last_checkpoint_id == projection.watermark_checkpoint_id
+                    and not projection.rows
+                ):
+                    filled = await self._fill_usage_only(
+                        session,
+                        session_id=session_id,
+                        tokens_for=tokens_for,
+                        metadata_for=metadata_for,
+                        projected_keys=set(),
+                    )
+                    return Success(
+                        ApplyOutcome(
+                            applied=filled > 0,
+                            reason="usage_filled" if filled > 0 else "same_checkpoint",
+                        )
+                    )
 
                 turn_seq, turn_opened = await _resolve_turn(
                     session, session_id, projection.query_source_key, session_row
@@ -429,7 +687,7 @@ class ChatTranscriptRepository:
                 set_values = _session_set_values(
                     session_row,
                     projection,
-                    checkpoint_id,
+                    projection.watermark_checkpoint_id,
                     turn_opened,
                     status=projection.session_status.value,
                 )
@@ -468,20 +726,25 @@ class ChatTranscriptRepository:
         tokens_for: Mapping[str, Any],
         metadata_for: Mapping[str, Mapping[str, Any]],
         projected_keys: set[str],
-    ) -> None:
+    ) -> int:
         """§7 usage-only fill — same-transaction, fill-once (target deduped).
 
         The projector drops rows already keyed in the saved turn context, so
         the segment's tokens land on the EXISTING assistant row instead.
         Read-modify-write UNDER the session's row lock (the lock at the top
         of this transaction serializes every writer for this session):
-        ``tokens_used`` fills only NULLs (replay cannot double-bill) and the
-        content-free metadata breakdown merges behind the same gate — this
-        also avoids json/jsonb operator mismatch (``extra_metadata`` is a
-        ``json`` column and ``||`` is jsonb-only).
+        ``tokens_used`` fills only NULLs (replay cannot double-bill), while
+        metadata fills only absent top-level facts. The target set is the
+        union of token and metadata keys, so a zero-token tool segment is not
+        lost. This read-modify-write also avoids json/jsonb operator mismatch
+        (``extra_metadata`` is a ``json`` column and ``||`` is jsonb-only).
         """
-        for source_key, tokens in tokens_for.items():
-            if source_key in projected_keys or tokens is None:
+        target_keys = (set(tokens_for) | set(metadata_for)) - projected_keys
+        filled = 0
+        for source_key in target_keys:
+            tokens = tokens_for.get(source_key)
+            attached = metadata_for.get(source_key)
+            if tokens is None and attached is None:
                 continue
             target_row = (
                 await session.execute(
@@ -489,17 +752,30 @@ class ChatTranscriptRepository:
                     .where(
                         ChatMessage.session_id == session_id,
                         ChatMessage.source_key == source_key,
-                        ChatMessage.tokens_used.is_(None),
+                        ChatMessage.role == "assistant",
                     )
                     .with_for_update()
                 )
             ).scalar_one_or_none()
             if target_row is None:
-                continue  # already billed, or deleted under us — fill-once holds
-            target_row.tokens_used = tokens
-            attached = metadata_for.get(source_key)
+                continue  # missing target or wrong row kind — fill-once holds
+            if tokens is not None and target_row.tokens_used is None:
+                target_row.tokens_used = tokens
+                filled += 1
             if attached is not None:
-                target_row.extra_metadata = {**(target_row.extra_metadata or {}), **dict(attached)}
+                existing_metadata = dict(target_row.extra_metadata or {})
+                merged_metadata = {
+                    **{
+                        key: value
+                        for key, value in dict(attached).items()
+                        if key not in existing_metadata
+                    },
+                    **existing_metadata,
+                }
+                if merged_metadata != existing_metadata:
+                    target_row.extra_metadata = merged_metadata
+                    filled += 1
+        return filled
 
     @staticmethod
     async def _insert_row(
@@ -534,7 +810,9 @@ class ChatTranscriptRepository:
         stmt = base.on_conflict_do_update(
             index_elements=[ChatMessage.session_id, ChatMessage.source_key],
             # Fill-once: never overwrite; replay cannot double-bill (§6).
-            set_={"tokens_used": func.coalesce(ChatMessage.tokens_used, base.excluded.tokens_used)},
+            set_={
+                "tokens_used": func.coalesce(ChatMessage.tokens_used, base.excluded.tokens_used),
+            },
         ).returning(
             # The xmax trick: a freshly inserted row has xmax 0, a
             # conflict-updated row carries the other writer's transaction id —
@@ -580,6 +858,12 @@ class ChatTranscriptRepository:
                             session_id=session_id,
                         )
                     )
+                schema_failure = _schema_gate(
+                    session_row.schema_version,
+                    operation="insert_rows_only",
+                )
+                if schema_failure is not None:
+                    return Failure(schema_failure)
                 turn_seq, turn_opened = await _resolve_turn(
                     session, session_id, projection.query_source_key, session_row
                 )
@@ -596,6 +880,28 @@ class ChatTranscriptRepository:
                         turn_seq=turn_seq,
                         checkpoint_id=row_checkpoint(projection),
                         tokens=None,
+                    )
+                if any(
+                    _plan_decision_prompt_key(row.source_key)
+                    == session_row.pending_plan_decision_key
+                    and (
+                        session_row.pending_plan_decision_checkpoint_id is None
+                        or session_row.pending_plan_decision_checkpoint_id
+                        == projection.watermark_checkpoint_id
+                    )
+                    for row in recoverable
+                ):
+                    # Hole-fill can be the first writer of the decision row
+                    # after a crash. Clear the proof in this same transaction,
+                    # even when the keyed insert was an idempotent conflict.
+                    await session.execute(
+                        update(ChatSession)
+                        .where(ChatSession.id == session_row.id)
+                        .values(
+                            pending_plan_decision_key=None,
+                            pending_plan_decision_modified=None,
+                            pending_plan_decision_checkpoint_id=None,
+                        )
                     )
                 if turn_opened and inserted > 0:
                     # §6 recovery reservation: a recovered query row OPENS the
@@ -708,26 +1014,73 @@ class ChatTranscriptRepository:
         terminal_statuses: frozenset[str],
         limit: int = 20,
     ) -> TranscriptResult[Sequence[SessionMeta]]:
-        """Non-terminal sessions idle past their orphan-grace boundary (§5.3)."""
+        """Non-terminal sessions idle past their orphan-grace boundary (§5.3).
+
+        The bounded sweep has two lanes because a missing persisted query is
+        ambiguous: fixture debris and a real checkpoint whose first transcript
+        write failed have the same SQL shape.  For limits of at least two, one
+        slot is reserved for the freshest ambiguous candidate and the rest for
+        oldest-first query-backed work; unused quota is filled from either
+        lane.  A one-row sweep is query-first and falls back to the freshest
+        ambiguous candidate.  This is deterministic priority, not strict
+        fairness among immortal ambiguous rows (which needs durable attempt
+        state).
+        """
+        if limit <= 0:
+            return Success(())
+        has_persisted_query = (
+            select(ChatMessage.id)
+            .where(
+                ChatMessage.session_id == ChatSession.session_id,
+                ChatMessage.kind == "query",
+            )
+            .exists()
+        )
         try:
             async with self._session_factory() as session:
-                rows = (
+                common_filters = (
+                    ChatSession.status.not_in(terminal_statuses),
+                    ChatSession.last_checkpoint_ts.is_not(None),
+                    ChatSession.last_checkpoint_ts <= older_than,
+                )
+                query_backed = (
                     (
                         await session.execute(
                             select(ChatSession)
-                            .where(
-                                ChatSession.status.not_in(terminal_statuses),
-                                ChatSession.last_checkpoint_ts.is_not(None),
-                                ChatSession.last_checkpoint_ts <= older_than,
+                            .where(*common_filters, has_persisted_query)
+                            .order_by(
+                                ChatSession.last_checkpoint_ts,
+                                ChatSession.session_id,
                             )
-                            .order_by(ChatSession.last_checkpoint_ts)
                             .limit(limit)
                         )
                     )
                     .scalars()
                     .all()
                 )
-                return Success(tuple(_session_meta_of(row) for row in rows))
+                ambiguous = (
+                    (
+                        await session.execute(
+                            select(ChatSession)
+                            .where(*common_filters, ~has_persisted_query)
+                            # Fresh first-write failures jump ahead of old,
+                            # immortal integration debris in this lane.
+                            .order_by(
+                                ChatSession.last_checkpoint_ts.desc(),
+                                ChatSession.session_id,
+                            )
+                            .limit(limit)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                scheduled = _schedule_stale_session_rows(
+                    query_backed=query_backed,
+                    ambiguous=ambiguous,
+                    limit=limit,
+                )
+                return Success(tuple(_session_meta_of(row) for row in scheduled))
         except SQLAlchemyError as exc:
             return _sanitize_db_error(exc, "list_stale_sessions")
 
@@ -930,7 +1283,11 @@ class ChatTranscriptRepository:
                 else:
                     row_dicts = (
                         await session.execute(
-                            select(ChatMessage.source_key, ChatMessage.kind, ChatMessage.ordinal)
+                            select(
+                                ChatMessage.source_key,
+                                ChatMessage.kind,
+                                ChatMessage.ordinal,
+                            )
                             .where(
                                 ChatMessage.session_id == session_id,
                                 ChatMessage.turn_seq == latest_turn,
@@ -940,13 +1297,22 @@ class ChatTranscriptRepository:
                     ).all()
                     keys = {entry.source_key for entry in row_dicts}
                     rows = tuple(
-                        TurnRow(kind=entry.kind, source_key=entry.source_key, ordinal=entry.ordinal)
+                        TurnRow(
+                            kind=entry.kind,
+                            source_key=entry.source_key,
+                            ordinal=entry.ordinal,
+                        )
                         for entry in row_dicts
                     )
                 return Success(
                     TranscriptTurnContext(
                         existing_keys=frozenset(keys),
-                        turn_rows=TurnRows(rows=rows),
+                        turn_rows=TurnRows(
+                            rows=rows,
+                            pending_plan_decision_key=session_row.pending_plan_decision_key,
+                            pending_plan_decision_modified=session_row.pending_plan_decision_modified,
+                            pending_plan_decision_checkpoint_id=session_row.pending_plan_decision_checkpoint_id,
+                        ),
                         session_status=SessionStatus(session_row.status),
                         turn_count=session_row.turn_count,
                         last_checkpoint_id=session_row.last_checkpoint_id,
@@ -1132,6 +1498,30 @@ def _schema_gate(
         expected_version=TRANSCRIPT_SCHEMA_VERSION,
         found_version=found,
     )
+
+
+def _schedule_stale_session_rows(
+    *,
+    query_backed: Sequence[ChatSession],
+    ambiguous: Sequence[ChatSession],
+    limit: int,
+) -> tuple[ChatSession, ...]:
+    """Merge pre-ordered sweep lanes without exceeding the caller's bound."""
+    if limit <= 0:
+        return ()
+    if limit == 1:
+        return tuple(query_backed[:1] or ambiguous[:1])
+
+    query_quota = limit - 1
+    selected = [*query_backed[:query_quota], *ambiguous[:1]]
+    remaining = limit - len(selected)
+    if remaining:
+        query_fill = query_backed[query_quota : query_quota + remaining]
+        selected.extend(query_fill)
+        remaining -= len(query_fill)
+    if remaining:
+        selected.extend(ambiguous[1 : 1 + remaining])
+    return tuple(selected)
 
 
 def _session_meta_of(row: ChatSession) -> SessionMeta:

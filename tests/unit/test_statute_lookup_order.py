@@ -63,13 +63,16 @@ async def test_statute_lookup_is_scoped_to_the_authenticated_tenant() -> None:
         act_name=" Contract Act ",
         section_ref=" 73 ",
         jurisdiction="India",
-        user_id="tenant-42",
+        tenant_id="tenant-42",
+        allowed_doc_ids=("00000000-0000-0000-0000-000000000042",),
     )
 
     assert result is None
-    assert "user_id = :user_id" in engine.connection.query
+    assert "tenant_id = :tenant_id" in engine.connection.query
+    assert "document_id = ANY" in engine.connection.query
     assert engine.connection.parameters == {
-        "user_id": "tenant-42",
+        "tenant_id": "tenant-42",
+        "allowed_doc_ids": ["00000000-0000-0000-0000-000000000042"],
         "act_name": "Contract Act",
         "section_ref": "73",
     }

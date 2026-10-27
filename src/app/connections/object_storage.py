@@ -941,10 +941,17 @@ class UploadRequest(BaseModel):
 
 
 def build_s3_key(
-    *, prefix: str, user_id: str, document_id: str, content_hash: str, filename: str
+    *,
+    prefix: str,
+    user_id: str,
+    document_id: str,
+    content_hash: str,
+    filename: str,
+    tenant_id: str | None = None,
 ) -> str:
     extension = _normalized_extension(filename)
-    return f"{prefix}/{user_id}/{document_id}/{content_hash}{extension}"
+    owner_prefix = f"{tenant_id}/{user_id}" if tenant_id else user_id
+    return f"{prefix}/{owner_prefix}/{document_id}/{content_hash}{extension}"
 
 
 def build_s3_uri(*, bucket: str, key: str) -> str:

@@ -2,7 +2,15 @@
 System tools: shell execution, filesystem operations, file search.
 
 All tools return the shared ToolResult envelope — structured, never self-rendered.
-Shell and filesystem tools require explicit capability grants via context.
+
+Every tool in this module is **deny-by-default**. It executes only when the
+server-owned ``ToolRuntime`` context grants the tool's capability, and every
+path-taking tool confines itself to the configured workspace jail
+(``TOOL_WORKSPACE_ROOTS``). Neither the grant nor the jail is ever a
+model-visible argument: LangChain injects ``ToolRuntime`` and hides it from the
+tool schema, so the model chooses *what* to run but never *whether* it may.
+Refusal messages name the missing grant or setting so the operator's next step
+is a grep, not a guessing game.
 """
 
 from __future__ import annotations
@@ -10,18 +18,80 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import subprocess  # noqa: S404 — this module IS the sandboxed shell tool; the import names SubprocessError for the specific catch below
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
-from langchain_core.tools import tool
+from langchain.tools import ToolRuntime
+from langchain_core.tools import InjectedToolArg, tool
 from pydantic import BaseModel, Field
 
+from app.config import get_settings
 from app.resilience.idempotency import ToolResult
 
 from .base import register_tool
 
 if TYPE_CHECKING:
     from typing import Any
+
+# ---------------------------------------------------------------------------
+# Capability model — the grants live in server-side policy, never in
+# model-visible arguments. See PLAN-agent-tools.md §3.
+# ---------------------------------------------------------------------------
+
+CAP_SHELL_EXECUTE = "system.shell.execute"
+CAP_FS_READ = "filesystem.read"
+CAP_FS_WRITE = "filesystem.write"
+
+
+def _granted(runtime: Annotated[ToolRuntime | None, InjectedToolArg], capability: str) -> bool:
+    """True only when the injected runtime context carries ``capability``."""
+    context = getattr(runtime, "context", None)
+    granted = context.get("capabilities", ()) if isinstance(context, Mapping) else ()
+    if isinstance(granted, str):
+        granted = (granted,)
+    return isinstance(granted, (list, tuple, set, frozenset)) and capability in granted
+
+
+def _require_capability(
+    runtime: Annotated[ToolRuntime | None, InjectedToolArg], capability: str
+) -> None:
+    if not _granted(runtime, capability):
+        msg = (
+            f"capability {capability!r} is not granted in the tool runtime context; "
+            "grant it in server-side policy — it can never come from model arguments"
+        )
+        raise PermissionError(msg)
+
+
+def _resolve_in_jail(raw: str, operation: str) -> Path:
+    """Resolve ``raw`` and require it to sit inside a configured workspace root.
+
+    The check runs on the *resolved* path, so a symlink from inside the jail to
+    anywhere outside it fails containment rather than passing the check and
+    escaping through the link.
+    """
+    roots = get_settings().TOOL_WORKSPACE_ROOTS
+    if not roots:
+        msg = (
+            "no workspace jail is configured; set TOOL_WORKSPACE_ROOTS before "
+            "binding filesystem or shell tools"
+        )
+        raise PermissionError(msg)
+    resolved = Path(raw).resolve()
+    if not any(resolved.is_relative_to(Path(root).resolve()) for root in roots):
+        msg = f"{operation} path {raw!r} resolves outside the workspace jail"
+        raise PermissionError(msg)
+    return resolved
+
+
+def _validate_file_pattern(file_pattern: str) -> None:
+    """Reject glob patterns that can select outside the requested directory."""
+    candidate = Path(file_pattern)
+    if candidate.is_absolute() or any(part == ".." for part in candidate.parts):
+        msg = f"search file_pattern {file_pattern!r} must be a relative pattern without '..'"
+        raise PermissionError(msg)
+
 
 # ---------------------------------------------------------------------------
 # Shell tool
@@ -47,17 +117,25 @@ async def shell_tool(
     command: str,
     cwd: str | None = None,
     timeout: int = 30,  # noqa: ASYNC109 — name must match ShellInput.timeout; the tool runtime passes timeout= as a kwarg
+    runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
 ) -> ToolResult:
     """
     Execute a shell command and return stdout/stderr.
-    Use carefully — only for trusted, sandboxed environments.
+
+    Requires the ``system.shell.execute`` grant and an explicit ``cwd`` inside
+    the workspace jail — a shell without a jailed working directory is an
+    unconfined process, so a missing ``cwd`` is a refusal, not a default.
     """
     try:
+        _require_capability(runtime, CAP_SHELL_EXECUTE)
+        if cwd is None:
+            return ToolResult.fail("shell_tool requires an explicit cwd inside the workspace jail")
+        jailed_cwd = _resolve_in_jail(cwd, "shell cwd")
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
+            cwd=str(jailed_cwd),
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         result = ShellOutput(
@@ -67,6 +145,8 @@ async def shell_tool(
             success=proc.returncode == 0,
         )
         return ToolResult.ok(data=result.model_dump())
+    except PermissionError as exc:
+        return ToolResult.fail(str(exc))
     except TimeoutError:
         return ToolResult.fail(f"Command timed out after {timeout}s")
     except (OSError, subprocess.SubprocessError) as exc:
@@ -101,10 +181,19 @@ class ListDirInput(BaseModel):
 
 @register_tool("filesystem", "read")
 @tool(args_schema=ReadFileInput)
-async def read_file(path: str, encoding: str = "utf-8") -> ToolResult:
+async def read_file(
+    path: str,
+    encoding: str = "utf-8",
+    runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
+) -> ToolResult:
     """Read the contents of a file and return them as a string."""
     try:
-        content = Path(path).read_text(encoding=encoding)
+        _require_capability(runtime, CAP_FS_READ)
+        target = _resolve_in_jail(path, "read")
+    except PermissionError as exc:
+        return ToolResult.fail(str(exc))
+    try:
+        content = target.read_text(encoding=encoding)
         return ToolResult.ok(data={"content": content})
     except FileNotFoundError:
         return ToolResult.fail(f"File not found: {path}")
@@ -121,16 +210,25 @@ async def read_file(path: str, encoding: str = "utf-8") -> ToolResult:
 
 @register_tool("filesystem", "write")
 @tool(args_schema=WriteFileInput)
-async def write_file(path: str, content: str, mode: str = "w") -> ToolResult:
+async def write_file(
+    path: str,
+    content: str,
+    mode: str = "w",
+    runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
+) -> ToolResult:
     """Write content to a file. Creates parent directories if needed."""
     try:
-        p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
+        _require_capability(runtime, CAP_FS_WRITE)
+        target = _resolve_in_jail(path, "write")
+    except PermissionError as exc:
+        return ToolResult.fail(str(exc))
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
         if mode == "a":
-            with p.open(mode="a", encoding="utf-8") as handle:  # noqa: ASYNC230 — sync Path I/O is this module's established convention (cf. read_text/write_text below)
+            with target.open(mode="a", encoding="utf-8") as handle:
                 handle.write(content)
         else:
-            p.write_text(content, encoding="utf-8")
+            target.write_text(content, encoding="utf-8")
         return ToolResult.ok(data={"message": f"Written {len(content)} bytes to {path}"})
     except PermissionError as exc:
         exc.add_note(f"path={path}, operation=write_file")
@@ -146,11 +244,18 @@ async def write_file(path: str, content: str, mode: str = "w") -> ToolResult:
 @register_tool("filesystem", "list")
 @tool(args_schema=ListDirInput)
 async def list_directory(
-    path: str = ".", recursive: bool = False, pattern: str | None = None
+    path: str = ".",
+    recursive: bool = False,
+    pattern: str | None = None,
+    runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
 ) -> ToolResult:
     """List files in a directory, optionally filtering by glob pattern."""
     try:
-        base = Path(path)
+        _require_capability(runtime, CAP_FS_READ)
+        base = _resolve_in_jail(path, "list")
+    except PermissionError as exc:
+        return ToolResult.fail(str(exc))
+    try:
         if not base.exists():
             return ToolResult.fail(f"Path does not exist: {path}")
 
@@ -191,20 +296,35 @@ class FileSearchInput(BaseModel):
 @tool(args_schema=FileSearchInput)
 async def file_search(
     query: str,
+    *,
     directory: str = ".",
     file_pattern: str = "*",
     max_results: int = 20,
     use_regex: bool = False,
+    runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
 ) -> ToolResult:
     """Search for a string or regex pattern across files in a directory."""
+    try:
+        _require_capability(runtime, CAP_FS_READ)
+        base = _resolve_in_jail(directory, "search")
+        _validate_file_pattern(file_pattern)
+    except PermissionError as exc:
+        return ToolResult.fail(str(exc))
+
     import re as _re
 
-    base = Path(directory)
     results: list[dict[str, Any]] = []
     pattern = _re.compile(query) if use_regex else None
 
     for file_path in base.rglob(file_pattern):
         if not file_path.is_file():
+            continue
+        # ``rglob`` can yield symlinked files.  Resolve every candidate before
+        # reading it; checking only ``directory`` would let a link inside the
+        # jail disclose an outside file.
+        try:
+            _resolve_in_jail(str(file_path), "search result")
+        except PermissionError:
             continue
         try:
             lines = file_path.read_text(errors="replace").splitlines()

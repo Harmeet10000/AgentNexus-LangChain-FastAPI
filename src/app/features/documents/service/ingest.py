@@ -10,6 +10,7 @@ from returns.result import Failure, Success
 from sqlalchemy import text
 
 from app.ai.embeddings import EmbeddingTaskType, embed_texts
+from app.config import get_settings
 from app.connections.object_storage import build_s3_key, key_from_s3_uri
 from app.extraction.langextract.service import (
     ExtractionFailed,
@@ -17,7 +18,21 @@ from app.extraction.langextract.service import (
     ExtractionRequest,
     ExtractionSucceeded,
 )
-from app.features.documents.classification import classify_document, segment_chunks
+from app.features.auth.tenancy import personal_tenant_id
+from app.features.documents.access_audit import (
+    DocumentAccessAuditEvent,
+    DocumentAccessAuditRecorder,
+    InMemoryDocumentAccessAuditRecorder,
+)
+from app.features.documents.classification import (
+    ClassifiedDocument,
+    ContractBoundary,
+    ParsedDocument,
+    QualityWarning,
+    classify_document,
+    establish_contract_boundaries,
+    segment_chunks,
+)
 from app.features.documents.constants import (
     ANALYZE_THRESHOLD_CHUNKS,
     INGEST_EMBEDDING_BATCH_SIZE,
@@ -57,12 +72,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, async_sessionmaker
 
     from app.connections.object_storage import StorageService
-    from app.features.documents.classification import (
-        ClassifiedDocument,
-        ParsedDocument,
-        PreparedChunk,
-        QualityWarning,
-    )
+    from app.features.documents.classification import PreparedChunk
     from app.features.documents.dto import IngestionJob, IngestionRuntime
     from app.features.documents.exceptions import DocumentResult
     from app.features.documents.legal_metadata import (
@@ -88,15 +98,18 @@ class DocumentCommandService:
         self,
         repo: DocumentRepository,
         object_store: StorageService | None,
+        audit_recorder: DocumentAccessAuditRecorder | None = None,
     ):
         self.repo: DocumentRepository = repo
         self.object_store: StorageService | None = object_store
+        self.audit_recorder = audit_recorder or InMemoryDocumentAccessAuditRecorder()
 
     @trace_layer("service")
     async def upload_document(
         self,
         *,
         user_id: str,
+        tenant_id: str | None = None,
         filename: str,
         content_type: str,
         raw_bytes: bytes,
@@ -107,9 +120,10 @@ class DocumentCommandService:
                     message="Uploaded document is empty", source="document_service"
                 )
             )
+        tenant_id = tenant_id or personal_tenant_id(user_id)
         content_hash = hashlib.sha256(raw_bytes).hexdigest()
         existing_result = await self.repo.get_document_by_user_hash(
-            user_id=user_id, content_hash=content_hash
+            user_id=user_id, tenant_id=tenant_id, content_hash=content_hash
         )
         if isinstance(existing_result, Success):
             existing = existing_result.unwrap()
@@ -133,6 +147,7 @@ class DocumentCommandService:
         object_key = build_s3_key(
             prefix="documents",
             user_id=user_id,
+            tenant_id=tenant_id,
             document_id=document_id,
             content_hash=content_hash,
             filename=filename,
@@ -147,7 +162,12 @@ class DocumentCommandService:
             key=object_key,
             data=raw_bytes,
             content_type=content_type,
-            metadata={"user_id": user_id, "document_id": document_id, "content_hash": content_hash},
+            metadata={
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+                "content_hash": content_hash,
+            },
         )
         if isinstance(storage_result, Failure):
             error = storage_result.failure()
@@ -189,6 +209,7 @@ class DocumentCommandService:
             payload={
                 "document_id": str(object=document.id),
                 "user_id": user_id,
+                "tenant_id": tenant_id,
                 "filename": filename,
                 "content_type": content_type,
                 "object_uri": object_uri,
@@ -209,9 +230,41 @@ class DocumentCommandService:
 
     @trace_layer("service")
     async def get_status(
-        self, *, user_id: str, document_id: str
+        self, *, user_id: str, document_id: str, tenant_id: str | None = None
     ) -> DocumentResult[DocumentStatusResponse]:
-        status_result = await self.repo.fetch_status(user_id=user_id, document_id=document_id)
+        resolved_tenant = tenant_id or personal_tenant_id(user_id)
+        result = await self._get_status(
+            user_id=user_id, document_id=document_id, tenant_id=resolved_tenant
+        )
+        outcome = "ok" if isinstance(result, Success) else "denied"
+        try:
+            await self.audit_recorder.append(
+                DocumentAccessAuditEvent(
+                    tenant_id=resolved_tenant,
+                    principal_id=user_id,
+                    operation="ingestion.status",
+                    requested_document_ids=(document_id,),
+                    document_ids=(document_id,) if isinstance(result, Success) else (),
+                    policy="mechanically_verified",
+                    outcome=outcome,
+                    reason=None if isinstance(result, Success) else result.failure().message,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — audit is a fail-closed boundary
+            exc.add_note(f"operation=ingestion.status, document_id={document_id}")
+            logger.bind(document_id=document_id, user_id=user_id).exception(
+                "document_access_audit_failed"
+            )
+        return result
+
+    async def _get_status(
+        self, *, user_id: str, document_id: str, tenant_id: str
+    ) -> DocumentResult[DocumentStatusResponse]:
+        status_result = await self.repo.fetch_status(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            document_id=document_id,
+        )
         if isinstance(status_result, Success):
             record: dict[str, Any] | None = status_result.unwrap()
             if record is not None:
@@ -266,7 +319,7 @@ async def _load_document_bytes(
 
 
 @trace_layer("service")
-async def process_document_ingestion(  # noqa: PLR0912, PLR0914 — staged workflow
+async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — staged workflow
     *,
     job: IngestionJob,
     runtime: IngestionRuntime,
@@ -275,22 +328,69 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914 — staged workf
     if isinstance(raw_result, Failure):
         return raw_result
     raw_bytes = raw_result.unwrap()
+    settings = get_settings()
     parsed: ParsedDocument = await parse_document(
-        raw_bytes=raw_bytes, filename=job.filename, content_type=job.content_type
+        raw_bytes=raw_bytes,
+        filename=job.filename,
+        content_type=job.content_type,
+        extraction_timeout_seconds=settings.DOCUMENT_EXTRACTION_TIMEOUT_SECONDS,
+        max_pages=settings.DOCUMENT_EXTRACTION_MAX_PAGES,
+        max_output_bytes=settings.DOCUMENT_EXTRACTION_MAX_OUTPUT_BYTES,
     )
-    classified: ClassifiedDocument = classify_document(
-        markdown=parsed.markdown, filename=job.filename
+    boundary_result = establish_contract_boundaries(
+        markdown=parsed.markdown, page_count=parsed.page_count
     )
-    legal = await _prepare_legal_metadata(
-        runtime=runtime,
-        markdown=parsed.markdown,
-        classified=classified,
+    boundaries = boundary_result.boundaries or [
+        ContractBoundary(
+            contract_index=0,
+            markdown=parsed.markdown,
+            start_char=0,
+            end_char=len(parsed.markdown),
+        )
+    ]
+    # Classification and legal extraction are intentionally inside this loop:
+    # a whole-file metadata pass is unsound for a PDF containing two contracts.
+    contract_classifications: list[ClassifiedDocument] = []
+    legal_preparations: list[tuple[ContractBoundary, _LegalPreparation]] = []
+    contract_parsed_items: list[tuple[ContractBoundary, ParsedDocument, ClassifiedDocument]] = []
+    prepared_chunks: list[PreparedChunk] = []
+    segmentation_warnings: list[QualityWarning] = []
+    for boundary in boundaries:
+        contract_parsed = parsed.model_copy(update={"markdown": boundary.markdown})
+        contract_classified = classify_document(
+            markdown=contract_parsed.markdown, filename=job.filename
+        )
+        contract_classifications.append(contract_classified)
+        contract_parsed_items.append((boundary, contract_parsed, contract_classified))
+        legal_preparation = (
+            await _prepare_legal_metadata(
+                runtime=runtime,
+                markdown=contract_parsed.markdown,
+                classified=contract_classified,
+            )
+            if not boundary_result.ambiguous
+            else _LegalPreparation(metadata=None, warnings=[])
+        )
+        legal_preparations.append((boundary, legal_preparation))
+
+    classified = _aggregate_contract_classifications(
+        contract_classifications,
+        boundary_warnings=boundary_result.warnings,
+        ambiguous=boundary_result.ambiguous,
+    )
+    legal = legal_preparations[0][1] if len(legal_preparations) == 1 else _LegalPreparation(
+        metadata=None,
+        warnings=[warning for _, preparation in legal_preparations for warning in preparation.warnings],
     )
     extraction_outcome = await _extract_document_knowledge(
         runtime=runtime,
         job=job,
         markdown=parsed.markdown,
-        jurisdiction=(legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction),
+        jurisdiction=(
+            legal.metadata.jurisdiction
+            if legal.metadata
+            else (classified.jurisdiction if len(boundaries) == 1 else None)
+        ),
         document_type=classified.document_kind,
     )
     status_result = await runtime.repo.update_document_status(
@@ -300,14 +400,33 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914 — staged workf
         document_kind=classified.document_kind,
         jurisdiction=(legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction),
         contract_type=(
-            legal.metadata.contract_type if legal.metadata else classified.contract_type
+            legal.metadata.contract_type
+            if legal.metadata
+            else (classified.contract_type if len(boundaries) == 1 else None)
         ),
-        parties=[*(legal.metadata.parties if legal.metadata else classified.parties)],
+        parties=[*(legal.metadata.parties if legal.metadata else (classified.parties if len(boundaries) == 1 else []))],
         metadata_={
             "content_type": job.content_type,
             "filename": job.filename,
             **classified.metadata_,
             **(legal.metadata.model_dump(exclude_none=True) if legal.metadata else {}),
+            **(
+                {
+                    "contracts": [
+                        {
+                            "contract_index": boundary.contract_index,
+                            **(
+                                preparation.metadata.model_dump(exclude_none=True)
+                                if preparation.metadata
+                                else {}
+                            ),
+                        }
+                        for boundary, preparation in legal_preparations
+                    ]
+                }
+                if len(boundaries) > 1
+                else {}
+            ),
         },
         structural_tree=parsed.structural_tree,
         extraction_incomplete=isinstance(extraction_outcome, ExtractionFailed),
@@ -327,22 +446,50 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914 — staged workf
     checkpoint_result = await _checkpoint_ingestion_transaction(runtime)
     if isinstance(checkpoint_result, Failure):
         return Failure(checkpoint_result.failure())
-    chunks, segmentation_warnings = await segment_chunks(parsed=parsed, classified=classified)
-    if legal.metadata is not None:
-        chunks = enrich_legal_chunks(
-            chunks=chunks,
-            classified=classified,
-            metadata=legal.metadata,
+    # Chunking happens only after extraction/status checkpoint.  This preserves
+    # the old transactional ordering while keeping each contract isolated.
+    for index, (boundary, contract_parsed, contract_classified) in enumerate(
+        contract_parsed_items
+    ):
+        contract_chunks, warnings = await segment_chunks(
+            parsed=contract_parsed,
+            classified=contract_classified,
         )
+        legal_preparation = legal_preparations[index][1]
+        if legal_preparation.metadata is not None:
+            contract_chunks = enrich_legal_chunks(
+                chunks=contract_chunks,
+                classified=contract_classified,
+                metadata=legal_preparation.metadata,
+            )
+        prepared_chunks.extend(_annotate_contract_chunks(contract_chunks, boundary))
+        segmentation_warnings.extend(warnings)
+
+    # Chunk identity remains unique within the document while contract_index
+    # preserves the independent legal identity used by evidence citations.
+    prepared_chunks = [
+        chunk.model_copy(update={"chunk_index": index})
+        for index, chunk in enumerate(prepared_chunks)
+    ]
     chunk_rows = await _embed_chunks(
         user_id=job.user_id,
         document_id=job.document_id,
-        chunks=chunks,
-        extra_warnings=segmentation_warnings + classified.warnings + legal.warnings,
+        chunks=prepared_chunks,
+        extra_warnings=(
+            boundary_result.warnings
+            + segmentation_warnings
+            + classified.warnings
+            + legal.warnings
+        ),
         extraction_outcome=extraction_outcome,
     )
     upsert_result = await runtime.repo.upsert_chunks(
-        build_chunk_rows(document_id=job.document_id, user_id=job.user_id, chunks=chunk_rows)
+        build_chunk_rows(
+            document_id=job.document_id,
+            user_id=job.user_id,
+            tenant_id=job.tenant_id,
+            chunks=chunk_rows,
+        )
     )
     if isinstance(upsert_result, Failure):
         log_expected_failure(upsert_result.failure(), operation="document_ingestion")
@@ -360,11 +507,18 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914 — staged workf
     if isinstance(checkpoint_result, Failure):
         return Failure(checkpoint_result.failure())
     if classified.graphiti_required:
-        await _write_contract_events(runtime.graphiti, legal.metadata, job.document_id)
+        for boundary, preparation in legal_preparations:
+            await _write_contract_events(
+                runtime.graphiti,
+                preparation.metadata,
+                job.document_id,
+                contract_index=boundary.contract_index,
+            )
         verify_result = await _verify_legal_chunks(
             repo=runtime.repo,
             graphiti=runtime.graphiti,
             user_id=job.user_id,
+            tenant_id=job.tenant_id,
             document_id=job.document_id,
             chunk_rows=chunk_rows,
         )
@@ -416,6 +570,81 @@ async def _checkpoint_ingestion_transaction(runtime: IngestionRuntime) -> Docume
     return Success(None)
 
 
+def _annotate_contract_chunks(
+    chunks: list[PreparedChunk], boundary: ContractBoundary
+) -> list[PreparedChunk]:
+    """Attach stable contract and source coordinates without inventing spans."""
+    annotated: list[PreparedChunk] = []
+    cursor = 0
+    for chunk in chunks:
+        start = boundary.markdown.find(chunk.content, cursor)
+        if start < 0:
+            start = boundary.markdown.find(chunk.content)
+        end = start + len(chunk.content) if start >= 0 else None
+        absolute_start = boundary.start_char + start if start >= 0 else None
+        absolute_end = boundary.start_char + end if end is not None else None
+        if end is not None:
+            cursor = end
+        metadata = {
+            **chunk.metadata_,
+            "contract_index": boundary.contract_index,
+            "source_start_char": absolute_start,
+            "source_end_char": absolute_end,
+            "source_boundary_start_char": boundary.start_char,
+            "source_boundary_end_char": boundary.end_char,
+        }
+        annotated.append(
+            chunk.model_copy(
+                update={
+                    "contract_index": boundary.contract_index,
+                    "source_start_char": absolute_start,
+                    "source_end_char": absolute_end,
+                    "metadata_": metadata,
+                }
+            )
+        )
+    return annotated
+
+
+def _aggregate_contract_classifications(
+    classifications: list[ClassifiedDocument],
+    *,
+    boundary_warnings: list[QualityWarning],
+    ambiguous: bool,
+) -> ClassifiedDocument:
+    if not classifications:
+        return ClassifiedDocument(
+            document_kind="generic", warnings=list(boundary_warnings)
+        )
+    first = classifications[0]
+    is_multi = len(classifications) > 1
+    warnings = [
+        *boundary_warnings,
+        *(warning for classification in classifications for warning in classification.warnings),
+    ]
+    if ambiguous:
+        warnings.append(
+            QualityWarning(
+                stage="contract_boundaries",
+                code="MULTI_CONTRACT_BOUNDARY_AMBIGUOUS",
+                message="Legal metadata extraction was skipped because contract boundaries were ambiguous.",
+                severity="warning",
+            )
+        )
+    if not is_multi:
+        return first.model_copy(update={"warnings": warnings})
+    kinds = {classification.document_kind for classification in classifications}
+    return ClassifiedDocument(
+        document_kind="legal_contract" if "legal_contract" in kinds else first.document_kind,
+        graphiti_required=any(classification.graphiti_required for classification in classifications),
+        warnings=warnings,
+        metadata_={
+            "contract_count": len(classifications),
+            "contract_kinds": sorted(kinds),
+        },
+    )
+
+
 async def _prepare_legal_metadata(
     *,
     runtime: IngestionRuntime,
@@ -436,17 +665,22 @@ async def _write_contract_events(
     graphiti: Graphiti | None,
     legal_metadata: LegalMetadataExtraction | None,
     document_id: str,
+    contract_index: int | None = None,
 ) -> None:
     if graphiti is None or legal_metadata is None:
         return
     for event_name, event_date in contract_event_dates(legal_metadata):
         try:
             await graphiti.add_episode(
-                name=f"{event_name}:{document_id}:{event_date}",
-                episode_body=f"{event_name} for {document_id} occurs on {event_date}.",
+                name=f"{event_name}:{document_id}:{contract_index}:{event_date}",
+                episode_body=(
+                    f"{event_name} for {document_id} contract {contract_index} "
+                    f"occurs on {event_date}."
+                ),
                 source_description=(
                     "{"
                     f'"doc_id":"{document_id}",'
+                    f'"contract_index":{contract_index if contract_index is not None else "null"},'
                     f'"event_type":"{event_name}",'
                     f'"event_date":"{event_date}"'
                     "}"
@@ -467,6 +701,7 @@ async def run_document_ingestion_task(
     *,
     document_id: str,
     user_id: str,
+    tenant_id: str | None = None,
     filename: str,
     content_type: str,
     object_uri: str,
@@ -475,7 +710,8 @@ async def run_document_ingestion_task(
     session_local: async_sessionmaker[Any],
     idempotency: IdempotencyGuard,
 ) -> dict[str, object]:
-    lock_key = _document_ingestion_lock_key(user_id, document_id)
+    tenant_id = tenant_id or personal_tenant_id(user_id)
+    lock_key = _document_ingestion_lock_key(tenant_id, document_id)
     async with engine.connect() as lock_connection:
         acquired = await lock_connection.scalar(
             text("SELECT pg_try_advisory_lock(:lock_key)"),
@@ -496,6 +732,7 @@ async def run_document_ingestion_task(
                     {
                         "document_id": document_id,
                         "user_id": user_id,
+                        "tenant_id": tenant_id,
                         "filename": filename,
                         "content_type": content_type,
                         "object_uri": object_uri,
@@ -579,6 +816,7 @@ async def _embed_chunks(
                     "id": str(uuid4()),
                     "chunk_index": chunk.chunk_index,
                     "document_version": chunk.document_version,
+                    "contract_index": chunk.contract_index,
                     "chunk_kind": chunk.chunk_kind,
                     "content": chunk.content,
                     "preamble": chunk.preamble,
@@ -734,6 +972,7 @@ async def _verify_legal_chunks(
     repo: DocumentRepository,
     graphiti: Graphiti | None,
     user_id: str,
+    tenant_id: str,
     document_id: str,
     chunk_rows: list[dict[str, object]],
 ) -> DocumentResult[int]:
@@ -753,7 +992,12 @@ async def _verify_legal_chunks(
         if result.verified:
             verified_count += 1
     upsert_result = await repo.upsert_chunks(
-        build_chunk_rows(document_id=document_id, user_id=user_id, chunks=chunk_rows)
+        build_chunk_rows(
+            document_id=document_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            chunks=chunk_rows,
+        )
     )
     if isinstance(upsert_result, Failure):
         log_expected_failure(upsert_result.failure(), operation="verify_legal_chunks")

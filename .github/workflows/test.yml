@@ -92,6 +92,9 @@ jobs:
       - name: Format check with ruff
         run: uv run ruff format --check src/ tests/
 
+      - name: Validate evaluation gold-set provenance
+        run: uv run python -m app.ai.evaluation.validate evals/golden/legal_retrieval_v1.jsonl
+
       - name: Type check with ty
         run: uv run ty check src/
 
@@ -147,6 +150,12 @@ jobs:
 
       - name: Run migrations
         run: uv run alembic upgrade head
+
+      - name: Reconcile personal tenants before production-readiness checks
+        run: uv run python scripts/migrate_personal_tenants.py --reconcile --limit 250
+
+      - name: Enforce personal-tenant rollout gate
+        run: uv run python scripts/migrate_personal_tenants.py --check
 
       - name: Check migration chain (single head, no model drift)
         run: |

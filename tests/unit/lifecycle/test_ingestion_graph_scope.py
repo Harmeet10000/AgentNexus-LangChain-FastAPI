@@ -83,3 +83,45 @@ async def test_ingestion_node_prefers_job_scoped_idempotency() -> None:
     runtime = ingest.await_args.kwargs["runtime"]
     assert runtime.idempotency is job_idempotency
     assert runtime.transaction_checkpoint == repo.session.commit
+
+
+@pytest.mark.asyncio
+async def test_early_worker_failure_is_persisted_as_failed_status() -> None:
+    async def fail_before_processing(**_: object) -> object:
+        error_message = "parser unavailable"
+        raise RuntimeError(error_message)
+
+    repo = MagicMock(spec=DocumentRepository)
+    repo.session = MagicMock(spec=AsyncSession)
+    repo.update_document_status = AsyncMock(return_value=Success(None))
+    node = _make_ingest_document_node(
+        object_store=MagicMock(spec=StorageService),
+        graphiti=None,
+        ingest_document_fn=fail_before_processing,
+        llm=FakeListChatModel(responses=["unused"]),
+    )
+
+    result = await node(
+        {
+            "document_id": "doc-1",
+            "user_id": "user-1",
+            "filename": "fixture.txt",
+            "content_type": "text/plain",
+            "object_uri": "s3://bucket/fixture.txt",
+        },
+        {"configurable": {"document_repository": repo}},  # type: ignore[arg-type]
+    )
+
+    assert result["status"] == "failed"
+    repo.update_document_status.assert_awaited_once_with(
+        document_id="doc-1",
+        status="failed",
+        metadata_={
+            "ingestion_error": {
+                "code": "INGESTION_UNEXPECTED_FAILURE",
+                "message": "Document ingestion failed unexpectedly",
+                "retryable": True,
+            }
+        },
+        extraction_incomplete=True,
+    )

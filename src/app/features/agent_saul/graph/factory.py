@@ -11,6 +11,7 @@ from app.ai.tools.registry import (
     get_tool_registry,
     register_default_tools,
 )
+from app.features.documents.tools.authorization import ToolRuntimeContext
 from app.features.documents.tools.bundle import AgentToolBundle
 
 from .nodes import (
@@ -30,7 +31,8 @@ from .nodes import (
     make_normalization_node,
     make_orchestrator_node,
     make_persist_memory_node,
-    make_planner_node,
+    make_plan_approval_node,
+    make_plan_generation_node,
     make_qna_node,
     make_relationship_mapping_node,
     make_risk_analysis_node,
@@ -87,6 +89,7 @@ class SaulGraphNodes(BaseModel):
     gateway: Any
     qna: Any
     orchestrator: Any
+    planner_generate: Any
     planner: Any
     ingestion: Any
     normalization: Any
@@ -135,8 +138,30 @@ def build_agent_registry(
         _transfer("transfer_to_risk"),
     ]
     if tools is not None:
+        # Keep each specialist's active toolset bounded.  The evidence tools
+        # are the authoritative search/read seam; legacy specialist tools stay
+        # available only where they add a distinct graph capability.
         risk_tools += [tools.query_knowledge_graph, tools.get_obligation_chain]
         compliance_tools += [tools.search_legal_precedents, tools.retrieve_statute_section]
+        if tools.search_evidence is not None and tools.read_evidence_by_id is not None:
+            # Both specialists use the same scoped evidence seam; compliance
+            # additionally receives readiness so missing uploaded authorities
+            # cannot be interpreted as compliance.
+            compliance_tools = [
+                _transfer("transfer_to_orchestrator"),
+                _transfer("transfer_to_risk"),
+                tools.search_evidence,
+                tools.read_evidence_by_id,
+            ]
+            if tools.get_ingestion_state is not None:
+                compliance_tools.append(tools.get_ingestion_state)
+            risk_tools = [
+                _transfer("transfer_to_orchestrator"),
+                tools.query_knowledge_graph,
+                tools.get_obligation_chain,
+                tools.search_evidence,
+                tools.read_evidence_by_id,
+            ]
 
     risk_agent = create_agent(
         model=pro_llm,
@@ -147,6 +172,9 @@ def build_agent_registry(
         # allowlist must be supplied at the application middleware configuration seam.
         middleware=[],
         response_format=RiskAnalysisOutput,
+        # ``TypedDict`` is valid at runtime for LangChain's context schema, but
+        # ty cannot express it as ``type[ContextT]`` in this overloaded call.
+        context_schema=cast("type[Any]", ToolRuntimeContext),
     )
 
     compliance_agent = create_agent(
@@ -155,6 +183,7 @@ def build_agent_registry(
         system_prompt=_COMPLIANCE_SYSTEM_PROMPT,
         middleware=[],
         response_format=ComplianceOutput,
+        context_schema=cast("type[Any]", ToolRuntimeContext),
     )
 
     # --- with_structured_output chains (Flash LLM) -------------------------
@@ -217,7 +246,8 @@ def _build_graph_nodes(
                 pro_llm.with_structured_output(OrchestratorAction),
             )
         ),
-        planner=make_planner_node(registry.planner_llm),
+        planner_generate=make_plan_generation_node(registry.planner_llm),
+        planner=make_plan_approval_node(),
         ingestion=make_ingestion_node(),
         normalization=make_normalization_node(registry.normalization_llm),
         segmentation=make_segmentation_node(registry.segmentation_llm),
@@ -229,5 +259,7 @@ def _build_graph_nodes(
         human_review=make_human_review_node(),
         finalization=make_finalization_node(registry.finalization_llm),
         persist_memory=make_persist_memory_node(memory_service),
-        deep_research=make_deep_research_node(tool_registry.deep_research_tool),
+        deep_research=make_deep_research_node(
+            evidence_service=tool_registry.evidence_service,
+        ),
     )

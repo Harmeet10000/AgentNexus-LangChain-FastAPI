@@ -21,8 +21,16 @@ from fastapi.responses import StreamingResponse
 from returns.result import Failure
 
 from app.config import get_settings
-from app.features.auth.dependencies import CurrentClaims
+from app.features.auth.account_store import AuthAccountStore
+from app.features.auth.dependencies import (
+    CurrentAuthorizationContext,
+    CurrentClaims,
+    TenantMembershipServiceDep,
+    WebSocketAuthorizationContext,
+    get_account_store,
+)
 from app.features.auth.websocket_security import WebSocketSecurityViolation
+from app.features.documents.dependencies import DocumentAuthorizationDep
 from app.kernel.result import render_result
 from app.observability.logging import logger
 from app.resilience.rate_limit import get_rate_limiter
@@ -92,10 +100,11 @@ def get_websocket_url(request: Request, path: str) -> str:
     summary="Create a new Agent Saul session and receive a thread_id + WS URL",
     dependencies=[Depends(limit_agent_session_creation)],
 )
-async def create_session(
+async def create_session(  # noqa: PLR0917 — FastAPI dependency injection boundary
     body: CreateSessionRequest,
     document_source: DocumentContentSourceDep,
-    claims: CurrentClaims,
+    authorization: CurrentAuthorizationContext,
+    document_authorization: DocumentAuthorizationDep,
     request: Request,
     response: Response,
 ) -> APIResponse[CreateSessionResponse]:
@@ -103,13 +112,31 @@ async def create_session(
     ws_path = f"{get_settings().API_PREFIX}/agent-saul/ws/{thread_id}"
     ws_url = get_websocket_url(request, ws_path)
 
-    log = logger.bind(user_id=claims.sub, thread_id=thread_id, doc_id=body.doc_id)
+    log = logger.bind(
+        user_id=authorization.user_id,
+        tenant_id=authorization.tenant_id,
+        thread_id=thread_id,
+        doc_id=body.primary_doc_id,
+    )
+
+    # ``CurrentAuthorizationContext`` intentionally carries no document
+    # allowlist: auth owns identity/roles while the documents repository owns
+    # the tenant corpus capability.  Resolve that capability here before
+    # narrowing the client selection.  Without this dependency every normal
+    # create-session request intersects against the context's empty default
+    # and is reduced to an empty scope before preflight.
+    scoped_doc_ids = document_authorization.narrow_document_ids(body.allowed_doc_ids)
+    primary_doc_id = body.primary_doc_id or body.doc_id
+    if primary_doc_id not in scoped_doc_ids:
+        primary_doc_id = scoped_doc_ids[0] if scoped_doc_ids else ""
 
     result = await AgentSaulService.create_session_for_document(
         websocket_url=ws_url,
         thread_id=thread_id,
-        doc_id=body.doc_id,
-        user_id=claims.sub,
+        doc_id=primary_doc_id,
+        allowed_doc_ids=list(scoped_doc_ids),
+        user_id=authorization.user_id,
+        tenant_id=authorization.tenant_id,
         document_source=document_source,
     )
     if isinstance(result, Failure):
@@ -174,11 +201,15 @@ async def export_session_transcript(
 
 
 @router.websocket("/ws/{thread_id}")
-async def saul_ws_endpoint(
+async def saul_ws_endpoint(  # noqa: PLR0917
     websocket: WebSocket,
     thread_id: str,
     deps: AgentSaulDepsWsAnnotated,
     security_context: AgentSaulWebSocketSecurityContextAnnotated,
+    authorization: WebSocketAuthorizationContext,
+    document_authorization: DocumentAuthorizationDep,
+    account_store: Annotated[AuthAccountStore, Depends(get_account_store)],
+    tenant_membership_service: TenantMembershipServiceDep,
 ) -> None:
     """
     WebSocket session lifecycle:
@@ -193,7 +224,20 @@ async def saul_ws_endpoint(
     """
     # ONE thread-context construction: identity and correlation are built
     # here (runtime.SaulThreadContext) and consumed by logs and the service.
-    context = SaulThreadContext(user_id=security_context.user_id, thread_id=thread_id)
+    context = SaulThreadContext(
+        user_id=authorization.user_id,
+        thread_id=thread_id,
+        tenant_id=authorization.tenant_id,
+        legal_roles=authorization.legal_roles,
+        self_review_allowed=authorization.self_review_allowed,
+        role_revision=authorization.role_revision,
+        allowed_doc_ids=document_authorization.allowed_doc_ids,
+        allowed_operations=authorization.allowed_operations,
+        capabilities=authorization.capabilities,
+    )
+    # The security dependency intentionally only authenticates the token. Bind
+    # the live tenant before registering presence/audit events.
+    security_context = security_context.model_copy(update={"tenant_id": authorization.tenant_id})
     log = logger.bind(
         user_id=context.user_id,
         thread_id=context.thread_id,
@@ -268,6 +312,8 @@ async def saul_ws_endpoint(
             ws_security=security_service,
             ws_context=security_context,
             session_factory=deps.session_factory,
+            account_store=account_store,
+            tenant_membership_service=tenant_membership_service,
         )
         await service.run_session(
             ws=websocket,

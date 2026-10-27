@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, assert_never, cast
 from uuid import uuid4
@@ -38,9 +39,12 @@ from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
 from app.config import get_settings
+from app.features.agent_saul.budget import BudgetLedger, BudgetLimits
 from app.features.agent_saul.document_source import (
     DOCUMENT_SOURCE_CONFIG_KEY,
+    DocumentReadiness,
     DocumentTextFailureCode,
+    document_content_source_from_config,
     postgres_document_content_source,
 )
 from app.features.agent_saul.dto import (
@@ -58,7 +62,9 @@ from app.features.agent_saul.dto import (
     ws_inbound_adapter,
 )
 from app.features.agent_saul.exceptions import (
+    AgentSaulDocumentIngestionFailedError,
     AgentSaulDocumentNotFoundError,
+    AgentSaulDocumentNotReadyError,
     AgentSaulInfrastructureError,
     AgentSaulValidationError,
 )
@@ -66,15 +72,19 @@ from app.features.agent_saul.graph.state import (
     GRAPH_NODE_NAMES,
     STATE_SCHEMA_VERSION,
     HITLInterruptType,
+    PlanStep,
     StateSchemaVersionError,
     WorkflowStatus,
     hydrate_state,
+    initial_ingestion_state,
+    legacy_resume_update,
 )
 from app.features.agent_saul.runtime import thread_owner_violates
 from app.features.agent_saul.thread_lock import ThreadLock
 from app.features.agent_saul.transcript.projection import PAUSE_WINDOW
-from app.features.agent_saul.transcript.recorder import TurnRecorder
+from app.features.agent_saul.transcript.recorder import PlanResumeEvidence, TurnRecorder
 from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
+from app.features.auth.tenancy import LegalRole
 from app.features.auth.websocket_security import (
     WebSocketIdleTimeout,
     WebSocketSecurityViolation,
@@ -89,6 +99,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from app.features.agent_saul.document_source import (
+        DocumentContentResult,
         DocumentContentSource,
         DocumentTextFailure,
     )
@@ -98,6 +109,8 @@ if TYPE_CHECKING:
     )
     from app.features.agent_saul.exceptions import AgentSaulError, AgentSaulResult
     from app.features.agent_saul.runtime import SaulThreadContext
+    from app.features.auth.account_store import AuthAccountStore
+    from app.features.auth.tenant_repository import TenantMembershipService
     from app.features.auth.websocket_security import (
         WebSocketSecurityContext,
         WebSocketSecurityService,
@@ -108,6 +121,7 @@ _NODE_STATUS_MAP: dict[str, WorkflowStatus] = {
     "gateway": WorkflowStatus.INITIALIZED,
     "qna": WorkflowStatus.QNA_CLARIFICATION,
     "orchestrator": WorkflowStatus.PLAN_PENDING,
+    "planner_generate": WorkflowStatus.PLAN_PENDING,
     "planner": WorkflowStatus.PLAN_AWAITING_APPROVAL,
     "ingestion": WorkflowStatus.INGESTING,
     "normalization": WorkflowStatus.NORMALIZING,
@@ -158,6 +172,65 @@ def _document_preflight_error(
             assert_never(unreachable)
 
 
+def _document_readiness_error(
+    readiness: DocumentReadiness,
+    *,
+    user_id: str,
+    doc_id: str,
+) -> AgentSaulError | None:
+    """Translate a persisted ingestion state into a session admission error."""
+    if readiness.status in {"completed", "completed_with_warnings"}:
+        return None
+    details: dict[str, object] = {
+        "doc_id": doc_id,
+        "user_id": user_id,
+        "ingestion_status": readiness.status,
+        "warning_count": readiness.warning_count,
+        "warnings": list(readiness.warnings),
+    }
+    if readiness.error_code is not None:
+        details["error_code"] = readiness.error_code
+    if readiness.error_message is not None:
+        details["error_message"] = readiness.error_message
+    if readiness.status == "failed":
+        return AgentSaulDocumentIngestionFailedError(
+            message=readiness.error_message or "Document ingestion failed",
+            details=details,
+            source="document_content_source",
+            doc_id=doc_id,
+            status=readiness.status,
+        )
+    return AgentSaulDocumentNotReadyError(
+        message="Document ingestion is not complete",
+        details=details,
+        source="document_content_source",
+        doc_id=doc_id,
+        status=readiness.status,
+    )
+
+
+async def _source_readiness(
+    source: DocumentContentSource,
+    *,
+    user_id: str,
+    doc_id: str,
+    tenant_id: str | None,
+) -> DocumentContentResult[DocumentReadiness]:
+    """Read readiness while keeping old source doubles source-compatible.
+
+    The protocol now includes ``check_readiness``.  The compatibility fallback
+    is intentionally only for injected legacy test doubles and old deployments;
+    the production Postgres adapter always implements the status query.
+    """
+    checker = getattr(source, "check_readiness", None)
+    if not callable(checker):
+        return Success(DocumentReadiness(status="completed"))
+    kwargs: dict[str, str] = {"user_id": user_id, "doc_id": doc_id}
+    if tenant_id is not None:
+        kwargs["tenant_id"] = tenant_id
+    return await cast("Any", checker)(**kwargs)
+
+
 class AgentSaulService:
     """Per-session WebSocket orchestration service.
 
@@ -175,6 +248,8 @@ class AgentSaulService:
         ws_context: WebSocketSecurityContext,
         *,
         session_factory: async_sessionmaker[AsyncSession],
+        account_store: AuthAccountStore | None = None,
+        tenant_membership_service: TenantMembershipService | None = None,
     ) -> None:
         self._graph = graph
         self._redis = redis
@@ -183,6 +258,8 @@ class AgentSaulService:
         self._ws_security = ws_security
         self._ws_context = ws_context
         self._session_factory = session_factory
+        self._account_store = account_store
+        self._tenant_membership_service = tenant_membership_service
         self._log = logger.bind(correlation_id=context.correlation_id)
 
     # ------------------------------------------------------------------
@@ -204,6 +281,8 @@ class AgentSaulService:
         doc_id: str,
         user_id: str,
         document_source: DocumentContentSource,
+        tenant_id: str | None = None,
+        allowed_doc_ids: list[str] | None = None,
     ) -> AgentSaulResult[CreateSessionResponse]:
         """HTTP pre-flight with document existence + ownership validation.
 
@@ -212,15 +291,38 @@ class AgentSaulService:
         sailed through to a turn that fails at ingestion. A rejected doc is a
         typed failure on the Result, never a raise.
         """
-        preflight = await document_source.ensure_document(user_id=user_id, doc_id=doc_id)
-        if isinstance(preflight, Failure):
-            failure = preflight.failure()
-            error = _document_preflight_error(failure, user_id=user_id, doc_id=doc_id)
-            log_expected_failure(
-                error,
-                operation="create_session_document_preflight",
+        requested_ids = list(dict.fromkeys(allowed_doc_ids or [doc_id]))
+        if doc_id not in requested_ids:
+            requested_ids.insert(0, doc_id)
+        for requested_doc_id in requested_ids:
+            kwargs: dict[str, str] = {"user_id": user_id, "doc_id": requested_doc_id}
+            if tenant_id is not None:
+                kwargs["tenant_id"] = tenant_id
+            preflight = await document_source.ensure_document(**kwargs)
+            if isinstance(preflight, Failure):
+                failure = preflight.failure()
+                error = _document_preflight_error(failure, user_id=user_id, doc_id=requested_doc_id)
+                log_expected_failure(error, operation="create_session_document_preflight")
+                return Failure(error)
+            readiness = await _source_readiness(
+                document_source,
+                user_id=user_id,
+                doc_id=requested_doc_id,
+                tenant_id=tenant_id,
             )
-            return Failure(error)
+            if isinstance(readiness, Failure):
+                failure = readiness.failure()
+                error = _document_preflight_error(failure, user_id=user_id, doc_id=requested_doc_id)
+                log_expected_failure(error, operation="create_session_readiness_preflight")
+                return Failure(error)
+            readiness_error = _document_readiness_error(
+                readiness.unwrap(), user_id=user_id, doc_id=requested_doc_id
+            )
+            if readiness_error is not None:
+                log_expected_failure(
+                    readiness_error, operation="create_session_readiness_preflight"
+                )
+                return Failure(readiness_error)
         return AgentSaulService.create_session(websocket_url=websocket_url, thread_id=thread_id)
 
     @trace_layer("service")
@@ -642,7 +744,9 @@ class AgentSaulService:
         hydrated = await self._hydrate_or_refuse(ws, config, {}, thread_id)
         if hydrated is None:
             return None
-        await self._emit_hitl_prompt(ws, thread_id, interrupts[0].value, recorder, snapshot)
+        await self._emit_hitl_prompt(
+            ws, thread_id, interrupts[0].value, recorder, snapshot, config=config
+        )
         return await self._apply_resume(
             first_resume, ws=ws, thread_id=thread_id, recorder=recorder, config=config
         )
@@ -690,6 +794,28 @@ class AgentSaulService:
                 ).model_dump(),
             )
             return None
+        scope_error = await self._validate_document_scope(start_msg, config, user_id)
+        if scope_error is not None:
+            readiness_code = (
+                "DOCUMENT_INGESTION_FAILED"
+                if scope_error.startswith("Document ingestion failed")
+                else "DOCUMENT_NOT_READY"
+                if scope_error.startswith("Document ingestion is not complete")
+                else "DOCUMENT_READINESS_UNAVAILABLE"
+                if scope_error.startswith("Document ingestion status is unavailable")
+                else "DOCUMENT_SCOPE_INVALID"
+            )
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node="gateway",
+                    code=readiness_code,
+                    message=scope_error,
+                    retryable=readiness_code
+                    in {"DOCUMENT_NOT_READY", "DOCUMENT_READINESS_UNAVAILABLE"},
+                ).model_dump(),
+            )
+            return None
         initial_input = await self._hydrate_or_refuse(
             ws,
             config,
@@ -699,6 +825,85 @@ class AgentSaulService:
         if initial_input is None:
             return None
         return initial_input, False
+
+    async def _validate_document_scope(
+        self, start_msg: WSStartMessage, config: RunnableConfig, user_id: str
+    ) -> str | None:
+        """Prove every requested document belongs to the live tenant.
+
+        The browser may select IDs, but it cannot widen the tenant boundary.
+        A single-document legacy client follows the same check as a new
+        multi-document client.
+        """
+        source = document_content_source_from_config(config)
+        if source is None:
+            return "Document content source is unavailable"
+        authorized_doc_ids = set(self._context.allowed_doc_ids)
+        for doc_id in start_msg.allowed_doc_ids:
+            if doc_id not in authorized_doc_ids:
+                return "One or more selected documents are outside the authorized corpus"
+            kwargs: dict[str, str] = {"user_id": user_id, "doc_id": doc_id}
+            if self._context.tenant_id:
+                kwargs["tenant_id"] = self._context.tenant_id
+            result = await source.ensure_document(**kwargs)
+            if isinstance(result, Failure):
+                return "One or more selected documents are unavailable"
+            readiness = await _source_readiness(
+                source,
+                user_id=user_id,
+                doc_id=doc_id,
+                tenant_id=self._context.tenant_id or None,
+            )
+            if isinstance(readiness, Failure):
+                return "Document ingestion status is unavailable"
+            current = readiness.unwrap()
+            if current.status == "failed":
+                return f"Document ingestion failed for {doc_id}" + (
+                    f": {current.error_message}" if current.error_message else ""
+                )
+            if current.status not in {"completed", "completed_with_warnings"}:
+                warning_suffix = (
+                    f" ({current.warning_count} warnings)" if current.warning_count else ""
+                )
+                return f"Document ingestion is not complete for {doc_id}{warning_suffix}"
+        return None
+
+    async def _document_scope_readiness_error(
+        self,
+        *,
+        config: RunnableConfig,
+        user_id: str,
+        doc_ids: list[str],
+    ) -> AgentSaulError | None:
+        """Re-check ownership and terminal ingestion state for a saved scope."""
+        source = document_content_source_from_config(config)
+        if source is None:
+            return AgentSaulInfrastructureError(
+                message="Document content source is unavailable",
+                details={"thread_id": self._context.thread_id},
+                source="document_content_source",
+            )
+        for doc_id in doc_ids:
+            kwargs: dict[str, str] = {"user_id": user_id, "doc_id": doc_id}
+            if self._context.tenant_id:
+                kwargs["tenant_id"] = self._context.tenant_id
+            presence = await source.ensure_document(**kwargs)
+            if isinstance(presence, Failure):
+                return _document_preflight_error(presence.failure(), user_id=user_id, doc_id=doc_id)
+            readiness = await _source_readiness(
+                source,
+                user_id=user_id,
+                doc_id=doc_id,
+                tenant_id=self._context.tenant_id or None,
+            )
+            if isinstance(readiness, Failure):
+                return _document_preflight_error(
+                    readiness.failure(), user_id=user_id, doc_id=doc_id
+                )
+            error = _document_readiness_error(readiness.unwrap(), user_id=user_id, doc_id=doc_id)
+            if error is not None:
+                return error
+        return None
 
     async def _assess_round(
         self,
@@ -720,8 +925,28 @@ class AgentSaulService:
             final_state = state_snapshot.values
             final_report = final_state.get("final_report")
             summary = final_report.summary if final_report else None
+            review = final_state.get("human_review")
             await self._send_json(
-                ws, WSDoneFrame(thread_id=thread_id, summary=summary).model_dump()
+                ws,
+                WSDoneFrame(
+                    thread_id=thread_id,
+                    summary=summary,
+                    self_reviewed=bool(
+                        final_report.self_reviewed
+                        if final_report is not None
+                        else final_state.get("self_reviewed", False)
+                    ),
+                    reviewer_id=(
+                        final_report.reviewer_id
+                        if final_report is not None
+                        else getattr(review, "reviewer_id", None)
+                    ),
+                    reviewer_role=(
+                        final_report.reviewer_role
+                        if final_report is not None
+                        else getattr(review, "reviewer_role", None)
+                    ),
+                ).model_dump(),
             )
             # T2 runs AFTER the DoneFrame is on the wire (§5.2).
             await recorder.on_end()
@@ -748,7 +973,7 @@ class AgentSaulService:
             return "unexpected_pause", None
         return "paused", state_snapshot
 
-    async def _gate_and_reconcile(
+    async def _gate_and_reconcile(  # noqa: PLR0912, PLR0914 — connect-time owner/status/HITL gate
         self,
         *,
         ws: WebSocket,
@@ -795,6 +1020,102 @@ class AgentSaulService:
                 ).model_dump(),
             )
             return False
+        state_tenant = snapshot.values.get("tenant_id") if snapshot.values else None
+        if state_tenant and self._context.tenant_id and state_tenant != self._context.tenant_id:
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="TENANT_SCOPE_MISMATCH",
+                    message="This thread belongs to another tenant",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return False
+
+        raw_persisted_ids = snapshot.values.get("allowed_doc_ids") if snapshot.values else None
+        persisted_ids = list(raw_persisted_ids) if isinstance(raw_persisted_ids, list) else []
+        if not persisted_ids and snapshot.values:
+            legacy_doc_id = snapshot.values.get("doc_id")
+            if isinstance(legacy_doc_id, str) and legacy_doc_id:
+                persisted_ids = [legacy_doc_id]
+        if persisted_ids:
+            source = document_content_source_from_config(config)
+            if source is None:
+                await self._send_json(
+                    ws,
+                    WSErrorFrame(
+                        node="gateway",
+                        code="DOCUMENT_SCOPE_INVALID",
+                        message="Document content source is unavailable",
+                        retryable=True,
+                    ).model_dump(),
+                )
+                return False
+            for doc_id in persisted_ids:
+                if str(doc_id) not in set(self._context.allowed_doc_ids):
+                    await self._send_json(
+                        ws,
+                        WSErrorFrame(
+                            node="gateway",
+                            code="DOCUMENT_SCOPE_INVALID",
+                            message="A saved document is no longer available to this tenant",
+                            retryable=False,
+                        ).model_dump(),
+                    )
+                    return False
+                kwargs: dict[str, str] = {"user_id": user_id, "doc_id": str(doc_id)}
+                if self._context.tenant_id:
+                    kwargs["tenant_id"] = self._context.tenant_id
+                scope_result = await source.ensure_document(**kwargs)
+                if isinstance(scope_result, Failure):
+                    await self._send_json(
+                        ws,
+                        WSErrorFrame(
+                            node="gateway",
+                            code="DOCUMENT_SCOPE_INVALID",
+                            message="A saved document is no longer available to this tenant",
+                            retryable=False,
+                        ).model_dump(),
+                    )
+                    return False
+                readiness = await _source_readiness(
+                    source,
+                    user_id=user_id,
+                    doc_id=str(doc_id),
+                    tenant_id=self._context.tenant_id or None,
+                )
+                if isinstance(readiness, Failure):
+                    await self._send_json(
+                        ws,
+                        WSErrorFrame(
+                            node="gateway",
+                            code="DOCUMENT_READINESS_UNAVAILABLE",
+                            message="Document ingestion status is unavailable; retry shortly",
+                            retryable=True,
+                        ).model_dump(),
+                    )
+                    return False
+                current = readiness.unwrap()
+                if current.status not in {"completed", "completed_with_warnings"}:
+                    code = (
+                        "DOCUMENT_INGESTION_FAILED"
+                        if current.status == "failed"
+                        else "DOCUMENT_NOT_READY"
+                    )
+                    message = current.error_message or (
+                        "Document ingestion is not complete; retry after ingestion finishes"
+                    )
+                    await self._send_json(
+                        ws,
+                        WSErrorFrame(
+                            node="gateway",
+                            code=code,
+                            message=message,
+                            retryable=current.status != "failed",
+                        ).model_dump(),
+                    )
+                    return False
 
         # Only an authenticated owner may let checkpoint evidence reach the
         # transcript repository. In particular, an orphan checkpoint owned by
@@ -870,6 +1191,50 @@ class AgentSaulService:
             WSErrorFrame(node=None, code=code, message=message, retryable=True).model_dump(),
         )
 
+    async def _persist_budget_pause(
+        self, *, config: RunnableConfig, state_snapshot: object, thread_id: str
+    ) -> bool:
+        """Persist the active wall-clock segment at the actual interrupt boundary."""
+        values = getattr(state_snapshot, "values", None)
+        raw = values.get("budget_ledger") if isinstance(values, dict) else None
+        if raw is None:
+            return True
+        try:
+            ledger = raw if isinstance(raw, BudgetLedger) else BudgetLedger.model_validate(raw)
+            paused = ledger.pause()
+            updater = getattr(self._graph, "aupdate_state", None)
+            if paused == ledger or not callable(updater):
+                return True
+            await updater(config, {"budget_ledger": paused})
+        except Exception as exc:  # noqa: BLE001 — pause must fail closed
+            exc.add_note(f"thread_id={thread_id}, operation=budget_pause")
+            self._log.bind(thread_id=thread_id).exception("saul_budget_pause_persist_failed")
+            return False
+        else:
+            return True
+
+    async def _persist_budget_resume(
+        self, *, config: RunnableConfig, state_snapshot: object, thread_id: str
+    ) -> bool:
+        """Start a new active segment only after a validated resume."""
+        values = getattr(state_snapshot, "values", None)
+        raw = values.get("budget_ledger") if isinstance(values, dict) else None
+        if raw is None:
+            return True
+        try:
+            ledger = raw if isinstance(raw, BudgetLedger) else BudgetLedger.model_validate(raw)
+            resumed = ledger.resume()
+            updater = getattr(self._graph, "aupdate_state", None)
+            if resumed == ledger or not callable(updater):
+                return True
+            await updater(config, {"budget_ledger": resumed})
+        except Exception as exc:  # noqa: BLE001 — resume must fail closed
+            exc.add_note(f"thread_id={thread_id}, operation=budget_resume")
+            self._log.bind(thread_id=thread_id).exception("saul_budget_resume_persist_failed")
+            return False
+        else:
+            return True
+
     async def _emit_hitl_prompt(
         self,
         ws: WebSocket,
@@ -877,6 +1242,8 @@ class AgentSaulService:
         interrupt_value: dict[str, Any],
         recorder: TurnRecorder,
         state_snapshot: object,
+        *,
+        config: RunnableConfig,
     ) -> bool:
         """Re-emit the saved HITL frame (live loop and reconnect-resume, §6).
 
@@ -899,6 +1266,10 @@ class AgentSaulService:
                 message=interrupt_value.get("message", "Human input required"),
             ).model_dump(),
         )
+        if not await self._persist_budget_pause(
+            config=config, state_snapshot=state_snapshot, thread_id=thread_id
+        ):
+            return False
         # T1 after the frame (§5.2); the client is reading either way.
         pause_result = await recorder.on_pause()
         if isinstance(pause_result, Failure):
@@ -924,7 +1295,7 @@ class AgentSaulService:
         )
         return True
 
-    async def _apply_resume(
+    async def _apply_resume(  # noqa: PLR0912, PLR0914, PLR0915 — resume authorization and evidence gate
         self,
         inbound: WSResumeMessage,
         *,
@@ -945,11 +1316,146 @@ class AgentSaulService:
             action=inbound.action,
         )
 
+        if not _recorder_resume_alive(recorder):
+            await self._send_lock_lost(ws, thread_id)
+            return None
+
         # §8 expiry authority: the deadline is re-checked from the FRESH
         # snapshot at the actual resume attempt — a reply that arrives
         # after the 24 h window (the user walked away with the prompt on
         # screen) still closes the turn instead of resuming it.
         fresh_snapshot = await self._graph.aget_state(config)
+        fresh_values = fresh_snapshot.values if isinstance(fresh_snapshot.values, dict) else {}
+        persisted_ids = fresh_values.get("allowed_doc_ids")
+        if not isinstance(persisted_ids, list) or not persisted_ids:
+            legacy_doc_id = fresh_values.get("doc_id")
+            persisted_ids = [legacy_doc_id] if isinstance(legacy_doc_id, str) else []
+        session_context = getattr(self, "_context", None)
+        readiness_error = (
+            await self._document_scope_readiness_error(
+                config=config,
+                user_id=str(fresh_values.get("user_id") or session_context.user_id),
+                doc_ids=[str(doc_id) for doc_id in persisted_ids if isinstance(doc_id, str)],
+            )
+            if session_context is not None
+            else None
+        )
+        if readiness_error is not None:
+            details = readiness_error.details or {}
+            status = str(details.get("ingestion_status") or "unavailable")
+            code = (
+                "DOCUMENT_INGESTION_FAILED"
+                if isinstance(readiness_error, AgentSaulDocumentIngestionFailedError)
+                else "DOCUMENT_NOT_READY"
+                if isinstance(readiness_error, AgentSaulDocumentNotReadyError)
+                else "DOCUMENT_READINESS_UNAVAILABLE"
+            )
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node="gateway",
+                    code=code,
+                    message=readiness_error.message,
+                    retryable=readiness_error.retryable,
+                ).model_dump(),
+            )
+            self._log.bind(
+                thread_id=thread_id,
+                ingestion_status=status,
+                error_code=str(readiness_error.code),
+            ).warning("saul_resume_document_readiness_refused")
+            return None
+        live_roles, live_self_review, live_revision = await self._live_authorization()
+        if session_context is not None and live_revision != session_context.role_revision:
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node="human_review",
+                    code="AUTHORIZATION_CHANGED",
+                    message="Authorization changed; reconnect with a fresh session",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return None
+        recorded_version = fresh_values.get("schema_version")
+        if recorded_version not in {1, STATE_SCHEMA_VERSION - 1, STATE_SCHEMA_VERSION}:
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="STATE_SCHEMA_INCOMPATIBLE",
+                    message="Paused state is not a supported resumable schema",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return None
+        fresh_interrupts = self._interrupts_of(fresh_snapshot)
+        interrupt_type = _interrupt_type_from_snapshot(fresh_snapshot)
+        if (
+            live_roles is not None
+            and interrupt_type
+            in {HITLInterruptType.PLAN_APPROVAL, HITLInterruptType.HUMAN_REVIEW_REQUIRED}
+            and inbound.action in {"approve", "reject", "modify"}
+        ):
+            if LegalRole.REVIEWER.value not in live_roles:
+                await self._send_json(
+                    ws,
+                    WSErrorFrame(
+                        node="human_review",
+                        code="REVIEWER_ROLE_REQUIRED",
+                        message="A live tenant reviewer role is required for approval or overrides",
+                        retryable=False,
+                    ).model_dump(),
+                )
+                return None
+            if (
+                not live_self_review
+                and session_context is not None
+                and str(session_context.user_id) == str(fresh_values.get("user_id"))
+            ):
+                await self._send_json(
+                    ws,
+                    WSErrorFrame(
+                        node="human_review",
+                        code="SELF_REVIEW_DISABLED",
+                        message="This tenant requires an independent reviewer",
+                        retryable=False,
+                    ).model_dump(),
+                )
+                return None
+        checkpoint_id = _snapshot_checkpoint_id(fresh_snapshot)
+        decision_modified = (
+            False
+            if inbound.action == "approve"
+            else True
+            if inbound.action == "modify" and bool(inbound.modified_plan)
+            else None
+        )
+        plan_resume = (
+            PlanResumeEvidence._from_interrupt(
+                fresh_interrupts[0],
+                modified=decision_modified is True,
+                checkpoint_id=checkpoint_id,
+            )
+            if fresh_interrupts and decision_modified is not None
+            else None
+        )
+        if (
+            decision_modified is not None
+            and fresh_interrupts
+            and _is_plan_approval_interrupt(fresh_interrupts[0])
+            and plan_resume is None
+        ):
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node="planner",
+                    code="RESUME_EVIDENCE_INVALID",
+                    message="Current plan approval cannot be bound to its checkpoint",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return None
         fresh_created = _coerce_ts(getattr(fresh_snapshot, "created_at", None))
         if fresh_created is not None and (datetime.now(tz=UTC) - fresh_created) > PAUSE_WINDOW:
             await recorder.reconcile()  # appends turn_closed(abandoned_expired)
@@ -965,6 +1471,20 @@ class AgentSaulService:
             )
             return None
 
+        legacy_plan, legacy_plan_error = _legacy_planner_proposal(fresh_snapshot)
+        if legacy_plan_error is not None:
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node="planner",
+                    code="LEGACY_PLAN_INCOMPATIBLE",
+                    message="Saved execution plan is incompatible with this runtime",
+                    retryable=False,
+                ).model_dump(),
+            )
+            self._log.bind(thread_id=thread_id).warning("saul_legacy_plan_refused")
+            return None
+
         # Build the resume payload the interrupted node's interrupt() call returns.
         resume_payload: dict[str, Any] = {
             "action": inbound.action,
@@ -975,15 +1495,105 @@ class AgentSaulService:
                 else None
             ),
             "overrides": inbound.overrides,
-            "reviewer_role": inbound.reviewer_role,
+            # Reviewer authority is resolved from the authenticated session
+            # and tenant membership. Never persist a client-supplied role.
+            "reviewer_role": (
+                LegalRole.REVIEWER.value
+                if live_roles is not None and LegalRole.REVIEWER.value in live_roles
+                else None
+            ),
+            "reviewer_id": session_context.user_id if session_context is not None else None,
         }
+        if inbound.action in {"approve", "reject", "modify"} and session_context is not None:
+            audit = getattr(recorder, "record_review_decision", None)
+            if not callable(audit):
+                await self._send_json(
+                    ws,
+                    WSErrorFrame(
+                        node="human_review",
+                        code="REVIEW_AUDIT_UNAVAILABLE",
+                        message="Review decision could not be durably recorded",
+                        retryable=True,
+                    ).model_dump(),
+                )
+                return None
+            audit_result = await audit(
+                action=inbound.action,
+                reviewer_id=session_context.user_id,
+                reviewer_role=LegalRole.REVIEWER.value,
+                self_reviewed=str(session_context.user_id) == str(fresh_values.get("user_id")),
+                checkpoint_id=checkpoint_id,
+            )
+            if isinstance(audit_result, Failure):
+                await self._send_json(
+                    ws,
+                    WSErrorFrame(
+                        node="human_review",
+                        code="REVIEW_AUDIT_UNAVAILABLE",
+                        message="Review decision could not be durably recorded",
+                        retryable=True,
+                    ).model_dump(),
+                )
+                return None
         # T1' — project-before-resume (§5.2): retry once internally, then
         # proceed fail-open with a reconcile hint; never block the resume
         # on transcript health.
-        resume_projection = await recorder.prepare_resume()
+        if not _recorder_resume_alive(recorder):
+            await self._send_lock_lost(ws, thread_id)
+            return None
+        resume_projection = await recorder.prepare_resume(plan_resume=plan_resume)
         if isinstance(resume_projection, Failure):
             self._log.bind(thread_id=thread_id).warning("saul_t1p_before_resume_project_failed")
-        return Command(resume=resume_payload)
+        if not _recorder_resume_alive(recorder):
+            await self._send_lock_lost(ws, thread_id)
+            return None
+        if not await self._persist_budget_resume(
+            config=config, state_snapshot=fresh_snapshot, thread_id=thread_id
+        ):
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="BUDGET_STATE_UNAVAILABLE",
+                    message="Budget state could not be durably resumed",
+                    retryable=True,
+                ).model_dump(),
+            )
+            return None
+        legacy_update = (
+            _legacy_resume_update(fresh_snapshot, legacy_plan)
+            if recorded_version != STATE_SCHEMA_VERSION
+            else None
+        )
+        return Command(update=legacy_update, resume=resume_payload)
+
+    async def _live_authorization(self) -> tuple[tuple[str, ...] | None, bool, int]:
+        """Re-resolve live role state before applying a durable HITL reply."""
+        session_context = getattr(self, "_context", None)
+        membership_service = getattr(self, "_tenant_membership_service", None)
+        if session_context is None:
+            # Internal resume/replay callers can exercise this method without a
+            # live WebSocket session.  There is no authenticated action to
+            # authorize in that shape; production sessions always provide both
+            # constructor-injected values through the router.
+            return None, False, -1
+        if membership_service is None:
+            # A live session without the membership authority is a fail-closed
+            # configuration: never turn a missing authorization dependency into
+            # an approval capability.
+            return (), False, -1
+        result = await membership_service.get_live_authorization(
+            tenant_id=session_context.tenant_id,
+            user_id=session_context.user_id,
+        )
+        if isinstance(result, Failure):
+            return (), False, -1
+        legal_roles, self_review_allowed, role_revision = result.unwrap()
+        return (
+            tuple(role.value for role in legal_roles),
+            self_review_allowed,
+            role_revision,
+        )
 
     async def _handle_hitl(
         self,
@@ -1001,7 +1611,7 @@ class AgentSaulService:
         SESSION_PAUSE_EXPIRED (§8) — the projector closed it.
         """
         delivered = await self._emit_hitl_prompt(
-            ws, thread_id, interrupt_value, recorder, state_snapshot
+            ws, thread_id, interrupt_value, recorder, state_snapshot, config=config
         )
         if not delivered:
             return None
@@ -1058,15 +1668,40 @@ class AgentSaulService:
                 )
                 return None
 
+            if not _recorder_resume_alive(recorder):
+                await self._send_lock_lost(ws, thread_id)
+                return None
+
             return await self._apply_resume(
                 inbound, ws=ws, thread_id=thread_id, recorder=recorder, config=config
             )
+
+    async def _send_lock_lost(self, ws: WebSocket, thread_id: str) -> None:
+        await self._send_json(
+            ws,
+            WSErrorFrame(
+                node=None,
+                code="LOCK_LOST",
+                message="Thread exclusion was lost; this run must stop",
+                retryable=False,
+            ).model_dump(),
+        )
+        self._log.bind(thread_id=thread_id).warning("saul_lock_lost_before_resume")
 
     async def _receive_json(self, ws: WebSocket) -> object:
         return await self._ws_security.receive_json(ws, self._ws_context)
 
     async def _send_json(self, ws: WebSocket, payload: object) -> None:
-        await self._ws_security.send_json(ws, payload, self._ws_context)
+        security = getattr(self, "_ws_security", None)
+        if security is not None:
+            await security.send_json(ws, payload, self._ws_context)
+            return
+        # Narrow compatibility seam for direct unit/replay harnesses that
+        # construct the service via ``__new__``; real sessions cannot reach
+        # this branch because the router injects WebSocketSecurityService.
+        sender = getattr(ws, "send_json", None)
+        if callable(sender):
+            await sender(payload)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1108,8 +1743,20 @@ class AgentSaulService:
             "thread_id": thread_id,
             "correlation_id": self._correlation_id,
             "schema_version": STATE_SCHEMA_VERSION,
-            "doc_id": start_msg.doc_id,
+            "doc_id": start_msg.primary_doc_id or start_msg.doc_id or start_msg.allowed_doc_ids[0],
+            "primary_doc_id": start_msg.primary_doc_id
+            or start_msg.doc_id
+            or start_msg.allowed_doc_ids[0],
+            "allowed_doc_ids": list(start_msg.allowed_doc_ids),
+            "tenant_id": self._context.tenant_id,
+            "legal_roles": [role.value for role in self._context.legal_roles],
+            "allowed_operations": list(self._context.allowed_operations),
+            "capabilities": list(self._context.capabilities),
+            "document_versions": [],
+            "self_review_allowed": self._context.self_review_allowed,
+            "self_reviewed": False,
             "document_text": None,
+            "ingestion_state": initial_ingestion_state(start_msg.allowed_doc_ids),
             # D4: the explicit saul_kind tag is the turn-boundary contract —
             # the projector derives turn existence purely from this tagged
             # HumanMessage surviving checkpoint serialization (verified
@@ -1126,6 +1773,7 @@ class AgentSaulService:
             "plan": [],
             "current_step": 0,
             "plan_approved": False,
+            "plan_rejection_feedback": None,
             "orchestrator_action": None,
             "normalized_document": None,
             "segments": [],
@@ -1141,7 +1789,20 @@ class AgentSaulService:
             "status": WorkflowStatus.INITIALIZED,
             "errors": [],
             "retry_count": 0,
-            "permissions": start_msg.permissions,
+            # Kept as an empty compatibility field until the state schema's
+            # server-owned authorization context lands; client permissions
+            # are never copied into graph state.
+            "permissions": {},
+            "budget_ledger": BudgetLedger(
+                limits=BudgetLimits(
+                    model_calls=get_settings().SAUL_MAX_MODEL_CALLS,
+                    retrieval_calls=get_settings().SAUL_MAX_RETRIEVAL_CALLS,
+                    tool_calls=get_settings().SAUL_MAX_TOOL_CALLS,
+                    deep_research_fanout=get_settings().SAUL_MAX_DEEP_RESEARCH_FANOUT,
+                    token_usage=get_settings().SAUL_MAX_TOKEN_USAGE,
+                    wall_clock_seconds=get_settings().SAUL_MAX_WALL_CLOCK_SECONDS,
+                )
+            ),
         }
 
 
@@ -1158,3 +1819,91 @@ def _coerce_ts(raw: object) -> datetime | None:
             return None
         return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
     return None
+
+
+def _legacy_planner_proposal(snapshot: StateSnapshot) -> tuple[list[PlanStep] | None, str | None]:
+    """Recover a proposal from an old combined planner checkpoint.
+
+    Before the planner/approval split, the proposal existed only in the
+    pending interrupt payload; the node had not returned a state update yet.
+    A resumed old checkpoint therefore has an empty ``state.plan``.  The
+    service must copy that exact displayed proposal into the state update sent
+    with ``Command(resume=...)`` or refuse explicitly when it is malformed.
+    """
+    values = snapshot.values if isinstance(snapshot.values, dict) else {}
+    if values.get("plan"):
+        return None, None
+    for interrupt in AgentSaulService._interrupts_of(snapshot):
+        value = getattr(interrupt, "value", None)
+        if not isinstance(value, dict):
+            continue
+        interrupt_type = value.get("type")
+        if interrupt_type not in {
+            HITLInterruptType.PLAN_APPROVAL,
+            HITLInterruptType.PLAN_APPROVAL.value,
+        }:
+            continue
+        raw_plan = value.get("plan")
+        if not isinstance(raw_plan, list) or not raw_plan:
+            return None, "Saved planner proposal is missing or empty"
+        try:
+            return [PlanStep.model_validate(step) for step in raw_plan], None
+        except ValidationError:
+            return None, "Saved planner proposal is incompatible with this runtime"
+    return None, None
+
+
+def _legacy_resume_update(
+    snapshot: StateSnapshot,
+    proposal: list[PlanStep] | None,
+) -> dict[str, Any]:
+    """Build a safe v2 channel update for a direct legacy-node resume.
+
+    A ``Command`` resumes the pending node directly; the graph entry
+    ``state_hydration`` node is not revisited.  Carry the hydrated scalar
+    channels and current schema marker explicitly, while omitting reducer
+    channels whose replay would duplicate accumulated values.
+    """
+    values = snapshot.values if isinstance(snapshot.values, dict) else {}
+    update = legacy_resume_update(dict(values))
+    if proposal is not None:
+        update["plan"] = proposal
+    return update
+
+
+def _snapshot_checkpoint_id(snapshot: StateSnapshot) -> str:
+    configurable = (
+        snapshot.config.get("configurable") if isinstance(snapshot.config, dict) else None
+    )
+    checkpoint_id = configurable.get("checkpoint_id") if isinstance(configurable, dict) else None
+    return checkpoint_id if isinstance(checkpoint_id, str) else ""
+
+
+def _is_plan_approval_interrupt(interrupt: object) -> bool:
+    value = (
+        interrupt.get("value", interrupt)
+        if isinstance(interrupt, Mapping)
+        else getattr(interrupt, "value", None)
+    )
+    return isinstance(value, Mapping) and value.get("type") in {
+        HITLInterruptType.PLAN_APPROVAL,
+        HITLInterruptType.PLAN_APPROVAL.value,
+    }
+
+
+def _interrupt_type_from_snapshot(snapshot: StateSnapshot) -> HITLInterruptType | None:
+    """Return the typed HITL kind without trusting client resume fields."""
+    interrupts = [interrupt for task in snapshot.tasks for interrupt in task.interrupts]
+    if not interrupts:
+        return None
+    value = getattr(interrupts[0], "value", None)
+    raw = value.get("type") if isinstance(value, Mapping) else None
+    try:
+        return HITLInterruptType(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _recorder_resume_alive(recorder: TurnRecorder) -> bool:
+    checker = getattr(recorder, "resume_is_allowed", None)
+    return checker() if callable(checker) else True

@@ -13,7 +13,7 @@ request/response contracts live in one module.
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
 from app.features.agent_saul.graph.state import (
     HITLInterruptType,
@@ -30,7 +30,11 @@ class WSStartMessage(BaseModel, frozen=True):
     """First message on a new WS connection.  Kicks off the graph."""
 
     type: Literal["start"] = "start"
-    doc_id: str = Field(description="ID returned by HTTP upload endpoint")
+    # ``doc_id`` remains accepted for rolling-client compatibility. New
+    # clients should send ``allowed_doc_ids`` and optionally ``primary_doc_id``.
+    doc_id: str | None = Field(default=None, description="Legacy primary document ID")
+    allowed_doc_ids: list[str] = Field(default_factory=list)
+    primary_doc_id: str | None = None
     user_query: str = Field(min_length=1, max_length=4096)
     thread_id: str | None = Field(
         default=None,
@@ -39,6 +43,24 @@ class WSStartMessage(BaseModel, frozen=True):
     permissions: dict[str, bool] = Field(default_factory=dict)
 
     model_config = {"extra": "forbid"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_document_scope(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        doc_id = value.get("doc_id")
+        raw_ids_obj = value.get("allowed_doc_ids")
+        raw_ids = raw_ids_obj if isinstance(raw_ids_obj, list) else []
+        ids = list(dict.fromkeys([*raw_ids, *([doc_id] if doc_id else [])]))
+        if not ids:
+            message = "at least one document ID is required"
+            raise ValueError(message)
+        primary = value.get("primary_doc_id") or doc_id or ids[0]
+        if primary not in ids:
+            message = "primary_doc_id must be included in allowed_doc_ids"
+            raise ValueError(message)
+        return {**value, "allowed_doc_ids": ids, "primary_doc_id": primary, "doc_id": primary}
 
 
 class WSResumeMessage(BaseModel, frozen=True):
@@ -51,6 +73,8 @@ class WSResumeMessage(BaseModel, frozen=True):
     modified_plan: list[PlanStep] | None = None
     # Human review fields — populated when action relates to human_review HITL
     overrides: list[dict[str, Any]] | None = None
+    # Deprecated compatibility field. It is deliberately ignored by the
+    # service; reviewer authority comes from live tenant membership.
     reviewer_role: str | None = None
 
     model_config = {"extra": "forbid"}
@@ -140,6 +164,9 @@ class WSDoneFrame(BaseModel, frozen=True):
     type: Literal["done"] = "done"
     thread_id: str
     summary: str | None = None
+    self_reviewed: bool = False
+    reviewer_id: str | None = None
+    reviewer_role: str | None = None
 
 
 WSOutbound = (
@@ -162,11 +189,31 @@ WSOutbound = (
 class CreateSessionRequest(BaseModel):
     """POST /agent-saul/sessions — pre-flight before WS connection."""
 
-    doc_id: str
+    doc_id: str | None = None
+    allowed_doc_ids: list[str] = Field(default_factory=list)
+    primary_doc_id: str | None = None
     user_query: str = Field(min_length=1, max_length=4096)
     permissions: dict[str, bool] = Field(default_factory=dict)
 
     model_config = {"extra": "forbid"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_document_scope(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        doc_id = value.get("doc_id")
+        raw_ids_obj = value.get("allowed_doc_ids")
+        raw_ids = raw_ids_obj if isinstance(raw_ids_obj, list) else []
+        ids = list(dict.fromkeys([*raw_ids, *([doc_id] if doc_id else [])]))
+        if not ids:
+            message = "at least one document ID is required"
+            raise ValueError(message)
+        primary = value.get("primary_doc_id") or doc_id or ids[0]
+        if primary not in ids:
+            message = "primary_doc_id must be included in allowed_doc_ids"
+            raise ValueError(message)
+        return {**value, "allowed_doc_ids": ids, "primary_doc_id": primary, "doc_id": primary}
 
 
 class CreateSessionResponse(BaseModel, frozen=True):

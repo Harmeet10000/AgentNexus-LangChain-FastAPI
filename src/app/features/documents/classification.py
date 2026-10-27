@@ -48,9 +48,12 @@ class PreparedChunk(BaseModel):
     content: str
     preamble: str = ""
     document_version: int = 1
+    contract_index: int | None = None
     locus: str | None = None
     clause_type: str | None = None
     page_no: int = 0
+    source_start_char: int | None = Field(default=None, ge=0)
+    source_end_char: int | None = Field(default=None, ge=0)
     metadata_: dict[str, object] = Field(default_factory=dict)
     custom_metadata: dict[str, object] = Field(default_factory=dict)
     quality_warnings: list[QualityWarning] = Field(default_factory=list)
@@ -64,6 +67,35 @@ class ParsedDocument(BaseModel):
     page_count: int
     tables: list[str] = Field(default_factory=list)
     structural_tree: dict[str, object] = Field(default_factory=dict)
+
+
+class ContractBoundary(BaseModel):
+    """A source-backed contract slice established before legal extraction.
+
+    Character offsets are offsets into ``ParsedDocument.markdown``.  They are
+    intentionally persisted as provenance metadata rather than inferred from
+    chunk order; this keeps a later chunker change from changing contract
+    identity or silently moving a citation across a boundary.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    contract_index: int = Field(ge=0)
+    markdown: str
+    start_char: int = Field(ge=0)
+    end_char: int = Field(ge=0)
+    start_page: int | None = Field(default=None, ge=1)
+    end_page: int | None = Field(default=None, ge=1)
+
+
+class ContractBoundaryResult(BaseModel):
+    """Boundary discovery result; ambiguity is explicit and fail-closed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    boundaries: list[ContractBoundary] = Field(default_factory=list)
+    warnings: list[QualityWarning] = Field(default_factory=list)
+    ambiguous: bool = False
 
 
 def classify_document(*, markdown: str, filename: str) -> ClassifiedDocument:
@@ -90,6 +122,95 @@ def classify_document(*, markdown: str, filename: str) -> ClassifiedDocument:
             graphiti_required=True,
         )
     return ClassifiedDocument(document_kind="generic", parties=parties)
+
+
+_CONTRACT_HEADING_RE = re.compile(
+    r"^\s*(?:\#+\s*)?(?=.*\b(?:agreement|contract)\b).*$",
+    re.IGNORECASE,
+)
+_CONTRACT_OPENING_RE = re.compile(
+    r"^\s*this\s+(?:master\s+services|professional\s+services|non[- ]disclosure|employment|lease|data\s+processing)?\s*(?:agreement|contract)\b",
+    re.IGNORECASE,
+)
+
+
+def establish_contract_boundaries(
+    *, markdown: str, page_count: int = 0
+) -> ContractBoundaryResult:
+    """Find high-confidence source markers for independently signed contracts.
+
+    This is deliberately conservative.  A phrase such as ``this agreement``
+    inside a clause is not a boundary.  We only split on a legal title heading
+    or a line-opening ``THIS ... AGREEMENT/CONTRACT`` marker separated from the
+    prior material.  If markers are contradictory or produce an empty slice,
+    the whole file is returned with a typed warning so callers cannot publish
+    mixed metadata as authoritative.
+    """
+    del page_count
+    if not markdown.strip():
+        return ContractBoundaryResult(
+            boundaries=[ContractBoundary(contract_index=0, markdown="", start_char=0, end_char=0)]
+        )
+    starts: list[int] = []
+    lines = markdown.splitlines(keepends=True)
+    offset = 0
+    for line in lines:
+        stripped = line.strip()
+        is_heading = bool(_CONTRACT_HEADING_RE.match(stripped)) and (
+            line.lstrip().startswith("#") or line.isupper() or len(stripped) <= 120
+        )
+        is_opening = bool(_CONTRACT_OPENING_RE.match(stripped)) and (
+            line.isupper() or line.lstrip().startswith("#")
+        )
+        if is_heading or is_opening:
+            starts.append(offset)
+        offset += len(line)
+    starts = sorted(set(starts))
+    if not starts or starts[0] > min(200, len(markdown)):
+        starts = [0]
+    elif starts[0] > 0:
+        # A title page before the first contract belongs to that contract; do
+        # not manufacture a metadata-bearing preamble contract.
+        starts[0] = 0
+
+    boundaries: list[ContractBoundary] = []
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(markdown)
+        fragment = markdown[start:end].strip()
+        if not fragment:
+            return ContractBoundaryResult(
+                boundaries=[
+                    ContractBoundary(
+                        contract_index=0,
+                        markdown=markdown,
+                        start_char=0,
+                        end_char=len(markdown),
+                    )
+                ],
+                warnings=[
+                    QualityWarning(
+                        stage="contract_boundaries",
+                        code="MULTI_CONTRACT_BOUNDARY_AMBIGUOUS",
+                        message="Contract markers did not produce non-empty source slices.",
+                        severity="warning",
+                    )
+                ],
+                ambiguous=True,
+            )
+        boundaries.append(
+            ContractBoundary(
+                contract_index=index,
+                markdown=fragment,
+                start_char=start,
+                end_char=end,
+                start_page=None,
+                end_page=None,
+            )
+        )
+    if len(boundaries) <= 1:
+        boundaries[0] = boundaries[0].model_copy(update={"contract_index": 0})
+        return ContractBoundaryResult(boundaries=boundaries)
+    return ContractBoundaryResult(boundaries=boundaries)
 
 
 async def segment_chunks(

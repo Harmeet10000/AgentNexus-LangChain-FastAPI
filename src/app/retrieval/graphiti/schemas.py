@@ -43,6 +43,7 @@ class ClauseEpisodeMetadata(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     doc_id: str
+    contract_index: int | None = None
     clause_id: str
     clause_type: str
     jurisdiction: str
@@ -196,6 +197,7 @@ class LegalEdgeInput(BaseModel):
     to_entity: str = Field(description="e.g. 'GlobalTech Ltd'")
     clause_id: str
     doc_id: str
+    contract_index: int | None = None
     user_id: str
     thread_id: str
     citation_source: str

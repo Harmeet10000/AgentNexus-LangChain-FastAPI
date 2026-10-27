@@ -4,14 +4,20 @@ import asyncio
 from typing import override
 
 from langchain_core.tools import BaseTool
+from pydantic import BaseModel
 from returns.result import Failure
 
 from app.connections.tavily import get_tavily_client
 from app.utils import ExternalServiceException
 
 
-class WebSearchInput(BaseTool):
-    """Input schema for web search tool."""
+class WebSearchInput(BaseModel):
+    """Input schema for web search tool.
+
+    A plain ``BaseModel``, not a ``BaseTool``: this class is an argument
+    *schema*, and inheriting the tool base made it a nameless, unusable tool
+    in its own right while muddying the model-facing schema.
+    """
 
     query: str
     max_results: int = 5

@@ -78,12 +78,24 @@ def wire_saul_topology(graph: Any, node_for: Callable[[str], Any]) -> None:
     graph.add_conditional_edges(
         "orchestrator",
         route_from_orchestrator,
-        {name: name for name in _VALID_WORKER_NODES} | {"planner": "planner", END: END},
+        {
+            **{name: name for name in _VALID_WORKER_NODES},
+            "planner_generate": "planner_generate",
+            END: END,
+        },
     )
+    # Plan generation is deliberately a checkpoint boundary before approval.
+    # The approval node is the only node containing interrupt(); resuming it
+    # cannot re-run the planner LLM and replace the displayed proposal.
+    graph.add_edge("planner_generate", "planner")
     graph.add_conditional_edges(
         "planner",
         route_deep_research,
-        {"deep_research": "deep_research", "orchestrator": "orchestrator"},
+        {
+            "deep_research": "deep_research",
+            "orchestrator": "orchestrator",
+            "planner_generate": "planner_generate",
+        },
     )
     graph.add_edge("deep_research", "orchestrator")
     graph.add_edge("ingestion", "normalization")

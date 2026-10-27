@@ -16,9 +16,10 @@ same output.  Cached in Redis for the session TTL, Postgres for 30 days.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from langchain_core.tools import tool
+from langchain.tools import ToolRuntime
+from langchain_core.tools import InjectedToolArg, tool
 from langchain_core.tools.base import BaseTool
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -26,6 +27,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.kernel.result import add_database_error_note
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
+
+from .authorization import trusted_tool_context
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -42,9 +45,10 @@ def make_retrieve_statute_section_tool(
         section_ref: str,
         jurisdiction: str,
         *,
-        user_id: str,
-        thread_id: str,
-        step_id: str,
+        runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
+        user_id: Annotated[str | None, InjectedToolArg] = None,
+        thread_id: Annotated[str | None, InjectedToolArg] = None,
+        step_id: Annotated[str | None, InjectedToolArg] = None,
     ) -> dict[str, Any]:
         """Retrieve the exact text of a specific statute section.
 
@@ -55,21 +59,34 @@ def make_retrieve_statute_section_tool(
             act_name: Name of the act (e.g., 'Indian Contract Act 1872')
             section_ref: Section reference (e.g., '73', '43A', '2(h)')
             jurisdiction: Jurisdiction (e.g., 'India', 'India - Maharashtra')
-            user_id: Current user ID
-            thread_id: Current thread ID
-            step_id: Plan step ID
+            Runtime identity and document scope are injected by LangGraph.
         """
+        authz = trusted_tool_context(
+            runtime,
+            legacy_user_id=user_id,
+            legacy_thread_id=thread_id,
+            legacy_step_id=step_id,
+        )
+        authz.require_operation("evidence.read")
         log = logger.bind(tool="retrieve_statute_section", act=act_name, section=section_ref)
 
         idem_key = IdempotencyGuard.make_key(
-            step_id=step_id,
+            step_id=authz.step_id,
             structural={
                 "act_name": act_name,
                 "section_ref": section_ref,
                 "jurisdiction": jurisdiction,
             },
             content=None,
-            user_id=user_id,
+            user_id=authz.user_id,
+            tool_name="retrieve_statute_section",
+            tenant_id=authz.tenant_id,
+            allowed_doc_ids=authz.allowed_doc_ids,
+            evidence_policy="mechanically_verified",
+            document_versions=authz.document_versions,
+            thread_id=authz.thread_id,
+            run_id=authz.run_id,
+            checkpoint_id=authz.checkpoint_id,
         )
         cached = await idempotency.get(idem_key)
         if cached is not None:
@@ -82,7 +99,9 @@ def make_retrieve_statute_section_tool(
                 act_name=act_name,
                 section_ref=section_ref,
                 jurisdiction=jurisdiction,
-                user_id=user_id,
+                tenant_id=authz.tenant_id,
+                allowed_doc_ids=authz.allowed_doc_ids,
+                user_id=user_id if authz.legacy_compat else None,
             )
         except SQLAlchemyError as exc:
             add_database_error_note(
@@ -122,9 +141,9 @@ def make_retrieve_statute_section_tool(
             key=idem_key,
             result=result,
             tool_name="retrieve_statute_section",
-            user_id=user_id,
-            thread_id=thread_id,
-            step_id=step_id,
+            user_id=authz.tenant_id,
+            thread_id=authz.thread_id,
+            step_id=authz.step_id,
         )
         log.info("statute_section_retrieved", found=result.success)
         return result.model_dump()
@@ -137,7 +156,10 @@ async def _fetch_statute_section(
     act_name: str,
     section_ref: str,
     jurisdiction: str,  # noqa: ARG001 — kept in the tool's contract; corpus is jurisdiction-agnostic today
-    user_id: str,
+    *,
+    tenant_id: str | None = None,
+    allowed_doc_ids: tuple[str, ...] | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any] | None:
     # Task 11.1: the point lookup targets the unified chunk corpus — the only
     # relations the migration history creates — via the statute identity
@@ -150,8 +172,12 @@ async def _fetch_statute_section(
     # tool to canonical identifiers; case/prefix variants are thus a caller
     # contract, not a query concern. A functional LOWER index can be added
     # if case-variant traffic is observed.
-    query = text(
-        """
+    legacy_scope = tenant_id is not None and not allowed_doc_ids and user_id is not None
+    if not legacy_scope and not allowed_doc_ids:
+        return None
+    if legacy_scope:
+        query = text(
+            """
         SELECT
             id::text,
             instrument_name AS act_name,
@@ -167,16 +193,45 @@ async def _fetch_statute_section(
         ORDER BY instrument_year DESC NULLS LAST
         LIMIT 1
         """
-    )
+        )
+    else:
+        query = text(
+            """
+        SELECT
+            id::text,
+            instrument_name AS act_name,
+            section_ref,
+            content AS body,
+            document_id::text AS document_id,
+            instrument_year AS year
+        FROM chunks
+        WHERE
+            tenant_id = :tenant_id
+            AND document_id = ANY(CAST(:allowed_doc_ids AS uuid[]))
+            AND instrument_name = :act_name
+            AND section_ref = :section_ref
+        ORDER BY instrument_year DESC NULLS LAST
+        LIMIT 1
+        """
+        )
     async with db_engine.connect() as conn:
         row = (
             await conn.execute(
                 query,
-                {
-                    "user_id": user_id,
-                    "act_name": act_name.strip(),
-                    "section_ref": section_ref.strip(),
-                },
+                (
+                    {
+                        "user_id": user_id,
+                        "act_name": act_name.strip(),
+                        "section_ref": section_ref.strip(),
+                    }
+                    if legacy_scope
+                    else {
+                        "tenant_id": tenant_id,
+                        "allowed_doc_ids": list(allowed_doc_ids or ()),
+                        "act_name": act_name.strip(),
+                        "section_ref": section_ref.strip(),
+                    }
+                ),
             )
         ).fetchone()
         if row is None:

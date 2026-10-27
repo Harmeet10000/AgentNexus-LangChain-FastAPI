@@ -30,9 +30,10 @@ forward — which is the state of the deployed instance (stamped ``0009``):
 - ``outbox_events``, ``dead_letter_events``              — ``0006``
 
 ``clauses`` is phantom in a stronger sense: **no revision in this chain
-creates it at all**, yet ``0010`` alters it and four query sites read
-it: three sites in ``features/search/repository.py`` via ``clauses_bm25_idx``,
-and one in ``langgraph_layer/ingestion_kb/nodes.py`` via ``bm25_force_merge``.
+creates it at all**, yet ``0010`` alters it and three legacy query sites read
+it through ``clauses_bm25_idx``. The superseded shared ingestion graph's
+maintenance call has since been removed; the canonical document pipeline uses
+the versioned ``chunks`` relation instead.
 
 ``0010`` is unrunnable
 ------------------------------

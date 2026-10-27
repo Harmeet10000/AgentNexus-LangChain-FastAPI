@@ -4,16 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
+from operator import itemgetter
 from typing import TYPE_CHECKING, NamedTuple, Protocol, cast, runtime_checkable
 
+from graphiti_core.errors import GraphitiError
 from langchain_core.messages import HumanMessage, SystemMessage
 from returns.result import Failure, Success
 
 from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.ai.generation import TextGenerationRequest
-from app.ai.graph.retry import retry_immediate
+from app.ai.graph.retry import TransientExternalError, retry_immediate
 from app.config import get_settings
+from app.features.auth.tenancy import personal_tenant_id
+from app.features.documents.access_audit import (
+    DocumentAccessAuditEvent,
+    DocumentAccessAuditRecorder,
+    InMemoryDocumentAccessAuditRecorder,
+)
 from app.features.documents.constants import (
+    CANONICAL_PIPELINE_VERSION,
     DEFAULT_SEARCH_CACHE_TTL_SECONDS,
     HYBRID_CANDIDATE_LIMIT,
     RRF_K,
@@ -21,6 +31,8 @@ from app.features.documents.constants import (
 )
 from app.features.documents.dto import (
     DocumentSearchResultItem,
+    EvidenceCoverage,
+    EvidencePolicy,
     LegalCitationResponse,
     QualityWarningDTO,
     RagContextSectionResponse,
@@ -35,6 +47,7 @@ from app.features.documents.repository import (
     build_search_filter_params,
 )
 from app.features.documents.retrieval_graph import (
+    Citation,
     ContextGrade,
     GeneratedAnswer,
     QueryPlan,
@@ -44,7 +57,7 @@ from app.features.documents.retrieval_graph import (
     get_shared_reranker,
 )
 from app.kernel.result import log_expected_failure
-from app.observability.logging import trace_layer
+from app.observability.logging import logger, trace_layer
 from app.retrieval.fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
 from app.retrieval.structural_navigator import navigate_tree
 from app.retrieval.token_counter import count_tokens as default_count_tokens
@@ -103,6 +116,7 @@ class _BranchInput(NamedTuple):
     """Shared input every fused-retrieval branch runs from."""
 
     user_id: str
+    tenant_id: str
     query_text: str
     query_embedding: list[float]
     candidate_limit: int
@@ -122,6 +136,7 @@ async def _run_bm25_branch(
     """Keyword branch coroutine."""
     return await repo.bm25_search(
         user_id=args.user_id,
+        tenant_id=args.tenant_id,
         query=args.query_text,
         candidate_limit=args.candidate_limit,
         filter_params=args.filter_params,
@@ -136,6 +151,7 @@ async def _run_vector_branch(
     """Dense-vector branch coroutine."""
     return await repo.vector_search(
         user_id=args.user_id,
+        tenant_id=args.tenant_id,
         embedding=args.query_embedding,
         candidate_limit=args.candidate_limit,
         filter_params=args.filter_params,
@@ -148,6 +164,7 @@ async def _run_trigram_branch(
     """Fuzzy-trigram branch coroutine."""
     return await repo.trigram_search(
         user_id=args.user_id,
+        tenant_id=args.tenant_id,
         query=args.query_text,
         candidate_limit=args.candidate_limit,
         filter_params=args.filter_params,
@@ -217,6 +234,7 @@ async def retrieve_fused(
     weights: Sequence[float] | None = None,
     bm25_threshold: float | None = None,
     exact_phrase: str | None = None,
+    tenant_id: str | None = None,
 ) -> DocumentResult[tuple[list[RankedChunk], dict[str, dict[str, Any]]]]:
     """Run the three branch legs over base chunks and fuse them in Python.
 
@@ -229,6 +247,7 @@ async def retrieve_fused(
     """
     branch_input = _BranchInput(
         user_id=user_id,
+        tenant_id=_resolve_tenant_id(tenant_id, user_id),
         query_text=query_text,
         query_embedding=query_embedding,
         candidate_limit=candidate_limit,
@@ -248,11 +267,17 @@ async def retrieve_fused(
     if not fused:
         return Success(([], {}))
     chunk_ids = [item.chunk_id for item in fused]
-    chunk_lookup_result = (
-        await repo.fetch_chunks_by_ids(chunk_ids, exact_phrase=exact_phrase)
-        if exact_phrase
-        else await repo.fetch_chunks_by_ids(chunk_ids)
-    )
+    fetch_kwargs: dict[str, Any] = {}
+    # Keep narrow repository test doubles and downstream adapters source
+    # compatible while using the tenant-aware repository in production.
+    fetch_parameters = inspect.signature(repo.fetch_chunks_by_ids).parameters
+    if "exact_phrase" in fetch_parameters:
+        fetch_kwargs["exact_phrase"] = exact_phrase
+    if "tenant_id" in fetch_parameters:
+        fetch_kwargs["tenant_id"] = _resolve_tenant_id(tenant_id, user_id)
+    if "allowed_doc_ids" in fetch_parameters:
+        fetch_kwargs["allowed_doc_ids"] = filter_params.get("document_ids") or None
+    chunk_lookup_result = await repo.fetch_chunks_by_ids(chunk_ids, **fetch_kwargs)
     if isinstance(chunk_lookup_result, Failure):
         return Failure(chunk_lookup_result.failure())
     lookup: dict[str, dict[str, Any]] = chunk_lookup_result.unwrap()
@@ -286,6 +311,11 @@ def lookup_to_rows(
                 "custom_metadata": {},
                 "quality_warnings": record.get("quality_warnings", []),
                 "graphiti_verified": bool(record.get("graphiti_verified", False)),
+                "graph_indexed": bool(record.get("graphiti_verified", False)),
+                "graph_indexed_at": record.get("graph_indexed_at"),
+                "document_version": record.get("document_version", 1),
+                "contract_index": record.get("contract_index"),
+                "pipeline_version": record.get("pipeline_version"),
                 "rrf_score": item.score,
                 "title": record.get("title"),
                 "chunk_index": record.get("chunk_index"),
@@ -318,7 +348,9 @@ class DocumentQueryService:
         llm_factory: Callable[[], BaseChatModel],
         redis: Redis | None,
         graphiti: Graphiti | None,
+        *,
         grader: ContextGrader | None = None,
+        audit_recorder: DocumentAccessAuditRecorder | None = None,
     ):
         self.repo: DocumentRepository = repo
         # The model client is constructed on first use, not at dependency
@@ -335,6 +367,42 @@ class DocumentQueryService:
         # `ask` down, so ``None`` keeps grading on the legacy inline path below;
         # every other consumer of `self.llm` is unchanged either way.
         self.grader: ContextGrader | None = grader
+        self.audit_recorder = audit_recorder or InMemoryDocumentAccessAuditRecorder()
+
+    async def _record_access(
+        self,
+        result: DocumentResult[Any],
+        *,
+        operation: str,
+        user_id: str,
+        tenant_id: str,
+        requested_document_ids: Sequence[str],
+        document_ids: Sequence[str] = (),
+        reason: str | None = None,
+        outcome: str | None = None,
+    ) -> DocumentResult[Any]:
+        outcome = outcome or ("ok" if isinstance(result, Success) else "denied")
+        if reason is None and isinstance(result, Failure):
+            reason = result.failure().message
+        try:
+            await self.audit_recorder.append(
+                DocumentAccessAuditEvent(
+                    tenant_id=tenant_id,
+                    principal_id=user_id,
+                    operation=operation,
+                    requested_document_ids=tuple(requested_document_ids),
+                    document_ids=tuple(document_ids),
+                    policy="mechanically_verified",
+                    outcome=outcome,
+                    reason=reason,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — audit is a fail-closed boundary
+            exc.add_note(f"operation={operation}, tenant_id={tenant_id}")
+            logger.bind(operation=operation, tenant_id=tenant_id).exception(
+                "document_access_audit_failed"
+            )
+        return result
 
     @property
     def llm(self) -> BaseChatModel:
@@ -347,6 +415,7 @@ class DocumentQueryService:
         self,
         *,
         user_id: str,
+        tenant_id: str | None = None,
         query: str,
         document_ids: list[str] | None = None,
         limit: int = 5,
@@ -354,6 +423,7 @@ class DocumentQueryService:
         """Navigate stored document trees through the repository boundary."""
         trees_result = await self.repo.fetch_structural_trees(
             user_id=user_id,
+            tenant_id=tenant_id,
             document_ids=document_ids or [],
         )
         if isinstance(trees_result, Failure):
@@ -374,10 +444,69 @@ class DocumentQueryService:
         self,
         *,
         user_id: str,
+        tenant_id: str | None = None,
+        allowed_doc_ids: tuple[str, ...] | None = None,
         payload: UnifiedSearchRequest,
         weights: Sequence[float] | None = None,
     ) -> DocumentResult[UnifiedSearchResponse]:
-        cache_key = _build_cache_key("documents:search", payload, user_id=user_id)
+        resolved_tenant = _resolve_tenant_id(tenant_id, user_id)
+        result = await self._search(
+            user_id=user_id,
+            tenant_id=resolved_tenant,
+            allowed_doc_ids=allowed_doc_ids,
+            payload=payload,
+            weights=weights,
+        )
+        scope = tuple(allowed_doc_ids or ())
+        document_ids = (
+            tuple(item.document_id for item in result.unwrap().items)
+            if isinstance(result, Success)
+            else ()
+        )
+        return cast(
+            "DocumentResult[UnifiedSearchResponse]",
+            await self._record_access(
+                result,
+                operation="document.search",
+                user_id=user_id,
+                tenant_id=resolved_tenant,
+                requested_document_ids=scope,
+                document_ids=document_ids,
+                reason=(
+                    "requested document scope is empty"
+                    if allowed_doc_ids == ()
+                    else None
+                ),
+                outcome="denied" if allowed_doc_ids == () else None,
+            ),
+        )
+
+    async def _search(  # noqa: PLR0914
+        self,
+        *,
+        user_id: str,
+        tenant_id: str | None = None,
+        allowed_doc_ids: tuple[str, ...] | None = None,
+        payload: UnifiedSearchRequest,
+        weights: Sequence[float] | None = None,
+    ) -> DocumentResult[UnifiedSearchResponse]:
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
+        explicit_scope = allowed_doc_ids is not None
+        scope_ids = tuple(dict.fromkeys(allowed_doc_ids or ()))
+        if explicit_scope and not scope_ids:
+            return Success(UnifiedSearchResponse(items=[], cache_hit=False))
+        scope_versions = await _resolve_scope_versions(
+            self.repo, tenant_id=tenant_id, allowed_doc_ids=scope_ids
+        )
+        cache_key = _build_cache_key(
+            "documents:search",
+            payload,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            allowed_doc_ids=scope_ids,
+            document_versions=scope_versions,
+            evidence_policy="mechanically_verified",
+        )
         lock_key = f"{cache_key}:lock"
         lock_acquired = False
         if not payload.bypass_cache and self.redis is not None:
@@ -407,11 +536,18 @@ class DocumentQueryService:
             redis=None if payload.bypass_cache else self.redis,
         )
         filter_params = build_search_filter_params(
-            metadata_filter=payload.metadata_filter.model_dump()
+            metadata_filter={
+                **payload.metadata_filter.model_dump(),
+                "document_ids": list(scope_ids)
+                if explicit_scope
+                else payload.metadata_filter.document_ids,
+                "scope_bound": explicit_scope,
+            }
         )
         fused_result = await retrieve_fused(
             repo=self.repo,
             user_id=user_id,
+            tenant_id=tenant_id,
             query_text=payload.query,
             query_embedding=query_embedding,
             candidate_limit=payload.candidate_limit,
@@ -444,6 +580,7 @@ class DocumentQueryService:
         self,
         *,
         user_id: str,
+        tenant_id: str | None = None,
         payload: UnifiedSearchRequest,
         query_embedding: list[float],
         filter_params: dict[str, Any],
@@ -465,6 +602,7 @@ class DocumentQueryService:
         """
         branch_input = _BranchInput(
             user_id=user_id,
+            tenant_id=_resolve_tenant_id(tenant_id, user_id),
             query_text=payload.query,
             query_embedding=query_embedding,
             candidate_limit=payload.candidate_limit,
@@ -484,10 +622,19 @@ class DocumentQueryService:
 
     @trace_layer("service")
     async def rag(
-        self, *, user_id: str, payload: documents_dto.UnifiedRagRequest
+        self,
+        *,
+        user_id: str,
+        tenant_id: str | None = None,
+        allowed_doc_ids: tuple[str, ...] | None = None,
+        payload: documents_dto.UnifiedRagRequest,
     ) -> DocumentResult[UnifiedRagResponse]:
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
         search_result = await self.search(
-            user_id=user_id, payload=UnifiedSearchRequest.model_validate(payload.model_dump())
+            user_id=user_id,
+            tenant_id=tenant_id,
+            allowed_doc_ids=allowed_doc_ids,
+            payload=UnifiedSearchRequest.model_validate(payload.model_dump()),
         )
         if isinstance(search_result, Failure):
             return Failure(search_result.failure())
@@ -518,6 +665,7 @@ class DocumentQueryService:
                 context=[
                     RagContextSectionResponse(
                         document_id=section.document_id,
+                        contract_index=_context_contract_index(section.chunk_metadata),
                         title=section.title,
                         content=section.content,
                         chunk_indices=section.chunk_indices,
@@ -531,7 +679,12 @@ class DocumentQueryService:
 
     @trace_layer("service")
     async def ask_via_retrieval_graph(
-        self, *, user_id: str, payload: documents_dto.UnifiedAskRequest
+        self,
+        *,
+        user_id: str,
+        tenant_id: str | None = None,
+        allowed_doc_ids: tuple[str, ...] | None = None,
+        payload: documents_dto.UnifiedAskRequest,
     ) -> DocumentResult[UnifiedAskResponse]:
         """Answer through the compiled retrieval graph rather than the inline loop in `ask`.
 
@@ -550,6 +703,17 @@ class DocumentQueryService:
         here: collapsing them is a behavioural change to a live endpoint, and this step is a
         deletion. The graph is the better-factored of the two and is the intended survivor.
         """
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
+        if allowed_doc_ids is not None and not allowed_doc_ids:
+            return Success(
+                UnifiedAskResponse(
+                    answer=_FALLBACK_ANSWER,
+                    citations=[],
+                    confidence="uncertain",
+                    evidence_policy="mechanically_verified",
+                )
+            )
+        scope_ids = tuple(dict.fromkeys(allowed_doc_ids or ()))
         graph = build_retrieval_graph(
             llm=self.llm,
             repo=self.repo,
@@ -559,8 +723,12 @@ class DocumentQueryService:
         result = await graph.ainvoke(
             {
                 "user_id": user_id,
+                "tenant_id": tenant_id,
+                "allowed_doc_ids": list(scope_ids),
+                "scope_bound": allowed_doc_ids is not None,
                 "query": payload.query,
                 "doc_ids_filter": payload.doc_ids_filter,
+                "contract_index": payload.contract_index,
                 "messages": [],
                 "iteration_count": 0,
             }
@@ -574,30 +742,103 @@ class DocumentQueryService:
                         chunk_id=citation.chunk_id,
                         clause_type=citation.clause_type,
                         claim=citation.claim,
+                        contract_index=(
+                            citation.contract_index
+                            if citation.contract_index is not None
+                            else _retrieved_contract_index(
+                                citation.chunk_id, result.get("retrieved_chunks", [])
+                            )
+                        ),
                     )
                     for citation in answer.citations
                 ],
                 confidence=answer.confidence,
+                evidence_policy="mechanically_verified",
                 cache_hit=bool(result.get("cache_hit")),
             )
         )
 
     @trace_layer("service")
-    async def ask(  # noqa: PLR0914
+    async def ask(
         self,
         *,
         user_id: str,
+        tenant_id: str | None = None,
+        allowed_doc_ids: tuple[str, ...] | None = None,
         payload: documents_dto.UnifiedAskRequest,
         require_graphiti_verified: bool,
     ) -> DocumentResult[UnifiedAskResponse]:
+        resolved_tenant = _resolve_tenant_id(tenant_id, user_id)
+        result = await self._ask(
+            user_id=user_id,
+            tenant_id=resolved_tenant,
+            allowed_doc_ids=allowed_doc_ids,
+            payload=payload,
+            require_graphiti_verified=require_graphiti_verified,
+        )
+        scope = tuple(allowed_doc_ids or ())
+        document_ids = scope if isinstance(result, Success) else ()
+        return cast(
+            "DocumentResult[UnifiedAskResponse]",
+            await self._record_access(
+                result,
+                operation="document.read",
+                user_id=user_id,
+                tenant_id=resolved_tenant,
+                requested_document_ids=scope,
+                document_ids=document_ids,
+                reason=(
+                    "requested document scope is empty"
+                    if allowed_doc_ids == ()
+                    else None
+                ),
+                outcome="denied" if allowed_doc_ids == () else None,
+            ),
+        )
+
+    async def _ask(  # noqa: PLR0914
+        self,
+        *,
+        user_id: str,
+        tenant_id: str | None = None,
+        allowed_doc_ids: tuple[str, ...] | None = None,
+        payload: documents_dto.UnifiedAskRequest,
+        require_graphiti_verified: bool,
+    ) -> DocumentResult[UnifiedAskResponse]:
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
+        explicit_scope = allowed_doc_ids is not None
+        scope_ids = tuple(dict.fromkeys(allowed_doc_ids or ()))
+        if explicit_scope and not scope_ids:
+            return Success(
+                UnifiedAskResponse(
+                    answer=_FALLBACK_ANSWER,
+                    citations=[],
+                    confidence="uncertain",
+                    evidence_policy=(
+                        "graph_indexed_only"
+                        if require_graphiti_verified
+                        else "mechanically_verified"
+                    ),
+                )
+            )
+        scope_versions = await _resolve_scope_versions(
+            self.repo, tenant_id=tenant_id, allowed_doc_ids=scope_ids
+        )
         answer_cache_key = _build_answer_cache_key(
             user_id=user_id,
+            tenant_id=tenant_id,
             query=payload.query,
             doc_ids_filter=payload.doc_ids_filter,
+            allowed_doc_ids=scope_ids,
+            document_versions=scope_versions,
             jurisdiction=payload.jurisdiction,
             contract_type=payload.contract_type,
+            contract_index=payload.contract_index,
             clause_type=payload.clause_type,
             require_graphiti_verified=require_graphiti_verified,
+            evidence_policy=(
+                "graph_indexed_only" if require_graphiti_verified else "mechanically_verified"
+            ),
         )
         if not payload.bypass_cache and self.redis is not None:
             cached = await self.redis.get(answer_cache_key)
@@ -631,7 +872,7 @@ class DocumentQueryService:
                 graphiti=self.graphiti,
                 user_id=user_id,
                 query=plan.rewritten_query,
-                doc_ids_filter=payload.doc_ids_filter,
+                doc_ids_filter=list(scope_ids) if explicit_scope else payload.doc_ids_filter,
             )
             embedding = await retry_immediate(
                 # `query=` binds the loop variable at definition rather than at call. It is awaited
@@ -646,10 +887,12 @@ class DocumentQueryService:
             )
             filter_params = build_search_filter_params(
                 metadata_filter={
-                    "document_ids": payload.doc_ids_filter,
+                    "document_ids": list(scope_ids) if explicit_scope else payload.doc_ids_filter,
+                    "scope_bound": explicit_scope,
                     "chunk_ids": graph_chunk_ids or [],
                     "jurisdiction": payload.jurisdiction or plan.jurisdiction,
                     "contract_type": payload.contract_type or plan.contract_type,
+                    "contract_index": payload.contract_index,
                     "clause_type": payload.clause_type,
                     "require_graphiti_verified": require_graphiti_verified,
                 }
@@ -657,6 +900,7 @@ class DocumentQueryService:
             fused_result = await retrieve_fused(
                 repo=self.repo,
                 user_id=user_id,
+                tenant_id=tenant_id,
                 query_text=plan.rewritten_query,
                 query_embedding=embedding,
                 candidate_limit=HYBRID_CANDIDATE_LIMIT,
@@ -690,17 +934,30 @@ class DocumentQueryService:
                     )
                 break
 
+        evidence_policy: EvidencePolicy = (
+            "graph_indexed_only" if require_graphiti_verified else "mechanically_verified"
+        )
+        rows_by_chunk_id = {str(row["chunk_id"]): row for row in rows}
+        result_document_ids = {str(row["document_id"]) for row in rows}
+        graph_document_ids = {
+            str(row["document_id"]) for row in rows if bool(row.get("graphiti_verified", False))
+        }
         response = UnifiedAskResponse(
             answer=answer.answer,
             citations=[
-                LegalCitationResponse(
-                    chunk_id=citation.chunk_id,
-                    clause_type=citation.clause_type,
-                    claim=citation.claim,
-                )
+                _citation_response(citation, rows_by_chunk_id.get(citation.chunk_id))
                 for citation in answer.citations
             ],
             confidence=answer.confidence,
+            evidence_policy=evidence_policy,
+            coverage=EvidenceCoverage(
+                documents_requested=len(scope_ids)
+                if explicit_scope
+                else len(payload.doc_ids_filter),
+                documents_ready=len(result_document_ids),
+                graph_indexed_documents=len(graph_document_ids),
+                graph_unavailable_documents=len(result_document_ids - graph_document_ids),
+            ),
             warnings=response_warnings,
             cache_hit=False,
         )
@@ -721,6 +978,7 @@ async def _build_query_plan(
     jurisdiction: str | None,
     contract_type: str | None,
     clause_type: str | None,
+    contract_index: int | None = None,
 ) -> QueryPlan:
     payload = serialize_to_toon(
         {
@@ -728,6 +986,7 @@ async def _build_query_plan(
             "doc_ids_filter": doc_ids_filter,
             "jurisdiction": jurisdiction,
             "contract_type": contract_type,
+            "contract_index": contract_index,
             "clause_type": clause_type,
         }
     )
@@ -775,7 +1034,7 @@ async def _graphiti_filter_chunk_ids(
             ),
             label="documents_graphiti_filter",
         )
-    except (ValueError, TypeError):
+    except (GraphitiError, TransientExternalError, ValueError, TypeError):
         return []
     chunk_ids: list[str] = []
     for result in raw_results or []:
@@ -888,6 +1147,18 @@ def _build_search_items(
             DocumentSearchResultItem(
                 chunk_id=ranked_chunk.chunk_id,
                 document_id=str(row["document_id"]),
+                document_version=int(cast("int | str", row.get("document_version", 1))),
+                contract_index=(
+                    int(cast("int | str", row["contract_index"]))
+                    if isinstance(row.get("contract_index"), (int, str))
+                    and not isinstance(row.get("contract_index"), bool)
+                    else None
+                ),
+                pipeline_version=(
+                    str(row["pipeline_version"])
+                    if row.get("pipeline_version") is not None
+                    else None
+                ),
                 title=str(row["title"]),
                 content=str(row["content"]),
                 chunk_index=int(cast("int | str", row["chunk_index"])),
@@ -896,6 +1167,12 @@ def _build_search_items(
                 chunk_metadata=cast("dict[str, object]", row["chunk_metadata"] or {}),
                 quality_warnings=_flatten_warnings(row.get("quality_warnings", [])),  # ty: ignore[invalid-argument-type]
                 graphiti_verified=bool(row.get("graphiti_verified", False)),
+                graph_indexed=bool(row.get("graphiti_verified", False)),
+                graph_indexed_at=(
+                    str(row["graph_indexed_at"])
+                    if row.get("graph_indexed_at") is not None
+                    else None
+                ),
                 score=ranked_chunk.score,
                 rank=ranked_chunk.rank,
             )
@@ -903,22 +1180,76 @@ def _build_search_items(
     return items
 
 
+async def _resolve_scope_versions(
+    repo: DocumentRepository,
+    *,
+    tenant_id: str,
+    allowed_doc_ids: Sequence[str],
+) -> tuple[tuple[str, int, str | None], ...]:
+    """Read current document identities before consulting a response cache.
+
+    Narrow repository doubles used by offline evaluation predate this method;
+    in that case the empty identity is safe (it disables version invalidation
+    without weakening the tenant/allowlist fence).  A repository failure also
+    returns an empty identity and retrieval remains the source of truth.
+    """
+    resolver = getattr(repo, "resolve_scope_versions", None)
+    if resolver is None or not allowed_doc_ids:
+        return ()
+    try:
+        result = await resolver(tenant_id=tenant_id, document_ids=tuple(allowed_doc_ids))
+    except (AttributeError, TypeError):
+        return ()
+    if isinstance(result, Failure):
+        return ()
+    raw = result.unwrap() if isinstance(result, Success) else result
+    return tuple(
+        (str(doc_id), int(version), str(pipeline) if pipeline is not None else None)
+        for doc_id, version, pipeline in raw
+    )
+
+
+def _resolve_tenant_id(tenant_id: str | None, user_id: str) -> str:
+    """Migration compatibility boundary for pre-membership callers."""
+    return tenant_id if tenant_id is not None else personal_tenant_id(user_id)
+
+
 def _build_cache_key(
     kind: str,
     payload: UnifiedSearchRequest,
     *,
     user_id: str,
+    tenant_id: str | None = None,
+    allowed_doc_ids: Sequence[str] = (),
+    document_versions: Sequence[tuple[str, int, str | None]] = (),
+    evidence_policy: EvidencePolicy = "mechanically_verified",
 ) -> str:
+    tenant_id = tenant_id or user_id
     normalized_query = " ".join(payload.query.lower().split())
     filter_json = to_sorted_key_bytes(payload.metadata_filter.model_dump())
     raw = b"|".join(
         [
             kind.encode("utf-8"),
             user_id.encode("utf-8"),
+            tenant_id.encode("utf-8"),
             normalized_query.encode("utf-8"),
             filter_json,
+            to_sorted_key_bytes({"allowed_doc_ids": sorted(allowed_doc_ids)}),
+            to_sorted_key_bytes(
+                {
+                    "document_versions": sorted(
+                        (
+                            (str(doc_id), int(version), pipeline)
+                            for doc_id, version, pipeline in document_versions
+                        ),
+                        key=itemgetter(0),
+                    )
+                }
+            ),
+            evidence_policy.encode("utf-8"),
             str(payload.limit).encode("utf-8"),
             str(payload.candidate_limit).encode("utf-8"),
+            CANONICAL_PIPELINE_VERSION.encode("utf-8"),
         ]
     )
     return "documents:" + hashlib.sha256(raw).hexdigest()
@@ -927,22 +1258,41 @@ def _build_cache_key(
 def _build_answer_cache_key(
     *,
     user_id: str,
+    tenant_id: str | None = None,
     query: str,
     doc_ids_filter: list[str],
     jurisdiction: str | None,
     contract_type: str | None,
     clause_type: str | None,
     require_graphiti_verified: bool,
+    contract_index: int | None = None,
+    allowed_doc_ids: Sequence[str] = (),
+    evidence_policy: EvidencePolicy | None = None,
+    document_versions: Sequence[tuple[str, int, str | None]] = (),
 ) -> str:
+    tenant_id = tenant_id or user_id
     raw = to_sorted_key_bytes(
         {
             "user_id": user_id,
+            "tenant_id": tenant_id,
             "query": " ".join(query.lower().split()),
             "doc_ids_filter": sorted(doc_ids_filter),
+            "allowed_doc_ids": sorted(allowed_doc_ids),
+            "document_versions": sorted(
+                (
+                    (str(doc_id), int(version), pipeline)
+                    for doc_id, version, pipeline in document_versions
+                ),
+                key=itemgetter(0),
+            ),
             "jurisdiction": jurisdiction,
             "contract_type": contract_type,
+            "contract_index": contract_index,
             "clause_type": clause_type,
             "require_graphiti_verified": require_graphiti_verified,
+            "evidence_policy": evidence_policy
+            or ("graph_indexed_only" if require_graphiti_verified else "mechanically_verified"),
+            "pipeline_version": CANONICAL_PIPELINE_VERSION,
         },
     )
     return "documents:answer:" + hashlib.sha256(raw).hexdigest()
@@ -980,6 +1330,22 @@ def _warnings_from_rows(rows: list[dict[str, object]]) -> list[QualityWarningDTO
     return _flatten_warnings([row.get("quality_warnings", []) for row in rows])
 
 
+def _context_contract_index(metadata: dict[str, object]) -> int | None:
+    """Return a contract index only when a context section is contract-local."""
+    value = metadata.get("contract_index")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str):
+        try:
+            parsed = int(value)
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
 def _row_to_chunk(row: dict[str, object]) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=str(row["chunk_id"]),
@@ -991,7 +1357,64 @@ def _row_to_chunk(row: dict[str, object]) -> RetrievedChunk:
             **cast("dict[str, object]", row.get("metadata_") or {}),
             "quality_warnings": row.get("quality_warnings", []),
             "graphiti_verified": bool(row.get("graphiti_verified")),
+            "graph_indexed": bool(row.get("graphiti_verified")),
+            "document_version": row.get("document_version", 1),
+            "pipeline_version": row.get("pipeline_version"),
+            "contract_index": row.get("contract_index"),
+            "graph_indexed_at": row.get("graph_indexed_at"),
         },
         custom_metadata=cast("dict[str, object]", row.get("custom_metadata") or {}),
         score=float(cast("float | int | str", row["rrf_score"])),
     )
+
+
+def _citation_response(citation: Citation, row: dict[str, object] | None) -> LegalCitationResponse:
+    """Attach immutable source provenance to a generated citation when available."""
+    chunk_id = citation.chunk_id
+    response = LegalCitationResponse(
+        chunk_id=chunk_id,
+        clause_type=citation.clause_type,
+        claim=citation.claim,
+    )
+    if row is None:
+        return response
+    return response.model_copy(
+        update={
+            "document_id": str(row["document_id"]) if row.get("document_id") else None,
+            "document_version": int(cast("int | str", row.get("document_version", 1))),
+            "contract_index": (
+                int(cast("int | str", row["contract_index"]))
+                if isinstance(row.get("contract_index"), (int, str))
+                and not isinstance(row.get("contract_index"), bool)
+                else None
+            ),
+            "pipeline_version": (
+                str(row["pipeline_version"]) if row.get("pipeline_version") is not None else None
+            ),
+            "page_no": int(cast("int | str", row.get("page_no", 0))),
+        }
+    )
+
+
+def _retrieved_contract_index(chunk_id: str, chunks: object) -> int | None:
+    """Recover server provenance for graph citations without trusting the LLM."""
+    if not isinstance(chunks, list):
+        return None
+    for chunk in chunks:
+        if isinstance(chunk, dict):
+            chunk_key = chunk.get("chunk_id")
+            value = chunk.get("contract_index")
+            metadata = chunk.get("metadata_")
+        else:
+            chunk_key = getattr(chunk, "chunk_id", None)
+            value = getattr(chunk, "contract_index", None)
+            metadata = getattr(chunk, "metadata_", None)
+        if chunk_key != chunk_id:
+            continue
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+        if isinstance(metadata, dict):
+            value = metadata.get("contract_index")
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                return value
+    return None

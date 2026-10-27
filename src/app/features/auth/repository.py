@@ -579,8 +579,8 @@ class RefreshTokenRepository:
         )
         try:
             created = await self._redis.set(
-                _OAUTH_LINK_STATE_KEY.format(intent.state_digest),
-                intent.model_dump_json(),
+                name=_OAUTH_LINK_STATE_KEY.format(intent.state_digest),
+                value=intent.model_dump_json(),
                 ex=ttl,
                 nx=True,
             )

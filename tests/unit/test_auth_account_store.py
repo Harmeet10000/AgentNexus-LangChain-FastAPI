@@ -9,8 +9,14 @@ import pytest
 from fastapi import Response
 from returns.result import Failure, Success
 
-from app.features.auth.account_store import BeanieAuthAccountStore, OAuthAccountInput
+from app.features.auth.account_store import (
+    BeanieAuthAccountStore,
+    InMemoryAuthAccountStore,
+    NewAuthAccount,
+    OAuthAccountInput,
+)
 from app.features.auth.exceptions import AuthConflictError, AuthInfrastructureError
+from app.features.auth.models import LegalRole, UserRole
 from app.kernel.result import render_result
 
 pytestmark = pytest.mark.unit
@@ -165,3 +171,35 @@ def test_auth_infrastructure_details_are_safe_for_rendering() -> None:
     assert "alice@example.com" not in str(envelope.model_dump())
     assert "secret-token-hash" not in str(envelope.model_dump())
     assert "driver leaked details" not in str(envelope.model_dump())
+
+
+@pytest.mark.asyncio
+async def test_tenant_binding_does_not_advance_platform_session_revision() -> None:
+    store = InMemoryAuthAccountStore()
+    created = await store.create(
+        NewAuthAccount(
+            email="tenant@example.com",
+            password_hash="hash",
+            role=UserRole.USER,
+            tenant_id="tenant-a",
+            legal_roles=(LegalRole.ANALYST,),
+        )
+    )
+    assert isinstance(created, Success)
+    account = created.unwrap()
+    account = account.model_copy(update={"role_revision": 7, "tenant_role_revision": 2})
+    store._unindex_account(created.unwrap())
+    store._index_account(account)
+
+    result = await store.set_tenant_binding(
+        account.id,
+        tenant_id="tenant-a",
+        legal_roles=(LegalRole.REVIEWER,),
+        role_revision=3,
+    )
+
+    assert isinstance(result, Success)
+    refreshed = (await store.find_by_id(account.id)).unwrap()
+    assert refreshed is not None
+    assert refreshed.role_revision == 7
+    assert refreshed.tenant_role_revision == 3

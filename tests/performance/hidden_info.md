@@ -214,3 +214,28 @@ anti use cases
 drawbacks
 1. too many actors 
 2. 
+
+
+## 1. Why Anthropic Needed a New Review Flow (0:29-1:21)
+Anthropic experienced a massive surge in code volume, with their main repository growing from 2,500 changes per day in May to over 30,000 in September. Given this scale, **reading every single line of code is no longer realistic**. Instead of manual human review for every line, the team shifted their focus to identifying **what could go wrong** with a change and determining the best mechanism (automated or human) to catch it. Their goal is for most Pull Requests (PRs) to merge with at most one human involved, while ensuring that reduced human oversight does not lead to more production issues.
+
+## 2. The Review Layers (1:21-2:57)
+Anthropic utilizes a layered, "Swiss cheese" model where multiple automated and human checks aim to catch bugs before they reach production:
+* **Engineer’s Session:** Before a PR is created, the engineer uses *Claude* to check its own work, such as running tests, building the app, or comparing screenshots to designs. A sub-agent with fresh context then reviews the diff.
+* **Automated Claude Review:** Once the PR is created, a separate *Claude* review runs automatically. Multiple agents look for bugs simultaneously, and a separate group of agents votes on the findings. Only verified issues are posted.
+* **Refinement:** If the reviewer repeatedly flags the same mistake, the team adds a lint rule or a note to `claude.md` to prevent future occurrences. If the reviewer flags things that are actually fine, they use a `review.md` file to instruct the agent on what truly matters in that specific code path.
+
+## 3. Security Review, CI, and Risk Tiers (2:57-4:22)
+Following the initial bug review, the flow proceeds through:
+* **Security Review:** A secondary *Claude* review specifically targeting security. PRs cannot merge if there are unresolved findings from either the bug or security reviews.
+* **CI Checks:** Final automated checks including testing, type checking, and linting. The PR template must be filled out, documenting how the change was tested and how to roll it back.
+* **Risk Tiers:** A classifier agent assigns a risk tier to every PR:
+    * **Low-risk:** (e.g., docs, feature-flagged code) Require no human approval if submitted by a trusted author.
+    * **Medium-risk:** (e.g., product changes, caching) Require one human reviewer.
+    * **High-risk:** Require two human reviewers. A secondary agent double-checks the classifier's tier assignment.
+
+## 4. Testing the Reviewer and the 50-Round Loop (4:22-6:01)
+To ensure the reviewer remains effective, Anthropic turns production incidents into **evals**, testing the agent daily on whether it would have caught those specific bugs. To avoid "noise" where an agent flags everything to be safe, they measure how humans interact with comments. A significant challenge was the "agent loop," where an agent author and agent reviewer would get stuck in a feedback loop (up to 50 rounds). Now, after three rounds, the reviewer prompts the human to step in, and re-reviews are limited to new changes, successfully reducing the need for multiple review passes.
+
+## 5. You Land It, You Own It (6:01-7:57)
+Anthropic’s operational philosophy shifts the human role toward what machines struggle with: high-level decisions, reviewing risky code like billing, and **owning the outcome**. The principle "you land it, you own it" ensures that the author remains responsible for fixing any breaks caused by their changes. While their revert rate dropped by 40%, the volume of merges doubled, meaning there is still a net increase in absolute reverts. The reviewer is a costly, high-token-budget tool, but the company recommends that smaller teams adopt key parts of this workflow, such as maintaining a `review.md`, capping review rounds, and ensuring humans remain accountable for final approvals.

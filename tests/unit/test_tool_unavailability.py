@@ -130,49 +130,6 @@ async def test_precedent_search_answers_unavailable_when_corpus_raises(monkeypat
     assert result["unavailable"] is True
 
 
-@pytest.mark.asyncio
-async def test_hybrid_tool_reports_the_vector_layer_unavailable() -> None:
-    from app.features.documents.tools.precedent_tools import (
-        make_hybrid_retrieve_precedents_tool,
-    )
-
-    class _Graphiti:
-        async def search_for_precedent_chains(self, **_kw: Any) -> list[Any]:
-            return []
-
-    class _EmptySubgraph:
-        def __init__(self) -> None:
-            self.nodes: list[object] = []
-            self.edges: list[object] = []
-
-        def to_context_text(self) -> str:
-            return ""
-
-    class _Expander:
-        async def expand_from_seeds(self, **_kw: Any) -> Any:
-            return _EmptySubgraph()
-
-    tool = make_hybrid_retrieve_precedents_tool(
-        _Graphiti(),
-        _Expander(),
-        object(),
-        _idempotency(),
-    )
-    result = await tool.ainvoke(
-        {
-            "query": "q",
-            "user_id": "u",
-            "doc_id": "d",
-            "num_results": 5,
-            "thread_id": "t",
-            "step_id": "s",
-        }
-    )
-    assert not isinstance(result, str)
-    assert result["unavailable"] is True
-    assert "pgvector" in result["error"]
-
-
 async def test_a_partial_source_set_sets_basis_unknown_and_keeps_the_survivor(
     monkeypatch: Any,
 ) -> None:

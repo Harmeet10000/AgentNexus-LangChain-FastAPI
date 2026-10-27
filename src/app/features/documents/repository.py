@@ -12,11 +12,13 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.features.auth.tenancy import personal_tenant_id
 from app.kernel.result import add_database_error_note
 from app.observability.logging import trace_layer
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 
 from .constants import (
+    CANONICAL_PIPELINE_VERSION,
     DISKANN_QUERY_RESCORE,
     DISKANN_QUERY_SEARCH_LIST_SIZE,
     PHRASE_OVERFETCH_MULTIPLE,
@@ -46,6 +48,8 @@ if TYPE_CHECKING:
     from .exceptions import DocumentResult
 
 _FILTER_SQL = """
+  AND c.tenant_id = :tenant_id
+  AND (CAST(:scope_bound AS boolean) IS FALSE OR c.document_id = ANY(CAST(:document_ids AS uuid[])))
   AND (
     COALESCE(array_length(CAST(:document_ids AS uuid[]), 1), 0) = 0
     OR c.document_id = ANY(CAST(:document_ids AS uuid[]))
@@ -67,6 +71,10 @@ _FILTER_SQL = """
     OR c.metadata_->>'contract_type' = CAST(:contract_type AS text)
   )
   AND (
+    CAST(:contract_index AS integer) IS NULL
+    OR c.contract_index = CAST(:contract_index AS integer)
+  )
+  AND (
     CAST(:clause_type AS text) IS NULL
     OR c.clause_type = CAST(:clause_type AS text)
   )
@@ -83,6 +91,16 @@ _FILTER_SQL = """
     OR c.metadata_->'parties' @> CAST(:parties_filter AS jsonb)
   )
 """
+
+
+def _resolve_tenant_id(tenant_id: str | None, user_id: str) -> str:
+    """Resolve the migration-only one-user tenant compatibility boundary.
+
+    Current HTTP/worker call paths pass an authoritative tenant.  Keeping the
+    fallback in this one named helper preserves old repository test doubles and
+    migration jobs without hiding an implicit tenant choice in every query.
+    """
+    return tenant_id if tenant_id is not None else personal_tenant_id(user_id)
 
 
 def _phrase_like_pattern(phrase: str) -> str:
@@ -104,15 +122,76 @@ class DocumentRepository:
         self.session: AsyncSession = session
 
     @trace_layer("repository")
+    async def resolve_scope_versions(
+        self,
+        *,
+        tenant_id: str,
+        document_ids: Sequence[str],
+    ) -> DocumentResult[tuple[tuple[str, int, str], ...]]:
+        """Resolve the corpus identity used by response caches.
+
+        Cache lookup must happen after this query: re-ingesting a document can
+        leave the same document id in the allowlist while replacing its chunks.
+        The version tuple therefore acts as the content-addressed read fence.
+        Missing documents are retained as ``(id, 0, pipeline)`` only by callers
+        that choose to represent them; this repository returns rows that exist.
+        """
+        if not document_ids:
+            return Success(())
+        try:
+            statement = text(
+                """
+                SELECT c.document_id::text AS document_id,
+                       COALESCE(MAX(c.document_version), 1)::int AS document_version,
+                       COALESCE(MAX(c.pipeline_version), :pipeline_version) AS pipeline_version
+                FROM chunks AS c
+                WHERE c.tenant_id = :tenant_id
+                  AND c.document_id = ANY(CAST(:document_ids AS uuid[]))
+                GROUP BY c.document_id
+                ORDER BY c.document_id
+                """
+            )
+            result = await self.session.execute(
+                statement,
+                params={
+                    "tenant_id": tenant_id,
+                    "document_ids": list(document_ids),
+                    "pipeline_version": CANONICAL_PIPELINE_VERSION,
+                },
+            )
+            return Success(
+                tuple(
+                    (
+                        str(row["document_id"]),
+                        int(row["document_version"]),
+                        str(row["pipeline_version"]),
+                    )
+                    for row in result.mappings().all()
+                )
+            )
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chunks")
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while resolving document versions",
+                    details={"tenant_id": tenant_id, "document_ids": list(document_ids)},
+                    source="document_repository",
+                )
+            )
+
+    @trace_layer("repository")
     async def get_document_by_user_hash(
         self,
         *,
         user_id: str,
+        tenant_id: str | None = None,
         content_hash: str,
     ) -> DocumentResult[UnifiedDocument | None]:
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
             statement: Select[tuple[UnifiedDocument]] = select(UnifiedDocument).where(
-                UnifiedDocument.user_id == user_id,
+                UnifiedDocument.tenant_id == tenant_id,
                 UnifiedDocument.content_hash == content_hash,
             )
             result: Result[tuple[UnifiedDocument]] = await self.session.execute(statement)
@@ -143,10 +222,12 @@ class DocumentRepository:
         *,
         user_id: str,
         document_id: str,
+        tenant_id: str | None = None,
     ) -> DocumentResult[UnifiedDocument | None]:
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
             statement: Select[tuple[UnifiedDocument]] = select(UnifiedDocument).where(
-                UnifiedDocument.user_id == user_id,
+                UnifiedDocument.tenant_id == tenant_id,
                 UnifiedDocument.id == UUID(document_id),
             )
             result: Result[tuple[UnifiedDocument]] = await self.session.execute(statement)
@@ -180,6 +261,7 @@ class DocumentRepository:
         self,
         *,
         user_id: str,
+        tenant_id: str | None = None,
         title: str,
         source_uri: str | None,
         object_uri: str,
@@ -191,9 +273,11 @@ class DocumentRepository:
         parties: list[object],
         metadata_: dict[str, object],
     ) -> DocumentResult[UnifiedDocument]:
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
             document = UnifiedDocument(
                 user_id=user_id,
+                tenant_id=tenant_id,
                 title=title,
                 source_uri=source_uri,
                 object_uri=object_uri,
@@ -298,14 +382,16 @@ class DocumentRepository:
         *,
         user_id: str,
         document_ids: list[str],
+        tenant_id: str | None = None,
     ) -> DocumentResult[list[dict[str, Any]]]:
         """Load tenant-scoped persisted trees for structural navigation."""
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
             statement = text(
                 """
                 SELECT id::text AS document_id, structural_tree
                 FROM documents
-                WHERE user_id = :user_id
+                WHERE tenant_id = :tenant_id
                   AND structural_tree <> '{}'::jsonb
                   AND (
                     cardinality(CAST(:document_ids AS uuid[])) = 0
@@ -316,7 +402,7 @@ class DocumentRepository:
             )
             result = await self.session.execute(
                 statement,
-                params={"user_id": user_id, "document_ids": document_ids},
+                params={"tenant_id": tenant_id, "document_ids": document_ids},
             )
             return Success([dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
@@ -440,7 +526,9 @@ class DocumentRepository:
         *,
         user_id: str,
         document_id: str,
+        tenant_id: str | None = None,
     ) -> DocumentResult[dict[str, Any] | None]:
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
             statement: TextClause = text(
                 text="""
@@ -450,18 +538,25 @@ class DocumentRepository:
                     d.object_uri,
                     d.title,
                     d.document_kind,
+                    d.metadata_ AS document_metadata,
                     COUNT(c.id)::int AS chunk_count,
                     COUNT(*) FILTER (WHERE c.graphiti_verified)::int AS verified_chunk_count,
+                    MAX(c.document_version)::int AS document_version,
+                    MAX(c.contract_index)::int AS contract_index,
+                    MAX(c.pipeline_version) AS pipeline_version,
+                    MAX(c.graph_indexed_at) AS graph_indexed_at,
+                    d.extraction_incomplete,
                     COALESCE(jsonb_agg(c.quality_warnings) FILTER (WHERE c.id IS NOT NULL), '[]'::jsonb) AS warnings
                 FROM documents AS d
                 LEFT JOIN chunks AS c
                   ON c.document_id = d.id
-                WHERE d.user_id = :user_id AND d.id = CAST(:document_id AS uuid)
-                GROUP BY d.id, d.status, d.object_uri, d.title, d.document_kind
+                WHERE d.tenant_id = :tenant_id AND d.id = CAST(:document_id AS uuid)
+                GROUP BY d.id, d.status, d.object_uri, d.title, d.document_kind,
+                    d.metadata_, d.extraction_incomplete
                 """
             )
             result = await self.session.execute(
-                statement, params={"user_id": user_id, "document_id": document_id}
+                statement, params={"tenant_id": tenant_id, "document_id": document_id}
             )
             row: RowMapping | None = result.mappings().one_or_none()
             if row is None:
@@ -493,12 +588,14 @@ class DocumentRepository:
         self,
         *,
         user_id: str,
+        tenant_id: str | None = None,
         query: str,
         candidate_limit: int,
         filter_params: dict[str, Any],
         bm25_threshold: float | None = None,
         exact_phrase: str | None = None,
     ) -> DocumentResult[list[dict[str, Any]]]:
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
             phrase_pattern = _phrase_like_pattern(exact_phrase) if exact_phrase else None
             fetch_limit = (
@@ -512,7 +609,7 @@ class DocumentRepository:
                     c.id::text AS chunk_id,
                     (-1 * (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx'))) AS score
                 FROM chunks AS c
-                WHERE c.user_id = :user_id
+                WHERE c.tenant_id = :tenant_id
                   AND (c.search_text <@> to_bm25query(:query, 'chunks_bm25_idx')) < 0
                   AND (
                     CAST(:bm25_threshold AS double precision) IS NULL
@@ -534,13 +631,13 @@ class DocumentRepository:
             result = await self.session.execute(
                 statement,
                 {
-                    "user_id": user_id,
                     "query": query,
                     "candidate_limit": candidate_limit,
                     "bm25_threshold": bm25_threshold,
                     "phrase_pattern": phrase_pattern,
                     "fetch_limit": fetch_limit,
                     **filter_params,
+                    "tenant_id": tenant_id,
                 },
             )
             rows = [dict(row) for row in result.mappings().all()]
@@ -561,10 +658,12 @@ class DocumentRepository:
         self,
         *,
         user_id: str,
+        tenant_id: str | None = None,
         embedding: list[float],
         candidate_limit: int,
         filter_params: dict[str, Any],
     ) -> DocumentResult[list[dict[str, Any]]]:
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
             statement: TextClause = text(
                 text="""
@@ -572,7 +671,7 @@ class DocumentRepository:
                     c.id::text AS chunk_id,
                     (1 - (c.embedding <=> CAST(:embedding AS vector))) AS score
                 FROM chunks AS c
-                WHERE c.user_id = :user_id
+                WHERE c.tenant_id = :tenant_id
                   AND c.embedding IS NOT NULL
                 """
                 + _FILTER_SQL
@@ -593,10 +692,10 @@ class DocumentRepository:
             result = await self.session.execute(
                 statement,
                 {
-                    "user_id": user_id,
                     "embedding": _vector_literal(embedding),
                     "candidate_limit": candidate_limit,
                     **filter_params,
+                    "tenant_id": tenant_id,
                 },
             )
             return Success(inner_value=[dict(row) for row in result.mappings().all()])
@@ -616,10 +715,12 @@ class DocumentRepository:
         self,
         *,
         user_id: str,
+        tenant_id: str | None = None,
         query: str,
         candidate_limit: int,
         filter_params: dict[str, Any],
     ) -> DocumentResult[list[dict[str, Any]]]:
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
             statement: TextClause = text(
                 text="""
@@ -627,7 +728,7 @@ class DocumentRepository:
                     c.id::text AS chunk_id,
                     similarity(c.search_text, :query) AS score
                 FROM chunks AS c
-                WHERE c.user_id = :user_id
+                WHERE c.tenant_id = :tenant_id
                   AND c.search_text % :query
                   AND similarity(c.search_text, :query) >= :similarity_threshold
                 """
@@ -641,11 +742,11 @@ class DocumentRepository:
             result = await self.session.execute(
                 statement,
                 params={
-                    "user_id": user_id,
                     "query": query,
                     "candidate_limit": candidate_limit,
                     "similarity_threshold": TRIGRAM_SIMILARITY_THRESHOLD,
                     **filter_params,
+                    "tenant_id": tenant_id,
                 },
             )
             return Success(inner_value=[dict(row) for row in result.mappings().all()])
@@ -665,6 +766,7 @@ class DocumentRepository:
         self,
         *,
         user_id: str,
+        tenant_id: str | None = None,
         jurisdictions: Sequence[str],
         document_kinds: Sequence[str],
         matters: Sequence[str],
@@ -677,6 +779,7 @@ class DocumentRepository:
         here — the caller treats that as "cannot narrow" and proceeds
         unconstrained.
         """
+        tenant_id = _resolve_tenant_id(tenant_id, user_id)
         if not (jurisdictions or document_kinds or matters):
             return Success(inner_value=[])
         try:
@@ -684,7 +787,7 @@ class DocumentRepository:
                 text="""
                 SELECT d.id::text AS document_id
                 FROM documents AS d
-                WHERE d.user_id = :user_id
+                WHERE d.tenant_id = :tenant_id
                   AND (
                     (
                       CAST(:jurisdictions AS text[]) IS NOT NULL
@@ -706,7 +809,7 @@ class DocumentRepository:
             result = await self.session.execute(
                 statement,
                 {
-                    "user_id": user_id,
+                    "tenant_id": tenant_id,
                     "jurisdictions": list(jurisdictions) or None,
                     "document_kinds": list(document_kinds) or None,
                     "matters": list(matters) or None,
@@ -726,11 +829,49 @@ class DocumentRepository:
             )
 
     @trace_layer("repository")
+    async def list_document_ids_for_tenant(
+        self, *, tenant_id: str, limit: int = 10_000
+    ) -> DocumentResult[tuple[str, ...]]:
+        """Return the server-owned document capability for one tenant.
+
+        This query is deliberately separate from retrieval.  It establishes
+        the allowlist used to intersect client filters before any chunk read;
+        tenant membership remains the authority and no user-supplied IDs are
+        ever used to populate it.
+        """
+        try:
+            statement = text(
+                """
+                SELECT d.id::text AS document_id
+                FROM documents AS d
+                WHERE d.tenant_id = :tenant_id
+                ORDER BY d.id::text ASC
+                LIMIT :limit
+                """
+            )
+            result = await self.session.execute(
+                statement, {"tenant_id": tenant_id, "limit": max(1, min(limit, 100_000))}
+            )
+            return Success(tuple(str(row[0]) for row in result.all()))
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="documents")
+            await self.session.rollback()
+            return Failure(
+                inner_value=DocumentDatabaseError(
+                    message="Database error while resolving tenant document capability",
+                    details={"tenant_id": tenant_id},
+                    source="document_repository",
+                )
+            )
+
+    @trace_layer("repository")
     async def fetch_chunks_by_ids(
         self,
         chunk_ids: Sequence[str],
         *,
         exact_phrase: str | None = None,
+        tenant_id: str | None = None,
+        allowed_doc_ids: Sequence[str] | None = None,
     ) -> DocumentResult[dict[str, dict[str, Any]]]:
         if not chunk_ids:
             return Success({})
@@ -744,15 +885,28 @@ class DocumentRepository:
                 c.content AS content,
                 c.preamble AS preamble,
                 c.search_text AS search_text,
+                c.document_version,
+                c.contract_index,
+                c.pipeline_version,
                 c.chunk_index,
                 c.chunk_kind,
                 c.clause_type,
+                c.page_no,
                 c.metadata_ AS chunk_metadata,
+                d.metadata_ AS document_metadata,
+                d.status AS document_status,
+                d.extraction_incomplete,
                 c.quality_warnings,
-                c.graphiti_verified
+                c.graphiti_verified,
+                c.graph_indexed_at
             FROM chunks AS c
             JOIN documents AS d ON d.id = c.document_id
             WHERE c.id = ANY(CAST(:chunk_ids AS uuid[]))
+              AND (CAST(:tenant_id AS text) IS NULL OR c.tenant_id = CAST(:tenant_id AS text))
+              AND (
+                CAST(:allowed_doc_ids AS uuid[]) IS NULL
+                OR c.document_id = ANY(CAST(:allowed_doc_ids AS uuid[]))
+              )
               AND (
                 CAST(:phrase_pattern AS text) IS NULL
                 OR c.search_text ILIKE CAST(:phrase_pattern AS text) ESCAPE '\\'
@@ -766,6 +920,8 @@ class DocumentRepository:
                     "phrase_pattern": (
                         _phrase_like_pattern(exact_phrase) if exact_phrase else None
                     ),
+                    "tenant_id": tenant_id,
+                    "allowed_doc_ids": list(allowed_doc_ids) if allowed_doc_ids else None,
                 },
             )
             return Success(
@@ -808,6 +964,9 @@ def build_chunk_upsert_statement(rows: list[dict[str, Any]]) -> Insert:
             "quality_warnings": statement.excluded.quality_warnings,
             "graphiti_episode_id": statement.excluded.graphiti_episode_id,
             "graphiti_verified": statement.excluded.graphiti_verified,
+            "pipeline_version": statement.excluded.pipeline_version,
+            "contract_index": statement.excluded.contract_index,
+            "graph_indexed_at": statement.excluded.graph_indexed_at,
             "updated_at": statement.excluded.updated_at,
             "instrument_name": statement.excluded.instrument_name,
             "section_ref": statement.excluded.section_ref,
@@ -817,8 +976,13 @@ def build_chunk_upsert_statement(rows: list[dict[str, Any]]) -> Insert:
 
 
 def build_chunk_rows(
-    *, document_id: str, user_id: str, chunks: Sequence[dict[str, Any]]
+    *,
+    document_id: str,
+    user_id: str,
+    chunks: Sequence[dict[str, Any]],
+    tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
+    tenant_id = _resolve_tenant_id(tenant_id, user_id)
     now = datetime.now(tz=UTC)
     rows: list[dict[str, Any]] = []
     for chunk in chunks:
@@ -832,7 +996,22 @@ def build_chunk_rows(
                 **chunk,
                 "document_id": document_id,
                 "user_id": user_id,
+                "tenant_id": tenant_id,
                 "document_version": int(chunk.get("document_version", 1)),
+                "contract_index": (
+                    int(chunk["contract_index"])
+                    if isinstance(chunk.get("contract_index"), int)
+                    and not isinstance(chunk.get("contract_index"), bool)
+                    and int(chunk["contract_index"]) >= 0
+                    else None
+                ),
+                "pipeline_version": str(
+                    chunk.get("pipeline_version") or CANONICAL_PIPELINE_VERSION
+                ),
+                "graph_indexed_at": (
+                    chunk.get("graph_indexed_at")
+                    or (now if bool(chunk.get("graphiti_verified", False)) else None)
+                ),
                 "locus": locus,
                 # The upsert's DO UPDATE SET refreshes updated_at from the row, so
                 # every write path carries it; callers may pin their own value.
@@ -843,17 +1022,21 @@ def build_chunk_rows(
 
 
 def build_search_filter_params(*, metadata_filter: dict[str, Any]) -> dict[str, Any]:
-    document_ids = metadata_filter.get("document_ids") or []
+    raw_document_ids = metadata_filter.get("document_ids")
+    document_ids = list(raw_document_ids) if raw_document_ids is not None else []
     parties = metadata_filter.get("parties") or []
     chunk_ids = metadata_filter.get("chunk_ids") or []
     return {
         "document_ids": document_ids,
+        "scope_bound": bool(metadata_filter.get("scope_bound", raw_document_ids is not None)),
         "chunk_ids": chunk_ids,
         "document_kind": metadata_filter.get("document_kind"),
         "jurisdiction": metadata_filter.get("jurisdiction"),
         "contract_type": metadata_filter.get("contract_type"),
+        "contract_index": metadata_filter.get("contract_index"),
         "clause_type": metadata_filter.get("clause_type"),
         "require_graphiti_verified": bool(metadata_filter.get("require_graphiti_verified")),
+        "tenant_id": metadata_filter.get("tenant_id"),
         "metadata_filter": json.dumps(metadata_filter.get("metadata_", {})),
         "parties_filter": json.dumps(parties),
     }

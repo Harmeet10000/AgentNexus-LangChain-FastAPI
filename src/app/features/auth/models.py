@@ -6,6 +6,8 @@ from beanie import Document, Indexed
 from pydantic import BaseModel, Field
 from pymongo import ASCENDING, IndexModel
 
+from .tenancy import LegalRole
+
 
 class UserRole(StrEnum):
     ADMIN = "admin"
@@ -68,9 +70,19 @@ class User(Document):
     is_verified: bool = Field(default=False)
     is_active: bool = Field(default=True)
     role: UserRole = Field(default=UserRole.USER)
-    # Monotonic authorization generation.  Role changes advance it before
-    # session invalidation so stale tokens can never regain privileges.
+    # Tenant ownership is separate from the platform role.  Existing users
+    # are backfilled to ``personal:<user_id>`` by the tenancy migration; the
+    # adapter keeps the fallback for documents created during rolling deploys.
+    tenant_id: str | None = Field(default=None, min_length=1, max_length=255)
+    legal_roles: tuple[LegalRole, ...] = (LegalRole.ANALYST,)
+    # Monotonic platform authorization/session generation.  This is deliberately
+    # independent from the SQL tenant-membership revision below; a tenant role
+    # edit must not silently change the meaning of platform session tokens.
     role_revision: int = Field(default=0, ge=0)
+    # SQL ``app_tenant_memberships.role_revision`` is authoritative.  ``None``
+    # keeps rolling deploys compatible with Mongo documents written before the
+    # mirror field existed; the adapter fills it from the SQL read on sync.
+    tenant_role_revision: int | None = Field(default=None, ge=0)
     session_revocation_pending: bool = Field(default=False)
     # Set once when a role-change invalidation begins. It is intentionally
     # separate from updated_at, which profile/account edits may advance while

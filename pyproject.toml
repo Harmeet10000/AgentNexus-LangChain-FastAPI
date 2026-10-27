@@ -74,7 +74,7 @@ dependencies = [
     "nh3>=0.3.3",
     # --- DOCUMENT PROCESSING ---
     "docling>=2.72.0",
-    "langextract>=1.2.0",
+    "langextract>=1.7.1,<2.0.0",
     # Docling declares these directly. Pin their CPU wheels explicitly so uv
     # cannot resolve a multi-gigabyte CUDA runtime for a RapidOCR deployment.
     "torch==2.9.1+cpu",
@@ -190,6 +190,8 @@ worker-completeness = "app.worker.celery.cli:completeness"
 test = "pytest:main"
 replay-outbox = "app.worker.operations.replay_outbox:main"
 seed = "database.seeders.run_seeders:main"
+migrate-personal-tenants = "scripts.migrate_personal_tenants:main"
+legal-eval = "app.ai.evaluation.experiment:main"
 
 
 [project.optional-dependencies]

@@ -32,7 +32,7 @@ damn-ai-service.com {
     handle /api/v1/health/self {
         reverse_proxy ai-service-1:5000 ai-service-2:5000 {
             lb_policy least_conn
-            health_uri /api/v1/health/self
+            health_uri /api/v1/health/ready
             health_interval 30s
         }
     }
@@ -41,7 +41,7 @@ damn-ai-service.com {
     handle /api/* {
         reverse_proxy ai-service-1:5000 ai-service-2:5000 {
             lb_policy least_conn
-            health_uri /api/v1/health/self
+            health_uri /api/v1/health/ready
             health_interval 30s
             fail_duration 30s
             max_fails 3
@@ -62,7 +62,7 @@ damn-ai-service.com {
     handle {
         reverse_proxy ai-service-1:5000 ai-service-2:5000 {
             lb_policy least_conn
-            health_uri /api/v1/health/self
+            health_uri /api/v1/health/ready
             health_interval 30s
             fail_duration 30s
             max_fails 3

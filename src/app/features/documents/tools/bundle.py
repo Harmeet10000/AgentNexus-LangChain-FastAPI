@@ -40,6 +40,12 @@ from typing import TYPE_CHECKING
 from langchain_core.tools.base import BaseTool
 from pydantic import BaseModel, ConfigDict
 
+from app.features.documents.service.evidence import EvidenceService
+from app.features.documents.tools.evidence import (
+    make_get_ingestion_state_tool,
+    make_read_evidence_tool,
+    make_search_evidence_tool,
+)
 from app.features.documents.tools.get_obligation_chain import make_get_obligation_chain_tool
 from app.features.documents.tools.query_knowledge_graph import make_query_knowledge_graph_tool
 from app.features.documents.tools.retrieve_statute_section import make_retrieve_statute_section_tool
@@ -56,11 +62,12 @@ class AgentToolBundle(BaseModel):
     """
     Immutable collection of all pre-built LangChain tools.
 
-    Tool assignment to agents (pending — agents are currently built with
-    empty tool lists in factory.py):
-      compliance_agent  → [search_legal_precedents, retrieve_statute_section]
-      risk_agent        → [query_knowledge_graph, get_obligation_chain]
-      deep_research     → deep_research_tool (delegates to search_legal_precedents)
+    Tool assignment to agents is bounded in ``agent_saul.graph.factory``:
+      compliance_agent  → scoped evidence search/read/readiness
+      risk_agent        → graph analysis plus scoped evidence search/read
+      deep_research     → the scoped EvidenceService adapter.  The old
+      ``search_legal_precedents`` alias is retained only for the compliance
+      specialist; research must not bypass the handle-based evidence seam.
 
     Memory writers (write_clause_episodes_to_graphiti / write_final_report_to_memory)
     are implemented but not yet wired into any node.
@@ -80,17 +87,30 @@ class AgentToolBundle(BaseModel):
     query_knowledge_graph: BaseTool
     get_obligation_chain: BaseTool
 
-    @property
-    def deep_research_tool(self) -> BaseTool:
-        return self.search_legal_precedents
+    # Scoped evidence contract. Optional keeps worker/test startup compatible
+    # while the lifecycle provider migrates to EvidenceService wiring.
+    search_evidence: BaseTool | None = None
+    read_evidence_by_id: BaseTool | None = None
+    get_ingestion_state: BaseTool | None = None
+    evidence_service: EvidenceService | None = None
 
 
 def build_tool_bundle(
     graphiti_service: GraphitiService,
     db_engine: AsyncEngine,
     idempotency: IdempotencyGuard,
+    evidence_service: EvidenceService | None = None,
 ) -> AgentToolBundle:
     """Build all tools once.  Call at lifespan startup only."""
+    evidence_tools = (
+        {
+            "search_evidence": make_search_evidence_tool(evidence_service),
+            "read_evidence_by_id": make_read_evidence_tool(evidence_service),
+            "get_ingestion_state": make_get_ingestion_state_tool(evidence_service),
+        }
+        if evidence_service is not None
+        else {}
+    )
     return AgentToolBundle(
         search_legal_precedents=make_search_legal_precedents_tool(
             graphiti_service=graphiti_service,
@@ -109,4 +129,6 @@ def build_tool_bundle(
             graphiti_service=graphiti_service,
             idempotency=idempotency,
         ),
+        evidence_service=evidence_service,
+        **evidence_tools,
     )

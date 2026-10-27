@@ -19,6 +19,7 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.connections.postgres import get_database_url
+from app.features.agent_saul.graph.state import STATE_SCHEMA_VERSION
 from app.features.agent_saul.transcript.errors import (
     TranscriptInfrastructureError,
     TranscriptNotFoundError,
@@ -48,6 +49,7 @@ class _Db(NamedTuple):
 
     factory: async_sessionmaker[Any]
     repo: ChatTranscriptRepository
+    engine: Any
 
 
 @pytest.fixture
@@ -64,7 +66,7 @@ async def db() -> AsyncIterator[_Db]:
     engine = create_async_engine(get_database_url(flavour="async"), pool_pre_ping=True)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
-        yield _Db(factory=factory, repo=ChatTranscriptRepository(factory))
+        yield _Db(factory=factory, repo=ChatTranscriptRepository(factory), engine=engine)
     finally:
         await engine.dispose()
 
@@ -294,6 +296,168 @@ async def test_schema_gate_fails_closed_on_unknown_version(db: _Db) -> None:
     assert isinstance(other.failure(), TranscriptNotFoundError)
 
 
+async def test_record_plan_decision_fact_is_owner_schema_and_prompt_gated(db: _Db) -> None:
+    repo = db.repo
+    session_id = str(uuid4())
+    prompt_key = "interrupt:fact-gated"
+    query_key = f"query:{session_id}"
+    created = await _apply(
+        repo,
+        _projection(
+            query_id=query_key,
+            rows=(
+                _row(0, query_key, "query"),
+                _row(1, prompt_key, "plan_prompt"),
+            ),
+            checkpoint_id="cp-fact-gated",
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(created, Success)
+
+    wrong_owner = await repo.record_plan_decision_fact(
+        session_id=session_id,
+        user_id="another-user",
+        decision_key=prompt_key,
+        modified=False,
+    )
+    assert isinstance(wrong_owner, Failure)
+    assert isinstance(wrong_owner.failure(), TranscriptNotFoundError)
+
+    invalid_key = await repo.record_plan_decision_fact(
+        session_id=session_id,
+        user_id=USER_ID,
+        decision_key="plaintext-plan-content",
+        modified=False,
+    )
+    assert isinstance(invalid_key, Failure)
+
+    recorded = await repo.record_plan_decision_fact(
+        session_id=session_id,
+        user_id=USER_ID,
+        decision_key=prompt_key,
+        modified=True,
+    )
+    assert isinstance(recorded, Success)
+    replay = await repo.record_plan_decision_fact(
+        session_id=session_id,
+        user_id=USER_ID,
+        decision_key=prompt_key,
+        modified=True,
+    )
+    assert isinstance(replay, Success)
+    assert replay.unwrap() is True
+
+    changed_answer = await repo.record_plan_decision_fact(
+        session_id=session_id,
+        user_id=USER_ID,
+        decision_key=prompt_key,
+        modified=False,
+    )
+    assert isinstance(changed_answer, Failure)
+
+    async with db.factory() as session:
+        pending = (
+            await session.execute(
+                sa_text(
+                    "SELECT pending_plan_decision_key, pending_plan_decision_modified "
+                    "FROM chat_sessions WHERE session_id = :sid"
+                ),
+                {"sid": session_id},
+            )
+        ).one()
+    assert pending.pending_plan_decision_key == prompt_key
+    assert pending.pending_plan_decision_modified is True
+
+    async with db.factory() as session, session.begin():
+        await session.execute(
+            sa_text("UPDATE chat_sessions SET schema_version = 0 WHERE session_id = :sid"),
+            {"sid": session_id},
+        )
+    unsupported = await repo.record_plan_decision_fact(
+        session_id=session_id,
+        user_id=USER_ID,
+        decision_key=prompt_key,
+        modified=True,
+    )
+    assert isinstance(unsupported, Failure)
+    assert isinstance(unsupported.failure(), TranscriptSchemaError)
+
+
+async def test_plan_decision_fact_survives_repo_restart_and_hole_fill_is_idempotent(
+    db: _Db,
+) -> None:
+    session_id = str(uuid4())
+    query_key = f"query:{session_id}"
+    prompt_key = "interrupt:restart-fact"
+    decision_key = "decision:restart-fact"
+    prompt = _projection(
+        query_id=query_key,
+        rows=(_row(0, query_key, "query"), _row(1, prompt_key, "plan_prompt")),
+        checkpoint_id="cp-restart-prompt",
+    )
+    first = await _apply(db.repo, prompt, user_id=USER_ID, session_id=session_id)
+    assert isinstance(first, Success)
+    fact = await db.repo.record_plan_decision_fact(
+        session_id=session_id,
+        user_id=USER_ID,
+        decision_key=prompt_key,
+        modified=False,
+    )
+    assert isinstance(fact, Success)
+
+    # Recreate the repository boundary before the resumed decision arrives.
+    await db.engine.dispose()
+    restarted_engine = create_async_engine(get_database_url(flavour="async"), pool_pre_ping=True)
+    restarted_factory = async_sessionmaker(restarted_engine, expire_on_commit=False)
+    restarted = ChatTranscriptRepository(restarted_factory)
+    decision = _projection(
+        query_id=query_key,
+        rows=(_row(2, decision_key, "plan_decision"),),
+        checkpoint_id="cp-restart-decision",
+        status=SessionStatus.RESUMED,
+    )
+    applied = await restarted.apply_projection(
+        decision,
+        user_id=USER_ID,
+        session_id=session_id,
+        prior_checkpoint_id="cp-restart-prompt",
+    )
+    assert isinstance(applied, Success)
+    replay = await restarted.apply_projection(
+        decision,
+        user_id=USER_ID,
+        session_id=session_id,
+        prior_checkpoint_id="cp-restart-decision",
+    )
+    assert isinstance(replay, Success)
+
+    async with restarted_factory() as session:
+        count = (
+            await session.execute(
+                sa_text(
+                    "SELECT count(*) FROM chat_messages "
+                    "WHERE session_id = :sid AND kind = 'plan_decision'"
+                ),
+                {"sid": session_id},
+            )
+        ).scalar_one()
+        pending = (
+            await session.execute(
+                sa_text(
+                    "SELECT pending_plan_decision_key, pending_plan_decision_modified "
+                    "FROM chat_sessions WHERE session_id = :sid"
+                ),
+                {"sid": session_id},
+            )
+        ).one()
+    assert count == 1
+    assert pending.pending_plan_decision_key is None
+    assert pending.pending_plan_decision_modified is None
+    await restarted_engine.dispose()
+
+
 async def test_turn_closed_flow_over_24h_pause_window(db: _Db) -> None:
     repo = db.repo
     session_id = str(uuid4())
@@ -370,7 +534,7 @@ def _snapshot_with(
         )
     return SimpleNamespace(
         values={
-            "schema_version": 1,
+            "schema_version": STATE_SCHEMA_VERSION,
             "user_id": user_id,
             "messages": [
                 HumanMessage(
@@ -492,6 +656,156 @@ async def test_sweep_context_returns_owner_with_context(db: _Db) -> None:
     unknown = await repo.get_sweep_context(session_id=str(uuid4()))
     assert isinstance(unknown, Failure)
     assert isinstance(unknown.failure(), TranscriptNotFoundError)
+
+
+async def test_stale_sweep_prioritizes_query_backed_work_without_hiding_recovery(
+    db: _Db,
+) -> None:
+    """A bounded batch must make progress without disabling first-write healing.
+
+    Sessions without a projected query are deliberately treated as ambiguous:
+    integration debris and a real checkpoint whose first transcript write
+    failed have the same durable SQL shape. Query-backed work gets most of the
+    batch while one freshest ambiguous candidate receives reserved service.
+    """
+    repo = db.repo
+    prefix = f"sweep-{uuid4().hex}-"
+    query_ids = [f"{prefix}query-{index:02d}" for index in reversed(range(25))]
+    debris_ids = [f"{prefix}anchor-{index:02d}" for index in range(25)]
+    first_recovery_id = f"{prefix}recovery-1"
+    second_recovery_id = f"{prefix}recovery-2"
+    terminal = frozenset(
+        {
+            str(SessionStatus.COMPLETED.value),
+            str(SessionStatus.FAILED.value),
+            str(SessionStatus.ABANDONED_EXPIRED.value),
+        }
+    )
+    query_ts = datetime(2000, 1, 1, tzinfo=UTC)
+    debris_ts = datetime(1990, 1, 1, tzinfo=UTC)
+    first_recovery_ts = datetime(2005, 1, 1, tzinfo=UTC)
+    second_recovery_ts = datetime(2006, 1, 1, tzinfo=UTC)
+
+    try:
+        async with db.factory() as session, session.begin():
+            await session.execute(
+                sa_text(
+                    "INSERT INTO chat_sessions "
+                    "(session_id, user_id, status, last_checkpoint_id, last_checkpoint_ts) "
+                    "VALUES (:session_id, :user_id, 'active', :checkpoint_id, :checkpoint_ts)"
+                ),
+                [
+                    {
+                        "session_id": session_id,
+                        "user_id": USER_ID,
+                        "checkpoint_id": f"cp-{session_id}",
+                        "checkpoint_ts": query_ts,
+                    }
+                    for session_id in query_ids
+                ]
+                + [
+                    {
+                        "session_id": session_id,
+                        "user_id": USER_ID,
+                        "checkpoint_id": "cp-unprojected",
+                        "checkpoint_ts": debris_ts,
+                    }
+                    for session_id in debris_ids
+                ]
+                + [
+                    {
+                        "session_id": first_recovery_id,
+                        "user_id": USER_ID,
+                        "checkpoint_id": "cp-recovery-1",
+                        "checkpoint_ts": first_recovery_ts,
+                    }
+                ],
+            )
+            await session.execute(
+                sa_text(
+                    "INSERT INTO chat_messages "
+                    "(session_id, user_id, role, content, turn_seq, ordinal, kind, "
+                    "source_key, source_checkpoint_id) VALUES "
+                    "(:session_id, :user_id, 'user', 'query', 1, 0, 'query', "
+                    ":source_key, :checkpoint_id)"
+                ),
+                [
+                    {
+                        "session_id": session_id,
+                        "user_id": USER_ID,
+                        "source_key": session_id,
+                        "checkpoint_id": f"cp-{session_id}",
+                    }
+                    for session_id in query_ids
+                ],
+            )
+
+        bounded = await repo.list_stale_sessions(
+            older_than=datetime(2010, 1, 1, tzinfo=UTC),
+            terminal_statuses=terminal,
+            limit=20,
+        )
+        assert isinstance(bounded, Success)
+        selected = [meta.session_id for meta in bounded.unwrap()]
+        assert len(selected) == 20
+        assert selected[:19] == sorted(query_ids)[:19]
+        assert selected[19] == first_recovery_id
+        assert not set(selected).intersection(debris_ids)
+
+        # After the selected recovery candidate leaves the non-terminal lane,
+        # a newer failed-first-write candidate receives the reserved slot on
+        # the next bounded pass instead of the same old debris monopolizing it.
+        async with db.factory() as session, session.begin():
+            await session.execute(
+                sa_text("UPDATE chat_sessions SET status = 'completed' WHERE session_id = :sid"),
+                {"sid": first_recovery_id},
+            )
+            await session.execute(
+                sa_text(
+                    "INSERT INTO chat_sessions "
+                    "(session_id, user_id, status, last_checkpoint_id, last_checkpoint_ts) "
+                    "VALUES (:session_id, :user_id, 'active', :checkpoint_id, :checkpoint_ts)"
+                ),
+                {
+                    "session_id": second_recovery_id,
+                    "user_id": USER_ID,
+                    "checkpoint_id": "cp-recovery-2",
+                    "checkpoint_ts": second_recovery_ts,
+                },
+            )
+        next_bounded = await repo.list_stale_sessions(
+            older_than=datetime(2010, 1, 1, tzinfo=UTC),
+            terminal_statuses=terminal,
+            limit=20,
+        )
+        assert isinstance(next_bounded, Success)
+        next_selected = [meta.session_id for meta in next_bounded.unwrap()]
+        assert len(next_selected) == 20
+        assert next_selected[:19] == sorted(query_ids)[:19]
+        assert next_selected[19] == second_recovery_id
+        assert not set(next_selected).intersection(debris_ids)
+
+        # With the query lane empty under this cutoff, its unused quota is
+        # filled from the ambiguous lane while preserving the hard bound.
+        debris_only = await repo.list_stale_sessions(
+            older_than=datetime(1995, 1, 1, tzinfo=UTC),
+            terminal_statuses=terminal,
+            limit=20,
+        )
+        assert isinstance(debris_only, Success)
+        debris_selected = [meta.session_id for meta in debris_only.unwrap()]
+        assert len(debris_selected) == 20
+        assert debris_selected == sorted(debris_ids)[:20]
+    finally:
+        async with db.factory() as session, session.begin():
+            await session.execute(
+                sa_text("DELETE FROM chat_messages WHERE session_id LIKE :prefix"),
+                {"prefix": f"{prefix}%"},
+            )
+            await session.execute(
+                sa_text("DELETE FROM chat_sessions WHERE session_id LIKE :prefix"),
+                {"prefix": f"{prefix}%"},
+            )
 
 
 async def test_gc_stamp_excludes_freshly_audited_session(db: _Db) -> None:
@@ -921,3 +1235,183 @@ async def test_ensure_session_unknown_schema_fails_closed_without_rewrite(db: _D
             )
         ).scalar_one()
     assert found == 99
+
+
+async def test_same_checkpoint_replay_fills_late_usage_without_session_mutation(db: _Db) -> None:
+    """An empty replay still applies late usage to the existing assistant row."""
+    repo = db.repo
+    session_id = str(uuid4())
+    query_key = f"query:{session_id}"
+    assistant_key = "prompt:late-usage"
+    first = await _apply(
+        repo,
+        _projection(
+            query_id=query_key,
+            checkpoint_id="cp-late-usage",
+            rows=(_row(0, query_key, "query"), _row(1, assistant_key, "plan_prompt")),
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    late = await _apply(
+        repo,
+        _projection(query_id=query_key, checkpoint_id="cp-late-usage"),
+        user_id=USER_ID,
+        session_id=session_id,
+        usage={assistant_key: 23},
+        usage_metadata={assistant_key: {"usage": {"input": 11, "output": 12}}},
+    )
+    assert isinstance(late, Success)
+    assert late.unwrap().applied is True
+    assert late.unwrap().reason == "usage_filled"
+
+    async with db.factory() as session:
+        saved_session = (
+            await session.execute(
+                sa_text(
+                    "SELECT status, last_checkpoint_id, turn_count FROM chat_sessions "
+                    "WHERE session_id = :sid"
+                ),
+                {"sid": session_id},
+            )
+        ).one()
+        saved_row = (
+            await session.execute(
+                sa_text(
+                    "SELECT tokens_used, extra_metadata FROM chat_messages "
+                    "WHERE session_id = :sid AND source_key = :source_key"
+                ),
+                {"sid": session_id, "source_key": assistant_key},
+            )
+        ).one()
+    assert saved_session.status == SessionStatus.ACTIVE.value
+    assert saved_session.last_checkpoint_id == "cp-late-usage"
+    assert saved_session.turn_count == 1
+    assert saved_row.tokens_used == 23
+    assert saved_row.extra_metadata["usage"] == {"input": 11, "output": 12}
+
+
+async def test_zero_token_metadata_only_replay_is_retained_and_idempotent(db: _Db) -> None:
+    """Tool calls are useful usage facts even when the segment has zero tokens."""
+    repo = db.repo
+    session_id = str(uuid4())
+    query_key = f"query:{session_id}"
+    assistant_key = "prompt:zero-tool"
+    await _apply(
+        repo,
+        _projection(
+            query_id=query_key,
+            checkpoint_id="cp-zero-tool",
+            rows=(_row(0, query_key, "query"), _row(1, assistant_key, "plan_prompt")),
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    metadata = {
+        "usage": {"input": 0, "output": 0},
+        "tool_calls": [{"name": "search", "ok": True, "ms": None}],
+    }
+    first_fill = await _apply(
+        repo,
+        _projection(query_id=query_key, checkpoint_id="cp-zero-tool"),
+        user_id=USER_ID,
+        session_id=session_id,
+        usage={assistant_key: 0},
+        usage_metadata={assistant_key: metadata},
+    )
+    assert isinstance(first_fill, Success)
+    assert first_fill.unwrap().applied is True
+
+    async with db.factory() as session:
+        session_before = (
+            await session.execute(
+                sa_text(
+                    "SELECT status, last_checkpoint_id, last_checkpoint_ts, turn_count "
+                    "FROM chat_sessions WHERE session_id = :sid"
+                ),
+                {"sid": session_id},
+            )
+        ).one()
+
+    replay = await _apply(
+        repo,
+        _projection(query_id=query_key, checkpoint_id="cp-zero-tool"),
+        user_id=USER_ID,
+        session_id=session_id,
+        usage={assistant_key: 99},
+        usage_metadata={
+            assistant_key: {
+                "usage": {"input": 99, "output": 0},
+                "tool_calls": [{"name": "different", "ok": False, "ms": 1.0}],
+            }
+        },
+    )
+    assert isinstance(replay, Success)
+
+    async with db.factory() as session:
+        saved = (
+            await session.execute(
+                sa_text(
+                    "SELECT tokens_used, extra_metadata FROM chat_messages "
+                    "WHERE session_id = :sid AND source_key = :source_key"
+                ),
+                {"sid": session_id, "source_key": assistant_key},
+            )
+        ).one()
+        saved_session = (
+            await session.execute(
+                sa_text(
+                    "SELECT status, last_checkpoint_id, last_checkpoint_ts, turn_count "
+                    "FROM chat_sessions WHERE session_id = :sid"
+                ),
+                {"sid": session_id},
+            )
+        ).one()
+    assert saved.tokens_used == 0
+    assert saved.extra_metadata == metadata
+    assert saved_session == session_before
+
+
+async def test_same_checkpoint_usage_cannot_fill_non_assistant_row(db: _Db) -> None:
+    """Usage side-input targets assistant rows only, even for a shared key."""
+    repo = db.repo
+    session_id = str(uuid4())
+    query_key = f"query:{session_id}"
+    first = await _apply(
+        repo,
+        _projection(
+            query_id=query_key,
+            checkpoint_id="cp-non-assistant-target",
+            rows=(_row(0, query_key, "query"),),
+        ),
+        user_id=USER_ID,
+        session_id=session_id,
+    )
+    assert isinstance(first, Success)
+
+    replay = await _apply(
+        repo,
+        _projection(query_id=query_key, checkpoint_id="cp-non-assistant-target"),
+        user_id=USER_ID,
+        session_id=session_id,
+        usage={query_key: 42},
+        usage_metadata={query_key: {"tool_calls": [{"name": "search", "ok": True}]}},
+    )
+    assert isinstance(replay, Success)
+    assert replay.unwrap().applied is False
+    assert replay.unwrap().reason == "same_checkpoint"
+
+    async with db.factory() as session:
+        saved = (
+            await session.execute(
+                sa_text(
+                    "SELECT tokens_used, extra_metadata FROM chat_messages "
+                    "WHERE session_id = :sid AND source_key = :source_key"
+                ),
+                {"sid": session_id, "source_key": query_key},
+            )
+        ).one()
+    assert saved.tokens_used is None
+    assert saved.extra_metadata is None

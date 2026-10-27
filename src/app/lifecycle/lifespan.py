@@ -52,11 +52,10 @@ from app.features.auth.repository import RefreshTokenRepository
 from app.features.auth.token_audit_log import TokenAuditLog
 from app.features.auth.websocket_security import build_websocket_security_service
 from app.features.billing.providers import RazorpayBillingProvider
-from app.features.documents.service import process_document_ingestion
+from app.features.documents.service import build_evidence_service
 from app.features.health.health_check import ALL_PROBES, check_cognee, check_graphiti
 from app.lifecycle.graphs import (
     graphiti_service,
-    provide_document_ingestion_graph,
     provide_langgraph_checkpointer,
     provide_saul_graph,
 )
@@ -325,37 +324,6 @@ async def _setup_checkpointer_state(app: FastAPI, _settings: Any) -> None:
     logger.info("LangGraph checkpointer initialized")
 
 
-async def _setup_ingestion_graph_state(app: FastAPI, settings: Any) -> None:
-    """Compile the ingestion graph through the shared startup policy path."""
-    object_store = getattr(app.state, "object_store", None)
-    if object_store is None:
-        message = "Object storage is unavailable for ingestion graph"
-        raise ServiceUnavailableException(message)
-    from app.extraction.langextract.service import AsyncExtractionService
-    from app.resilience.idempotency import IdempotencyGuard
-
-    extraction = AsyncExtractionService.from_settings(settings)
-    app.state.langextract_service = extraction
-    redis_client = getattr(app.state, "redis", None)
-    graphiti = getattr(app.state, "graphiti", None)
-    writer = graphiti_service(graphiti) if graphiti is not None else None
-    idempotency = (
-        IdempotencyGuard(redis=redis_client, db_engine=app.state.db_engine)
-        if redis_client is not None
-        else None
-    )
-    app.state.ingestion_graph = provide_document_ingestion_graph(
-        settings=settings,
-        object_store=object_store,
-        graphiti=graphiti,
-        ingest_document_fn=process_document_ingestion,
-        extraction=extraction,
-        graph_writer=writer,
-        idempotency=idempotency,
-    )
-    logger.info("Document ingestion graph initialized")
-
-
 async def _setup_saul_graph_state(app: FastAPI, settings: Any) -> None:
     """Compile Agent Saul after every collaborator it requires exists."""
     checkpointer = getattr(app.state, "langgraph_checkpointer", None)
@@ -370,12 +338,19 @@ async def _setup_saul_graph_state(app: FastAPI, settings: Any) -> None:
     if graphiti is None:
         message = "Graphiti is unavailable for Agent Saul"
         raise ServiceUnavailableException(message)
+    app.state.evidence_service = build_evidence_service(
+        session_factory=app.state.db_session_local,
+        redis=redis_client,
+        handle_ttl_seconds=settings.EVIDENCE_HANDLE_TTL_SECONDS,
+    )
     app.state.saul_graph = provide_saul_graph(
         settings=settings,
         checkpointer=checkpointer,
         redis=redis_client,
         db_engine=app.state.db_engine,
+        session_factory=app.state.db_session_local,
         graphiti=graphiti_service(graphiti),
+        evidence_service=app.state.evidence_service,
     )
     logger.info("Agent Saul graph initialized")
 
@@ -501,16 +476,6 @@ STARTUP_POLICIES: tuple[StartupPolicy, ...] = (
         fatal_on=(),
         degrade_on=(ConnectionError, TimeoutError, OSError, RuntimeError, ValueError),
         report=_report_outbox_relay_degraded,
-    ),
-    StartupPolicy(
-        name="document_ingestion_graph",
-        setup=_setup_ingestion_graph_state,
-        state_attr="ingestion_graph",
-        fatal_on=(),
-        degrade_on=(Exception,),
-        report=lambda exc: logger.bind(
-            component="document_ingestion_graph", error_type=type(exc).__name__
-        ).warning("Document ingestion graph unavailable; continuing without capability"),
     ),
     StartupPolicy(
         name="agent_saul_graph",

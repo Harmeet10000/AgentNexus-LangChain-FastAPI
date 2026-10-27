@@ -1,0 +1,69 @@
+{
+  "manifest_version": "experiment_v1",
+  "name": "legal-retrieval-smoke",
+  "golden_set_path": "../golden/legal_retrieval_v1.jsonl",
+  "golden_set_version": "legal_retrieval_v1",
+  "smoke_only": true,
+  "fixture": "synthetic_seed",
+  "cutoff": 10,
+  "variants": [
+    {
+      "name": "inline-ask",
+      "kind": "inline_ask",
+      "evidence_policy": "graph_indexed_only",
+      "comparison_group": "answering-path"
+    },
+    {
+      "name": "search-read-verify-answer",
+      "kind": "evidence_pipeline",
+      "evidence_policy": "mechanically_verified",
+      "comparison_group": "answering-path"
+    },
+    {
+      "name": "deterministic-retrieve",
+      "kind": "deterministic_retrieve",
+      "evidence_policy": "graph_indexed_only",
+      "comparison_group": "retrieval-path"
+    },
+    {
+      "name": "compiled-retrieval-graph",
+      "kind": "compiled_retrieval_graph",
+      "evidence_policy": "graph_indexed_only",
+      "comparison_group": "retrieval-path"
+    },
+    {
+      "name": "deterministic-preamble",
+      "kind": "deterministic_preamble",
+      "evidence_policy": "graph_indexed_only",
+      "comparison_group": "preamble"
+    },
+    {
+      "name": "contextualized-preamble",
+      "kind": "contextualized_preamble",
+      "evidence_policy": "mechanically_verified",
+      "comparison_group": "preamble"
+    }
+  ],
+  "generator_judge": {
+    "name": "synthetic-seed-generator",
+    "model": "deterministic-fake",
+    "prompt_version": "smoke-v1",
+    "prompt": "No model call: echo the expected synthetic seed identifiers.",
+    "version": "fixture-2026-10-27"
+  },
+  "entailment_judge": {
+    "name": "synthetic-seed-entailment",
+    "model": "deterministic-fake",
+    "prompt_version": "smoke-v1",
+    "prompt": "No model call: no legal claim labels are inferred by this smoke fixture.",
+    "version": "fixture-2026-10-27"
+  },
+  "thresholds": [
+    {
+      "metric": "retrieval_recall_at_k",
+      "operator": "gte",
+      "value": 1.0,
+      "action": "kill"
+    }
+  ]
+}

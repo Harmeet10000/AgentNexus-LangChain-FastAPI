@@ -183,11 +183,10 @@ SOURCE_ALLOWLIST_MAX_IDS = 100
 def _intersect_doc_ids(*, request_ids: list[str], allowlist: list[str]) -> list[str]:
     """Combine the request document filter with the identifier allowlist."""
     if not allowlist:
-        return request_ids
+        return []
     if not request_ids:
         return allowlist
-    narrowed = [doc_id for doc_id in allowlist if doc_id in request_ids]
-    return narrowed or request_ids
+    return [doc_id for doc_id in allowlist if doc_id in request_ids]
 
 
 def make_source_identifier_node(
@@ -203,12 +202,21 @@ def make_source_identifier_node(
 
     async def source_identifier_node(state: RetrievalState) -> dict[str, object]:
         plan: QueryPlan = state["query_plan"]
+        server_scope = list(state.get("allowed_doc_ids") or [])
+        if state.get("scope_bound") and not server_scope:
+            # An explicit empty capability is not equivalent to "all docs".
+            # Keep the graph alive for its envelope, but make every retrieval
+            # leg return no evidence.
+            return {"query_plan": plan.model_copy(update={"allowlist": []})}
         if state.get("iteration_count", 0) > 0:
             if not plan.allowlist:
                 return {"query_plan": plan}
             logger.bind(operation="source_identifier", iteration=state.get("iteration_count")).info(
                 "source_allowlist_widened_on_retry"
             )
+            # Widen only the model-inferred narrowing.  The server-owned
+            # allowlist remains authoritative and is re-applied by the
+            # hybrid node; never widen it on a retry.
             return {"query_plan": plan.model_copy(update={"allowlist": []})}
 
         query = plan.rewritten_query
@@ -233,6 +241,7 @@ def make_source_identifier_node(
             return {"query_plan": plan}
         resolved = await repo.find_document_ids_by_metadata(
             user_id=state["user_id"],
+            tenant_id=state.get("tenant_id"),
             jurisdictions=criteria.jurisdictions,
             document_kinds=criteria.document_kinds,
             matters=criteria.matters,
@@ -256,12 +265,29 @@ def make_graph_retrieval_node(
     async def graph_retrieval_node(state: RetrievalState) -> dict[str, object]:
         if graphiti is None:
             return {"graph_chunk_ids": []}
+        # Graphiti's historical user group is not an authorization boundary:
+        # it can contain documents from several tenant scopes.  The SQL leg
+        # must not be the first place that discards those results.  Only the
+        # server-issued document capability may reach this optional graph leg;
+        # an unscoped request therefore degrades to no graph narrowing.
+        server_doc_ids = list(state.get("allowed_doc_ids") or [])
+        if state.get("scope_bound") and not server_doc_ids:
+            return {"graph_chunk_ids": []}
+        if not server_doc_ids:
+            return {"graph_chunk_ids": []}
+        request_doc_ids = list(state.get("doc_ids_filter") or [])
+        group_ids = _intersect_doc_ids(
+            request_ids=request_doc_ids,
+            allowlist=server_doc_ids,
+        )
+        if not group_ids:
+            return {"graph_chunk_ids": []}
         plan = state["query_plan"]
         try:
             raw_results = await retry_immediate(
                 lambda: graphiti.search(
                     query=plan.rewritten_query,
-                    group_ids=[state["user_id"], *state.get("doc_ids_filter", [])],
+                    group_ids=group_ids,
                     num_results=20,
                 ),
                 label="graphiti_retrieval_search",
@@ -326,25 +352,39 @@ def make_hybrid_retrieval_node(
         # back only by the caller never passing another user's chunk ids. The unified query
         # scopes on the parent document's owner, which is why the state field is required here
         # rather than optional.
+        request_doc_ids = list(state.get("doc_ids_filter") or [])
+        server_doc_ids = list(state.get("allowed_doc_ids") or [])
+        scoped_doc_ids = (
+            _intersect_doc_ids(request_ids=request_doc_ids, allowlist=server_doc_ids)
+            if state.get("scope_bound")
+            else request_doc_ids
+        )
         filter_params = build_search_filter_params(
             metadata_filter={
                 # The request filter and the identifier allowlist both constrain:
                 # intersect when both name documents, otherwise take whichever
                 # is present. A conflicting inference loses to the explicit
                 # request filter rather than silently emptying retrieval.
-                "document_ids": _intersect_doc_ids(
-                    request_ids=list(state.get("doc_ids_filter") or []),
-                    allowlist=list(plan.allowlist or []),
+                "document_ids": (
+                    _intersect_doc_ids(
+                        request_ids=scoped_doc_ids,
+                        allowlist=list(plan.allowlist),
+                    )
+                    if plan.allowlist
+                    else scoped_doc_ids
                 ),
+                "scope_bound": bool(state.get("scope_bound")),
                 "chunk_ids": list(chunk_ids or []),
                 "jurisdiction": plan.jurisdiction,
                 "contract_type": plan.contract_type,
+                "contract_index": state.get("contract_index"),
             }
         )
         rows_result = await retry_immediate(
             lambda: retrieve_fused(
                 repo=repo,
                 user_id=state["user_id"],
+                tenant_id=state.get("tenant_id"),
                 query_text=plan.rewritten_query,
                 query_embedding=embedding,
                 candidate_limit=HYBRID_CANDIDATE_LIMIT,
@@ -534,7 +574,11 @@ def make_generator_node(
             )
 
         if redis is not None:
-            cache_key = _answer_cache_key(plan.rewritten_query, state.get("doc_ids_filter", []))
+            cache_key = _answer_cache_key(
+                plan.rewritten_query,
+                state.get("doc_ids_filter", []),
+                state.get("contract_index"),
+            )
             ttl = 60 * 60 * 24 if state.get("doc_ids_filter") else 60 * 60
             await redis.setex(cache_key, ttl, answer.model_dump_json())
 
@@ -587,18 +631,43 @@ def _row_to_chunk(row: dict[str, Any]) -> RetrievedChunk:
         clause_type=str(row["clause_type"]),
         parent_doc_id=str(row["parent_doc_id"]),
         chunk_index=int(chunk_index) if chunk_index is not None else 0,
+        contract_index=_read_contract_index(row),
         metadata_=dict(row["metadata_"] or {}),
         custom_metadata=dict(row["custom_metadata"] or {}),
         score=float(row["rrf_score"]),
     )
 
 
-def _answer_cache_key(rewritten_query: str, doc_ids_filter: list[str]) -> str:
+def _answer_cache_key(
+    rewritten_query: str,
+    doc_ids_filter: list[str],
+    contract_index: int | None = None,
+) -> str:
     raw = json.dumps(
-        {"query": " ".join(rewritten_query.lower().split()), "doc_ids": sorted(doc_ids_filter)},
+        {
+            "query": " ".join(rewritten_query.lower().split()),
+            "doc_ids": sorted(doc_ids_filter),
+            "contract_index": contract_index,
+        },
         sort_keys=True,
     )
     return "kb:answer:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _read_contract_index(row: dict[str, Any]) -> int | None:
+    value = row.get("contract_index")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value >= 0:
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    metadata = row.get("metadata_")
+    if isinstance(metadata, dict):
+        value = metadata.get("contract_index")
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return None
 
 
 def _extract_postgres_chunk_ids(value: str) -> list[str]:

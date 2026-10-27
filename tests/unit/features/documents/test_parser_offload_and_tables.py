@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from app.features.documents import parser as parser_module
-from app.features.documents.parser import parse_document
+from app.features.documents.parser import DocumentExtractionBudgetError, parse_document
 
 if TYPE_CHECKING:
     from typing import Any
@@ -221,3 +221,36 @@ async def test_the_markdown_and_title_survive_the_offload() -> None:
     assert parsed.markdown == _MARKDOWN
     assert parsed.title == "Master Services Agreement"
     assert parsed.page_count == 3
+
+
+@pytest.mark.usefixtures("_patched_converter")
+async def test_page_budget_rejects_documents_before_ingestion() -> None:
+    with pytest.raises(DocumentExtractionBudgetError, match="pages; limit is 2"):
+        await parse_document(
+            raw_bytes=_RAW,
+            filename=_FILENAME,
+            content_type="application/pdf",
+            max_pages=2,
+        )
+
+
+@pytest.mark.usefixtures("_patched_converter")
+async def test_output_budget_rejects_expanded_markdown() -> None:
+    with pytest.raises(DocumentExtractionBudgetError, match="extracted output"):
+        await parse_document(
+            raw_bytes=_RAW,
+            filename=_FILENAME,
+            content_type="application/pdf",
+            max_output_bytes=16,
+        )
+
+
+@pytest.mark.usefixtures("_patched_converter")
+async def test_wall_clock_budget_is_enforced() -> None:
+    with pytest.raises(DocumentExtractionBudgetError, match="wall-clock budget"):
+        await parse_document(
+            raw_bytes=_RAW,
+            filename=_FILENAME,
+            content_type="application/pdf",
+            extraction_timeout_seconds=0.01,
+        )

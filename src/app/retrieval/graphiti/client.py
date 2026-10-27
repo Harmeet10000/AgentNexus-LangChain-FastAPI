@@ -61,6 +61,7 @@ class BoundGraphitiService:
         user_id: str,
         doc_id: str | None = None,
         num_results: int = 10,
+        allowed_doc_ids: tuple[str, ...] = (),
     ) -> list[GraphitiSearchResult]:
         return await search_for_risk_context(
             self._graphiti,
@@ -68,6 +69,7 @@ class BoundGraphitiService:
             user_id,
             doc_id,
             num_results,
+            allowed_doc_ids=allowed_doc_ids,
         )
 
     async def search_for_precedent_chains(
@@ -76,6 +78,7 @@ class BoundGraphitiService:
         user_id: str,
         jurisdiction: str = "India",
         num_results: int = 10,
+        allowed_doc_ids: tuple[str, ...] = (),
     ) -> list[GraphitiSearchResult]:
         return await search_for_precedent_chains(
             self._graphiti,
@@ -83,6 +86,7 @@ class BoundGraphitiService:
             user_id,
             jurisdiction,
             num_results,
+            allowed_doc_ids=allowed_doc_ids,
         )
 
     async def get_obligation_chain(
@@ -91,6 +95,7 @@ class BoundGraphitiService:
         user_id: str,
         doc_id: str | None = None,
         depth: int = 3,
+        allowed_doc_ids: tuple[str, ...] = (),
     ) -> list[GraphitiSearchResult]:
         return await get_obligation_chain(
             self._graphiti,
@@ -98,6 +103,7 @@ class BoundGraphitiService:
             user_id,
             doc_id,
             depth,
+            allowed_doc_ids=allowed_doc_ids,
         )
 
 
@@ -224,6 +230,8 @@ async def search_for_risk_context(
     user_id: str,
     doc_id: str | None = None,
     num_results: int = 10,
+    *,
+    allowed_doc_ids: tuple[str, ...] = (),
 ) -> list[GraphitiSearchResult]:
     """Search the knowledge graph for risk-relevant context.
 
@@ -241,9 +249,12 @@ async def search_for_risk_context(
     Returns:
         List of scored GraphitiSearchResult items.
     """
-    group_ids: list[str] = [user_id]
-    if doc_id:
-        group_ids.append(doc_id)
+    # Explicit document scope is authoritative. An empty allowlist is an
+    # authorization boundary, not a request to widen to historical groups.
+    del user_id, doc_id
+    if not allowed_doc_ids:
+        return []
+    group_ids: list[str] = list(allowed_doc_ids)
 
     logger.bind(
         service="graphiti",
@@ -278,6 +289,8 @@ async def search_for_precedent_chains(
     user_id: str,
     jurisdiction: str = "India",
     num_results: int = 10,
+    *,
+    allowed_doc_ids: tuple[str, ...] = (),
 ) -> list[GraphitiSearchResult]:
     """Search the knowledge graph for compliance precedents.
 
@@ -294,6 +307,10 @@ async def search_for_precedent_chains(
     Returns:
         List of scored precedent results.
     """
+    del user_id
+    if not allowed_doc_ids:
+        return []
+
     logger.bind(
         service="graphiti",
         query=query[:80],
@@ -303,7 +320,7 @@ async def search_for_precedent_chains(
     try:
         raw_results = await graphiti.search(
             query=query,
-            group_ids=[user_id],
+            group_ids=list(allowed_doc_ids),
             num_results=num_results * 2,
         )
 
@@ -329,6 +346,8 @@ async def get_obligation_chain(
     user_id: str,
     doc_id: str | None = None,
     depth: int = 3,
+    *,
+    allowed_doc_ids: tuple[str, ...] = (),
 ) -> list[GraphitiSearchResult]:
     """Forward-chain obligations from a named entity.
 
@@ -347,9 +366,10 @@ async def get_obligation_chain(
     Returns:
         List of obligation chain results.
     """
-    group_ids: list[str] = [user_id]
-    if doc_id:
-        group_ids.append(doc_id)
+    del user_id, doc_id
+    if not allowed_doc_ids:
+        return []
+    group_ids: list[str] = list(allowed_doc_ids)
 
     obligation_query = f"obligations responsibilities duties of {entity_name}"
     logger.bind(

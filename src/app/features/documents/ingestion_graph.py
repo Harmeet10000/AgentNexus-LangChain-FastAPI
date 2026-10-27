@@ -10,6 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 from returns.result import Failure
 
 from app.kernel.result import log_expected_failure
+from app.observability.logging import logger
 from app.utils import ServiceUnavailableException
 
 from .dto import IngestionJob, IngestionRuntime
@@ -49,6 +50,7 @@ class DocumentIngestionState(TypedDict, total=False):
 
     document_id: str
     user_id: str
+    tenant_id: str
     filename: str
     content_type: str
     object_uri: str
@@ -113,28 +115,59 @@ def _make_ingest_document_node(
             _IDEMPOTENCY_CONFIG_KEY,
             idempotency,
         )
-        result = await ingest_document_fn(
-            job=IngestionJob(
-                document_id=state.get("document_id", ""),
-                user_id=state.get("user_id", ""),
-                filename=state.get("filename", ""),
-                content_type=state.get("content_type", ""),
-                object_uri=state.get("object_uri", ""),
-            ),
-            runtime=IngestionRuntime(
-                object_store=object_store,
-                repo=repo,
-                graphiti=graphiti,
-                llm=llm,
-                extraction=extraction,
-                graph_writer=graph_writer,
-                idempotency=job_idempotency,
-                transaction_checkpoint=repo.session.commit,
-            ),
+        job = IngestionJob(
+            document_id=state.get("document_id", ""),
+            user_id=state.get("user_id", ""),
+            tenant_id=state.get("tenant_id", ""),
+            filename=state.get("filename", ""),
+            content_type=state.get("content_type", ""),
+            object_uri=state.get("object_uri", ""),
         )
+        try:
+            result = await ingest_document_fn(
+                job=job,
+                runtime=IngestionRuntime(
+                    object_store=object_store,
+                    repo=repo,
+                    graphiti=graphiti,
+                    llm=llm,
+                    extraction=extraction,
+                    graph_writer=graph_writer,
+                    idempotency=job_idempotency,
+                    transaction_checkpoint=repo.session.commit,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 — worker boundary must persist failure
+            exc.add_note(f"document_id={job.document_id}, operation=ingest_document_node")
+            logger.bind(
+                document_id=job.document_id,
+                operation="ingest_document_node",
+                error=str(exc),
+            ).exception("Document ingestion failed unexpectedly")
+            await _record_ingestion_failure(
+                repo,
+                document_id=job.document_id,
+                error_code="INGESTION_UNEXPECTED_FAILURE",
+                error_message="Document ingestion failed unexpectedly",
+                retryable=True,
+            )
+            return {
+                "status": "failed",
+                "error_code": "INGESTION_UNEXPECTED_FAILURE",
+                "error_message": "Document ingestion failed unexpectedly",
+                "error_retryable": True,
+            }
         if isinstance(result, Failure):
             error = result.failure()
             log_expected_failure(error=error, operation="ingest_document_node")
+            await _record_ingestion_failure(
+                repo,
+                document_id=job.document_id,
+                error_code=str(error.code),
+                error_message=error.message,
+                retryable=error.retryable,
+                details=error.details,
+            )
             return {
                 "status": "failed",
                 "error_code": str(error.code),
@@ -144,3 +177,31 @@ def _make_ingest_document_node(
         return result.unwrap()
 
     return ingest_document_node
+
+
+async def _record_ingestion_failure(
+    repo: DocumentRepository,
+    *,
+    document_id: str,
+    error_code: str,
+    error_message: str,
+    retryable: bool,
+    details: dict[str, object] | None = None,
+) -> None:
+    """Persist a terminal/early failure so ``received`` cannot lie forever."""
+    metadata: dict[str, object] = {
+        "ingestion_error": {
+            "code": error_code,
+            "message": error_message,
+            "retryable": retryable,
+            **(details or {}),
+        }
+    }
+    status_result = await repo.update_document_status(
+        document_id=document_id,
+        status="failed",
+        metadata_=metadata,
+        extraction_incomplete=True,
+    )
+    if isinstance(status_result, Failure):
+        log_expected_failure(error=status_result.failure(), operation="record_ingestion_failure")

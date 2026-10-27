@@ -93,6 +93,20 @@ def test_a_grounding_verification_with_no_citations_fails_validation() -> None:
         GroundingVerificationOutput(**kwargs, citations=[])
 
 
+def test_negative_grounding_verification_can_report_no_available_citations() -> None:
+    from app.features.agent_saul.graph.state import GroundingVerificationOutput
+
+    result = GroundingVerificationOutput(
+        verified=False,
+        unverified_claims=["The claim has no supporting source."],
+        notes="No supporting evidence was available.",
+        citations=[],
+    )
+
+    assert result.verified is False
+    assert result.citations == []
+
+
 # --- 8.2 declared output strategy ---
 
 

@@ -56,14 +56,18 @@ class UnifiedDocument(Base):
 
     __tablename__ = "documents"
     __table_args__ = (
-        UniqueConstraint("user_id", "content_hash", name="uq_documents_user_content_hash"),
+        UniqueConstraint("tenant_id", "content_hash", name="uq_documents_tenant_content_hash"),
+        # Retained for rolling deployments and audit queries; ownership is
+        # enforced by tenant_id, not uploader identity.
         Index("ix_documents_user_id", "user_id"),
+        Index("ix_documents_tenant_id", "tenant_id"),
         Index("ix_documents_kind", "document_kind"),
         Index("ix_documents_status", "status"),
         Index("ix_documents_metadata_gin", "metadata_", postgresql_using="gin"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    tenant_id: Mapped[str] = mapped_column(String(length=255), nullable=False, default="")
     user_id: Mapped[str] = mapped_column(String(length=255), nullable=False)
     title: Mapped[str] = mapped_column(String(length=500), nullable=False)
     source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -107,20 +111,21 @@ class UnifiedChunk(Base):
             name="uq_chunks_document_version_chunk_index",
         ),
         Index("ix_chunks_user_document", "user_id", "document_id"),
+        Index("ix_chunks_tenant_document", "tenant_id", "document_id"),
         Index("ix_chunks_kind", "chunk_kind"),
         Index(
             "ix_chunks_kind_legal_contract",
-            "user_id",
+            "tenant_id",
             postgresql_where=sa_text("chunk_kind = 'legal_contract'"),
         ),
         Index(
             "ix_chunks_kind_legal_policy",
-            "user_id",
+            "tenant_id",
             postgresql_where=sa_text("chunk_kind = 'legal_policy'"),
         ),
         Index(
             "ix_chunks_kind_generic",
-            "user_id",
+            "tenant_id",
             postgresql_where=sa_text("chunk_kind = 'generic'"),
         ),
         Index("ix_chunks_metadata_gin", "metadata_", postgresql_using="gin"),
@@ -163,7 +168,7 @@ class UnifiedChunk(Base):
         # Created by revision 0016; rescoped by revision 0017.
         Index(
             "ix_chunks_instrument_section",
-            "user_id",
+            "tenant_id",
             "instrument_name",
             "section_ref",
             sa_text("instrument_year DESC NULLS LAST"),
@@ -172,6 +177,7 @@ class UnifiedChunk(Base):
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    tenant_id: Mapped[str] = mapped_column(String(length=255), nullable=False, default="")
     document_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey(column="documents.id", ondelete="CASCADE"),
@@ -182,6 +188,12 @@ class UnifiedChunk(Base):
     # document_id and chunk_index it forms chunk identity — two versions of the
     # same document coexist with distinguishable rows rather than overwriting.
     document_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Stable contract identity within a multi-contract source file.  ``NULL``
+    # is the explicit legacy/unknown value; it is never treated as contract 0.
+    contract_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pipeline_version: Mapped[str] = mapped_column(
+        String(length=128), nullable=False, default="documents-v1"
+    )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     chunk_kind: Mapped[str] = mapped_column(String(length=64), nullable=False, default="generic")
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -205,6 +217,12 @@ class UnifiedChunk(Base):
     quality_warnings: Mapped[list[object]] = mapped_column(JSONB, default=list, nullable=False)
     graphiti_episode_id: Mapped[str | None] = mapped_column(String(length=255), nullable=True)
     graphiti_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Retain graphiti_verified for rolling-deploy compatibility.  This
+    # timestamp is the provenance signal exposed as graph_indexed to callers;
+    # it records graph observation, not legal truth.
+    graph_indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     search_text: Mapped[str] = mapped_column(
         Text,
         Computed(

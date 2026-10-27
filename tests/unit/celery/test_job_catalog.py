@@ -52,7 +52,7 @@ def test_producer_catalog_import_does_not_load_worker_modules() -> None:
     script = """
 import sys
 from app.shared.jobs.catalog import JOB_CATALOG
-assert len(JOB_CATALOG) == 15
+assert len(JOB_CATALOG) == 16
 assert not any(name == "app.worker" or name.startswith("app.worker.") for name in sys.modules)
 """
     result = subprocess.run(  # noqa: S603 — literal trusted smoke-test script

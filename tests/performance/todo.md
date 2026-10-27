@@ -314,6 +314,42 @@ todos:-
 221. fix the files tht are scrambled in utils,shared, combine celery, and other places by improving the feature based sliced folder structure to an advanced level.  DONE
 162. what kind of text splitters do i need. diff in PGvector and pgvectorstore in langchain  DONE
 248. should i use neo4j and postgres in cognee or let cognee use it own thing?  DONE
+253. verify PR #70 squash-merge is content-identical to the pre-squash tip (e7f7f33 vs b795ef3 diff empty for src/docs), then delete the stale feat/saul-transcript-persistence remote branch, local worktree (/tmp/langchain-fastapi-production-saul), and local ref  DONE
+254. fix Playwright on Ubuntu 26.04: PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64 (generic linux64 CfT build, arch suffix required for the registry key) chromium install; verified launch; crawl4ai probe healthy  DONE
+255. clean app boot: all 9 health probes healthy (database, redis, postgres, neo4j restored Aura, graphiti "Agent Saul graph initialized", celery, memory, disk, agentMemory), /api/v1/health/live 200  DONE
+256. root-cause every-run LOCK_LOST at ~20 s: the app Redis comes from redis_fastapi whose connection_kwargs() omits decode_responses, so pipe.get() returned bytes against the str owner token — every first renewal (TTL/3) declared the lease lost; watchdog proved the key value never changed on the wire  DONE
+257. fix thread_lock._compare_and_act ownership compare to normalize bytes|str (P5a guard) + regression test running the real flow against FakeRedis(decode_responses=False) (eb38892)  DONE
+258. verify the real WS chat chain end-to-end as a user: register → login → POST sessions → WS handshake → start frame → gateway/qna/orchestrator nodes streaming status frames  DONE
+259. confirm orchestrator/finalization blocked by Gemini free tier: gemini-3.1-pro-preview 429 RESOURCE_EXHAUSTED limit:0 (~16.5h daily reset); decides the remaining full happy-path verification  DONE
+260. verify transcript persistence in Postgres for today's dead thread (c1b57bd5…): chat_sessions row (turn_count=1, watermark + checkpoint set) + tagged query row in chat_messages; 5 checkpoints / 12 blobs / 38 checkpoint_writes rows  DONE
+261. verify transcript export endpoint: GET /api/v1/agent-saul/sessions/{id}/export → 200 NDJSON stream with the query row + turn_closed(outcome=failed) row  DONE
+262. resolve the sweep closed=0 mystery: both manual sweeps ran inside the 15-min ORPHAN_GRACE (ckpt 14:27:31, sweeps 14:39/14:42) so deriving heartbeat_stale_within_grace NoOp is correct-by-design; after grace, manual _reconcile_once derived failed, applied it, wrote turn_closed row — projector chain verified end-to-end  DONE
+263. explain the 20 stale-scan NoOps: integration-test debris snapshots have no tagged query → missing_tagged_query chain-of-custody NoOp by design; they never close or GC and can occupy sweep batches (dev-DB pollution, batch ordering tweak = later work)  DONE
+264. note the dev sweep never runs automatically: agent-saul-transcript-sweep-periodic is a celery beat */15 cron and dev runs uvicorn-only per README; sweep verified by manual invocation of _transcript_sweep_async  DONE
+265. remove dead Mongo-flavored src/app/utils/api_features.py + its two export lines from utils/__init__ (zero callers; every repo is a single typed SQLAlchemy 2.0 dialect) (281b2da)  DONE
+266. fix the MissingGreenlet landmine: Invoice.line_items lazy="selectin" so post-execute traversal in _invoice_to_response / PDF render can't blow up under the async driver; back_populates side kept lazy deliberately (f908ea1)  DONE
+267. annotate credits/repository statements with Select[tuple[Model]]/Update to match the rest of billing's typing discipline (0b8bbff)  DONE
+268. fix alembic 0026: constraint drop by actual name — 0024's FK lands under the naming convention (fk_credit_notes_source_invoice_id_invoices), not the bare PG default; drop resolved by definition, downgrade stays consistent (e74143b)  DONE
+269. expression-index the JSONB idempotency lookups (0027 + mirrored model Indexes, double-paren form): plans.billing_operation_key, plans.billing_idempotency_scope, user_credits.operation_key (4a3a1ae)  DONE
+270. apply migrations to the dev DB (0022 → head 0027) with staged commit-inspect-continue; verified via pg_indexes/pg_constraint and downgrade 0026 → upgrade head round-trip; 302 billing tests + ty clean + app live 200 after model reload  DONE
+271. unify Saul runtime wiring: one scope-agnostic module owning session/claims/thread-context construction, so HTTP and WS paths stop duplicating reader logic (STRONG — churn hotspot). features/agent_saul/dependencies.py already needed WS-scope dep readers (7aeba9f) and fail-closed WS unwrap (7f04409); every auth-semantics change is now made twice and the copies drift (same bug class as the bytes-token LOCK_LOST: two readers diverging on the same Redis value). Do: move the core readers into one module typed against small Protocols; keep TWO thin adapters only (FastAPI Depends for HTTP, frame-extraction for WS) that feed the same core; no decorator injection and no god context object — narrow explicit data. Acceptance: session/thread/graphiti lookups exist once, both adapters call them; duplicated blocks deleted; test_saul_step_budget.py + WS revocation tests green; ws+http semantics verified identical on one login/revocation flow.  DONE — runtime.py added (zero fastapi/starlette imports, scope Protocols); dependencies.py −116/+70 adapters; SaulThreadContext wiring in service/router; parity tests identical bundles/503s/owner-violation across scopes; fail-closed WS semantics byte-identical incl. 7f04409; 78 tests + ruff/ty/lint-imports(5/5)/ast-grep 0; committed as "unify Saul runtime wiring behind a scope-agnostic core"
+272. finish job publication consolidation: everything publishes through JobBus (outbox-backed on broker, in-memory in dev); registry validate-only; delete typed_send direct-send path (STRONG — one way to publish). Two publication paths already exist (direct typed_send + the WIP shared/jobs bus.py/catalog.py/in_memory.py + events/outbox); every new job author currently must pick → drift + two failure modes to reason about under incident. Do: route all task sends through JobBus; registry validates catalog coverage at import/startup only (dev catches misses, never runtime ceremony per call); add a deletion-test (ast-grep/grep sweep) that fails on any direct send creeping back. Acceptance: single publication entrypoint; dev (in-memory) and worker (real broker) modes both demoed end-to-end; tests + lint-imports + ty clean.  DONE — typed_send + TaskRoutingOverrideError + dispatch()/publish_sync* deleted; send_task now private behind JobBus.enqueue in connections/celery_producer.py (only send_task left in src per grep); replay_outbox → enqueue; lifespan dev-fallback InMemoryJobBus (202 not 503 when broker down, prod keeps real transport); deletion-test test_publication_consolidation.py (4 assertions: token sweep, send_task locality, no celery_producer imports in features/**, registry publish-shape check); 166 celery tests + ruff/ty/lint-imports 5/5 + ast-grep 0 + import smoke; 7 files +236/−265; behavioral deltas documented: legacy facades no longer accept arbitrary Celery send options (only expires/countdown survive via EnqueueOptions)
+276. relocate graphiti + rag helpers out of shared/rag: retrieval/graphiti/ owns the domain behavior bound to a live Graphiti (BoundGraphitiService, schemas, subgraph, clause writers); connections/graphiti.py now contains the real setup/close/indices lifecycle implementations instead of re-exporting; token_counter + structural_navigator + errors → retrieval/; commented-out strategies.py → examples/rag_strategies.py; shared/rag retired. Import seams rerouted across documents/extraction/lifecycle/ai; import-linter contract retargeted to app.retrieval; ast-grep FeatureError ignore covers retrieval/**/errors.py. Validated: lint-imports 5/5, ty 0 errors, ruff clean, 235 targeted tests (66 rag/lifecycle/registry + 169 agent_saul/ai/documents), ast-grep lane-clean.  DONE (03f1a7d)
+277. E2E gate run for 273 on the new models (gemini-3.1-flash-lite-preview was Google-shut-down 2026-05-25; flash+pro now = gemini-3.5-flash-lite GA, verified 200 via live generateContent probes against our key; embedder/vision ids also re-checked). Stage verdict: register/verified-login/WS/turn/persistence/export all PASS; Gemini quota SOLVED (qna scored 0.85, zero 429s). NEW blocker found: graph ingestion node is a code stub — make_ingestion_node returns document_text from hardcoded `text = ""` (graph/nodes.py ~L378) → every turn deterministically ends outcome=failed with [normalization MISSING_DOCUMENT_TEXT, segmentation MISSING_NORMALIZED_DOCUMENT]; no turn can complete in this boot regardless of model. Also discovered: doc_id is required+unvalidated at gateway (nonexistent id passes); ingest endpoints 503 in this dev boot (S3_BUCKET_NAME empty → object storage degrades to None; ingestion graph unprovisioned); WS handshake needs Authorization + Origin http://localhost:3000; resume frame semantics = {"type":"resume","thread_id":…,"action":"approve|reject|modify",…}; session_id == thread_id by design; turn outcome parses only from turn_closed metadata JSON (no success column). Artifacts: /tmp/opencode/boot8_e2e_*.log.  DONE
+278. fix the graph ingestion-node stub (prerequisite to 273's gate): real DocumentTextProvider seam into the ingestion node (canonical doc-text source discovered + injected per runtime.py pattern), clean state errors on doc-missing/foreign/nonempty-mismatch instead of silent "", doc-existence/ownership validation at session creation, unit tests per branch; then re-drive the full happy-path E2E.  DONE — canonical source = UnifiedChunk rows (latest version, chunk_index-ordered \n\n join; object_uri alone is NOT text); DocumentContentSource protocol + Postgres adapter in document_source.py; injected per-turn via AgentSaulService._build_config → RunnableConfig.configurable (verified survives AsyncPostgresSaver.aput checkpoint restore); node maps provider outcomes to closed-enum state AgentErrors (DOCUMENT_NOT_FOUND/EMPTY_TEXT/SOURCE_UNAVAILABLE + DOCUMENT_SOURCE_NOT_WIRED) riding the existing errors reducer; session-creation preflight validates doc existence/ownership (404 typed error, outage 503, foreign doc reads as NOT_FOUND — refuse-before-revealing); provider reads Postgres so S3-less dev is unblocked; 14 tests; orchestrator verified: lane ruff/ty clean, ast-grep 0, contracts 5/5, agent_saul 98 passed, import OK. Worker reported full unit suite 1297.
+
+275. auth WS gate: user policy = fail-closed. Implemented per my recommendation: owner-equality check on session rows (session_owner_mismatch structured event, wire code unchanged) + Redis outage now closes connections (fail-closed matching agent_saul resolve_ws_session); periodic sweep deliberately stays fail-open (monitor, not gate — comment documents why). New tests pin both with structured-log assertions. ruff/ty clean, ast-grep 0, lint-imports 5/5, auth WS suites + coupled runtime/shutdown tests pass. Done by worker (empty report — orchestrator verified + fixed 3 lint nits and formatted myself).  DONE
+
+274. TextGenerator seam: REOPENED and implemented. Structured-output variant added to ai/generation: TextGenerationRequest gains response_schema/temperature/model (validated at construction); separate generate_structured method (no union contract) → GeneratedStructured(output: BaseModel); adapter runs with_structured_output inside the same breaker/retries, usage_metadata captured both paths; request-level overrides via lifespan-wired model_factory. Pilot: _grade_context routes through the seam when present, degrades to kept _grade_context_via_llm fallback when absent (ask() never regresses); _build_query_plan/_generate_answer untouched by design. Validator finishes: pinned grader temperature=0.1 (legacy parity, was inheriting 0.7) + flipped the request-equality test; 135 unit tests, ruff/ty clean, contracts 5/5, ast-grep 0, import OK. Heavier call-sites (_build_query_plan, then _generate_answer) migrate only after grade parity holds a while.  DONE (commit below)
+234. learn about classVars, policy, strEnum, namedTuple, final, mapping, list, set, learn crawler/processor.py policy  and check if UUIDv7 is available in ORM  DONE
+277. WebSocketSecurityService.send_json() no longer performs a Redis session lookup for every token frame. It now uses a per-connection, single-flight validity check with a default five-second interval:
+- Valid checks are cached for five seconds.
+- Revoked, expired, wrong-owner, and Redis-failure results remain fail-closed and are never cached.
+- Handshake and inbound-frame validation remain immediate.
+- The periodic sweep remains process-local and sequential, with a roughly 30-second idle-connection revocation interval.
+- The actual Redis pool default was verified as 100 connections per app process, not 10.
+- ThreadLock was verified as an ownership-token lease with renewal every TTL/3.  DONE
+275. auth-lane gap found during runtime unification: features/auth/websocket_security.py::_check_session_validity validates session expiry on per-frame WS checks but never checks user_id (agent_saul handshake does both). Resolved per user policy: per-frame check now fails closed on Redis outage and rejects owner mismatch with a distinct structured event; periodic sweep remains fail-open because it is monitoring, not the enforcement gate. DONE
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses can be used to make the lynk linter     DELAYED    
@@ -326,6 +362,7 @@ todos:-
 53. add voice support by using gemini 3 for TTS and STT  with websockets   ABANDONED
 170. write cron job for memory decay and then send to celery for off loading for cognee   ABANDONED
 152. see cogneeRetriver how does vertex ai differ from google_genai  ABANDONDED
+67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/   ABANDONED
 
 160. check how can Port & Adapter/strategy & factory can help 
 161. what functional programming patterns should i use in FastAPI, python,learn pattern matching & ROP,flow()/bind()/map(), learn function composition with this example and in which case should this be used 
@@ -337,7 +374,6 @@ def compose(*functions: Composable) -> Composable:
     return lambda data: reduce(apply, functions, data)
 
 
-67. go and learn https://www.marktechpost.com/2026/03/01/how-to-design-a-production-grade-multi-agent-communication-system-using-langgraph-structured-message-bus-acp-logging-and-persistent-shared-state-architecture/
 99. use promptfoo for detecting prompt injection attacks, automated red team attacks, 
 
 218. add a small gloassary of the project from the screenshot, we are open at the core, we share about are roadmap, how we think about things, and of course we share all our code and should strive to be in that way. its important to maintian the things they live and iterate over the product. 
@@ -382,17 +418,61 @@ To solve these problems, the creator shifted to a **production-grade database ar
 172. use prebuilt and custom middlewares in langchain 
 179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
 
-
-
-
-234. learn about classVars, policy, strEnum, namedTuple, final, mapping, list, set, learn crawler/processor.py policy  and check if UUIDv7 is available in ORM
-242. fix agent tools
+242. fix agent tools. need to check what are all the tools my agent has. does it have all the tools it needs or does it require more? what are the best practices and principles for making agent tools.
 
 250. instal pdb debugger and others, flamegraph, skip list DS, swiss tables
 251. the repository has more than one ingestion flow. The documents-service path uses LangExtract; the separate ingestion graph has its own extraction/segmentation stages. 
 190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
 136. use LangExtract outputs to build rich graph knowledge from your legal documents.  in document processing
-252. remove retrival graph if present and 
+252. remove retrival graph if present and figure out is this is the best way to do retrival Full picture gathered. Here are the facts first, then one decision I need from you before touching the layout (the two halves of your instruction point at different homes).
+
+1. Is there a retrieval graph? — Yes, and it's deliberately unreachable
+
+src/app/features/documents/retrieval_graph/ (graph/nodes/reranker/state) is a compiled plan → retrieve → grade → generate machine, built via DocumentQueryService.ask_via_retrieval_graph. Its own docstring says it is "deliberately not exposed by any router" — zero HTTP endpoints reach it. The mounted endpoints (/search/ask, /legal/ask) call service.ask, which duplicates the same node sequence inline — the docstring flags that duplication as recorded debt and calls the graph "the intended survivor." So for todo #252: it exists but is dormant; removing it is safe from an API standpoint but deletes the "intended survivor" your notes endorsed.
+
+2. How does Agent Saul CRUD information?
+
+It reads through tools and can't create/update/delete through any tool:
+
+Operation	Mechanism
+Read (tools)	4 evidence tools (below) — query-only, idempotency-guarded
+Create/Update	Implicit, service-level: AgentMemoryService (cognee remember/improve) called after turns; write_clause_episodes_to_graphiti runs at ingest time, not agent time
+Delete	Nothing. Graph pruning/consolidation exists only via memory-service internals
+
+Graphiti write tools exist but are not wired: write_clause_episode / write_relationship_edge (@tool-decorated in shared/rag/graphiti/write_clause_episodes.py) — bundle.py's docstring admits "implemented but not yet wired into any node." So the agent has no self-service memory writes today.
+
+3. All tools Agent Saul has
+
+Tool	Agent	Type	Schema style
+transfer_to_orchestrator	risk, compliance	handoff	explicit args_schema
+transfer_to_risk	compliance	handoff	explicit args_schema
+query_knowledge_graph	risk	read (graphiti)	inferred from signature
+get_obligation_chain	risk	read (graphiti)	inferred from signature
+search_legal_precedents	compliance (+deep_research alias)	read (pg+graphiti)	inferred from signature
+retrieve_statute_section	compliance	read (pg)	inferred from signature
+
+Plus a global registry (register_default_tools) Saul doesn't get: web_search, shell_tool, read_file, write_file, list_directory, file_search — and all transfer_to_* roles.
+
+4. Rule-54 compliance verdict: yes, all conform — two cosmetic drifts
+
+• Names: every tool is snake_case (handoff transfer_to_<role>, evidence tools, shell/file, memory writers). None would trip provider validation.
+• Descriptions: present everywhere (@tool docstrings or description= kwargs).
+• args_schema: handoff + shell tools pass explicit Pydantic schemas; the 4 evidence tools infer from typed signatures — same runtime schema, just a second idiom. Not a violation, but non-uniform.
+• One real smell: WebSearchInput(BaseTool) — an input schema class inheriting from BaseTool should be a plain BaseModel; harmless today but schema-as-tool confusion worth a one-line fix if you care.
+• precedent_tools.py also defines internal tools (hybrid_retrieve_precedents, detect_graph_research) that aren't in the bundle.
+
+5. The graphiti layout — one decision needed
+
+Current seams: implementation lives in shared/rag/graphiti/ (client 600L, schemas, subgraph, writers); connections/graphiti.py is a thin re-export (used by lifespan + worker/documents.py); shared/rag/ also holds production-load-bearing helpers: token_counter (documents + retrieval graph), structural_navigator (query service), errors (langextract) — plus strategies.py, which appears unused.
+
+Your first line says inline the functions into connections/graphiti.py; the second says shift into src/app/retrieval/graphiti — different homes. Which layout do you want?
+
+280.
+273. unify transcript sync orchestration — GATE RELEASED after item 279 E2E PASS. The recorder (turn-time apply_projection) and reconcile sweep (cron _transcript_sweep_async → _reconcile_once → apply_projection) are two orchestrators over the same projector; their divergence already cost a debugging session (closed=0 sweep analysis, items 262-263). Fold known sweep-batch issues into the same change: list_stale_sessions ordering tweak + integration-debris exclusion (≈200 non-terminal no-op snapshots clog the 20/beat batch); one orchestration module owning "apply snapshot + derive status + close turn + emit" with recorder and sweep as thin callers. Acceptance: parity test — recorder and sweep produce identical rows for the same snapshot; happy-path E2E green after refactor. IN PROGRESS.
+274. TextGenerator seam: SHELVED by read-only evaluation (no code changed). Cause: the seam wire contract is free text only — protocol.py `TextGenerator.generate(TextGenerationRequest) -> Result[GeneratedText]` = {prompt, system} → {text}; zero structured-output, zero usage/cost metadata (adapter discards usage_metadata), model pinned at lifespan build (GEMINI_PRO_MODEL, temp 0.7 vs documents-wanted 0.1, no passthrough). Meanwhile every LLM site in the documents `ask` loop uses `with_structured_output(…)` (query.py: _build_query_plan L690, _grade_context L763, _generate_answer L786) — a "one call-site pilot" actually means adding structured output to the seam itself, exceeding pilot scope and risking a JSON-in-free-text quality regression on the live /ask endpoint. Positive asset found: InMemoryTextGenerator + tests/unit/ai/test_generation.py is a ready-made harness (good). REOPEN condition: add a structured-output variant to ai/generation protocol/models/adapter as its own item, then pilot _grade_context (the lowest-risk site) first.
+
+
+279. re-drive the full happy-path E2E against the fixed graph (item 278's gate): DONE — PASS (boot17; thread `4dae8393-149f-4d07-944c-780334be3b8f`, document `0a30f773-5c54-4ad0-96a0-9d64db995af2`). WebSocket emitted `final_summary`; Postgres persisted `chat_sessions.status=completed`, `turn_count=1`, and transcript kinds `query`, `clarification_prompt`, `clarification_reply`, `clarification_prompt`, `final_summary`; authenticated NDJSON export returned HTTP 200 (`application/x-ndjson`) with all five rows and the final summary. Per §§3.4/5.3–5.4, successful completion is represented by `final_summary` + cached `completed`; `turn_closed` is only for failed/abandoned turns, so its absence is correct. Item 273 gate released.
 ```
 
 10:00 AM Beijing Time = 07:30 AM IST
@@ -402,6 +482,23 @@ To solve these problems, the creator shifted to a **production-grade database ar
 summarise these chapters in great detail and depth and take video's transcript as reference for outputing verbatim
 
 summarise this video in great detail and depth by dividing it into 5 minute chunk and take video's transcript as reference for  outputing verbatim
+
+and add hidden knowledge that only a veteran would know and not somw newbie who has just read this
+
+a good system design is good interface design. how a system inerface interacts with world. how the component interacts with each other. and this includes data structures
+The Socratic method: Use AI to guide your understanding by asking it to quiz you or explain concepts rather than just providing the final answer
+Act as a hostile Staff Systems Reviewer. Do not praise the design or write code for me. Ask me 3 brutal, deep-technical edge-case questions regarding memory safety, high-concurrency race conditions, or tail-latency spikes that my design fails to account for. Wait for my answers before grilling me further.
+
+Practice Property-Based Testing (using libraries like fast-check, Hypothesis, or Go's rapid). Instead of writing standard unit tests, define the invariants that must always hold true across thousands of randomized inputs, and force the system to break them.
+
+Use CPU and memory profilers (like pprof in Go/Python, or Linux perf) to find hot paths, cache misses, and memory allocations. Force yourself to optimize a bottleneck down by 50% using profiling data, without letting an LLM guess the solution
+
+Write an HTTP/1.1 or HTTP/2 server from scratch in a language like Go, Rust, or C++ using raw TCP sockets (net package). Parse byte streams, handle keep-alive connections, and manage concurrency using raw epoll/goroutines.
+
+how do i use ontology in OKF
+
+The Intuition: You look at operating system primitives and concurrency control. You leverage Copy-On-Write (COW) semantics, Hard Links in Linux filesystems, or Write-Ahead Logs (WALs) with MVCC (Multi-Version Concurrency Control). You realize that a "snapshot" isn't a physical copy of files; it's a frozen point-in-time logical view created by redirecting pointer mutations to a new delta file while the background thread safely flushes the immutable parts to disk.
+
 
 src/app/
 ├── api/                                  # composition/root transport registration

@@ -1,0 +1,17 @@
+{
+  "manifest_version": "golden_provenance_v1",
+  "golden_set_version": "legal_retrieval_v1",
+  "artifact": "legal_retrieval_v1.jsonl",
+  "source_policy": {
+    "allowed_source_types": ["public", "synthetic", "client"],
+    "client_requires": ["written_permission", "verified_license_terms"],
+    "public_requires": ["public_terms_verified", "terms_reference_or_not_required"],
+    "synthetic_requires": ["synthetic_owned", "not_required_or_verified_terms"],
+    "unknown_or_forbidden_provenance": "ci_failure"
+  },
+  "annotation_policy": {
+    "retrieval_relevance_role": "engineer",
+    "claim_entailment_role": "legal_sme",
+    "double_label_adjudication": "optional"
+  }
+}

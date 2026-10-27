@@ -4,6 +4,15 @@ from app.ai.embeddings import embed_text, embed_texts
 from app.features.documents.classification import classify_document, segment_chunks
 from app.features.documents.parser import parse_document
 
+from .evidence import (
+    EvidenceHandle,
+    EvidenceHandleStore,
+    EvidenceService,
+    InMemoryEvidenceHandleStore,
+    RedisEvidenceHandleStore,
+    SessionFactoryEvidenceRepository,
+    build_evidence_service,
+)
 from .ingest import (
     DocumentCommandService,
     _checkpoint_ingestion_transaction,
@@ -54,7 +63,13 @@ __all__ = [
     "_SEARCH_BRANCHES",
     "DocumentCommandService",
     "DocumentQueryService",
+    "EvidenceHandle",
+    "EvidenceHandleStore",
+    "EvidenceService",
+    "InMemoryEvidenceHandleStore",
+    "RedisEvidenceHandleStore",
     "RetrievalBranchPolicy",
+    "SessionFactoryEvidenceRepository",
     "_BranchInput",
     "_LegalPreparation",
     "_batched",
@@ -86,6 +101,7 @@ __all__ = [
     "_warnings_from_rows",
     "_write_contract_events",
     "_write_extracted_clause_episodes",
+    "build_evidence_service",
     "classify_document",
     "embed_text",
     "embed_texts",

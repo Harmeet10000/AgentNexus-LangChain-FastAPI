@@ -40,9 +40,9 @@ from app.features.agent_saul.thread_lock import ThreadLock
 from app.features.agent_saul.transcript.projection import (
     ORPHAN_GRACE,
     SessionStatus,
-    project,
     snapshot_to_view,
 )
+from app.features.agent_saul.transcript.sync import apply_snapshot, prepare_snapshot
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -66,6 +66,7 @@ _HINT_BOUND = 16
 
 _GC_STAMP_KEY = "gc_swept_at"
 _LIVE_LOCK_KEY_PREFIX = "saul:thread_lock:"
+_SNAPSHOT_OWNER_MISMATCH_REASON = "snapshot_owner_mismatch"
 _TERMINAL_STATUS_VALUES: frozenset[str] = frozenset(
     (
         SessionStatus.COMPLETED.value,
@@ -198,12 +199,15 @@ class _ThreadReconcileOutcome:
                       projector saw nothing derivable (pre-first-step,
                       missing opener, stale heartbeat) — a checkpoint under
                       such a verdict stays put.
+    ``reason``      — the exact ``ApplyOutcome.reason`` for a NoOp, retained
+                      for structured sweep diagnostics.
     ``failed``      — any repository/graph/aliveness error; nothing may be
                       concluded.
     """
 
     status: str | None = None
     checkpoint_id: str | None = None
+    reason: str | None = None
     clean: bool = False
     failed: bool = True
 
@@ -250,29 +254,46 @@ async def _reconcile_once(
             # §6 [v3]: aliveness unknowable → no verdict, no rows, no close.
             return _ThreadReconcileOutcome()
     snapshot = await graph.aget_state(config)  # public LangGraph API (§1)
-    view = snapshot_to_view(snapshot)
-    derived = project(
-        view,
-        turn_context.existing_keys,
-        turn_context.turn_rows,
-        now,
+    view = snapshot_to_view(snapshot, allow_legacy_paused=True)
+    if view.user_id and view.user_id != owner_user_id:
+        logger.bind(
+            session_id=session_id,
+            repository_owner_user_id=owner_user_id,
+            snapshot_user_id=view.user_id,
+            reason=_SNAPSHOT_OWNER_MISMATCH_REASON,
+        ).warning("transcript_sweep_snapshot_owner_mismatch")
+        return _ThreadReconcileOutcome(
+            reason=_SNAPSHOT_OWNER_MISMATCH_REASON,
+        )
+    prepared = prepare_snapshot(
+        view=view,
+        existing_keys=turn_context.existing_keys,
+        turn_rows=turn_context.turn_rows,
+        now=now,
         aliveness=aliveness,
     )
-    if derived.is_no_op:
-        # Explicit "derive nothing" (§5.3 NoOp row). Neither clean nor a
-        # verdict — the reason field says which observation gap it was.
-        return _ThreadReconcileOutcome(clean=True, failed=False)
-    if derived.session_status is None:
-        return _ThreadReconcileOutcome(failed=True)
-    applied = await repo.apply_projection(
-        derived,
+    applied = await apply_snapshot(
+        repo=repo,
+        prepared=prepared,
         user_id=owner_user_id,
         session_id=session_id,
         prior_checkpoint_id=turn_context.last_checkpoint_id,
     )
     if isinstance(applied, Failure):
         return _ThreadReconcileOutcome()
-    if not applied.unwrap().applied and applied.unwrap().reason == "stale_projection":
+    sync = applied.unwrap()
+    derived = sync.projection
+    if derived.is_no_op:
+        # Explicit "derive nothing" (§5.3 NoOp row). Neither clean nor a
+        # verdict — the reason field says which observation gap it was.
+        return _ThreadReconcileOutcome(
+            reason=sync.applied.reason,
+            clean=True,
+            failed=False,
+        )
+    if derived.session_status is None:
+        return _ThreadReconcileOutcome(failed=True)
+    if not sync.applied.applied and sync.applied.reason == "stale_projection":
         # A newer writer landed between the read and the apply: NEVER
         # move the cache backward (§5.3) — this pass concludes nothing.
         return _ThreadReconcileOutcome()
@@ -282,6 +303,40 @@ async def _reconcile_once(
         clean=False,
         failed=False,
     )
+
+
+async def _reconcile_locked(
+    *,
+    repo: ChatTranscriptRepository,
+    graph: CompiledStateGraph[Any],
+    redis: Redis,
+    session_id: str,
+    now: datetime,
+) -> _ThreadReconcileOutcome | None:
+    """Reconcile a hinted/stale thread inside its connection exclusion fence.
+
+    The lock is acquired before the sweep reads either the SQL context or the
+    checkpoint.  That ordering is the important part of the fence: probing a
+    lock key and then acquiring it later leaves a probe-to-apply race in which
+    a live writer can start after the probe.  Once acquired, the lease itself
+    is the aliveness fact, so ``_reconcile_once`` must not perform a second
+    Redis probe.  ``None`` means another owner holds the lease (or acquisition
+    failed closed), and is deliberately not a reconciliation failure.
+    """
+    lock = ThreadLock(redis, session_id)
+    if not await lock.acquire():
+        return None
+    try:
+        return await _reconcile_once(
+            repo=repo,
+            graph=graph,
+            redis=redis,
+            session_id=session_id,
+            now=now,
+            aliveness=False,
+        )
+    finally:
+        await lock.release()
 
 
 async def _reconcile_hinted_threads(
@@ -303,12 +358,16 @@ async def _reconcile_hinted_threads(
     hint_ids = [str(item) for item in popped]
     for thread_id in hint_ids:
         try:
-            outcome = await _reconcile_once(
+            outcome = await _reconcile_locked(
                 repo=repo, graph=graph, redis=redis, session_id=thread_id, now=now
             )
-            logger.bind(thread_id=thread_id, status=outcome.status, clean=outcome.clean).debug(
-                "transcript_sweep_hint_reconciled"
-            )
+            logger.bind(
+                thread_id=thread_id,
+                status=outcome.status if outcome is not None else None,
+                clean=outcome.clean if outcome is not None else False,
+                reason=outcome.reason if outcome is not None else None,
+                skipped=outcome is None,
+            ).debug("transcript_sweep_hint_reconciled")
         except Exception as exc:  # noqa: BLE001 — one hinted thread never stops the sweep
             exc.add_note(f"operation=transcript_sweep, thread_id={thread_id}")
             logger.bind(thread_id=thread_id, error=str(exc)).warning(
@@ -337,7 +396,7 @@ async def _reconcile_stale_sessions(
     for session_meta in stale.unwrap():
         scanned += 1
         try:
-            outcome = await _reconcile_once(
+            outcome = await _reconcile_locked(
                 repo=repo,
                 graph=graph,
                 redis=redis,
@@ -350,7 +409,14 @@ async def _reconcile_stale_sessions(
                 "transcript_sweep_reconcile_failed"
             )
             continue
-        if outcome.status in _TERMINAL_STATUS_VALUES:
+        logger.bind(
+            session_id=session_meta.session_id,
+            status=outcome.status if outcome is not None else None,
+            clean=outcome.clean if outcome is not None else False,
+            reason=outcome.reason if outcome is not None else None,
+            skipped=outcome is None,
+        ).debug("transcript_sweep_stale_reconciled")
+        if outcome is not None and outcome.status in _TERMINAL_STATUS_VALUES:
             closed += 1
     return scanned, closed
 

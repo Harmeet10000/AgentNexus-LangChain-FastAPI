@@ -10,6 +10,7 @@ from returns.result import Failure
 from app.observability.logging import logger
 from app.utils import APIException
 
+from .config import LANGEXTRACT_MODEL_ID, LangExtractModelId
 from .docling_preprocessor import (
     DoclingProcessingContext,
     preprocess_legal_document,
@@ -28,7 +29,7 @@ class LangExtractBatchContext(BaseModel):
 
     model_config = {"frozen": True}
 
-    model_id: str = "gemini-2.5-flash"
+    model_id: LangExtractModelId = LANGEXTRACT_MODEL_ID
     extraction_passes: int = 3
     max_workers: int = 12  # Tune based on your GPU/CPU quota
     vertex_batch_enabled: bool = False

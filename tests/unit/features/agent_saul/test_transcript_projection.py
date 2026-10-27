@@ -36,18 +36,18 @@ THREAD = "thread-0001"
 CHECKPOINT = "checkpoint-0001"
 
 
-def interrupt_tasks(interrupts: tuple) -> tuple[CheckpointTask, ...]:
+def interrupt_tasks(
+    interrupts: tuple[dict[str, object], ...],
+) -> tuple[CheckpointTask, ...]:
     """Build the task dict shape the projector reads interrupts off (§4.1 only reader)."""
-    return (
-        CheckpointTask(id="t1", name="qna", error=None, interrupts=interrupts, state=None, path=()),
-    )
+    return (CheckpointTask(id="t1", name="qna", interrupts=list(interrupts), state=None),)
 
 
 def snapshot(
     *,
-    values: dict,
+    values: dict[str, object],
     next_nodes: tuple[str, ...] = (),
-    interrupts: tuple = (),
+    interrupts: tuple[dict[str, object], ...] = (),
     step: int = 5,
     ts: datetime | None = NOW,
 ) -> StateSnapshot:
@@ -83,9 +83,9 @@ def untagged_reply(
 def test_snapshot_to_view_extracts_frozen_facts() -> None:
     snap = snapshot(
         values={
+            "schema_version": STATE_SCHEMA_VERSION,
             "user_id": "u1",
             "thread_id": THREAD,
-            "schema_version": STATE_SCHEMA_VERSION,
             "messages": [tagged_query(), untagged_reply()],
             "plan": [],
             "plan_approved": False,
@@ -108,6 +108,7 @@ def test_snapshot_to_view_extracts_frozen_facts() -> None:
 def test_snapshot_to_view_drops_non_human_messages() -> None:
     snap = snapshot(
         values={
+            "schema_version": STATE_SCHEMA_VERSION,
             "user_id": "u1",
             "messages": [tagged_query(), AIMessage(content="assistant text", id="a1")],
         }
@@ -122,15 +123,49 @@ def test_snapshot_to_view_refuses_unknown_schema_version() -> None:
         snapshot_to_view(snap)
 
 
-def test_snapshot_to_view_accepts_legacy_missing_version() -> None:
+def test_snapshot_to_view_refuses_legacy_missing_version_at_projection_boundary() -> None:
     snap = snapshot(values={"user_id": "u1", "messages": [tagged_query()]})
-    view = snapshot_to_view(snap)
+    with pytest.raises(Exception, match="schema_version"):
+        snapshot_to_view(snap)
+
+
+def test_snapshot_to_view_allows_only_explicit_legacy_plan_pause_recovery() -> None:
+    snap = snapshot(
+        values={"schema_version": 1, "user_id": "u1", "messages": [tagged_query()]},
+        next_nodes=("planner",),
+        interrupts=({"type": "plan_approval", "message": "review"},),
+    )
+    with pytest.raises(Exception, match="schema_version"):
+        snapshot_to_view(snap)
+    view = snapshot_to_view(snap, allow_legacy_paused=True)
     assert view.schema_version == STATE_SCHEMA_VERSION
+
+
+def test_snapshot_to_view_allows_legacy_clarification_pause_recovery() -> None:
+    snap = snapshot(
+        values={"schema_version": 1, "user_id": "u1", "messages": [tagged_query()]},
+        next_nodes=("qna",),
+        interrupts=({"type": "clarification_needed", "message": "clarify"},),
+    )
+    view = snapshot_to_view(snap, allow_legacy_paused=True)
+    assert view.schema_version == STATE_SCHEMA_VERSION
+
+
+@pytest.mark.parametrize("recorded_version", [None, 0, 99])
+def test_snapshot_to_view_refuses_unmigrated_or_unknown_versions(
+    recorded_version: int | None,
+) -> None:
+    values: dict[str, object] = {"user_id": "u1", "messages": [tagged_query()]}
+    if recorded_version is not None:
+        values["schema_version"] = recorded_version
+    with pytest.raises(Exception, match="schema_version"):
+        snapshot_to_view(snapshot(values=values), allow_legacy_paused=True)
 
 
 def test_snapshot_to_view_normalizes_final_report_summary() -> None:
     snap = snapshot(
         values={
+            "schema_version": STATE_SCHEMA_VERSION,
             "user_id": "u1",
             "messages": [tagged_query()],
             "final_report": {"summary": "5 risks found, 3 citations"},
@@ -392,12 +427,52 @@ def test_project_pause_plan_prompt_is_plan_kind() -> None:
     assert out.session_status == SessionStatus.CLARIFYING
 
 
+def test_plan_prompt_never_persists_plan_text() -> None:
+    secret = "confidential client strategy"
+    plan = [{"step": secret, "ordinal": 1}]
+    out = project(
+        _view(
+            next_nodes=("planner",),
+            interrupts=(
+                InterruptView(
+                    id="i-secret",
+                    value={"type": "plan_approval", "plan": plan, "message": "Review plan"},
+                ),
+            ),
+        ),
+        EMPTY_KEYS,
+        TurnRows(rows=(TurnRow(kind="query", source_key="msg-query-1", ordinal=0),)),
+        NOW,
+        aliveness=True,
+    )
+    prompt = next(row for row in out.rows if row.kind == "plan_prompt")
+    assert secret not in str(prompt.model_dump())
+
+
+def test_legacy_plan_prompt_without_witness_does_not_fabricate_decision() -> None:
+    out = project(
+        _view(plan_approved=True, plan=({"step": "approved"},)),
+        EMPTY_KEYS,
+        TurnRows(
+            rows=(
+                TurnRow(kind="query", source_key="msg-query-1", ordinal=0),
+                TurnRow(kind="plan_prompt", source_key="interrupt:i2", ordinal=1),
+            )
+        ),
+        NOW,
+        aliveness=True,
+    )
+    assert not any(row.kind == "plan_decision" for row in out.rows)
+
+
 def test_project_resume_writes_reply_then_decision() -> None:
     turn_rows = TurnRows(
         rows=(
             TurnRow(kind="query", source_key="msg-query-1", ordinal=0),
             TurnRow(kind="plan_prompt", source_key="interrupt:i2", ordinal=1),
-        )
+        ),
+        pending_plan_decision_key="interrupt:i2",
+        pending_plan_decision_modified=False,
     )
     out = project(
         _view(
@@ -422,9 +497,15 @@ def test_project_modified_plan_decision_label() -> None:
     turn_rows = TurnRows(
         rows=(
             TurnRow(kind="query", source_key="msg-query-1", ordinal=0),
-            TurnRow(kind="plan_prompt", source_key="interrupt:i2", ordinal=1),
+            TurnRow(
+                kind="plan_prompt",
+                source_key="interrupt:i2",
+                ordinal=1,
+            ),
         ),
         paused_plan=({"step": "ingest raw", "ordinal": 1},),
+        pending_plan_decision_key="interrupt:i2",
+        pending_plan_decision_modified=True,
     )
     out = project(
         _view(plan_approved=True, plan=({"step": "ingest modified", "ordinal": 1},)),
@@ -659,7 +740,9 @@ def test_decision_slot_reserved_before_followup_prompt() -> None:
         rows=(
             TurnRow(kind="query", source_key="msg-query-1", ordinal=0),
             TurnRow(kind="plan_prompt", source_key="interrupt:i2", ordinal=1),
-        )
+        ),
+        pending_plan_decision_key="interrupt:i2",
+        pending_plan_decision_modified=False,
     )
     out = project(
         _view(

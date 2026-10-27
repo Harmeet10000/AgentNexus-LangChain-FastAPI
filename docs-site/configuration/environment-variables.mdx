@@ -79,6 +79,7 @@ Production guardrail: when `ENVIRONMENT=production`, startup fails if any secret
 | `GEMINI_MAX_TOKENS` | int | `2048` | Default output cap |
 | `GEMINI_CONTEXT_CACHE_TTL` | str | `3600s` | Context-cache TTL suffix included |
 | `LANGEXTRACT_API_KEY` | SecretStr | `empty-langextract-api-key` | LangExtract service key |
+| `LANGEXTRACT_MODEL` | `Literal["gemini-3.5-flash-lite"]` | `gemini-3.5-flash-lite` | Validated LangExtract model ID |
 
 Details on [LLM models](/configuration/llm-models).
 

@@ -1,13 +1,24 @@
 """Node-boundary delegation pairs (agent-message-standard 2.1)."""
 
+import json
 from typing import Any
 
+import pytest
+from langchain.agents.structured_output import StructuredOutputValidationError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.features.agent_saul.graph.nodes import (
     delegation_pairs_from,
     make_compliance_node,
+    make_orchestrator_node,
     make_risk_analysis_node,
+)
+from app.features.agent_saul.graph.state import (
+    IngestionDocumentState,
+    IngestionDocumentStatus,
+    OrchestratorAction,
+    OrchestratorActionType,
+    WorkflowStatus,
 )
 
 
@@ -41,6 +52,7 @@ def _state() -> dict[str, Any]:
     return {
         "user_id": "u",
         "thread_id": "t",
+        "doc_id": "d",
         "segments": [],
         "extracted_entities": [],
         "relationships": [],
@@ -81,6 +93,102 @@ async def test_compliance_node_appends_linked_pair() -> None:
 
     assert len(result["messages"]) == 2
     assert result["compliance_result"] is not None
+
+
+async def test_compliance_node_maps_invalid_structured_output_to_graph_failure() -> None:
+    class InvalidAgent:
+        async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
+            message = "missing required citation"
+            tool_name = "ComplianceOutput"
+            raise StructuredOutputValidationError(
+                tool_name,
+                message,
+                AIMessage(content="invalid structured output"),
+            )
+
+    result = await make_compliance_node(InvalidAgent())(_state())  # type: ignore[arg-type]
+
+    assert result["status"].value == "failed"
+    assert result["errors"][0].code == "INVALID_COMPLIANCE_OUTPUT"
+    assert result["errors"][0].retryable is True
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (WorkflowStatus.FINALIZING, OrchestratorActionType.SYNTHESIZE),
+        (WorkflowStatus.FAILED, OrchestratorActionType.DONE),
+        (WorkflowStatus.COMPLETED, OrchestratorActionType.DONE),
+    ],
+)
+async def test_orchestrator_routes_terminal_workflow_states_without_model_call(
+    status: WorkflowStatus,
+    expected: OrchestratorActionType,
+) -> None:
+    class NeverCalled:
+        async def ainvoke(self, _input: list[Any]) -> Any:
+            message = "terminal orchestrator must not invoke the model"
+            raise AssertionError(message)
+
+    state = {
+        **_state(),
+        "status": status,
+        "current_step": 3,
+    }
+    result = await make_orchestrator_node(NeverCalled())(state)  # type: ignore[arg-type]
+
+    assert result["orchestrator_action"].action_type == expected
+    assert result["current_step"] == 4
+
+
+async def test_orchestrator_receives_bounded_ingestion_and_delegation_context() -> None:
+    class Capture:
+        def __init__(self) -> None:
+            self.inputs: list[Any] = []
+
+        async def ainvoke(self, messages: list[Any]) -> OrchestratorAction:
+            self.inputs.append(messages)
+            return OrchestratorAction(
+                action_type=OrchestratorActionType.CONTINUE,
+                target_node="risk_analysis",
+                reflection="continue with scoped analysis",
+            )
+
+    capture = Capture()
+    state = {
+        **_state(),
+        "allowed_doc_ids": ["doc-a", "doc-b"],
+        "status": WorkflowStatus.PLAN_APPROVED,
+        "current_step": 2,
+        "plan": [],
+        "plan_approved": True,
+        "ingestion_state": [
+            IngestionDocumentState(
+                document_id="doc-a",
+                status=IngestionDocumentStatus.READY,
+            ),
+            IngestionDocumentState(
+                document_id="doc-b",
+                status=IngestionDocumentStatus.WARNINGS,
+                warning_count=1,
+            ),
+        ],
+        "risk_analysis": None,
+        "compliance_result": None,
+        "grounding": None,
+        "human_review": None,
+        "errors": [],
+    }
+
+    result = await make_orchestrator_node(capture)(state)  # type: ignore[arg-type]
+    context = json.loads(capture.inputs[0][1].content)
+    documents = context["capabilities"]["documents"]
+
+    assert [item["document_id"] for item in documents] == ["doc-a", "doc-b"]
+    assert [item["status"] for item in documents] == ["ready", "warnings"]
+    assert context["capabilities"]["delegation"]["allowed_targets"]
+    assert context["capabilities"]["delegation"]["remaining_model_calls"] >= 0
+    assert result["orchestrator_action"].target_node == "risk_analysis"
 
 
 async def test_nodes_without_transfers_append_nothing() -> None:

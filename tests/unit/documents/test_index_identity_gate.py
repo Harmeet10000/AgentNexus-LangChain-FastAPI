@@ -20,10 +20,8 @@ import re
 from pathlib import Path
 
 from app.features.documents import constants, repository
-from app.shared.langgraph_layer.ingestion_kb import nodes as ingestion_nodes
 
 _REPO_SOURCE = Path(repository.__file__).read_text(encoding="utf-8")
-_NODES_SOURCE = Path(ingestion_nodes.__file__).read_text(encoding="utf-8")
 
 _LITERAL_RE = re.compile(r"to_bm25query\((?::\w+|'\w[^']*'),\s*'([^']+)'\)")
 
@@ -41,10 +39,6 @@ def test_every_bm25_index_literal_equals_the_single_definition() -> None:
     assert len(literals) == 4, literals
     assert set(literals) == {constants.CHUNKS_BM25_INDEX_NAME}
     assert constants.CHUNKS_BM25_INDEX_NAME == "chunks_bm25_idx"
-
-
-def test_the_index_maintenance_call_names_the_same_index() -> None:
-    assert f"bm25_force_merge('{constants.CHUNKS_BM25_INDEX_NAME}')" in _NODES_SOURCE
 
 
 def test_the_chunk_upsert_key_equals_the_single_definition() -> None:

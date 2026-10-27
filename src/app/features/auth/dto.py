@@ -3,6 +3,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from .models import LegalRole
+
 # ── Requests ──────────────────────────────────────────────────────────────────
 
 
@@ -141,3 +143,16 @@ class OAuthLinkConfirmRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     confirm: bool
+
+
+class UpdateTenantMembershipRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    legal_roles: tuple[LegalRole, ...] = (LegalRole.ANALYST,)
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class UpdateSelfReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allowed: bool

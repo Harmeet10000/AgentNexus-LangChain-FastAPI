@@ -23,6 +23,7 @@ MODEL_MODULE_NAMES: tuple[str, ...] = (
     "app.features.agent_saul.models",
     "app.features.billing.credits.models",
     "app.features.documents.models",
+    "app.features.auth.tenant_models",
     "app.features.billing.invoices.invoice_batch",
     "app.features.billing.invoices.invoice_void",
     "app.features.billing.invoices.models",

@@ -46,6 +46,7 @@ def ingest_document(
     *,
     document_id: str,
     user_id: str,
+    tenant_id: str | None = None,
     filename: str,
     content_type: str,
     object_uri: str,
@@ -65,6 +66,7 @@ def ingest_document(
             lambda: run_document_ingestion_task(
                 document_id=document_id,
                 user_id=user_id,
+                tenant_id=tenant_id or f"personal:{user_id}",
                 filename=filename,
                 content_type=content_type,
                 object_uri=object_uri,

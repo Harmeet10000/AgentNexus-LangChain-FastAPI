@@ -28,6 +28,7 @@ from redis.asyncio import Redis
 from returns.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.features.auth.tenancy import LegalRole
 from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
@@ -164,6 +165,15 @@ class SaulThreadContext(BaseModel):
 
     user_id: str
     thread_id: str
+    tenant_id: str = ""
+    legal_roles: tuple[LegalRole, ...] = (LegalRole.ANALYST,)
+    self_review_allowed: bool = True
+    role_revision: int = 0
+    # Capability grants are resolved by the authenticated dependency and
+    # copied into graph state once; the client never supplies or widens them.
+    allowed_doc_ids: tuple[str, ...] = ()
+    allowed_operations: tuple[str, ...] = ()
+    capabilities: tuple[str, ...] = ()
     correlation_id: str = Field(default_factory=lambda: str(uuid4()))
 
 

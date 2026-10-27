@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
+from operator import itemgetter
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,6 +29,7 @@ from redis.exceptions import RedisError
 _REDIS_TTL_SECONDS = 86_400
 _POSTGRES_TTL_DAYS = 30
 _REDIS_KEY_PREFIX = "idempotency:v2:"
+_SCOPED_KEY_SCHEMA_VERSION = 2
 
 
 class IdempotencyPersistenceError(RuntimeError):
@@ -113,6 +115,15 @@ class IdempotencyGuard:
         structural: dict[str, Any],
         user_id: str,
         content: dict[str, Any] | None = None,
+        tool_name: str = "",
+        tenant_id: str | None = None,
+        allowed_doc_ids: tuple[str, ...] | list[str] = (),
+        evidence_policy: str | None = None,
+        document_versions: tuple[tuple[str, int, str | None], ...]
+        | list[tuple[str, int, str | None]] = (),
+        thread_id: str | None = None,
+        run_id: str | None = None,
+        checkpoint_id: str | None = None,
     ) -> str:
         """Build a deterministic SHA-256 key for a tool invocation.
 
@@ -122,17 +133,54 @@ class IdempotencyGuard:
         meaning. Write paths pass ``content=None`` — replaying an identical
         write must hit.
         """
-        payload = json.dumps(
-            {
-                "step_id": step_id,
-                "structural": IdempotencyGuard._canon(structural),
-                "content": IdempotencyGuard._canon(content),
-                "user_id": user_id,
-            },
-            sort_keys=True,
-            default=str,
+        # The first deployment of this contract persisted keys made from only
+        # step/structural/content/user.  Keep producing that exact digest for
+        # unscoped callers so a checkpoint already in flight can resume after
+        # deploy.  Once a scope is supplied, use an explicit versioned payload;
+        # a scoped invocation must never fall back to the unscoped key because
+        # that would permit a cross-tenant/document replay.
+        scoped = any(
+            (
+                tool_name,
+                tenant_id is not None,
+                bool(allowed_doc_ids),
+                evidence_policy is not None,
+                bool(document_versions),
+                thread_id is not None,
+                run_id is not None,
+                checkpoint_id is not None,
+            )
         )
-        return hashlib.sha256(payload.encode()).hexdigest()
+        payload: dict[str, Any] = {
+            "step_id": step_id,
+            "structural": IdempotencyGuard._canon(structural),
+            "content": IdempotencyGuard._canon(content),
+            "user_id": user_id,
+        }
+        if scoped:
+            payload = {
+                "schema_version": _SCOPED_KEY_SCHEMA_VERSION,
+                **payload,
+                "tool_name": tool_name,
+                "tenant_id": tenant_id or user_id,
+                "allowed_doc_ids": sorted(str(item) for item in allowed_doc_ids),
+                "evidence_policy": evidence_policy,
+                "document_versions": sorted(
+                    [
+                        (str(doc_id), int(version), pipeline)
+                        for doc_id, version, pipeline in document_versions
+                    ],
+                    key=itemgetter(0),
+                ),
+                # Session correlation is part of the key whenever supplied;
+                # omitting it would allow a cached specialist result from one
+                # run/checkpoint to bleed into another.
+                "thread_id": thread_id,
+                "run_id": run_id,
+                "checkpoint_id": checkpoint_id,
+            }
+        payload_json = json.dumps(payload, sort_keys=True, default=str)
+        return hashlib.sha256(payload_json.encode()).hexdigest()
 
     async def get(self, key: str) -> ToolResult | None:
         """Return a cached tool result when a prior execution exists."""

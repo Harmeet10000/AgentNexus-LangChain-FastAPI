@@ -1,0 +1,61 @@
+{
+  "benchmark": "upload-extraction-ingestion-boundary",
+  "timestamp_utc": "2026-10-27T19:28:40.904326+00:00",
+  "python": "3.12",
+  "production_limits": {
+    "max_upload_size_bytes": 10485760,
+    "extraction_timeout_seconds": 120.0,
+    "extraction_max_pages": 250,
+    "extraction_max_output_bytes": 52428800
+  },
+  "upload_validation": [
+    {
+      "size_bytes": 1024,
+      "wall_clock_seconds": 6.910800038895104e-05,
+      "accepted": true,
+      "failure_code": null,
+      "output_bytes": 1024
+    },
+    {
+      "size_bytes": 1048576,
+      "wall_clock_seconds": 5.4561998695135117e-05,
+      "accepted": true,
+      "failure_code": null,
+      "output_bytes": 1048576
+    },
+    {
+      "size_bytes": 5242880,
+      "wall_clock_seconds": 4.218700087221805e-05,
+      "accepted": true,
+      "failure_code": null,
+      "output_bytes": 5242880
+    },
+    {
+      "size_bytes": 10485760,
+      "wall_clock_seconds": 8.562500079278834e-05,
+      "accepted": true,
+      "failure_code": null,
+      "output_bytes": 10485760
+    },
+    {
+      "size_bytes": 10485761,
+      "wall_clock_seconds": 0.00010247700083709788,
+      "accepted": false,
+      "failure_code": "FILE_TOO_LARGE",
+      "output_bytes": 0
+    }
+  ],
+  "extraction_and_classification": {
+    "fixture": "/home/harmeet/Desktop/Projects/langchain-fastapi-production/tools/lynk/testdata/contracts/minimal-valid.docx",
+    "input_bytes": 1628,
+    "wall_clock_seconds": 0.13505955899927358,
+    "peak_rss_bytes": 701845504,
+    "rss_delta_bytes": 1048576,
+    "page_count": 0,
+    "output_bytes": 388,
+    "token_count_estimate": 59,
+    "classification": "legal_contract",
+    "failure_mode": null
+  },
+  "scope_note": "Measures the bounded upload and parser/classification stages at ingestion; DB/object-store/network/embedding/chunk-model work is excluded for deterministic offline benchmarking."
+}

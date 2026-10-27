@@ -10,6 +10,12 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 
 from app.observability.logging import logger
 
+from .config import (
+    LANGEXTRACT_MODEL_ID,
+    LangExtractModelId,
+    validate_model_id,
+)
+
 
 class ExtractionRequest(BaseModel):
     """One extraction operation derived from a parsed document."""
@@ -19,7 +25,7 @@ class ExtractionRequest(BaseModel):
     text: str
     prompt_description: str
     examples: tuple[lx.data.ExampleData, ...] = ()
-    model_id: str = "gemini-2.5-flash"
+    model_id: LangExtractModelId = LANGEXTRACT_MODEL_ID
     extraction_passes: int = 3
     max_workers: int = 12
 
@@ -28,6 +34,11 @@ class ExtractionProvider(Protocol):
     """Synchronous provider contract dispatched outside the event loop."""
 
     def extract(self, request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]: ...
+
+
+# Kept as a type-level alias for existing callers; the provider API itself is
+# unchanged and remains synchronous behind the async facade.
+type SyncExtractionProvider = ExtractionProvider
 
 
 class ExtractionFailureCode(StrEnum):
@@ -61,17 +72,18 @@ type ExtractionOutcome = ExtractionSucceeded | ExtractionFailed
 class LangExtractClient:
     """Synchronous adapter around LangExtract's functional provider API."""
 
-    __slots__ = ("_api_key",)
+    __slots__ = ("_api_key", "_model_id")
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, model_id: LangExtractModelId = LANGEXTRACT_MODEL_ID) -> None:
         self._api_key = api_key
+        self._model_id = validate_model_id(model_id)
 
     def extract(self, request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]:
         raw = lx.extract(
             text_or_documents=request.text,
             prompt_description=request.prompt_description,
             examples=list(request.examples),
-            model_id=request.model_id,
+            model_id=self._model_id,
             extraction_passes=request.extraction_passes,
             max_workers=request.max_workers,
             api_key=self._api_key,
@@ -100,7 +112,8 @@ class AsyncExtractionService:
         api_key = secret.get_secret_value().strip()
         if not api_key or api_key == "empty-langextract-api-key":
             return cls(provider=None)
-        return cls(provider=LangExtractClient(api_key))
+        model_id = validate_model_id(getattr(settings, "LANGEXTRACT_MODEL", LANGEXTRACT_MODEL_ID))
+        return cls(provider=LangExtractClient(api_key, model_id=model_id))
 
     @property
     def configured(self) -> bool:
