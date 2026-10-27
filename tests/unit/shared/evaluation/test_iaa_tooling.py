@@ -709,6 +709,9 @@ def test_merge_missing_sidecar_case_exits_one(tmp_path: Path) -> None:
 def test_merged_output_passes_real_validation(tmp_path: Path) -> None:
     fixture = wave3_fixture(tmp_path)
     assert run_merge(merge_argv(fixture, tmp_path)) == 0
+    # the merged output is v2 data, so the normal load path now requires its
+    # own sibling manifest; reuse the fixture-manifest helper for it
+    write_manifest(fixture["out"], tmp_path / "corpus")
     result = asyncio.run(load_validated_golden_set(fixture["out"]))
     assert isinstance(result, Success)
     queries = result.unwrap().queries

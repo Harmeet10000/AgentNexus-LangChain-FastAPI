@@ -878,7 +878,11 @@ async def load_validated_golden_set(path: Path) -> GoldenSetLoadResult:
     When a sibling ``<stem>.manifest.json`` exists it is parsed and audited:
     artifact checksums are recomputed, permissions are re-checked, and (for
     ``legal_retrieval_v2``) row document references are cross-referenced
-    against the manifest's per_artifact source ids.
+    against the manifest's per_artifact source ids.  A ``legal_retrieval_v2``
+    set without its sibling manifest fails closed in every consumer of this
+    loader, not only in the validate CLI: without the manifest the provenance
+    audit cannot run, so the load is rejected.  v1 sets keep loading with or
+    without a manifest.
     """
     result = await load_golden_set(path)
     if isinstance(result, Failure):
@@ -891,6 +895,17 @@ async def load_validated_golden_set(path: Path) -> GoldenSetLoadResult:
             manifest = await _load_manifest(manifest_path)
         except (OSError, ValueError) as exc:
             return _malformed(row_index=1, message=f"Unable to load golden-set manifest: {exc}")
+    elif golden_set.version == GOLDEN_SET_V2_VERSION:
+        # Fail closed before provenance validation: without the manifest the
+        # release-tier conditions in validate_golden_set would also produce
+        # misleading issues, so the missing sibling is the root cause to report.
+        return _malformed(
+            row_index=1,
+            message=(
+                f"legal_retrieval_v2 golden set requires a sibling "
+                f"{manifest_path.name} provenance manifest (expected at {manifest_path})"
+            ),
+        )
     try:
         validate_golden_set(golden_set, manifest=manifest)
     except GoldenSetProvenanceError as exc:

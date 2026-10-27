@@ -160,6 +160,15 @@ async def test_manifest_entry_without_checksum_and_source_url_fails(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_release_row_with_pending_sme_adjudication_fails(tmp_path: Path) -> None:
+    # v2 loads fail closed without a manifest, so ship one to exercise the
+    # provenance rule this test targets.
+    corpus_root = tmp_path / "corpus"
+    sha256 = _write_artifact(corpus_root, "doc-1")
+    _write_manifest(
+        tmp_path / "release.manifest.json",
+        [_artifact_entry("doc-1", sha256)],
+        corpus_root,
+    )
     row = _v2_row(
         provenance=_provenance(quality_tier="release", adjudication={"status": "pending_sme"})
     )
@@ -286,6 +295,15 @@ async def test_disallowed_redistribution_with_stored_original_fails(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_paired_rows_must_form_a_control_treatment_pair(tmp_path: Path) -> None:
+    # v2 loads fail closed without a manifest, so ship one to exercise the
+    # pairing rule this test targets.
+    corpus_root = tmp_path / "corpus"
+    sha256 = _write_artifact(corpus_root, "doc-1")
+    _write_manifest(
+        tmp_path / "paired.manifest.json",
+        [_artifact_entry("doc-1", sha256)],
+        corpus_root,
+    )
     rows = [
         _v2_row(
             case_id="direct_answer_fixture_010",
@@ -430,3 +448,70 @@ async def test_v2_exemplar_set_passes_validation() -> None:
     golden_set = result.unwrap()
     assert golden_set.version == "legal_retrieval_v2"
     assert golden_set.provenance_schema_version == "golden_provenance_v1"
+
+
+@pytest.mark.asyncio
+async def test_v2_set_without_sibling_manifest_fails_load(tmp_path: Path) -> None:
+    """v2 gold data is unauditable without its manifest, so every load refuses it."""
+    path = tmp_path / "set.jsonl"
+    _write_set(path, _v2_row())  # provenance-clean rows: the manifest is the only problem
+
+    result = await load_validated_golden_set(path)
+
+    assert isinstance(result, Failure)
+    assert "requires a sibling set.manifest.json provenance manifest" in result.failure().message
+
+
+@pytest.mark.asyncio
+async def test_v2_manifest_audit_issue_fails_load(tmp_path: Path) -> None:
+    """An existing manifest with an audit defect still fails the normal load path."""
+    corpus_root = tmp_path / "corpus"
+    _write_artifact(corpus_root, "doc-1")
+    _write_manifest(
+        tmp_path / "set.manifest.json",
+        [
+            {
+                "source_id": "doc-1",
+                "source_url": "https://example.test/doc-1",
+                "original_filename": "original.txt",
+            }
+        ],
+        corpus_root,
+    )
+    path = tmp_path / "set.jsonl"
+    _write_set(path, _v2_row())
+
+    result = await load_validated_golden_set(path)
+
+    assert isinstance(result, Failure)
+    assert "sha256 checksum is missing" in result.failure().message
+
+
+@pytest.mark.asyncio
+async def test_v1_set_without_manifest_still_loads(tmp_path: Path) -> None:
+    """v1 keeps loading with no sibling manifest and no audit."""
+    metadata = {
+        "version": "legal_retrieval_v1",
+        "provenance_schema_version": "golden_provenance_v1",
+    }
+    v1_row: dict[str, object] = {
+        "query": "Which clause applies?",
+        "expected_chunk_ids": ["chunk-1"],
+        "expected_document_ids": ["doc-1"],
+        "jurisdiction": "India",
+        "document_kind": "contracts",
+        "difficulty": "easy",
+        "notes": "fixture",
+        "awaiting_sme_expansion": False,
+        "case_type": "direct_answer",
+        "retrieval_relevance": "relevant",
+        "claim_entailment": "entailed",
+        "provenance": _provenance(),
+    }
+    path = tmp_path / "v1.jsonl"
+    path.write_text(json.dumps(metadata) + "\n" + json.dumps(v1_row) + "\n", encoding="utf-8")
+
+    result = await load_validated_golden_set(path)
+
+    assert isinstance(result, Success)
+    assert result.unwrap().version == "legal_retrieval_v1"
