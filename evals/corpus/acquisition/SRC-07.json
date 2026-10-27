@@ -1,0 +1,50 @@
+{
+ "source_id": "SRC-07",
+ "title": "Indian Railways Standard General Conditions of Contract (GCC) April 2022 — IREPS digitally signed copy with scanned circular prefix",
+ "issuer": "Indian Railways (Railway Board), Ministry of Railways, Government of India; published via IREPS (CRIS)",
+ "source_url": "https://www.ireps.gov.in/ireps/upload/files/092024/77357644/GCC-APRIL-2022.pdf",
+ "terms_licence_url": "https://indianrailways.gov.in/footer/copyright-policy",
+ "jurisdiction": "IN",
+ "document_date": "2022-04-27",
+ "access_date": "2026-10-28",
+ "source_type": "public",
+ "classification": "public",
+ "original_filename": "original.pdf",
+ "mime_type": "application/pdf",
+ "sha256": "7f87527c5446cfd7343d6426d8da15bd1e53edd0218b0190328a62b1a13fc9dc",
+ "file_size_bytes": 5265744,
+ "permission_status": "public_terms_verified",
+ "redistribution_status": "permitted_with_attribution",
+ "model_processing_status": "permitted",
+ "ocr_status": "embedded_text_layer",
+ "ocr_engine": "pdftotext (poppler)",
+ "ocr_engine_version": "26.01.0",
+ "extraction_settings": {
+  "download_command": "curl -L --fail --silent --show-error --max-time 300 --retry 2 --retry-delay 5 -A \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36\" -H \"Accept: application/pdf,*/*\" -o original.pdf \"<URL>\"",
+  "page_count_command": "pdfinfo original.pdf",
+  "raw_ocr_command": "pdftotext original.pdf -   # verbatim output, written unmodified to raw_ocr.txt (poppler 26.01.0)",
+  "pages_json_command": "pdftotext -f N -l N original.pdf -   # per page N=1..page_count, one-based page_no, assembled in order",
+  "normalization_command": "python3 normalize(): ",
+  "normalization_rules": "R1 remove NUL bytes; R2 CRLF and lone CR to LF; R3 U+00A0 and U+2007..U+200B converted to U+0020; R4 ligatures U+FB00-FB06 expanded to component letters; R5 form-feed (U+000C) page markers removed; R6 trailing whitespace stripped per line; R7 runs of 3+ blank lines collapsed to 2; R8 nothing else — no spelling, hyphenation or OCR repair of any kind",
+  "verification_commands": "file --mime-type original.pdf; sha256sum original.pdf; head -c 8 (PDF magic check)"
+ },
+ "page_count": 155,
+ "characteristics": {
+  "scan_heavy": true,
+  "table_schedule_heavy": true,
+  "irregular_numbering": true,
+  "version_pair_role": true,
+  "multi_contract": false,
+  "clean_control": false,
+  "notes": "scanned circular prefix (p2-3) with noisy OCR text layer; header stamps alternate between 'GCC April 2022' (typed body) and 'GCC July 2020' (index pages); version pair with failed SRC-08 (ACS-9) and SRC-09 (ACS-11)"
+ },
+ "document_version_identity": "GCC April 2022 (IREPS digital signature by DAVULURI SREE VENKATESH, 23.09.2024, IREPS-CRIS); circular prefix No. 2022/CE-I/CT(AC)/GCC-2022/Policy dated 27.04.2022; index pages carry 'GCC July 2020' base stamps under the April 2022 edition",
+ "contract_boundaries": [],
+ "ambiguous_boundaries": [
+  "typed GCC body vs scanned circular prefix: pages 2-3 are an OCR-noisy scanned circular (garbled Devanagari), page 1 is a typed cover, page 4 begins the typed INDEX — single contract, no sub-boundaries drawn"
+ ],
+ "page_map_file": "pages.json",
+ "attribution_string": "Source: Indian Railways (Railway Board), Ministry of Railways, Government of India; published via IREPS (CRIS), <https://www.ireps.gov.in/ireps/upload/files/092024/77357644/GCC-APRIL-2022.pdf>, accessed 2026-10-28; reproduced under the Ministry of Railways copyright policy <https://indianrailways.gov.in/footer/copyright-policy>.",
+ "unresolved_rights_notes": null,
+ "terms_note": "The Ministry of Railways copyright policy (https://indianrailways.gov.in/footer/copyright-policy) is the verified permission basis for reproduction. The IREPS footer Terms & Conditions (https://www.ireps.gov.in/) were retrievable but contain no explicit reproduction clause; the IREPS URL is retained only as download/source provenance in source_url."
+}

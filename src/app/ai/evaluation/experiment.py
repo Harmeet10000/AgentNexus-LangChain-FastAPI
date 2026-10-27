@@ -23,7 +23,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from returns.result import Failure
 
 from .metrics import ndcg_at_k, recall_at_k
-from .schema import GoldenItemProvenance, load_validated_golden_set, validate_golden_set
+from .schema import (
+    NO_EVIDENCE_CASE_TYPES,
+    GoldenItemProvenance,
+    load_validated_golden_set,
+    validate_golden_set,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -333,9 +338,9 @@ class VariantComparison(BaseModel):
 
 def stratum_for(query: GoldenQuery) -> str:
     """Classify a query without inventing labels absent from the gold set."""
-    if query.case_type in {"unanswerable", "statute_not_in_corpus"}:
+    if query.case_type in NO_EVIDENCE_CASE_TYPES:
         return "no_evidence"
-    if query.case_type == "near_miss":
+    if query.case_type == "near_miss_clause":
         return "near_miss"
     notes = query.notes.lower()
     if "conflicting" in notes:
@@ -401,7 +406,7 @@ def _case_metrics(
         entailment = sum(claim.status == query.claim_entailment for claim in claims) / len(claims)
     citations = output.citations
     evidence_ids = {item.evidence_id for item in output.evidence}
-    no_evidence = query.case_type in {"unanswerable", "statute_not_in_corpus"}
+    no_evidence = query.case_type in NO_EVIDENCE_CASE_TYPES
     return CaseMetrics(
         retrieval_recall_at_k=recall_at_k(output.retrieved_chunk_ids, expected, cutoff),
         retrieval_ndcg_at_k=ndcg_at_k(output.retrieved_chunk_ids, expected, cutoff),
@@ -677,7 +682,7 @@ class SyntheticSeedAdapter:
     async def run(query: GoldenQuery, variant: VariantConfig) -> AdapterOutput:
         expected = list(query.expected_chunk_ids)
         documents = list(query.expected_document_ids)
-        no_evidence = query.case_type in {"unanswerable", "statute_not_in_corpus"}
+        no_evidence = query.case_type in NO_EVIDENCE_CASE_TYPES
         retrieved = [] if no_evidence else expected
         evidence = [
             EvidenceRef(

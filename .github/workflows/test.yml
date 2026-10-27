@@ -95,6 +95,12 @@ jobs:
       - name: Validate evaluation gold-set provenance
         run: uv run python -m app.ai.evaluation.validate evals/golden/legal_retrieval_v1.jsonl
 
+      - name: Validate gold-set v2 cases and manifest
+        run: uv run python -m app.ai.evaluation.validate evals/golden/legal_retrieval_v2.jsonl
+
+      - name: Check corpus binaries against redistribution policy
+        run: uv run python scripts/check_corpus_binaries.py evals/corpus
+
       - name: Type check with ty
         run: uv run ty check src/
 

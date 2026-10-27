@@ -1,0 +1,49 @@
+{
+ "source_id": "SRC-09",
+ "title": "Indian Railways Standard GCC April 2022 — Advance Correction Slip No. 11 (ACS-11)",
+ "issuer": "Indian Railways (Railway Board) / East Central Railway, Government of India",
+ "source_url": "https://indianrailways.gov.in/railwayboard/uploads/directorate/civil_engg/2026/2026_03_13%20Indian%20Railways%20Standard%20General%20Conditions%20of%20Contract%2C%20April%202022%20(Advance%20Correction%20Slip%20No_%2011).pdf",
+ "terms_licence_url": "https://www.ireps.gov.in/ (Terms & Conditions / Privacy Policy, site footer)",
+ "jurisdiction": "IN",
+ "document_date": null,
+ "access_date": "2026-10-28",
+ "source_type": "public",
+ "classification": "public",
+ "original_filename": null,
+ "mime_type": null,
+ "sha256": null,
+ "file_size_bytes": null,
+ "permission_status": "public_terms_verified",
+ "redistribution_status": "permitted_with_attribution",
+ "model_processing_status": "permitted",
+ "ocr_status": null,
+ "ocr_engine": null,
+ "ocr_engine_version": null,
+ "extraction_settings": {
+  "download_command": "curl -L --fail --silent --show-error -A \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36\" -o original.pdf \"<URL>\"",
+  "failure": "HTTP 404 (curl exit 22) on primary URL",
+  "alternates_tried": [
+   "http:// variant of the same path -> 302 redirect to https -> same 404",
+   "www. host variant -> 404",
+   "parent directory listing -> 'Site Under Construction' page (uploads tree restructured)",
+   "railwayboard view_section.jsp id=0,4,1244 -> 404",
+   "web.archive.org / other mirrors NOT used per mission rule (never substitute a mirror)"
+  ]
+ },
+ "page_count": null,
+ "characteristics": {
+  "scan_heavy": false,
+  "table_schedule_heavy": false,
+  "irregular_numbering": false,
+  "version_pair_role": true,
+  "multi_contract": false,
+  "clean_control": false,
+  "notes": "ACQUISITION FAILED — see unresolved_rights_notes and evals/corpus/README.md failure table"
+ },
+ "document_version_identity": "GCC April 2022 + ACS-11",
+ "contract_boundaries": [],
+ "ambiguous_boundaries": [],
+ "page_map_file": null,
+ "attribution_string": "Source: Indian Railways, <https://indianrailways.gov.in/railwayboard/uploads/directorate/civil_engg/2026/2026_03_13%20Indian%20Railways%20Standard%20General%20Conditions%20of%20Contract%2C%20April%202022%20(Advance%20Correction%20Slip%20No_%2011).pdf>, attempted access 2026-10-28; download FAILED (HTTP 404).",
+ "unresolved_rights_notes": "DOWNLOAD FAILED: HTTP 404 (curl exit 22, 'The requested URL returned error: 404'). Alternates tried per mission rule: http->https redirect (same 404), www host variant (404), parent directory listing (returns 'Site Under Construction' — indianrailways.gov.in uploads tree restructured as of 2026-10-28), railwayboard section page (404). Mirror substitution prohibited by mission. Fixture-role impact documented in README."
+}

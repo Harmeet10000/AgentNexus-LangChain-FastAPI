@@ -1,0 +1,43 @@
+{
+ "source_id": "SYN-05",
+ "title": "SYN-05 Synthetic scanned-style purchase order with operative term in a footnote (PO-2026-04517)",
+ "issuer": "Corpus agent (Wave 2A) — synthetic fixture",
+ "source_url": null,
+ "terms_licence_url": null,
+ "jurisdiction": "IN",
+ "document_date": null,
+ "access_date": "2026-10-28",
+ "source_type": "synthetic",
+ "classification": "synthetic",
+ "original_filename": "original.pdf",
+ "mime_type": "application/pdf",
+ "sha256": "7e336666e8024b270289dcfec197efbd3ebc87b96ee0774b192dee642da7a0b2",
+ "file_size_bytes": 27056,
+ "permission_status": "synthetic_owned",
+ "redistribution_status": "not_applicable_synthetic",
+ "model_processing_status": "permitted",
+ "ocr_status": "embedded_text_layer",
+ "ocr_engine": "pdftotext (poppler)",
+ "ocr_engine_version": "26.01.0",
+ "extraction_settings": {
+  "authored": "Wave 2A: authored by rendering an image with PIL 12.1.1 (JPEG q72, 150 dpi, GaussianBlur 0.4, -0.4deg rotation, seeded noise) and embedding the image in a single-page PDF via PIL's PDF writer; that render was image-only (pdftotext returned 0 chars). RE-RENDER NOTE 2026-10-28 (Wave 2B-2): re-rendered as a single-page text-layer PDF via LibreOffice Writer (txt->pdf; producer LibreOffice 26.2.5.2) because the image-only render had no text layer and the footnote_as_operative cases require mechanically extractable text (verbatim quote verification). Same authored PO (PO-2026-04517), same operative footnote-2 terms (payment 45 days, LD 0.75%/week capped at 10%); raw_ocr.txt, normalized.txt and pages.json regenerated from the re-rendered PDF. See artifacts/SYN-05/ATTRIBUTION.md.",
+  "pages_json_command": "pdftotext -f N -l N original.pdf - (one-based page_no; regenerated from the re-rendered text-layer PDF)",
+  "normalization_rules": "R1 remove NUL bytes; R2 CRLF and lone CR to LF; R3 U+00A0 and U+2007..U+200B converted to U+0020; R4 ligatures U+FB00-FB06 expanded to component letters; R5 form-feed (U+000C) page markers removed; R6 trailing whitespace stripped per line; R7 runs of 3+ blank lines collapsed to 2; R8 nothing else — no spelling, hyphenation or OCR repair of any kind"
+ },
+ "page_count": 1,
+ "characteristics": {
+  "scan_heavy": true,
+  "table_schedule_heavy": false,
+  "irregular_numbering": false,
+  "version_pair_role": false,
+  "multi_contract": false,
+  "clean_control": false,
+  "notes": "scanned-style purchase order, re-rendered 2026-10-28 with an embedded text layer (see extraction_settings.authored): pdftotext now extracts the full text including the footnote-2 operative term; the Wave 2A visual noise/skew effects are gone, so the OCR-noise axis of the corpus is carried by SRC-05/06/07 and SYN-05's role is purely footnote-placement"
+ },
+ "document_version_identity": "SYN-05 (synthetic fixture, v1)",
+ "contract_boundaries": [],
+ "ambiguous_boundaries": [],
+ "page_map_file": "pages.json",
+ "attribution_string": "Source: synthetic fixture authored by the corpus agent (Wave 2A), 2026-10-28; synthetic_owned; SYNTHETIC — authored by the corpus agent for evaluation fixture use only; no third-party rights; India Code/Gazette/CPWD redistribution is prohibited (independently verified 2026-10-28) so statutory text is reproduced from model knowledge with drift-risk labeling.",
+ "unresolved_rights_notes": "SYNTHETIC — authored by the corpus agent for evaluation fixture use only; no third-party rights; India Code/Gazette/CPWD redistribution is prohibited (independently verified 2026-10-28) so statutory text is reproduced from model knowledge with drift-risk labeling."
+}

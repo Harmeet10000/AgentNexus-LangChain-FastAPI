@@ -32,18 +32,23 @@ from .metrics import ndcg_at_k, precision_at_k, recall_at_k, reciprocal_rank
 from .report import EvaluationReport, write_report
 from .runner import RetrievalEvaluation, run_retrieval_eval
 from .schema import (
+    ArtifactProvenance,
     GoldenItemProvenance,
+    GoldenProvenanceManifest,
     GoldenQuery,
     GoldenSet,
     GoldenSetProvenanceError,
+    audit_golden_manifest,
     load_golden_set,
     load_validated_golden_set,
+    manifest_path_for,
     validate_golden_set,
 )
 
 __all__ = [
     "AdapterOutput",
     "AggregateMetrics",
+    "ArtifactProvenance",
     "CaseMetrics",
     "CaseObservation",
     "ClaimObservation",
@@ -55,6 +60,7 @@ __all__ = [
     "ExperimentReport",
     "ExperimentVerdict",
     "GoldenItemProvenance",
+    "GoldenProvenanceManifest",
     "GoldenQuery",
     "GoldenSet",
     "GoldenSetProvenanceError",
@@ -68,10 +74,12 @@ __all__ = [
     "VariantComparison",
     "VariantConfig",
     "VariantEvaluation",
+    "audit_golden_manifest",
     "compare_policies",
     "evaluate_thresholds",
     "load_golden_set",
     "load_validated_golden_set",
+    "manifest_path_for",
     "ndcg_at_k",
     "precision_at_k",
     "recall_at_k",

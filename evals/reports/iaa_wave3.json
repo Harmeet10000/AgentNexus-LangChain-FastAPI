@@ -1,0 +1,110 @@
+{
+  "annotators": [
+    "wave3-engineer-a",
+    "wave3-engineer-b"
+  ],
+  "n": 105,
+  "raw_agreement": 0.9428571428571428,
+  "kappa": 0.8151950718685831,
+  "confusion_matrix": {
+    "relevant": {
+      "relevant": 85,
+      "partially_relevant": 2,
+      "irrelevant": 0,
+      "not_applicable": 0
+    },
+    "partially_relevant": {
+      "relevant": 1,
+      "partially_relevant": 1,
+      "irrelevant": 0,
+      "not_applicable": 0
+    },
+    "irrelevant": {
+      "relevant": 0,
+      "partially_relevant": 0,
+      "irrelevant": 5,
+      "not_applicable": 3
+    },
+    "not_applicable": {
+      "relevant": 0,
+      "partially_relevant": 0,
+      "irrelevant": 0,
+      "not_applicable": 8
+    }
+  },
+  "disagreements": [
+    {
+      "case_id": "multi_document-lr2-003",
+      "a": "partially_relevant",
+      "b": "relevant"
+    },
+    {
+      "case_id": "no_evidence_vs_ingestion_failure-lr2-002",
+      "a": "irrelevant",
+      "b": "not_applicable"
+    },
+    {
+      "case_id": "no_evidence_vs_ingestion_failure-lr2-003",
+      "a": "irrelevant",
+      "b": "not_applicable"
+    },
+    {
+      "case_id": "partial_coverage_answer-lr2-001",
+      "a": "relevant",
+      "b": "partially_relevant"
+    },
+    {
+      "case_id": "partial_coverage_answer-lr2-003",
+      "a": "relevant",
+      "b": "partially_relevant"
+    },
+    {
+      "case_id": "unanswerable-lr2-002",
+      "a": "irrelevant",
+      "b": "not_applicable"
+    }
+  ],
+  "per_confidence": {
+    "high": {
+      "n": 83,
+      "raw_agreement": 0.9518072289156626,
+      "kappa": 0.714039621016365
+    },
+    "medium": {
+      "n": 13,
+      "raw_agreement": 0.9230769230769231,
+      "kappa": 0.8522727272727274
+    },
+    "low": {
+      "n": 9,
+      "raw_agreement": 0.8888888888888888,
+      "kappa": 0.8235294117647058
+    }
+  },
+  "per_agreement_pattern": {
+    "exact_agreement": {
+      "n": 99,
+      "raw_agreement": 1.0,
+      "kappa": 1.0
+    },
+    "adjacent_disagreement": {
+      "n": 6,
+      "raw_agreement": 0.0,
+      "kappa": -0.125
+    },
+    "distant_disagreement": {
+      "n": 0,
+      "raw_agreement": null,
+      "kappa": null
+    }
+  },
+  "gate": {
+    "passed": true,
+    "thresholds": {
+      "min_kappa": 0.7,
+      "min_agreement": 0.8,
+      "rule": "n >= 5: kappa >= min_kappa and raw_agreement >= min_agreement; n < 5: raw_agreement == 1.0"
+    }
+  },
+  "generated_at": "2026-10-27T22:30:06+00:00"
+}
