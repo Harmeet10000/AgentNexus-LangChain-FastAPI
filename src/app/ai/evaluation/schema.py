@@ -138,6 +138,11 @@ _REDISTRIBUTION_DENY_TOKENS = (
 )
 
 _ADJUDICATOR_REQUIRED = "A completed disagreement requires an adjudicator"
+_WAIVER_RATIONALE_MIN_LENGTH = 20
+_WAIVER_REQUIRES_RATIONALE = (
+    "Waived-with-reason requires a rationale of at least 20 characters"
+)
+_WAIVER_REQUIRES_ADJUDICATOR = "Waived-with-reason requires a named human adjudicator"
 _SOURCE_FLAGS_MISMATCH = "Public/synthetic indicators do not match source_type"
 _PERMISSION_MISMATCH = "permission_status is incompatible with source_type"
 _TERMS_REFERENCE_REQUIRED = "Verified license/terms status requires a reference"
@@ -290,6 +295,14 @@ class AdjudicationRecord(BaseModel):
             raise ValueError(_MODEL_ADJUDICATOR_FORBIDDEN)
         if self.status == "adjudicated" and not self.adjudicator:
             raise ValueError(_ADJUDICATED_REQUIRES_HUMAN)
+        if self.status == "waived_with_reason":
+            # A waiver satisfies the release gate, so it must be as accountable
+            # as an adjudication: a substantive rationale and a named human.
+            # The model-name guard above already covers the adjudicator value.
+            if self.rationale is None or len(self.rationale.strip()) < _WAIVER_RATIONALE_MIN_LENGTH:
+                raise ValueError(_WAIVER_REQUIRES_RATIONALE)
+            if not self.adjudicator:
+                raise ValueError(_WAIVER_REQUIRES_ADJUDICATOR)
         return self
 
 
@@ -593,13 +606,19 @@ def manifest_path_for(golden_set_path: Path) -> Path:
 
 
 def referenced_document_ids(query: GoldenQuery) -> set[str]:
-    """Collect every document identifier a case references by id."""
+    """Collect every document identifier a case references by id.
+
+    Documents named only in ``expected_ingestion_states`` count too: an
+    ingestion-failure case measures a document it never expects to retrieve,
+    so omitting it here would let a case reference an undeclared document.
+    """
     referenced: set[str] = set(query.expected_document_ids)
     referenced.update(query.allowed_doc_ids)
     referenced.update(query.stale_document_ids)
     referenced.update(query.forbidden_document_ids)
     referenced.update(span.document_id for span in query.expected_spans)
     referenced.update(marker.document_id for marker in query.adversarial_markers)
+    referenced.update(state.document_id for state in query.expected_ingestion_states)
     return referenced
 
 

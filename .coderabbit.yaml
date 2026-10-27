@@ -5,6 +5,9 @@ reviews:
     auto_incremental_review: true
   path_filters:
     - "!uv.lock"
+    - "!evals/corpus/artifacts/**"
+    - "!evals/annotations/wave3-annotator-*.jsonl"
+    - "!evals/reports/**"
     - "!docs/learning/**"
     - "!openspec/changes/**/archive/**"
     - "!tests/performance/**"

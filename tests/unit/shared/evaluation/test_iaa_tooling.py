@@ -6,7 +6,9 @@ project's own ``app.ai.evaluation.validate`` module.
 """
 
 import asyncio
+import hashlib
 import json
+import shutil
 import subprocess  # noqa: S404 — spawns the project's own compute_iaa script only
 import sys
 from pathlib import Path
@@ -15,6 +17,7 @@ from typing import Any
 import pytest
 import scripts.compute_iaa as iaa
 from returns.result import Success
+from scripts import merge_annotations
 from scripts.compute_iaa import kappa_from_margins as script_kappa_from_margins
 from scripts.compute_iaa import run as run_iaa
 from scripts.merge_annotations import run as run_merge
@@ -129,6 +132,46 @@ def write_gold(path: Path, rows: list[dict[str, Any]]) -> str:
     return metadata
 
 
+def write_manifest(gold: Path, corpus_root: Path) -> Path:
+    """Write a minimal but auditable v2 manifest next to a fixture gold file.
+
+    The single per_artifact entry has a stored original whose checksum matches,
+    so the merge's temp-file validation exercises the real manifest audit path.
+    ``named_adjudicator`` lets release-tier ``adjudicated`` rows validate.
+    """
+    content = b"fixture-corpus-bytes"
+    artifact_dir = corpus_root / "artifacts" / "doc-fixture"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "original.txt").write_bytes(content)
+    manifest = {
+        "manifest_version": "golden_provenance_v1",
+        "golden_set_version": "legal_retrieval_v2",
+        "artifact": gold.name,
+        "corpus_manifest_path": str(corpus_root),
+        "source_policy": {},
+        "annotation_policy": {},
+        "sme_requirements": {
+            "role": "practising lawyer",
+            "domain": "contract law",
+            "independence": "independent of whoever produced the labels",
+            "commitment": "sign-off on disputed cases",
+            "named_adjudicator": "sme-lead-7",
+            "adjudication_status": "pending_sme",
+        },
+        "per_artifact": [
+            {
+                "source_id": "doc-fixture",
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "source_url": "https://fixture.test/doc-fixture",
+                "original_filename": "original.txt",
+            }
+        ],
+    }
+    manifest_path = gold.with_name(f"{gold.stem}.manifest.json")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return manifest_path
+
+
 def sidecars_for(spec: tuple[tuple[str, str, str, str], ...]) -> tuple[list, list]:
     sidecar_a = [annotation(case, label_a) for case, label_a, _, _ in spec]
     sidecar_b = [annotation(case, label_b, annotator=ANNOTATOR_B) for case, _, label_b, _ in spec]
@@ -169,15 +212,22 @@ def compute_iaa_report(
 
 
 def wave3_fixture(tmp_path: Path) -> dict[str, Path]:
-    """Full fixture: gold set + sidecars + passing IAA report (thresholds met)."""
+    """Full fixture: gold set + manifest + sidecars + passing IAA report."""
     rows = [gold_row(case, grader=grader) for case, _, _, grader in WAVE3_FIXTURE]
     gold = tmp_path / "legal_retrieval_v2.jsonl"
     write_gold(gold, rows)
+    manifest = write_manifest(gold, tmp_path / "corpus")
     _, report = compute_iaa_report(tmp_path, WAVE3_FIXTURE)
-    return {"gold": gold, "report": report, "out": tmp_path / "merged.jsonl"}
+    return {"gold": gold, "manifest": manifest, "report": report, "out": tmp_path / "merged.jsonl"}
 
 
-def merge_argv(fixture: dict[str, Path], tmp_path: Path, *, apply: bool = True) -> list[str]:
+def merge_argv(
+    fixture: dict[str, Path],
+    tmp_path: Path,
+    *,
+    apply: bool = True,
+    reopen: bool = False,
+) -> list[str]:
     argv = [
         "--gold",
         str(fixture["gold"]),
@@ -192,6 +242,8 @@ def merge_argv(fixture: dict[str, Path], tmp_path: Path, *, apply: bool = True) 
     ]
     if apply:
         argv.append("--apply")
+    if reopen:
+        argv.append("--reopen")
     return argv
 
 
@@ -592,7 +644,7 @@ def test_merge_validation_failure_rolls_back(tmp_path: Path) -> None:
     code = run_merge(merge_argv(fixture, tmp_path))
     assert code == 1
     assert fixture["gold"].read_bytes() == original  # untouched
-    assert list(tmp_path.glob("*.merge-*.tmp")) == []  # temp rolled back
+    assert list(tmp_path.glob("*.merge-*")) == []  # temp gold + temp manifest rolled back
 
 
 def test_merge_temp_file_removed_on_any_exception(
@@ -611,7 +663,7 @@ def test_merge_temp_file_removed_on_any_exception(
     with pytest.raises(KeyboardInterrupt):
         run_merge(merge_argv(fixture, tmp_path))
     assert fixture["gold"].read_bytes() == original  # untouched
-    assert list(tmp_path.glob("*.merge-*.tmp")) == []  # temp unlinked before the raise
+    assert list(tmp_path.glob("*.merge-*")) == []  # temp gold + manifest unlinked before raise
 
 
 def test_merge_replaced_output_is_world_readable(tmp_path: Path) -> None:
@@ -626,7 +678,12 @@ def test_merge_is_idempotent(tmp_path: Path) -> None:
     argv = merge_argv(fixture, tmp_path)
     assert run_merge(argv) == 0
     first_pass = fixture["out"].read_bytes()
-    # second pass runs against the already-merged output
+    # second pass runs against the already-merged output; give it the same
+    # sibling manifest the in-place merge would have
+    shutil.copyfile(
+        fixture["manifest"],
+        fixture["out"].with_name(f"{fixture['out'].stem}.manifest.json"),
+    )
     argv[argv.index("--gold") + 1] = str(fixture["out"])
     assert run_merge(argv) == 0
     assert fixture["out"].read_bytes() == first_pass
@@ -670,3 +727,191 @@ def test_merged_output_passes_real_validation(tmp_path: Path) -> None:
         and len(query.provenance.annotations) == 2
         for query in release
     )
+
+
+# --- merge guard rails: manifest consult, IAA recheck, annotator identity ----
+
+
+def test_iaa_rejects_same_annotator_on_both_sides(tmp_path: Path) -> None:
+    spec = WAVE3_FIXTURE[:2]
+    base = tmp_path / "same-annotator"
+    base.mkdir()
+    write_questions(base / "questions.jsonl", [case for case, _, _, _ in spec])
+    sidecar_a = sidecars_for(spec)[0]
+    write_jsonl(base / "sidecar-a.jsonl", sidecar_a)
+    write_jsonl(base / "sidecar-b.jsonl", sidecar_a)  # the same annotator twice
+    code = run_iaa(
+        [
+            "--a",
+            str(base / "sidecar-a.jsonl"),
+            "--b",
+            str(base / "sidecar-b.jsonl"),
+            "--questions",
+            str(base / "questions.jsonl"),
+            "--out",
+            str(base / "report.json"),
+        ]
+    )
+    assert code == 1
+
+
+def test_merge_rejects_same_annotator_on_both_sides(tmp_path: Path) -> None:
+    fixture = wave3_fixture(tmp_path)
+    sidecar_b = [
+        json.loads(line)
+        for line in (tmp_path / "sidecar-b.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    for record in sidecar_b:
+        record["annotator_id"] = ANNOTATOR_A  # identical to sidecar A
+    write_jsonl(tmp_path / "sidecar-b.jsonl", sidecar_b)
+    original = fixture["gold"].read_bytes()
+    code = run_merge(merge_argv(fixture, tmp_path))
+    assert code == 1
+    assert fixture["gold"].read_bytes() == original  # no rows promoted
+    assert not fixture["out"].exists()
+
+
+def test_merge_recomputed_iaa_matches_compute_iaa(tmp_path: Path) -> None:
+    code, report_path = compute_iaa_report(tmp_path, WAVE3_FIXTURE)
+    assert code == 0
+    report = json.loads(report_path.read_text())
+    records_a, records_b = sidecars_for(WAVE3_FIXTURE)
+    errors: list[str] = []
+    by_case_a = iaa.validate_sidecar(tmp_path / "map-a.jsonl", records_a, errors)
+    by_case_b = iaa.validate_sidecar(tmp_path / "map-b.jsonl", records_b, errors)
+    assert errors == []
+    case_ids = sorted(case for case, _, _, _ in WAVE3_FIXTURE)
+    kappa, raw, disagreements = merge_annotations.recompute_iaa(case_ids, by_case_a, by_case_b)
+    assert kappa == pytest.approx(iaa.cohen_kappa(
+        [iaa.relevance_of(by_case_a[case_id]) for case_id in case_ids],
+        [iaa.relevance_of(by_case_b[case_id]) for case_id in case_ids],
+    ))
+    assert kappa == pytest.approx(report["kappa"])
+    assert raw == pytest.approx(report["raw_agreement"])
+    assert disagreements == report["disagreements"]
+
+
+def test_merge_refuses_when_report_kappa_is_stale(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Sidecar label edits preserving row count + disagreement ids move kappa."""
+    fixture = wave3_fixture(tmp_path)
+    sidecar_a, sidecar_b = sidecars_for(WAVE3_FIXTURE)
+    for records in (sidecar_a, sidecar_b):
+        for record in records:
+            if record["case_id"] == "direct_answer-unit-001":
+                record["labels"]["retrieval_relevance"] = "irrelevant"
+    write_jsonl(tmp_path / "sidecar-a.jsonl", sidecar_a)
+    write_jsonl(tmp_path / "sidecar-b.jsonl", sidecar_b)
+    original = fixture["gold"].read_bytes()
+    code = run_merge(merge_argv(fixture, tmp_path))
+    assert code == 2
+    assert "kappa" in capsys.readouterr().err
+    assert fixture["gold"].read_bytes() == original  # untouched
+    assert not fixture["out"].exists()
+
+
+def test_merge_refuses_when_recomputed_gate_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture = wave3_fixture(tmp_path)
+    report = json.loads(fixture["report"].read_text(encoding="utf-8"))
+    report["gate"]["thresholds"]["min_kappa"] = 0.9  # recomputed kappa 0.75 fails this
+    fixture["report"].write_text(json.dumps(report), encoding="utf-8")
+    original = fixture["gold"].read_bytes()
+    code = run_merge(merge_argv(fixture, tmp_path))
+    assert code == 2
+    assert "recomputed IAA gate fails" in capsys.readouterr().err
+    assert fixture["gold"].read_bytes() == original  # untouched
+    assert not fixture["out"].exists()
+
+
+def test_merge_refuses_v2_gold_without_manifest(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture = wave3_fixture(tmp_path)
+    fixture["manifest"].unlink()
+    original = fixture["gold"].read_bytes()
+    code = run_merge(merge_argv(fixture, tmp_path))
+    assert code == 1
+    assert "manifest" in capsys.readouterr().err
+    assert fixture["gold"].read_bytes() == original  # untouched
+    assert not fixture["out"].exists()
+    assert list(tmp_path.glob("*.merge-*")) == []  # no temp gold or temp manifest residue
+
+
+def test_merge_temp_validation_consults_copied_manifest(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The pre-move validation must fail on a corrupt manifest, not skip it."""
+    fixture = wave3_fixture(tmp_path)
+    manifest = json.loads(fixture["manifest"].read_text(encoding="utf-8"))
+    manifest["per_artifact"][0]["sha256"] = "0" * 64  # corrupt stored-artifact checksum
+    fixture["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+    original = fixture["gold"].read_bytes()
+    code = run_merge(merge_argv(fixture, tmp_path))
+    assert code == 1
+    assert "sha256 mismatch" in capsys.readouterr().err
+    assert fixture["gold"].read_bytes() == original  # untouched
+    assert list(tmp_path.glob("*.merge-*")) == []  # temp manifest cleaned up too
+
+
+# --- merge of pre-adjudicated rows ------------------------------------------
+
+
+ADJUDICATED_CASE = "direct_answer-unit-020"
+
+
+def adjudicated_gold_row(case_id: str, *, grader: str = "deterministic") -> dict[str, Any]:
+    row = gold_row(case_id, grader=grader)
+    provenance = row["provenance"]
+    provenance["human_review_status"] = "adjudicated"
+    provenance["quality_tier"] = "release"
+    provenance["adjudication"] = {
+        "status": "adjudicated",
+        "adjudicator": "sme-lead-7",
+        "method": "independent_sme",
+        "rationale": "SME reviewed the disputed relevance and confirmed the engineer label",
+        "checklist": {"spans": True},
+        "decided_at": "2026-10-28T12:00:00+00:00",
+    }
+    return row
+
+
+def adjudicated_fixture(tmp_path: Path) -> dict[str, Path]:
+    """One pre-adjudicated release row + agreeing sidecars + passing report."""
+    spec = ((ADJUDICATED_CASE, "relevant", "relevant", "deterministic"),)
+    gold = tmp_path / "gold.jsonl"
+    write_gold(gold, [adjudicated_gold_row(ADJUDICATED_CASE)])
+    manifest = write_manifest(gold, tmp_path / "corpus")
+    _, report = compute_iaa_report(tmp_path, spec)
+    return {"gold": gold, "manifest": manifest, "report": report, "out": tmp_path / "merged.jsonl"}
+
+
+def test_merge_preserves_pre_adjudicated_row(tmp_path: Path) -> None:
+    fixture = adjudicated_fixture(tmp_path)
+    prior = json.loads(fixture["gold"].read_text(encoding="utf-8").splitlines()[1])
+    assert run_merge(merge_argv(fixture, tmp_path)) == 0
+    _, rows = read_gold_rows(fixture["out"])
+    assert len(rows) == 1
+    merged = rows[0]["provenance"]
+    # annotation records are attached, but everything the SME decided stays verbatim
+    assert [record["annotator_id"] for record in merged["annotations"]] == [
+        ANNOTATOR_A,
+        ANNOTATOR_B,
+    ]
+    assert merged["adjudication"] == prior["provenance"]["adjudication"]
+    assert merged["human_review_status"] == "adjudicated"
+    assert merged["quality_tier"] == "release"
+
+
+def test_merge_reopen_rewrites_pre_adjudicated_row(tmp_path: Path) -> None:
+    fixture = adjudicated_fixture(tmp_path)
+    assert run_merge(merge_argv(fixture, tmp_path, reopen=True)) == 0
+    _, rows = read_gold_rows(fixture["out"])
+    provenance = rows[0]["provenance"]
+    assert provenance["human_review_status"] == "engineer_reviewed"
+    assert provenance["adjudication"]["status"] == "not_required"
+    assert provenance["adjudication"]["adjudicator"] is None
+    assert provenance["quality_tier"] == "release"
+    assert len(provenance["annotations"]) == 2

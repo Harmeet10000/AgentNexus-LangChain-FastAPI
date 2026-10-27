@@ -196,6 +196,21 @@ def relevance_of(record: dict[str, Any]) -> str:
     return value if isinstance(value, str) else ""
 
 
+def annotator_id_overlap(
+    by_case_a: dict[str, dict[str, Any]],
+    by_case_b: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Return sorted annotator_ids present in BOTH sidecars (empty when distinct).
+
+    Shared by ``compute_iaa.py`` and ``merge_annotations.py`` so both tools
+    enforce one identical contract: a paired computation over the same
+    annotator twice would report perfect agreement and promote rows.
+    """
+    annotators_a = {record["annotator_id"] for record in by_case_a.values()}
+    annotators_b = {record["annotator_id"] for record in by_case_b.values()}
+    return sorted(annotators_a & annotators_b)
+
+
 def _confidence_of(record: dict[str, Any]) -> str:
     value = record.get("confidence")
     return value if isinstance(value, str) and value in _CONFIDENCE_ORDER else "low"
@@ -262,6 +277,12 @@ def _load_inputs(
     records_b = load_jsonl_objects(args.b, errors)
     by_case_a = validate_sidecar(args.a, records_a, errors)
     by_case_b = validate_sidecar(args.b, records_b, errors)
+    overlap = annotator_id_overlap(by_case_a, by_case_b)
+    if overlap:
+        errors.append(
+            "the same annotator_id appears on both sides: "
+            f"{', '.join(overlap)}; a paired computation needs two distinct annotators"
+        )
     if universe:
         errors.extend(
             f"{args.a}: case_id {missing!r} missing from the question universe"

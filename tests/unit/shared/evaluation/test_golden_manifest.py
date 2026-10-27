@@ -215,6 +215,58 @@ async def test_v2_row_referencing_undeclared_document_fails(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_ingestion_state_for_undeclared_document_fails(tmp_path: Path) -> None:
+    """A doc named only in expected_ingestion_states must also be declared."""
+    corpus_root = tmp_path / "corpus"
+    sha256 = _write_artifact(corpus_root, "doc-1")
+    _write_manifest(
+        tmp_path / "set.manifest.json",
+        [_artifact_entry("doc-1", sha256)],
+        corpus_root,
+    )
+    row = _v2_row(
+        expected_ingestion_states=[
+            {"document_id": "doc-1", "state": "ready"},
+            {"document_id": "doc-undeclared", "state": "failed"},
+        ],
+    )
+    path = tmp_path / "set.jsonl"
+    _write_set(path, row)
+
+    result = await load_validated_golden_set(path)
+
+    assert isinstance(result, Failure)
+    assert "not present in manifest per_artifact" in result.failure().message
+
+
+@pytest.mark.asyncio
+async def test_ingestion_state_document_declared_in_per_artifact_passes(tmp_path: Path) -> None:
+    corpus_root = tmp_path / "corpus"
+    sha256 = _write_artifact(corpus_root, "doc-1")
+    undeclared_sha256 = _write_artifact(corpus_root, "doc-undeclared")
+    _write_manifest(
+        tmp_path / "set.manifest.json",
+        [
+            _artifact_entry("doc-1", sha256),
+            _artifact_entry("doc-undeclared", undeclared_sha256),
+        ],
+        corpus_root,
+    )
+    row = _v2_row(
+        expected_ingestion_states=[
+            {"document_id": "doc-1", "state": "ready"},
+            {"document_id": "doc-undeclared", "state": "failed"},
+        ],
+    )
+    path = tmp_path / "set.jsonl"
+    _write_set(path, row)
+
+    result = await load_validated_golden_set(path)
+
+    assert isinstance(result, Success)
+
+
+@pytest.mark.asyncio
 async def test_disallowed_redistribution_with_stored_original_fails(tmp_path: Path) -> None:
     corpus_root = tmp_path / "corpus"
     sha256 = _write_artifact(corpus_root, "doc-1")
@@ -277,6 +329,26 @@ def test_adjudicator_resembling_a_model_name_is_rejected() -> None:
         method="independent_sme",
     )
     assert record.adjudicator == "senior-sme-1"
+
+
+def test_waiver_requires_rationale_and_human_adjudicator() -> None:
+    rationale = "SME lead waived this row: duplicate of an adjudicated case in the same wave"
+    with pytest.raises(ValidationError, match="rationale"):
+        AdjudicationRecord(status="waived_with_reason")
+    with pytest.raises(ValidationError, match="rationale"):
+        AdjudicationRecord(
+            status="waived_with_reason", rationale="too short", adjudicator="sme-lead-7"
+        )
+    with pytest.raises(ValidationError, match="adjudicator"):
+        AdjudicationRecord(status="waived_with_reason", rationale=rationale)
+    with pytest.raises(ValidationError, match="human reviewer"):
+        AdjudicationRecord(status="waived_with_reason", rationale=rationale, adjudicator="gpt-5")
+
+    record = AdjudicationRecord(
+        status="waived_with_reason", rationale=rationale, adjudicator="sme-lead-7"
+    )
+    assert record.status == "waived_with_reason"
+    assert record.adjudicator == "sme-lead-7"
 
 
 def _manifest_for(golden_set_version: str, per_artifact: list[dict[str, object]]) -> GoldenProvenanceManifest:
