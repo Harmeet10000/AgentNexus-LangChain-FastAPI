@@ -1008,7 +1008,7 @@ def make_ingestion_node() -> ConfiguredStateNode:
     raise for them, and must never silently continue with empty text.
     """
 
-    async def ingestion_node(state: LegalAgentState, config: RunnableConfig) -> dict[str, Any]:  # noqa: PLR0914
+    async def ingestion_node(state: LegalAgentState, config: RunnableConfig) -> dict[str, Any]:  # noqa: PLR0912, PLR0914
         allowed_doc_ids = tuple(dict.fromkeys(state.get("allowed_doc_ids") or [state["doc_id"]]))
         log = logger.bind(
             node="ingestion",
@@ -1091,6 +1091,29 @@ def make_ingestion_node() -> ConfiguredStateNode:
                         error_code="INGESTION_INCOMPLETE",
                     )
                 }
+            scope_versions = tuple(
+                (document_id, version, None)
+                for document_id, version in sorted(
+                    {
+                        (segment.document_id, segment.document_version)
+                        for segment in segments
+                    }
+                )
+            )
+            contract_values: dict[tuple[str, int], list[int | None]] = {}
+            for segment in segments:
+                contract_values.setdefault(
+                    (segment.document_id, segment.document_version), []
+                ).append(segment.contract_index)
+            scope_contracts = tuple(
+                (
+                    document_id,
+                    version,
+                    tuple(sorted({index for index in indexes if index is not None})),
+                    bool(indexes) and all(index is None for index in indexes),
+                )
+                for (document_id, version), indexes in sorted(contract_values.items())
+            )
             # ``segments`` is an append-only LangGraph channel because entity
             # extraction fans out with Send. Avoid duplicating canonical rows
             # when a paused legacy checkpoint replays the ingestion node.
@@ -1105,6 +1128,8 @@ def make_ingestion_node() -> ConfiguredStateNode:
                 "legacy_structure_fallback": False,
                 "document_text": None,
                 "segments": new_segments,
+                "document_versions": list(scope_versions),
+                "document_contracts": list(scope_contracts),
                 "ingestion_state": _ingestion_snapshot(
                     allowed_doc_ids,
                     IngestionDocumentStatus.READY,
@@ -1554,6 +1579,7 @@ def _analysis_tool_context(state: LegalAgentState) -> ToolRuntimeContext:
         "run_id": run_id,
         "checkpoint_id": checkpoint_id,
         "document_versions": tuple(state.get("document_versions", ())),
+        "document_contracts": tuple(state.get("document_contracts", ())),
     }
 
 

@@ -28,7 +28,7 @@ from neo4j.exceptions import Neo4jError
 sys.path.insert(0, "src")
 
 from app.config import get_settings
-from app.utils import logger
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from neo4j import AsyncSession

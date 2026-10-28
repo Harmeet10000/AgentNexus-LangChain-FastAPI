@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import importlib.util
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from typing import Any
 
 from app.features.health.health_check import check_neo4j_plugins
+
+
+def test_standalone_cognee_probe_imports_with_application_logger() -> None:
+    """The executable probe must use the logger's canonical module path."""
+    path = "scripts/verify_cognee_graph.py"
+    spec = importlib.util.spec_from_file_location("verify_cognee_graph", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.logger is not None
 
 
 class _FakeState:

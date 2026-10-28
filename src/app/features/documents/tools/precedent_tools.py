@@ -16,6 +16,10 @@ from langchain_core.tools.base import BaseTool
 
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
+from app.retrieval.graphiti.grouping import (
+    GraphitiDocumentScope,
+    fanout_graphiti_group_ids,
+)
 
 from .authorization import trusted_tool_context
 
@@ -77,9 +81,45 @@ def make_detect_graph_conflicts_tool(
         if cached is not None:
             return cached.model_dump()
 
-        # The only groups accepted are server-issued document ids.  The old
-        # user/tenant group widened this operation to historical corpus data.
-        conflicts = await subgraph_expander.detect_conflicts(group_ids=list(authz.allowed_doc_ids))  # ty: ignore[unresolved-attribute]
+        # Neo4j receives the same canonical partition IDs as Graphiti writes;
+        # use the shared scope fan-out so this tool cannot drift from ordinary
+        # retrieval on legacy-null contracts or version-only grants.
+        versions = {doc_id: version for doc_id, version, _ in authz.document_versions}
+        contracts = {
+            (doc_id, version): (indexes, legacy_null)
+            for doc_id, version, indexes, legacy_null in authz.document_contracts
+        }
+        scopes: list[GraphitiDocumentScope] = []
+        for allowed_doc_id in authz.allowed_doc_ids:
+            version = versions.get(allowed_doc_id)
+            if version is None:
+                continue
+            indexes, legacy_null = contracts.get((allowed_doc_id, version), ((), False))
+            scopes.append(
+                GraphitiDocumentScope(
+                    tenant_id=authz.tenant_id,
+                    document_id=allowed_doc_id,
+                    document_version=version,
+                    contract_indexes=indexes,
+                    legacy_null_contract=legacy_null,
+                )
+            )
+        group_ids = fanout_graphiti_group_ids(scopes)
+        if not group_ids:
+            result = ToolResult.fail(
+                "No authorized graph partitions were available for this analysis.",
+                tool="detect_graph_conflicts",
+            )
+            await idempotency.set(
+                key=idem_key,
+                result=result,
+                tool_name="detect_graph_conflicts",
+                user_id=authz.user_id,
+                thread_id=authz.thread_id,
+                step_id=authz.step_id,
+            )
+            return result.model_dump()
+        conflicts = await subgraph_expander.detect_conflicts(group_ids=group_ids)  # ty: ignore[unresolved-attribute]
 
         result = ToolResult.ok(
             data={

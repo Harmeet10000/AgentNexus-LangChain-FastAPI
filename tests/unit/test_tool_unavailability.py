@@ -168,3 +168,40 @@ async def test_a_partial_source_set_sets_basis_unknown_and_keeps_the_survivor(
     assert result["data"]["insufficient_basis"] is None
     assert result["data"]["unavailable_layers"] == ["statutes"]
     assert len(result["data"]["precedents"]) == 1
+
+
+async def test_graphiti_outage_is_not_rendered_as_empty_precedent_success(
+    monkeypatch: Any,
+) -> None:
+    from app.features.documents.tools.search_legal_precedents import (
+        make_search_legal_precedents_tool,
+    )
+    from app.retrieval.graphiti.schemas import GraphitiAvailability, GraphitiSearchOutcome
+
+    class _Graphiti:
+        async def search_for_precedent_chains(self, **_kw: Any) -> GraphitiSearchOutcome:
+            return GraphitiSearchOutcome(
+                availability=GraphitiAvailability.UNAVAILABLE,
+                coverage={"requested": 5, "returned": 0},
+            )
+
+    async def _statutes(**_kw: Any) -> list[dict[str, Any]]:
+        return []
+
+    monkeypatch.setattr(
+        "app.features.documents.tools.search_legal_precedents._search_statutes_postgres",
+        _statutes,
+    )
+
+    tool = make_search_legal_precedents_tool(_Graphiti(), object(), _idempotency())
+    result = await tool.ainvoke(
+        {
+            "query": "penalty clauses",
+            "clause_id": "c1",
+            "jurisdiction": "India",
+            "user_id": "u",
+            "thread_id": "t",
+            "step_id": "s",
+        }
+    )
+    assert result["unavailable"] is True

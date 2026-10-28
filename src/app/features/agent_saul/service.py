@@ -973,7 +973,7 @@ class AgentSaulService:
             return "unexpected_pause", None
         return "paused", state_snapshot
 
-    async def _gate_and_reconcile(  # noqa: PLR0912, PLR0914 — connect-time owner/status/HITL gate
+    async def _gate_and_reconcile(  # noqa: PLR0912, PLR0914, PLR0915 — connect-time owner/status/HITL gate
         self,
         *,
         ws: WebSocket,
@@ -1753,6 +1753,7 @@ class AgentSaulService:
             "allowed_operations": list(self._context.allowed_operations),
             "capabilities": list(self._context.capabilities),
             "document_versions": [],
+            "document_contracts": [],
             "self_review_allowed": self._context.self_review_allowed,
             "self_reviewed": False,
             "document_text": None,

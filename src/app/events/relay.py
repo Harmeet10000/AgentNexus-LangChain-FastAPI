@@ -14,8 +14,11 @@ from pydantic import ValidationError
 from sqlalchemy import delete, func, select, text, update
 
 from app.events.model import OutboxEvent
+from app.events.writer import with_terminal_outbox
+from app.features.auth.tenancy import personal_tenant_id
 from app.observability.logging import logger
 from app.shared.jobs import EnqueueOptions, JobBus, prepare_job, require_direct_receipt
+from app.shared.jobs.names import DOCUMENTS_INGEST
 from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
@@ -361,7 +364,12 @@ class OutboxRelay:
         row = (
             (
                 await session.execute(
-                    select(OutboxEvent.publish_attempts)
+                    select(
+                        OutboxEvent.publish_attempts,
+                        OutboxEvent.event_type,
+                        OutboxEvent.aggregate_id,
+                        OutboxEvent.payload,
+                    )
                     .where(OutboxEvent.id == event_id)
                     .with_for_update(),
                 )
@@ -373,6 +381,37 @@ class OutboxRelay:
             return
         attempts = row["publish_attempts"] + 1
         if attempts >= _MAX_RETRIES:
+            if row["event_type"] == DOCUMENTS_INGEST:
+                # The task may be dead-lettered before its worker starts.
+                # Emit the same terminal integration event in this transaction
+                # so a document cannot remain stuck in ``received`` forever.
+                source_payload = cast("dict[str, object]", row["payload"])
+                raw_version = source_payload.get("document_version", 1)
+                document_version = raw_version if isinstance(raw_version, int) else 1
+                raw_user_id = str(source_payload.get("user_id") or "")
+                raw_tenant_id = str(source_payload.get("tenant_id") or "")
+                resolved_tenant_id = raw_tenant_id or (
+                    personal_tenant_id(raw_user_id) if raw_user_id else ""
+                )
+                await with_terminal_outbox(
+                    session,
+                    document_id=str(source_payload.get("document_id") or row["aggregate_id"]),
+                    payload={
+                        "document_id": str(
+                            source_payload.get("document_id") or row["aggregate_id"]
+                        ),
+                        "user_id": raw_user_id,
+                        "tenant_id": resolved_tenant_id,
+                        "document_version": document_version,
+                        "status": "failed",
+                        "attempt": attempts,
+                        # The original outbox event is the stable task
+                        # identity for a broker dead-letter.
+                        "task_id": event_id,
+                        "error_code": "OUTBOX_DEAD_LETTERED",
+                        "error_message": error,
+                    },
+                )
             # Kept as explicit SQL: INSERT ... SELECT across the two outbox
             # tables with gen_random_uuid() is clearer spelled out than composed.
             await session.execute(

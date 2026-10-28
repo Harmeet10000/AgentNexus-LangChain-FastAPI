@@ -30,6 +30,7 @@ from app.shared.jobs.names import (
     CREDITS_EXPIRE,
     CREDITS_RECONCILE,
     DOCUMENTS_INGEST,
+    DOCUMENTS_INGEST_TERMINAL,
     SEND_PASSWORD_RESET_EMAIL,
     SEND_VERIFICATION_EMAIL,
 )
@@ -38,6 +39,7 @@ from app.shared.jobs.payloads import (
     CeleryTaskPayload,
     CrawlerJobPayload,
     DocumentIngestPayload,
+    DocumentIngestTerminalPayload,
     NoKwargsPayload,
     PasswordResetEmailPayload,
     VerificationEmailPayload,
@@ -183,6 +185,13 @@ _CATALOG: dict[str, JobDefinition[CeleryTaskPayload]] = {
     DOCUMENTS_INGEST: _job(
         DOCUMENTS_INGEST,
         DocumentIngestPayload,
+        queue=JobQueue.INGESTION,
+        capability=JobCapability.DOCUMENT_INGESTION,
+        declaring_module="app.worker.jobs.documents",
+    ),
+    DOCUMENTS_INGEST_TERMINAL: _job(
+        DOCUMENTS_INGEST_TERMINAL,
+        DocumentIngestTerminalPayload,
         queue=JobQueue.INGESTION,
         capability=JobCapability.DOCUMENT_INGESTION,
         declaring_module="app.worker.jobs.documents",

@@ -277,6 +277,21 @@ class Settings(BaseSettings):
     # LangExtract's model_id is provider-routed; keep this exact and validated
     # so stale settings cannot silently downgrade document extraction.
     LANGEXTRACT_MODEL: Literal["gemini-3.5-flash-lite"] = Field(default="gemini-3.5-flash-lite")
+    # Calls are charged per source chunk and extraction pass.  The cap remains
+    # global across all contracts and Celery retries, so chunk size is an
+    # explicit cost/control knob rather than an implicit provider default.
+    LANGEXTRACT_MAX_CONTRACTS: int = Field(default=8, ge=1, le=64)
+    LANGEXTRACT_MAX_MODEL_CALLS: int = Field(default=256, ge=0)
+    LANGEXTRACT_MAX_CHAR_BUFFER: int = Field(default=1000, ge=1, le=100_000)
+    LANGEXTRACT_MAX_INPUT_TOKENS: int = Field(default=200_000, ge=0)
+    LANGEXTRACT_MAX_OUTPUT_TOKENS: int = Field(default=100_000, ge=0)
+    LANGEXTRACT_MAX_COST_USD: float = Field(default=10.0, ge=0)
+    # Conservative configurable estimate for Gemini 3.5 Flash-Lite. Token and
+    # call caps remain the primary guard when provider pricing changes.
+    LANGEXTRACT_COST_PER_1K_TOKENS_USD: float = Field(default=0.0001, ge=0)
+    LANGEXTRACT_WALL_CLOCK_SECONDS: float = Field(default=900.0, gt=0, le=3600.0)
+    LANGEXTRACT_EXTRACTION_PASSES: int = Field(default=3, ge=1, le=20)
+    LANGEXTRACT_MAX_WORKERS: int = Field(default=12, ge=1, le=64)
 
     # --- Pinecone Vector Database ---
     PINECONE_API_KEY: SecretStr = Field(default=SecretStr(""))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import TYPE_CHECKING, cast
 
@@ -11,6 +12,7 @@ import pytest
 
 import app.events.relay as relay_module
 from app.events.relay import OutboxRelay
+from app.events.writer import terminal_event_id
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -53,6 +55,46 @@ class _MappingResult:
 
     def all(self) -> list[dict[str, object]]:
         return [] if self._row is None else [self._row]
+
+
+class _ScalarResult:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def scalar_one_or_none(self) -> str:
+        return self.value
+
+
+class _DeadLetterSession:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object] | None]] = []
+        self.commits = 0
+
+    async def execute(
+        self, statement: Any, parameters: dict[str, object] | None = None
+    ) -> _MappingResult | _ScalarResult:
+        sql = str(statement)
+        self.calls.append((sql, parameters))
+        if "FOR UPDATE" in sql:
+            return _MappingResult(
+                {
+                    "publish_attempts": 4,
+                    "event_type": "tasks.documents_ingest",
+                    "aggregate_id": "doc-1",
+                    "payload": {
+                        "document_id": "doc-1",
+                        "user_id": "user-1",
+                        "tenant_id": "tenant-1",
+                        "document_version": 2,
+                    },
+                }
+            )
+        if "INSERT INTO outbox_events" in sql:
+            return _ScalarResult("terminal-event")
+        return _MappingResult(None)
+
+    async def commit(self) -> None:
+        self.commits += 1
 
 
 class _Session:
@@ -201,6 +243,28 @@ async def test_startup_scan_publishes_through_the_direct_interface() -> None:
             },
         )
     ]
+
+
+async def test_dead_letter_stages_idempotent_terminal_event_and_notifies_relay() -> None:
+    session = _DeadLetterSession()
+
+    await OutboxRelay._mark_failed("source-event", "broker unavailable", session=session)  # type: ignore[arg-type]
+
+    terminal_insert = next(
+        (parameters for sql, parameters in session.calls if "INSERT INTO outbox_events" in sql),
+        None,
+    )
+    assert terminal_insert is not None
+    terminal_payload = json.loads(str(terminal_insert["payload"]))
+    assert terminal_insert["id"] == terminal_event_id(terminal_payload)
+    assert terminal_payload["status"] == "failed"
+    assert terminal_payload["task_id"] == "source-event"
+    notify_calls = [
+        parameters for sql, parameters in session.calls if "pg_notify" in sql
+    ]
+    assert notify_calls == [{"channel": "outbox_channel", "event_id": terminal_insert["id"]}]
+    assert any("dead_letter_events" in sql for sql, _ in session.calls)
+    assert session.commits == 1
 
 
 async def test_publish_refuses_a_payload_the_registry_rejects() -> None:

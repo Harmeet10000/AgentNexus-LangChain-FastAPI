@@ -59,6 +59,7 @@ from app.features.documents.retrieval_graph import (
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
 from app.retrieval.fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
+from app.retrieval.graphiti.grouping import build_graphiti_group_id
 from app.retrieval.structural_navigator import navigate_tree
 from app.retrieval.token_counter import count_tokens as default_count_tokens
 from app.shared.langchain_layer import serialize_to_toon
@@ -714,6 +715,30 @@ class DocumentQueryService:
                 )
             )
         scope_ids = tuple(dict.fromkeys(allowed_doc_ids or ()))
+        scope_versions = await _resolve_scope_versions(
+            self.repo, tenant_id=tenant_id, allowed_doc_ids=scope_ids
+        )
+        scope_contracts = await _resolve_scope_contracts(
+            self.repo, tenant_id=tenant_id, allowed_doc_ids=scope_ids
+        )
+        version_by_document = {document_id: version for document_id, version, _ in scope_versions}
+        contracts_by_document = {
+            document_id: (version, indexes, legacy_null)
+            for document_id, version, indexes, legacy_null in scope_contracts
+        }
+        unavailable_scope_documents: list[str] = []
+        for document_id in scope_ids:
+            version = version_by_document.get(document_id)
+            contract_scope = contracts_by_document.get(document_id)
+            if version is None or contract_scope is None or contract_scope[0] != version:
+                unavailable_scope_documents.append(document_id)
+                continue
+            _scope_version, indexes, legacy_null = contract_scope
+            if payload.contract_index is not None:
+                if payload.contract_index not in indexes:
+                    unavailable_scope_documents.append(document_id)
+            elif not indexes and not legacy_null:
+                unavailable_scope_documents.append(document_id)
         graph = build_retrieval_graph(
             llm=self.llm,
             repo=self.repo,
@@ -725,6 +750,9 @@ class DocumentQueryService:
                 "user_id": user_id,
                 "tenant_id": tenant_id,
                 "allowed_doc_ids": list(scope_ids),
+                "document_versions": list(scope_versions),
+                "document_contracts": list(scope_contracts),
+                "scope_unavailable_documents": unavailable_scope_documents,
                 "scope_bound": allowed_doc_ids is not None,
                 "query": payload.query,
                 "doc_ids_filter": payload.doc_ids_filter,
@@ -754,6 +782,26 @@ class DocumentQueryService:
                 ],
                 confidence=answer.confidence,
                 evidence_policy="mechanically_verified",
+                coverage=EvidenceCoverage(
+                    documents_requested=len(scope_ids),
+                    documents_ready=len(scope_ids) - len(unavailable_scope_documents),
+                    graph_unavailable_documents=len(unavailable_scope_documents),
+                ),
+                warnings=(
+                    [
+                        QualityWarningDTO(
+                            stage="graph_scope",
+                            code="GRAPH_SCOPE_UNAVAILABLE",
+                            message=(
+                                "Authoritative document version/contract scope was unavailable "
+                                f"for {len(unavailable_scope_documents)} authorized document(s)."
+                            ),
+                            severity="warning",
+                        )
+                    ]
+                    if unavailable_scope_documents
+                    else []
+                ),
                 cache_hit=bool(result.get("cache_hit")),
             )
         )
@@ -824,6 +872,9 @@ class DocumentQueryService:
         scope_versions = await _resolve_scope_versions(
             self.repo, tenant_id=tenant_id, allowed_doc_ids=scope_ids
         )
+        scope_contracts = await _resolve_scope_contracts(
+            self.repo, tenant_id=tenant_id, allowed_doc_ids=scope_ids
+        )
         answer_cache_key = _build_answer_cache_key(
             user_id=user_id,
             tenant_id=tenant_id,
@@ -870,9 +921,12 @@ class DocumentQueryService:
             )
             graph_chunk_ids = await _graphiti_filter_chunk_ids(
                 graphiti=self.graphiti,
-                user_id=user_id,
+                tenant_id=tenant_id,
                 query=plan.rewritten_query,
                 doc_ids_filter=list(scope_ids) if explicit_scope else payload.doc_ids_filter,
+                contract_index=payload.contract_index,
+                document_versions=scope_versions,
+                document_contracts=scope_contracts,
             )
             embedding = await retry_immediate(
                 # `query=` binds the loop variable at definition rather than at call. It is awaited
@@ -1021,16 +1075,78 @@ async def _build_query_plan(
 async def _graphiti_filter_chunk_ids(
     *,
     graphiti: Graphiti | None,
-    user_id: str,
+    tenant_id: str = "",
+    user_id: str | None = None,
     query: str,
     doc_ids_filter: list[str],
+    contract_index: int | None = None,
+    document_versions: Sequence[tuple[str, int, str | None]] = (),
+    document_contracts: Sequence[tuple[str, int, tuple[int | None, ...], bool]] = (),
 ) -> list[str]:
-    if graphiti is None:
+    """Narrow candidates using the server-selected tenant Graphiti scope.
+
+    ``user_id`` remains accepted for callers that used the pre-tenant helper
+    signature, but it is intentionally ignored.  A user identity is an audit
+    field, not a Graphiti authority boundary; when the explicit tenant scope
+    is absent this helper fails closed instead of deriving one from the user.
+    """
+    _ = user_id
+    if graphiti is None or not tenant_id or not doc_ids_filter:
+        return []
+    versions = {document_id: version for document_id, version, _ in document_versions}
+    contract_scopes = {
+        (document_id, version): (indexes, legacy_null)
+        for document_id, version, indexes, legacy_null in document_contracts
+    }
+    group_ids: list[str] = []
+    for document_id in doc_ids_filter:
+        version = versions.get(document_id)
+        if version is None:
+            # No authoritative version means no graph read.  In particular,
+            # never fall back to the historical bare/v1 document group.
+            continue
+        scope = contract_scopes.get((document_id, version))
+        if scope is None:
+            continue
+        indexes, legacy_null = scope
+        if contract_index is not None:
+            if contract_index not in indexes:
+                continue
+            group_ids.append(
+                build_graphiti_group_id(
+                    tenant_id=tenant_id,
+                    document_id=document_id,
+                    document_version=version,
+                    contract_index=contract_index,
+                )
+            )
+            continue
+        if not indexes and not legacy_null:
+            continue
+        group_ids.extend(
+            build_graphiti_group_id(
+                tenant_id=tenant_id,
+                document_id=document_id,
+                document_version=version,
+                contract_index=index,
+            )
+            for index in indexes
+        )
+        if legacy_null:
+            group_ids.append(
+                build_graphiti_group_id(
+                    tenant_id=tenant_id,
+                    document_id=document_id,
+                    document_version=version,
+                    contract_index=None,
+                )
+            )
+    if not group_ids:
         return []
     try:
         raw_results = await retry_immediate(
             lambda: graphiti.search(
-                query=query, group_ids=[user_id, *doc_ids_filter], num_results=20
+                query=query, group_ids=group_ids, num_results=20
             ),
             label="documents_graphiti_filter",
         )
@@ -1202,11 +1318,45 @@ async def _resolve_scope_versions(
         return ()
     if isinstance(result, Failure):
         return ()
-    raw = result.unwrap() if isinstance(result, Success) else result
-    return tuple(
-        (str(doc_id), int(version), str(pipeline) if pipeline is not None else None)
-        for doc_id, version, pipeline in raw
-    )
+    try:
+        raw = result.unwrap() if isinstance(result, Success) else result
+        return tuple(
+            (str(doc_id), int(version), str(pipeline) if pipeline is not None else None)
+            for doc_id, version, pipeline in raw
+        )
+    except (AttributeError, TypeError, ValueError):
+        return ()
+
+
+async def _resolve_scope_contracts(
+    repo: DocumentRepository,
+    *,
+    tenant_id: str,
+    allowed_doc_ids: Sequence[str],
+) -> tuple[tuple[str, int, tuple[int | None, ...], bool], ...]:
+    """Resolve exact contract partitions; an unavailable scope fails closed."""
+    resolver = getattr(repo, "resolve_scope_contracts", None)
+    if resolver is None or not allowed_doc_ids:
+        return ()
+    try:
+        result = await resolver(tenant_id=tenant_id, document_ids=tuple(allowed_doc_ids))
+    except (AttributeError, TypeError):
+        return ()
+    if isinstance(result, Failure):
+        return ()
+    try:
+        raw = result.unwrap() if isinstance(result, Success) else result
+        return tuple(
+            (
+                str(doc_id),
+                int(version),
+                tuple(index for index in indexes if index is None or int(index) >= 0),
+                bool(legacy_null),
+            )
+            for doc_id, version, indexes, legacy_null in raw
+        )
+    except (AttributeError, TypeError, ValueError):
+        return ()
 
 
 def _resolve_tenant_id(tenant_id: str | None, user_id: str) -> str:

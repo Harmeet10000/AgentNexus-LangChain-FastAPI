@@ -20,7 +20,12 @@ from sqlalchemy import Insert
 from sqlalchemy.dialects import postgresql
 
 from app.events.model import OutboxEvent
-from app.events.writer import OUTBOX_CHANNEL, PostgresOutboxAdapter, with_outbox
+from app.events.writer import (
+    OUTBOX_CHANNEL,
+    PostgresOutboxAdapter,
+    terminal_event_id,
+    with_outbox,
+)
 from app.shared.jobs import AggregateRef, InMemoryDirectAdapter, JobBus, TypedJob
 from app.shared.jobs.catalog import JOB_CATALOG
 from app.shared.jobs.names import CRAWLER_CRAWL, DOCUMENTS_INGEST
@@ -94,6 +99,21 @@ class TestWithOutbox:
                     payload=_DOCUMENT_PAYLOAD,
                 )
             )
+
+
+def test_terminal_event_identity_is_stable_but_attempt_scoped() -> None:
+    payload = {
+        "tenant_id": "tenant-a",
+        "document_id": "doc-123",
+        "document_version": 2,
+        "status": "failed",
+        "attempt": 1,
+        "task_id": "task-a",
+    }
+
+    assert terminal_event_id(payload) == terminal_event_id(dict(payload))
+    assert terminal_event_id(payload | {"task_id": "task-b"}) != terminal_event_id(payload)
+    assert terminal_event_id(payload | {"document_version": 3}) != terminal_event_id(payload)
 
 
 @pytest.mark.asyncio

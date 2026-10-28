@@ -39,7 +39,7 @@ class BoundLogger(Protocol):
 _SUBGRAPH_CYPHER = """
 MATCH path = (seed)-[r*1..{depth}]-(connected)
 WHERE seed.uuid IN $seed_uuids
-  AND (connected.group_id IN $group_ids OR connected.group_id IS NULL)
+  AND connected.group_id IN $group_ids
 UNWIND nodes(path) AS n
 WITH DISTINCT n, path
 UNWIND relationships(path) AS rel
@@ -193,7 +193,7 @@ async def get_obligation_chain(
     find_cypher = """
     MATCH (n)
     WHERE toLower(n.name) CONTAINS toLower($entity_name)
-      AND (n.group_id IN $group_ids OR n.group_id IS NULL)
+      AND n.group_id IN $group_ids
     RETURN n.uuid AS uuid LIMIT 5
     """
     try:

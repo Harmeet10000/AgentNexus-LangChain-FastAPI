@@ -151,6 +151,7 @@ class DocumentRepository:
                 ORDER BY c.document_id
                 """
             )
+
             result = await self.session.execute(
                 statement,
                 params={
@@ -175,6 +176,61 @@ class DocumentRepository:
             return Failure(
                 DocumentDatabaseError(
                     message="Database error while resolving document versions",
+                    details={"tenant_id": tenant_id, "document_ids": list(document_ids)},
+                    source="document_repository",
+                )
+            )
+
+    @trace_layer("repository")
+    async def resolve_scope_contracts(
+        self,
+        *,
+        tenant_id: str,
+        document_ids: Sequence[str],
+    ) -> DocumentResult[tuple[tuple[str, int, tuple[int | None, ...], bool], ...]]:
+        """Resolve contract partitions for each authorized document version.
+
+        ``NULL`` is returned as a legacy marker only when every chunk in that
+        version has a null contract index.  Mixed modern/null data is treated
+        as modern and the null partition is excluded from Graphiti reads.
+        """
+        if not document_ids:
+            return Success(())
+        try:
+            statement = text(
+                """
+                SELECT c.document_id::text AS document_id,
+                       c.document_version::int AS document_version,
+                       array_agg(DISTINCT c.contract_index) AS contract_indexes,
+                       bool_and(c.contract_index IS NULL) AS all_legacy_null
+                FROM chunks AS c
+                WHERE c.tenant_id = :tenant_id
+                  AND c.document_id = ANY(CAST(:document_ids AS uuid[]))
+                GROUP BY c.document_id, c.document_version
+                ORDER BY c.document_id, c.document_version
+                """
+            )
+            result = await self.session.execute(
+                statement,
+                {"tenant_id": tenant_id, "document_ids": list(document_ids)},
+            )
+            scopes: list[tuple[str, int, tuple[int | None, ...], bool]] = []
+            for row in result.mappings().all():
+                raw_indexes = row["contract_indexes"] or []
+                indexes = tuple(
+                    int(index) for index in raw_indexes if index is not None and int(index) >= 0
+                )
+                legacy_null = bool(row["all_legacy_null"]) and not indexes
+                scopes.append(
+                    (str(row["document_id"]), int(row["document_version"]), indexes, legacy_null)
+                )
+            return Success(tuple(scopes))
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chunks")
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while resolving document contract scopes",
                     details={"tenant_id": tenant_id, "document_ids": list(document_ids)},
                     source="document_repository",
                 )
@@ -327,6 +383,7 @@ class DocumentRepository:
         metadata_: dict[str, object] | None = None,
         structural_tree: dict[str, object] | None = None,
         extraction_incomplete: bool | None = None,
+        ingestion_identity: dict[str, object] | None = None,
     ) -> DocumentResult[None]:
         try:
             statement: TextClause = text(
@@ -339,11 +396,23 @@ class DocumentRepository:
                 jurisdiction = COALESCE(:jurisdiction, jurisdiction),
                 contract_type = COALESCE(:contract_type, contract_type),
                 parties = COALESCE(CAST(:parties AS jsonb), parties),
-                metadata_ = COALESCE(CAST(:metadata_ AS jsonb), metadata_),
+                metadata_ = CASE
+                    WHEN CAST(:metadata_ AS jsonb) IS NULL THEN metadata_
+                    ELSE COALESCE(metadata_, '{}'::jsonb) || CAST(:metadata_ AS jsonb)
+                END,
                 structural_tree = COALESCE(CAST(:structural_tree AS jsonb), structural_tree),
                 extraction_incomplete = COALESCE(:extraction_incomplete, extraction_incomplete),
                 updated_at = :updated_at
             WHERE id = CAST(:document_id AS uuid)
+              AND (
+                    CAST(:identity_version AS integer) IS NULL
+                    OR (
+                        metadata_->'ingestion_state'->>'tenant_id' = CAST(:identity_tenant AS text)
+                        AND (metadata_->'ingestion_state'->>'document_version')::int = CAST(:identity_version AS int)
+                        AND (metadata_->'ingestion_state'->>'attempt')::int = CAST(:identity_attempt AS int)
+                        AND metadata_->'ingestion_state'->>'task_id' = CAST(:identity_task_id AS text)
+                    )
+              )
             """
             )
             await self.session.execute(
@@ -361,6 +430,32 @@ class DocumentRepository:
                         json.dumps(obj=structural_tree) if structural_tree is not None else None
                     ),
                     "extraction_incomplete": extraction_incomplete,
+                    "identity_tenant": (
+                        str(ingestion_identity.get("tenant_id", ""))
+                        if ingestion_identity is not None
+                        else None
+                    ),
+                    "identity_version": (
+                        int(raw_version)
+                        if ingestion_identity is not None
+                        and isinstance(
+                            raw_version := ingestion_identity.get("document_version"), (int, str)
+                        )
+                        and not isinstance(raw_version, bool)
+                        else None
+                    ),
+                    "identity_attempt": (
+                        int(raw_attempt)
+                        if ingestion_identity is not None
+                        and isinstance(raw_attempt := ingestion_identity.get("attempt"), (int, str))
+                        and not isinstance(raw_attempt, bool)
+                        else None
+                    ),
+                    "identity_task_id": (
+                        str(ingestion_identity.get("task_id") or "")
+                        if ingestion_identity is not None
+                        else None
+                    ),
                     "updated_at": datetime.now(tz=UTC),
                 },
             )
@@ -372,6 +467,97 @@ class DocumentRepository:
                 DocumentDatabaseError(
                     message="Database error while updating document status",
                     details={"document_id": document_id, "error": str(exc)},
+                    source="document_repository",
+                )
+            )
+
+    @trace_layer("repository")
+    async def apply_terminal_ingestion_failure(
+        self,
+        *,
+        document_id: str,
+        tenant_id: str,
+        document_version: int,
+        attempt: int,
+        task_id: str,
+        metadata_: dict[str, object],
+    ) -> DocumentResult[bool]:
+        """Apply a dead-letter failure only to the current ingestion identity.
+
+        The row lock makes the read/compare/write one transaction.  This is
+        deliberately separate from the general status updater: terminal
+        notifications are at-least-once and may arrive after a retry,
+        re-ingestion, or successful completion.
+        """
+        try:
+            result = await self.session.execute(
+                text(
+                    """
+                    SELECT tenant_id, status, metadata_
+                    FROM documents
+                    WHERE id = CAST(:document_id AS uuid)
+                    FOR UPDATE
+                    """
+                ),
+                {"document_id": document_id},
+            )
+            row = result.mappings().one_or_none()
+            if row is None or str(row["tenant_id"]) != tenant_id:
+                return Success(False)
+            current_status = str(row["status"] or "")
+            current_metadata = row["metadata_"] if isinstance(row["metadata_"], dict) else {}
+            raw_state = current_metadata.get("ingestion_state")
+            if current_status in {"completed", "completed_with_warnings"}:
+                return Success(False)
+            if isinstance(raw_state, dict):
+                try:
+                    stored_tenant = str(raw_state.get("tenant_id", ""))
+                    stored_version = int(raw_state.get("document_version", 0))
+                    stored_attempt = int(raw_state.get("attempt", -1))
+                    stored_task_id = str(raw_state.get("task_id") or "")
+                    identity_matches = (
+                        stored_tenant == tenant_id
+                        and stored_version == document_version
+                        and stored_task_id == task_id
+                        and stored_attempt <= attempt
+                    )
+                except (TypeError, ValueError):
+                    identity_matches = False
+                    stored_tenant = ""
+                    stored_version = 0
+                    stored_attempt = -1
+                    stored_task_id = ""
+                if not identity_matches:
+                    return Success(False)
+                if current_status == "failed":
+                    return Success(False)
+            expected_identity = (
+                {
+                    "tenant_id": stored_tenant,
+                    "document_version": stored_version,
+                    "attempt": stored_attempt,
+                    "task_id": stored_task_id,
+                }
+                if isinstance(raw_state, dict)
+                else None
+            )
+            update_result = await self.update_document_status(
+                document_id=document_id,
+                status="failed",
+                metadata_=metadata_,
+                extraction_incomplete=True,
+                ingestion_identity=expected_identity,
+            )
+            if isinstance(update_result, Failure):
+                return Failure(update_result.failure())
+            return Success(True)
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="documents")
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while applying terminal ingestion failure",
+                    details={"document_id": document_id},
                     source="document_repository",
                 )
             )

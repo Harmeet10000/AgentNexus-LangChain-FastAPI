@@ -82,9 +82,11 @@ def test_relational_handlers_note_before_rollback_and_failure() -> None:
                     for statement in body
                     for node in ast.walk(statement)
                 )
-    # Includes the invoices row-lock repository operation and the durable
-    # subscription lifecycle persistence adapter's SQL handlers.
-    assert checked == 114
+    # Includes the document scope resolver and terminal-ingestion row-lock
+    # handlers alongside the invoices and subscription lifecycle adapters.
+    # Keep this as an explicit inventory tripwire so a future SQL catcher
+    # cannot silently skip the note-before-rollback contract.
+    assert checked == 117
 
 
 def test_rollback_gate_fixture_has_forbidden_and_permitted_forms() -> None:

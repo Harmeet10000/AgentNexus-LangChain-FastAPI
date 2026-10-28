@@ -36,6 +36,7 @@ from app.kernel.result import add_database_error_note
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
+from app.retrieval.graphiti.schemas import GraphitiAvailability
 
 from .authorization import trusted_tool_context
 
@@ -120,6 +121,11 @@ def make_search_legal_precedents_tool(
             allowed_doc_ids=authz.allowed_doc_ids,
             jurisdiction=jurisdiction,
             num_results=5,
+            tenant_id=authz.tenant_id,
+            document_versions=tuple(
+                (document_id, version) for document_id, version, _ in authz.document_versions
+            ),
+            document_contracts=authz.document_contracts,
         )
 
         # --- Postgres: statute text retrieval --------------------------------
@@ -127,6 +133,11 @@ def make_search_legal_precedents_tool(
         # sufficiency verdict must NOT be computed from the surviving source
         # alone — expose basis-unknown and keep whatever the other leg found.
         unavailable_layers: list[str] = []
+        graphiti_availability = getattr(
+            graphiti_results, "availability", GraphitiAvailability.AVAILABLE
+        )
+        if graphiti_availability == GraphitiAvailability.UNAVAILABLE:
+            unavailable_layers.append("graphiti")
         try:
             statute_results = await _search_statutes_postgres(
                 db_engine=db_engine,
@@ -143,7 +154,7 @@ def make_search_legal_precedents_tool(
             statute_results = []
 
         basis_unknown = bool(unavailable_layers)
-        if unavailable_layers and not graphiti_results:
+        if unavailable_layers and not graphiti_results and not statute_results:
             # Every leg failed or answered empty while one was unreachable:
             # report unavailability rather than a fabricated "no results".
             unavailable = ToolResult.unavailable_result(
@@ -168,6 +179,8 @@ def make_search_legal_precedents_tool(
             data={
                 "unavailable_layers": unavailable_layers,
                 "basis_unknown": basis_unknown,
+                "graphiti_availability": str(graphiti_availability),
+                "graphiti_coverage": getattr(graphiti_results, "coverage", {}),
                 "precedents": [
                     {
                         "name": r.name,

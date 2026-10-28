@@ -81,6 +81,13 @@ def test_stable_json_serialization_uses_the_catalog_payload_model() -> None:
     assert job.wire_json() == job.payload.model_dump_json()
 
 
+def test_wire_payload_preserves_explicit_empty_required_values() -> None:
+    payload = {**_DOCUMENT_PAYLOAD, "tenant_id": ""}
+    job = JOB_CATALOG[DOCUMENTS_INGEST].prepare(payload)
+
+    assert job.wire_payload()["tenant_id"] == ""
+
+
 @pytest.mark.asyncio
 async def test_direct_and_durable_receipts_are_discriminated_and_ordered() -> None:
     bus = InMemoryJobBus()

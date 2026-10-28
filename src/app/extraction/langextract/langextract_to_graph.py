@@ -23,6 +23,9 @@ class GraphIngestionContext(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     document_id: str
+    tenant_id: str = ""
+    document_version: int = 1
+    contract_index: int = 0
     source_url: str = ""
     neo4j_client: object | None = None
     user_id: str

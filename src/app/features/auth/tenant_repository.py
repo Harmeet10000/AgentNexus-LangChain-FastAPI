@@ -17,7 +17,12 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.observability.logging import logger
 
-from .exceptions import AuthConflictError, AuthInfrastructureError, AuthNotFoundError
+from .exceptions import (
+    AuthAuthorizationError,
+    AuthConflictError,
+    AuthInfrastructureError,
+    AuthNotFoundError,
+)
 from .models import LegalRole
 from .tenancy import normalize_legal_role
 from .tenant_models import Tenant, TenantMembership
@@ -52,6 +57,20 @@ class TenantMembershipRepository:
 
     async def get_membership(self, tenant_id: str, user_id: str) -> TenantMembership | None:
         return await self._session.get(TenantMembership, (tenant_id, user_id))
+
+    async def list_memberships_for_user(self, user_id: str) -> list[TenantMembership]:
+        """Return every SQL membership for ``user_id``.
+
+        The account document's ``tenant_id`` is a denormalised last-active
+        hint.  Selection therefore starts from this relation and never from
+        Mongo, otherwise a stale mirror can silently cross a tenant boundary.
+        """
+        result = await self._session.scalars(
+            select(TenantMembership)
+            .where(TenantMembership.user_id == user_id)
+            .order_by(TenantMembership.tenant_id)
+        )
+        return list(result.all())
 
     async def ensure_tenant(self, tenant_id: str, *, display_name: str) -> Tenant:
         tenant = await self.get_tenant(tenant_id)
@@ -217,6 +236,62 @@ class TenantMembershipService:
                 )
             )
         return Success((roles, bool(tenant.self_review_allowed), membership.role_revision))
+
+    async def resolve_tenant(
+        self,
+        *,
+        user_id: str,
+        requested_tenant_id: str | None = None,
+    ) -> AuthResult[str]:
+        """Resolve the active tenant from SQL memberships.
+
+        A single membership is unambiguous.  Multiple memberships require a
+        selector supplied by the request/session boundary and that selector is
+        checked against SQL.  Mongo's mirror is deliberately not consulted.
+        """
+        try:
+            async with self._session_factory() as session:
+                memberships = await TenantMembershipRepository(session).list_memberships_for_user(
+                    user_id
+                )
+        except SQLAlchemyError as exc:
+            exc.add_note(f"user_id={user_id}, operation=resolve_tenant")
+            logger.bind(user_id=user_id).exception("tenant_selection_read_failed")
+            return Failure(
+                AuthInfrastructureError(
+                    message="Tenant selection read failed",
+                    details={"operation": "resolve_tenant"},
+                    source="tenant_membership_service",
+                )
+            )
+        tenant_ids = tuple(membership.tenant_id for membership in memberships)
+        if requested_tenant_id is not None:
+            if requested_tenant_id not in tenant_ids:
+                return Failure(
+                    AuthAuthorizationError(
+                        message="Requested tenant is not an active membership",
+                        details={"tenant_id": requested_tenant_id, "user_id": user_id},
+                        source="tenant_membership_service",
+                    )
+                )
+            return Success(requested_tenant_id)
+        if len(tenant_ids) == 1:
+            return Success(tenant_ids[0])
+        if not tenant_ids:
+            return Failure(
+                AuthNotFoundError(
+                    message="No tenant membership found",
+                    details={"user_id": user_id},
+                    source="tenant_membership_service",
+                )
+            )
+        return Failure(
+            AuthConflictError(
+                message="Tenant selector is required for multiple memberships",
+                details={"user_id": user_id, "membership_count": len(tenant_ids)},
+                source="tenant_membership_service",
+            )
+        )
 
     async def update_roles(
         self,

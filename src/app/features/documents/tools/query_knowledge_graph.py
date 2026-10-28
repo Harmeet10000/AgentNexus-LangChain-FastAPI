@@ -23,6 +23,7 @@ from langchain_core.tools.base import BaseTool
 
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
+from app.retrieval.graphiti.schemas import GraphitiAvailability
 
 from .authorization import trusted_tool_context
 
@@ -103,7 +104,20 @@ def make_query_knowledge_graph_tool(
             doc_id=doc_id,
             num_results=num_results,
             allowed_doc_ids=authz.allowed_doc_ids,
+            tenant_id=authz.tenant_id,
+            document_versions=tuple(
+                (document_id, version) for document_id, version, _ in authz.document_versions
+            ),
+            document_contracts=authz.document_contracts,
         )
+
+        availability = getattr(results, "availability", GraphitiAvailability.AVAILABLE)
+        if availability == GraphitiAvailability.UNAVAILABLE:
+            return ToolResult.unavailable_result(
+                reason="Knowledge graph is unavailable; no graph result was produced.",
+                tool="query_knowledge_graph",
+                coverage=getattr(results, "coverage", {}),
+            ).model_dump()
 
         # Sort by multi-objective score descending
         sorted_results = sorted(results, key=lambda r: r.relevance_score, reverse=True)
@@ -123,6 +137,8 @@ def make_query_knowledge_graph_tool(
                 ],
                 "total_found": len(sorted_results),
                 "query": query,
+                "graphiti_availability": str(availability),
+                "graphiti_coverage": getattr(results, "coverage", {}),
             },
             tool="query_knowledge_graph",
         )

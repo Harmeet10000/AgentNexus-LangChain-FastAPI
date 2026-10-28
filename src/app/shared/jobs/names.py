@@ -3,8 +3,11 @@
 from typing import Final
 
 DOCUMENTS_INGEST: Final = "tasks.documents_ingest"
+DOCUMENTS_INGEST_TERMINAL: Final = "tasks.documents_ingest_terminal"
 CRAWLER_CRAWL: Final = "tasks.crawler_crawl"
-INGESTION_TASK_NAMES: Final[frozenset[str]] = frozenset({DOCUMENTS_INGEST})
+INGESTION_TASK_NAMES: Final[frozenset[str]] = frozenset(
+    {DOCUMENTS_INGEST, DOCUMENTS_INGEST_TERMINAL}
+)
 SEND_VERIFICATION_EMAIL: Final = "auth.send_verification_email"
 SEND_PASSWORD_RESET_EMAIL: Final = "auth.send_password_reset_email"  # noqa: S105 — wire name, not a credential
 AUTH_PENDING_REVOCATION_RECONCILE: Final = "auth.pending_revocation_reconcile"

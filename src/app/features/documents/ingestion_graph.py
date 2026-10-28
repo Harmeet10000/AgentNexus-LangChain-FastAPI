@@ -9,6 +9,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from returns.result import Failure
 
+from app.events import with_terminal_outbox
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger
 from app.utils import ServiceUnavailableException
@@ -54,6 +55,9 @@ class DocumentIngestionState(TypedDict, total=False):
     filename: str
     content_type: str
     object_uri: str
+    document_version: int
+    attempt: int
+    task_id: str
     status: str
     chunk_count: int
     verified_chunk_count: int
@@ -119,6 +123,9 @@ def _make_ingest_document_node(
             document_id=state.get("document_id", ""),
             user_id=state.get("user_id", ""),
             tenant_id=state.get("tenant_id", ""),
+            document_version=state.get("document_version", 1),
+            attempt=state.get("attempt", 0),
+            task_id=_terminal_task_id(config),
             filename=state.get("filename", ""),
             content_type=state.get("content_type", ""),
             object_uri=state.get("object_uri", ""),
@@ -144,13 +151,9 @@ def _make_ingest_document_node(
                 operation="ingest_document_node",
                 error=str(exc),
             ).exception("Document ingestion failed unexpectedly")
-            await _record_ingestion_failure(
-                repo,
-                document_id=job.document_id,
-                error_code="INGESTION_UNEXPECTED_FAILURE",
-                error_message="Document ingestion failed unexpectedly",
-                retryable=True,
-            )
+            # Celery owns retryable failures.  Recording ``failed`` here would
+            # make the document look terminal during the retry window and
+            # would also stage a terminal event that can race the retry.
             return {
                 "status": "failed",
                 "error_code": "INGESTION_UNEXPECTED_FAILURE",
@@ -160,14 +163,20 @@ def _make_ingest_document_node(
         if isinstance(result, Failure):
             error = result.failure()
             log_expected_failure(error=error, operation="ingest_document_node")
-            await _record_ingestion_failure(
-                repo,
-                document_id=job.document_id,
-                error_code=str(error.code),
-                error_message=error.message,
-                retryable=error.retryable,
-                details=error.details,
-            )
+            if not error.retryable:
+                await _record_ingestion_failure(
+                    repo,
+                    document_id=job.document_id,
+                    user_id=job.user_id,
+                    tenant_id=job.tenant_id,
+                    document_version=job.document_version,
+                    attempt=job.attempt,
+                    task_id=job.task_id,
+                    error_code=str(error.code),
+                    error_message=error.message,
+                    retryable=False,
+                    details=error.details,
+                )
             return {
                 "status": "failed",
                 "error_code": str(error.code),
@@ -183,25 +192,80 @@ async def _record_ingestion_failure(
     repo: DocumentRepository,
     *,
     document_id: str,
+    user_id: str = "",
+    tenant_id: str = "",
+    document_version: int = 1,
+    attempt: int = 0,
+    task_id: str | None = None,
     error_code: str,
     error_message: str,
     retryable: bool,
     details: dict[str, object] | None = None,
 ) -> None:
-    """Persist a terminal/early failure so ``received`` cannot lie forever."""
+    """Persist one exhausted/non-retryable failure and its terminal event."""
+    if retryable:
+        return
     metadata: dict[str, object] = {
         "ingestion_error": {
             "code": error_code,
             "message": error_message,
             "retryable": retryable,
+            "ingestion_state": {
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+                "document_version": document_version,
+                "attempt": attempt,
+                "task_id": task_id or "",
+            },
             **(details or {}),
         }
     }
-    status_result = await repo.update_document_status(
-        document_id=document_id,
-        status="failed",
-        metadata_=metadata,
-        extraction_incomplete=True,
-    )
-    if isinstance(status_result, Failure):
-        log_expected_failure(error=status_result.failure(), operation="record_ingestion_failure")
+    if details is not None and "extraction_budget" in details:
+        metadata["extraction_budget"] = details["extraction_budget"]
+    if details is not None and "knowledge_extraction_failure" in details:
+        metadata["knowledge_extraction_failure"] = details["knowledge_extraction_failure"]
+    try:
+        status_result = await repo.update_document_status(
+            document_id=document_id,
+            status="failed",
+            metadata_=metadata,
+            extraction_incomplete=True,
+        )
+    except Exception as exc:  # noqa: BLE001 — failure recording must not mask terminal state
+        exc.add_note(f"document_id={document_id}, operation=record_ingestion_failure_status")
+        logger.bind(document_id=document_id, error=str(exc)).exception(
+            "Document failure status persistence raised"
+        )
+    else:
+        if isinstance(status_result, Failure):
+            log_expected_failure(error=status_result.failure(), operation="record_ingestion_failure")
+    session = getattr(repo, "session", None)
+    if session is not None:
+        try:
+            await with_terminal_outbox(
+                session,
+                document_id=document_id,
+                payload={
+                    "document_id": document_id,
+                    "user_id": user_id,
+                    "tenant_id": tenant_id,
+                    "status": "failed",
+                    "document_version": document_version,
+                    "attempt": attempt,
+                    "task_id": task_id,
+                    "error_code": error_code,
+                    "error_message": error_message,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — outbox degradation is audited, not fatal
+            exc.add_note(f"document_id={document_id}, operation=record_ingestion_failure_outbox")
+            logger.bind(document_id=document_id, error=str(exc)).exception(
+                "Document terminal outbox staging failed"
+            )
+
+
+def _terminal_task_id(config: RunnableConfig) -> str | None:
+    """Read worker identity from invocation metadata without trusting payload data."""
+    configurable = config.get("configurable", {})
+    raw = configurable.get("task_id") or configurable.get("celery_task_id")
+    return raw if isinstance(raw, str) and raw else None

@@ -16,6 +16,7 @@ from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.ai.graph.retry import TransientExternalError, retry_immediate
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger
+from app.retrieval.graphiti.grouping import GraphitiDocumentScope, fanout_graphiti_group_ids
 from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
 from app.utils import InfrastructureException
 
@@ -262,7 +263,7 @@ def make_source_identifier_node(
 def make_graph_retrieval_node(
     graphiti: Any,
 ) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
-    async def graph_retrieval_node(state: RetrievalState) -> dict[str, object]:
+    async def graph_retrieval_node(state: RetrievalState) -> dict[str, object]:  # noqa: PLR0914 — scope fan-out keeps identity together
         if graphiti is None:
             return {"graph_chunk_ids": []}
         # Graphiti's historical user group is not an authorization boundary:
@@ -276,10 +277,48 @@ def make_graph_retrieval_node(
         if not server_doc_ids:
             return {"graph_chunk_ids": []}
         request_doc_ids = list(state.get("doc_ids_filter") or [])
-        group_ids = _intersect_doc_ids(
+        document_ids = _intersect_doc_ids(
             request_ids=request_doc_ids,
             allowlist=server_doc_ids,
         )
+        if not document_ids or not state.get("tenant_id"):
+            return {"graph_chunk_ids": []}
+        versions = {
+            document_id: version
+            for document_id, version, _ in state.get("document_versions", [])
+        }
+        scoped_contracts = {
+            document_id: (indexes, legacy_null)
+            for document_id, _version, indexes, legacy_null in state.get(
+                "document_contracts", []
+            )
+        }
+        scopes = []
+        for document_id in document_ids:
+            version = versions.get(document_id)
+            if version is None or document_id in state.get("scope_unavailable_documents", []):
+                # A missing version/contract grant is an unavailable graph
+                # scope, never an invitation to probe the legacy v1 group.
+                continue
+            explicit_contract = state.get("contract_index")
+            scoped = scoped_contracts.get(document_id)
+            if scoped is None:
+                continue
+            indexes, legacy_null = scoped
+            if explicit_contract is not None:
+                if explicit_contract not in indexes:
+                    continue
+                indexes, legacy_null = (explicit_contract,), False
+            scopes.append(
+                GraphitiDocumentScope(
+                    tenant_id=state["tenant_id"],
+                    document_id=document_id,
+                    document_version=version,
+                    contract_indexes=indexes,
+                    legacy_null_contract=legacy_null,
+                )
+            )
+        group_ids = fanout_graphiti_group_ids(scopes)
         if not group_ids:
             return {"graph_chunk_ids": []}
         plan = state["query_plan"]
@@ -310,6 +349,21 @@ def make_graph_retrieval_node(
         return {"graph_chunk_ids": sorted(set(chunk_ids))}
 
     return graph_retrieval_node
+
+
+def _document_version_for(
+    document_versions: list[tuple[str, int, str | None]], document_id: str
+) -> int:
+    """Resolve the server-issued version for a scoped document.
+
+    Version one is the compatibility identity for legacy states that predate
+    version grants; it remains encoded in the canonical group ID and never
+    falls back to a bare document group.
+    """
+    return next(
+        (version for candidate, version, _ in document_versions if candidate == document_id),
+        1,
+    )
 
 
 def make_hybrid_retrieval_node(

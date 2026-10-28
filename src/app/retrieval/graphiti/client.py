@@ -15,18 +15,29 @@ Design decisions:
 from __future__ import annotations
 
 import json
+import traceback
+from asyncio import TimeoutError as AsyncTimeoutError
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import NAMESPACE_URL, uuid5
 
 from graphiti_core.errors import GraphitiError
 from graphiti_core.nodes import EpisodeType
+from neo4j.exceptions import Neo4jError
 
 from app.observability.logging import logger
 
-from .schemas import GraphitiSearchResult
+from .grouping import (
+    GraphitiDocumentScope,
+    build_graphiti_group_id,
+    fanout_graphiti_group_ids,
+)
+from .schemas import GraphitiAvailability, GraphitiSearchOutcome, GraphitiSearchResult
+
+_GRAPHITI_TRANSPORT_ERRORS = (GraphitiError, Neo4jError, AsyncTimeoutError, OSError)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from typing import Any
 
     from graphiti_core import Graphiti
@@ -34,6 +45,14 @@ if TYPE_CHECKING:
     from .schemas import (
         ClauseEpisodeMetadata,
         LegalEdgeInput,
+    )
+
+
+def _scope_unavailable(*, requested: int) -> GraphitiSearchOutcome:
+    """Represent an authorized allowlist with no resolvable graph groups."""
+    return GraphitiSearchOutcome(
+        availability=GraphitiAvailability.UNAVAILABLE,
+        coverage={"requested": requested, "returned": 0, "reason": "scope_unavailable"},
     )
 
 
@@ -59,10 +78,15 @@ class BoundGraphitiService:
         self,
         query: str,
         user_id: str,
+        *,
         doc_id: str | None = None,
         num_results: int = 10,
         allowed_doc_ids: tuple[str, ...] = (),
-    ) -> list[GraphitiSearchResult]:
+        tenant_id: str | None = None,
+        contract_index: int | None = None,
+        document_versions: Sequence[tuple[str, int]] = (),
+        document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
+    ) -> GraphitiSearchOutcome:
         return await search_for_risk_context(
             self._graphiti,
             query,
@@ -70,16 +94,25 @@ class BoundGraphitiService:
             doc_id,
             num_results,
             allowed_doc_ids=allowed_doc_ids,
+            tenant_id=tenant_id,
+            contract_index=contract_index,
+            document_versions=document_versions,
+            document_contracts=document_contracts,
         )
 
     async def search_for_precedent_chains(
         self,
         query: str,
         user_id: str,
+        *,
         jurisdiction: str = "India",
         num_results: int = 10,
         allowed_doc_ids: tuple[str, ...] = (),
-    ) -> list[GraphitiSearchResult]:
+        tenant_id: str | None = None,
+        contract_index: int | None = None,
+        document_versions: Sequence[tuple[str, int]] = (),
+        document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
+    ) -> GraphitiSearchOutcome:
         return await search_for_precedent_chains(
             self._graphiti,
             query,
@@ -87,16 +120,25 @@ class BoundGraphitiService:
             jurisdiction,
             num_results,
             allowed_doc_ids=allowed_doc_ids,
+            tenant_id=tenant_id,
+            contract_index=contract_index,
+            document_versions=document_versions,
+            document_contracts=document_contracts,
         )
 
     async def get_obligation_chain(
         self,
         entity_name: str,
         user_id: str,
+        *,
         doc_id: str | None = None,
         depth: int = 3,
         allowed_doc_ids: tuple[str, ...] = (),
-    ) -> list[GraphitiSearchResult]:
+        tenant_id: str | None = None,
+        contract_index: int | None = None,
+        document_versions: Sequence[tuple[str, int]] = (),
+        document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
+    ) -> GraphitiSearchOutcome:
         return await get_obligation_chain(
             self._graphiti,
             entity_name,
@@ -104,6 +146,10 @@ class BoundGraphitiService:
             doc_id,
             depth,
             allowed_doc_ids=allowed_doc_ids,
+            tenant_id=tenant_id,
+            contract_index=contract_index,
+            document_versions=document_versions,
+            document_contracts=document_contracts,
         )
 
 
@@ -136,7 +182,10 @@ async def write_clause_episode(
         Exception: If write fails.
     """
     source_description = metadata.model_dump_json()
-    episode_name = f"clause:{metadata.doc_id}:{metadata.clause_id}"
+    episode_name = (
+        f"clause:{metadata.tenant_id}:{metadata.doc_id}:v{metadata.document_version}:"
+        f"c{metadata.contract_index}:{metadata.clause_id}"
+    )
     episode_uuid = str(uuid5(NAMESPACE_URL, f"agentnexus:{episode_name}"))
 
     logger.bind(
@@ -152,12 +201,22 @@ async def write_clause_episode(
             source=EpisodeType.text,
             source_description=source_description,
             reference_time=datetime.now(tz=UTC),
-            group_id=metadata.doc_id,
+            group_id=build_graphiti_group_id(
+                tenant_id=metadata.tenant_id,
+                document_id=metadata.doc_id,
+                document_version=metadata.document_version,
+                contract_index=metadata.contract_index,
+            ),
             uuid=episode_uuid,
         )
-    except Exception as exc:
+    except _GRAPHITI_TRANSPORT_ERRORS as exc:
         exc.add_note("operation=write_clause_episode, service=graphiti")
-        logger.bind(service="graphiti").exception("Failed to write clause episode")
+        exc.add_note(traceback.format_exc())
+        logger.bind(
+            service="graphiti",
+            operation="write_clause_episode",
+            error_type=type(exc).__name__,
+        ).exception("Failed to write clause episode")
         raise
     return episode_uuid
 
@@ -183,7 +242,10 @@ async def write_relationship_edge(
     Raises:
         Exception: If write fails.
     """
-    episode_name = f"edge:{edge.doc_id}:{edge.clause_id}:{edge.from_entity}:{edge.relationship}:{edge.to_entity}"
+    episode_name = (
+        f"edge:{edge.tenant_id}:{edge.doc_id}:v{edge.document_version}:c{edge.contract_index}:"
+        f"{edge.clause_id}:{edge.from_entity}:{edge.relationship}:{edge.to_entity}"
+    )
     episode_uuid = str(uuid5(NAMESPACE_URL, f"agentnexus:{episode_name}"))
     source_description = json.dumps(
         {
@@ -209,12 +271,22 @@ async def write_relationship_edge(
             source=EpisodeType.text,
             source_description=source_description,
             reference_time=datetime.now(tz=UTC),
-            group_id=edge.doc_id,
+            group_id=build_graphiti_group_id(
+                tenant_id=edge.tenant_id,
+                document_id=edge.doc_id,
+                document_version=edge.document_version,
+                contract_index=edge.contract_index,
+            ),
             uuid=episode_uuid,
         )
-    except Exception as exc:
+    except _GRAPHITI_TRANSPORT_ERRORS as exc:
         exc.add_note("operation=write_relationship_edge, service=graphiti")
-        logger.bind(service="graphiti").exception("Failed to write relationship edge")
+        exc.add_note(traceback.format_exc())
+        logger.bind(
+            service="graphiti",
+            operation="write_relationship_edge",
+            error_type=type(exc).__name__,
+        ).exception("Failed to write relationship edge")
         raise
     return episode_uuid
 
@@ -232,12 +304,15 @@ async def search_for_risk_context(
     num_results: int = 10,
     *,
     allowed_doc_ids: tuple[str, ...] = (),
-) -> list[GraphitiSearchResult]:
+    tenant_id: str | None = None,
+    contract_index: int | None = None,
+    document_versions: Sequence[tuple[str, int]] = (),
+    document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
+) -> GraphitiSearchOutcome:
     """Search the knowledge graph for risk-relevant context.
 
-    Searches across:
-    - Current document episodes (group_id=doc_id) for clause-level context
-    - User's historical documents (group_id=user_id) for precedent patterns
+    Searches across the server-authorized canonical tenant/document/version/
+    contract partitions for clause-level context and precedent patterns.
 
     Args:
         graphiti: Graphiti instance.
@@ -253,8 +328,19 @@ async def search_for_risk_context(
     # authorization boundary, not a request to widen to historical groups.
     del user_id, doc_id
     if not allowed_doc_ids:
-        return []
-    group_ids: list[str] = list(allowed_doc_ids)
+        return GraphitiSearchOutcome()
+    group_ids = _scoped_group_ids(
+        allowed_doc_ids,
+        tenant_id=tenant_id,
+        contract_index=contract_index,
+        document_versions=document_versions,
+        document_contracts=document_contracts,
+    )
+    # An allowlist without a live tenant is not an authorization scope.  Do
+    # not pass an empty ``group_ids`` list to Graphiti: providers may interpret
+    # that as "all groups" rather than "no groups".
+    if not group_ids:
+        return _scope_unavailable(requested=num_results)
 
     logger.bind(
         service="graphiti",
@@ -268,14 +354,22 @@ async def search_for_risk_context(
             group_ids=group_ids,
             num_results=num_results,
         )
-    except GraphitiError as exc:
+    except _GRAPHITI_TRANSPORT_ERRORS as exc:
         exc.add_note(f"query={query[:80]}, task=risk_analysis")
+        exc.add_note(traceback.format_exc())
         logger.bind(service="graphiti").exception("Graphiti risk context search failed")
-        return []
+        return GraphitiSearchOutcome(
+            availability=GraphitiAvailability.UNAVAILABLE,
+            coverage={"requested": num_results, "returned": 0, "error": type(exc).__name__},
+        )
     else:
-        return [
+        results = [
             _score_and_convert(r, query=query, task="risk_analysis") for r in (raw_results or [])
         ]
+        return GraphitiSearchOutcome(
+            results,
+            coverage={"requested": num_results, "returned": len(results), "group_ids": group_ids},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +385,11 @@ async def search_for_precedent_chains(
     num_results: int = 10,
     *,
     allowed_doc_ids: tuple[str, ...] = (),
-) -> list[GraphitiSearchResult]:
+    tenant_id: str | None = None,
+    contract_index: int | None = None,
+    document_versions: Sequence[tuple[str, int]] = (),
+    document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
+) -> GraphitiSearchOutcome:
     """Search the knowledge graph for compliance precedents.
 
     Searches user's historical approved reports — the highest-trust
@@ -309,7 +407,7 @@ async def search_for_precedent_chains(
     """
     del user_id
     if not allowed_doc_ids:
-        return []
+        return GraphitiSearchOutcome()
 
     logger.bind(
         service="graphiti",
@@ -318,21 +416,38 @@ async def search_for_precedent_chains(
     ).info("Searching Graphiti for precedents")
 
     try:
+        group_ids = _scoped_group_ids(
+            allowed_doc_ids,
+            tenant_id=tenant_id,
+            contract_index=contract_index,
+            document_versions=document_versions,
+            document_contracts=document_contracts,
+        )
+        if not group_ids:
+            return _scope_unavailable(requested=num_results)
         raw_results = await graphiti.search(
             query=query,
-            group_ids=list(allowed_doc_ids),
+            group_ids=group_ids,
             num_results=num_results * 2,
         )
 
         filtered = [r for r in (raw_results or []) if _has_jurisdiction(r, jurisdiction)][
             :num_results
         ]
-    except GraphitiError as exc:
+    except _GRAPHITI_TRANSPORT_ERRORS as exc:
         exc.add_note(f"query={query[:80]}, task=precedent_chains")
+        exc.add_note(traceback.format_exc())
         logger.bind(service="graphiti").exception("Graphiti precedent search failed")
-        return []
+        return GraphitiSearchOutcome(
+            availability=GraphitiAvailability.UNAVAILABLE,
+            coverage={"requested": num_results, "returned": 0, "error": type(exc).__name__},
+        )
     else:
-        return [_score_and_convert(r, query=query, task="compliance") for r in filtered]
+        results = [_score_and_convert(r, query=query, task="compliance") for r in filtered]
+        return GraphitiSearchOutcome(
+            results,
+            coverage={"requested": num_results, "returned": len(results)},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +463,11 @@ async def get_obligation_chain(
     depth: int = 3,
     *,
     allowed_doc_ids: tuple[str, ...] = (),
-) -> list[GraphitiSearchResult]:
+    tenant_id: str | None = None,
+    contract_index: int | None = None,
+    document_versions: Sequence[tuple[str, int]] = (),
+    document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
+) -> GraphitiSearchOutcome:
     """Forward-chain obligations from a named entity.
 
     Example: given "Acme Corp", returns:
@@ -368,8 +487,16 @@ async def get_obligation_chain(
     """
     del user_id, doc_id
     if not allowed_doc_ids:
-        return []
-    group_ids: list[str] = list(allowed_doc_ids)
+        return GraphitiSearchOutcome()
+    group_ids = _scoped_group_ids(
+        allowed_doc_ids,
+        tenant_id=tenant_id,
+        contract_index=contract_index,
+        document_versions=document_versions,
+        document_contracts=document_contracts,
+    )
+    if not group_ids:
+        return _scope_unavailable(requested=depth * 5)
 
     obligation_query = f"obligations responsibilities duties of {entity_name}"
     logger.bind(
@@ -384,15 +511,74 @@ async def get_obligation_chain(
             group_ids=group_ids,
             num_results=depth * 5,
         )
-    except GraphitiError as exc:
+    except _GRAPHITI_TRANSPORT_ERRORS as exc:
         exc.add_note(f"query={obligation_query[:80]}, task=obligation_chain")
+        exc.add_note(traceback.format_exc())
         logger.bind(service="graphiti").exception("Graphiti obligation chain search failed")
-        return []
+        return GraphitiSearchOutcome(
+            availability=GraphitiAvailability.UNAVAILABLE,
+            coverage={"requested": depth * 5, "returned": 0, "error": type(exc).__name__},
+        )
     else:
-        return [
+        results = [
             _score_and_convert(r, query=obligation_query, task="obligation_chain")
             for r in (raw_results or [])
         ]
+        return GraphitiSearchOutcome(
+            results,
+            coverage={"requested": depth * 5, "returned": len(results), "group_ids": group_ids},
+        )
+
+
+def _scoped_group_ids(
+    document_ids: tuple[str, ...],
+    *,
+    tenant_id: str | None,
+    contract_index: int | None,
+    document_versions: Sequence[tuple[str, int]],
+    document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
+) -> list[str]:
+    """Build exact authorized tenant/document/version/contract partitions.
+
+    The legacy ``contract_index`` argument is retained for callers that have
+    already narrowed to one contract.  Without it, modern callers must supply
+    ``document_contracts``; an absent contract scope returns no groups rather
+    than querying the shared ``contract_none`` partition.
+    """
+    if not tenant_id:
+        return []
+    versions = {str(item[0]): int(item[1]) for item in document_versions}
+    contracts = {
+        document_id: (int(version), tuple(indexes), legacy_null)
+        for document_id, version, indexes, legacy_null in document_contracts
+    }
+    scopes: list[GraphitiDocumentScope] = []
+    for document_id in document_ids:
+        scoped = contracts.get(document_id)
+        if scoped is not None:
+            version, scoped_indexes, scoped_legacy_null = scoped
+        else:
+            version = versions.get(document_id)
+            # A missing version is not a safe request for the legacy v1
+            # partition: fail closed rather than widening the graph scope.
+            if version is None:
+                continue
+            scoped_indexes, scoped_legacy_null = (), False
+        if contract_index is not None:
+            indexes: tuple[int | None, ...] = (contract_index,)
+            legacy_null = False
+        else:
+            indexes, legacy_null = scoped_indexes, scoped_legacy_null
+        scopes.append(
+            GraphitiDocumentScope(
+                tenant_id=tenant_id,
+                document_id=document_id,
+                document_version=version,
+                contract_indexes=indexes,
+                legacy_null_contract=legacy_null,
+            )
+        )
+    return fanout_graphiti_group_ids(scopes)
 
 
 # ---------------------------------------------------------------------------

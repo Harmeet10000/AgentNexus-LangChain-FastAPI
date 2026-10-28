@@ -25,7 +25,9 @@ socket.socket.connect = no_connection
 from app.connections.celery_producer import celery_app
 from app.shared.jobs.names import DOCUMENTS_INGEST
 from app.shared.jobs.registry import CeleryTaskRegistry, TaskPayloadValidationError
-assert len(CeleryTaskRegistry.registered_names()) == 16
+# The terminal ingestion notification is validated through the same
+# producer-side catalog, without importing its worker implementation.
+assert len(CeleryTaskRegistry.registered_names()) == 17
 try:
     CeleryTaskRegistry.validate(DOCUMENTS_INGEST, {})
 except TaskPayloadValidationError:

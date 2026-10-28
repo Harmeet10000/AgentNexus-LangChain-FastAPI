@@ -96,6 +96,47 @@ async def test_graphiti_empty_allowlist_does_not_widen_to_user_or_tenant_groups(
     assert graphiti.calls == []
 
 
+@pytest.mark.asyncio
+async def test_graphiti_allowlist_without_tenant_does_not_issue_unscoped_search() -> None:
+    class _Graphiti:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def search(self, **kwargs: object) -> list[object]:
+            self.calls.append(kwargs)
+            return []
+
+    graphiti = _Graphiti()
+    assert (
+        await search_for_risk_context(
+            graphiti,
+            "q",
+            "alice",
+            allowed_doc_ids=("doc-a",),
+        )
+        == []
+    )
+    assert (
+        await search_for_precedent_chains(
+            graphiti,
+            "q",
+            "alice",
+            allowed_doc_ids=("doc-a",),
+        )
+        == []
+    )
+    assert (
+        await get_obligation_chain(
+            graphiti,
+            "entity",
+            "alice",
+            allowed_doc_ids=("doc-a",),
+        )
+        == []
+    )
+    assert graphiti.calls == []
+
+
 def test_evidence_tools_hide_identity_and_document_scope_from_model_schema() -> None:
     from app.features.documents.tools.get_obligation_chain import (
         make_get_obligation_chain_tool,

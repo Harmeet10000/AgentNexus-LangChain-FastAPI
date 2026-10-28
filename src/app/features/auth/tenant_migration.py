@@ -59,11 +59,17 @@ class TenantMigrationReport:
 
 @dataclass(slots=True)
 class TenantReadinessReport:
-    """Rollout gate proving active Mongo accounts have one SQL authority."""
+    """Rollout gate proving active accounts have valid SQL memberships.
+
+    Team memberships are intentionally not a duplicate condition: an account
+    may belong to many tenants.  Every active account must, however, retain a
+    valid personal tenant for the compatibility/default path.
+    """
 
     active_accounts: int = 0
     valid_accounts: int = 0
     missing_membership: list[str] = field(default_factory=list)
+    missing_personal_tenant: list[str] = field(default_factory=list)
     duplicate_membership: list[str] = field(default_factory=list)
     invalid_membership: list[str] = field(default_factory=list)
     missing_tenant: list[str] = field(default_factory=list)
@@ -75,6 +81,7 @@ class TenantReadinessReport:
         return not any(
             (
                 self.missing_membership,
+                self.missing_personal_tenant,
                 self.duplicate_membership,
                 self.invalid_membership,
                 self.missing_tenant,
@@ -89,6 +96,7 @@ class TenantReadinessReport:
             "active_accounts": self.active_accounts,
             "valid_accounts": self.valid_accounts,
             "missing_membership": list(self.missing_membership),
+            "missing_personal_tenant": list(self.missing_personal_tenant),
             "duplicate_membership": list(self.duplicate_membership),
             "invalid_membership": list(self.invalid_membership),
             "missing_tenant": list(self.missing_tenant),
@@ -258,35 +266,41 @@ async def check_tenant_readiness(
         if not user_memberships:
             report.missing_membership.append(user_id)
             continue
-        if len(user_memberships) != 1:
-            report.duplicate_membership.append(user_id)
-            continue
-        membership = user_memberships[0]
-        if membership.tenant_id != expected_tenant or membership.tenant_id not in tenants:
-            report.invalid_membership.append(user_id)
+        personal = [m for m in user_memberships if m.tenant_id == expected_tenant]
+        if not personal:
+            report.missing_personal_tenant.append(user_id)
+        elif expected_tenant not in tenants:
+            report.missing_tenant.append(user_id)
+
+        account_invalid = False
+        for membership in user_memberships:
             if membership.tenant_id not in tenants:
                 report.missing_tenant.append(user_id)
-            continue
-        try:
-            roles = normalize_legal_roles(membership.legal_roles)
-        except (TypeError, ValueError):
+                account_invalid = True
+            try:
+                normalize_legal_roles(membership.legal_roles)
+            except (TypeError, ValueError):
+                account_invalid = True
+        if account_invalid:
             report.invalid_membership.append(user_id)
-            continue
-        try:
-            mirror_roles = normalize_legal_roles(user.legal_roles)
-        except (TypeError, ValueError):
-            mirror_roles = ()
-        tenant_revision = getattr(user, "tenant_role_revision", None)
-        if tenant_revision is None:
-            # Explicit rolling-deploy compatibility for pre-mirror Mongo docs.
-            tenant_revision = user.role_revision
-        if (
-            user.tenant_id != membership.tenant_id
-            or mirror_roles != roles
-            or tenant_revision != membership.role_revision
-        ):
+
+        # Mongo is a mirror of the last selected membership, not a readiness
+        # authority.  Only flag a mirror tenant that points outside SQL; a
+        # valid team tenant is an acceptable last-active value.
+        if user.tenant_id is not None and user.tenant_id not in {
+            membership.tenant_id for membership in user_memberships
+        }:
             report.mirror_mismatch.append(user_id)
-        if user_id not in report.pending_mirror_sync and user_id not in report.mirror_mismatch:
+        if (
+            user_id not in report.pending_mirror_sync
+            and user_id not in report.mirror_mismatch
+            and not account_invalid
+            and personal
+            and expected_tenant in tenants
+        ):
             report.valid_accounts += 1
     report.pending_mirror_sync = sorted(set(report.pending_mirror_sync))
+    report.missing_tenant = sorted(set(report.missing_tenant))
+    report.invalid_membership = sorted(set(report.invalid_membership))
+    report.missing_personal_tenant = sorted(set(report.missing_personal_tenant))
     return report

@@ -8,6 +8,13 @@ with the caller.
 
 from .model import DeadLetterEvent, OutboxEvent
 from .relay import OutboxRelay
-from .writer import with_outbox
+from .writer import terminal_event_id, with_outbox, with_terminal_outbox
 
-__all__ = ["DeadLetterEvent", "OutboxEvent", "OutboxRelay", "with_outbox"]
+__all__ = [
+    "DeadLetterEvent",
+    "OutboxEvent",
+    "OutboxRelay",
+    "terminal_event_id",
+    "with_outbox",
+    "with_terminal_outbox",
+]

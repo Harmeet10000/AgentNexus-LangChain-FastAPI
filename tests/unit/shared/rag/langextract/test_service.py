@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,8 @@ from pydantic import SecretStr, ValidationError
 
 from app.extraction.langextract.service import (
     AsyncExtractionService,
+    ExtractionBudget,
+    ExtractionBudgetDimension,
     ExtractionFailed,
     ExtractionFailureCode,
     ExtractionRequest,
@@ -136,3 +139,94 @@ async def test_provider_exception_becomes_a_typed_failure() -> None:
         "Traceback (most recent call last)" in note and "RuntimeError: provider unavailable" in note
         for note in provider_error.__notes__
     )
+
+
+async def test_provider_failure_preserves_attempt_usage_in_the_budget() -> None:
+    provider_error = RuntimeError("provider unavailable")
+
+    class FailingProvider:
+        def extract(self, _request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]:
+            raise provider_error
+
+    budget = ExtractionBudget(
+        max_model_calls=10,
+        cost_per_1k_tokens_usd=2.0,
+        model_calls=1,
+        input_tokens=10,
+        cost_estimate_usd=0.02,
+    )
+    outcome = await AsyncExtractionService(FailingProvider()).extract(
+        ExtractionRequest(text="abcd", prompt_description="p", budget=budget)
+    )
+
+    assert isinstance(outcome, ExtractionFailed)
+    assert outcome.budget.model_calls == 4
+    assert outcome.budget.input_tokens == 13
+    assert outcome.budget.output_tokens == 0
+    assert outcome.budget.cost_estimate_usd == pytest.approx(0.026)
+
+
+async def test_budget_exhaustion_is_typed_and_does_not_call_provider() -> None:
+    called = False
+
+    class Provider:
+        def extract(self, _request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]:
+            nonlocal called
+            called = True
+            return ()
+
+    outcome = await AsyncExtractionService(Provider()).extract(
+        ExtractionRequest(
+            text="text",
+            prompt_description="prompt",
+            budget=ExtractionBudget(max_model_calls=0),
+        )
+    )
+
+    assert isinstance(outcome, ExtractionFailed)
+    assert outcome.code is ExtractionFailureCode.BUDGET_EXHAUSTED
+    assert outcome.budget_dimension is ExtractionBudgetDimension.MODEL_CALLS
+    assert called is False
+
+
+async def test_extraction_passes_consume_model_call_budget() -> None:
+    called = False
+
+    class Provider:
+        def extract(self, _request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]:
+            nonlocal called
+            called = True
+            return ()
+
+    outcome = await AsyncExtractionService(Provider()).extract(
+        ExtractionRequest(
+            text="text",
+            prompt_description="prompt",
+            extraction_passes=3,
+            budget=ExtractionBudget(max_model_calls=2),
+        )
+    )
+
+    assert isinstance(outcome, ExtractionFailed)
+    assert outcome.code is ExtractionFailureCode.BUDGET_EXHAUSTED
+    assert outcome.budget_dimension is ExtractionBudgetDimension.MODEL_CALLS
+    assert called is False
+
+
+async def test_wall_clock_budget_cancels_a_slow_provider() -> None:
+    class SlowProvider:
+        def extract(self, _request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]:
+            time.sleep(0.05)
+            return ()
+
+    outcome = await AsyncExtractionService(SlowProvider()).extract(
+        ExtractionRequest(
+            text="text",
+            prompt_description="prompt",
+            budget=ExtractionBudget(wall_clock_seconds=0.001),
+        )
+    )
+
+    assert isinstance(outcome, ExtractionFailed)
+    assert outcome.code is ExtractionFailureCode.BUDGET_EXHAUSTED
+    assert outcome.budget_dimension is ExtractionBudgetDimension.WALL_CLOCK

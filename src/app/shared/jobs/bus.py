@@ -117,7 +117,20 @@ class TypedJob[T: CeleryTaskPayload](BaseModel):
 
     def wire_payload(self) -> dict[str, object]:
         """Return the stable JSON-compatible payload sent to an adapter."""
-        return cast("dict[str, object]", self.payload.model_dump(mode="json"))
+        # Do not infer optionality from the value.  Empty strings, zero, and
+        # false are valid values for required fields (``tenant_id`` is the
+        # important example), and dropping them makes a valid typed job fail
+        # validation at the adapter boundary.  Defaults may be omitted for
+        # compatibility with older rows, but an explicitly supplied default
+        # value remains visible on the wire.
+        full = cast("dict[str, object]", self.payload.model_dump(mode="json"))
+        fields_set = self.payload.model_fields_set
+        return {
+            field_name: value
+            for field_name, value in full.items()
+            if type(self.payload).model_fields[field_name].is_required()
+            or field_name in fields_set
+        }
 
     def wire_json(self) -> str:
         """Return the payload's canonical Pydantic JSON representation."""

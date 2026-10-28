@@ -19,6 +19,7 @@ from app.features.documents.retrieval_graph.nodes import (
     make_query_analyzer_node,
 )
 from app.features.documents.retrieval_graph.state import QueryPlan
+from app.retrieval.graphiti.grouping import build_graphiti_group_id
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -84,8 +85,11 @@ async def test_graph_retrieval_uses_only_server_document_scope() -> None:
     await node(
         {
             "user_id": "user-1",
+            "tenant_id": "tenant-a",
             "allowed_doc_ids": ["doc-authorized"],
             "scope_bound": True,
+            "document_versions": [("doc-authorized", 1, None)],
+            "document_contracts": [("doc-authorized", 1, (None,), True)],
             "query_plan": QueryPlan(rewritten_query="who may terminate?"),
             "doc_ids_filter": ["doc-authorized", "doc-requested-but-unauthorized"],
         }
@@ -94,7 +98,12 @@ async def test_graph_retrieval_uses_only_server_document_scope() -> None:
     assert calls == [
         {
             "query": "who may terminate?",
-            "group_ids": ["doc-authorized"],
+            "group_ids": [
+                build_graphiti_group_id(
+                    tenant_id="tenant-a",
+                    document_id="doc-authorized",
+                )
+            ],
             "num_results": 20,
         }
     ]

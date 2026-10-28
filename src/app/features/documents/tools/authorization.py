@@ -33,6 +33,7 @@ class ToolRuntimeContext(TypedDict, total=False):
     run_id: str
     checkpoint_id: str
     document_versions: tuple[tuple[str, int, str | None], ...]
+    document_contracts: tuple[tuple[str, int, tuple[int | None, ...], bool], ...]
     # Server-side capability grants (PLAN-agent-tools.md §3). Default deny:
     # a system/filesystem tool executes only when its capability appears here.
     capabilities: tuple[str, ...]
@@ -49,6 +50,7 @@ class ToolAuthorizationContext:
     run_id: str
     checkpoint_id: str
     document_versions: tuple[tuple[str, int, str | None], ...]
+    document_contracts: tuple[tuple[str, int, tuple[int | None, ...], bool], ...]
     capabilities: tuple[str, ...]
     # True only for callers that explicitly use the pre-runtime compatibility
     # arguments.  This keeps the old test/client seam isolated; production
@@ -97,6 +99,7 @@ def trusted_tool_context(  # noqa: PLR0914 — normalize the complete runtime co
             run_id=legacy_thread_id or "",
             checkpoint_id="",
             document_versions=(),
+            document_contracts=(),
             capabilities=(),
             legacy_compat=True,
         )
@@ -132,6 +135,27 @@ def trusted_tool_context(  # noqa: PLR0914 — normalize the complete runtime co
         if isinstance(raw_versions, (list, tuple))
         else ()
     )
+    raw_contracts = context.get("document_contracts", state.get("document_contracts", ()))
+    document_contracts = (
+        tuple(
+            (
+                str(item[0]),
+                int(item[1]),
+                tuple(
+                    int(contract) if contract is not None else None
+                    for contract in item[2]
+                    if (isinstance(contract, int) and contract >= 0) or contract is None
+                ),
+                bool(item[3]) if len(item) > 3 else False,
+            )
+            for item in raw_contracts
+            if isinstance(item, (list, tuple))
+            and len(item) >= 3
+            and isinstance(item[2], (list, tuple, set, frozenset))
+        )
+        if isinstance(raw_contracts, (list, tuple))
+        else ()
+    )
     # Identity and capability authority is carried by ToolRuntime.context.
     # ``runtime.state`` is model-controlled specialist state and therefore is
     # never a fallback for these grants: omission means deny, not inheritance.
@@ -147,6 +171,7 @@ def trusted_tool_context(  # noqa: PLR0914 — normalize the complete runtime co
         run_id=str(run_id),
         checkpoint_id=str(checkpoint_id),
         document_versions=document_versions,
+        document_contracts=document_contracts,
         capabilities=capabilities,
     )
 

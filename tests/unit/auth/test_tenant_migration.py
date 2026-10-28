@@ -67,6 +67,11 @@ class FakeSession:
     async def flush(self) -> None:
         return None
 
+    async def scalars(self, statement: object):
+        model = getattr(statement, "column_descriptions", [{}])[0].get("entity")
+        values = self.store.tenants.values() if model is Tenant else self.store.memberships.values()
+        return type("ScalarResult", (), {"all": lambda _self: list(values)})()
+
 
 class FakeStore:
     def __init__(self) -> None:
@@ -238,3 +243,53 @@ def test_legacy_admin_legal_role_normalizes_to_corpus_admin() -> None:
     from app.features.auth.tenant_repository import normalize_legal_roles
 
     assert normalize_legal_roles(("admin",)) == (LegalRole.CORPUS_ADMIN,)
+
+
+@pytest.mark.asyncio
+async def test_sql_tenant_selection_requires_selector_for_multiple_memberships() -> None:
+    store = FakeStore()
+    personal = personal_tenant_id("multi-user")
+    store.tenants[personal] = Tenant(id=personal, display_name="Personal")
+    store.tenants["team-a"] = Tenant(id="team-a", display_name="Team A")
+    for tenant_id in (personal, "team-a"):
+        store.memberships[tenant_id, "multi-user"] = TenantMembership(
+            tenant_id=tenant_id,
+            user_id="multi-user",
+            legal_role="analyst",
+            legal_roles=["analyst"],
+        )
+    service = TenantMembershipService(store.factory)
+
+    missing = await service.resolve_tenant(user_id="multi-user")
+    selected = await service.resolve_tenant(user_id="multi-user", requested_tenant_id="team-a")
+    unauthorized = await service.resolve_tenant(
+        user_id="multi-user", requested_tenant_id="team-missing"
+    )
+
+    assert isinstance(missing, Failure)
+    assert isinstance(selected, Success)
+    assert selected.unwrap() == "team-a"
+    assert isinstance(unauthorized, Failure)
+
+
+@pytest.mark.asyncio
+async def test_readiness_accepts_personal_plus_valid_team_memberships() -> None:
+    from app.features.auth.tenant_migration import check_tenant_readiness
+
+    store = FakeStore()
+    user = FakeUser("ready-user", tenant_id="team-a")
+    personal = personal_tenant_id(user.id)
+    for tenant_id in (personal, "team-a"):
+        store.tenants[tenant_id] = Tenant(id=tenant_id, display_name=tenant_id)
+        store.memberships[tenant_id, user.id] = TenantMembership(
+            tenant_id=tenant_id,
+            user_id=user.id,
+            legal_role="analyst",
+            legal_roles=["analyst"],
+        )
+
+    report = await check_tenant_readiness(store.factory, users(user))
+
+    assert report.ready
+    assert report.duplicate_membership == []
+    assert report.valid_accounts == 1

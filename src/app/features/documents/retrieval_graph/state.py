@@ -90,6 +90,9 @@ class RetrievalState(MessagesState, total=False):
     user_id: str
     tenant_id: str
     allowed_doc_ids: list[str]
+    document_versions: list[tuple[str, int, str | None]]
+    document_contracts: list[tuple[str, int, tuple[int | None, ...], bool]]
+    scope_unavailable_documents: list[str]
     scope_bound: bool
     query: str
     doc_ids_filter: list[str]

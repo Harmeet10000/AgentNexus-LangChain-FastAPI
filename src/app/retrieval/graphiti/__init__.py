@@ -34,11 +34,23 @@ from .client import (
     write_clause_episode,
     write_relationship_edge,
 )
+from .grouping import (
+    GraphitiDocumentScope,
+    GraphitiGroupScope,
+    build_graphiti_group_id,
+    fanout_graphiti_group_ids,
+    parse_graphiti_group_id,
+)
 from .write_clause_episodes import write_clause_episodes_to_graphiti
 
 __all__ = [
     "BoundGraphitiService",
+    "GraphitiDocumentScope",
+    "GraphitiGroupScope",
+    "build_graphiti_group_id",
+    "fanout_graphiti_group_ids",
     "get_obligation_chain",
+    "parse_graphiti_group_id",
     "search_for_precedent_chains",
     "search_for_risk_context",
     "write_clause_episode",

@@ -283,10 +283,11 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
 
 
 def test_document_ingestion_advisory_lock_key_is_stable_and_tenant_scoped() -> None:
-    first = _document_ingestion_lock_key("user-1", "doc-1")
+    first = _document_ingestion_lock_key("tenant-1", "doc-1", 1)
 
-    assert first == _document_ingestion_lock_key("user-1", "doc-1")
-    assert first != _document_ingestion_lock_key("user-2", "doc-1")
+    assert first == _document_ingestion_lock_key("tenant-1", "doc-1", 1)
+    assert first != _document_ingestion_lock_key("tenant-2", "doc-1", 1)
+    assert first != _document_ingestion_lock_key("tenant-1", "doc-1", 2)
     assert -(2**63) <= first < 2**63
 
 

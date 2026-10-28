@@ -28,8 +28,12 @@ They're structured as an async service function, not a tool, because:
 from __future__ import annotations
 
 import asyncio
+import traceback
+from asyncio import TimeoutError as AsyncTimeoutError
 from typing import TYPE_CHECKING, Protocol
 
+from graphiti_core.errors import GraphitiError
+from neo4j.exceptions import Neo4jError
 from pydantic import BaseModel, ConfigDict
 
 from app.extraction.langextract.langextract_to_graph import GraphIngestionContext
@@ -55,6 +59,15 @@ class GraphitiService(Protocol):
 
 
 _MAX_CONCURRENT_WRITES: int = 5
+_GRAPHITI_WRITE_ERRORS = (
+    GraphitiError,
+    Neo4jError,
+    AsyncTimeoutError,
+    OSError,
+    RuntimeError,
+    ValueError,
+    AttributeError,
+)
 
 
 class ClauseWriteResult(BaseModel):
@@ -108,6 +121,8 @@ async def write_clause_episodes_to_graphiti(
             segment=seg,
             doc_id=ctx.document_id,
             user_id=ctx.user_id,
+            tenant_id=ctx.tenant_id,
+            document_version=ctx.document_version,
             thread_id=ctx.thread_id,
             jurisdiction=ctx.jurisdiction,
             document_type=ctx.document_type,
@@ -132,6 +147,8 @@ async def write_clause_episodes_to_graphiti(
             doc_id=ctx.document_id,
             user_id=ctx.user_id,
             thread_id=ctx.thread_id,
+            tenant_id=ctx.tenant_id,
+            document_version=ctx.document_version,
             graphiti_service=graphiti_service,
             idempotency=idempotency,
         )
@@ -149,11 +166,13 @@ async def write_clause_episodes_to_graphiti(
 
 async def _write_single_clause_episode(
     segment: ClauseSegment,
+    *,
     doc_id: str,
     user_id: str,
+    tenant_id: str,
+    document_version: int,
     thread_id: str,
     jurisdiction: str,
-    *,
     document_type: str,
     human_reviewed: bool,
     graphiti_service: GraphitiService,
@@ -162,7 +181,13 @@ async def _write_single_clause_episode(
 ) -> ClauseWriteResult:
     idem_key = IdempotencyGuard.make_key(
         step_id=f"clause_episode:{segment.clause_id}",
-        structural={"doc_id": doc_id, "clause_id": segment.clause_id},
+        structural={
+            "doc_id": doc_id,
+            "tenant_id": tenant_id,
+            "document_version": document_version,
+            "contract_index": segment.contract_index,
+            "clause_id": segment.clause_id,
+        },
         content=None,
         user_id=user_id,
     )
@@ -179,6 +204,8 @@ async def _write_single_clause_episode(
 
             metadata = ClauseEpisodeMetadata(
                 doc_id=doc_id,
+                tenant_id=tenant_id,
+                document_version=document_version,
                 contract_index=segment.contract_index,
                 clause_id=segment.clause_id,
                 clause_type=segment.clause_type.value,
@@ -209,10 +236,12 @@ async def _write_single_clause_episode(
                 episode_uuid=uuid,
                 success=True,
             )
-        except (RuntimeError, ValueError, AttributeError) as exc:
+        except _GRAPHITI_WRITE_ERRORS as exc:
+            exc.add_note(f"clause_id={segment.clause_id}, operation=write_clause_episode")
+            exc.add_note(traceback.format_exc())
             logger.bind(
                 clause_id=segment.clause_id,
-                error=str(exc),
+                error_type=type(exc).__name__,
             ).exception("clause_episode_write_failed")
             return ClauseWriteResult(
                 clause_id=segment.clause_id,
@@ -224,16 +253,24 @@ async def _write_single_clause_episode(
 
 async def _write_single_relationship_edge(
     relationship: LegalRelationship,
+    *,
     doc_id: str,
     user_id: str,
     thread_id: str,
-    *,
+    tenant_id: str,
+    document_version: int,
     graphiti_service: GraphitiService,
     idempotency: IdempotencyGuard,
 ) -> RelationshipWriteResult:
     idem_key = IdempotencyGuard.make_key(
         step_id=f"rel_edge:{relationship.edge_id}",
-        structural={"doc_id": doc_id, "edge_id": relationship.edge_id},
+        structural={
+            "doc_id": doc_id,
+            "tenant_id": tenant_id,
+            "document_version": document_version,
+            "contract_index": relationship.contract_index,
+            "edge_id": relationship.edge_id,
+        },
         content=None,
         user_id=user_id,
     )
@@ -253,6 +290,9 @@ async def _write_single_relationship_edge(
             to_entity=relationship.to_node,
             clause_id=relationship.clause_id,
             doc_id=doc_id,
+            tenant_id=tenant_id,
+            document_version=document_version,
+            contract_index=relationship.contract_index,
             user_id=user_id,
             thread_id=thread_id,
             citation_source=relationship.citation.source,
@@ -275,10 +315,12 @@ async def _write_single_relationship_edge(
             episode_uuid=uuid,
             success=True,
         )
-    except (RuntimeError, ValueError, AttributeError) as exc:
+    except _GRAPHITI_WRITE_ERRORS as exc:
+        exc.add_note(f"edge_id={relationship.edge_id}, operation=write_relationship_edge")
+        exc.add_note(traceback.format_exc())
         logger.bind(
             edge_id=relationship.edge_id,
-            error=str(exc),
+            error_type=type(exc).__name__,
         ).exception("relationship_edge_write_failed")
         return RelationshipWriteResult(
             edge_id=relationship.edge_id,

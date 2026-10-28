@@ -63,7 +63,7 @@ def main() -> None:
     mode.add_argument(
         "--check",
         action="store_true",
-        help="verify every active Mongo account has exactly one valid SQL membership and a converged mirror; exits 1 when not ready",
+        help="verify every active Mongo account has a personal plus valid SQL memberships and no pending/mismatched mirror; exits 1 when not ready",
     )
     mode.add_argument(
         "--reconcile",

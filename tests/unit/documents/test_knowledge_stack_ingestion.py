@@ -38,6 +38,7 @@ class _ObjectStore:
 class _Repo:
     def __init__(self, trees: list[dict[str, Any]] | None = None) -> None:
         self.status_calls: list[dict[str, Any]] = []
+        self.chunk_rows: list[dict[str, Any]] = []
         self.trees = trees or []
         self.transaction_checkpoints = 0
 
@@ -45,7 +46,8 @@ class _Repo:
         self.status_calls.append(kwargs)
         return Success(None)
 
-    async def upsert_chunks(self, _rows: object) -> Success[None]:
+    async def upsert_chunks(self, rows: object) -> Success[None]:
+        self.chunk_rows = list(cast("Any", rows))
         return Success(None)
 
     async def fetch_structural_trees(self, **_kwargs: object) -> Success[list[dict[str, Any]]]:
@@ -90,8 +92,15 @@ async def _run_ingestion(
         events.append("chunk")
         return [PreparedChunk(chunk_index=0, chunk_kind="generic", content="Payment is due.")], []
 
-    async def embed_chunks(**_kwargs: object) -> list[dict[str, object]]:
-        return [{"id": "10000000-0000-0000-0000-000000000001", "chunk_index": 0}]
+    async def embed_chunks(**kwargs: object) -> list[dict[str, object]]:
+        outcome = cast("Any", kwargs["extraction_outcome"])
+        return [
+            {
+                "id": "10000000-0000-0000-0000-000000000001",
+                "chunk_index": 0,
+                "custom_metadata": document_service.ingest._extraction_metadata(outcome),
+            }
+        ]
 
     class RecordingProvider:
         def extract(self, request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]:
@@ -134,16 +143,27 @@ async def test_extraction_runs_once_before_chunking_and_empty_success_is_complet
     assert repo.status_calls[0]["structural_tree"]["name"] == "Fixture"
 
 
-async def test_extraction_failure_is_visible_but_ingestion_completes(monkeypatch: Any) -> None:
+async def test_extraction_failure_is_visible_as_warning_but_ingestion_completes(
+    monkeypatch: Any,
+) -> None:
     def fail(_request: ExtractionRequest) -> tuple[lx.data.AnnotatedDocument, ...]:
         message = "provider down"
         raise RuntimeError(message)
 
     events, repo, result = await _run_ingestion(monkeypatch, fail)
 
-    assert result.unwrap()["status"] == "completed"
+    assert result.unwrap()["status"] == "completed_with_warnings"
     assert events == ["extract", "chunk"]
     assert repo.status_calls[0]["extraction_incomplete"] is True
+    metadata = repo.status_calls[0]["metadata_"]
+    assert metadata["knowledge_extraction"] == "incomplete"
+    assert metadata["knowledge_extraction_failure"] == "provider_error"
+    assert metadata["knowledge_extraction_message"] == "LangExtract provider failed"
+    assert repo.chunk_rows[0]["custom_metadata"]["knowledge_extraction"] == "incomplete"
+    assert (
+        repo.chunk_rows[0]["custom_metadata"]["knowledge_extraction_failure"]
+        == "provider_error"
+    )
     assert repo.transaction_checkpoints == 2
 
 

@@ -20,6 +20,7 @@ Design rationale:
 
 from __future__ import annotations
 
+from collections import UserList
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -43,6 +44,8 @@ class ClauseEpisodeMetadata(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     doc_id: str
+    tenant_id: str = ""
+    document_version: int = 1
     contract_index: int | None = None
     clause_id: str
     clause_type: str
@@ -70,6 +73,29 @@ class GraphitiSearchResult(BaseModel):
     group_id: str | None = None
     created_at: datetime | None = None
     metadata_raw: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphitiAvailability(StrEnum):
+    """Read health is part of the retrieval contract, not inferred from hits."""
+
+    AVAILABLE = "available"
+    DEGRADED = "degraded"
+    UNAVAILABLE = "unavailable"
+
+
+class GraphitiSearchOutcome(UserList[GraphitiSearchResult]):
+    """List-compatible search result carrying explicit coverage/health."""
+
+    def __init__(
+        self,
+        results: list[GraphitiSearchResult] | None = None,
+        *,
+        availability: GraphitiAvailability = GraphitiAvailability.AVAILABLE,
+        coverage: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(results or [])
+        self.availability = availability
+        self.coverage = coverage or {"requested": 0, "returned": len(self)}
 
 
 class PartyNode(BaseModel):
@@ -197,6 +223,8 @@ class LegalEdgeInput(BaseModel):
     to_entity: str = Field(description="e.g. 'GlobalTech Ltd'")
     clause_id: str
     doc_id: str
+    tenant_id: str = ""
+    document_version: int = 1
     contract_index: int | None = None
     user_id: str
     thread_id: str

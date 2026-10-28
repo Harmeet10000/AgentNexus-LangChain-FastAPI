@@ -328,6 +328,9 @@ class IngestionJob(BaseModel):
     document_id: str
     user_id: str
     tenant_id: str = ""
+    document_version: int = Field(default=1, ge=1)
+    attempt: int = Field(default=0, ge=0)
+    task_id: str | None = None
     filename: str
     content_type: str
     object_uri: str

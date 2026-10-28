@@ -624,7 +624,7 @@ class ClauseExtractionInput(BaseModel, frozen=True):
 # extend hydrate_state so older recognised shapes upgrade deterministically.
 # ---------------------------------------------------------------------------
 
-STATE_SCHEMA_VERSION: Final[int] = 7
+STATE_SCHEMA_VERSION: Final[int] = 8
 
 # States persisted before the schema_version field existed carry no key at
 # all; version 1 is also accepted as the recognised legacy shape and
@@ -646,6 +646,7 @@ _LEGACY_STATE_DEFAULTS: dict[str, Any] = {
     "allowed_operations": [],
     "capabilities": [],
     "document_versions": [],
+    "document_contracts": [],
     # Legacy checkpoints have no trustworthy tenant policy; fail closed.
     "self_review_allowed": False,
     "self_reviewed": False,
@@ -701,7 +702,7 @@ def hydrate_state(state: dict[str, Any]) -> dict[str, Any]:
     recorded = state.get("schema_version")
     if recorded == STATE_SCHEMA_VERSION and not isinstance(state.get("budget_ledger"), dict):
         return state
-    if recorded is not None and recorded not in {0, 1, 2, 3, 4, 5, 6}:
+    if recorded is not None and recorded not in {0, 1, 2, 3, 4, 5, 6, 7}:
         msg = (
             f"refusing agent state: recorded schema_version={recorded!r} "
             f"cannot be loaded by this runtime "
@@ -784,6 +785,7 @@ class LegalAgentState(TypedDict):
     allowed_operations: list[str]
     capabilities: list[str]
     document_versions: list[tuple[str, int, str | None]]
+    document_contracts: list[tuple[str, int, tuple[int | None, ...], bool]]
     self_review_allowed: bool
     self_reviewed: bool
     document_text: str | None  # populated by ingestion node
