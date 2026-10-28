@@ -501,6 +501,37 @@ def test_iaa_structural_errors_exit_one(tmp_path: Path) -> None:
         assert run(case_dir) == 1, name
 
 
+def test_iaa_missing_universe_case_message_names_sidecar(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A universe case with no annotation is reported against its sidecar."""
+    spec = WAVE3_FIXTURE[:6]
+    base = tmp_path / "missing-case"
+    base.mkdir()
+    write_questions(base / "questions.jsonl", [case for case, _, _, _ in spec])
+    sidecar_a, sidecar_b = sidecars_for(spec)
+    write_jsonl(base / "sidecar-a.jsonl", sidecar_a)
+    write_jsonl(base / "sidecar-b.jsonl", sidecar_b[:-1])  # annotator B missed one case
+    code = run_iaa(
+        [
+            "--a",
+            str(base / "sidecar-a.jsonl"),
+            "--b",
+            str(base / "sidecar-b.jsonl"),
+            "--questions",
+            str(base / "questions.jsonl"),
+            "--out",
+            str(base / "report.json"),
+        ]
+    )
+    assert code == 1
+    missing_case = spec[-1][0]
+    err = capsys.readouterr().err
+    assert f"question-universe case '{missing_case}' has no annotation in" in err
+    assert str(base / "sidecar-b.jsonl") in err
+    assert "missing from the question universe" not in err
+
+
 def test_iaa_cli_subprocess_reports_gate_failure(tmp_path: Path) -> None:
     spec = (
         ("direct_answer-unit-001", "relevant", "relevant", "deterministic"),
@@ -709,9 +740,13 @@ def test_merge_missing_sidecar_case_exits_one(tmp_path: Path) -> None:
 def test_merged_output_passes_real_validation(tmp_path: Path) -> None:
     fixture = wave3_fixture(tmp_path)
     assert run_merge(merge_argv(fixture, tmp_path)) == 0
-    # the merged output is v2 data, so the normal load path now requires its
-    # own sibling manifest; reuse the fixture-manifest helper for it
-    write_manifest(fixture["out"], tmp_path / "corpus")
+    # a distinct --out path must carry its own sibling manifest: both the
+    # merged JSONL and <stem>.manifest.json exist, and the output loads
+    # through the normal validated path with nothing hand-added
+    out_manifest = fixture["out"].with_name(f"{fixture['out'].stem}.manifest.json")
+    assert fixture["out"].is_file()
+    assert out_manifest.is_file()
+    assert out_manifest.read_bytes() == fixture["manifest"].read_bytes()
     result = asyncio.run(load_validated_golden_set(fixture["out"]))
     assert isinstance(result, Success)
     queries = result.unwrap().queries
@@ -730,6 +765,27 @@ def test_merged_output_passes_real_validation(tmp_path: Path) -> None:
         and len(query.provenance.annotations) == 2
         for query in release
     )
+
+
+def test_merge_in_place_leaves_exactly_one_manifest(tmp_path: Path) -> None:
+    """An in-place --apply keeps the gold's sibling manifest, not a duplicate."""
+    fixture = wave3_fixture(tmp_path)
+    manifest_before = fixture["manifest"].read_bytes()
+    argv = [
+        "--gold",
+        str(fixture["gold"]),
+        "--a",
+        str(tmp_path / "sidecar-a.jsonl"),
+        "--b",
+        str(tmp_path / "sidecar-b.jsonl"),
+        "--iaa",
+        str(fixture["report"]),
+        "--apply",
+    ]
+    assert run_merge(argv) == 0
+    assert list(tmp_path.glob("*.manifest.json")) == [fixture["manifest"]]
+    assert fixture["manifest"].read_bytes() == manifest_before
+    assert list(tmp_path.glob("*.merge-*")) == []  # no temp gold or temp manifest residue
 
 
 # --- merge guard rails: manifest consult, IAA recheck, annotator identity ----
@@ -829,6 +885,44 @@ def test_merge_refuses_when_recomputed_gate_fails(
     assert not fixture["out"].exists()
 
 
+# (case, label_a, label_b): n=10, raw=8/10=0.80, p_e=0.47, kappa~0.6226 —
+# it clears a weakened 0.5/0.5 report gate but fails the 0.70/0.80 defaults.
+WEAK_GATE_SPEC: tuple[tuple[str, str, str, str], ...] = (
+    ("direct_answer-unit-101", "relevant", "relevant", "deterministic"),
+    ("direct_answer-unit-102", "relevant", "relevant", "deterministic"),
+    ("direct_answer-unit-103", "relevant", "relevant", "deterministic"),
+    ("direct_answer-unit-104", "relevant", "relevant", "deterministic"),
+    ("direct_answer-unit-105", "relevant", "relevant", "deterministic"),
+    ("direct_answer-unit-106", "relevant", "relevant", "deterministic"),
+    ("direct_answer-unit-107", "partially_relevant", "partially_relevant", "deterministic"),
+    ("direct_answer-unit-108", "irrelevant", "irrelevant", "deterministic"),
+    ("direct_answer-unit-109", "relevant", "partially_relevant", "deterministic"),
+    ("direct_answer-unit-110", "irrelevant", "partially_relevant", "deterministic"),
+)
+
+
+def test_merge_recheck_ignores_weakened_report_thresholds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The gate recheck uses the stricter of report thresholds and defaults."""
+    rows = [gold_row(case, grader=grader) for case, _, _, grader in WEAK_GATE_SPEC]
+    gold = tmp_path / "gold.jsonl"
+    write_gold(gold, rows)
+    write_manifest(gold, tmp_path / "corpus")
+    # the report genuinely passes under its own weakened 0.5/0.5 thresholds
+    _, report = compute_iaa_report(
+        tmp_path, WEAK_GATE_SPEC, extra_args=["--min-kappa", "0.5", "--min-agreement", "0.5"]
+    )
+    fixture = {"gold": gold, "report": report, "out": tmp_path / "merged.jsonl"}
+    code = run_merge(merge_argv(fixture, tmp_path))
+    assert code == 2  # kappa 0.6226 clears 0.5 but not the enforced 0.70
+    err = capsys.readouterr().err
+    assert "recomputed IAA gate fails" in err
+    assert "min_kappa=0.7" in err
+    assert "min_agreement=0.8" in err
+    assert not fixture["out"].exists()
+
+
 def test_merge_refuses_v2_gold_without_manifest(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -918,3 +1012,111 @@ def test_merge_reopen_rewrites_pre_adjudicated_row(tmp_path: Path) -> None:
     assert provenance["adjudication"]["adjudicator"] is None
     assert provenance["quality_tier"] == "release"
     assert len(provenance["annotations"]) == 2
+
+
+# --- merge of pre-waived rows (waived_with_reason is human-decided too) ------
+
+
+WAIVED_CASE = "direct_answer-unit-021"
+WAIVED_RATIONALE = "duplicate of an already adjudicated case in the same wave"
+
+
+def waived_gold_row(case_id: str) -> dict[str, Any]:
+    row = gold_row(case_id, grader="deterministic")
+    provenance = row["provenance"]
+    provenance["human_review_status"] = "sme_reviewed"
+    provenance["quality_tier"] = "release"
+    provenance["annotators"]["legal_sme_entailment"] = "sme-1"
+    provenance["adjudication"] = {
+        "status": "waived_with_reason",
+        "adjudicator": "sme-lead-7",
+        "rationale": WAIVED_RATIONALE,
+    }
+    return row
+
+
+def waived_fixture(tmp_path: Path) -> dict[str, Path]:
+    """One pre-waived release row + agreeing sidecars + passing report."""
+    spec = ((WAIVED_CASE, "relevant", "relevant", "deterministic"),)
+    gold = tmp_path / "gold.jsonl"
+    write_gold(gold, [waived_gold_row(WAIVED_CASE)])
+    manifest = write_manifest(gold, tmp_path / "corpus")
+    _, report = compute_iaa_report(tmp_path, spec)
+    return {"gold": gold, "manifest": manifest, "report": report, "out": tmp_path / "merged.jsonl"}
+
+
+def test_merge_preserves_pre_waived_row(tmp_path: Path) -> None:
+    fixture = waived_fixture(tmp_path)
+    prior = json.loads(fixture["gold"].read_text(encoding="utf-8").splitlines()[1])
+    assert run_merge(merge_argv(fixture, tmp_path)) == 0
+    _, rows = read_gold_rows(fixture["out"])
+    assert len(rows) == 1
+    merged = rows[0]["provenance"]
+    assert merged["adjudication"] == prior["provenance"]["adjudication"]
+    assert merged["human_review_status"] == "sme_reviewed"
+    assert merged["quality_tier"] == "release"
+    assert len(merged["annotations"]) == 2
+
+
+def test_merge_reopen_resets_pre_waived_row(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture = waived_fixture(tmp_path)
+    assert run_merge(merge_argv(fixture, tmp_path, reopen=True)) == 0
+    _, rows = read_gold_rows(fixture["out"])
+    provenance = rows[0]["provenance"]
+    assert provenance["human_review_status"] == "engineer_reviewed"
+    assert provenance["quality_tier"] == "release"
+    assert provenance["adjudication"]["status"] == "not_required"
+    assert provenance["adjudication"]["adjudicator"] is None
+    # the plan reports which status was reopened
+    assert "adjudication: reopened (waived_with_reason -> pending_sme)" in capsys.readouterr().out
+
+
+# --- pending_sme conversions keep no stale decision fields -------------------
+
+
+def stale_adjudication_fixture(tmp_path: Path, adjudication: dict[str, Any]) -> dict[str, Path]:
+    """WAVE3 fixture with unit-005's adjudication replaced by ``adjudication``."""
+    rows = [gold_row(case, grader=grader) for case, _, _, grader in WAVE3_FIXTURE]
+    for row in rows:
+        if row["case_id"] == "direct_answer-unit-005":
+            row["provenance"]["adjudication"] = adjudication
+    gold = tmp_path / "legal_retrieval_v2.jsonl"
+    write_gold(gold, rows)
+    manifest = write_manifest(gold, tmp_path / "corpus")
+    _, report = compute_iaa_report(tmp_path, WAVE3_FIXTURE)
+    return {"gold": gold, "manifest": manifest, "report": report, "out": tmp_path / "merged.jsonl"}
+
+
+def test_merge_conversion_to_pending_discards_stale_decision_fields(tmp_path: Path) -> None:
+    """not_required -> pending_sme drops method/decided_at and rewrites rationale."""
+    stale = {
+        "status": "not_required",
+        "method": "independent_sme",
+        "adjudicator": None,
+        "rationale": RELEASE_RATIONALE,
+        "checklist": {},
+        "decided_at": "2026-10-01T00:00:00+00:00",
+    }
+    fixture = stale_adjudication_fixture(tmp_path, stale)
+    assert run_merge(merge_argv(fixture, tmp_path)) == 0
+    _, rows = read_gold_rows(fixture["out"])
+    by_case = {row["case_id"]: row for row in rows}
+    adjudication = by_case["direct_answer-unit-005"]["provenance"]["adjudication"]
+    assert adjudication["status"] == "pending_sme"
+    assert "method" not in adjudication
+    assert "decided_at" not in adjudication
+    assert "adjudicator" not in adjudication
+    assert adjudication["rationale"].startswith("reopened by merge run ")
+    assert by_case["direct_answer-unit-005"]["provenance"]["quality_tier"] == "candidate"
+
+
+def test_merge_preserves_already_pending_adjudication(tmp_path: Path) -> None:
+    """An existing pending_sme record is preserved verbatim (idempotence)."""
+    existing = {"status": "pending_sme", "rationale": "custom pending reason"}
+    fixture = stale_adjudication_fixture(tmp_path, dict(existing))
+    assert run_merge(merge_argv(fixture, tmp_path)) == 0
+    _, rows = read_gold_rows(fixture["out"])
+    by_case = {row["case_id"]: row for row in rows}
+    assert by_case["direct_answer-unit-005"]["provenance"]["adjudication"] == existing

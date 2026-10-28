@@ -24,6 +24,7 @@ from app.ai.evaluation.schema import (
     GoldenItemProvenance,
     GoldenQuery,
     GoldenSet,
+    PolicyOverride,
     load_golden_set,
 )
 
@@ -108,6 +109,76 @@ class FakeAdapter:
             runtime=RuntimeStats(tool_calls=2, model_calls=1, input_tokens=4, output_tokens=2),
             evidence_policy=variant.evidence_policy,
         )
+
+
+class AbstainAdapter:
+    """Abstains for every query, or only for one designated query."""
+
+    def __init__(self, *, abstain_for: str | None = None) -> None:
+        self.abstain_for = abstain_for
+
+    async def run(self, query: GoldenQuery, variant: VariantConfig) -> AdapterOutput:
+        abstained = self.abstain_for is None or query.query == self.abstain_for
+        return AdapterOutput(
+            retrieved_chunk_ids=[],
+            claims=[],
+            citations=[],
+            abstained=abstained,
+            coverage=Coverage(documents_requested=1, documents_ready=1),
+            runtime=RuntimeStats(tool_calls=1, model_calls=0),
+            evidence_policy=variant.evidence_policy,
+        )
+
+
+def _abstention_query(text: str, **overrides: object) -> GoldenQuery:
+    """A direct-answer v2 row whose query itself declares expected abstention."""
+    row: dict[str, object] = {
+        "query": text,
+        "expected_chunk_ids": [f"chunk-{text}"],
+        "expected_document_ids": [f"document-{text}"],
+        "jurisdiction": "India",
+        "document_kind": "contracts",
+        "difficulty": "easy",
+        "notes": "fixture",
+        "awaiting_sme_expansion": False,
+        "case_type": "direct_answer",
+        "retrieval_relevance": "relevant",
+        "claim_entailment": "not_applicable",
+        "expected_abstention": True,
+        "expected_evidence_status": "no_evidence",
+        "provenance": _provenance(),
+    }
+    row.update(overrides)
+    return GoldenQuery(**row)  # type: ignore[arg-type]
+
+
+def _no_evidence_query(text: str, **overrides: object) -> GoldenQuery:
+    """An index_not_ready v2 row with a graph-indexed policy override."""
+    row: dict[str, object] = {
+        "query": text,
+        "expected_chunk_ids": [],
+        "expected_document_ids": [],
+        "jurisdiction": "India",
+        "document_kind": "contracts",
+        "difficulty": "hard",
+        "notes": "fixture",
+        "awaiting_sme_expansion": False,
+        "case_type": "index_not_ready",
+        "retrieval_relevance": "not_applicable",
+        "claim_entailment": "not_applicable",
+        "expected_abstention": True,
+        "expected_evidence_status": "index_not_ready",
+        "expected_coverage_ratio_min": 0.0,
+        "policy_overrides": {
+            "graph_indexed_only": PolicyOverride(
+                expected_abstention=False,
+                expected_evidence_status="index_not_ready",
+            )
+        },
+        "provenance": _provenance(),
+    }
+    row.update(overrides)
+    return GoldenQuery(**row)  # type: ignore[arg-type]
 
 
 def test_stratification_preserves_multi_document_and_special_cases() -> None:
@@ -339,3 +410,108 @@ async def test_smoke_report_is_explicitly_non_decisional() -> None:
         "retrieval-path",
         "preamble",
     }
+
+
+@pytest.mark.asyncio
+async def test_v2_row_honors_query_expected_abstention() -> None:
+    """correct_abstention is scored against the query field, not the case type."""
+    variant = VariantConfig(
+        name="pipeline",
+        kind="evidence_pipeline",
+        evidence_policy="mechanically_verified",
+    )
+    golden_set = GoldenSet(
+        version="gold_v1",
+        provenance_schema_version="golden_provenance_v1",
+        queries=[_abstention_query("expect-abstention")],
+    )
+
+    # adapter never abstains: the query's expected_abstention=true makes this
+    # incorrect (the old case-type lookup would have scored it correct)
+    report = await run_experiment(
+        manifest=_manifest(variant), golden_set=golden_set, adapter=FakeAdapter()
+    )
+    assert report.variants[0].rows[0].metrics.correct_abstention == pytest.approx(0.0)
+
+    report = await run_experiment(
+        manifest=_manifest(variant),
+        golden_set=golden_set,
+        adapter=AbstainAdapter(abstain_for="expect-abstention"),
+    )
+    assert report.variants[0].rows[0].metrics.correct_abstention == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+async def test_policy_override_abstention_applies_under_matching_variant() -> None:
+    """A policy_overrides entry keyed by the variant's policy wins over the base."""
+    graph = VariantConfig(name="graph", kind="inline_ask", evidence_policy="graph_indexed_only")
+    verified = VariantConfig(
+        name="verified",
+        kind="evidence_pipeline",
+        evidence_policy="mechanically_verified",
+    )
+    golden_set = GoldenSet(
+        version="gold_v1",
+        provenance_schema_version="golden_provenance_v1",
+        queries=[_no_evidence_query("index-not-ready")],
+    )
+
+    report = await run_experiment(
+        manifest=_manifest(graph, verified),
+        golden_set=golden_set,
+        adapter=AbstainAdapter(abstain_for="index-not-ready"),
+    )
+
+    by_variant = {evaluation.variant.name: evaluation for evaluation in report.variants}
+    # graph_indexed_only override expects NO abstention, so abstaining is wrong
+    graph_row = by_variant["graph"].rows[0]
+    assert graph_row.metrics.correct_abstention == pytest.approx(0.0)
+    # mechanically_verified has no override: the base expected_abstention holds
+    verified_row = by_variant["verified"].rows[0]
+    assert verified_row.metrics.correct_abstention == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+async def test_v1_rows_keep_case_type_abstention_fallback() -> None:
+    """Rows without expected_abstention keep the case-type lookup behaviour."""
+    variant = VariantConfig(
+        name="pipeline",
+        kind="evidence_pipeline",
+        evidence_policy="mechanically_verified",
+    )
+    # a v1-shaped row neither declares expected_abstention nor policy_overrides
+    v1_row = GoldenQuery(
+        query="legacy-missing",
+        expected_chunk_ids=[],
+        expected_document_ids=[],
+        jurisdiction="India",
+        document_kind="statutes",
+        difficulty="hard",
+        notes="legacy fixture",
+        awaiting_sme_expansion=False,
+        case_type="statute_not_in_corpus",
+        retrieval_relevance="not_applicable",
+        claim_entailment="not_applicable",
+        provenance=_provenance(),
+    )
+    answerable = _query("legacy-answerable")
+    assert "expected_abstention" not in v1_row.model_fields_set
+    assert "expected_abstention" not in answerable.model_fields_set
+    assert v1_row.policy_overrides == {}
+    golden_set = GoldenSet(
+        version="gold_v1",
+        provenance_schema_version="golden_provenance_v1",
+        queries=[v1_row, answerable],
+    )
+
+    report = await run_experiment(
+        manifest=_manifest(variant),
+        golden_set=golden_set,
+        adapter=AbstainAdapter(),  # abstains for every query
+    )
+
+    by_query = {row.query: row.metrics for row in report.variants[0].rows}
+    # no-evidence case type: abstaining is the correct behaviour
+    assert by_query["legacy-missing"].correct_abstention == pytest.approx(1.0)
+    # direct_answer case type: abstaining is not expected
+    assert by_query["legacy-answerable"].correct_abstention == pytest.approx(0.0)

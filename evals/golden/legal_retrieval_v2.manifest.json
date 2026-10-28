@@ -2,7 +2,7 @@
   "manifest_version": "golden_provenance_v1",
   "golden_set_version": "legal_retrieval_v2",
   "artifact": "legal_retrieval_v2.jsonl",
-  "corpus_manifest_path": "evals/corpus",
+  "corpus_manifest_path": "../corpus",
   "notes": "per_artifact materialized on 2026-10-28 (manifest-reconciliation step) from evals/corpus/acquisition/<SOURCE_ID>.json: 17 artifact-bearing entries (SRC-01..SRC-07, SRC-12..SRC-16, SYN-01..SYN-05). Every sha256 and file_size_bytes was recomputed with sha256sum against evals/corpus/artifacts/<SOURCE_ID>/original.* and matched; page counts re-verified via pdfinfo (form-feed split for .txt); contract_boundaries carried verbatim (all one-based, within page_count).\nEXCLUDED from per_artifact - acquisition FAILED, no artifact exists (kept out so the audit rule 'sha256 checksum is missing' stays meaningful): SRC-08 (Indian Railways GCC April 2022 ACS-9 correction slip) - download failed HTTP 404; SRC-09 (GCC April 2022 ACS-11) - download failed HTTP 404; SRC-10 (ECR tender packet IBD v3.0) - download failed HTTP 404 on ecr.indianrailways.gov.in; SRC-11 (GCC 2019-revision older-edition decoy) - download failed HTTP 404. All four: indianrailways.gov.in uploads tree restructured ('Site Under Construction'); alternates tried, no mirror substitution per mission rule. Failure records with exact errors remain authoritative at evals/corpus/acquisition/SRC-08.json, SRC-09.json, SRC-10.json, SRC-11.json and evals/corpus/README.md section 2.\nTranslations applied to satisfy the implemented audit (acquisition value -> manifest value): (1) SYN-01..SYN-05 source_url null -> 'in-repo://evals/corpus/artifacts/<ID>/original.<ext>' pointing at the authored file (synthetic fixtures are authored in-repo; the audit requires a non-empty source_url per entry).\nNot carried into ArtifactProvenance (no schema field; model config extra=forbid) and still authoritative in the acquisition records: page_count, ocr_engine_version, extraction_settings, ambiguous_boundaries. reconciliation_2026_10_28: orphan SRC-EXEMPLAR entries dropped (rows replaced by 105 authored cases); SYN-05 re-pinned to re-rendered text-layer PDF sha256=7e336666e802...; SRC-08..11 remain excluded (download failures).\nbinary_storage_2026_10_28: the SRC-05/SRC-06 original.pdf payloads (~94MB combined, image-only scans with zero text layer, referenced by zero gold rows) are intentionally NOT stored in-repo; their per_artifact entries retain the acquired sha256/file_size_bytes for re-download verification (re-fetch from source_url with the recorded download_command, then verify sha256 — see acquisition/SRC-05.json and SRC-06.json storage_note), and the audit's designed warn-and-skip ('original file not found; checksum skipped') fires for exactly these two entries.\nlicence_2026_10_28: SRC-07 terms_licence_url re-pinned to the Ministry of Railways copyright policy (https://indianrailways.gov.in/footer/copyright-policy) as the verified permission basis; the IREPS footer T&C was retrievable but contains no explicit reproduction clause and the IREPS URL remains only as source_url/download provenance.",
   "source_policy": {
     "allowed_source_types": [
@@ -706,7 +706,7 @@
       "permission_status": "synthetic_owned",
       "redistribution_status": "not_applicable_synthetic",
       "model_processing_status": "permitted",
-      "ocr_status": "synthetic",
+      "ocr_status": "embedded_text_layer",
       "ocr_engine": "pdftotext (poppler)",
       "characteristics": {
         "scan_heavy": true,

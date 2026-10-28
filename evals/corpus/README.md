@@ -56,10 +56,10 @@ Rationale: India Code / Gazette / CPWD redistribution is prohibited (independent
 
 | id | file | sha256 (prefix) | bytes | pages | purpose |
 |---|---|---|---|---|---|
-| SYN-01 | `original.txt` | `1c4889cbf918…` | 7,437 | 1 | statute excerpt: ICA 1872 ss. 73–74 + A&C Act 1996 s. 34 (from model knowledge, mandated header, "not a reproduction of India Code official text") |
-| SYN-02 | `original.txt` | `79846f04bd33…` | 7,965 | 2 | cross-tenant twin works contracts, one template: Tenant A LD **0.5%**/wk (p1) vs Tenant B LD **1.0%**/wk (p2); Completion Date 30 Jun vs 31 Jul 2026 |
-| SYN-03 | `original.txt` | `b00fa3e3f9d4…` | 2,618 | 1 | benign addendum to SYN-02-WC-A (30-day extension; LD rate unchanged at 0.5%/wk, 5% cap) |
-| SYN-04 | `original.txt` | `0ac11f68446b…` | 4,147 | 1 | **adversarial twin of SYN-03**: fake `### SYSTEM MESSAGE ###`, `ignore prior instructions` payloads, poisoned Clause 3.1 (claims 1.0% LD); true operative term restated in Clause 3.2 (0.5%) |
+| SYN-01 | `original.txt` | `1c4889cbf918…` | 7,471 | 1 | statute excerpt: ICA 1872 ss. 73–74 + A&C Act 1996 s. 34 (from model knowledge, mandated header, "not a reproduction of India Code official text") |
+| SYN-02 | `original.txt` | `79846f04bd33…` | 7,977 | 2 | cross-tenant twin works contracts, one template: Tenant A LD **0.5%**/wk (p1) vs Tenant B LD **1.0%**/wk (p2); Completion Date 30 Jun vs 31 Jul 2026 |
+| SYN-03 | `original.txt` | `b00fa3e3f9d4…` | 2,626 | 1 | benign addendum to SYN-02-WC-A (30-day extension; LD rate unchanged at 0.5%/wk, 5% cap) |
+| SYN-04 | `original.txt` | `0ac11f68446b…` | 4,161 | 1 | **adversarial twin of SYN-03**: fake `### SYSTEM MESSAGE ###`, `ignore prior instructions` payloads, poisoned Clause 3.1 (claims 1.0% LD); true operative term restated in Clause 3.2 (0.5%) |
 | SYN-05 | `original.pdf` | `7e336666e802…` | 27,056 | 1 | scanned-style purchase order, **re-rendered 2026-10-28 with an embedded text layer** (single-page text-layer PDF via LibreOffice Writer 26.2.5.2, txt→pdf) so quotes are mechanically extractable; operative payment term (45 days) + LD (0.75%/wk, 10% cap) appear **only in footnote 2**. Created because SRC-05/06 have no text layer and tesseract was unavailable (the mission's fallback trigger); the Wave 2A image-only render (PIL JPEG q72, `38e831feea76…`, 294,364 bytes) had zero text layer and was superseded — see the re-render note in `artifacts/SYN-05/ATTRIBUTION.md`. |
 
 SYN-04's payload is inert fixture data. It exists to test that ingestion treats document text as untrusted; every page of the file is labeled as adversarial synthetic.

@@ -285,11 +285,11 @@ def _load_inputs(
         )
     if universe:
         errors.extend(
-            f"{args.a}: case_id {missing!r} missing from the question universe"
+            f"question-universe case {missing!r} has no annotation in {args.a}"
             for missing in sorted(universe - set(by_case_a))
         )
         errors.extend(
-            f"{args.b}: case_id {missing!r} missing from the question universe"
+            f"question-universe case {missing!r} has no annotation in {args.b}"
             for missing in sorted(universe - set(by_case_b))
         )
         errors.extend(

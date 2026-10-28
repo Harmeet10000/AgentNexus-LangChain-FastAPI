@@ -11,6 +11,7 @@ from app.ai.evaluation.schema import (
     GoldenProvenanceManifest,
     GoldenQuery,
     GoldenSet,
+    SmeRequirements,
     audit_golden_manifest,
     load_golden_set,
     load_validated_golden_set,
@@ -92,8 +93,9 @@ def _write_manifest(
     path: Path,
     per_artifact: list[dict[str, object]],
     corpus_root: Path,
+    sme_requirements: dict[str, object] | None = None,
 ) -> None:
-    manifest = {
+    manifest: dict[str, object] = {
         "manifest_version": "golden_provenance_v1",
         "golden_set_version": "legal_retrieval_v2",
         "artifact": path.name.removesuffix(".manifest.json") + ".jsonl",
@@ -102,6 +104,8 @@ def _write_manifest(
         "annotation_policy": {},
         "per_artifact": per_artifact,
     }
+    if sme_requirements is not None:
+        manifest["sme_requirements"] = sme_requirements
     path.write_text(json.dumps(manifest), encoding="utf-8")
 
 
@@ -152,7 +156,11 @@ async def test_manifest_entry_without_checksum_and_source_url_fails(tmp_path: Pa
         json.loads((tmp_path / "set.manifest.json").read_text(encoding="utf-8"))
     )
 
-    issues = await audit_golden_manifest(manifest, loaded.unwrap())
+    issues = await audit_golden_manifest(
+        manifest,
+        loaded.unwrap(),
+        manifest_path=tmp_path / "set.manifest.json",
+    )
 
     assert any("sha256 checksum is missing" in issue for issue in issues)
     assert any("source_url is missing" in issue for issue in issues)
@@ -515,3 +523,159 @@ async def test_v1_set_without_manifest_still_loads(tmp_path: Path) -> None:
 
     assert isinstance(result, Success)
     assert result.unwrap().version == "legal_retrieval_v1"
+
+
+# --- C12: release-tier named adjudicator must be a present human name --------
+
+
+def test_sme_requirements_rejects_model_like_named_adjudicator() -> None:
+    with pytest.raises(ValidationError, match="human reviewer"):
+        SmeRequirements(
+            role="practising lawyer",
+            domain="contract law",
+            independence="independent of whoever produced the labels",
+            commitment="sign-off on disputed cases",
+            named_adjudicator="claude-sme-lead",
+        )
+
+    record = SmeRequirements(
+        role="practising lawyer",
+        domain="contract law",
+        independence="independent of whoever produced the labels",
+        commitment="sign-off on disputed cases",
+        named_adjudicator="sme-lead-7",
+    )
+    assert record.named_adjudicator == "sme-lead-7"
+
+
+def _adjudicated_release_row() -> dict[str, object]:
+    return _v2_row(
+        provenance=_provenance(
+            quality_tier="release",
+            human_review_status="adjudicated",
+            adjudication={
+                "status": "adjudicated",
+                "adjudicator": "sme-lead-7",
+                "method": "independent_sme",
+                "rationale": "SME confirmed the disputed relevance",
+                "checklist": {},
+                "decided_at": "2026-10-28T00:00:00+00:00",
+            },
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_release_adjudicated_row_with_blank_manifest_adjudicator_fails(
+    tmp_path: Path,
+) -> None:
+    """A whitespace-only manifest named_adjudicator counts as missing."""
+    corpus_root = tmp_path / "corpus"
+    sha256 = _write_artifact(corpus_root, "doc-1")
+    _write_manifest(
+        tmp_path / "set.manifest.json",
+        [_artifact_entry("doc-1", sha256)],
+        corpus_root,
+        sme_requirements={
+            "role": "practising lawyer",
+            "domain": "contract law",
+            "independence": "independent of whoever produced the labels",
+            "commitment": "sign-off on disputed cases",
+            "named_adjudicator": "   ",
+            "adjudication_status": "complete",
+        },
+    )
+    path = tmp_path / "set.jsonl"
+    _write_set(path, _adjudicated_release_row())
+
+    result = await load_validated_golden_set(path)
+
+    assert isinstance(result, Failure)
+    assert "release-tier adjudication requires a named adjudicator" in result.failure().message
+
+
+@pytest.mark.asyncio
+async def test_release_adjudicated_row_with_model_manifest_adjudicator_fails(
+    tmp_path: Path,
+) -> None:
+    """A model-like manifest named_adjudicator is rejected at parse time."""
+    corpus_root = tmp_path / "corpus"
+    sha256 = _write_artifact(corpus_root, "doc-1")
+    _write_manifest(
+        tmp_path / "set.manifest.json",
+        [_artifact_entry("doc-1", sha256)],
+        corpus_root,
+        sme_requirements={
+            "role": "practising lawyer",
+            "domain": "contract law",
+            "independence": "independent of whoever produced the labels",
+            "commitment": "sign-off on disputed cases",
+            "named_adjudicator": "gpt-5-sme-lead",
+            "adjudication_status": "complete",
+        },
+    )
+    path = tmp_path / "set.jsonl"
+    _write_set(path, _adjudicated_release_row())
+
+    result = await load_validated_golden_set(path)
+
+    assert isinstance(result, Failure)
+    assert "Unable to load golden-set manifest" in result.failure().message
+
+
+# --- C13: relative corpus_manifest_path anchors to the manifest directory ----
+
+
+@pytest.mark.asyncio
+async def test_audit_resolves_relative_corpus_path_from_manifest_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A relative corpus_manifest_path must not depend on the process cwd."""
+    corpus_root = tmp_path / "corpus"
+    _write_artifact(corpus_root, "doc-1")
+    manifest = {
+        "manifest_version": "golden_provenance_v1",
+        "golden_set_version": "legal_retrieval_v2",
+        "artifact": "set.jsonl",
+        "corpus_manifest_path": "corpus",  # relative to the manifest's directory
+        "source_policy": {},
+        "annotation_policy": {},
+        "per_artifact": [_artifact_entry("doc-1", "0" * 64)],  # corrupt checksum
+    }
+    (tmp_path / "set.manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    path = tmp_path / "set.jsonl"
+    _write_set(path, _v2_row())
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)  # cwd holds no evals/corpus
+
+    result = await load_validated_golden_set(path)
+
+    # a sha256 mismatch proves the artifact was located relative to the
+    # manifest directory and actually hashed (an unresolved path would only
+    # produce the checksum-skipped warning and pass)
+    assert isinstance(result, Failure)
+    assert "sha256 mismatch" in result.failure().message
+    assert "checksum skipped" not in capsys.readouterr().err
+
+
+# --- C14: manifest load failures retain the underlying cause -----------------
+
+
+@pytest.mark.asyncio
+async def test_corrupted_manifest_failure_carries_cause_details(tmp_path: Path) -> None:
+    path = tmp_path / "set.jsonl"
+    _write_set(path, _v2_row())
+    (tmp_path / "set.manifest.json").write_text("{not json", encoding="utf-8")
+
+    result = await load_validated_golden_set(path)
+
+    assert isinstance(result, Failure)
+    failure = result.failure()
+    # the API-facing message is unchanged; the underlying cause is retained
+    # in the structured details (MalformedGoldenRowError is a pydantic model,
+    # so e.add_note() is not available)
+    assert failure.message.startswith("Unable to load golden-set manifest")
+    details = failure.details or {}
+    assert "JSONDecodeError" in str(details.get("manifest_cause"))
+    assert "set.manifest.json" in str(details.get("manifest"))

@@ -543,6 +543,13 @@ class SmeRequirements(BaseModel):
     named_adjudicator: str | None = None
     adjudication_status: str = Field(default="pending_sme", min_length=1)
 
+    @model_validator(mode="after")
+    def named_adjudicator_must_be_human(self) -> SmeRequirements:
+        """Reject model-like names with the same rule as AdjudicationRecord."""
+        if self.named_adjudicator and _MODEL_ADJUDICATOR_PATTERN.search(self.named_adjudicator):
+            raise ValueError(_MODEL_ADJUDICATOR_FORBIDDEN)
+        return self
+
 
 class GoldenProvenanceManifest(BaseModel):
     """Manifest binding a golden set to its source artifacts and policies."""
@@ -589,12 +596,14 @@ class GoldenSetReadException(InfrastructureException):
         )
 
 
-def _malformed(*, row_index: int, message: str) -> Failure[MalformedGoldenRowError]:
+def _malformed(
+    *, row_index: int, message: str, details: dict[str, object] | None = None
+) -> Failure[MalformedGoldenRowError]:
     return Failure(
         MalformedGoldenRowError(
             message=message,
             row_index=row_index,
-            details={"row_index": row_index},
+            details={"row_index": row_index, **(details or {})},
             source="golden_set_loader",
         )
     )
@@ -713,7 +722,8 @@ def _validate_row_provenance(
             if manifest is not None and manifest.sme_requirements is not None
             else None
         )
-        if named_adjudicator is None:
+        # A blank or whitespace-only name is as good as no name at all.
+        if not (named_adjudicator or "").strip():
             issues.append(
                 f"row {row_index}: release-tier adjudication requires a named adjudicator "
                 "in the manifest sme_requirements"
@@ -759,11 +769,20 @@ def _redistribution_disallows_storage(status: str | None) -> bool:
     return any(token in normalized for token in _REDISTRIBUTION_DENY_TOKENS)
 
 
-def _artifact_root(manifest: GoldenProvenanceManifest) -> Path:
-    """Resolve the corpus root that artifact directories live under."""
+def _artifact_root(manifest: GoldenProvenanceManifest, manifest_dir: Path | None) -> Path:
+    """Resolve the corpus root that artifact directories live under.
+
+    A relative ``corpus_manifest_path`` is resolved against the manifest's own
+    directory — recorded via ``manifest_dir`` by callers that know where the
+    manifest was loaded from — so the audit is independent of the process
+    working directory.  ``manifest_dir`` is ``None`` only for direct audit
+    callers without a manifest path, which keep the historical cwd fallback.
+    """
     base = manifest.corpus_manifest_path or "evals/corpus"
     root = Path(base)
-    return root if root.is_absolute() else Path.cwd() / root
+    if root.is_absolute():
+        return root
+    return (manifest_dir if manifest_dir is not None else Path.cwd()) / root
 
 
 def _artifact_file(root: Path, entry: ArtifactProvenance) -> Path | None:
@@ -789,6 +808,8 @@ async def _sha256_of(path: Path) -> str:
 async def audit_golden_manifest(
     manifest: GoldenProvenanceManifest,
     golden_set: GoldenSet,
+    *,
+    manifest_path: Path | None = None,
 ) -> list[str]:
     """Audit manifest artifacts against the files on disk and the gold rows.
 
@@ -797,7 +818,9 @@ async def audit_golden_manifest(
     with a recorded warning; present files must match their declared sha256,
     and v2 sets may only reference documents declared in ``per_artifact``.  A
     v2 manifest without ``per_artifact`` entries is itself an issue: it would
-    silently disable the provenance audit.
+    silently disable the provenance audit.  ``manifest_path`` anchors the
+    resolution of a relative ``corpus_manifest_path`` to the manifest's own
+    directory; callers that loaded the manifest from disk should pass it.
     """
     issues: list[str] = []
     if manifest.golden_set_version != golden_set.version:
@@ -812,7 +835,9 @@ async def audit_golden_manifest(
         # there is nothing further to audit for them.
         return issues
     source_ids = {entry.source_id for entry in manifest.per_artifact}
-    artifact_root = _artifact_root(manifest)
+    artifact_root = _artifact_root(
+        manifest, manifest_path.parent if manifest_path is not None else None
+    )
     for entry in manifest.per_artifact:
         issues.extend(await _audit_artifact_entry(entry, artifact_root))
     if golden_set.version == GOLDEN_SET_V2_VERSION:
@@ -894,7 +919,19 @@ async def load_validated_golden_set(path: Path) -> GoldenSetLoadResult:
         try:
             manifest = await _load_manifest(manifest_path)
         except (OSError, ValueError) as exc:
-            return _malformed(row_index=1, message=f"Unable to load golden-set manifest: {exc}")
+            # MalformedGoldenRowError is a frozen pydantic model, not a
+            # BaseException, so e.add_note() is unavailable here and this
+            # module deliberately has no logger; the underlying cause is
+            # retained in the structured error details instead. The
+            # API-facing message stays unchanged.
+            return _malformed(
+                row_index=1,
+                message=f"Unable to load golden-set manifest: {exc}",
+                details={
+                    "manifest": str(manifest_path),
+                    "manifest_cause": f"{type(exc).__name__}: {exc}",
+                },
+            )
     elif golden_set.version == GOLDEN_SET_V2_VERSION:
         # Fail closed before provenance validation: without the manifest the
         # release-tier conditions in validate_golden_set would also produce
@@ -912,7 +949,7 @@ async def load_validated_golden_set(path: Path) -> GoldenSetLoadResult:
         first_issue = exc.issues[0] if exc.issues else "Invalid golden-set provenance"
         return _malformed(row_index=1, message=first_issue)
     if manifest is not None:
-        issues = await audit_golden_manifest(manifest, golden_set)
+        issues = await audit_golden_manifest(manifest, golden_set, manifest_path=manifest_path)
         if issues:
             return _malformed(row_index=1, message=issues[0])
     return result

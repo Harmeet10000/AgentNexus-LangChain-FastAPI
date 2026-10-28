@@ -21,9 +21,12 @@ untouched and the script exits 1.  The validator looks up a manifest named
 after the file it loads, so the real gold file's sibling manifest is copied
 next to the randomly named temp file before validation (and unlinked with it
 on every exit path); a v2 gold set without a sibling manifest is refused
-instead of being validated manifest-less.  Without ``--apply`` it is a dry
-run that prints what would change.  The metadata line 1 and row order are
-preserved.
+instead of being validated manifest-less.  When ``--out`` names a different
+path, the same manifest is kept next to the output as its sibling
+``<output_stem>.manifest.json`` so the written set can be loaded and
+re-validated; an in-place apply keeps the gold's existing sibling untouched.
+Without ``--apply`` it is a dry run that prints what would change.  The
+metadata line 1 and row order are preserved.
 
 The IAA report is never trusted as-is: the gate is recomputed from the two
 sidecars' labels (Cohen's kappa + raw agreement, implemented inline and
@@ -31,9 +34,10 @@ cross-checked against the report's ``gate.thresholds``) and the merge refuses
 when the recomputed gate fails, the disagreement set differs, or the reported
 kappa no longer matches the sidecars.
 
-Rows an SME has already adjudicated (``adjudication.status == "adjudicated"``)
-are preserved verbatim — only their annotation records are refreshed — so a
-re-run after SME review cannot clobber the adjudication; pass ``--reopen`` to
+Rows an SME has already decided (``adjudication.status == "adjudicated"`` or
+``"waived_with_reason"`` — a waiver satisfies the same release gate) are
+preserved verbatim — only their annotation records are refreshed — so a
+re-run after SME review cannot clobber the decision; pass ``--reopen`` to
 downgrade those rows to ``pending_sme`` and let the normal rules rewrite them.
 
 Usage:
@@ -101,6 +105,9 @@ _DISAGREEMENT_RATIONALE = (
     "dual engineer disagreement on retrieval_relevance; SME adjudication required"
 )
 _NON_DETERMINISTIC_RATIONALE = "row is not deterministically graded; SME adjudication pending"
+# Adjudication statuses that mean an SME already made the call: a rerun must
+# preserve them verbatim and --reopen resets them to pending_sme.
+_HUMAN_DECIDED_STATUSES = frozenset({"adjudicated", "waived_with_reason"})
 
 
 class _MergeInputs(NamedTuple):
@@ -180,10 +187,12 @@ def recompute_iaa(
 def _recheck_iaa_gate(inputs: _MergeInputs) -> list[str]:
     """Recompute the IAA gate from the sidecars and cross-check the report.
 
-    Refuses (exit 2) when the recomputed gate fails under the report's own
-    ``gate.thresholds``, when the recomputed disagreement set differs from the
-    report's, or when the recomputed kappa differs from the report's value by
-    more than 1e-9 — a stale or tampered report in either case.
+    Refuses (exit 2) when the recomputed gate fails under the stricter of the
+    report's ``gate.thresholds`` and the module defaults (both are lower
+    bounds, so stricter means higher — a report may not weaken the gate),
+    when the recomputed disagreement set differs from the report's, or when
+    the recomputed kappa differs from the report's value by more than 1e-9 —
+    a stale or tampered report in either case.
     """
     case_ids = sorted({row["case_id"] for row in inputs.rows})
     kappa, raw, disagreements = recompute_iaa(case_ids, inputs.by_case_a, inputs.by_case_b)
@@ -210,8 +219,13 @@ def _recheck_iaa_gate(inputs: _MergeInputs) -> list[str]:
         )
     thresholds = report["gate"].get("thresholds")
     threshold_map = thresholds if isinstance(thresholds, dict) else {}
-    min_kappa = float(threshold_map.get("min_kappa", _DEFAULT_MIN_KAPPA))
-    min_agreement = float(threshold_map.get("min_agreement", _DEFAULT_MIN_AGREEMENT))
+    # Both thresholds are lower bounds, so the effective gate is the stricter
+    # (higher) of the report's values and the module defaults: a report can
+    # tighten the gate but can never weaken it below 0.70/0.80.
+    min_kappa = max(float(threshold_map.get("min_kappa", _DEFAULT_MIN_KAPPA)), _DEFAULT_MIN_KAPPA)
+    min_agreement = max(
+        float(threshold_map.get("min_agreement", _DEFAULT_MIN_AGREEMENT)), _DEFAULT_MIN_AGREEMENT
+    )
     n = len(case_ids)
     gate_passed = (
         raw >= 1.0
@@ -304,10 +318,24 @@ def _release_adjudication(existing: object) -> dict[str, Any]:
 
 
 def _pending_sme_adjudication(existing: object, rationale: str) -> dict[str, Any]:
-    """Build the pending-SME adjudication record without ever naming an adjudicator."""
+    """Build the pending-SME adjudication record without ever naming an adjudicator.
+
+    A record that is already ``pending_sme`` is preserved as-is (only a
+    missing rationale is filled in), which is what makes repeated merges
+    byte-identical.  Converting any other existing record back to
+    ``pending_sme`` discards its stale decision fields (``method``,
+    ``decided_at``, a named ``adjudicator`` and the old ``rationale``) and
+    writes a fresh rationale describing the reopen.
+    """
     adjudication = dict(existing) if isinstance(existing, dict) else {}
+    if adjudication.get("status") == "pending_sme":
+        adjudication["status"] = "pending_sme"
+        adjudication.setdefault("rationale", rationale)
+        return adjudication
+    for stale_field in ("method", "decided_at", "adjudicator", "rationale"):
+        adjudication.pop(stale_field, None)
     adjudication["status"] = "pending_sme"
-    adjudication.setdefault("rationale", rationale)
+    adjudication["rationale"] = f"reopened by merge run {_utc_now()}"
     return adjudication
 
 
@@ -325,12 +353,13 @@ def merge_row(
 ) -> list[str]:
     """Fold both annotation records into one gold row; return change descriptions.
 
-    A row an SME has already adjudicated (``adjudication.status ==
-    "adjudicated"``) is frozen: only its annotation records are refreshed and
-    its adjudication record, ``human_review_status``, and ``quality_tier`` are
-    left verbatim, so re-running a merge after SME review cannot clobber the
-    adjudication.  ``reopen=True`` downgrades such rows to ``pending_sme``
-    first and lets the normal rules rewrite them.
+    A row an SME has already decided (``adjudication.status == "adjudicated"``
+    or ``"waived_with_reason"``) is frozen: only its annotation records are
+    refreshed and its adjudication record, ``human_review_status``, and
+    ``quality_tier`` are left verbatim, so re-running a merge after SME review
+    cannot clobber the decision.  ``reopen=True`` downgrades such rows to
+    ``pending_sme`` first (reporting which status was reopened) and lets the
+    normal rules rewrite them.
     """
     changes: list[str] = []
     provenance: dict[str, Any] = row["provenance"]
@@ -353,16 +382,17 @@ def merge_row(
     provenance["annotations"] = merged_annotations
 
     existing_adjudication: object = provenance.get("adjudication")
-    pre_adjudicated = (
-        isinstance(existing_adjudication, dict)
-        and existing_adjudication.get("status") == "adjudicated"
-    )
-    if pre_adjudicated and reopen:
+    pre_decided_status: str | None = None
+    if isinstance(existing_adjudication, dict) and existing_adjudication.get("status") in (
+        _HUMAN_DECIDED_STATUSES
+    ):
+        pre_decided_status = str(existing_adjudication["status"])
+    if pre_decided_status is not None and reopen:
         provenance["human_review_status"] = "pending"
         provenance["adjudication"] = {"status": "pending_sme"}
-        changes.append("adjudication: reopened (adjudicated -> pending_sme)")
-        pre_adjudicated = False
-    if pre_adjudicated:
+        changes.append(f"adjudication: reopened ({pre_decided_status} -> pending_sme)")
+        pre_decided_status = None
+    if pre_decided_status is not None:
         return changes
 
     if provenance.get("human_review_status") == "pending":
@@ -447,7 +477,11 @@ def _write_and_validate(
     cross-reference and checksum audit that CI will run on the real file.  The
     gold file's sibling manifest is therefore copied next to the temp file
     before validation, and the temp manifest is unlinked on every exit path
-    alongside the temp gold file.  A v2 gold set without a sibling manifest is
+    alongside the temp gold file.  When the output path's stem differs from
+    the gold's, the manifest is kept next to the output instead (as
+    ``<output_stem>.manifest.json``) so the written set can be loaded again;
+    when the output replaces the gold in place, its existing sibling manifest
+    stays and is not duplicated.  A v2 gold set without a sibling manifest is
     refused outright instead of being validated manifest-less.
     """
     handle_fd, temp_name = tempfile.mkstemp(
@@ -457,6 +491,7 @@ def _write_and_validate(
     temp_path = Path(temp_name)
     temp_manifest = _manifest_path_for(temp_path)
     real_manifest = _manifest_path_for(gold_path)
+    out_manifest = _manifest_path_for(out_path)
     try:
         temp_path.write_text(payload, encoding="utf-8")
         if _temp_file_version(temp_path) == _GOLD_SET_V2_VERSION and not real_manifest.is_file():
@@ -485,7 +520,13 @@ def _write_and_validate(
     # the replaced gold set keeps world-readable permissions.
     temp_path.chmod(0o644)
     temp_path.replace(out_path)
-    temp_manifest.unlink(missing_ok=True)
+    if out_manifest != real_manifest and real_manifest.is_file():
+        # A different output path needs its own sibling manifest, or the
+        # written set cannot be loaded again; in place, the gold's existing
+        # sibling remains and the redundant temp copy is dropped.
+        temp_manifest.replace(out_manifest)
+    else:
+        temp_manifest.unlink(missing_ok=True)
     return []
 
 
@@ -500,7 +541,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--out",
         type=Path,
         default=None,
-        help="output path (default: the --gold path, i.e. in place)",
+        help=(
+            "output path (default: the --gold path, i.e. in place); a different path also "
+            "receives a copy of the gold's provenance manifest as its sibling "
+            "<output_stem>.manifest.json"
+        ),
     )
     parser.add_argument(
         "--apply", action="store_true", help="write the merged gold set (default: dry run)"
@@ -509,9 +554,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--reopen",
         action="store_true",
         help=(
-            "downgrade rows already adjudicated by an SME back to pending_sme and let the "
-            "normal merge rules rewrite them (default: preserve adjudicated rows verbatim, "
-            "refreshing only their annotation records)"
+            "downgrade rows an SME has already decided (adjudicated or waived_with_reason) back "
+            "to pending_sme and let the normal merge rules rewrite them (default: preserve "
+            "decided rows verbatim, refreshing only their annotation records)"
         ),
     )
     return parser.parse_args(argv)
