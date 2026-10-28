@@ -55,12 +55,14 @@ def test_explicitly_migratable_legacy_versions_are_upgraded(legacy_version: int)
     assert hydrated["allowed_doc_ids"] == ["doc-a"]
 
 
-@pytest.mark.parametrize("unsupported_version", [4, 5, 6, 7])
-def test_historical_versions_without_migration_adapters_are_refused(
-    unsupported_version: int,
+@pytest.mark.parametrize("legacy_version", [4, 5, 6, 7])
+def test_historical_versions_with_deterministic_adapters_are_upgraded(
+    legacy_version: int,
 ) -> None:
-    with pytest.raises(StateSchemaVersionError):
-        hydrate_state({"schema_version": unsupported_version})
+    hydrated = hydrate_state({"schema_version": legacy_version, "doc_id": "doc-a"})
+
+    assert hydrated["schema_version"] == STATE_SCHEMA_VERSION
+    assert hydrated["allowed_doc_ids"] == ["doc-a"]
 
 
 def test_absent_version_key_treated_as_legacy_and_upgraded() -> None:
@@ -89,12 +91,19 @@ def test_hydrate_resolves_the_module_constant_not_an_inlined_literal(
     """Patching the module attribute changes hydrate behaviour — proof the
     function reads the imported constant at call time instead of a baked-in
     literal."""
+    actual_current_version = state_module.STATE_SCHEMA_VERSION
     monkeypatch.setattr(state_module, "STATE_SCHEMA_VERSION", 424242)
     sentinel_state = {"schema_version": 424242}
     assert hydrate_state(sentinel_state) is sentinel_state
     with pytest.raises(StateSchemaVersionError) as exc_info:
-        hydrate_state({"schema_version": 7})
+        hydrate_state({"schema_version": actual_current_version})
     assert "424242" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("invalid_version", [True, False, 8.0, "8", [], {}, -1, 99])
+def test_invalid_schema_version_values_raise_typed_error(invalid_version: object) -> None:
+    with pytest.raises(StateSchemaVersionError):
+        hydrate_state({"schema_version": invalid_version})
 
 
 def test_version_constant_has_exactly_one_definition() -> None:

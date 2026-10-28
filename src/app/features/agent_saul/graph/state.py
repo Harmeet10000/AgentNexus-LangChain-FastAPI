@@ -626,11 +626,14 @@ class ClauseExtractionInput(BaseModel, frozen=True):
 
 STATE_SCHEMA_VERSION: Final[int] = 8
 
-# The state schema history has only ever shipped migration adapters for these
-# versions.  Keep this list explicit rather than deriving it from the current
-# version: a numeric predecessor is not automatically loadable merely because
-# the version was once emitted by a deployment.
-_MIGRATABLE_STATE_SCHEMA_VERSIONS: Final[frozenset[int]] = frozenset({0, 1, 2, 3})
+# Every predecessor from the pre-versioned shape through v7 has a deterministic
+# adapter here: additive defaults plus the legacy document-scope and ingestion
+# normalisation below.  Keep this registry explicit rather than deriving it
+# from the current version: a numeric predecessor is not automatically
+# loadable merely because it is less than the current version.  In particular,
+# v7 is the last schema emitted before the current v8 writer and must remain
+# resumable after this deployment.
+_MIGRATABLE_STATE_SCHEMA_VERSIONS: Final[frozenset[int]] = frozenset({0, 1, 2, 3, 4, 5, 6, 7})
 
 # States persisted before the schema_version field existed carry no key at
 # all. Versions in _MIGRATABLE_STATE_SCHEMA_VERSIONS are accepted as
@@ -707,15 +710,22 @@ def hydrate_state(state: dict[str, Any]) -> dict[str, Any]:
     the input dict.
     """
     recorded = state.get("schema_version")
-    if recorded == STATE_SCHEMA_VERSION and not isinstance(state.get("budget_ledger"), dict):
-        return state
-    if recorded is not None and recorded not in _MIGRATABLE_STATE_SCHEMA_VERSIONS:
+    # Validate the wire value before comparing or hashing it.  ``bool`` is an
+    # ``int`` subclass and unhashable values (for example lists/dicts) would
+    # otherwise either alias a valid version or leak a raw TypeError from set
+    # membership.  ``None`` is the deliberately supported pre-versioned shape.
+    if recorded is not None and (
+        type(recorded) is not int
+        or (recorded != STATE_SCHEMA_VERSION and recorded not in _MIGRATABLE_STATE_SCHEMA_VERSIONS)
+    ):
         msg = (
             f"refusing agent state: recorded schema_version={recorded!r} "
             f"cannot be loaded by this runtime "
             f"(expected {STATE_SCHEMA_VERSION!r})"
         )
         raise StateSchemaVersionError(msg)
+    if recorded == STATE_SCHEMA_VERSION and not isinstance(state.get("budget_ledger"), dict):
+        return state
     migrated = {**_LEGACY_STATE_DEFAULTS, **state}
     # v0-v2 only carried one document. Preserve that checkpoint's exact scope
     # rather than treating an absent allowlist as unrestricted retrieval.
