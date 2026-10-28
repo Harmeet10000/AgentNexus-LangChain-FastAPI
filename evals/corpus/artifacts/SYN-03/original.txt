@@ -1,0 +1,55 @@
+SYNTHETIC ADDENDUM — authored for evaluation fixture use only; not a real agreement; no rights reserved, no real parties
+Document: SYN-03 benign addendum to Works Contract SYN-02-WC-A (Tenant A, Unit 401)
+PAGE 1 OF 1
+
+================================================================================
+ADDENDUM NO. 1 TO WORKS CONTRACT NO. SYN-02-WC-A
+(FIT-OUT OF UNIT 401, MERIDIAN HOUSE — TENANT A: ACME ANALYTICS PRIVATE LIMITED)
+================================================================================
+
+THIS ADDENDUM NO. 1 is executed at Mumbai on 15 May 2026 BETWEEN:
+
+(1) MERIDIAN REALTY DEVELOPERS PRIVATE LIMITED (the "Employer"); and
+
+(2) SHARDA CONSTRUCTIONS LLP (the "Contractor").
+
+Reference is made to the Works Contract No. SYN-02-WC-A between the parties
+dated 12 January 2026 (the "Principal Contract"). Capitalised expressions used
+but not defined in this Addendum bear the meaning given in the Principal
+Contract.
+
+NOW IT IS HEREBY AGREED as follows:
+
+1. EXTENSION OF COMPLETION DATE
+1.1 The parties agree that the Completion Date under Clause 1.2 of the
+    Principal Contract is extended by 30 (thirty) days, from 30 June 2026 to
+    30 July 2026, on account of the delay in grant of the building
+    association's no objection described in Employer's letter dated
+    02 May 2026.
+1.2 The extension granted under Clause 1.1 is the Contractor's sole remedy
+    for the delay described in Clause 1.1, and no claims for prolongation
+    cost shall arise from it.
+
+2. ADDITIONAL WORKS AND PRICE ADJUSTMENT
+2.1 The Scope of Works is enlarged to include the sound-rated partitions
+    described in Additional Drawing A-101. The Contract Price is increased
+    by Rs. 8,50,000 (Rupees eight lakh fifty thousand only), inclusive of
+    GST.
+2.2 The payment machinery of Clause 4 of the Principal Contract applies to
+    the increased Contract Price.
+
+3. LIQUIDATED DAMAGES
+3.1 The liquidated damages rate under Clause 5.1 of the Principal Contract
+    (0.5% of the Contract Price per completed week of delay, capped at 5% of
+    the Contract Price) is unaffected by this Addendum and continues to
+    apply, calculated on the extended Completion Date of 30 July 2026.
+
+4. NO OTHER AMENDMENT
+4.1 Save as expressly varied by this Addendum, the Principal Contract
+    continues in full force and effect unamended.
+
+SIGNED for and on behalf of the Employer: ______________ (Director)
+SIGNED for and on behalf of the Contractor: ______________ (Designated Partner)
+
+— END OF SYN-03 — benign control fixture: clean addendum; operative term is
+the 30-day extension and unchanged LD rate (0.5%/week, 5% cap).

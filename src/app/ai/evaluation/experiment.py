@@ -23,7 +23,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from returns.result import Failure
 
 from .metrics import ndcg_at_k, recall_at_k
-from .schema import GoldenItemProvenance, load_validated_golden_set, validate_golden_set
+from .schema import (
+    NO_EVIDENCE_CASE_TYPES,
+    GoldenItemProvenance,
+    load_validated_golden_set,
+    validate_golden_set,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -333,9 +338,9 @@ class VariantComparison(BaseModel):
 
 def stratum_for(query: GoldenQuery) -> str:
     """Classify a query without inventing labels absent from the gold set."""
-    if query.case_type in {"unanswerable", "statute_not_in_corpus"}:
+    if query.case_type in NO_EVIDENCE_CASE_TYPES:
         return "no_evidence"
-    if query.case_type == "near_miss":
+    if query.case_type == "near_miss_clause":
         return "near_miss"
     notes = query.notes.lower()
     if "conflicting" in notes:
@@ -386,6 +391,23 @@ def _aggregate(rows: Sequence[CaseObservation]) -> AggregateMetrics:
     )
 
 
+def _expected_abstention(query: GoldenQuery, evidence_policy: EvidencePolicy) -> bool:
+    """Return the expected abstention for one query under one evidence policy.
+
+    v2 rows declare ``expected_abstention`` (optionally per policy through
+    ``policy_overrides`` keyed by the variant's evidence policy), so the
+    expectation comes from the query itself.  The case-type lookup is only the
+    fallback for v1 rows, which lack the field — keeping their scores
+    byte-compatible with the pre-v2 behaviour.
+    """
+    override = query.policy_overrides.get(evidence_policy)
+    if override is not None:
+        return override.expected_abstention
+    if "expected_abstention" in query.model_fields_set:
+        return query.expected_abstention
+    return query.case_type in NO_EVIDENCE_CASE_TYPES
+
+
 def _case_metrics(
     query: GoldenQuery,
     output: AdapterOutput,
@@ -401,7 +423,9 @@ def _case_metrics(
         entailment = sum(claim.status == query.claim_entailment for claim in claims) / len(claims)
     citations = output.citations
     evidence_ids = {item.evidence_id for item in output.evidence}
-    no_evidence = query.case_type in {"unanswerable", "statute_not_in_corpus"}
+    # The adapter policy was already validated equal to the variant's, so the
+    # output's policy selects the matching policy_overrides entry.
+    expected_abstention = _expected_abstention(query, output.evidence_policy)
     return CaseMetrics(
         retrieval_recall_at_k=recall_at_k(output.retrieved_chunk_ids, expected, cutoff),
         retrieval_ndcg_at_k=ndcg_at_k(output.retrieved_chunk_ids, expected, cutoff),
@@ -409,7 +433,7 @@ def _case_metrics(
         claim_support_rate=supported / len(claims) if claims else 0.0,
         unsupported_claim_rate=unsupported / len(claims) if claims else 0.0,
         abstained=float(output.abstained),
-        correct_abstention=float(output.abstained == no_evidence),
+        correct_abstention=float(output.abstained == expected_abstention),
         citation_validity=sum(
             citation.valid and citation.evidence_id in evidence_ids for citation in citations
         )
@@ -677,7 +701,7 @@ class SyntheticSeedAdapter:
     async def run(query: GoldenQuery, variant: VariantConfig) -> AdapterOutput:
         expected = list(query.expected_chunk_ids)
         documents = list(query.expected_document_ids)
-        no_evidence = query.case_type in {"unanswerable", "statute_not_in_corpus"}
+        no_evidence = query.case_type in NO_EVIDENCE_CASE_TYPES
         retrieved = [] if no_evidence else expected
         evidence = [
             EvidenceRef(

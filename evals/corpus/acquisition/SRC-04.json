@@ -1,0 +1,92 @@
+{
+ "source_id": "SRC-04",
+ "title": "Construction of 4-laning of Shahganj bypass end to Badi (Package-IV) of NH-146B, Madhya Pradesh (HAM) — Concession Agreement volume with Schedules, Integrity Pact, Corrigendum & Reply to Pre-Bid Queries, Financial Bid, Letter of Award",
+ "issuer": "National Highways Authority of India (NHAI), Ministry of Road Transport & Highways, Government of India",
+ "source_url": "https://nhai.gov.in/nhai/sites/default/files/project_agreement/N0909501006MP.pdf",
+ "terms_licence_url": "https://nhai.gov.in/nhai/website-policies",
+ "jurisdiction": "IN",
+ "document_date": "2024-08-29",
+ "access_date": "2026-10-28",
+ "source_type": "public",
+ "classification": "public",
+ "original_filename": "original.pdf",
+ "mime_type": "application/pdf",
+ "sha256": "b566b81555f6ab295598d3cd85a49dbf03fe068311c815cf07f06633135f75f5",
+ "file_size_bytes": 37223714,
+ "permission_status": "public_terms_verified",
+ "redistribution_status": "permitted_with_attribution",
+ "model_processing_status": "permitted",
+ "ocr_status": "embedded_text_layer",
+ "ocr_engine": "pdftotext (poppler)",
+ "ocr_engine_version": "26.01.0",
+ "extraction_settings": {
+  "download_command": "curl -L --fail --silent --show-error --max-time 300 --retry 2 --retry-delay 5 -A \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36\" -H \"Accept: application/pdf,*/*\" -o original.pdf \"<URL>\"",
+  "page_count_command": "pdfinfo original.pdf",
+  "raw_ocr_command": "pdftotext original.pdf -   # verbatim output, written unmodified to raw_ocr.txt (poppler 26.01.0)",
+  "pages_json_command": "pdftotext -f N -l N original.pdf -   # per page N=1..page_count, one-based page_no, assembled in order",
+  "normalization_command": "python3 normalize(): ",
+  "normalization_rules": "R1 remove NUL bytes; R2 CRLF and lone CR to LF; R3 U+00A0 and U+2007..U+200B converted to U+0020; R4 ligatures U+FB00-FB06 expanded to component letters; R5 form-feed (U+000C) page markers removed; R6 trailing whitespace stripped per line; R7 runs of 3+ blank lines collapsed to 2; R8 nothing else — no spelling, hyphenation or OCR repair of any kind",
+  "verification_commands": "file --mime-type original.pdf; sha256sum original.pdf; head -c 8 (PDF magic check)"
+ },
+ "page_count": 372,
+ "characteristics": {
+  "scan_heavy": true,
+  "table_schedule_heavy": true,
+  "irregular_numbering": false,
+  "version_pair_role": false,
+  "multi_contract": true,
+  "clean_control": false,
+  "notes": "digital-signature stamp text on nearly every page; garbled Hindi letter at p372 (OCR noise); 'Schedule of Documents' listing at p4 = volume index; extracted biannual annuity tables"
+ },
+ "document_version_identity": "NHAI HAM concession packet, tender NHAI/HQ/MP/Budhni-Badi/Pkg-4/HAM/2023 dated 15.12.2023; financial bid dated 24.02.2024; packet digitally signed 29.08.2024 (CA execution date uses blanks — not machine-readable)",
+ "contract_boundaries": [
+  {
+   "contract_index": 1,
+   "title": "Concession Agreement with Schedules A-S (HAM)",
+   "page_range": [
+    5,
+    320
+   ]
+  },
+  {
+   "contract_index": 2,
+   "title": "Integrity Pact (tender NHAI/HQ/MP/Budhni-Badi/Pkg-4/2023 dated 15.12.2023)",
+   "page_range": [
+    321,
+    330
+   ]
+  },
+  {
+   "contract_index": 3,
+   "title": "Annexure: Corrigendum & Reply to Pre-Bid Queries",
+   "page_range": [
+    331,
+    363
+   ]
+  },
+  {
+   "contract_index": 4,
+   "title": "Financial Bid (Appendix IB)",
+   "page_range": [
+    364,
+    367
+   ]
+  },
+  {
+   "contract_index": 5,
+   "title": "Letter of Award and Acceptance thereof",
+   "page_range": [
+    368,
+    372
+   ]
+  }
+ ],
+ "ambiguous_boundaries": [
+  "Pages 1-4 are cover/title pages and the 'INDEX FOR VOLUME I' — front matter attributed to no contract; flagged rather than merged into contract_index 1",
+  "p331 is an 'Annexure' divider page placed at the start of the Corrigendum section; included in contract_index 3's range",
+  "CA execution date uses blanks ('this the ___ day of ___'); packet-level fixity date is the 29.08.2024 digital signature"
+ ],
+ "page_map_file": "pages.json",
+ "attribution_string": "Source: National Highways Authority of India (NHAI), Ministry of Road Transport & Highways, Government of India, <https://nhai.gov.in/nhai/sites/default/files/project_agreement/N0909501006MP.pdf>, accessed 2026-10-28; reproduced under <https://nhai.gov.in/nhai/website-policies>.",
+ "unresolved_rights_notes": null
+}

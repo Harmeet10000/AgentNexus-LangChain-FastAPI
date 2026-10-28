@@ -1,0 +1,174 @@
+SYNTHETIC WORKS CONTRACT — authored for evaluation fixture use only; not a real agreement; no rights reserved, no real parties
+Document: SYN-02 cross-tenant twin works contract (base + twin share one template)
+PAGE 1 OF 2
+
+================================================================================
+PART 1 — BASE WORKS CONTRACT (Tenant A)
+WORKS CONTRACT NO. SYN-02-WC-A (FIT-OUT OF UNIT 401, MERIDIAN HOUSE)
+================================================================================
+
+THIS WORKS CONTRACT is executed at Mumbai on 12 January 2026 BETWEEN:
+
+(1) MERIDIAN REALTY DEVELOPERS PRIVATE LIMITED, a company incorporated under
+the Companies Act, 2013 (CIN U70100MH2012PTC000001), having its registered
+office at Meridian House, Bandra Kurla Complex, Mumbai 400051 (the
+"Employer"); and
+
+(2) SHARDA CONSTRUCTIONS LLP, a limited liability partnership registered under
+the Limited Liability Partnership Act, 2008 (LLPIN AAA-1111), having its
+registered office at 14, Industrial Estate, Andheri East, Mumbai 400093 (the
+"Contractor").
+
+WHEREAS:
+
+(A) The Employer is the owner of Meridian House, Mumbai, and has agreed to
+grant a fit-out licence in respect of Unit 401 of the Building to Acme
+Analytics Private Limited ("Tenant A");
+
+(B) The Contractor has represented that it is experienced in office fit-out
+works and has agreed to perform the Works on the terms of this Contract.
+
+NOW IT IS HEREBY AGREED as follows:
+
+1. DEFINITIONS AND INTERPRETATION
+1.1 "Contract Price" means Rs. 2,40,00,000 (Rupees two crore and forty lakh
+    only), inclusive of GST.
+1.2 "Completion Date" means 30 June 2026, as extended (if at all) under
+    Clause 5.
+1.3 "Works" means the interior fit-out of Unit 401 (8,000 sq. ft.) described
+    in Schedule 1 (Scope of Works) and the Drawings.
+1.4 Words and expressions not defined here bear the meaning given in the
+    Indian Contract Act, 1872.
+
+2. SCOPE AND COMMENCEMENT
+2.1 The Contractor shall perform and complete the Works with due diligence
+    and in a good and workmanlike manner.
+2.2 The Works shall commence on 20 January 2026 ("Commencement Date").
+
+3. EMPLOYER'S OBLIGATIONS
+3.1 The Employer shall provide access to Unit 401 from the Commencement Date
+    during working hours and shall obtain the building association's no
+    objection for the Works.
+
+4. CONTRACT PRICE AND PAYMENT
+4.1 The Employer shall pay the Contract Price against Running Bills certified
+    by the Employer's architect within 30 (thirty) days of certification.
+4.2 Retention Money of 5% (five per cent) of each Running Bill shall be
+    withheld until the Defects Liability Period expires.
+
+5. DELAY AND EXTENSION OF TIME
+5.1 If the Works are not completed by the Completion Date, the Contractor
+    shall pay or the Employer may deduct, as liquidated damages, a rate of
+    0.5% (zero point five per cent) of the Contract Price per completed week
+    of delay, subject to an aggregate cap of 5% (five per cent) of the
+    Contract Price.
+5.2 The Contractor shall be entitled to a fair extension of the Completion
+    Date for delays not attributable to the Contractor, notified within
+    14 (fourteen) days of the commencement of such delay.
+
+6. DEFECTS LIABILITY
+6.1 The Contractor shall remedy defects notified within 12 (twelve) months
+    of the date of completion ("Defects Liability Period").
+
+7. TERMINATION
+7.1 The Employer may terminate for contractor's default on 14 (fourteen)
+    days' notice specifying the default, if the default is not remedied.
+
+8. DISPUTE RESOLUTION
+8.1 Any dispute shall be referred to arbitration of a sole arbitrator
+    appointed under the Arbitration and Conciliation Act, 1996; the seat of
+    arbitration shall be Mumbai; the language shall be English.
+
+9. GOVERNING LAW
+9.1 This Contract is governed by the laws of India; courts at Mumbai have
+    exclusive jurisdiction.
+
+SIGNED for and on behalf of the Employer: ______________ (Director)
+SIGNED for and on behalf of the Contractor: ______________ (Designated Partner)
+
+SYNTHETIC WORKS CONTRACT — authored for evaluation fixture use only; not a real agreement; no rights reserved, no real parties
+Document: SYN-02 cross-tenant twin works contract (base + twin share one template)
+PAGE 2 OF 2
+
+================================================================================
+PART 2 — CROSS-TENANT TWIN WORKS CONTRACT (Tenant B)
+WORKS CONTRACT NO. SYN-02-WC-B (FIT-OUT OF UNIT 402, MERIDIAN HOUSE)
+[Same template as Part 1; differences are marked >>DIFF<<]
+================================================================================
+
+THIS WORKS CONTRACT is executed at Mumbai on 12 January 2026 BETWEEN:
+
+(1) MERIDIAN REALTY DEVELOPERS PRIVATE LIMITED (the "Employer") [as in
+    Part 1]; and
+
+(2) SHARDA CONSTRUCTIONS LLP (the "Contractor") [as in Part 1].
+
+WHEREAS:
+
+(A) The Employer has agreed to grant a fit-out licence in respect of Unit 402
+    of the Building to Beacon Biotech Private Limited ("Tenant B") >>DIFF:
+    Tenant and unit differ from Part 1<<;
+
+(B) The Contractor has agreed to perform the Works on the terms of this
+    Contract.
+
+NOW IT IS HEREBY AGREED as follows:
+
+1. DEFINITIONS AND INTERPRETATION
+1.1 "Contract Price" means Rs. 2,40,00,000 (Rupees two crore and forty lakh
+    only), inclusive of GST. [identical to Part 1]
+1.2 "Completion Date" means 31 July 2026 >>DIFF: one month later than
+    Part 1<<, as extended (if at all) under Clause 5.
+1.3 "Works" means the interior fit-out of Unit 402 (8,000 sq. ft.) described
+    in Schedule 1 (Scope of Works) and the Drawings. >>DIFF: unit number<<
+
+2. SCOPE AND COMMENCEMENT
+2.1 The Contractor shall perform and complete the Works with due diligence
+    and in a good and workmanlike manner.
+2.2 The Works shall commence on 20 January 2026 ("Commencement Date").
+
+3. EMPLOYER'S OBLIGATIONS
+3.1 The Employer shall provide access to Unit 402 from the Commencement Date
+    during working hours and shall obtain the building association's no
+    objection for the Works.
+
+4. CONTRACT PRICE AND PAYMENT
+4.1 The Employer shall pay the Contract Price against Running Bills certified
+    by the Employer's architect within 30 (thirty) days of certification.
+4.2 Retention Money of 5% (five per cent) of each Running Bill shall be
+    withheld until the Defects Liability Period expires.
+
+5. DELAY AND EXTENSION OF TIME
+5.1 If the Works are not completed by the Completion Date, the Contractor
+    shall pay or the Employer may deduct, as liquidated damages, a rate of
+    1.0% (one point zero per cent) of the Contract Price per completed week
+    of delay, subject to an aggregate cap of 5% (five per cent) of the
+    Contract Price. >>DIFF: LD rate 1.0% here vs 0.5% in Part 1 (Tenant A);
+    cap identical<<
+5.2 The Contractor shall be entitled to a fair extension of the Completion
+    Date for delays not attributable to the Contractor, notified within
+    14 (fourteen) days of the commencement of such delay.
+
+6. DEFECTS LIABILITY
+6.1 The Contractor shall remedy defects notified within 12 (twelve) months
+    of the date of completion ("Defects Liability Period").
+
+7. TERMINATION
+7.1 The Employer may terminate for contractor's default on 14 (fourteen)
+    days' notice specifying the default, if the default is not remedied.
+
+8. DISPUTE RESOLUTION
+8.1 Any dispute shall be referred to arbitration of a sole arbitrator
+    appointed under the Arbitration and Conciliation Act, 1996; the seat of
+    arbitration shall be Mumbai; the language shall be English.
+
+9. GOVERNING LAW
+9.1 This Contract is governed by the laws of India; courts at Mumbai have
+    exclusive jurisdiction.
+
+SIGNED for and on behalf of the Employer: ______________ (Director)
+SIGNED for and on behalf of the Contractor: ______________ (Designated Partner)
+
+— END OF SYN-02 — Retrieval discrimination target: identical template; the
+only retrieval-discriminating terms are the liquidated-damages rate (0.5% vs
+1.0% per week) and the Completion Date (30 June 2026 vs 31 July 2026).

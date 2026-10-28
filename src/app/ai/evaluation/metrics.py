@@ -1,7 +1,8 @@
-"""Pure, binary-relevance retrieval metrics."""
+"""Pure, binary-relevance retrieval metrics and annotation-agreement math."""
 
-from collections.abc import Sequence, Set
+from collections.abc import Mapping, Sequence, Set
 from math import log2
+from typing import Final
 
 
 def _top_k(ranked_ids: Sequence[str], k: int) -> Sequence[str]:
@@ -46,3 +47,52 @@ def ndcg_at_k(ranked_ids: Sequence[str], expected_ids: Set[str], k: int) -> floa
     ideal_hits = min(k, len(expected_ids))
     ideal_dcg = sum(1.0 / log2(rank + 1) for rank in range(1, ideal_hits + 1))
     return dcg / ideal_dcg
+
+
+# Ordinal scale of the retrieval-relevance dimension, from strongest to weakest
+# evidence claim.  Adjacency on this scale defines the coarse agreement
+# patterns reported by the wave-3 IAA tooling.  Mirrors the
+# ``RetrievalRelevance`` literal in ``app.ai.evaluation.schema`` (redeclared so
+# this module stays import-free of the schema layer).
+RELEVANCE_AGREEMENT_SCALE: Final[tuple[str, ...]] = (
+    "relevant",
+    "partially_relevant",
+    "irrelevant",
+    "not_applicable",
+)
+
+
+def kappa_from_margins(observed_agreement: float, expected_agreement: float) -> float:
+    """Return Cohen's kappa from pre-computed observed/expected agreement.
+
+    ``(p_o - p_e) / (1 - p_e)`` with the degenerate-case contract: when the
+    expected agreement reaches 1.0 the denominator vanishes, so a totally
+    agreeing sample is defined as kappa 1.0 and any non-total agreement on a
+    single-category sample is defined as kappa 0.0.
+    """
+    if expected_agreement >= 1.0:
+        return 1.0 if observed_agreement >= 1.0 else 0.0
+    return (observed_agreement - expected_agreement) / (1.0 - expected_agreement)
+
+
+def cohen_kappa_unweighted(matrix: Mapping[str, Mapping[str, int]]) -> float:
+    """Return unweighted Cohen's kappa for a confusion matrix.
+
+    ``matrix`` maps rater-A labels to rater-B label counts (rows = rater A,
+    columns = rater B).  Expected agreement is the sum over labels of the
+    product of the two raters' marginal proportions; an empty matrix scores
+    0.0.
+    """
+    total = sum(sum(row.values()) for row in matrix.values())
+    if total == 0:
+        return 0.0
+    observed = sum(row.get(label, 0) for label, row in matrix.items()) / total
+    row_totals = {label: sum(row.values()) for label, row in matrix.items()}
+    col_totals: dict[str, int] = {}
+    for row in matrix.values():
+        for label, count in row.items():
+            col_totals[label] = col_totals.get(label, 0) + count
+    expected = sum(
+        (row_totals[label] / total) * (col_totals.get(label, 0) / total) for label in row_totals
+    )
+    return kappa_from_margins(observed, expected)

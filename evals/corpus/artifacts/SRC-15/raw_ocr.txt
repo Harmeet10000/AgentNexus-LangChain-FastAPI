@@ -1,0 +1,1012 @@
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+Core Terms
+
+1
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+1. Definitions used in the contract
+Interpret this Contract using Joint Schedule 1 (Definitions).
+
+2. How the contract works
+2.1
+
+The Supplier is eligible for the award of Call-Off Contracts during the Framework Contract Period.
+
+2.2
+
+CCS does not guarantee the Supplier any exclusivity, quantity or value of work under the Framework
+Contract.
+
+2.3
+
+CCS has paid one penny to the Supplier legally to form the Framework Contract. The Supplier
+acknowledges this payment.
+
+2.4
+
+If the Buyer decides to buy Deliverables under the Framework Contract it must use Framework Schedule
+7 (Call-Off Award Procedure) and must state its requirements using Framework Schedule 6 (Order Form
+Template and Call-Off Schedules). If allowed by the Regulations, the Buyer can:
+(a) make changes to Framework Schedule 6 (Order Form Template and Call-Off Schedules);
+(b) create new Call-Off Schedules;
+(c) exclude optional template Call-Off Schedules; and/or
+(d) use Special Terms in the Order Form to add or change terms.
+
+2.5
+
+Each Call-Off Contract:
+(a) is a separate Contract from the Framework Contract;
+(b) is between a Supplier and a Buyer;
+(c) includes Core Terms, Schedules and any other changes or items in the completed Order Form; and
+(d) survives the termination of the Framework Contract.
+
+2.6
+
+Where the Supplier is approached by any Other Contracting Authority requesting Deliverables or
+substantially similar goods or services, the Supplier must tell them about this Framework Contract
+before accepting their order.
+
+2.7
+
+The Supplier acknowledges it has all the information required to perform its obligations under each
+Contract before entering into a Contract. When information is provided by a Relevant Authority no
+warranty of its accuracy is given to the Supplier.
+
+2.8
+
+The Supplier will not be excused from any obligation, or be entitled to additional Costs or Charges
+because it failed to either:
+(a) verify the accuracy of the Due Diligence Information; or
+(b) properly perform its own adequate checks.
+
+2.9
+
+CCS and the Buyer will not be liable for errors, omissions or misrepresentation of any information.
+2
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+2.10 The Supplier warrants and represents that all statements made and documents submitted as part of the
+procurement of Deliverables are and remain true and accurate.
+
+3. What needs to be delivered
+3.1 All deliverables
+3.1.1 The Supplier must provide Deliverables:
+(a) that comply with the Specification, the Framework Tender Response and, in relation to a Call-Off
+Contract, the Call-Off Tender (if there is one);
+(b) to a professional standard;
+(c) using reasonable skill and care;
+(d) using Good Industry Practice;
+(e) using its own policies, processes and internal quality control measures as long as they do not conflict
+with the Contract;
+(f) on the dates agreed; and
+(g) that comply with Law.
+3.1.2 The Supplier must provide Deliverables with a warranty of at least 90 days from Delivery against all
+obvious defects.
+
+3.2 Goods clauses
+3.2.1 All Goods delivered must be new, or as new if recycled, unused and of recent origin.
+3.2.2 All manufacturer warranties covering the Goods must be assignable to the Buyer on request and for
+free.
+3.2.3 The Supplier transfers ownership of the Goods on Delivery or payment for those Goods, whichever is
+earlier.
+3.2.4 Risk in the Goods transfers to the Buyer on Delivery of the Goods, but remains with the Supplier if the
+Buyer notices damage following Delivery and lets the Supplier know within 3 Working Days of Delivery.
+3.2.5 The Supplier warrants that it has full and unrestricted ownership of the Goods at the time of transfer of
+ownership.
+3.2.6 The Supplier must deliver the Goods on the date and to the specified location during the Buyer’s
+working hours.
+3.2.7 The Supplier must provide sufficient packaging for the Goods to reach the point of Delivery safely and
+undamaged.
+3.2.8 All deliveries must have a delivery note attached that specifies the order number, type and quantity of
+Goods.
+3.2.9 The Supplier must provide all tools, information and instructions the Buyer needs to make use of the
+3
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+Goods.
+3.2.10 The Supplier must indemnify the Buyer against the costs of any Recall of the Goods and give notice of
+actual or anticipated action about the Recall of the Goods.
+3.2.11 The Buyer can cancel any order or part order of Goods which has not been Delivered. If the Buyer gives
+less than 14 days notice then it will pay the Supplier’s reasonable and proven costs already incurred on
+the cancelled order as long as the Supplier takes all reasonable steps to minimise these costs.
+3.2.12 The Supplier must at its own cost repair, replace, refund or substitute (at the Buyer’s option and
+request) any Goods that the Buyer rejects because they do not conform with Clause 3. If the Supplier
+does not do this it will pay the Buyer’s costs including repair or re-supply by a third party.
+
+3.3 Services clauses
+3.3.1 Late Delivery of the Services will be a Default of a Call-Off Contract.
+3.3.2 The Supplier must co-operate with the Buyer and third party suppliers on all aspects connected with
+the Delivery of the Services and ensure that Supplier Staff comply with any reasonable instructions.
+3.3.3 The Supplier must at its own risk and expense provide all Supplier Equipment required to Deliver the
+Services.
+3.3.4 The Supplier must allocate sufficient resources and appropriate expertise to each Contract.
+3.3.5 The Supplier must take all reasonable care to ensure performance does not disrupt the Buyer’s
+operations, employees or other contractors.
+3.3.6 The Supplier must ensure all Services, and anything used to Deliver the Services, are of good quality
+and free from defects.
+3.3.7 The Buyer is entitled to withhold payment for partially or undelivered Services, but doing so does not
+stop it from using its other rights under the Contract.
+
+4. Pricing and payments
+4.1
+
+In exchange for the Deliverables, the Supplier must invoice the Buyer for the Charges in the Order Form.
+
+4.2
+
+CCS must invoice the Supplier for the Management Charge and the Supplier must pay it using the
+process in Framework Schedule 5 (Management Charges and Information).
+
+4.3
+
+All Charges and the Management Charge:
+(a) exclude VAT, which is payable on provision of a valid VAT invoice; and
+(b) include all costs connected with the Supply of Deliverables.
+
+4.4
+
+The Buyer must pay the Supplier the Charges within 30 days of receipt by the Buyer of a valid,
+4
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+undisputed invoice, in cleared funds using the payment method and details stated in the Order Form.
+4.5
+
+A Supplier invoice is only valid if it:
+(a) includes all appropriate references including the Contract reference number and other details
+reasonably requested by the Buyer;
+(b) includes a detailed breakdown of Delivered Deliverables and Milestone(s) (if any); and
+(c) does not include any Management Charge (the Supplier must not charge the Buyer in any way for
+the Management Charge).
+
+4.6
+
+The Buyer must accept and process for payment an undisputed Electronic Invoice received from the
+Supplier.
+
+4.7
+
+The Buyer may retain or set-off payment of any amount owed to it by the Supplier if notice and reasons
+are provided.
+
+4.8
+
+The Supplier must ensure that all Subcontractors are paid, in full, within 30 days of receipt of a valid,
+undisputed invoice. If this does not happen, CCS or the Buyer can publish the details of the late payment
+or non-payment.
+
+4.9
+
+If CCS or the Buyer can get more favourable commercial terms for the supply at cost of any materials,
+goods or services used by the Supplier to provide the Deliverables, then CCS or the Buyer may require
+the Supplier to replace its existing commercial terms with the more favourable terms offered for the
+relevant items.
+
+4.10 If CCS or the Buyer uses Clause 4.9 then the Framework Prices (and where applicable, the Charges) must
+be reduced by an agreed amount by using the Variation Procedure.
+4.11 The Supplier has no right of set-off, counterclaim, discount or abatement unless they are ordered to do
+so by a court.
+
+5. The buyer’s obligations to the supplier
+5.1
+
+If Supplier Non-Performance arises from an Authority Cause:
+(a) neither CCS or the Buyer can terminate a Contract under Clause 10.4.1;
+(b) the Supplier is entitled to reasonable and proven additional expenses and to relief from liability and
+Deduction under this Contract;
+(c) the Supplier is entitled to additional time needed to make the Delivery; and
+(d) the Supplier cannot suspend the ongoing supply of Deliverables.
+
+5.2
+
+Clause 5.1 only applies if the Supplier:
+(a) gives notice to the Party responsible for the Authority Cause within 10 Working Days of becoming
+aware;
+(b) demonstrates that the Supplier Non-Performance would not have occurred but for the Authority
+5
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+Cause; and
+(c) mitigated the impact of the Authority Cause.
+
+6. Record keeping and reporting
+6.1
+
+The Supplier must attend Progress Meetings with the Buyer and provide Progress Reports when
+specified in the Order Form.
+
+6.2
+
+The Supplier must keep and maintain full and accurate records and accounts on everything to do with
+the Contract:
+(a) during the Contract Period;
+(b) for 7 years after the End Date; and
+(c) in accordance with UK GDPR,
+including but not limited to the records and accounts stated in the definition of Audit in Joint Schedule 1.
+
+6.3
+
+The Relevant Authority or an Auditor can Audit the Supplier.
+
+6.4
+
+During an Audit, the Supplier must:
+(a) allow the Relevant Authority or any Auditor access to their premises to verify all contract accounts
+and records of everything to do with the Contract and provide copies for an Audit; and
+(b) provide information to the Relevant Authority or to the Auditor and reasonable co-operation at
+their request.
+
+6.5
+
+Where the Audit of the Supplier is carried out by an Auditor, the Auditor shall be entitled to share any
+information obtained during the Audit with the Relevant Authority.
+
+6.6
+
+If the Supplier is not providing any of the Deliverables, or is unable to provide them, it must
+immediately:
+(a) tell the Relevant Authority and give reasons;
+(b) propose corrective action; and
+(c) provide a deadline for completing the corrective action.
+
+6.7
+
+The Supplier must provide CCS with a Self Audit Certificate supported by an audit report at the end of
+each Contract Year. The report must contain:
+(a) the methodology of the review;
+(b) the sampling techniques applied;
+(c) details of any issues; and
+(d) any remedial action taken.
+
+6.8
+
+The Self Audit Certificate must be completed and signed by an auditor or senior member of the
+Supplier’s management team that is qualified in either a relevant audit or financial discipline.
+6
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+7. Supplier staff
+7.1
+
+The Supplier Staff involved in the performance of each Contract must:
+(a) be appropriately trained and qualified;
+(b) be vetted using Good Industry Practice and the Security Policy; and
+(c) comply with all conduct requirements when on the Buyer’s Premises.
+
+7.2
+
+Where a Buyer decides one of the Supplier’s Staff is not suitable to work on a contract, the Supplier
+must replace them with a suitably qualified alternative.
+
+7.3
+
+If requested, the Supplier must replace any person whose acts or omissions have caused the Supplier to
+breach Clause 27.
+
+7.4
+
+The Supplier must provide a list of Supplier Staff needing to access the Buyer’s Premises and say why
+access is required.
+
+7.5
+
+The Supplier indemnifies CCS and the Buyer against all claims brought by any person employed by the
+Supplier caused by an act or omission of the Supplier or any Supplier Staff.
+
+8. Rights and protection
+8.1
+
+The Supplier warrants and represents that:
+(a) it has full capacity and authority to enter into and to perform each Contract;
+(b) each Contract is executed by its authorised representative;
+(c) it is a legally valid and existing organisation incorporated in the place it was formed;
+(d) there are no known legal or regulatory actions or investigations before any court, administrative
+body or arbitration tribunal pending or threatened against it or its Affiliates that might affect its
+ability to perform each Contract;
+(e) it maintains all necessary rights, authorisations, licences and consents to perform its obligations
+under each Contract;
+(f) it does not have any contractual obligations which are likely to have a material adverse effect on its
+ability to perform each Contract;
+(g) it is not impacted by an Insolvency Event; and
+(h) it will comply with each Call-Off Contract.
+
+8.2
+
+The warranties and representations in Clauses 2.10 and 8.1 are repeated each time the Supplier provides
+Deliverables under the Contract.
+
+8.3
+
+The Supplier indemnifies both CCS and every Buyer against each of the following:
+(a) wilful misconduct of the Supplier, Subcontractor and Supplier Staff that impacts the Contract; and
+(b) non-payment by the Supplier of any Tax or National Insurance.
+7
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+8.4
+
+All claims indemnified under this Contract must use Clause 26.
+
+8.5
+
+The description of any provision of this Contract as a warranty does not prevent CCS or a Buyer from
+exercising any termination right that it may have for breach of that clause by the Supplier.
+
+8.6
+
+If the Supplier becomes aware of a representation or warranty that becomes untrue or misleading, it
+must immediately notify CCS and every Buyer.
+
+8.7
+
+All third party warranties and indemnities covering the Deliverables must be assigned for the Buyer’s
+benefit by the Supplier.
+
+9. Intellectual Property Rights (IPRs)
+9.1
+
+Each Party keeps ownership of its own Existing IPRs. The Supplier gives the Buyer a non-exclusive,
+perpetual, royalty-free, irrevocable, transferable worldwide licence to use, change and sub-license the
+Supplier’s Existing IPR to enable it to both:
+(a) receive and use the Deliverables; and
+(b) make use of the deliverables provided by a Replacement Supplier.
+
+9.2
+
+Any New IPR created under a Contract is owned by the Buyer. The Buyer gives the Supplier a licence to
+use any Existing IPRs and New IPRs for the purpose of fulfilling its obligations during the Contract Period.
+
+9.3
+
+Where a Party acquires ownership of IPRs incorrectly under this Contract it must do everything
+reasonably necessary to complete a transfer assigning them in writing to the other Party on request and
+at its own cost.
+
+9.4
+
+Neither Party has the right to use the other Party’s IPRs, including any use of the other Party’s names,
+logos or trademarks, except as provided in Clause 9 or otherwise agreed in writing.
+
+9.5
+
+If there is an IPR Claim, the Supplier indemnifies CCS and each Buyer against all losses, damages, costs or
+expenses (including professional fees and fines) incurred as a result.
+
+9.6
+
+If an IPR Claim is made or anticipated the Supplier must at its own expense and the Buyer’s sole option,
+either:
+(a) obtain for CCS and the Buyer the rights in Clause 9.1 and 9.2 without infringing any third party IPR;
+or
+(b) replace or modify the relevant item with substitutes that do not infringe IPR without adversely
+affecting the functionality or performance of the Deliverables.
+
+9.7
+
+In spite of any other provisions of a Contract and for the avoidance of doubt, award of a Contract by the
+Buyer and placement of any contract task under it does not constitute an authorisation by the Crown
+under Sections 55 and 56 of the Patents Act 1977 or Section 12 of the Registered Designs Act 1949. The
+Supplier acknowledges that any authorisation by the Buyer under its statutory powers must be expressly
+provided in writing, with reference to the acts authorised and the specific IPR involved.
+8
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+10. Ending the contract or any subcontract
+10.1 Contract Period
+10.1.1 The Contract takes effect on the Start Date and ends on the End Date or earlier if required by Law.
+10.1.2 The Relevant Authority can extend the Contract for the Extension Period by giving the Supplier no less
+than 3 Months' written notice before the Contract expires.
+
+10.2 Ending the contract without a reason
+10.2.1 CCS has the right to terminate the Framework Contract at any time without reason by giving the
+Supplier at least 30 days' notice.
+10.2.2 Each Buyer has the right to terminate their Call-Off Contract at any time without reason by giving the
+Supplier not less than 90 days' written notice.
+
+10.3 Rectification plan process
+10.3.1 If there is a Default, the Relevant Authority may, without limiting its other rights, request that the
+Supplier provide a Rectification Plan, within 10 working days .
+10.3.2 When the Relevant Authority receives a requested Rectification Plan it can either:
+(a) reject the Rectification Plan or revised Rectification Plan, giving reasons; or
+(b) accept the Rectification Plan or revised Rectification Plan (without limiting its rights) and the
+Supplier must immediately start work on the actions in the Rectification Plan at its own cost, unless
+agreed otherwise by the Parties.
+10.3.3 Where the Rectification Plan or revised Rectification Plan is rejected, the Relevant Authority:
+(a) must give reasonable grounds for its decision; and
+(b) may request that the Supplier provides a revised Rectification Plan within 5 Working Days.
+10.3.4 If the Relevant Authority rejects any Rectification Plan, including any revised Rectification Plan, the
+Relevant Authority does not have to request a revised Rectification Plan before exercising its right to
+terminate its Contract under Clause 10.4.3(a).
+
+10.4 When CCS or the buyer can end a contract
+10.4.1 If any of the following events happen, the Relevant Authority has the right to immediately terminate its
+Contract by issuing a Termination Notice to the Supplier:
+(a) there is a Supplier Insolvency Event;
+(b) there is a Default that is not corrected in line with an accepted Rectification Plan;
+(c) the Supplier does not provide a Rectification Plan within 10 days of the request;
+(d) there is any material Default of the Contract;
+(e) there is any material Default of any Joint Controller Agreement relating to any Contract;
+9
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+(f) there is a Default of Clauses 2.10, 9, 14, 15, 27, 32 or Framework Schedule 9 (Cyber Essentials)
+(where applicable) relating to any Contract;
+(g) there is a consistent repeated failure to meet the Performance Indicators in Framework Schedule 4
+(Framework Management);
+(h) there is a Change of Control of the Supplier which is not pre-approved by the Relevant Authority in
+writing;
+(i) if the Relevant Authority discovers that the Supplier was in one of the situations in 57 (1) or 57(2) of
+the Regulations at the time the Contract was awarded; or
+(j) the Supplier or its Affiliates embarrass or bring CCS or the Buyer into disrepute or diminish the
+public trust in them.
+10.4.2 CCS may terminate the Framework Contract if a Buyer terminates a Call-Off Contract for any of the
+reasons listed in Clause 10.4.1.
+10.4.3 If any of the following non-fault based events happen, the Relevant Authority has the right to
+immediately terminate its Contract by issuing a Termination Notice to the Supplier:
+(a) the Relevant Authority rejects a Rectification Plan;
+(b) there is a Variation which cannot be agreed using Clause 24 (Changing the contract) or resolved
+using Clause 34 (Resolving disputes);
+(c) if there is a declaration of ineffectiveness in respect of any Variation; or
+(d) the events in 73 (1) (a) of the Regulations happen.
+
+10.5 When the supplier can end the contract
+The Supplier can issue a Reminder Notice if the Buyer does not pay an undisputed invoice on time. The
+Supplier can terminate a Call-Off Contract if the Buyer fails to pay an undisputed invoiced sum due and
+worth over 10% of the annual Contract Value within 30 days of the date of the Reminder Notice.
+
+10.6 What happens if the contract ends
+10.6.1 Where a Party terminates a Contract under any of Clauses 10.2.1, 10.2.2, 10.4.1, 10.4.2, 10.4.3, 10.5 or
+20.2 or a Contract expires all of the following apply:
+(a) The Buyer’s payment obligations under the terminated Contract stop immediately.
+(b) Accumulated rights of the Parties are not affected.
+(c) The Supplier must promptly repay to the Buyer any and all Charges the Buyer has paid in advance in
+respect of Deliverables not provided by the Supplier as at the End Date.
+(d) The Supplier must promptly delete or return the Government Data except where required to retain
+copies by Law.
+(e) The Supplier must promptly return any of CCS or the Buyer’s property provided under the
+terminated Contract.
+(f) The Supplier must, at no cost to CCS or the Buyer, co-operate fully in the handover and reprocurement (including to a Replacement Supplier).
+10.6.2 In addition to the consequences of termination listed in Clause 10.6.1, where the Relevant Authority
+10
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+terminates a Contract under Clause 10.4.1 the Supplier is also responsible for the Relevant Authority’s
+reasonable costs of procuring Replacement Deliverables for the rest of the Contract Period.
+10.6.3 In addition to the consequences of termination listed in Clause 10.6.1, if either the Relevant Authority
+terminates a Contract under Clause 10.2.1 or 10.2.2 or a Supplier terminates a Call-Off Contract under
+Clause 10.5:
+(a) the Buyer must promptly pay all outstanding Charges incurred to the Supplier; and
+(b) the Buyer must pay the Supplier reasonable committed and unavoidable Losses as long as the
+Supplier provides a fully itemised and costed schedule with evidence - the maximum value of this
+payment is limited to the total sum payable to the Supplier if the Contract had not been terminated.
+10.6.4 In addition to the consequences of termination listed in Clause 10.6.1, where a Party terminates under
+Clause 20.2 each Party must cover its own Losses.
+10.6.5 The following Clauses survive the termination or expiry of each Contract: 3.2.10, 4.2, 6, 7.5, 9, 11, 12.2,
+14, 15, 16, 17, 18, 31.3, 34, 35 and any Clauses and Schedules which are expressly or by implication
+intended to continue.
+
+10.7 Partially ending and suspending the contract
+10.7.1 Where CCS has the right to terminate the Framework Contract it can suspend the Supplier's ability to
+accept Orders (for any period) and the Supplier cannot enter into any new Call-Off Contracts during
+this period. If this happens, the Supplier must still meet its obligations under any existing Call-Off
+Contracts that have already been signed.
+10.7.2 Where CCS has the right to terminate a Framework Contract it is entitled to terminate all or part of it.
+10.7.3 Where the Buyer has the right to terminate a Call-Off Contract it can terminate or suspend (for any
+period), all or part of it. If the Buyer suspends a Contract it can provide the Deliverables itself or buy
+them from a third party.
+10.7.4 The Relevant Authority can only partially terminate or suspend a Contract if the remaining parts of that
+Contract can still be used to effectively deliver the intended purpose.
+10.7.5 The Parties must agree any necessary Variation required by Clause 10.7 using the Variation Procedure,
+but the Supplier may not either:
+(a) reject the Variation; or
+(b) increase the Charges, except where the right to partial termination is under Clause 10.2.
+10.7.6 The Buyer can still use other rights available, or subsequently available to it if it acts on its rights under
+Clause 10.7.
+
+10.8 When subcontracts can be ended
+At the Buyer’s request, the Supplier must terminate any Subcontracts in any of the following events:
+11
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+(a) there is a Change of Control of a Subcontractor which is not pre-approved by the Relevant Authority
+in writing;
+(b) the acts or omissions of the Subcontractor have caused or materially contributed to a right of
+termination under Clause 10.4; or
+(c) a Subcontractor or its Affiliates embarrasses or brings into disrepute or diminishes the public trust in
+the Relevant Authority.
+
+11. How much you can be held responsible for
+11.1 Each Party's total aggregate liability in each Contract Year under this Framework Contract (whether in
+tort, contract or otherwise) is no more than £1,000,000.
+11.2 Each Party's total aggregate liability in each Contract Year under each Call-Off Contract (whether in tort,
+contract or otherwise) is no more than the greater of £5 million or 150% of the Estimated Yearly Charges
+unless specified in the Call-Off Order Form.
+11.3 No Party is liable to the other for:
+(a) any indirect Losses; or
+(b) Loss of profits, turnover, savings, business opportunities or damage to goodwill (in each case
+whether direct or indirect).
+11.4 In spite of Clause 11.1 and 11.2, neither Party limits or excludes any of the following:
+(a) its liability for death or personal injury caused by its negligence, or that of its employees, agents or
+Subcontractors;
+(b) its liability for bribery or fraud or fraudulent misrepresentation by it or its employees;
+(c) any liability that cannot be excluded or limited by Law;
+(d) its obligation to pay the required Management Charge or Default Management Charge.
+11.5 In spite of Clauses 11.1 and 11.2, the Supplier does not limit or exclude its liability for any indemnity
+given under Clauses 7.5, 8.3(b), 9.5, 31.3 or Call-Off Schedule 2 (Staff Transfer) of a Contract.
+11.6 In spite of Clauses 11.1, 11.2 but subject to Clauses 11.3 and 11.4, the Supplier's aggregate liability in
+each and any Contract Year under each Contract under Clause 14.8 shall in no event exceed the Data
+Protection Liability Cap.
+11.7 Each Party must use all reasonable endeavours to mitigate any Loss or damage which it suffers under or
+in connection with each Contract, including any indemnities.
+11.8 When calculating the Supplier’s liability under Clause 11.1 or 11.2 the following items will not be taken
+into consideration:
+(a) Deductions; and
+12
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+(b) any items specified in Clauses 11.5 or 11.6.
+11.9 If more than one Supplier is party to a Contract, each Supplier Party is jointly and severally liable for their
+obligations under that Contract.
+
+12. Obeying the law
+12.1 The Supplier must use reasonable endeavours to comply with the provisions of Joint Schedule 5
+(Corporate Social Responsibility).
+12.2 To the extent that it arises as a result of a Default by the Supplier, the Supplier indemnifies the Relevant
+Authority against any fine or penalty incurred by the Relevant Authority pursuant to Law and any costs
+incurred by the Relevant Authority in defending any proceedings which result in such fine or penalty.
+12.3 The Supplier must appoint a Compliance Officer who must be responsible for ensuring that the Supplier
+complies with Law, Clause 12.1 and Clauses 27 to 32.
+
+13. Insurance
+The Supplier must, at its own cost, obtain and maintain the Required Insurances in Joint Schedule 3
+(Insurance Requirements) and any Additional Insurances in the Order Form.
+
+14. Data protection
+14.1 The Supplier must process Personal Data and ensure that Supplier Staff process Personal Data only in
+accordance with Joint Schedule 11 (Processing Data).
+14.2 The Supplier must not remove any ownership or security notices in or relating to the Government Data.
+14.3 The Supplier must make accessible back-ups of all Government Data, stored in an agreed off-site
+location and send the Buyer copies every 6 Months.
+14.4 The Supplier must ensure that any Supplier system holding any Government Data, including back-up
+data, is a secure system that complies with the Security Policy and any applicable Security Management
+Plan.
+14.5 If at any time the Supplier suspects or has reason to believe that the Government Data provided under a
+Contract is corrupted, lost or sufficiently degraded, then the Supplier must notify the Relevant Authority
+and immediately suggest remedial action.
+14.6 If the Government Data is corrupted, lost or sufficiently degraded so as to be unusable the Relevant
+Authority may either or both:
+(a) tell the Supplier to restore or get restored Government Data as soon as practical but no later than 5
+Working Days from the date that the Relevant Authority receives notice, or the Supplier finds out
+about the issue, whichever is earlier; and/or
+(b) restore the Government Data itself or using a third party.
+13
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+14.7 The Supplier must pay each Party’s reasonable costs of complying with Clause 14.6 unless CCS or the
+Buyer is at fault.
+14.8 The Supplier:
+(a) must provide the Relevant Authority with all Government Data in an agreed open format within 10
+Working Days of a written request;
+(b) must have documented processes to guarantee prompt availability of Government Data if the
+Supplier stops trading;
+(c) must securely destroy all Storage Media that has held Government Data at the end of life of that
+media using Good Industry Practice;
+(d) securely erase all Government Data and any copies it holds when asked to do so by CCS or the Buyer
+unless required by Law to retain it; and
+(e) indemnifies CCS and each Buyer against any and all Losses incurred if the Supplier breaches Clause
+14 and any Data Protection Legislation.
+
+15. What you must keep confidential
+15.1 Each Party must:
+(a) keep all Confidential Information it receives confidential and secure;
+(b) except as expressly set out in the Contract at Clauses 15.2 to 15.4 or elsewhere in the Contract, not
+disclose, use or exploit the Disclosing Party’s Confidential Information without the Disclosing Party's
+prior written consent; and
+(c) immediately notify the Disclosing Party if it suspects unauthorised access, copying, use or disclosure
+of the Confidential Information.
+15.2 In spite of Clause 15.1, a Party may disclose Confidential Information which it receives from the
+Disclosing Party in any of the following instances:
+(a) where disclosure is required by applicable Law or by a court with the relevant jurisdiction if, to the
+extent not prohibited by Law, the Recipient Party notifies the Disclosing Party of the full
+circumstances, the affected Confidential Information and extent of the disclosure;
+(b) if the Recipient Party already had the information without obligation of confidentiality before it was
+disclosed by the Disclosing Party;
+(c) if the information was given to it by a third party without obligation of confidentiality;
+(d) if the information was in the public domain at the time of the disclosure;
+(e) if the information was independently developed without access to the Disclosing Party’s
+Confidential Information;
+(f) on a confidential basis, to its auditors;
+(g) on a confidential basis, to its professional advisers on a need-to-know basis; or
+(h) to the Serious Fraud Office where the Recipient Party has reasonable grounds to believe that the
+Disclosing Party is involved in activity that may be a criminal offence under the Bribery Act 2010.
+14
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+15.3 In spite of Clause 15.1, the Supplier may disclose Confidential Information on a confidential basis to
+Supplier Staff on a need-to-know basis to allow the Supplier to meet its obligations under the Contract.
+The Supplier Staff must enter into a direct confidentiality agreement with the Relevant Authority at its
+request.
+15.4 In spite of Clause 15.1, CCS or the Buyer may disclose Confidential Information in any of the following
+cases:
+(a) on a confidential basis to the employees, agents, consultants and contractors of CCS or the Buyer;
+(b) on a confidential basis to any other Central Government Body, any successor body to a Central
+Government Body or any company that CCS or the Buyer transfers or proposes to transfer all or any
+part of its business to;
+(c) if CCS or the Buyer (acting reasonably) considers disclosure necessary or appropriate to carry out its
+public functions;
+(d) where requested by Parliament; or
+(e) under Clauses 4.7 and 16.
+15.5 For the purposes of Clauses 15.2 to 15.4 references to disclosure on a confidential basis means
+disclosure under a confidentiality agreement or arrangement including terms as strict as those required
+in Clause 15.
+15.6 Transparency Information is not Confidential Information.
+15.7 The Supplier must not make any press announcement or publicise the Contracts or any part of them in
+any way, without the prior written consent of the Relevant Authority and must take all reasonable steps
+to ensure that Supplier Staff do not either.
+
+16. When you can share information
+16.1 The Supplier must tell the Relevant Authority within 48 hours if it receives a Request For Information.
+16.2 Within five (5) Working Days of the Buyer’s request the Supplier must give CCS and each Buyer full cooperation and information needed so the Buyer can:
+(a) publish the Transparency Information;
+(b) comply with any Freedom of Information Act (FOIA) request; and/or
+(c) comply with any Environmental Information Regulations (EIR) request.
+16.3 The Relevant Authority may talk to the Supplier to help it decide whether to publish information under
+Clause 16. However, the extent, content and format of the disclosure is the Relevant Authority’s decision
+in its absolute discretion.
+
+17. Invalid parts of the contract
+If any part of a Contract is prohibited by Law or judged by a court to be unlawful, void or unenforceable, it
+must be read as if it was removed from that Contract as much as required and rendered ineffective as far as
+15
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+possible without affecting the rest of the Contract, whether it is valid or enforceable.
+
+18. No other terms apply
+The provisions incorporated into each Contract are the entire agreement between the Parties. The Contract
+replaces all previous statements, agreements and any course of dealings made between the Parties, whether
+written or oral, in relation to its subject matter. No other provisions apply.
+
+19. Other people’s rights in a contract
+No third parties may use the Contracts (Rights of Third Parties) Act 1999 (CRTPA) to enforce any term of the
+Contract unless stated (referring to CRTPA) in the Contract. This does not affect third party rights and
+remedies that exist independently from CRTPA.
+
+20. Circumstances beyond your control
+20.1 Any Party affected by a Force Majeure Event is excused from performing its obligations under a Contract
+while the inability to perform continues, if it both:
+(a) provides a Force Majeure Notice to the other Party; and
+(b) uses all reasonable measures practical to reduce the impact of the Force Majeure Event.
+20.2 Either Party can partially or fully terminate the affected Contract if the provision of the Deliverables is
+materially affected by a Force Majeure Event which lasts for 90 days continuously.
+
+21. Relationships created by the contract
+No Contract creates a partnership, joint venture or employment relationship. The Supplier must represent
+themselves accordingly and ensure others do so.
+
+22. Giving up contract rights
+A partial or full waiver or relaxation of the terms of a Contract is only valid if it is stated to be a waiver in
+writing to the other Party.
+
+23. Transferring responsibilities
+23.1 The Supplier cannot assign, novate or transfer a Contract or any part of a Contract without the Relevant
+Authority’s written consent.
+23.2 The Relevant Authority can assign, novate or transfer its Contract or any part of it to any Central
+Government Body, public or private sector body which performs the functions of the Relevant Authority.
+23.3 When CCS or the Buyer uses its rights under Clause 23.2 the Supplier must enter into a novation
+agreement in the form that CCS or the Buyer specifies.
+23.4 The Supplier can terminate a Contract novated under Clause 23.2 to a private sector body that is
+experiencing an Insolvency Event.
+16
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+23.5 The Supplier remains responsible for all acts and omissions of the Supplier Staff as if they were its own.
+23.6 If CCS or the Buyer asks the Supplier for details about Subcontractors, the Supplier must provide details
+of Subcontractors at all levels of the supply chain including:
+(a) their name;
+(b) the scope of their appointment; and
+(c) the duration of their appointment.
+
+24. Changing the contract
+24.1 Either Party can request a Variation which is only effective if agreed in writing and signed by both
+Parties.
+24.2 The Supplier must provide an Impact Assessment either:
+(a) with the Variation Form, where the Supplier requests the Variation; or
+(b) within the time limits included in a Variation Form requested by CCS or the Buyer.
+24.3 If the Variation cannot be agreed or resolved by the Parties, CCS or the Buyer can either:
+(a) agree that the Contract continues without the Variation; or
+(b) terminate the affected Contract, unless in the case of a Call-Off Contract, the Supplier has already
+provided part or all of the provision of the Deliverables, or where the Supplier can show evidence of
+substantial work being carried out to provide them; or
+(c) refer the Dispute to be resolved using Clause 34 (Resolving Disputes).
+24.4 CCS and the Buyer are not required to accept a Variation request made by the Supplier.
+24.5 If there is a General Change in Law, the Supplier must bear the risk of the change and is not entitled to
+ask for an increase to the Framework Prices or the Charges.
+24.6 If there is a Specific Change in Law or one is likely to happen during the Contract Period the Supplier
+must give CCS and the Buyer notice of the likely effects of the changes as soon as reasonably practical.
+They must also say if they think any Variation is needed either to the Deliverables, Framework Prices or a
+Contract and provide evidence:
+(a) that the Supplier has kept costs as low as possible, including in Subcontractor costs; and
+(b) of how it has affected the Supplier’s costs.
+24.7 Any change in the Framework Prices or relief from the Supplier's obligations because of a Specific
+Change in Law must be implemented using Clauses 24.1 to 24.4.
+24.8 For 101(5) of the Regulations, if the Court declares any Variation ineffective, the Parties agree that their
+17
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+mutual rights and obligations will be regulated by the terms of the Contract as they existed immediately
+prior to that Variation and as if the Parties had never entered into that Variation.
+
+25. How to communicate about the contract
+25.1 All notices under the Contract must be in writing and are considered effective on the Working Day of
+delivery as long as they are delivered before 5:00pm on a Working Day. Otherwise the notice is effective
+on the next Working Day. An email is effective at 9:00am on the first Working Day after sending unless
+an error message is received.
+25.2 Notices to CCS must be sent to the CCS Authorised Representative’s address or email address in the
+Framework Award Form.
+25.3 Notices to the Buyer must be sent to the Buyer Authorised Representative’s address or email address in
+the Order Form.
+25.4 This Clause does not apply to the service of legal proceedings or any documents in any legal action,
+arbitration or dispute resolution.
+
+26. Dealing with claims
+26.1 If a Beneficiary is notified of a Claim then it must notify the Indemnifier as soon as reasonably practical
+and no later than 10 Working Days.
+26.2 At the Indemnifier’s cost the Beneficiary must both:
+(a) allow the Indemnifier to conduct all negotiations and proceedings to do with a Claim; and
+(b) give the Indemnifier reasonable assistance with the claim if requested.
+26.3 The Beneficiary must not make admissions about the Claim without the prior written consent of the
+Indemnifier which can not be unreasonably withheld or delayed.
+26.4 The Indemnifier must consider and defend the Claim diligently using competent legal advisors and in a
+way that does not damage the Beneficiary’s reputation.
+26.5 The Indemnifier must not settle or compromise any Claim without the Beneficiary's prior written
+consent which it must not unreasonably withhold or delay.
+26.6 Each Beneficiary must take all reasonable steps to minimise and mitigate any losses that it suffers
+because of the Claim.
+26.7 If the Indemnifier pays the Beneficiary money under an indemnity and the Beneficiary later recovers
+money which is directly related to the Claim, the Beneficiary must immediately repay the Indemnifier
+the lesser of either:
+(a) the sum recovered minus any legitimate amount spent by the Beneficiary when recovering this
+money; or
+18
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+(b) the amount the Indemnifier paid the Beneficiary for the Claim.
+
+27. Preventing fraud, bribery and corruption
+27.1 The Supplier must not during any Contract Period:
+(a) commit a Prohibited Act or any other criminal offence in the Regulations 57(1) and 57(2); or
+(b) do or allow anything which would cause CCS or the Buyer, including any of their employees,
+consultants, contractors, Subcontractors or agents to breach any of the Relevant Requirements or
+incur any liability under them.
+27.2 The Supplier must during the Contract Period:
+(a) create, maintain and enforce adequate policies and procedures to ensure it complies with the
+Relevant Requirements to prevent a Prohibited Act and require its Subcontractors to do the same;
+(b) keep full records to show it has complied with its obligations under Clause 27 and give copies to CCS
+or the Buyer on request; and
+(c) if required by the Relevant Authority, within 20 Working Days of the Start Date of the relevant
+Contract, and then annually, certify in writing to the Relevant Authority, that they have complied
+with Clause 27, including compliance of Supplier Staff, and provide reasonable supporting evidence
+of this on request, including its policies and procedures.
+27.3 The Supplier must immediately notify CCS and the Buyer if it becomes aware of any breach of Clauses
+27.1 or 27.2 or has any reason to think that it, or any of the Supplier Staff, has either:
+(a) been investigated or prosecuted for an alleged Prohibited Act;
+(b) been debarred, suspended, proposed for suspension or debarment, or is otherwise ineligible to take
+part in procurement programmes or contracts because of a Prohibited Act by any government
+department or agency;
+(c) received a request or demand for any undue financial or other advantage of any kind related to a
+Contract; or
+(d) suspected that any person or Party directly or indirectly related to a Contract has committed or
+attempted to commit a Prohibited Act.
+27.4 If the Supplier notifies CCS or the Buyer as required by Clause 27.3, the Supplier must respond promptly
+to their further enquiries, co-operate with any investigation and allow the Audit of any books, records
+and relevant documentation.
+27.5 In any notice the Supplier gives under Clause 27.3 it must specify the:
+(a) Prohibited Act;
+(b) identity of the Party who it thinks has committed the Prohibited Act; and
+(c) action it has decided to take.
+
+19
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+28. Equality, diversity and human rights
+28.1 The Supplier must follow all applicable equality Law when they perform their obligations under the
+Contract, including:
+(a) protections against discrimination on the grounds of race, sex, gender reassignment, religion or
+belief, disability, sexual orientation, pregnancy, maternity, age or otherwise; and
+(b) any other requirements and instructions which CCS or the Buyer reasonably imposes related to
+equality Law.
+28.2 The Supplier must take all necessary steps, and inform CCS or the Buyer of the steps taken, to prevent
+anything that is considered to be unlawful discrimination by any court or tribunal, or the Equality and
+Human Rights Commission (or any successor organisation) when working on a Contract.
+
+29. Health and safety
+29.1 The Supplier must perform its obligations meeting the requirements of:
+(a) all applicable Law regarding health and safety; and
+(b) the Buyer’s current health and safety policy while at the Buyer’s Premises, as provided to the
+Supplier.
+29.2 The Supplier and the Buyer must as soon as possible notify the other of any health and safety incidents
+or material hazards they are aware of at the Buyer Premises that relate to the performance of a
+Contract.
+
+30. Environment
+30.1 When working on Site the Supplier must perform its obligations under the Buyer’s current
+Environmental Policy, which the Buyer must provide.
+30.2 The Supplier must ensure that Supplier Staff are aware of the Buyer’s Environmental Policy.
+
+31. Tax
+31.1 The Supplier must not breach any Tax or social security obligations and must enter into a binding
+agreement to pay any late contributions due, including where applicable, any interest or any fines. CCS
+and the Buyer cannot terminate a Contract where the Supplier has not paid a minor Tax or social
+security contribution.
+31.2 Where the Charges payable under a Contract with the Buyer are or are likely to exceed £5 million at any
+point during the relevant Contract Period, and an Occasion of Tax Non-Compliance occurs, the Supplier
+must notify CCS and the Buyer of it within 5 Working Days including:
+(a) the steps that the Supplier is taking to address the Occasion of Tax Non-Compliance and any
+mitigating factors that it considers relevant; and
+(b) other information relating to the Occasion of Tax Non-Compliance that CCS and the Buyer may
+20
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+reasonably need.
+31.3 Where the Supplier or any Supplier Staff are liable to be taxed or to pay National Insurance contributions
+in the UK relating to payment received under a Call-Off Contract, the Supplier must both:
+(a) comply with the Income Tax (Earnings and Pensions) Act 2003 and all other statutes and regulations
+relating to income tax, the Social Security Contributions and Benefits Act 1992 (including IR35) and
+National Insurance contributions; and
+(b) indemnify the Buyer against any Income Tax, National Insurance and social security contributions
+and any other liability, deduction, contribution, assessment or claim arising from or made during or
+after the Contract Period in connection with the provision of the Deliverables by the Supplier or any
+of the Supplier Staff.
+31.4 If any of the Supplier Staff are Workers who receive payment relating to the Deliverables, then the
+Supplier must ensure that its contract with the Worker contains the following requirements:
+(a) the Buyer may, at any time during the Contract Period, request that the Worker provides
+information which demonstrates they comply with Clause 31.3, or why those requirements do not
+apply, the Buyer can specify the information the Worker must provide and the deadline for
+responding;
+(b) the Worker’s contract may be terminated at the Buyer’s request if the Worker fails to provide the
+information requested by the Buyer within the time specified by the Buyer;
+(c) the Worker’s contract may be terminated at the Buyer’s request if the Worker provides information
+which the Buyer considers is not good enough to demonstrate how it complies with Clause 31.3 or
+confirms that the Worker is not complying with those requirements; and
+(d) the Buyer may supply any information they receive from the Worker to HMRC for revenue collection
+and management.
+
+32. Conflict of interest
+32.1 The Supplier must take action to ensure that neither the Supplier nor the Supplier Staff are placed in the
+position of an actual or potential Conflict of Interest.
+32.2 The Supplier must promptly notify and provide details to CCS and each Buyer if a Conflict of Interest
+happens or is expected to happen.
+32.3 CCS and each Buyer can terminate its Contract immediately by giving notice in writing to the Supplier or
+take any steps it thinks are necessary where there is or may be an actual or potential Conflict of Interest.
+
+33. Reporting a breach of the contract
+33.1 As soon as it is aware of it the Supplier and Supplier Staff must report to CCS or the Buyer any actual or
+suspected breach of:
+(a) Law;
+(b) Clause 12.1; or
+21
+
+Crown Copyright 2021
+
+Version: 3.0.11
+Core Terms
+
+(c) Clauses 27 to 32.
+33.2 The Supplier must not retaliate against any of the Supplier Staff who in good faith reports a breach listed
+in Clause 33.1 to the Buyer or a Prescribed Person.
+
+34. Resolving disputes
+34.1 If there is a Dispute, the senior representatives of the Parties who have authority to settle the Dispute
+will, within 28 days of a written request from the other Party, meet in good faith to resolve the Dispute.
+34.2 If the Dispute is not resolved at that meeting, the Parties can attempt to settle it by mediation using the
+Centre for Effective Dispute Resolution (CEDR) Model Mediation Procedure current at the time of the
+Dispute. If the Parties cannot agree on a mediator, the mediator will be nominated by CEDR. If either
+Party does not wish to use, or continue to use mediation, or mediation does not resolve the Dispute, the
+Dispute must be resolved using Clauses 34.3 to 34.5.
+34.3 Unless the Relevant Authority refers the Dispute to arbitration using Clause 34.4, the Parties irrevocably
+agree that the courts of England and Wales have the exclusive jurisdiction to:
+(a) determine the Dispute;
+(b) grant interim remedies; and/or
+(c) grant any other provisional or protective relief.
+34.4 The Supplier agrees that the Relevant Authority has the exclusive right to refer any Dispute to be finally
+resolved by arbitration under the London Court of International Arbitration Rules current at the time of
+the Dispute. There will be only one arbitrator. The seat or legal place of the arbitration will be London
+and the proceedings will be in English.
+34.5 The Relevant Authority has the right to refer a Dispute to arbitration even if the Supplier has started or
+has attempted to start court proceedings under Clause 34.3, unless the Relevant Authority has agreed to
+the court proceedings or participated in them. Even if court proceedings have started, the Parties must
+do everything necessary to ensure that the court proceedings are stayed in favour of any arbitration
+proceedings if they are started under Clause 34.4.
+34.6 The Supplier cannot suspend the performance of a Contract during any Dispute.
+
+35. Which law applies
+This Contract and any Disputes arising out of, or connected to it, are governed by English law.
+
+22
+
+

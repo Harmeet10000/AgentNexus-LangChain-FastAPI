@@ -1,0 +1,138 @@
+{
+  "generated": "2026-10-28",
+  "derived_from": "evals/corpus/acquisition/*.json (21 records)",
+  "totals": {
+    "acquisition_records": 21,
+    "real_sources_acquired": 12,
+    "synthetic_fixtures": 5,
+    "artifact_bearing_sources": 17,
+    "failed_downloads": 4,
+    "original_binaries_stored_in_repo": 15,
+    "original_binaries_not_stored": [
+      "SRC-05",
+      "SRC-06"
+    ]
+  },
+  "per_characteristic": {
+    "scan_heavy": {
+      "count": 5,
+      "source_ids": [
+        "SRC-04",
+        "SRC-05",
+        "SRC-06",
+        "SRC-07",
+        "SYN-05"
+      ]
+    },
+    "table_schedule_heavy": {
+      "count": 6,
+      "source_ids": [
+        "SRC-01",
+        "SRC-02",
+        "SRC-03",
+        "SRC-04",
+        "SRC-07",
+        "SRC-14"
+      ]
+    },
+    "irregular_numbering": {
+      "count": 2,
+      "source_ids": [
+        "SRC-07",
+        "SRC-14"
+      ]
+    },
+    "version_pair_role": {
+      "count": 7,
+      "source_ids": [
+        "SRC-01",
+        "SRC-02",
+        "SRC-03",
+        "SRC-07",
+        "SYN-02",
+        "SYN-03",
+        "SYN-04"
+      ]
+    },
+    "multi_contract": {
+      "count": 3,
+      "source_ids": [
+        "SRC-04",
+        "SRC-14",
+        "SYN-02"
+      ]
+    },
+    "clean_control": {
+      "count": 9,
+      "source_ids": [
+        "SRC-01",
+        "SRC-02",
+        "SRC-03",
+        "SRC-12",
+        "SRC-13",
+        "SRC-15",
+        "SRC-16",
+        "SYN-01",
+        "SYN-03"
+      ]
+    }
+  },
+  "per_jurisdiction": {
+    "GB": 3,
+    "IN": 14
+  },
+  "failed_downloads": [
+    {
+      "source_id": "SRC-08",
+      "title": "Indian Railways Standard GCC April 2022 — Advance Correction Slip No. 9 (ACS-9), scanned signed letter",
+      "reason": "HTTP 404 (curl exit 22) on primary URL",
+      "alternates_tried": [
+        "http:// variant of the same path -> 302 redirect to https -> same 404",
+        "www. host variant -> 404",
+        "parent directory listing -> 'Site Under Construction' page (uploads tree restructured)",
+        "railwayboard view_section.jsp id=0,4,1244 -> 404",
+        "web.archive.org / other mirrors NOT used per mission rule (never substitute a mirror)"
+      ],
+      "record": "evals/corpus/acquisition/SRC-08.json"
+    },
+    {
+      "source_id": "SRC-09",
+      "title": "Indian Railways Standard GCC April 2022 — Advance Correction Slip No. 11 (ACS-11)",
+      "reason": "HTTP 404 (curl exit 22) on primary URL",
+      "alternates_tried": [
+        "http:// variant of the same path -> 302 redirect to https -> same 404",
+        "www. host variant -> 404",
+        "parent directory listing -> 'Site Under Construction' page (uploads tree restructured)",
+        "railwayboard view_section.jsp id=0,4,1244 -> 404",
+        "web.archive.org / other mirrors NOT used per mission rule (never substitute a mirror)"
+      ],
+      "record": "evals/corpus/acquisition/SRC-09.json"
+    },
+    {
+      "source_id": "SRC-10",
+      "title": "ECR (East Central Railway) tender packet IBD v3.0 (0100-series numbering)",
+      "reason": "HTTP 404 (curl exit 22) on primary URL",
+      "alternates_tried": [
+        "http:// variant of the same path -> 302 redirect to https -> same 404",
+        "www. host variant -> 404",
+        "parent directory listing -> 'Site Under Construction' page (uploads tree restructured)",
+        "railwayboard view_section.jsp id=0,4,1244 -> 404",
+        "web.archive.org / other mirrors NOT used per mission rule (never substitute a mirror)"
+      ],
+      "record": "evals/corpus/acquisition/SRC-10.json"
+    },
+    {
+      "source_id": "SRC-11",
+      "title": "Indian Railways Standard General Conditions of Contract (2019 revision, 06.09.2019) — older-revision decoy",
+      "reason": "HTTP 404 (curl exit 22) on primary URL",
+      "alternates_tried": [
+        "http:// variant of the same path -> 302 redirect to https -> same 404",
+        "www. host variant -> 404",
+        "parent directory listing -> 'Site Under Construction' page (uploads tree restructured)",
+        "railwayboard view_section.jsp id=0,4,1244 -> 404",
+        "web.archive.org / other mirrors NOT used per mission rule (never substitute a mirror)"
+      ],
+      "record": "evals/corpus/acquisition/SRC-11.json"
+    }
+  ]
+}

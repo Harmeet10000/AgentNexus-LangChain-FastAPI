@@ -1,0 +1,68 @@
+{
+ "source_id": "SRC-14",
+ "title": "Crown Commercial Service and Supplier Framework Agreement (Agreement Ref: RM3765) v2",
+ "issuer": "Crown Commercial Service (CCS), Cabinet Office, United Kingdom",
+ "source_url": "https://assets.crowncommercial.gov.uk/wp-content/uploads/RM3765-Framework-agreement-v2.pdf",
+ "terms_licence_url": "http://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+ "jurisdiction": "GB",
+ "document_date": "2016-04-25",
+ "access_date": "2026-10-28",
+ "source_type": "public",
+ "classification": "public",
+ "original_filename": "original.pdf",
+ "mime_type": "application/pdf",
+ "sha256": "04a38b514cac075d7492f3ec75b6fc76ee193a3ff284dd6b709c08a5c9d5c128",
+ "file_size_bytes": 1539207,
+ "permission_status": "public_terms_verified",
+ "redistribution_status": "permitted_with_attribution",
+ "model_processing_status": "permitted",
+ "ocr_status": "embedded_text_layer",
+ "ocr_engine": "pdftotext (poppler)",
+ "ocr_engine_version": "26.01.0",
+ "extraction_settings": {
+  "download_command": "curl -L --fail --silent --show-error --max-time 300 --retry 2 --retry-delay 5 -A \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36\" -H \"Accept: application/pdf,*/*\" -o original.pdf \"<URL>\"",
+  "page_count_command": "pdfinfo original.pdf",
+  "raw_ocr_command": "pdftotext original.pdf -   # verbatim output, written unmodified to raw_ocr.txt (poppler 26.01.0)",
+  "pages_json_command": "pdftotext -f N -l N original.pdf -   # per page N=1..page_count, one-based page_no, assembled in order",
+  "normalization_command": "python3 normalize(): ",
+  "normalization_rules": "R1 remove NUL bytes; R2 CRLF and lone CR to LF; R3 U+00A0 and U+2007..U+200B converted to U+0020; R4 ligatures U+FB00-FB06 expanded to component letters; R5 form-feed (U+000C) page markers removed; R6 trailing whitespace stripped per line; R7 runs of 3+ blank lines collapsed to 2; R8 nothing else — no spelling, hyphenation or OCR repair of any kind",
+  "verification_commands": "file --mime-type original.pdf; sha256sum original.pdf; head -c 8 (PDF magic check)"
+ },
+ "page_count": 134,
+ "characteristics": {
+  "scan_heavy": false,
+  "table_schedule_heavy": true,
+  "irregular_numbering": true,
+  "version_pair_role": false,
+  "multi_contract": true,
+  "clean_control": false,
+  "notes": "jurisdiction decoy (UK law, LCIA arbitration, England courts); 22 framework schedules incl. 'NOT USED' placeholders; 2 pages with <20 chars (cover/blank)"
+ },
+ "document_version_identity": "RM3765 Framework Agreement v2, made 25/04/2016; Framework Schedules 1-22 (10, 15, 16 'NOT USED')",
+ "contract_boundaries": [
+  {
+   "contract_index": 1,
+   "title": "Framework Agreement RM3765 (main terms + Framework Schedules 1-22)",
+   "page_range": [
+    1,
+    134
+   ]
+  },
+  {
+   "contract_index": 2,
+   "title": "Template Call-Off Contract (Framework Schedule 4: Annex 1 Template Order Form + Annex 2 Template Call Off Terms)",
+   "page_range": [
+    76,
+    77
+   ]
+  }
+ ],
+ "ambiguous_boundaries": [
+  "The template call-off contract is embedded inside the framework agreement's schedule sequence (PDF pages 76-77 sit inside contract_index 1's range) — it is a template incorporated by reference, not a separately executed contract; boundary retained for fixture use and flagged interpretive",
+  "Draft Deed of Guarantee form (Framework Schedule 13, PDF pages 104-113) is a second embedded template; NOT counted as a separate contract boundary",
+  "TOC printed page numbers are offset from PDF page numbers; boundary pages located by content headings, not TOC"
+ ],
+ "page_map_file": "pages.json",
+ "attribution_string": "Source: Crown Commercial Service (CCS), Cabinet Office, United Kingdom, <https://assets.crowncommercial.gov.uk/wp-content/uploads/RM3765-Framework-agreement-v2.pdf>, accessed 2026-10-28; reproduced under <http://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/>.",
+ "unresolved_rights_notes": null
+}

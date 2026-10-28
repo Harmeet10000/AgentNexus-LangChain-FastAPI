@@ -1,0 +1,132 @@
+SYNTHETIC — derived from public statute text; India Code redistribution prohibited so reproduced from model knowledge, for evaluation fixture use only
+Document: SYN-01 statute excerpt (fixture)
+Jurisdiction: India | Corpus: legal-retrieval gold set, Wave 2A | Access date of underlying law: 2026-10-28
+
+================================================================================
+THE INDIAN CONTRACT ACT, 1872 (ACT No. IX OF 1872)
+Excerpt — sections 73 and 74 (as reproduced from model knowledge; wording may
+drift marginally from the official text; do not cite as authority)
+================================================================================
+
+73. Compensation for loss or damage caused by breach of contract.—When a
+contract has been broken, the party who suffers by such breach is entitled to
+receive, from the party who has broken the contract, compensation for any loss
+or damage caused to him thereby, which naturally arose in the usual course of
+things from such breach, or which the parties knew, when they made the
+contract, to be likely to result from the breach of it.
+
+    Such compensation is not to be given for any remote and indirect loss or
+damage sustained by reason of the breach.
+
+    Explanation.—In estimating the loss or damage arising from a breach of
+contract, the means which existed of remedying the inconvenience caused by the
+non-performance of the contract must be taken into account.
+
+    Illustrations
+    (a) A contracts to sell and deliver 50 maunds of jute to B, at a fixed
+    price, to be delivered on a fixed day. A neglects to deliver the jute.
+    B may recover from A the market-price of the jute on the day fixed for
+    delivery, and thus sustain no additional loss.
+
+    (b) A contracts with B to repair B's house and wrongfully neglects to
+    repair it according to his contract. B is entitled to the cost of the
+    repairs, and any other damage caused by the non-repair, but not to
+    compensation for inconvenience caused by the delay, unless he can show
+    that the delay was known to A to be likely to cause it.
+
+    (c) A, a carrier, contracts to deliver goods to B by a certain day. From
+    the default of A the goods are not delivered until long after the day
+    fixed, and, in consequence, B loses a profitable market. B is entitled
+    to compensation for the loss of the market, if A knew at the time of
+    making the contract that the market existed and that B intended to sell
+    the goods in it on the day fixed.
+
+74. Compensation for breach of contract where penalty stipulated for.—When a
+contract has been broken, if a sum is named in the contract as the amount to
+be paid in case of such breach, or if the contract contains any other
+stipulation by way of penalty, the party who complains of the breach is
+entitled, whether or not actual damage or loss is proved to have been caused
+thereby, to receive from the party who has broken the contract reasonable
+compensation not exceeding the amount so named or, as the case may be, the
+penalty stipulated for.
+
+    Explanation.—A stipulation for increased interest from the date of
+    default may be a stipulation by way of penalty.
+
+    [Exception (for contracts of insurance and certain other agreements) and
+    Illustrations (a)–(f) reproduced in substance from the Act.]
+
+================================================================================
+THE ARBITRATION AND CONCILIATION ACT, 1996 (ACT No. XXVI OF 1996)
+Excerpt — section 34 (as reproduced from model knowledge, including the 2015
+and 2019 amendments; wording may drift marginally from the official text)
+================================================================================
+
+34. Application for setting aside arbitral award.—(1) Recourse to a Court
+against an arbitral award may be made only by an application for setting aside
+such award in accordance with sub-section (2) and sub-section (3).
+
+    (2) An arbitral award may be set aside by the Court only if—
+
+        (a) the party making the application furnishes proof that—
+
+            (i) a party was under some incapacity, or
+            (ii) the arbitration agreement is not valid under the law to which
+                the parties have subjected it, or
+            (iii) the party making the application was not given proper notice
+                of the appointment of the arbitrator or of the arbitral
+                proceedings or was otherwise unable to present his case, or
+            (iv) the arbitral award deals with a dispute not contemplated by
+                or not falling within the terms of the submission to
+                arbitration, or contains decisions on matters beyond the scope
+                of the submission to arbitration, or
+            (v) the composition of the arbitral tribunal or the arbitral
+                procedure was not in accordance with the agreement of the
+                parties or Part I of this Act;
+
+        (b) the Court finds that—
+
+            (i) the subject-matter of the dispute is not capable of settlement
+                by arbitration under the law for the time being in force, or
+            (ii) the arbitral award is in conflict with the public policy of
+                India.
+
+    Explanation 1.—For the avoidance of doubt and without limiting
+    sub-section (2), it is hereby declared that an award is in conflict with
+    the public policy of India if the making of the award was induced or
+    affected by fraud or corruption.
+
+    Explanation 2.—For the purposes of clause (b) of sub-section (2), the
+    expression "the policy of India" means the fundamental policy of Indian
+    law, as evidenced by the judgments of the Supreme Court of India; the
+    interest of India; justice or morality; and, in addition, patent
+    illegality appearing on the face of the award. An award is only in
+    conflict with the public policy of India if its making was induced or
+    affected by fraud or corruption, or was in violation of section 75 or
+    section 81, or was in contravention with the fundamental policy of Indian
+    law, or was in conflict with the most basic notions of morality or
+    justice. [2015 amendment, as reproduced from model knowledge]
+
+    (3) An application for setting aside may not be made after three months
+    have elapsed from the date on which the party making that application had
+    received the arbitral award or, if a request had been made under section
+    33, from the date on which that request had been disposed of by the
+    arbitral tribunal:
+
+        Provided that if the Court is satisfied that the applicant was
+        prevented by sufficient cause from making the application within the
+        said period of three months, it may entertain the application within
+        a further period of thirty days, but not thereafter.
+
+    (4) On receipt of an application under sub-section (1), the Court may,—
+
+        (a) where it is satisfied that a prima facie case has been made out
+        that the award is liable to be set aside under clause (a) or clause
+        (b) of sub-section (2), issue notice to the other party; and
+
+        (b) where it is not so satisfied, dismiss the application without
+        issuing notice to the other party. [2019 amendment, as reproduced
+        from model knowledge]
+
+— END OF SYNTHETIC EXCERPT — Fixture for evaluating clause retrieval and
+citation grounding. Not a reproduction of India Code official text.

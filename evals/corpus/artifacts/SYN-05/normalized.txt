@@ -1,0 +1,37 @@
+SYNTHETIC PURCHASE ORDER - authored for evaluation fixture use only; not a real
+order; no rights reserved, no real parties
+Document: SYN-05 synthetic purchase order with operative term in footnote 2 (rerendered v2 with text layer)
+PAGE 1 OF 1
+================================================================================
+MERIDIAN SUPPLY CO. PRIVATE LIMITED
+PURCHASE ORDER PO-2026-04517
+Date: 10 June 2026
+================================================================================
+Vendor: Kaveri Electrocomponents LLP, Plot 14, MIDC Chakan, Pune 410501
+Buyer reference: RFQ/2026/0731
+1. The Vendor shall supply the goods described in Schedule A at the unit prices
+stated therein. The Purchase Order value is Rs. 18,75,000 (Rupees eighteen
+lakh seventy-five thousand only), exclusive of GST.
+2. Delivery shall be completed at the Buyer's warehouse at Chakan, Pune, on or
+before 31 August 2026.
+3. Payment Terms: as stated in footnote 2 below.
+4. Liquidated damages for delayed delivery: as stated in footnote 2 below.
+5. All other terms are as per the Master Supply Agreement dated 01.04.2025;
+where this Purchase Order conflicts with it, this Purchase Order prevails.
+Schedule A (summary): control boards model CB-40, 250 units at Rs. 7,500 per
+unit.
+SIGNED for and on behalf of Meridian Supply Co. Private Limited: ______________
+(Authorised Signatory)
+FOOTNOTES
+1 "Master Supply Agreement" means the master supply agreement executed between
+the Buyer and the Vendor on 01.04.2025, as amended from time to time.
+2 Notwithstanding anything stated on the face of this Purchase Order or in the
+Master Supply Agreement, the Buyer shall pay correct invoices within 45
+(forty-five) days of receipt, and the Vendor shall pay liquidated damages at
+0.75% (zero point seven five per cent) of the Purchase Order value per
+completed week of delay in delivery, subject to an aggregate cap of 10%
+(ten per cent) of the Purchase Order value.
+- END OF SYN-05 - footnote-as-operative fixture: the operative payment term
+(45 days) and the liquidated damages rate (0.75%/week, 10% cap) appear only in
+footnote 2; the face of the order defers to the footnote.
+
