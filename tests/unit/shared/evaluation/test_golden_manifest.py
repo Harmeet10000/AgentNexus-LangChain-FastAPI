@@ -679,3 +679,17 @@ async def test_corrupted_manifest_failure_carries_cause_details(tmp_path: Path) 
     details = failure.details or {}
     assert "JSONDecodeError" in str(details.get("manifest_cause"))
     assert "set.manifest.json" in str(details.get("manifest"))
+
+
+def test_sme_requirements_accepts_plain_human_name() -> None:
+    """A human name with no model tokens passes the adjudicator guard."""
+    from app.ai.evaluation.schema import SmeRequirements
+
+    assert SmeRequirements(
+        role="practising lawyer",
+        domain="Indian contract law",
+        independence="independent of label producers",
+        commitment="sign-off on disputed cases",
+        named_adjudicator="Jane Hillman",
+        adjudication_status="adjudicated",
+    ).named_adjudicator == "Jane Hillman"

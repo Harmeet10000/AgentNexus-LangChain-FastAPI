@@ -328,7 +328,7 @@ def _pending_sme_adjudication(existing: object, rationale: str) -> dict[str, Any
     byte-identical.  Converting any other existing record back to
     ``pending_sme`` discards its stale decision fields (``method``,
     ``decided_at``, a named ``adjudicator`` and the old ``rationale``) and
-    writes a fresh rationale describing the reopen.
+    writes a fresh rationale describing the reopen and appending the caller-provided reason.
     """
     adjudication = dict(existing) if isinstance(existing, dict) else {}
     if adjudication.get("status") == "pending_sme":
@@ -338,7 +338,8 @@ def _pending_sme_adjudication(existing: object, rationale: str) -> dict[str, Any
     for stale_field in ("method", "decided_at", "adjudicator", "rationale"):
         adjudication.pop(stale_field, None)
     adjudication["status"] = "pending_sme"
-    adjudication["rationale"] = f"reopened by merge run {_utc_now()}"
+    reopened = f"reopened by merge run {_utc_now()}"
+    adjudication["rationale"] = f"{reopened}: {rationale}" if rationale else reopened
     return adjudication
 
 

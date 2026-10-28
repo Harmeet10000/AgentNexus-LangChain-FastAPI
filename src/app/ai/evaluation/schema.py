@@ -23,6 +23,7 @@ import aiofiles
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 from returns.result import Failure, Result, Success
 
+from app.observability.logging import logger
 from app.utils.exceptions import InfrastructureException, NotFoundException
 
 from .exceptions import MalformedGoldenRowError
@@ -127,7 +128,7 @@ _CASE_TYPE_ALIASES: dict[str, GoldenCaseType] = {
     "standard": "direct_answer",
     "near_miss": "near_miss_clause",
 }
-_MODEL_ADJUDICATOR_PATTERN = re.compile(r"gpt|claude|gemini|llm|model", re.IGNORECASE)
+_MODEL_ADJUDICATOR_PATTERN = re.compile(r"(?<![A-Za-z])(gpt|claude|gemini|llm|model)(?![A-Za-z])", re.IGNORECASE)
 _REDISTRIBUTION_DENY_TOKENS = (
     "disallow",
     "forbid",
@@ -920,10 +921,12 @@ async def load_validated_golden_set(path: Path) -> GoldenSetLoadResult:
             manifest = await _load_manifest(manifest_path)
         except (OSError, ValueError) as exc:
             # MalformedGoldenRowError is a frozen pydantic model, not a
-            # BaseException, so e.add_note() is unavailable here and this
-            # module deliberately has no logger; the underlying cause is
-            # retained in the structured error details instead. The
-            # API-facing message stays unchanged.
+            # BaseException, so e.add_note() is unavailable here; the cause
+            # is retained both in the structured error details and in the
+            # internal diagnostic log. The API-facing message stays unchanged.
+            logger.bind(component="evaluation", manifest=str(manifest_path)).opt(
+                exception=True
+            ).warning("golden_set_manifest_load_failed", error=str(exc))
             return _malformed(
                 row_index=1,
                 message=f"Unable to load golden-set manifest: {exc}",
