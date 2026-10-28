@@ -128,7 +128,22 @@ _CASE_TYPE_ALIASES: dict[str, GoldenCaseType] = {
     "standard": "direct_answer",
     "near_miss": "near_miss_clause",
 }
-_MODEL_ADJUDICATOR_PATTERN = re.compile(r"(?<![A-Za-z])(gpt|claude|gemini|llm|model)(?![A-Za-z])", re.IGNORECASE)
+_MODEL_ADJUDICATOR_PATTERN = re.compile(
+    r"(?<![A-Za-z])(gpt|claude|gemini|llm|model)(?![A-Za-z])", re.IGNORECASE
+)
+# Compound model names embed guarded tokens inside letters (ChatGPT, AutoGPT);
+# no human name contains these, so they are matched without boundaries.
+_MODEL_ADJUDICATOR_COMPOUND_PATTERN = re.compile(
+    r"chatgpt|autogpt|openai|anthropic|deepseek|copilot", re.IGNORECASE
+)
+
+
+def _adjudicator_is_model(value: str) -> bool:
+    """True when a value names a model under either the guarded or compound rule."""
+    return bool(
+        _MODEL_ADJUDICATOR_PATTERN.search(value)
+        or _MODEL_ADJUDICATOR_COMPOUND_PATTERN.search(value)
+    )
 _REDISTRIBUTION_DENY_TOKENS = (
     "disallow",
     "forbid",
@@ -292,7 +307,7 @@ class AdjudicationRecord(BaseModel):
 
     @model_validator(mode="after")
     def require_human_adjudicator(self) -> AdjudicationRecord:
-        if self.adjudicator and _MODEL_ADJUDICATOR_PATTERN.search(self.adjudicator):
+        if self.adjudicator and _adjudicator_is_model(self.adjudicator):
             raise ValueError(_MODEL_ADJUDICATOR_FORBIDDEN)
         if self.status == "adjudicated" and not self.adjudicator:
             raise ValueError(_ADJUDICATED_REQUIRES_HUMAN)
@@ -547,7 +562,7 @@ class SmeRequirements(BaseModel):
     @model_validator(mode="after")
     def named_adjudicator_must_be_human(self) -> SmeRequirements:
         """Reject model-like names with the same rule as AdjudicationRecord."""
-        if self.named_adjudicator and _MODEL_ADJUDICATOR_PATTERN.search(self.named_adjudicator):
+        if self.named_adjudicator and _adjudicator_is_model(self.named_adjudicator):
             raise ValueError(_MODEL_ADJUDICATOR_FORBIDDEN)
         return self
 

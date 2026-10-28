@@ -693,3 +693,40 @@ def test_sme_requirements_accepts_plain_human_name() -> None:
         named_adjudicator="Jane Hillman",
         adjudication_status="adjudicated",
     ).named_adjudicator == "Jane Hillman"
+
+
+def test_adjudicator_guard_rejects_compound_model_names() -> None:
+    """ChatGPT-style compounds are rejected even though their tokens sit inside letters."""
+    import pytest
+
+    from app.ai.evaluation.schema import AdjudicationRecord, SmeRequirements
+
+    with pytest.raises(ValueError, match="human reviewer"):
+        SmeRequirements(
+            role="practising lawyer",
+            domain="Indian contract law",
+            independence="independent of label producers",
+            commitment="sign-off on disputed cases",
+            named_adjudicator="ChatGPT",
+            adjudication_status="adjudicated",
+        )
+    with pytest.raises(ValueError, match="human reviewer"):
+        AdjudicationRecord(
+            adjudicator="AutoGPT-4",
+            method="independent_sme",
+            status="adjudicated",
+        )
+
+
+def test_adjudicator_guard_accepts_surname_with_guarded_token() -> None:
+    """Surnames merely containing guarded substrings (Gellman, Modelski) pass."""
+    from app.ai.evaluation.schema import SmeRequirements
+
+    assert SmeRequirements(
+        role="practising lawyer",
+        domain="Indian contract law",
+        independence="independent of label producers",
+        commitment="sign-off on disputed cases",
+        named_adjudicator="Marcus Gellman",
+        adjudication_status="adjudicated",
+    ).named_adjudicator == "Marcus Gellman"
