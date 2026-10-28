@@ -144,6 +144,8 @@ def _adjudicator_is_model(value: str) -> bool:
         _MODEL_ADJUDICATOR_PATTERN.search(value)
         or _MODEL_ADJUDICATOR_COMPOUND_PATTERN.search(value)
     )
+
+
 _REDISTRIBUTION_DENY_TOKENS = (
     "disallow",
     "forbid",
@@ -155,9 +157,7 @@ _REDISTRIBUTION_DENY_TOKENS = (
 
 _ADJUDICATOR_REQUIRED = "A completed disagreement requires an adjudicator"
 _WAIVER_RATIONALE_MIN_LENGTH = 20
-_WAIVER_REQUIRES_RATIONALE = (
-    "Waived-with-reason requires a rationale of at least 20 characters"
-)
+_WAIVER_REQUIRES_RATIONALE = "Waived-with-reason requires a rationale of at least 20 characters"
 _WAIVER_REQUIRES_ADJUDICATOR = "Waived-with-reason requires a named human adjudicator"
 _SOURCE_FLAGS_MISMATCH = "Public/synthetic indicators do not match source_type"
 _PERMISSION_MISMATCH = "permission_status is incompatible with source_type"
