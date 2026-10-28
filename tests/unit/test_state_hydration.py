@@ -47,6 +47,22 @@ def test_previous_current_version_is_upgraded_after_planner_state_addition() -> 
     assert hydrated["plan_rejection_feedback"] is None
 
 
+@pytest.mark.parametrize("legacy_version", [2, 3])
+def test_explicitly_migratable_legacy_versions_are_upgraded(legacy_version: int) -> None:
+    hydrated = hydrate_state({"schema_version": legacy_version, "doc_id": "doc-a"})
+
+    assert hydrated["schema_version"] == STATE_SCHEMA_VERSION
+    assert hydrated["allowed_doc_ids"] == ["doc-a"]
+
+
+@pytest.mark.parametrize("unsupported_version", [4, 5, 6, 7])
+def test_historical_versions_without_migration_adapters_are_refused(
+    unsupported_version: int,
+) -> None:
+    with pytest.raises(StateSchemaVersionError):
+        hydrate_state({"schema_version": unsupported_version})
+
+
 def test_absent_version_key_treated_as_legacy_and_upgraded() -> None:
     hydrated = hydrate_state({"user_id": "u1"})
     assert hydrated["schema_version"] == STATE_SCHEMA_VERSION

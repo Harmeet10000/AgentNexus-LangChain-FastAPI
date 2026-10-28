@@ -626,11 +626,18 @@ class ClauseExtractionInput(BaseModel, frozen=True):
 
 STATE_SCHEMA_VERSION: Final[int] = 8
 
+# The state schema history has only ever shipped migration adapters for these
+# versions.  Keep this list explicit rather than deriving it from the current
+# version: a numeric predecessor is not automatically loadable merely because
+# the version was once emitted by a deployment.
+_MIGRATABLE_STATE_SCHEMA_VERSIONS: Final[frozenset[int]] = frozenset({0, 1, 2, 3})
+
 # States persisted before the schema_version field existed carry no key at
-# all; version 1 is also accepted as the recognised legacy shape and
-# backfilled with fields introduced by the planner replay and analysis-safety
-# fixes. These changes share one persisted-state migration boundary so the
-# service's legacy-resume path can safely upgrade the old planner checkpoint.
+# all. Versions in _MIGRATABLE_STATE_SCHEMA_VERSIONS are accepted as
+# recognised legacy shapes and backfilled with fields introduced by the
+# planner replay, canonical-ingestion, and analysis-safety fixes. These
+# changes share one persisted-state migration boundary so the service's
+# legacy-resume path can safely upgrade the old planner checkpoint.
 # Existing values always win — defaults only fill what is missing.
 _LEGACY_STATE_DEFAULTS: dict[str, Any] = {
     "user_id": "",
@@ -702,7 +709,7 @@ def hydrate_state(state: dict[str, Any]) -> dict[str, Any]:
     recorded = state.get("schema_version")
     if recorded == STATE_SCHEMA_VERSION and not isinstance(state.get("budget_ledger"), dict):
         return state
-    if recorded is not None and recorded not in {0, 1, 2, 3, 4, 5, 6, 7}:
+    if recorded is not None and recorded not in _MIGRATABLE_STATE_SCHEMA_VERSIONS:
         msg = (
             f"refusing agent state: recorded schema_version={recorded!r} "
             f"cannot be loaded by this runtime "
