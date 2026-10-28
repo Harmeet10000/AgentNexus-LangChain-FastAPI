@@ -132,12 +132,15 @@ def write_gold(path: Path, rows: list[dict[str, Any]]) -> str:
     return metadata
 
 
-def write_manifest(gold: Path, corpus_root: Path) -> Path:
+def write_manifest(gold: Path, corpus_root: Path, *, corpus_value: str | None = None) -> Path:
     """Write a minimal but auditable v2 manifest next to a fixture gold file.
 
     The single per_artifact entry has a stored original whose checksum matches,
     so the merge's temp-file validation exercises the real manifest audit path.
     ``named_adjudicator`` lets release-tier ``adjudicated`` rows validate.
+    ``corpus_value`` overrides the recorded ``corpus_manifest_path`` (default:
+    the absolute corpus root); pass a relative value such as ``"../corpus"``
+    to reproduce the repo's own shipped-manifest layout.
     """
     content = b"fixture-corpus-bytes"
     artifact_dir = corpus_root / "artifacts" / "doc-fixture"
@@ -147,7 +150,7 @@ def write_manifest(gold: Path, corpus_root: Path) -> Path:
         "manifest_version": "golden_provenance_v1",
         "golden_set_version": "legal_retrieval_v2",
         "artifact": gold.name,
-        "corpus_manifest_path": str(corpus_root),
+        "corpus_manifest_path": corpus_value if corpus_value is not None else str(corpus_root),
         "source_policy": {},
         "annotation_policy": {},
         "sme_requirements": {
@@ -219,6 +222,36 @@ def wave3_fixture(tmp_path: Path) -> dict[str, Path]:
     manifest = write_manifest(gold, tmp_path / "corpus")
     _, report = compute_iaa_report(tmp_path, WAVE3_FIXTURE)
     return {"gold": gold, "manifest": manifest, "report": report, "out": tmp_path / "merged.jsonl"}
+
+
+def relative_corpus_fixture(tmp_path: Path) -> dict[str, Path]:
+    """Fixture mirroring the repo layout: gold in gold/, manifest corpus ``../corpus``.
+
+    The manifest records its corpus RELATIVE to itself (``../corpus`` from
+    ``gold/``), exactly like ``evals/golden/legal_retrieval_v2.manifest.json``.
+    The ``--out`` directory sits two levels deeper than the gold on purpose: a
+    verbatim manifest copy would there resolve ``../corpus`` to a corpus
+    directory that does not exist, whereas a same-depth move resolves the
+    naive copy correctly by accident — the depth change is what makes the
+    corpus-path rebasing observable.
+    """
+    gold_dir = tmp_path / "gold"
+    gold_dir.mkdir()
+    gold = gold_dir / "legal_retrieval_v2.jsonl"
+    rows = [gold_row(case, grader=grader) for case, _, _, grader in WAVE3_FIXTURE]
+    write_gold(gold, rows)
+    corpus_root = tmp_path / "corpus"
+    manifest = write_manifest(gold, corpus_root, corpus_value="../corpus")
+    _, report = compute_iaa_report(tmp_path, WAVE3_FIXTURE)
+    out_dir = tmp_path / "subdir" / "exports"
+    out_dir.mkdir(parents=True)
+    return {
+        "gold": gold,
+        "manifest": manifest,
+        "report": report,
+        "corpus": corpus_root,
+        "out": out_dir / "merged.jsonl",
+    }
 
 
 def merge_argv(
@@ -767,6 +800,46 @@ def test_merged_output_passes_real_validation(tmp_path: Path) -> None:
     )
 
 
+def test_merge_out_manifest_rebases_relative_corpus_path(tmp_path: Path) -> None:
+    """A moved output's manifest still resolves the source manifest's corpus."""
+    fixture = relative_corpus_fixture(tmp_path)
+    source_value = json.loads(fixture["manifest"].read_text(encoding="utf-8"))[
+        "corpus_manifest_path"
+    ]
+    assert source_value == "../corpus"  # relative, like the shipped v2 manifest
+    assert run_merge(merge_argv(fixture, tmp_path)) == 0
+    out_manifest = fixture["out"].with_name(f"{fixture['out'].stem}.manifest.json")
+    assert out_manifest.is_file()
+    copied_value = json.loads(out_manifest.read_text(encoding="utf-8"))["corpus_manifest_path"]
+    assert copied_value != source_value  # the verbatim ../corpus copy was actually rebased
+    assert not Path(copied_value).is_absolute()  # rebased as a relative path for portability
+    assert (out_manifest.parent / copied_value).resolve() == (
+        fixture["manifest"].parent / source_value
+    ).resolve()  # both resolve to the same absolute corpus directory
+    result = asyncio.run(load_validated_golden_set(fixture["out"]))
+    assert isinstance(result, Success)
+
+
+def test_merge_out_refuses_checksum_after_artifact_corruption(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The moved manifest must audit the real corpus, not silently skip it."""
+    fixture = relative_corpus_fixture(tmp_path)
+    assert run_merge(merge_argv(fixture, tmp_path)) == 0  # first apply validates cleanly
+    artifact = fixture["corpus"] / "artifacts" / "doc-fixture" / "original.txt"
+    artifact.write_bytes(b"tampered after the first apply")
+    fresh_exports = tmp_path / "fresh" / "exports"
+    fresh_exports.mkdir(parents=True)
+    second = {"gold": fixture["gold"], "report": fixture["report"], "out": fresh_exports / "merged.jsonl"}
+    original = fixture["gold"].read_bytes()
+    code = run_merge(merge_argv(second, tmp_path))
+    assert code == 1
+    assert "sha256 mismatch" in capsys.readouterr().err  # audit ran from the moved location
+    assert not second["out"].exists()
+    assert fixture["gold"].read_bytes() == original  # untouched
+    assert list(fresh_exports.glob("*.merge-*")) == []  # temp gold + manifest rolled back
+
+
 def test_merge_in_place_leaves_exactly_one_manifest(tmp_path: Path) -> None:
     """An in-place --apply keeps the gold's sibling manifest, not a duplicate."""
     fixture = wave3_fixture(tmp_path)
@@ -786,6 +859,29 @@ def test_merge_in_place_leaves_exactly_one_manifest(tmp_path: Path) -> None:
     assert list(tmp_path.glob("*.manifest.json")) == [fixture["manifest"]]
     assert fixture["manifest"].read_bytes() == manifest_before
     assert list(tmp_path.glob("*.merge-*")) == []  # no temp gold or temp manifest residue
+
+
+def test_merge_in_place_keeps_relative_corpus_manifest_untouched(tmp_path: Path) -> None:
+    """An in-place apply needs no rebase: the relative corpus path stays as-is."""
+    fixture = relative_corpus_fixture(tmp_path)
+    manifest_before = fixture["manifest"].read_bytes()
+    argv = [
+        "--gold",
+        str(fixture["gold"]),
+        "--a",
+        str(tmp_path / "sidecar-a.jsonl"),
+        "--b",
+        str(tmp_path / "sidecar-b.jsonl"),
+        "--iaa",
+        str(fixture["report"]),
+        "--apply",
+    ]
+    assert run_merge(argv) == 0
+    assert list((tmp_path / "gold").glob("*.manifest.json")) == [fixture["manifest"]]
+    assert fixture["manifest"].read_bytes() == manifest_before  # not rewritten
+    manifest = json.loads(fixture["manifest"].read_text(encoding="utf-8"))
+    assert manifest["corpus_manifest_path"] == "../corpus"
+    assert list((tmp_path / "gold").glob("*.merge-*")) == []  # no temp gold or manifest residue
 
 
 # --- merge guard rails: manifest consult, IAA recheck, annotator identity ----

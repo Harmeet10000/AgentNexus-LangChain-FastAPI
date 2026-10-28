@@ -24,7 +24,10 @@ on every exit path); a v2 gold set without a sibling manifest is refused
 instead of being validated manifest-less.  When ``--out`` names a different
 path, the same manifest is kept next to the output as its sibling
 ``<output_stem>.manifest.json`` so the written set can be loaded and
-re-validated; an in-place apply keeps the gold's existing sibling untouched.
+re-validated, with a relative ``corpus_manifest_path`` rebased so the copy
+still resolves the same corpus directory from its new location (otherwise
+the moved set would silently skip its checksum audit there); an in-place
+apply keeps the gold's existing sibling untouched.
 Without ``--apply`` it is a dry run that prints what would change.  The
 metadata line 1 and row order are preserved.
 
@@ -460,6 +463,61 @@ def _temp_file_version(temp_path: Path) -> str | None:
     return metadata.get("version") if isinstance(metadata, dict) else None
 
 
+def _resolve_corpus_root(manifest_dir: Path, corpus_manifest_path: str | None) -> Path:
+    """Resolve the corpus root the way the validator resolves it for a manifest.
+
+    Mirrors ``app.ai.evaluation.schema._artifact_root`` locally (the merge tool
+    stays stdlib-only): a relative ``corpus_manifest_path`` — or the
+    validator's ``evals/corpus`` default when the field is absent — resolves
+    against the manifest's own directory; an absolute path is used as-is.
+    """
+    root = Path(corpus_manifest_path or "evals/corpus")
+    if root.is_absolute():
+        return root
+    return manifest_dir / root
+
+
+def _rebased_manifest_text(
+    manifest_text: str, source_manifest: Path, target_manifest: Path
+) -> str:
+    """Return a copied manifest's text with its corpus path rebased for the move.
+
+    The gold's manifest records its corpus directory relative to itself (the
+    shipped v2 manifest uses ``../corpus``), so a verbatim copy next to an
+    ``--out`` output in another directory would resolve that path against the
+    OUTPUT's directory: the corpus would not be found there and — because the
+    audit warn-and-skips missing artifact files — every checksum and
+    redistribution check would silently skip.  When the copy would resolve a
+    different corpus root from ``target_manifest``'s directory than it does
+    from ``source_manifest``'s, ``corpus_manifest_path`` is rewritten to a
+    relative ``os.path.relpath`` that resolves to the SAME absolute corpus
+    directory from the new location (repo-portable), falling back to the
+    absolute path when ``relpath`` cannot express the move (e.g. across
+    Windows drives); all other manifest content is preserved.  When the copy
+    already resolves the same root (in-place apply, or an absolute corpus
+    path), the text is returned unchanged.
+    """
+    try:
+        parsed = json.loads(manifest_text)
+    except json.JSONDecodeError:
+        return manifest_text  # not ours to repair; validation refuses a broken manifest
+    if not isinstance(parsed, dict):
+        return manifest_text
+    value = parsed.get("corpus_manifest_path")
+    if value is not None and not isinstance(value, str):
+        return manifest_text  # schema-invalid manifest; leave it for the validator to refuse
+    current: str | None = value or None
+    source_root = _resolve_corpus_root(source_manifest.parent, current).resolve()
+    if source_root == _resolve_corpus_root(target_manifest.parent, current).resolve():
+        return manifest_text  # the copy already resolves the same corpus from the target
+    try:
+        rebased = os.path.relpath(source_root, target_manifest.parent.resolve())
+    except ValueError:  # pragma: no cover - only reachable across Windows drives
+        rebased = str(source_root)
+    parsed["corpus_manifest_path"] = rebased
+    return json.dumps(parsed, ensure_ascii=False, indent=2) + "\n"
+
+
 def _write_and_validate(
     payload: str, out_path: Path, repo_root: Path, gold_path: Path
 ) -> list[str]:
@@ -483,6 +541,18 @@ def _write_and_validate(
     when the output replaces the gold in place, its existing sibling manifest
     stays and is not duplicated.  A v2 gold set without a sibling manifest is
     refused outright instead of being validated manifest-less.
+
+    The copy is also rebased for the output location: a relative
+    ``corpus_manifest_path`` is recorded relative to the gold's directory, so
+    a verbatim copy next to an ``--out`` output elsewhere would resolve it
+    against the output's directory — where the corpus does not exist — and,
+    because the audit warn-and-skips missing artifact files, every checksum
+    and redistribution check for the moved set would silently skip.  The copy
+    therefore carries a ``corpus_manifest_path`` that resolves to the SAME
+    absolute corpus directory from the output's location (a relative path
+    where possible), and the pre-move validation audits that same corpus; an
+    in-place apply resolves identically, keeps the copied manifest text
+    unchanged, and never rewrites the gold's own sibling.
     """
     handle_fd, temp_name = tempfile.mkstemp(
         dir=out_path.parent, prefix=f"{out_path.name}.merge-", suffix=".tmp"
@@ -503,6 +573,15 @@ def _write_and_validate(
             ]
         if real_manifest.is_file():
             shutil.copyfile(real_manifest, temp_manifest)
+            manifest_text: str | None
+            try:
+                manifest_text = temp_manifest.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                manifest_text = None  # validation refuses non-UTF-8; keep the verbatim copy
+            if manifest_text is not None:
+                rebased = _rebased_manifest_text(manifest_text, real_manifest, out_manifest)
+                if rebased != manifest_text:
+                    temp_manifest.write_text(rebased, encoding="utf-8")
         passed, message = _run_gold_validation(temp_path, repo_root)
     except OSError as exc:
         temp_path.unlink(missing_ok=True)
@@ -544,7 +623,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help=(
             "output path (default: the --gold path, i.e. in place); a different path also "
             "receives a copy of the gold's provenance manifest as its sibling "
-            "<output_stem>.manifest.json"
+            "<output_stem>.manifest.json, with its corpus path rebased for the new location"
         ),
     )
     parser.add_argument(
