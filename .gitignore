@@ -244,3 +244,6 @@ graphify-out/
 
 # personal local agent config, never track (contains credentials)
 /opencode.json
+
+# parallel-cli research scratch (session dumps)
+.research/parallel/*
