@@ -19,6 +19,7 @@ from app.features.billing.money import (
 from app.kernel.errors import ErrorKind
 from app.kernel.result import add_database_error_note
 from app.observability.logging import trace_layer
+from app.utils.storage import uri_to_location
 
 from .dto import InvoiceLineItemDTO, InvoiceResponse
 from .exceptions import (
@@ -60,7 +61,7 @@ if TYPE_CHECKING:
 _DEFAULT_SAC_CODE = "998314"
 
 
-def _invoice_to_response(invoice: Invoice) -> InvoiceResponse:
+def _invoice_to_response(invoice: Invoice, *, pdf_url: str | None = None) -> InvoiceResponse:
     return InvoiceResponse(
         id=str(invoice.id),
         invoice_number=invoice.invoice_number,
@@ -83,7 +84,7 @@ def _invoice_to_response(invoice: Invoice) -> InvoiceResponse:
         issued_at=invoice.issued_at,
         due_at=invoice.due_at,
         paid_at=invoice.paid_at,
-        pdf_url=invoice.pdf_url,
+        pdf_url=invoice.pdf_url if pdf_url is None else pdf_url,
         line_items=[
             InvoiceLineItemDTO(
                 plan_name=item.plan_name,
@@ -352,7 +353,13 @@ class InvoiceService:
         )
         if isinstance(result, Failure):
             return result
-        return Success([_invoice_to_response(i) for i in result.unwrap()])
+        responses: list[InvoiceResponse] = []
+        for invoice in result.unwrap():
+            response_result = await self._signed_invoice_response(invoice)
+            if isinstance(response_result, Failure):
+                return response_result
+            responses.append(response_result.unwrap())
+        return Success(responses)
 
     @trace_layer("service")
     async def get_invoice(
@@ -368,7 +375,36 @@ class InvoiceService:
             # Deliberately indistinguishable from unknown IDs: a distinct
             # status here would let callers probe which IDs exist.
             return Failure(InvoiceNotFoundError(message="Invoice not found"))
-        return Success(_invoice_to_response(invoice))
+        return await self._signed_invoice_response(invoice)
+
+    async def _signed_invoice_response(self, invoice: Invoice) -> InvoiceResult[InvoiceResponse]:
+        """Sign private invoice PDF references only when producing an API response."""
+        storage = self.storage
+        pdf_reference = invoice.pdf_url
+        if storage is None or not pdf_reference:
+            return Success(_invoice_to_response(invoice))
+        if pdf_reference.startswith("s3://"):
+            location = uri_to_location(pdf_reference)
+            if isinstance(location, Failure):
+                error = location.failure()
+                return Failure(InvoiceStorageError(message=error.message, details=error.details))
+            object_location = location.unwrap()
+            if object_location.bucket != storage.bucket:
+                return Failure(
+                    InvoiceStorageError(message="Invoice PDF belongs to an unexpected bucket")
+                )
+            object_key = object_location.key
+        elif "://" in pdf_reference:
+            # Preserve legacy external URLs while existing records age out.
+            return Success(_invoice_to_response(invoice))
+        else:
+            # Older versions persisted a bare key when S3_PUBLIC_URL was empty.
+            object_key = pdf_reference
+        signed = await storage.get_signed_get_url(key=object_key)
+        if isinstance(signed, Failure):
+            error = signed.failure()
+            return Failure(InvoiceStorageError(message=error.message, details=error.details))
+        return Success(_invoice_to_response(invoice, pdf_url=signed.unwrap()))
 
     @trace_layer("service")
     async def void_invoice(  # noqa: PLR0912
@@ -462,8 +498,8 @@ class InvoiceService:
             )
             if isinstance(audit_reissue, Failure):
                 return Failure(_translate_collaborator_error(audit_reissue.failure()))
-            return Success(_invoice_to_response(reissued))
-        return Success(_invoice_to_response(voided))
+            return await self._signed_invoice_response(reissued)
+        return await self._signed_invoice_response(voided)
 
     async def _store_pdf(
         self, pdf_bytes: bytes, name: str, *, folder: str = "billing/invoices"
@@ -483,7 +519,5 @@ class InvoiceService:
                     source="storage",
                 )
             )
-        public_base = get_settings().S3_PUBLIC_URL.rstrip("/")
-        # Never drop the reference silently: without a public base the
-        # storage key itself is the retrievable handle.
-        return Success(f"{public_base}/{key}" if public_base else key)
+        # Persist a stable private reference; sign it only when returned to a caller.
+        return Success(storage_result.unwrap())
