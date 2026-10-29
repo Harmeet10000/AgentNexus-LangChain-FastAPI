@@ -222,6 +222,15 @@ uv run ty check src/                            # types
 uv run pytest                                   # unit suite (integration excluded by default)
 uv run pytest -m integration                    # integration (needs live services)
 ast-grep scan src/                              # structural rules
+
+# worker role profiles — queue, pool, concurrency and child-recycle are
+# owned by the role definition; do not add a second -Q or process-shape flag
+uv run worker --role default --loglevel=info
+uv run worker --role ingestion --loglevel=info
+uv run worker --role crawler --loglevel=info
+uv run beat --loglevel=info
+
+# the same four commands, as make targets
 make celery              # default worker pool
 make celery-ingestion    # ingestion worker pool
 make celery-crawler      # crawler worker pool
