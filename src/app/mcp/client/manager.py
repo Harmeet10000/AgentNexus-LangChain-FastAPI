@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import time
 from contextlib import suppress
-from functools import cache
 from typing import TYPE_CHECKING
 
 import opentelemetry.trace as otel_trace
@@ -296,8 +295,15 @@ class MCPClientManager:
         mcp_upstream_health.set(1, {"server": server_name})
 
 
-@cache
-def get_mcp_client_manager() -> MCPClientManager:
+def build_mcp_client_manager() -> MCPClientManager:
+    """Create the MCP client manager for the calling process.
+
+    The caller owns the lifecycle: the FastAPI lifespan stores it on
+    ``app.state.mcp_manager`` and closes it at shutdown; the standalone MCP
+    process binds it via ``bind_mcp_client_manager`` and closes it on exit.
+    This deliberately replaces a ``@cache`` singleton that violated the
+    architecture rules AND leaked upstream sessions — nothing ever closed it.
+    """
     if not get_settings().MCP_CLIENT_ENABLED:
         return MCPClientManager(server_configs=[])
     return MCPClientManager(server_configs=load_mcp_client_server_configs())

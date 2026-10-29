@@ -9,7 +9,6 @@ __all__ = [
     "MCPToolResponse",
     "bind_mcp_parent_app",
     "exchange_subject_token_for_mcp_token",
-    "get_mcp_client_manager",
     "get_mcp_http_app",
     "get_mcp_server",
     "get_stored_mcp_tokens",
@@ -43,10 +42,10 @@ def __getattr__(name: str):
             "wrap_mcp_interaction_errors": wrap_mcp_interaction_errors,
         }[name]
 
-    if name in {"MCPClientManager", "get_mcp_client_manager"}:
-        from app.mcp.client.manager import MCPClientManager, get_mcp_client_manager
+    if name == "MCPClientManager":
+        from app.mcp.client.manager import MCPClientManager
 
-        return MCPClientManager if name == "MCPClientManager" else get_mcp_client_manager
+        return MCPClientManager
 
     if name in {
         "MCPClientServerConfig",

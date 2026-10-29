@@ -9,7 +9,6 @@ from fastapi import FastAPI
 from opentelemetry import metrics
 
 from app.config import get_settings
-from app.mcp.client.manager import get_mcp_client_manager
 from app.mcp.common.models import MCPToolCatalogEntry, MCPToolResponse
 from app.observability.logging import logger
 from app.utils import NotFoundException
@@ -24,8 +23,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Any
 
+    from app.mcp.client.manager import MCPClientManager
+
 
 _mcp_runtime: dict[str, FastAPI | None] = {"parent_app": None}
+_mcp_manager_runtime: dict[str, MCPClientManager | None] = {"client_manager": None}
 
 
 def bind_mcp_parent_app(app: FastAPI | None) -> None:
@@ -34,6 +36,29 @@ def bind_mcp_parent_app(app: FastAPI | None) -> None:
 
 def get_bound_mcp_parent_app() -> FastAPI | None:
     return _mcp_runtime["parent_app"]
+
+
+def bind_mcp_client_manager(manager: MCPClientManager) -> None:
+    """Bind the process-scoped MCP client manager used by tool/resource handlers.
+
+    The manager's lifecycle belongs to whoever boots the runtime — the FastAPI
+    lifespan (which stores it on ``app.state`` and closes it at shutdown) or
+    the standalone MCP process. Tool handlers only read the binding; the
+    ``@cache`` accessor this replaces constructed upstream sessions that
+    nothing ever released.
+    """
+    _mcp_manager_runtime["client_manager"] = manager
+
+
+def get_bound_mcp_client_manager() -> MCPClientManager:
+    manager = _mcp_manager_runtime["client_manager"]
+    if manager is None:
+        msg = (
+            "MCP client manager is not bound. Boot through the app lifespan or "
+            "run_mcp_server; tool handlers never construct their own upstream sessions."
+        )
+        raise RuntimeError(msg)
+    return manager
 
 
 def _truncate_payload(data: Any) -> Any:
@@ -259,7 +284,7 @@ def _register_tools(server: Any) -> None:
                     if query_lower in entry.name.lower() or query_lower in entry.description.lower()
                 ]
 
-                upstream_entries = await get_mcp_client_manager().discover_servers()
+                upstream_entries = await get_bound_mcp_client_manager().discover_servers()
                 upstream_matches = [
                     {
                         "id": f"upstream:{entry['name']}",
@@ -310,7 +335,7 @@ def _register_tools(server: Any) -> None:
 
                 if resource_id.startswith("upstream:"):
                     server_name = resource_id.split(":", 1)[1]
-                    return _ok(await get_mcp_client_manager().get_server_status(server_name))
+                    return _ok(await get_bound_mcp_client_manager().get_server_status(server_name))
 
                 msg = "MCP catalog entry"
                 raise NotFoundException(msg, resource_id)
@@ -322,7 +347,7 @@ def _register_tools(server: Any) -> None:
         @server.tool(annotations={"readOnlyHint": True})
         async def list_upstream_servers(limit: int = 10, offset: int = 0) -> dict[str, Any]:
             async def _handler() -> dict[str, Any]:
-                servers = await get_mcp_client_manager().discover_servers()
+                servers = await get_bound_mcp_client_manager().discover_servers()
                 safe_limit = max(1, min(limit, settings.MCP_MAX_PAGE_SIZE))
                 safe_offset = max(0, offset)
                 page = servers[safe_offset : safe_offset + safe_limit]

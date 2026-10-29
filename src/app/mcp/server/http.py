@@ -45,13 +45,19 @@ def run_mcp_server(
     port: int | None = None,
     path: str | None = None,
 ) -> None:
+    import asyncio
+
+    from app.mcp.client.manager import build_mcp_client_manager
     from app.mcp.lifespan_mcp import (
         initialize_mcp_observability,
         shutdown_mcp_observability,
     )
+    from app.mcp.server.tools import bind_mcp_client_manager
 
     initialize_mcp_observability()
     settings = get_settings()
+    manager = build_mcp_client_manager()
+    bind_mcp_client_manager(manager)
     try:
         server = get_mcp_server()
         resolved_transport = transport or settings.MCP_RUN_TRANSPORT
@@ -68,4 +74,5 @@ def run_mcp_server(
             log_level=settings.MCP_LOG_LEVEL,
         )
     finally:
+        asyncio.run(manager.close())
         shutdown_mcp_observability()

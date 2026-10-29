@@ -4,8 +4,11 @@ import json
 from typing import TYPE_CHECKING
 
 from app.config import get_settings
-from app.mcp.client.manager import get_mcp_client_manager
-from app.mcp.server.tools import _tool_catalog, get_bound_mcp_parent_app
+from app.mcp.server.tools import (
+    _tool_catalog,
+    get_bound_mcp_client_manager,
+    get_bound_mcp_parent_app,
+)
 
 if TYPE_CHECKING:
     from typing import Any
@@ -87,7 +90,7 @@ async def _get_health() -> dict[str, Any]:
 
 
 async def _get_upstream_status(server_name: str) -> dict[str, Any]:
-    return await get_mcp_client_manager().get_server_status(server_name)
+    return await get_bound_mcp_client_manager().get_server_status(server_name)
 
 
 async def _get_catalog() -> dict[str, Any]:
