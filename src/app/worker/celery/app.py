@@ -97,6 +97,14 @@ class CatalogValidatingWorker(Worker):
     """Run role or full-catalog completeness after task modules bind."""
 
     def __init__(self, *args: object, **kwargs: object) -> None:
+        # Celery's click path constructs ``app.Worker(...)`` without an
+        # ``app=`` kwarg; the Worker class default is None and only the
+        # process-current app can fill it — which this app never is when
+        # launched through ``worker_main``. Bind the registry's active
+        # app so ``self.app.loader`` exists by the time Celery's
+        # ``init_worker()`` runs.
+        if kwargs.get("app") is None and _apps.active is not None:
+            kwargs["app"] = _apps.active
         super().__init__(*args, **kwargs)
         app = cast("Celery", self.app)
         role = app.conf.get("worker_role")

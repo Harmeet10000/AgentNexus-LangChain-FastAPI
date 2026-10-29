@@ -77,7 +77,9 @@ class DocumentIngestionTask(ResilientTask):
         if not isinstance(document_id, str) or not isinstance(user_id, str):
             return
         tenant_id = payload.get("tenant_id")
-        resolved_tenant_id = tenant_id if isinstance(tenant_id, str) and tenant_id else f"personal:{user_id}"
+        resolved_tenant_id = (
+            tenant_id if isinstance(tenant_id, str) and tenant_id else f"personal:{user_id}"
+        )
         document_version = payload.get("document_version", 1)
         if not isinstance(document_version, int) or isinstance(document_version, bool):
             document_version = 1
