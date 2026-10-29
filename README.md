@@ -247,18 +247,24 @@ src/app/
 ├── config/              # pydantic settings (.env.development)
 ├── connections/         # Postgres/Timescale, Redis, Mongo, RabbitMQ, Graphiti
 ├── extraction/          # Docling parsing, LangExtract (incl. two-pass relationships)
-├── features/
-│   ├── agent_saul/      # orchestration graph, specialists, HITL, WebSocket
-│   ├── documents/       # upload, ingestion graph, retrieval, evidence service, tools
+├── features/            # hexagonal slices: api/ application/ domain/ adapters/
+│   ├── agent_saul/      # orchestration graph (graph/ at slice root), HITL, WebSocket
+│   ├── documents/       # upload, ingestion shim, retrieval, evidence service, tools
 │   ├── auth/            # accounts, tenancy, legal roles, tenant migration
-│   └── …                # billing, crawler, health, profile, audit
+│   └── …                # billing (subdomain-layered by design), crawler, health
+├── shared/              # cross-feature runtime: jobs, langchain/langgraph layers, rate_limit
+├── kernel/              # pure primitives: clock, ids, result, tenancy
 ├── retrieval/           # Graphiti integration + idempotent graph writer
 ├── lifecycle/           # lifespan startup policies with typed degradation
 └── worker/              # Celery role profiles, task catalog, beat schedule
 evals/                   # golden corpus, provenance manifest, annotations, reports
-docs/                    # diagrams, runbooks, smoke-test findings
+docs/                    # diagrams, runbooks, architecture.md, smoke-test findings
 docs-site/               # Mintlify documentation site
 ```
+
+The modular-monolith / hexagonal-slice standard — dependency rule, the five
+import-linter contracts, per-feature disposition — is recorded in
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Documentation
 
