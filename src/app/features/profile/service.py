@@ -4,7 +4,7 @@ from app.features.auth.account_store import AuthAccount, AuthAccountStore
 from app.features.auth.repository import RefreshTokenRepository
 from app.observability.logging import logger, trace_layer
 from app.security.passwords import hash_password, verify_password
-from app.utils.storage import StorageService
+from app.utils.storage import StorageService, uri_to_location
 
 from .dto import AvatarResponse, UpdateProfileRequest
 from .exceptions import (
@@ -143,11 +143,11 @@ class ProfileService:
         if isinstance(stored, Failure):
             error = stored.failure()
             return Failure(ProfileStorageError(message=error.message, details=error.details))
-        public_url = f"{storage.public_url}/{key}" if storage.public_url else stored.unwrap()
+        object_uri = stored.unwrap()
 
-        # Optionally delete old avatar — best-effort, non-blocking
+        # Persist the private object reference; the response URL is signed below.
         old_avatar = user.avatar_url
-        saved = await self._account_store.set_avatar_url(user.id, public_url)
+        saved = await self._account_store.set_avatar_url(user.id, object_uri)
         if isinstance(saved, Failure):
             error = saved.failure()
             return Failure(
@@ -159,10 +159,42 @@ class ProfileService:
                 )
             )
 
-        if old_avatar and storage.public_url:
-            # Extract key from old URL and delete asynchronously
-            old_key = old_avatar.removeprefix(storage.public_url + "/")
-            await storage.delete_object(key=old_key)
+        if old_avatar and old_avatar.startswith("s3://"):
+            old_location = uri_to_location(old_avatar)
+            if isinstance(old_location, Success):
+                old_key = old_location.unwrap().key
+                # This key is intentionally constant per user. The new PUT
+                # overwrites the same object, so deleting old_key here would
+                # delete the newly uploaded avatar.
+                if old_key != key:
+                    await storage.delete_object(key=old_key)
+
+        signed_url = await self.signed_avatar_url(object_uri)
+        if isinstance(signed_url, Failure):
+            return signed_url
 
         logger.bind(user_id=user.id).info("Avatar uploaded")
-        return Success(AvatarResponse(avatar_url=public_url))
+        return Success(AvatarResponse(avatar_url=signed_url.unwrap() or object_uri))
+
+    async def signed_avatar_url(self, avatar_reference: str | None) -> ProfileResult[str | None]:
+        """Resolve a stored private object reference to a time-limited read URL."""
+        if avatar_reference is None:
+            return Success(None)
+        storage = self._storage
+        if storage is None:
+            return Success(avatar_reference)
+        if not avatar_reference.startswith("s3://"):
+            # Preserve pre-migration external URLs while existing records age out.
+            return Success(avatar_reference)
+        location = uri_to_location(avatar_reference)
+        if isinstance(location, Failure):
+            error = location.failure()
+            return Failure(ProfileStorageError(message=error.message, details=error.details))
+        object_location = location.unwrap()
+        if object_location.bucket != storage.bucket:
+            return Failure(ProfileStorageError(message="Avatar belongs to an unexpected bucket"))
+        signed = await storage.get_signed_get_url(key=object_location.key)
+        if isinstance(signed, Failure):
+            error = signed.failure()
+            return Failure(ProfileStorageError(message=error.message, details=error.details))
+        return Success(signed.unwrap())

@@ -102,6 +102,33 @@ def test_service_from_settings_falls_back_to_none_without_a_public_url() -> None
     service = StorageService.from_settings(_settings(S3_PUBLIC_URL=""))
 
     assert service.public_url is None
+    assert service.presigned_get_ttl_seconds == 18_000
+
+
+@pytest.mark.asyncio
+async def test_signed_get_uses_configured_five_hour_ttl_by_default() -> None:
+    class _SigningClient:
+        bucket = "test-bucket"
+        expires_in: int | None = None
+
+        def generate_presigned_url(
+            self,
+            operation: str,
+            params: dict[str, Any],
+            expires_in: int,
+        ) -> str:
+            del operation, params
+            self.expires_in = expires_in
+            return "https://signed.example/object"
+
+    client = _SigningClient()
+    service = StorageService.from_settings(_settings(), client=client)
+
+    result = await service.get_signed_get_url(key="billing/invoices/INV-1.pdf")
+
+    assert isinstance(result, Success)
+    assert result.unwrap() == "https://signed.example/object"
+    assert client.expires_in == 18_000
 
 
 def test_key_helpers_round_trip() -> None:
@@ -130,7 +157,7 @@ async def test_put_object_returns_the_uri_from_the_crud_layer() -> None:
             return None
 
     result = await put_object(
-        _Client(),  # ty: ignore[invalid-argument-type] — structural client double
+        _Client(),
         key="documents/a.txt",
         data=b"payload",
         content_type="text/plain",
@@ -153,13 +180,13 @@ async def test_client_errors_become_typed_retryable_failures() -> None:
 
     client = _Client()
     failed = await put_object(
-        client,  # ty: ignore[invalid-argument-type] — structural client double
+        client,
         key="documents/a.txt",
         data=b"payload",
         content_type="text/plain",
         metadata={},
     )
-    deleted = await delete_object(client, key="documents/a.txt")  # ty: ignore[invalid-argument-type]
+    deleted = await delete_object(client, key="documents/a.txt")
 
     assert isinstance(failed, Failure)
     error = failed.failure()

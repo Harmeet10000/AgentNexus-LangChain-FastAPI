@@ -43,6 +43,7 @@ class StorageService(BaseModel):  # noqa: PLR0904 — one method per S3 operatio
 
     bucket: str
     public_url: str | None = None
+    presigned_get_ttl_seconds: int = 18_000
     _client: ObjectStoreClient = PrivateAttr()
 
     @classmethod
@@ -62,6 +63,7 @@ class StorageService(BaseModel):  # noqa: PLR0904 — one method per S3 operatio
         service = cls(
             bucket=settings.S3_BUCKET_NAME,
             public_url=settings.S3_PUBLIC_URL.rstrip("/") or None,
+            presigned_get_ttl_seconds=settings.S3_PRESIGNED_GET_TTL_SECONDS,
         )
         service._client = client
         return service
@@ -197,9 +199,13 @@ class StorageService(BaseModel):  # noqa: PLR0904 — one method per S3 operatio
         self,
         *,
         key: str,
-        expires_in: int = 900,
+        expires_in: int | None = None,
     ) -> StorageResult[str]:
-        return await s3_func.get_signed_get_url(self._client, key=key, expires_in=expires_in)
+        return await s3_func.get_signed_get_url(
+            self._client,
+            key=key,
+            expires_in=expires_in or self.presigned_get_ttl_seconds,
+        )
 
     async def get_signed_put_url(
         self,

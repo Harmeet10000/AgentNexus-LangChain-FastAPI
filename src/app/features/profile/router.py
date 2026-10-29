@@ -21,12 +21,20 @@ router = APIRouter(prefix="/profile", tags=["profile"])
 
 
 @router.get("/")
-async def get_profile(user: CurrentVerifiedUser) -> APIResponse[UserResponse]:
+async def get_profile(
+    user: CurrentVerifiedUser,
+    request: Request,
+    response: Response,
+) -> APIResponse[UserResponse]:
+    service = await get_profile_service(request)
+    avatar_result = await service.signed_avatar_url(user.avatar_url)
+    if isinstance(avatar_result, Failure):
+        return render_result(Failure(avatar_result.failure()), response)
     result = UserResponse(
         id=str(user.id),
         email=user.email,
         full_name=user.full_name,
-        avatar_url=user.avatar_url,
+        avatar_url=avatar_result.unwrap(),
         role=user.role.value,
         is_verified=user.is_verified,
         is_active=user.is_active,
@@ -44,21 +52,24 @@ async def update_profile(
 ) -> APIResponse[UserResponse]:
     service = await get_profile_service(request)
     result = await service.update_profile(user, body)
-    return render_result(
-        result.map(
-            lambda updated: UserResponse(
-                id=str(updated.id),
-                email=updated.email,
-                full_name=updated.full_name,
-                avatar_url=updated.avatar_url,
-                role=updated.role.value,
-                is_verified=updated.is_verified,
-                is_active=updated.is_active,
-                created_at=updated.created_at,
-            )
+    if isinstance(result, Failure):
+        return render_result(result, response, message="Profile updated")
+    updated = result.unwrap()
+    avatar_result = await service.signed_avatar_url(updated.avatar_url)
+    if isinstance(avatar_result, Failure):
+        return render_result(Failure(avatar_result.failure()), response)
+    return http_response(
+        "Profile updated",
+        data=UserResponse(
+            id=str(updated.id),
+            email=updated.email,
+            full_name=updated.full_name,
+            avatar_url=avatar_result.unwrap(),
+            role=updated.role.value,
+            is_verified=updated.is_verified,
+            is_active=updated.is_active,
+            created_at=updated.created_at,
         ),
-        response,
-        message="Profile updated",
     )
 
 
