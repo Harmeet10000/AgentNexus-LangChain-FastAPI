@@ -6,11 +6,11 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connections import get_postgres_db
-from app.connections.object_storage import StorageService
 from app.features.audit.repository import AuditLogRepository
 from app.features.billing.payments.repository import PaymentRepository
 from app.features.billing.plans.repository import PlanRepository
 from app.features.billing.subscriptions.repository import SubscriptionRepository
+from app.utils.storage import StorageService
 
 from .repository import InvoiceRepository
 from .service import InvoiceService

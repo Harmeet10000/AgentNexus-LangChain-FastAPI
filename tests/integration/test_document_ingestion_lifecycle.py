@@ -13,7 +13,7 @@ from sqlalchemy import delete, func, select
 
 from app.config import get_settings
 from app.connections import init_db
-from app.connections.object_storage import StorageService
+from app.utils.storage import StorageService
 from app.features.documents import service as document_service
 from app.features.documents.ingestion_graph import build_document_ingestion_graph
 from app.features.documents.models import UnifiedChunk, UnifiedDocument

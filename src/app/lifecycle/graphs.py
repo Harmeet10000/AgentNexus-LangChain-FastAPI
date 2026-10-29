@@ -32,10 +32,10 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
     from app.config.settings import Settings
-    from app.connections.object_storage import StorageService
     from app.extraction.langextract.service import AsyncExtractionService
     from app.features.documents.service.evidence import EvidenceService
     from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
+    from app.utils.storage import StorageService
 
     type IngestDocumentFn = Callable[..., Awaitable[Any]]
 

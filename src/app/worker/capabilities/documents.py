@@ -22,7 +22,6 @@ from app.connections.graphiti import (
     setup_graphiti,
     setup_graphiti_indices,
 )
-from app.connections.object_storage import StorageService
 from app.connections.redis import create_redis_client
 from app.extraction.langextract.service import AsyncExtractionService
 from app.features.documents.service import process_document_ingestion
@@ -30,6 +29,7 @@ from app.lifecycle.graphs import graphiti_service, provide_document_ingestion_gr
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard
 from app.utils import ServiceUnavailableException
+from app.utils.storage import StorageService
 from app.worker.capabilities.owner import (
     CapabilityLifecycle,
     CapabilityOwner,

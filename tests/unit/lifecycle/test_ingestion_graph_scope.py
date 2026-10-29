@@ -12,7 +12,7 @@ from returns.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.features.documents.ingestion_graph as ingestion_graph_module
-from app.connections.object_storage import StorageService
+from app.utils.storage import StorageService
 from app.features.documents.ingestion_graph import (
     DocumentIngestionState,
     _make_ingest_document_node,

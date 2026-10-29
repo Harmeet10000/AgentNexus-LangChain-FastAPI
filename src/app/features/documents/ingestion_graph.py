@@ -23,8 +23,8 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
 
-    from app.connections.object_storage import StorageService
     from app.extraction.langextract.service import AsyncExtractionService
+    from app.utils.storage import StorageService
 
     from .exceptions import DocumentResult
     from .repository import DocumentRepository

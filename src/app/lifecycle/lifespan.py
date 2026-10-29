@@ -34,7 +34,6 @@ from app.connections import (
     close_tavily_http_client,
     create_crawl4ai_crawler,
     create_mongo_client,
-    create_object_store,
     create_outbox_relay,
     create_tavily_http_client,
     get_shared_httpx_client,
@@ -65,6 +64,7 @@ from app.observability.logging import logger
 from app.resilience.circuit_breaker import CircuitBreakerService, RedisCircuitBreakerStore
 from app.shared.jobs import JobBus
 from app.utils import DependencyHealth, ServiceUnavailableException
+from app.utils.storage import create_object_store
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti

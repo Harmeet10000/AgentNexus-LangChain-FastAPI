@@ -43,7 +43,6 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.connections.object_storage import StorageService
     from app.features.audit.repository import AuditLogRepository
     from app.features.billing.invoices.repository import InvoiceRepository
     from app.features.billing.payments.models import Payment
@@ -53,6 +52,7 @@ if TYPE_CHECKING:
     from app.features.billing.subscriptions.models import Subscription
     from app.features.billing.subscriptions.repository import SubscriptionRepository
     from app.kernel.errors import FeatureError
+    from app.utils.storage import StorageService
 
     from .dto import VoidInvoiceDTO
     from .exceptions import InvoiceError, InvoiceResult

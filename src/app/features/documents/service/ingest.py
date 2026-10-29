@@ -16,7 +16,6 @@ from sqlalchemy import text
 
 from app.ai.embeddings import EmbeddingTaskType, embed_texts
 from app.config import get_settings
-from app.connections.object_storage import build_s3_key, key_from_s3_uri
 from app.events import with_outbox, with_terminal_outbox
 from app.extraction.langextract.langextract_to_graph import GraphIngestionContext
 from app.extraction.langextract.service import (
@@ -80,6 +79,7 @@ from app.observability.logging import logger, trace_layer
 from app.retrieval.graphiti.grouping import build_graphiti_group_id
 from app.retrieval.graphiti.write_clause_episodes import write_clause_episodes_to_graphiti
 from app.shared.jobs.names import DOCUMENTS_INGEST
+from app.utils.storage import build_s3_key, key_from_s3_uri
 
 _GRAPHITI_TRANSPORT_ERRORS = (GraphitiError, Neo4jError, AsyncTimeoutError, OSError)
 _GRAPHITI_EVENT_ERRORS = (
@@ -96,7 +96,6 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, async_sessionmaker
 
-    from app.connections.object_storage import StorageService
     from app.features.documents.classification import PreparedChunk
     from app.features.documents.dto import IngestionJob, IngestionRuntime
     from app.features.documents.exceptions import DocumentResult
@@ -107,6 +106,7 @@ if TYPE_CHECKING:
     from app.retrieval.graphiti.write_clause_episodes import (
         GraphitiService as ClauseWriterService,
     )
+    from app.utils.storage import StorageService
 
 
 class DocumentCommandService:

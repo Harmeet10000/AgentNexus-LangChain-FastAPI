@@ -34,7 +34,7 @@ from .neo4j import (
     get_neo4j_session,
     init_neo4j,
 )
-from .object_storage import create_object_store
+from .object_storage import get_object_store, get_s3_client
 from .postgres import close_db_engine, get_postgres_db, init_db
 from .redis import close_redis_client, create_redis_client, get_redis
 from .tavily import (
@@ -61,7 +61,6 @@ __all__ = [
     "create_crawl4ai_crawler",
     "create_httpx_client",
     "create_mongo_client",
-    "create_object_store",
     "create_outbox_relay",
     "create_redis_client",
     "create_tavily_http_client",
@@ -71,8 +70,10 @@ __all__ = [
     "get_mongodb",
     "get_neo4j_driver",
     "get_neo4j_session",
+    "get_object_store",
     "get_postgres_db",
     "get_redis",
+    "get_s3_client",
     "get_shared_httpx_client",
     "get_shared_tavily_http_client",
     "get_tavily_http_client",

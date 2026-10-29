@@ -12,10 +12,10 @@ from langchain_core.language_models import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.connections.object_storage import (
+from app.extraction.langextract.service import AsyncExtractionService
+from app.utils.storage import (
     StorageService,
 )
-from app.extraction.langextract.service import AsyncExtractionService
 
 from .constants import DEFAULT_PAGE_SIZE, DEFAULT_RAG_TOKEN_BUDGET, MAX_PAGE_SIZE
 from .repository import DocumentRepository

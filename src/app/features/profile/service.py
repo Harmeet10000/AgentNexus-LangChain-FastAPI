@@ -1,10 +1,10 @@
 from returns.result import Failure, Success
 
-from app.connections.object_storage import StorageService
 from app.features.auth.account_store import AuthAccount, AuthAccountStore
 from app.features.auth.repository import RefreshTokenRepository
 from app.observability.logging import logger, trace_layer
 from app.security.passwords import hash_password, verify_password
+from app.utils.storage import StorageService
 
 from .dto import AvatarResponse, UpdateProfileRequest
 from .exceptions import (

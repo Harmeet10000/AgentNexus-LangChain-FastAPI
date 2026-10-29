@@ -588,7 +588,7 @@ section-order = [
 ]
 # Adapter-owned error unions: Pydantic evaluates ClassVar at model build,
 # so typing imports stay runtime even under `from __future__ import annotations`.
-"src/app/connections/object_storage.py" = ["TC003"]
+"src/app/utils/storage/models.py" = ["TC003"]
 "src/app/connections/tavily.py" = ["TC003"]
 "src/app/connections/mailer.py" = ["TC003"]
 # kernel/result.py carries Pydantic models: ClassVar must stay runtime.
